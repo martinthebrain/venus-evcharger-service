@@ -33,6 +33,24 @@ class _AutoInputHelperBasicSubscriptionCases:
         self.assertIn(("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power"), helper._signal_matches)
         self.assertIn(("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power"), helper._monitored_specs)
 
+    def test_busitem_subscription_callback_is_bound_to_current_dbus_generation(self):
+        helper = self._make_helper()
+        helper._dbus_generation = 7
+        helper._system_bus_generation = 7
+        bus = MagicMock()
+        helper._system_bus = bus
+        helper._refresh_source = MagicMock()
+
+        helper._subscribe_busitem_path("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power")
+        callback = bus.add_signal_receiver.call_args.args[0]
+
+        callback(sender="svc", path="/Ac/Power")
+        helper._refresh_source.assert_called_once_with("pv")
+
+        helper._dbus_generation = 8
+        callback(sender="svc", path="/Ac/Power")
+        helper._refresh_source.assert_called_once_with("pv")
+
     def test_clear_missing_subscriptions_removes_stale_entries_and_ignores_remove_errors(self):
         helper = self._make_helper()
         keep_key = ("pv", "svc", "/Ac/Power")
@@ -52,6 +70,56 @@ class _AutoInputHelperBasicSubscriptionCases:
         helper._clear_missing_subscriptions(set())
         self.assertEqual(helper._signal_matches, {})
         self.assertEqual(helper._monitored_specs, {})
+
+    def test_reset_system_bus_removes_all_matches_closes_bus_and_invalidates_generation(self):
+        helper = self._make_helper()
+        bus = MagicMock()
+        busitem_match = MagicMock()
+        failing_match = MagicMock(remove=MagicMock(side_effect=RuntimeError("remove failed")))
+        name_owner_match = MagicMock()
+        helper._system_bus = bus
+        helper._dbus_generation = 3
+        helper._system_bus_generation = 3
+        helper._name_owner_match = name_owner_match
+        helper._signal_matches = {
+            ("pv", "svc", "/Ac/Power"): busitem_match,
+            ("grid", "svc", "/Ac/Grid/L1/Power"): failing_match,
+        }
+        helper._monitored_specs = {
+            ("pv", "svc", "/Ac/Power"): {"source": "pv"},
+            ("grid", "svc", "/Ac/Grid/L1/Power"): {"source": "grid"},
+        }
+
+        helper._reset_system_bus()
+
+        busitem_match.remove.assert_called_once_with()
+        failing_match.remove.assert_called_once_with()
+        name_owner_match.remove.assert_called_once_with()
+        bus.close.assert_called_once_with()
+        self.assertIsNone(helper._system_bus)
+        self.assertIsNone(helper._name_owner_match)
+        self.assertEqual(helper._signal_matches, {})
+        self.assertEqual(helper._monitored_specs, {})
+        self.assertEqual(helper._system_bus_generation, 0)
+        self.assertEqual(helper._dbus_generation, 4)
+
+    def test_register_name_owner_subscription_tracks_match_and_deduplicates(self):
+        helper = self._make_helper()
+        bus = MagicMock()
+        bus.add_signal_receiver.return_value = "name-match"
+        helper._system_bus = bus
+        helper._dbus_generation = 5
+        helper._system_bus_generation = 5
+
+        helper._register_name_owner_subscription()
+        helper._register_name_owner_subscription()
+
+        bus.add_signal_receiver.assert_called_once()
+        self.assertEqual(helper._name_owner_match, "name-match")
+        callback = bus.add_signal_receiver.call_args.args[0]
+        helper._schedule_refresh_subscriptions = MagicMock()
+        callback("com.victronenergy.system", "", ":1.2")
+        helper._schedule_refresh_subscriptions.assert_called_once_with()
 
     def test_desired_subscription_specs_combines_pv_battery_and_grid_sources(self):
         helper = self._make_helper()
@@ -85,6 +153,29 @@ class _AutoInputHelperBasicSubscriptionCases:
         helper._warning_throttled.assert_called_once()
         args = helper._warning_throttled.call_args[0]
         self.assertEqual(args[0], "auto-helper-source-signal-pv")
+        self.assertGreater(helper._dbus_subscription_backoff_until, 0.0)
+
+    def test_on_source_signal_resets_bus_and_schedules_backoff_after_dbus_error(self):
+        helper = self._make_helper()
+        helper._dbus_generation = 2
+        helper._system_bus_generation = 2
+        helper._refresh_source = MagicMock(side_effect=AssertionError("dbus connection broken"))
+        helper._warning_throttled = MagicMock()
+        scheduled = []
+
+        with patch("venus_evcharger.inputs.helper.subscriptions.time.time", return_value=100.0):
+            with patch(
+                "venus_evcharger.inputs.helper.subscriptions.GLib.timeout_add",
+                side_effect=lambda delay, callback: scheduled.append((delay, callback)),
+            ):
+                helper._on_source_signal("pv", 2, sender="svc", path="/Ac/Power")
+
+        helper._warning_throttled.assert_called_once()
+        self.assertIsNone(helper._system_bus)
+        self.assertEqual(helper._system_bus_generation, 0)
+        self.assertEqual(helper._dbus_generation, 3)
+        self.assertEqual(helper._dbus_subscription_backoff_until, 105.0)
+        self.assertEqual(len(scheduled), 1)
 
     def test_refresh_subscriptions_timer_requests_refresh_and_obeys_stop_flag(self):
         helper = self._make_helper()
@@ -125,4 +216,15 @@ class _AutoInputHelperBasicSubscriptionCases:
         helper._schedule_refresh_subscriptions = MagicMock()
         helper._on_name_owner_changed("com.victronenergy.system", "", ":1.5")
         helper._on_name_owner_changed("com.example.unrelated", "", ":1.6")
+        helper._schedule_refresh_subscriptions.assert_called_once_with()
+
+    def test_on_name_owner_changed_ignores_stale_dbus_generation(self):
+        helper = self._make_helper()
+        helper._dbus_generation = 4
+        helper._schedule_refresh_subscriptions = MagicMock()
+
+        helper._on_name_owner_changed(3, "com.victronenergy.system", "", ":1.5")
+        helper._schedule_refresh_subscriptions.assert_not_called()
+
+        helper._on_name_owner_changed(4, "com.victronenergy.system", "", ":1.6")
         helper._schedule_refresh_subscriptions.assert_called_once_with()

@@ -86,6 +86,11 @@ class _AutoInputHelperSnapshotMixin:
         default_values = {
             "_last_snapshot_state": self._empty_snapshot,
             "_next_source_poll_at": self._default_source_poll_schedule,
+            "_system_bus": None,
+            "_dbus_generation": 0,
+            "_system_bus_generation": 0,
+            "_name_owner_match": None,
+            "_dbus_subscription_backoff_until": 0.0,
             "_signal_matches": dict,
             "_monitored_specs": dict,
             "_refresh_scheduled": False,

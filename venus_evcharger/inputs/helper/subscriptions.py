@@ -7,6 +7,7 @@ service. It periodically writes a compact JSON snapshot that the main process
 can consume safely, even if DBus becomes slow or temporarily inconsistent.
 """
 
+import time
 from functools import partial
 from typing import Any, cast
 
@@ -27,8 +28,10 @@ class _AutoInputHelperSubscriptionMixin:
         key = self._signal_spec_key(source_name, service_name, path)
         if key in self._signal_matches:
             return
-        match = self._get_system_bus().add_signal_receiver(
-            partial(self._on_source_signal, source_name),
+        bus = self._get_system_bus()
+        generation = int(getattr(self, "_system_bus_generation", 0) or 0)
+        match = bus.add_signal_receiver(
+            partial(self._on_source_signal, source_name, generation),
             signal_name="PropertiesChanged",
             dbus_interface="com.victronenergy.BusItem",
             bus_name=service_name,
@@ -50,11 +53,7 @@ class _AutoInputHelperSubscriptionMixin:
             if key in desired_keys:
                 continue
             match = self._signal_matches.pop(key, None)
-            if match is not None:
-                try:
-                    match.remove()
-                except Exception:  # pylint: disable=broad-except
-                    pass
+            self._remove_signal_match(match)
             self._monitored_specs.pop(key, None)
 
     def _desired_pv_subscription_specs(self: Any) -> list[tuple[str, str, str]]:
@@ -124,14 +123,25 @@ class _AutoInputHelperSubscriptionMixin:
     def _refresh_subscriptions(self: Any) -> bool:
         """Rebuild path subscriptions after startup or a DBus service topology change."""
         self._ensure_poll_state()
-        desired_specs = self._desired_subscription_specs()
-        desired_keys = set()
-        for source_name, service_name, path in desired_specs:
-            key = self._signal_spec_key(source_name, service_name, path)
-            desired_keys.add(key)
-            self._subscribe_busitem_path(source_name, service_name, path)
-        self._clear_missing_subscriptions(desired_keys)
-        self._refresh_all_sources()
+        if self._subscription_refresh_backoff_active():
+            self._schedule_refresh_subscriptions()
+            return False
+        try:
+            self._register_name_owner_subscription()
+            desired_specs = self._desired_subscription_specs()
+            desired_keys = set()
+            for source_name, service_name, path in desired_specs:
+                key = self._signal_spec_key(source_name, service_name, path)
+                desired_keys.add(key)
+                self._subscribe_busitem_path(source_name, service_name, path)
+            self._clear_missing_subscriptions(desired_keys)
+            self._refresh_all_sources()
+        except Exception as error:  # pylint: disable=broad-except
+            self._handle_dbus_callback_error(
+                "auto-helper-refresh-subscriptions",
+                "Auto input helper failed to refresh DBus subscriptions: %s",
+                error,
+            )
         return False
 
     def _schedule_refresh_subscriptions(self: Any) -> None:
@@ -140,32 +150,87 @@ class _AutoInputHelperSubscriptionMixin:
         if self._refresh_scheduled:
             return
         self._refresh_scheduled = True
+        delay_seconds = self._subscription_refresh_delay_seconds()
 
         def _run() -> bool:
             self._refresh_scheduled = False
+            if self._stop_requested:
+                return False
             refreshed: bool = self._refresh_subscriptions()
             return refreshed
 
-        GLib.idle_add(_run)
+        if delay_seconds > 0.0:
+            GLib.timeout_add(max(1, int(delay_seconds * 1000)), _run)
+        else:
+            GLib.idle_add(_run)
 
-    def _on_source_signal(self: Any, source_name: str, *args: object, **kwargs: object) -> None:
+    def _subscription_refresh_backoff_active(self: Any) -> bool:
+        return self._subscription_refresh_delay_seconds() > 0.0
+
+    def _subscription_refresh_delay_seconds(self: Any) -> float:
+        backoff_until = float(getattr(self, "_dbus_subscription_backoff_until", 0.0) or 0.0)
+        return max(0.0, backoff_until - time.time())
+
+    def _on_source_signal(
+        self: Any,
+        source_name: str,
+        dbus_generation: int | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
         """Refresh one source when its DBus path emits a change signal."""
         del args, kwargs
+        if not self._dbus_callback_generation_current(dbus_generation):
+            return
         try:
             self._refresh_source(source_name)
         except Exception as error:  # pylint: disable=broad-except
-            self._warning_throttled(
+            self._handle_dbus_callback_error(
                 f"auto-helper-source-signal-{source_name}",
-                max(5.0, self.auto_dbus_backoff_base_seconds or 5.0),
                 "Auto input helper failed to refresh %s after signal: %s",
                 source_name,
                 error,
             )
 
-    def _on_name_owner_changed(self: Any, name: str, _old_owner: str, _new_owner: str) -> None:
+    def _on_name_owner_changed(self: Any, *args: object) -> None:
         """Rebuild subscriptions when relevant DBus services appear or disappear."""
-        if self._is_relevant_name_owner_change(name):
-            self._schedule_refresh_subscriptions()
+        dbus_generation, name = self._parse_name_owner_changed_args(args)
+        if not self._dbus_callback_generation_current(dbus_generation):
+            return
+        try:
+            if self._is_relevant_name_owner_change(name):
+                self._schedule_refresh_subscriptions()
+        except Exception as error:  # pylint: disable=broad-except
+            self._handle_dbus_callback_error(
+                "auto-helper-name-owner-signal",
+                "Auto input helper failed to process DBus owner change for %s: %s",
+                name,
+                error,
+            )
+
+    @staticmethod
+    def _parse_name_owner_changed_args(args: tuple[object, ...]) -> tuple[int | None, str]:
+        if len(args) >= 4 and isinstance(args[0], int):
+            return args[0], str(args[1])
+        if args:
+            return None, str(args[0])
+        return None, ""
+
+    def _dbus_callback_generation_current(self: Any, dbus_generation: int | None) -> bool:
+        if dbus_generation is None:
+            return True
+        return int(dbus_generation) == int(getattr(self, "_dbus_generation", 0) or 0)
+
+    def _handle_dbus_callback_error(self: Any, warning_key: str, message: str, *args: object) -> None:
+        self._warning_throttled(
+            warning_key,
+            max(5.0, self.auto_dbus_backoff_base_seconds or 5.0),
+            message,
+            *args,
+        )
+        self._reset_system_bus()
+        self._dbus_subscription_backoff_until = time.time() + max(1.0, self.auto_dbus_backoff_base_seconds or 5.0)
+        self._schedule_refresh_subscriptions()
 
     def _is_relevant_name_owner_change(self: Any, name: str) -> bool:
         """Return whether a DBus owner-change affects monitored Auto-input services."""
@@ -218,12 +283,65 @@ class _AutoInputHelperSubscriptionMixin:
         return False
 
     def _reset_system_bus(self: Any) -> None:
-        """Drop the cached DBus connection."""
+        """Drop the cached DBus connection and all signal matches tied to it."""
+        self._ensure_poll_state()
+        bus = self._system_bus
+        self._clear_all_signal_matches()
+        self._close_system_bus(bus)
         self._system_bus = None
+        self._system_bus_generation = 0
+        self._dbus_generation = int(getattr(self, "_dbus_generation", 0) or 0) + 1
 
     def _get_system_bus(self: Any) -> Any:
         """Return the current DBus connection for this helper process."""
+        self._ensure_poll_state()
         if self._system_bus is None:
             dbus_module = cast(Any, dbus)
             self._system_bus = dbus_module.SystemBus(private=True)
+            self._dbus_generation = int(getattr(self, "_dbus_generation", 0) or 0) + 1
+            self._system_bus_generation = self._dbus_generation
         return self._system_bus
+
+    def _register_name_owner_subscription(self: Any) -> None:
+        """Subscribe to DBus name-owner changes for dynamic service tracking."""
+        self._ensure_poll_state()
+        if self._name_owner_match is not None:
+            return
+        bus = self._get_system_bus()
+        generation = int(getattr(self, "_system_bus_generation", 0) or 0)
+        self._name_owner_match = bus.add_signal_receiver(
+            partial(self._on_name_owner_changed, generation),
+            signal_name="NameOwnerChanged",
+            dbus_interface="org.freedesktop.DBus",
+            bus_name="org.freedesktop.DBus",
+            path="/org/freedesktop/DBus",
+        )
+
+    def _clear_all_signal_matches(self: Any) -> None:
+        for key in list(getattr(self, "_signal_matches", {})):
+            match = self._signal_matches.pop(key, None)
+            self._remove_signal_match(match)
+            self._monitored_specs.pop(key, None)
+        self._remove_signal_match(getattr(self, "_name_owner_match", None))
+        self._name_owner_match = None
+
+    @staticmethod
+    def _remove_signal_match(match: Any) -> None:
+        if match is None:
+            return
+        try:
+            match.remove()
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    @staticmethod
+    def _close_system_bus(bus: Any) -> None:
+        if bus is None:
+            return
+        close = getattr(bus, "close", None)
+        if not callable(close):
+            return
+        try:
+            close()
+        except Exception:  # pylint: disable=broad-except
+            pass

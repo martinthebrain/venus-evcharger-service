@@ -200,6 +200,10 @@ class AutoInputHelper(
 
     def _init_helper_runtime_state(self) -> None:
         self._system_bus = None
+        self._dbus_generation = 0
+        self._system_bus_generation = 0
+        self._name_owner_match = None
+        self._dbus_subscription_backoff_until = 0.0
         self._dbus_list_backoff_until = 0.0
         self._dbus_list_failures = 0
         self._resolved_auto_pv_services = []
@@ -340,16 +344,6 @@ class AutoInputHelper(
             self.snapshot_path,
         )
 
-    def _register_name_owner_subscription(self) -> None:
-        """Subscribe to DBus name-owner changes for dynamic service tracking."""
-        self._get_system_bus().add_signal_receiver(
-            self._on_name_owner_changed,
-            signal_name="NameOwnerChanged",
-            dbus_interface="org.freedesktop.DBus",
-            bus_name="org.freedesktop.DBus",
-            path="/org/freedesktop/DBus",
-        )
-
     def _install_main_loop_timers(self) -> None:
         """Install the periodic timers used by the helper main loop."""
         GLib.timeout_add(max(500, int(self.poll_interval_seconds * 1000)), self._heartbeat_snapshot)
@@ -372,8 +366,11 @@ class AutoInputHelper(
         self._refresh_subscriptions()
         self._install_main_loop_timers()
         assert self._main_loop is not None
-        self._main_loop.run()
-        logging.info("Auto input helper stopping pid=%s", os.getpid())
+        try:
+            self._main_loop.run()
+        finally:
+            self._reset_system_bus()
+            logging.info("Auto input helper stopping pid=%s", os.getpid())
 
 
 def main(argv: list[str] | None = None) -> int:
