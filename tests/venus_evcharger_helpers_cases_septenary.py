@@ -87,7 +87,7 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
         service.virtual_mode = 1
         service.virtual_startstop = 1
         service.virtual_enable = 1
-        self._set_worker_snapshot(service, captured_at=100.0, pm_status={
+        self._set_worker_snapshot(service, captured_at=100.0, pm_confirmed=True, pm_status={
             "output": True,
             "apower": 1980.0,
             "voltage": 230.0,
@@ -112,7 +112,7 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
         service.virtual_startstop = 1
         service.virtual_enable = 1
         service._startup_manual_target = True
-        self._set_worker_snapshot(service, captured_at=100.0, pm_status={
+        self._set_worker_snapshot(service, captured_at=100.0, pm_confirmed=True, pm_status={
             "output": False,
             "apower": 0.0,
             "voltage": 230.0,
@@ -132,7 +132,7 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
 
     def test_update_uses_worker_snapshot_instead_of_direct_blocking_reads(self):
         service = self._make_update_service()
-        self._set_worker_snapshot(service, captured_at=100.0, pm_status={
+        self._set_worker_snapshot(service, captured_at=100.0, pm_confirmed=True, pm_status={
             "output": True,
             "apower": 1800.0,
             "voltage": 230.0,

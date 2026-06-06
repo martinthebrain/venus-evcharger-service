@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from venus_evcharger.core.contracts import (
     normalized_worker_snapshot,
@@ -61,21 +61,41 @@ class _UpdateCyclePmSnapshotMixin:
         now: float,
         soft_fail_seconds: float,
     ) -> dict[str, Any] | None:
-        """Return the last remembered PM status when it is still inside soft-fail budget."""
+        """Return the last confirmed PM status when it is still inside soft-fail budget."""
+        confirmed_status = getattr(svc, "_last_confirmed_pm_status", None)
+        confirmed_at = getattr(svc, "_last_confirmed_pm_status_at", None)
+        if cls._cached_pm_status_usable(confirmed_status, confirmed_at, now, soft_fail_seconds):
+            pm_status = dict(cast(dict[str, Any], confirmed_status))
+            pm_status["_pm_confirmed"] = True
+            return pm_status
+        if not bool(getattr(svc, "_last_pm_status_confirmed", False)):
+            return None
         if (
             svc._last_pm_status is None
             or svc._last_pm_status_at is None
-            or not timestamp_age_within(
-                svc._last_pm_status_at,
+            or not cls._cached_pm_status_usable(svc._last_pm_status, svc._last_pm_status_at, now, soft_fail_seconds)
+        ):
+            return None
+        pm_status = dict(svc._last_pm_status)
+        pm_status["_pm_confirmed"] = True
+        return pm_status
+
+    @classmethod
+    def _cached_pm_status_usable(
+        cls,
+        pm_status: Any,
+        captured_at: Any,
+        now: float,
+        soft_fail_seconds: float,
+    ) -> bool:
+        return isinstance(pm_status, dict) and captured_at is not None and bool(
+            timestamp_age_within(
+                captured_at,
                 now,
                 soft_fail_seconds,
                 future_tolerance_seconds=cls.FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS,
             )
-        ):
-            return None
-        pm_status = dict(svc._last_pm_status)
-        pm_status["_pm_confirmed"] = bool(getattr(svc, "_last_pm_status_confirmed", False))
-        return pm_status
+        )
 
     @staticmethod
     def _direct_pm_snapshot_max_age_seconds(svc: Any) -> float:
@@ -104,6 +124,8 @@ class _UpdateCyclePmSnapshotMixin:
         if pm_status is None:
             return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
         pm_status["_pm_confirmed"] = pm_confirmed
+        if not pm_confirmed:
+            return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
         if cls._pm_snapshot_falls_back_to_cache(snapshot_at, now):
             return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
         should_remember, within_soft_fail = cls._pm_snapshot_storage_decision(

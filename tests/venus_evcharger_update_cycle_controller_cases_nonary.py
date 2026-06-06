@@ -110,6 +110,45 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         self.assertEqual(service._last_pm_status, {"output": True})
 
+    def test_resolve_pm_status_for_update_rejects_unconfirmed_local_placeholder(self):
+        service = SimpleNamespace(
+            _last_pm_status={"output": True},
+            _last_pm_status_at=99.0,
+            _last_pm_status_confirmed=False,
+            _last_confirmed_pm_status=None,
+            _last_confirmed_pm_status_at=None,
+            auto_shelly_soft_fail_seconds=10.0,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertIsNone(
+            controller.resolve_pm_status_for_update(
+                service,
+                {"pm_status": {"output": True}, "pm_confirmed": False, "pm_captured_at": 99.0},
+                100.0,
+            )
+        )
+
+    def test_resolve_pm_status_for_update_falls_back_to_confirmed_snapshot_for_unconfirmed_worker_data(self):
+        service = SimpleNamespace(
+            _last_pm_status={"output": True},
+            _last_pm_status_at=99.0,
+            _last_pm_status_confirmed=False,
+            _last_confirmed_pm_status={"output": False},
+            _last_confirmed_pm_status_at=96.0,
+            auto_shelly_soft_fail_seconds=10.0,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertEqual(
+            controller.resolve_pm_status_for_update(
+                service,
+                {"pm_status": {"output": True}, "pm_confirmed": False, "pm_captured_at": 99.0},
+                100.0,
+            ),
+            {"output": False, "_pm_confirmed": True},
+        )
+
     def test_resolve_pm_status_for_update_rejects_future_worker_snapshot(self):
         service = SimpleNamespace(
             _last_pm_status={"output": True},

@@ -123,6 +123,15 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._last_pm_status_at = None
         svc._last_pm_status_confirmed = False
         svc._last_shelly_warning = None
+        svc._shelly_state = "unknown"
+        svc._shelly_last_error_reason = ""
+        svc._shelly_last_error_detail = ""
+        svc._shelly_last_error_at = None
+        svc._shelly_consecutive_errors = 0
+        svc._shelly_last_ok_at = None
+        svc._shelly_retry_after = 0.0
+        svc._shelly_session_reset_count = 0
+        svc._shelly_offline_since = None
         svc._last_auto_metrics = default_auto_metrics()
         initialize_victron_balance_runtime_state(svc)
         svc._last_voltage = None

@@ -162,7 +162,7 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
 
     def test_update_uses_cached_inputs_and_updates_observability_paths(self):
         service = self._make_update_service()
-        self._set_worker_snapshot(service, captured_at=100.0, pm_captured_at=100.0, pm_status={
+        self._set_worker_snapshot(service, captured_at=100.0, pm_captured_at=100.0, pm_confirmed=True, pm_status={
             "output": False,
             "apower": 0.0,
             "voltage": 230.0,

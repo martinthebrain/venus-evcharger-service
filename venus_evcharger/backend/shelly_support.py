@@ -413,6 +413,13 @@ class ShellyBackendBase:
         session = getattr(service, "session", None)
         self._session = cast(Any, session if session is not None else requests.Session())
 
+    def reset_transport_session(self, session: Any | None = None) -> None:
+        """Replace the HTTP session after transport-level failures."""
+        old_session = getattr(self, "_session", None)
+        if old_session is not None and old_session is not session and hasattr(old_session, "close"):
+            old_session.close()
+        self._session = cast(Any, session if session is not None else requests.Session())
+
     def _auth(self) -> HTTPDigestAuth | tuple[str, str] | None:
         """Return one optional auth object for Shelly HTTP calls."""
         settings = self.settings

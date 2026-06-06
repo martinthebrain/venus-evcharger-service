@@ -154,6 +154,24 @@ class _DbusPublishDiagnosticsMixin:
             "/Auto/InputCacheHits": int(error_state.get("cache_hits", 0)),
         }
 
+    def _shelly_counter_values(self, now: float) -> dict[str, str | int]:
+        """Return Shelly transport and retry diagnostics."""
+        svc = self.service
+        retry_remaining = 0
+        source_retry_remaining = getattr(svc, "_source_retry_remaining", None)
+        if callable(source_retry_remaining):
+            retry_remaining = int(source_retry_remaining("shelly", now))
+        else:
+            retry_after = getattr(svc, "_shelly_retry_after", 0.0)
+            if isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool):
+                retry_remaining = max(0, int(float(retry_after) - float(now)))
+        return {
+            "/Auto/ShellyState": str(getattr(svc, "_shelly_state", "unknown") or "unknown"),
+            "/Auto/ShellyLastError": str(getattr(svc, "_shelly_last_error_reason", "") or ""),
+            "/Auto/ShellyRetryRemaining": retry_remaining,
+            "/Auto/ShellyConsecutiveErrors": int(getattr(svc, "_shelly_consecutive_errors", 0) or 0),
+        }
+
     def _phase_counter_values(self, now: float) -> dict[str, str | int | float]:
         """Return outward phase diagnostics and supported-layout information."""
         return {
@@ -282,6 +300,7 @@ class _DbusPublishDiagnosticsMixin:
             **self._software_update_counter_values(),
             **self._charger_counter_values(now),
             **self._error_counter_values(error_state),
+            **self._shelly_counter_values(now),
             **self._phase_counter_values(now),
             **self._contactor_counter_values(),
             **self._runtime_timing_values(now),
@@ -303,6 +322,8 @@ class _DbusPublishDiagnosticsMixin:
         )
         return {
             "/Auto/LastShellyReadAge": self._age_seconds(last_shelly_read_at, now),
+            "/Auto/ShellyLastOkAge": self._age_seconds(getattr(svc, "_shelly_last_ok_at", None), now),
+            "/Auto/PendingRelayAge": self._age_seconds(getattr(svc, "_pending_relay_requested_at", None), now),
             "/Auto/LastPvReadAge": self._age_seconds(svc._last_pv_at, now),
             "/Auto/LastBatteryReadAge": self._age_seconds(svc._last_battery_soc_at, now),
             "/Auto/LastGridReadAge": self._age_seconds(svc._last_grid_at, now),
