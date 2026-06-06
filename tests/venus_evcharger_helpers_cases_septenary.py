@@ -46,6 +46,8 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
             "battery_soc": 58.0,
             "grid_captured_at": 100.0,
             "grid_power": -2200.0,
+            "writer_pid": 4321,
+            "helper_generation": 0,
         }
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 7

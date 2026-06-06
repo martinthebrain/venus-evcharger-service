@@ -210,10 +210,14 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._relay_sync_deadline_at = None
         svc._relay_sync_failure_reported = False
         svc._auto_input_helper_process = None
+        svc._auto_input_helper_generation = 0
         svc._auto_input_helper_last_start_at = 0.0
         svc._auto_input_helper_restart_requested_at = None
         svc._auto_input_snapshot_last_seen = None
+        svc._auto_input_snapshot_seen_for_current_helper = False
         svc._auto_input_snapshot_mtime_ns = None
         svc._auto_input_snapshot_last_captured_at = None
         svc._auto_input_snapshot_version = None
+        svc._auto_input_snapshot_writer_pid = None
+        svc._auto_input_snapshot_generation = None
 __all__ = ["_RuntimeSupportSetupMixin"]

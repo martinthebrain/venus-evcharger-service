@@ -34,6 +34,8 @@ class AutoInputSupervisor(
             "battery_soc",
             "grid_captured_at",
             "grid_power",
+            "writer_pid",
+            "helper_generation",
         }
     )
 

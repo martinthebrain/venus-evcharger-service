@@ -191,6 +191,8 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
             "battery_soc": 57.0,
             "grid_captured_at": 100.0,
             "grid_power": -2100.0,
+            "writer_pid": 4321,
+            "helper_generation": 0,
         }
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 1
@@ -245,6 +247,8 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
             "battery_soc": 57.0,
             "grid_captured_at": 100.0,
             "grid_power": -2100.0,
+            "writer_pid": 4321,
+            "helper_generation": 0,
         }
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 3
@@ -302,6 +306,8 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
             "battery_soc": 57.0,
             "grid_captured_at": 100.0,
             "grid_power": -2100.0,
+            "writer_pid": 4321,
+            "helper_generation": 0,
         }
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 2

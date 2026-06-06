@@ -114,7 +114,7 @@ class _AutoInputHelperSourcesRuntimeCases:
                 venus_evcharger_auto_input_helper.main(["/tmp/config.ini", "/tmp/snapshot.json", "1234"]),
                 0,
             )
-        helper_cls.assert_called_once_with("/tmp/config.ini", "/tmp/snapshot.json", "1234")
+        helper_cls.assert_called_once_with("/tmp/config.ini", "/tmp/snapshot.json", "1234", None)
         fake_helper.run.assert_called_once_with()
 
     def test_main_uses_default_config_path_when_argv_missing(self):
@@ -123,4 +123,4 @@ class _AutoInputHelperSourcesRuntimeCases:
             with patch("venus_evcharger_auto_input_helper.os.path.abspath", return_value="/repo/venus_evcharger_auto_input_helper.py"):
                 self.assertEqual(venus_evcharger_auto_input_helper.main([]), 0)
 
-        helper_cls.assert_called_once_with("/repo/deploy/venus/config.venus_evcharger.ini", None, None)
+        helper_cls.assert_called_once_with("/repo/deploy/venus/config.venus_evcharger.ini", None, None, None)

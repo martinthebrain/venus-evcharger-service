@@ -63,6 +63,15 @@ class _AutoInputSupervisorSnapshotValidationMixin:
             return None
         return version
 
+    @staticmethod
+    def _coerce_snapshot_int(value: Any) -> int | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     def _invalid_snapshot(
         self,
         warning_key: str,
@@ -210,6 +219,8 @@ class _AutoInputSupervisorSnapshotValidationMixin:
     ) -> dict[str, Any] | None:
         normalized = dict(snapshot)
         normalized["snapshot_version"] = version
+        if self._validate_snapshot_identity(path, snapshot, normalized) is None:
+            return None
         for keys, coercer, label in self._snapshot_normalization_specs():
             if not self._normalize_snapshot_fields(path, snapshot, normalized, keys, coercer, label):
                 return None
@@ -237,6 +248,32 @@ class _AutoInputSupervisorSnapshotValidationMixin:
                 "numeric",
             ),
         )
+
+    def _validate_snapshot_identity(
+        self,
+        path: str,
+        snapshot: dict[str, Any],
+        normalized: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        writer_pid = self._coerce_snapshot_int(snapshot.get("writer_pid"))
+        if writer_pid is None or writer_pid <= 0:
+            return self._invalid_snapshot(
+                "auto-input-helper-schema-invalid",
+                path,
+                "Auto input helper snapshot %s requires positive integer writer_pid field",
+            )
+
+        helper_generation = self._coerce_snapshot_int(snapshot.get("helper_generation"))
+        if helper_generation is None or helper_generation < 0:
+            return self._invalid_snapshot(
+                "auto-input-helper-schema-invalid",
+                path,
+                "Auto input helper snapshot %s requires non-negative integer helper_generation field",
+            )
+
+        normalized["writer_pid"] = writer_pid
+        normalized["helper_generation"] = helper_generation
+        return normalized
 
     def _normalize_snapshot_count_fields(
         self,

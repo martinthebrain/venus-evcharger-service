@@ -54,9 +54,15 @@ class AutoInputHelper(
 ):
     SNAPSHOT_SCHEMA_VERSION = AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION
 
-    def __init__(self, config_path: str, snapshot_path: str | None = None, parent_pid: object = None) -> None:
+    def __init__(
+        self,
+        config_path: str,
+        snapshot_path: str | None = None,
+        parent_pid: object = None,
+        helper_generation: object = None,
+    ) -> None:
         parser = self._load_helper_parser(config_path)
-        self._init_helper_base_config(config_path, parser, snapshot_path, parent_pid)
+        self._init_helper_base_config(config_path, parser, snapshot_path, parent_pid, helper_generation)
         self._init_helper_polling()
         self._init_helper_pv_config()
         self._init_helper_battery_config()
@@ -78,10 +84,12 @@ class AutoInputHelper(
         parser: configparser.ConfigParser,
         snapshot_path: str | None,
         parent_pid: object,
+        helper_generation: object,
     ) -> None:
         self.config_path = config_path
         self.config = parser["DEFAULT"]
         self.parent_pid = self._parsed_parent_pid(parent_pid)
+        self.helper_generation = self._parsed_helper_generation(helper_generation)
         self.snapshot_path = snapshot_path or self.config.get(
             "AutoInputSnapshotPath",
             "/run/dbus-venus-evcharger-auto.json",
@@ -93,6 +101,12 @@ class AutoInputHelper(
         if isinstance(parent_pid, (str, int)):
             return int(parent_pid)
         return None
+
+    @staticmethod
+    def _parsed_helper_generation(helper_generation: object) -> int:
+        if isinstance(helper_generation, (str, int)):
+            return max(0, int(helper_generation))
+        return 0
 
     def _init_helper_polling(self) -> None:
         auto_input_poll_interval_ms = self._auto_input_poll_interval_ms()
@@ -281,6 +295,8 @@ class AutoInputHelper(
         """Persist the helper snapshot atomically in RAM."""
         normalized_payload = dict(payload)
         normalized_payload.setdefault("snapshot_version", self.SNAPSHOT_SCHEMA_VERSION)
+        normalized_payload["writer_pid"] = os.getpid()
+        normalized_payload["helper_generation"] = int(getattr(self, "helper_generation", 0) or 0)
         serialized = compact_json(normalized_payload)
         if serialized == self._last_payload:
             return
@@ -371,11 +387,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     snapshot_path = argv[1] if len(argv) > 1 else None
     parent_pid = argv[2] if len(argv) > 2 else None
+    helper_generation = argv[3] if len(argv) > 3 else None
     logging.basicConfig(
         format="%(levelname)s [pid=%(process)d %(threadName)s] %(message)s",
         level=logging.INFO,
     )
-    helper = AutoInputHelper(config_path, snapshot_path, parent_pid)
+    helper = AutoInputHelper(config_path, snapshot_path, parent_pid, helper_generation)
     helper.run()
     return 0
 

@@ -8,7 +8,9 @@ auto-audit logging, and safe persistence of runtime-only state.
 
 from __future__ import annotations
 
+import faulthandler
 import logging
+import os
 import time
 from typing import Any
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
@@ -63,6 +65,48 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
         svc._invalidate_auto_battery_service()
         svc._dbus_list_backoff_until = 0.0
 
+    @staticmethod
+    def _watchdog_restart_attempts(svc: Any) -> int:
+        """Return how many recovery attempts are allowed before process restart."""
+        value = getattr(svc, "auto_watchdog_restart_attempts", 0)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return 0
+        return max(0, int(value))
+
+    @staticmethod
+    def _watchdog_restart_enabled_for_topology(svc: Any) -> bool:
+        """Return whether a configured load topology may use runit restart escalation."""
+        return bool(getattr(svc, "topology_configured", getattr(svc, "host_configured", False)))
+
+    @classmethod
+    def _watchdog_restart_due(cls, svc: Any) -> bool:
+        """Return whether repeated stale recoveries should restart the service process."""
+        restart_attempts = cls._watchdog_restart_attempts(svc)
+        if restart_attempts <= 0:
+            return False
+        if not cls._watchdog_restart_enabled_for_topology(svc):
+            return False
+        return int(getattr(svc, "_recovery_attempts", 0)) >= restart_attempts
+
+    @staticmethod
+    def _exit_for_watchdog_restart() -> None:
+        """Exit immediately so the runit supervisor starts a clean service process."""
+        os._exit(75)
+
+    def _restart_process_after_stale_watchdog(self, svc: Any, now: float) -> None:
+        """Dump stacks and let the process supervisor recover a persistently stale service."""
+        logging.critical(
+            "Watchdog restart after %s stale recovery attempts over %ss (%s)",
+            svc._recovery_attempts,
+            self._age_seconds(self._watchdog_base_timestamp(svc), now),
+            svc._state_summary(),
+        )
+        try:
+            faulthandler.dump_traceback(all_threads=True)
+        except Exception as error:  # pylint: disable=broad-except
+            logging.debug("Unable to dump watchdog traceback before restart: %s", error)
+        self._exit_for_watchdog_restart()
+
     def watchdog_recover(self, now: float) -> None:
         """Perform low-risk in-memory recovery steps after prolonged stale periods."""
         svc = self.service
@@ -80,6 +124,8 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
             self._age_seconds(self._watchdog_base_timestamp(svc), now),
             svc._state_summary(),
         )
+        if self._watchdog_restart_due(svc):
+            self._restart_process_after_stale_watchdog(svc, now)
 
     def warning_throttled(
         self,

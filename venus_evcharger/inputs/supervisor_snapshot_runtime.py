@@ -91,13 +91,49 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         freshness_timestamp: float | None,
         current: float,
         fields: dict[str, Any],
+        seen_for_current_helper: bool,
     ) -> None:
         svc = self.service
         svc._auto_input_snapshot_mtime_ns = mtime_ns
-        svc._auto_input_snapshot_last_seen = freshness_timestamp if freshness_timestamp is not None else current
+        if seen_for_current_helper:
+            svc._auto_input_snapshot_last_seen = freshness_timestamp if freshness_timestamp is not None else current
+        elif not getattr(svc, "_auto_input_snapshot_seen_for_current_helper", False):
+            svc._auto_input_snapshot_last_seen = None
+        svc._auto_input_snapshot_seen_for_current_helper = bool(seen_for_current_helper)
         svc._auto_input_snapshot_last_captured_at = fields.get("captured_at")
         svc._auto_input_snapshot_version = fields.get("snapshot_version")
+        svc._auto_input_snapshot_writer_pid = fields.get("writer_pid")
+        svc._auto_input_snapshot_generation = fields.get("helper_generation")
         svc._update_worker_snapshot(**fields)
+
+    def _snapshot_seen_for_current_helper(
+        self,
+        snapshot: dict[str, Any],
+        freshness_timestamp: float | None,
+        stale: bool,
+    ) -> bool:
+        if stale or freshness_timestamp is None:
+            return False
+        return self._snapshot_matches_current_helper(snapshot, freshness_timestamp)
+
+    def _snapshot_matches_current_helper(self, snapshot: dict[str, Any], freshness_timestamp: float) -> bool:
+        svc = self.service
+        helper_start = float(getattr(svc, "_auto_input_helper_last_start_at", 0.0) or 0.0)
+        if helper_start > 0.0 and freshness_timestamp < helper_start:
+            return False
+
+        expected_generation = self._coerce_snapshot_int(getattr(svc, "_auto_input_helper_generation", None))
+        snapshot_generation = self._coerce_snapshot_int(snapshot.get("helper_generation"))
+        if expected_generation is not None and expected_generation > 0:
+            if snapshot_generation != expected_generation:
+                return False
+
+        process = getattr(svc, "_auto_input_helper_process", None)
+        expected_pid = self._coerce_snapshot_int(getattr(process, "pid", None))
+        snapshot_pid = self._coerce_snapshot_int(snapshot.get("writer_pid"))
+        if expected_pid is not None and snapshot_pid is not None and snapshot_pid != expected_pid:
+            return False
+        return True
 
     def _snapshot_timestamps_valid(
         self,
@@ -151,7 +187,7 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         self,
         path: str,
         current: float,
-    ) -> tuple[int | None, float | None, dict[str, Any]] | None:
+    ) -> tuple[int | None, float | None, bool, dict[str, Any]] | None:
         svc = self.service
         mtime_ns = self._snapshot_mtime_ns(path)
         if not self._snapshot_path_changed(path, mtime_ns, svc._auto_input_snapshot_mtime_ns):
@@ -164,7 +200,10 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
             return None
         fields = self._build_snapshot_fields(snapshot, current, captured_at, stale)
         fields["snapshot_version"] = snapshot["snapshot_version"]
-        return mtime_ns, freshness_timestamp, fields
+        fields["writer_pid"] = self._coerce_snapshot_int(snapshot.get("writer_pid"))
+        fields["helper_generation"] = self._coerce_snapshot_int(snapshot.get("helper_generation"))
+        seen_for_current_helper = self._snapshot_seen_for_current_helper(snapshot, freshness_timestamp, stale)
+        return mtime_ns, freshness_timestamp, seen_for_current_helper, fields
 
     def refresh_snapshot(self, now: float | None = None) -> None:
         svc = self.service
@@ -174,5 +213,5 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         payload = self._refresh_snapshot_payload(path, current)
         if payload is None:
             return
-        mtime_ns, freshness_timestamp, fields = payload
-        self._apply_snapshot(mtime_ns, freshness_timestamp, current, fields)
+        mtime_ns, freshness_timestamp, seen_for_current_helper, fields = payload
+        self._apply_snapshot(mtime_ns, freshness_timestamp, current, fields, seen_for_current_helper)

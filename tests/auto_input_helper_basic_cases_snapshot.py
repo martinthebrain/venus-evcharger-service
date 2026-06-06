@@ -53,15 +53,19 @@ class _AutoInputHelperBasicSnapshotCases:
 
     def test_write_snapshot_uses_atomic_ram_file(self):
         helper = self._make_helper()
+        helper.helper_generation = 9
         with tempfile.TemporaryDirectory() as temp_dir:
             helper.snapshot_path = f"{temp_dir}/auto.json"
-            helper._write_snapshot({"captured_at": 100.0, "pv_power": 0.0})
+            with patch("venus_evcharger_auto_input_helper.os.getpid", return_value=12345):
+                helper._write_snapshot({"captured_at": 100.0, "pv_power": 0.0})
             with open(helper.snapshot_path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
 
         self.assertEqual(payload["captured_at"], 100.0)
         self.assertEqual(payload["pv_power"], 0.0)
         self.assertEqual(payload["snapshot_version"], AutoInputHelper.SNAPSHOT_SCHEMA_VERSION)
+        self.assertEqual(payload["writer_pid"], 12345)
+        self.assertEqual(payload["helper_generation"], 9)
 
     def test_collect_snapshot_polls_battery_less_often_than_pv_and_grid(self):
         helper = self._make_helper()
@@ -81,6 +85,8 @@ class _AutoInputHelperBasicSnapshotCases:
         self.assertEqual(second["grid_power"], -750.0)
         self.assertEqual(second["captured_at"], 102.0)
         self.assertEqual(second["snapshot_version"], AutoInputHelper.SNAPSHOT_SCHEMA_VERSION)
+        self.assertIn("writer_pid", second)
+        self.assertIn("helper_generation", second)
         self.assertEqual(helper._get_pv_power.call_count, 2)
         self.assertEqual(helper._get_grid_power.call_count, 2)
         self.assertEqual(helper._get_battery_soc.call_count, 1)

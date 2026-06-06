@@ -164,6 +164,47 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         self.assertTrue(controller._watchdog_recovery_suppressed(service, 100.0))
         self.assertEqual(controller.source_retry_remaining("dbus", 100.0), 10)
 
+    def test_watchdog_restarts_configured_service_after_repeated_stale_recoveries(self) -> None:
+        service = make_runtime_support_service(
+            _is_update_stale=self._always_stale,
+            topology_configured=True,
+            auto_watchdog_stale_seconds=10.0,
+            auto_watchdog_recovery_seconds=0.0,
+            auto_watchdog_restart_attempts=2,
+            _last_recovery_attempt_at=None,
+            _recovery_attempts=1,
+            started_at=0.0,
+        )
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+
+        with patch.object(RuntimeSupportController, "_exit_for_watchdog_restart") as restart, patch(
+            "venus_evcharger.runtime.health.faulthandler.dump_traceback"
+        ):
+            controller.watchdog_recover(100.0)
+
+        restart.assert_called_once_with()
+        service._reset_system_bus.assert_called_once_with()
+
+    def test_watchdog_does_not_restart_unconfigured_service(self) -> None:
+        service = make_runtime_support_service(
+            _is_update_stale=self._always_stale,
+            topology_configured=False,
+            host_configured=False,
+            auto_watchdog_stale_seconds=10.0,
+            auto_watchdog_recovery_seconds=0.0,
+            auto_watchdog_restart_attempts=1,
+            _last_recovery_attempt_at=None,
+            _recovery_attempts=0,
+            started_at=0.0,
+        )
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+
+        with patch.object(RuntimeSupportController, "_exit_for_watchdog_restart") as restart:
+            controller.watchdog_recover(100.0)
+
+        restart.assert_not_called()
+        service._reset_system_bus.assert_called_once_with()
+
     def test_health_helpers_ignore_unknown_failure_keys(self) -> None:
         service = make_runtime_support_service(
             _error_state={"dbus": 0},

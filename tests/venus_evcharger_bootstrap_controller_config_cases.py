@@ -212,6 +212,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                     "AutoShellySoftFailSeconds": "17",
                     "AutoWatchdogStaleSeconds": "111",
                     "AutoWatchdogRecoverySeconds": "22",
+                    "AutoWatchdogRestartAttempts": "6",
                     "AutoStartupWarmupSeconds": "18",
                     "AutoManualOverrideSeconds": "333",
                     "StartupDeviceInfoRetries": "4",
@@ -292,6 +293,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.auto_shelly_soft_fail_seconds, 17.0)
         self.assertEqual(service.auto_watchdog_stale_seconds, 111.0)
         self.assertEqual(service.auto_watchdog_recovery_seconds, 22.0)
+        self.assertEqual(service.auto_watchdog_restart_attempts, 6)
         self.assertEqual(service.auto_startup_warmup_seconds, 18.0)
         self.assertEqual(service.auto_manual_override_seconds, 333.0)
         self.assertEqual(service.startup_device_info_retries, 4)
