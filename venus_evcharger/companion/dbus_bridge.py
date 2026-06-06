@@ -54,6 +54,10 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServicesMixin, _Energy
         svc = self.service
         if not bool(getattr(svc, "companion_dbus_bridge_enabled", False)):
             return False
+        direct_allowed = getattr(svc, "_dbus_publish_direct_allowed", None)
+        enqueue_publish = getattr(svc, "_enqueue_companion_dbus_publish", None)
+        if callable(direct_allowed) and callable(enqueue_publish) and not bool(direct_allowed()):
+            return bool(enqueue_publish(now))
         current_time = float(now) if isinstance(now, (int, float)) else time.monotonic()
         get_snapshot = getattr(svc, "_get_worker_snapshot", None)
         snapshot = get_snapshot() if callable(get_snapshot) else {}
@@ -104,6 +108,9 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServicesMixin, _Energy
         dbus_service: Any,
         values: Mapping[str, Any],
     ) -> bool:
+        assert_allowed = getattr(self.service, "_assert_dbus_mainloop_thread", None)
+        if callable(assert_allowed):
+            assert_allowed(f"companion DBus publish {service_key}")
         previous_values = self._published_values.setdefault(service_key, {})
         changed = False
         for path, value in values.items():

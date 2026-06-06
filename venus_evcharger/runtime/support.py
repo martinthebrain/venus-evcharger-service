@@ -31,11 +31,13 @@ _TEST_PATCH_EXPORTS = (logging, os, dbus, write_text_atomically)
 
 
 from venus_evcharger.runtime.audit import _RuntimeSupportAuditMixin
+from venus_evcharger.runtime.async_mainloop import _RuntimeSupportAsyncMainloopMixin
 from venus_evcharger.runtime.health import _RuntimeSupportHealthMixin
 from venus_evcharger.runtime.setup import _RuntimeSupportSetupMixin
 
 
 class RuntimeSupportController(
+    _RuntimeSupportAsyncMainloopMixin,
     _RuntimeSupportSetupMixin,
     _RuntimeSupportAuditMixin,
     _RuntimeSupportHealthMixin,

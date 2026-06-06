@@ -140,6 +140,23 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
 
         DbusWriteController._restore_write_state(service, snapshot)
 
+    def test_restore_write_state_queues_dbus_restore_when_async_publish_is_available(self) -> None:
+        service = SimpleNamespace(
+            _time_now=MagicMock(return_value=123.0),
+            _enqueue_dbus_publish_values=MagicMock(),
+        )
+        snapshot = {
+            "attrs": {},
+            "deques": {},
+            "values": {},
+            "mappings": {},
+            "dbus_paths": {"/Mode": 0},
+        }
+
+        DbusWriteController._restore_write_state(service, snapshot)
+
+        service._enqueue_dbus_publish_values.assert_called_once_with([("/Mode", 0)], 123.0)
+
     def test_handle_mode_write_returns_true_when_save_fails_after_relay_side_effects_started(self) -> None:
         service = SimpleNamespace(
             virtual_mode=0,

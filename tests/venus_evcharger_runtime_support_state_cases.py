@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import os
 import tempfile
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
 from venus_evcharger.runtime.audit import _RuntimeSupportAuditMixin
 from venus_evcharger.runtime.support import RuntimeSupportController
+from venus_evcharger.control import ControlCommand
 from tests.venus_evcharger_runtime_support_support import RuntimeSupportTestCaseBase
 from tests.venus_evcharger_test_fixtures import make_auto_metrics, make_runtime_support_service
 
@@ -217,3 +220,150 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
 
         self.assertEqual(service._error_state, {"dbus": 0})
         self.assertEqual(service._failure_active, {"dbus": False})
+
+    def test_async_publish_queue_coalesces_and_flushes_from_mainloop(self) -> None:
+        service = make_runtime_support_service()
+        service._dbusservice = {"/A": 0, "/UpdateIndex": 0}
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        service._dbus_publish_state = {}
+
+        controller.enqueue_dbus_publish_values([("/A", 1), ("/A", 2)], 100.0)
+        controller.enqueue_dbus_update_index_bump(100.0)
+        self.assertTrue(controller.flush_dbus_publish_queue())
+
+        self.assertEqual(service._dbusservice["/A"], 2)
+        self.assertEqual(service._dbusservice["/UpdateIndex"], 1)
+        self.assertEqual(service._dbus_publish_state["/A"], {"value": 2, "updated_at": 100.0})
+
+    def test_update_worker_scheduler_returns_while_cycle_is_blocked(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        service = make_runtime_support_service()
+
+        def blocking_update() -> bool:
+            started.set()
+            release.wait(2.0)
+            return True
+
+        service._update = blocking_update
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.start_update_worker()
+        try:
+            first_start = time.monotonic()
+            self.assertTrue(controller.schedule_update_cycle())
+            self.assertTrue(started.wait(1.0))
+            self.assertLess(time.monotonic() - first_start, 1.0)
+
+            second_start = time.monotonic()
+            self.assertTrue(controller.schedule_update_cycle())
+            self.assertLess(time.monotonic() - second_start, 0.1)
+            self.assertGreaterEqual(service._update_worker_skipped_count, 1)
+        finally:
+            release.set()
+            service._update_worker_stop_event.set()
+            service._update_worker_event.set()
+            service._update_worker_thread.join(1.0)
+
+    def test_control_command_worker_returns_while_backend_command_is_blocked(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        command = ControlCommand(name="set_start_stop", path="/StartStop", value=1)
+        service = make_runtime_support_service()
+
+        def blocking_command(_command: ControlCommand) -> SimpleNamespace:
+            started.set()
+            release.wait(2.0)
+            return SimpleNamespace(accepted=True)
+
+        service._handle_control_command = blocking_command
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.start_control_command_worker()
+        try:
+            enqueue_started = time.monotonic()
+            self.assertTrue(controller.enqueue_control_command(command))
+            self.assertLess(time.monotonic() - enqueue_started, 0.1)
+            self.assertTrue(started.wait(1.0))
+            self.assertEqual(service._desired_control_values["/StartStop"], 1)
+        finally:
+            release.set()
+            service._control_command_stop_event.set()
+            service._control_command_event.set()
+            service._control_command_thread.join(1.0)
+
+    def test_runtime_executor_serializes_commands_before_update_cycles(self) -> None:
+        order: list[str] = []
+        command = ControlCommand(name="set_start_stop", path="/StartStop", value=1)
+        service = make_runtime_support_service()
+        service._handle_control_command = MagicMock(side_effect=lambda _command: order.append("command") or SimpleNamespace(accepted=True))
+        service._update = MagicMock(side_effect=lambda: order.append("update") or True)
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.start_update_worker()
+        controller.start_control_command_worker()
+        try:
+            self.assertTrue(controller.enqueue_control_command(command))
+            self.assertTrue(controller.schedule_update_cycle())
+            deadline = time.monotonic() + 1.0
+            while len(order) < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+        finally:
+            service._runtime_executor_stop_event.set()
+            service._runtime_executor_event.set()
+            service._runtime_executor_thread.join(1.0)
+
+        self.assertEqual(order, ["command", "update"])
+        self.assertIs(service._update_worker_thread, service._control_command_thread)
+
+    def test_mainloop_watchdog_dumps_traceback_and_exits_on_stale_heartbeat(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        service._mainloop_heartbeat_at = 1.0
+        service._mainloop_watchdog_stale_seconds = 1.0
+        service._mainloop_watchdog_stop_event = SimpleNamespace(wait=MagicMock(return_value=False))
+
+        with (
+            patch("venus_evcharger.runtime.async_mainloop.time.time", return_value=10.0),
+            patch.object(RuntimeSupportController, "_dump_mainloop_watchdog_traceback") as dump_traceback,
+            patch.object(RuntimeSupportController, "_exit_for_mainloop_watchdog", side_effect=SystemExit) as exit_restart,
+            self.assertRaises(SystemExit),
+        ):
+            controller._mainloop_watchdog_loop()
+
+        dump_traceback.assert_called_once_with(service)
+        exit_restart.assert_called_once_with()
+
+    def test_companion_publish_is_coalesced_and_flushed_in_mainloop(self) -> None:
+        service = make_runtime_support_service()
+        service._companion_dbus_bridge = SimpleNamespace(publish=MagicMock(return_value=True))
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.mark_mainloop_thread()
+
+        self.assertTrue(controller.enqueue_companion_dbus_publish(123.0))
+        self.assertTrue(controller.flush_companion_dbus_publish_queue())
+
+        service._companion_dbus_bridge.publish.assert_called_once_with(123.0)
+
+    def test_dbus_thread_guard_rejects_worker_thread_access(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.mark_mainloop_thread()
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            try:
+                controller.assert_dbus_mainloop_thread("test dbus write")
+            except Exception as error:  # pylint: disable=broad-except
+                errors.append(error)
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(1.0)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], RuntimeError)

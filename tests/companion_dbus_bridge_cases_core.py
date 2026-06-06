@@ -3,6 +3,33 @@ from tests.companion_dbus_bridge_cases_common import *
 
 
 class _CompanionDbusBridgeCoreCases:
+    def test_bridge_publish_queues_when_called_outside_mainloop_thread(self) -> None:
+        service = SimpleNamespace(
+            companion_dbus_bridge_enabled=True,
+            _dbus_publish_direct_allowed=MagicMock(return_value=False),
+            _enqueue_companion_dbus_publish=MagicMock(return_value=True),
+        )
+        bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
+
+        self.assertTrue(bridge.publish(100.0))
+
+        service._enqueue_companion_dbus_publish.assert_called_once_with(100.0)
+
+    def test_bridge_direct_publish_uses_dbus_thread_guard(self) -> None:
+        service = SimpleNamespace(
+            companion_dbus_bridge_enabled=True,
+            _dbus_publish_direct_allowed=MagicMock(return_value=True),
+            _assert_dbus_mainloop_thread=MagicMock(side_effect=RuntimeError("wrong thread")),
+            _get_worker_snapshot=MagicMock(return_value={}),
+        )
+        bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
+        bridge._battery_service = _FakeVeDbusService("battery")
+
+        with self.assertRaisesRegex(RuntimeError, "wrong thread"):
+            bridge.publish(100.0)
+
+        service._assert_dbus_mainloop_thread.assert_called_once()
+
     def test_bridge_starts_and_publishes_battery_and_pvinverter_services(self) -> None:
         snapshot = {
             "battery_combined_soc": 62.0,

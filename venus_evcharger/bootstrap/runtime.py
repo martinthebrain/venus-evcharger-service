@@ -211,11 +211,23 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
     def start_runtime_loops(self) -> None:
         """Register DBus paths, start background workers, and arm timers."""
         svc = self.service
+        mark_mainloop_thread = getattr(svc, "_mark_mainloop_thread", None)
+        if callable(mark_mainloop_thread):
+            mark_mainloop_thread()
         if self._topology_configured(svc):
             svc._start_io_worker()
         else:
             logging.info("No load topology is configured yet; skipping runtime I/O worker startup")
         svc._start_control_api_server()
+        start_update_worker = getattr(svc, "_start_update_worker", None)
+        if callable(start_update_worker):
+            start_update_worker()
+        start_control_command_worker = getattr(svc, "_start_control_command_worker", None)
+        if callable(start_control_command_worker):
+            start_control_command_worker()
+        start_mainloop_watchdog = getattr(svc, "_start_mainloop_watchdog", None)
+        if callable(start_mainloop_watchdog):
+            start_mainloop_watchdog()
         start_companion_bridge = getattr(svc, "_start_companion_dbus_bridge", None)
         if callable(start_companion_bridge):
             start_companion_bridge()
@@ -225,7 +237,20 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
             svc.runtime_state_path,
             svc._state_summary(),
         )
-        self._gobject.timeout_add(svc.poll_interval_ms, svc._update)
+        schedule_update_cycle = getattr(svc, "_schedule_update_cycle", None)
+        if callable(schedule_update_cycle):
+            self._gobject.timeout_add(svc.poll_interval_ms, schedule_update_cycle)
+        else:
+            self._gobject.timeout_add(svc.poll_interval_ms, svc._update)
+        flush_dbus_publish_queue = getattr(svc, "_flush_dbus_publish_queue", None)
+        if callable(flush_dbus_publish_queue):
+            self._gobject.timeout_add(
+                int(getattr(svc, "_dbus_publish_flush_interval_ms", 200)),
+                flush_dbus_publish_queue,
+            )
+        mainloop_heartbeat_tick = getattr(svc, "_mainloop_heartbeat_tick", None)
+        if callable(mainloop_heartbeat_tick):
+            self._gobject.timeout_add(1000, mainloop_heartbeat_tick)
         self._gobject.timeout_add(svc.sign_of_life_minutes * 60 * 1000, svc._sign_of_life)
 
     def fetch_device_info_with_fallback(self) -> dict[str, Any]:

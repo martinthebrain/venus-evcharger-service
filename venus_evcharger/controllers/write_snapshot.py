@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 from collections import deque
+import time
 from typing import Any
 
 SNAPSHOT_DBUS_PATHS = (
@@ -149,7 +150,6 @@ SNAPSHOT_VALUE_ATTRS = (
     "_stop_smoothed_grid_power",
 )
 SNAPSHOT_MAPPING_ATTRS = (
-    "_dbusservice",
     "_dbus_publish_state",
     "_worker_snapshot",
     "_last_pm_status",
@@ -186,12 +186,25 @@ def _snapshot_mappings(svc: Any, attr_names: tuple[str, ...]) -> dict[str, dict[
 
 
 def _snapshot_dbus_paths(svc: Any, dbus_paths: tuple[str, ...]) -> dict[str, Any]:
-    """Capture writable DBus paths when the service exposes mapping access."""
+    """Capture writable DBus paths from local publish bookkeeping only."""
+    publish_state = getattr(svc, "_dbus_publish_state", None)
+    captured: dict[str, Any] = {}
+    if isinstance(publish_state, dict):
+        for path in dbus_paths:
+            entry = publish_state.get(path)
+            if isinstance(entry, dict) and "value" in entry:
+                captured[path] = copy.deepcopy(entry["value"])
+
+    direct_allowed = getattr(svc, "_dbus_publish_direct_allowed", None)
+    if callable(direct_allowed) and not bool(direct_allowed()):
+        return captured
+
     dbus_service = getattr(svc, "_dbusservice", None)
     if dbus_service is None:
-        return {}
-    captured: dict[str, Any] = {}
+        return captured
     for path in dbus_paths:
+        if path in captured:
+            continue
         try:
             captured[path] = dbus_service[path]
         except Exception:  # pylint: disable=broad-except
@@ -241,7 +254,15 @@ def _restore_mappings(svc: Any, saved_mappings: dict[str, dict[str, Any]]) -> No
 
 
 def _restore_dbus_paths(svc: Any, saved_paths: dict[str, Any]) -> None:
-    """Restore writable DBus paths on best effort."""
+    """Restore writable DBus paths on best effort without worker-thread DBus access."""
+    if not saved_paths:
+        return
+    enqueue_publish = getattr(svc, "_enqueue_dbus_publish_values", None)
+    if callable(enqueue_publish):
+        now_func = getattr(svc, "_time_now", None)
+        current = float(now_func()) if callable(now_func) else time.time()
+        enqueue_publish(list(saved_paths.items()), current)
+        return
     dbus_service = getattr(svc, "_dbusservice", None)
     if dbus_service is None:
         return

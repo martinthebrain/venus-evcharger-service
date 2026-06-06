@@ -194,6 +194,21 @@ def _age_counter_diagnostic_defaults() -> PathMap:
     }
 
 
+def _runtime_timing_diagnostic_defaults() -> PathMap:
+    """Return async-runtime timing diagnostics initialized to neutral values."""
+    return {
+        "/Auto/UpdateWorkerDurationSeconds": (0.0, None),
+        "/Auto/UpdateWorkerPending": (0, None),
+        "/Auto/UpdateWorkerSkipped": (0, None),
+        "/Auto/PublishFlushDurationSeconds": (0.0, None),
+        "/Auto/PublishQueueLagSeconds": (0.0, None),
+        "/Auto/PublishQueueDropped": (0, None),
+        "/Auto/WriteCommandDurationSeconds": (0.0, None),
+        "/Auto/WriteCommandQueueLagSeconds": (0.0, None),
+        "/Auto/MainloopHeartbeatAge": (0.0, None),
+    }
+
+
 class _ServiceBootstrapPathMixin(_ComposableControllerMixin):
     @staticmethod
     def _connected_value(svc: Any) -> int:
@@ -362,6 +377,7 @@ class _ServiceBootstrapPathMixin(_ComposableControllerMixin):
             **_software_update_diagnostic_defaults(svc),
             **_phase_diagnostic_defaults(svc),
             **_age_counter_diagnostic_defaults(),
+            **_runtime_timing_diagnostic_defaults(),
         }
 
     def _all_service_paths(self) -> PathMap:

@@ -135,4 +135,8 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
 
     def _publish_companion_dbus_bridge(self, now: float | None = None) -> bool:
         self._ensure_companion_dbus_bridge()
+        direct_allowed = getattr(self, "_dbus_publish_direct_allowed", None)
+        enqueue_publish = getattr(self, "_enqueue_companion_dbus_publish", None)
+        if callable(direct_allowed) and callable(enqueue_publish) and not bool(direct_allowed()):
+            return cast(bool, enqueue_publish(now))
         return cast(bool, self._companion_dbus_bridge.publish(now))

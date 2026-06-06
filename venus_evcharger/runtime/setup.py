@@ -138,6 +138,7 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
             current_version=self._read_local_version(repo_root),
             boot_auto_due_at=self._boot_delayed_update_due_at(started_at, 3600.0),
         )
+        self.initialize_async_runtime_state()
 
     def reset_system_bus(self) -> None:
         """Invalidate cached DBus connections so each thread reconnects cleanly."""

@@ -186,6 +186,27 @@ class _DbusPublishDiagnosticsMixin:
             "/Auto/ContactorLockoutSource": self._contactor_lockout_source(self.service),
         }
 
+    def _runtime_timing_values(self, now: float) -> dict[str, int | float]:
+        """Return timing and queue diagnostics for async runtime health."""
+        svc = self.service
+        mainloop_heartbeat_at = getattr(svc, "_mainloop_heartbeat_at", None)
+        heartbeat_age = (
+            max(0.0, now - float(mainloop_heartbeat_at))
+            if isinstance(mainloop_heartbeat_at, (int, float))
+            else -1.0
+        )
+        return {
+            "/Auto/UpdateWorkerDurationSeconds": float(getattr(svc, "_last_update_cycle_duration_seconds", 0.0)),
+            "/Auto/UpdateWorkerPending": int(bool(getattr(svc, "_update_worker_pending", False))),
+            "/Auto/UpdateWorkerSkipped": int(getattr(svc, "_update_worker_skipped_count", 0)),
+            "/Auto/PublishFlushDurationSeconds": float(getattr(svc, "_last_publish_flush_duration_seconds", 0.0)),
+            "/Auto/PublishQueueLagSeconds": float(getattr(svc, "_last_dbus_publish_queue_lag_seconds", 0.0)),
+            "/Auto/PublishQueueDropped": int(getattr(svc, "_dbus_publish_dropped_count", 0)),
+            "/Auto/WriteCommandDurationSeconds": float(getattr(svc, "_last_write_command_duration_seconds", 0.0)),
+            "/Auto/WriteCommandQueueLagSeconds": float(getattr(svc, "_last_write_command_queue_lag_seconds", 0.0)),
+            "/Auto/MainloopHeartbeatAge": heartbeat_age,
+        }
+
     @staticmethod
     def _auto_decision_metric_float(metrics: Mapping[str, Any], field_name: str) -> float:
         value = finite_float_or_none(metrics.get(field_name))
@@ -263,6 +284,7 @@ class _DbusPublishDiagnosticsMixin:
             **self._error_counter_values(error_state),
             **self._phase_counter_values(now),
             **self._contactor_counter_values(),
+            **self._runtime_timing_values(now),
         }
 
     def _diagnostic_age_values(self, now: float) -> dict[str, float]:

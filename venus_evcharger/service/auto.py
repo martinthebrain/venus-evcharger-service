@@ -108,6 +108,9 @@ class DbusAutoLogicMixin(ServiceControllerFactoryMixin):
 
     def _handle_write(self, path: str, value: Any) -> bool:
         command = self._control_command_from_write(path, value, source="dbus")
+        enqueue_command = getattr(self, "_enqueue_control_command", None)
+        if callable(enqueue_command) and bool(getattr(self, "_control_command_async_enabled", False)):
+            return bool(enqueue_command(command))
         result = self._handle_control_command(command)
         return bool(result.accepted)
 
