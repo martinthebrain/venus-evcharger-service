@@ -16,6 +16,10 @@ from venus_evcharger.core.shared import (
     first_matching_prefixed_service,
 )
 from venus_evcharger.energy import EnergySourceDefinition, EnergySourceSnapshot
+from venus_evcharger.inputs.helper.capacity_persistence import (
+    configured_estimated_capacity_payload,
+    persist_estimated_capacity_if_ah_changed,
+)
 
 
 _EXPECTED_MISSING_DBUS_ERROR_NAMES = frozenset(
@@ -58,41 +62,51 @@ def _is_expected_missing_dbus_error(error: BaseException) -> bool:
 
 
 class _AutoInputHelperSourceDbusMixin:
+    @staticmethod
+    def _dbus_module() -> Any:
+        return dbus
+
     def _get_dbus_value(self: Any, service_name: str, path: str) -> float | int | None:
+        def _read() -> float | int | None:
+            obj = self._get_system_bus().get_object(service_name, path)
+            interface = cast(Any, self._dbus_module()).Interface(obj, "com.victronenergy.BusItem")
+            return cast(float | int | None, coerce_dbus_numeric(interface.GetValue(timeout=self.dbus_method_timeout_seconds)))
+
+        return cast(float | int | None, self._dbus_retry_read(service_name, path, "DBus read", _read))
+
+    def _get_dbus_child_nodes(self: Any, service_name: str, path: str) -> list[str]:
+        def _read() -> list[str]:
+            obj = self._get_system_bus().get_object(service_name, path)
+            interface = cast(Any, self._dbus_module()).Interface(obj, "org.freedesktop.DBus.Introspectable")
+            return cast(list[str], self._child_nodes_from_introspection(interface.Introspect(timeout=self.dbus_method_timeout_seconds)))
+
+        return cast(list[str], self._dbus_retry_read(service_name, path, "DBus introspection", _read))
+
+    def _dbus_retry_read(self: Any, service_name: str, path: str, label: str, read: Any) -> Any:
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                obj = self._get_system_bus().get_object(service_name, path)
-                interface = cast(Any, dbus).Interface(obj, "com.victronenergy.BusItem")
-                return cast(float | int | None, coerce_dbus_numeric(interface.GetValue(timeout=self.dbus_method_timeout_seconds)))
+                return read()
             except Exception as error:  # pylint: disable=broad-except
                 last_error = error
                 if _is_expected_missing_dbus_error(error):
                     logging.debug("DBus value missing for %s %s: %s", service_name, path, error)
                     raise
-                self._reset_system_bus()
-                if attempt == 0:
-                    logging.debug("DBus read retry for %s %s after error: %s", service_name, path, error)
+                self._reset_system_bus_after_retryable_error(attempt, label, service_name, path, error)
         assert last_error is not None
         raise last_error
 
-    def _get_dbus_child_nodes(self: Any, service_name: str, path: str) -> list[str]:
-        last_error: Exception | None = None
-        for attempt in range(2):
-            try:
-                obj = self._get_system_bus().get_object(service_name, path)
-                interface = cast(Any, dbus).Interface(obj, "org.freedesktop.DBus.Introspectable")
-                return cast(list[str], self._child_nodes_from_introspection(interface.Introspect(timeout=self.dbus_method_timeout_seconds)))
-            except Exception as error:  # pylint: disable=broad-except
-                last_error = error
-                if _is_expected_missing_dbus_error(error):
-                    logging.debug("DBus child nodes missing for %s %s: %s", service_name, path, error)
-                    raise
-                self._reset_system_bus()
-                if attempt == 0:
-                    logging.debug("DBus introspection retry for %s %s after error: %s", service_name, path, error)
-        assert last_error is not None
-        raise last_error
+    def _reset_system_bus_after_retryable_error(
+        self: Any,
+        attempt: int,
+        label: str,
+        service_name: str,
+        path: str,
+        error: Exception,
+    ) -> None:
+        self._reset_system_bus()
+        if attempt == 0:
+            logging.debug("%s retry for %s %s after error: %s", label, service_name, path, error)
 
     @staticmethod
     def _child_nodes_from_introspection(xml_data: object) -> list[str]:
@@ -105,7 +119,7 @@ class _AutoInputHelperSourceDbusMixin:
             return []
         try:
             dbus_proxy = self._get_system_bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
-            dbus_iface = cast(Any, dbus).Interface(dbus_proxy, "org.freedesktop.DBus")
+            dbus_iface = cast(Any, self._dbus_module()).Interface(dbus_proxy, "org.freedesktop.DBus")
             names = list(dbus_iface.ListNames(timeout=self.dbus_method_timeout_seconds))
             self._dbus_list_failures = 0
             self._dbus_list_backoff_until = 0.0
@@ -166,6 +180,51 @@ class _AutoInputHelperSourceDbusMixin:
         value = getattr(self, "auto_battery_capacity_wh", None)
         return float(value) if isinstance(value, (int, float)) else None
 
+    def _primary_energy_chemistry(self: Any) -> str:
+        return str(getattr(self, "auto_battery_chemistry", "lfp") or "lfp").strip().lower()
+
+    def _primary_energy_capacity_auto_estimate(self: Any) -> bool:
+        return bool(getattr(self, "auto_battery_capacity_auto_estimate", True))
+
+    def _primary_energy_capacity_wh_path(self: Any) -> str:
+        return str(getattr(self, "auto_battery_capacity_wh_path", "") or "")
+
+    def _primary_energy_capacity_ah_path(self: Any) -> str:
+        return str(getattr(self, "auto_battery_capacity_ah_path", "/InstalledCapacity") or "/InstalledCapacity")
+
+    def _primary_energy_voltage_path(self: Any) -> str:
+        return str(getattr(self, "auto_battery_voltage_path", "/Dc/0/Voltage") or "/Dc/0/Voltage")
+
+    def _primary_energy_capacity_estimate_min_soc(self: Any) -> float:
+        return max(0.0, float(getattr(self, "auto_battery_capacity_estimate_min_soc", 95.0) or 95.0))
+
+    def _primary_energy_capacity_startup_recheck_seconds(self: Any) -> float:
+        return max(0.0, float(getattr(self, "auto_battery_capacity_startup_recheck_seconds", 300.0) or 300.0))
+
+    def _primary_energy_estimated_capacity_wh(self: Any) -> float | None:
+        return self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_wh", None))
+
+    def _primary_energy_estimated_capacity_ah(self: Any) -> float | None:
+        return self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_ah", None))
+
+    def _primary_energy_estimated_capacity_nominal_voltage(self: Any) -> float | None:
+        return self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_nominal_voltage", None))
+
+    def _primary_energy_estimated_capacity_cell_count(self: Any) -> int | None:
+        try:
+            value = int(float(getattr(self, "auto_battery_capacity_estimated_cell_count", 0) or 0))
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    @staticmethod
+    def _positive_float_or_none(value: object) -> float | None:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        return numeric if numeric > 0.0 else None
+
     def _primary_energy_battery_power_path(self: Any) -> str:
         return str(getattr(self, "auto_battery_power_path", "") or "")
 
@@ -189,6 +248,17 @@ class _AutoInputHelperSourceDbusMixin:
             service_prefix=self._primary_energy_service_prefix(),
             soc_path=self._primary_energy_soc_path(),
             usable_capacity_wh=self._primary_energy_capacity_wh(),
+            battery_chemistry=self._primary_energy_chemistry(),
+            capacity_auto_estimate=self._primary_energy_capacity_auto_estimate(),
+            capacity_wh_path=self._primary_energy_capacity_wh_path(),
+            capacity_ah_path=self._primary_energy_capacity_ah_path(),
+            voltage_path=self._primary_energy_voltage_path(),
+            capacity_estimate_min_soc=self._primary_energy_capacity_estimate_min_soc(),
+            capacity_startup_recheck_seconds=self._primary_energy_capacity_startup_recheck_seconds(),
+            estimated_capacity_wh=self._primary_energy_estimated_capacity_wh(),
+            estimated_capacity_ah=self._primary_energy_estimated_capacity_ah(),
+            estimated_capacity_nominal_voltage_v=self._primary_energy_estimated_capacity_nominal_voltage(),
+            estimated_capacity_cell_count=self._primary_energy_estimated_capacity_cell_count(),
             battery_power_path=self._primary_energy_battery_power_path(),
             ac_power_path=self._primary_energy_ac_power_path(),
             pv_power_path=self._primary_energy_pv_power_path(),
@@ -385,8 +455,8 @@ class _AutoInputHelperSourceDbusMixin:
         self._delay_source_retry("battery")
         return None
 
-    @staticmethod
     def _dbus_energy_source_snapshot_payload(
+        self: Any,
         source: EnergySourceDefinition,
         service_name: str,
         soc_value: float | None,
@@ -397,12 +467,19 @@ class _AutoInputHelperSourceDbusMixin:
         operating_mode: str,
         now: float,
     ) -> EnergySourceSnapshot:
+        capacity_payload = self._dbus_energy_source_capacity_payload(source, service_name, soc_value, now)
         return EnergySourceSnapshot(
             source_id=source.source_id,
             role=source.role,
             service_name=service_name,
             soc=soc_value,
-            usable_capacity_wh=source.usable_capacity_wh,
+            usable_capacity_wh=cast(float | None, capacity_payload.get("usable_capacity_wh")),
+            usable_capacity_source=str(capacity_payload.get("usable_capacity_source", "")),
+            installed_capacity_ah=cast(float | None, capacity_payload.get("installed_capacity_ah")),
+            capacity_voltage_v=cast(float | None, capacity_payload.get("capacity_voltage_v")),
+            capacity_nominal_voltage_v=cast(float | None, capacity_payload.get("capacity_nominal_voltage_v")),
+            capacity_cell_count=cast(int | None, capacity_payload.get("capacity_cell_count")),
+            battery_chemistry=source.battery_chemistry,
             net_battery_power_w=net_battery_power,
             ac_power_w=ac_power,
             pv_input_power_w=pv_input_power,
@@ -412,6 +489,182 @@ class _AutoInputHelperSourceDbusMixin:
             confidence=1.0,
             captured_at=now,
         )
+
+    def _dbus_energy_source_capacity_payload(
+        self: Any,
+        source: EnergySourceDefinition,
+        service_name: str,
+        soc_value: float | None,
+        now: float,
+    ) -> dict[str, object]:
+        configured = self._configured_dbus_capacity_payload(source)
+        if configured is not None:
+            return configured
+        cached = self._cached_dbus_capacity_payload(source, service_name)
+        startup_recheck_due = self._dbus_capacity_startup_recheck_due(source, service_name, now)
+        if self._dbus_cached_capacity_usable(cached, startup_recheck_due):
+            return cached
+        inferred = self._fresh_dbus_capacity_payload(source, service_name, soc_value, startup_recheck_due)
+        return self._resolved_dbus_capacity_payload(inferred, cached)
+
+    @staticmethod
+    def _dbus_cached_capacity_usable(cached: dict[str, object] | None, startup_recheck_due: bool) -> bool:
+        return cached is not None and not startup_recheck_due
+
+    @staticmethod
+    def _resolved_dbus_capacity_payload(
+        inferred: dict[str, object] | None,
+        cached: dict[str, object] | None,
+    ) -> dict[str, object]:
+        if inferred is not None:
+            return inferred
+        if cached is not None:
+            return cached
+        return {"usable_capacity_wh": None, "usable_capacity_source": ""}
+
+    def _fresh_dbus_capacity_payload(
+        self: Any,
+        source: EnergySourceDefinition,
+        service_name: str,
+        soc_value: float | None,
+        startup_recheck_due: bool,
+    ) -> dict[str, object] | None:
+        inferred = self._infer_dbus_capacity_payload(source, service_name, soc_value)
+        if inferred is None:
+            return None
+        self._store_dbus_capacity_payload(source, service_name, inferred, startup_recheck_done=startup_recheck_due)
+        self._persist_dbus_capacity_payload_if_needed(source, inferred, startup_recheck_due)
+        return inferred
+
+    @staticmethod
+    def _configured_dbus_capacity_payload(source: EnergySourceDefinition) -> dict[str, object] | None:
+        if source.usable_capacity_wh is None or source.usable_capacity_wh <= 0.0:
+            return None
+        return {"usable_capacity_wh": source.usable_capacity_wh, "usable_capacity_source": "configured"}
+
+    def _cached_dbus_capacity_payload(
+        self: Any,
+        source: EnergySourceDefinition,
+        service_name: str,
+    ) -> dict[str, object] | None:
+        key = self._dbus_capacity_cache_key(source, service_name)
+        estimates = getattr(self, "_auto_battery_capacity_estimates", {})
+        cached = estimates.get(key) if isinstance(estimates, dict) else None
+        if isinstance(cached, dict):
+            return dict(cached)
+        return configured_estimated_capacity_payload(source)
+
+    def _persist_dbus_capacity_payload_if_needed(
+        self: Any,
+        source: EnergySourceDefinition,
+        payload: dict[str, object],
+        startup_recheck_done: bool,
+    ) -> None:
+        if not startup_recheck_done:
+            return
+        try:
+            changed = persist_estimated_capacity_if_ah_changed(str(getattr(self, "config_path", "")), source, payload)
+        except Exception as error:  # pylint: disable=broad-except
+            logging.warning("Unable to persist auto-estimated battery capacity: %s", error)
+            return
+        if changed:
+            logging.info("Persisted auto-estimated battery capacity for source %s", source.source_id)
+
+    def _dbus_capacity_startup_recheck_due(
+        self: Any,
+        source: EnergySourceDefinition,
+        service_name: str,
+        now: float,
+    ) -> bool:
+        if not self._dbus_capacity_startup_recheck_time_due(source, now):
+            return False
+        return not self._dbus_capacity_startup_recheck_seen(source, service_name)
+
+    def _dbus_capacity_startup_recheck_time_due(self: Any, source: EnergySourceDefinition, now: float) -> bool:
+        recheck_at = float(getattr(self, "_auto_battery_capacity_startup_recheck_at", 0.0) or 0.0)
+        return bool(source.capacity_startup_recheck_seconds > 0.0 and recheck_at > 0.0 and now >= recheck_at)
+
+    def _dbus_capacity_startup_recheck_seen(self: Any, source: EnergySourceDefinition, service_name: str) -> bool:
+        rechecked = getattr(self, "_auto_battery_capacity_startup_rechecked", {})
+        key = self._dbus_capacity_cache_key(source, service_name)
+        return bool(isinstance(rechecked, dict) and rechecked.get(key))
+
+    def _store_dbus_capacity_payload(
+        self: Any,
+        source: EnergySourceDefinition,
+        service_name: str,
+        payload: dict[str, object],
+        *,
+        startup_recheck_done: bool,
+    ) -> None:
+        if not isinstance(getattr(self, "_auto_battery_capacity_estimates", None), dict):
+            self._auto_battery_capacity_estimates = {}
+        key = self._dbus_capacity_cache_key(source, service_name)
+        self._auto_battery_capacity_estimates[key] = dict(payload)
+        if startup_recheck_done:
+            if not isinstance(getattr(self, "_auto_battery_capacity_startup_rechecked", None), dict):
+                self._auto_battery_capacity_startup_rechecked = {}
+            self._auto_battery_capacity_startup_rechecked[key] = True
+
+    @staticmethod
+    def _dbus_capacity_cache_key(source: EnergySourceDefinition, service_name: str) -> str:
+        return f"{source.source_id}:{service_name}"
+
+    def _infer_dbus_capacity_payload(
+        self: Any,
+        source: EnergySourceDefinition,
+        service_name: str,
+        soc_value: float | None,
+    ) -> dict[str, object] | None:
+        if not self._dbus_capacity_inference_allowed(source, soc_value):
+            return None
+        direct_capacity = self._read_positive_optional_energy_value(service_name, source.capacity_wh_path)
+        if direct_capacity is not None:
+            return self._direct_dbus_capacity_payload(direct_capacity)
+        installed_capacity_ah = self._read_positive_optional_energy_value(service_name, source.capacity_ah_path)
+        voltage = self._read_positive_optional_energy_value(service_name, source.voltage_path)
+        return self._lfp_inferred_dbus_capacity_payload(installed_capacity_ah, voltage)
+
+    @staticmethod
+    def _dbus_capacity_inference_allowed(source: EnergySourceDefinition, soc_value: float | None) -> bool:
+        if not source.capacity_auto_estimate or source.battery_chemistry.strip().lower() != "lfp":
+            return False
+        return bool(soc_value is not None and float(soc_value) >= float(source.capacity_estimate_min_soc))
+
+    @staticmethod
+    def _direct_dbus_capacity_payload(direct_capacity: float) -> dict[str, object]:
+        return {
+            "usable_capacity_wh": direct_capacity,
+            "usable_capacity_source": "dbus_capacity_wh",
+        }
+
+    def _lfp_inferred_dbus_capacity_payload(
+        self: Any,
+        installed_capacity_ah: float | None,
+        voltage: float | None,
+    ) -> dict[str, object] | None:
+        nominal_voltage, cell_count = self._lfp_nominal_voltage_from_full_voltage(voltage)
+        if installed_capacity_ah is None or nominal_voltage is None or cell_count is None:
+            return None
+        return {
+            "usable_capacity_wh": installed_capacity_ah * nominal_voltage,
+            "usable_capacity_source": "dbus_lfp_inferred",
+            "installed_capacity_ah": installed_capacity_ah,
+            "capacity_voltage_v": voltage,
+            "capacity_nominal_voltage_v": nominal_voltage,
+            "capacity_cell_count": cell_count,
+        }
+
+    def _read_positive_optional_energy_value(self: Any, service_name: str, path: str) -> float | None:
+        value = self._read_optional_energy_value(service_name, path)
+        return value if value is not None and value > 0.0 else None
+
+    @staticmethod
+    def _lfp_nominal_voltage_from_full_voltage(voltage: float | None) -> tuple[float | None, int | None]:
+        if voltage is None or voltage < 40.0 or voltage > 60.0:
+            return None, None
+        cell_count = 15 if voltage < 52.5 else 16
+        return cell_count * 3.2, cell_count
 
     def _dbus_energy_source_snapshot(self: Any, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
         service_name, fields = self._read_dbus_energy_source_fields_with_primary_retry(source)
@@ -427,14 +680,14 @@ class _AutoInputHelperSourceDbusMixin:
         return cast(
             EnergySourceSnapshot,
             self._dbus_energy_source_snapshot_payload(
-            source,
-            service_name,
-            validated_soc,
-            net_battery_power,
-            ac_power,
-            pv_input_power,
-            grid_interaction,
-            operating_mode,
-            now,
+                source,
+                service_name,
+                validated_soc,
+                net_battery_power,
+                ac_power,
+                pv_input_power,
+                grid_interaction,
+                operating_mode,
+                now,
             ),
         )

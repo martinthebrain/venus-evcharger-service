@@ -27,6 +27,13 @@ class EnergySourceProfile:
     pv_power_path: str = ""
     grid_interaction_path: str = ""
     operating_mode_path: str = ""
+    battery_chemistry: str = "lfp"
+    capacity_auto_estimate: bool = True
+    capacity_wh_path: str = ""
+    capacity_ah_path: str = "/InstalledCapacity"
+    voltage_path: str = "/Dc/0/Voltage"
+    capacity_estimate_min_soc: float = 95.0
+    capacity_startup_recheck_seconds: float = 300.0
     default_host: str = ""
     default_port_candidates: tuple[int, ...] = ()
     default_unit_id_candidates: tuple[int, ...] = ()
@@ -315,7 +322,7 @@ def resolve_energy_source_profile(profile_name: object) -> EnergySourceProfile |
     return _PROFILES.get(canonical_name)
 
 
-def energy_source_profile_defaults(profile_name: object) -> Mapping[str, str]:
+def energy_source_profile_defaults(profile_name: object) -> Mapping[str, Any]:
     """Expose one profile as a mapping suitable for config overlay logic."""
     profile = resolve_energy_source_profile(profile_name)
     if profile is None:
@@ -331,6 +338,13 @@ def energy_source_profile_defaults(profile_name: object) -> Mapping[str, str]:
         "PvPowerPath": profile.pv_power_path,
         "GridInteractionPath": profile.grid_interaction_path,
         "OperatingModePath": profile.operating_mode_path,
+        "BatteryChemistry": profile.battery_chemistry,
+        "CapacityAutoEstimate": profile.capacity_auto_estimate,
+        "CapacityWhPath": profile.capacity_wh_path,
+        "CapacityAhPath": profile.capacity_ah_path,
+        "VoltagePath": profile.voltage_path,
+        "CapacityEstimateMinSoc": profile.capacity_estimate_min_soc,
+        "CapacityStartupRecheckSeconds": profile.capacity_startup_recheck_seconds,
     }
 
 

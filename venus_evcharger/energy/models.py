@@ -26,6 +26,17 @@ class EnergySourceDefinition:
     service_prefix: str = ""
     soc_path: str = "/Soc"
     usable_capacity_wh: float | None = None
+    battery_chemistry: str = "lfp"
+    capacity_auto_estimate: bool = True
+    capacity_wh_path: str = ""
+    capacity_ah_path: str = "/InstalledCapacity"
+    voltage_path: str = "/Dc/0/Voltage"
+    capacity_estimate_min_soc: float = 95.0
+    capacity_startup_recheck_seconds: float = 300.0
+    estimated_capacity_wh: float | None = None
+    estimated_capacity_ah: float | None = None
+    estimated_capacity_nominal_voltage_v: float | None = None
+    estimated_capacity_cell_count: int | None = None
     battery_power_path: str = ""
     ac_power_path: str = ""
     pv_power_path: str = ""
@@ -42,6 +53,12 @@ class EnergySourceSnapshot:
     service_name: str
     soc: float | None = None
     usable_capacity_wh: float | None = None
+    usable_capacity_source: str = ""
+    installed_capacity_ah: float | None = None
+    capacity_voltage_v: float | None = None
+    capacity_nominal_voltage_v: float | None = None
+    capacity_cell_count: int | None = None
+    battery_chemistry: str = ""
     net_battery_power_w: float | None = None
     charge_limit_power_w: float | None = None
     discharge_limit_power_w: float | None = None
@@ -75,6 +92,12 @@ class EnergySourceSnapshot:
             "service_name": self.service_name,
             "soc": self.soc,
             "usable_capacity_wh": self.usable_capacity_wh,
+            "usable_capacity_source": self.usable_capacity_source,
+            "installed_capacity_ah": self.installed_capacity_ah,
+            "capacity_voltage_v": self.capacity_voltage_v,
+            "capacity_nominal_voltage_v": self.capacity_nominal_voltage_v,
+            "capacity_cell_count": self.capacity_cell_count,
+            "battery_chemistry": self.battery_chemistry,
             "net_battery_power_w": self.net_battery_power_w,
             "charge_power_w": self.charge_power_w,
             "discharge_power_w": self.discharge_power_w,

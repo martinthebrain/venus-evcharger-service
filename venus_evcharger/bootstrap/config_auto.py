@@ -41,6 +41,18 @@ class _ServiceBootstrapAutoConfigMixin(_ComposableControllerMixin):
         ).strip()
         svc.auto_battery_scan_interval_seconds = float(_config_value(defaults, "AutoBatteryScanIntervalSeconds", 60))
         svc.auto_battery_capacity_wh = float(_config_value(defaults, "AutoBatteryCapacityWh", 0))
+        svc.auto_battery_chemistry = str(_config_value(defaults, "AutoBatteryChemistry", "lfp")).strip().lower()
+        svc.auto_battery_capacity_auto_estimate = defaults.get(
+            "AutoBatteryCapacityAutoEstimate",
+            "1",
+        ).strip().lower() in ("1", "true", "yes", "on")
+        svc.auto_battery_capacity_wh_path = defaults.get("AutoBatteryCapacityWhPath", "").strip()
+        svc.auto_battery_capacity_ah_path = defaults.get("AutoBatteryCapacityAhPath", "/InstalledCapacity").strip()
+        svc.auto_battery_voltage_path = defaults.get("AutoBatteryVoltagePath", "/Dc/0/Voltage").strip()
+        svc.auto_battery_capacity_estimate_min_soc = float(_config_value(defaults, "AutoBatteryCapacityEstimateMinSoc", 95))
+        svc.auto_battery_capacity_startup_recheck_seconds = float(
+            _config_value(defaults, "AutoBatteryCapacityStartupRecheckSeconds", 300)
+        )
         svc.auto_battery_power_path = defaults.get("AutoBatteryPowerPath", "").strip()
         svc.auto_battery_ac_power_path = defaults.get("AutoBatteryAcPowerPath", "").strip()
         svc.auto_battery_pv_power_path = defaults.get("AutoBatteryPvPowerPath", "").strip()

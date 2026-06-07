@@ -70,7 +70,7 @@ class _AutoInputHelperBasicSnapshotCases:
     def test_collect_snapshot_polls_battery_less_often_than_pv_and_grid(self):
         helper = self._make_helper()
         helper._get_pv_power = MagicMock(side_effect=[2100.0, 2200.0])
-        helper._get_battery_soc = MagicMock(side_effect=[55.0])
+        helper._get_battery_snapshot = MagicMock(side_effect=[{"battery_soc": 55.0, "battery_source_count": 1}])
         helper._get_grid_power = MagicMock(side_effect=[-800.0, -750.0])
 
         first = helper._collect_snapshot(100.0)
@@ -89,14 +89,15 @@ class _AutoInputHelperBasicSnapshotCases:
         self.assertIn("helper_generation", second)
         self.assertEqual(helper._get_pv_power.call_count, 2)
         self.assertEqual(helper._get_grid_power.call_count, 2)
-        self.assertEqual(helper._get_battery_soc.call_count, 1)
+        self.assertEqual(helper._get_battery_snapshot.call_count, 1)
+        self.assertEqual(second["battery_source_count"], 1)
 
     def test_collect_snapshot_clears_source_fields_when_getter_returns_none(self):
         helper = self._make_helper()
         helper._last_snapshot_state["pv_power"] = 2100.0
         helper._last_snapshot_state["pv_captured_at"] = 90.0
         helper._get_pv_power = MagicMock(return_value=None)
-        helper._get_battery_soc = MagicMock(return_value=55.0)
+        helper._get_battery_snapshot = MagicMock(return_value={"battery_soc": 55.0})
         helper._get_grid_power = MagicMock(return_value=-800.0)
 
         snapshot = helper._collect_snapshot(100.0)
@@ -202,7 +203,8 @@ class _AutoInputHelperBasicSnapshotCases:
         helper = self._make_helper()
         helper._set_source_value = MagicMock()
         helper._get_pv_power = MagicMock(return_value=2100.0)
-        helper._get_battery_soc = MagicMock(return_value=56.0)
+        battery_payload = {"battery_soc": 56.0, "battery_source_count": 1}
+        helper._get_battery_snapshot = MagicMock(return_value=battery_payload)
         helper._get_grid_power = MagicMock(return_value=-800.0)
 
         helper._refresh_source("pv", 100.0)
@@ -211,7 +213,7 @@ class _AutoInputHelperBasicSnapshotCases:
         helper._refresh_source("unknown", 103.0)
 
         helper._set_source_value.assert_any_call("pv", 2100.0, 100.0)
-        helper._set_source_value.assert_any_call("battery", 56.0, 101.0)
+        helper._set_source_value.assert_any_call("battery", battery_payload, 101.0)
         helper._set_source_value.assert_any_call("grid", -800.0, 102.0)
         self.assertEqual(helper._set_source_value.call_count, 3)
 

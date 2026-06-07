@@ -32,6 +32,8 @@ class _AutoInputHelperSnapshotMixin:
             "battery_combined_discharge_power_w",
             "battery_combined_net_power_w",
             "battery_combined_ac_power_w",
+            "battery_combined_pv_input_power_w",
+            "battery_combined_grid_interaction_w",
             "battery_headroom_charge_w",
             "battery_headroom_discharge_w",
             "expected_near_term_export_w",
@@ -47,9 +49,13 @@ class _AutoInputHelperSnapshotMixin:
             "battery_discharge_balance_control_ready_count",
             "battery_discharge_balance_supported_control_source_count",
             "battery_discharge_balance_experimental_control_source_count",
+            "battery_average_confidence",
             "battery_source_count",
             "battery_online_source_count",
             "battery_valid_soc_source_count",
+            "battery_battery_source_count",
+            "battery_hybrid_inverter_source_count",
+            "battery_inverter_source_count",
             "battery_sources",
             "battery_learning_profiles",
         )
@@ -93,6 +99,9 @@ class _AutoInputHelperSnapshotMixin:
             "_dbus_subscription_backoff_until": 0.0,
             "_signal_matches": dict,
             "_monitored_specs": dict,
+            "_auto_battery_capacity_estimates": dict,
+            "_auto_battery_capacity_startup_recheck_at": 0.0,
+            "_auto_battery_capacity_startup_rechecked": dict,
             "_refresh_scheduled": False,
             "subscription_refresh_seconds": 60.0,
             "validation_poll_seconds": 30.0,
@@ -117,7 +126,7 @@ class _AutoInputHelperSnapshotMixin:
 
         source_specs = (
             ("pv", self.auto_pv_poll_interval_seconds, self._get_pv_power, "pv_power", "pv_captured_at"),
-            ("battery", self.auto_battery_poll_interval_seconds, self._get_battery_soc, "battery_soc", "battery_captured_at"),
+            ("battery", self.auto_battery_poll_interval_seconds, self._get_battery_snapshot, "battery_soc", "battery_captured_at"),
             ("grid", self.auto_grid_poll_interval_seconds, self._get_grid_power, "grid_power", "grid_captured_at"),
         )
 
@@ -214,7 +223,7 @@ class _AutoInputHelperSnapshotMixin:
         if source_name == "pv":
             value = self._get_pv_power()
         elif source_name == "battery":
-            value = self._get_battery_soc()
+            value = self._get_battery_snapshot()
         elif source_name == "grid":
             value = self._get_grid_power()
         else:
