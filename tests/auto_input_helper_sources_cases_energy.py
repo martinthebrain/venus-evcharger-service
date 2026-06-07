@@ -25,6 +25,7 @@ class _AutoInputHelperSourcesEnergyCases:
             ),
         )
         helper._energy_source_has_readable_data = MagicMock(side_effect=[True, True])
+        helper._list_dbus_services = MagicMock(return_value=["configured-hybrid"])
         helper._resolve_auto_battery_service = MagicMock(return_value="resolved-primary")
 
         self.assertEqual(helper._resolve_energy_source_service(helper.auto_energy_sources[0]), "resolved-primary")
@@ -162,6 +163,7 @@ class _AutoInputHelperSourcesEnergyCases:
             ),
         )
         helper._energy_source_has_readable_data = MagicMock(return_value=True)
+        helper._list_dbus_services = MagicMock(return_value=["configured-secondary"])
         helper._resolved_auto_energy_services = None
         helper._auto_energy_last_scan = None
         self.assertEqual(helper._resolve_energy_source_service(helper.auto_energy_sources[1]), "configured-secondary")
@@ -232,6 +234,7 @@ class _AutoInputHelperSourcesEnergyCases:
         helper._resolved_auto_energy_services = None
         helper._auto_energy_last_scan = None
         helper._energy_source_has_readable_data = MagicMock(return_value=True)
+        helper._list_dbus_services = MagicMock(return_value=["configured-battery"])
         self.assertEqual(helper._configured_auto_battery_service(100.0), "configured-battery")
         self.assertIsInstance(helper._resolved_auto_energy_services, dict)
         self.assertIsInstance(helper._auto_energy_last_scan, dict)
@@ -239,7 +242,15 @@ class _AutoInputHelperSourcesEnergyCases:
         helper = self._make_helper()
         helper.auto_battery_service = "configured-battery"
         helper._energy_source_has_readable_data = MagicMock(side_effect=RuntimeError("boom"))
+        helper._list_dbus_services = MagicMock(return_value=["configured-battery"])
         self.assertIsNone(helper._configured_auto_battery_service(100.0))
+
+        helper = self._make_helper()
+        helper.auto_battery_service = "configured-battery"
+        helper._list_dbus_services = MagicMock(return_value=["com.victronenergy.system"])
+        helper._energy_source_has_readable_data = MagicMock(return_value=True)
+        self.assertIsNone(helper._configured_auto_battery_service(100.0))
+        helper._energy_source_has_readable_data.assert_not_called()
 
         helper = self._make_helper()
         unresolved_source = EnergySourceDefinition(source_id="missing", role="battery", connector_type="dbus")

@@ -18,6 +18,45 @@ from venus_evcharger.core.shared import (
 from venus_evcharger.energy import EnergySourceDefinition, EnergySourceSnapshot
 
 
+_EXPECTED_MISSING_DBUS_ERROR_NAMES = frozenset(
+    (
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.UnknownInterface",
+        "org.freedesktop.DBus.Error.UnknownMethod",
+        "org.freedesktop.DBus.Error.UnknownObject",
+    )
+)
+
+_EXPECTED_MISSING_DBUS_ERROR_TEXT = (
+    "NameHasNoOwner",
+    "ServiceUnknown",
+    "UnknownInterface",
+    "UnknownMethod",
+    "UnknownObject",
+    "was not provided by any .service files",
+)
+
+
+def _dbus_error_name(error: BaseException) -> str:
+    getter = getattr(error, "get_dbus_name", None)
+    if callable(getter):
+        try:
+            return str(getter() or "")
+        except Exception:  # pragma: no cover - defensive for foreign DBus objects
+            return ""
+    return str(getattr(error, "_dbus_error_name", "") or "")
+
+
+def _is_expected_missing_dbus_error(error: BaseException) -> bool:
+    """Return whether a DBus error means absent data, not a broken connection."""
+    error_name = _dbus_error_name(error)
+    if error_name in _EXPECTED_MISSING_DBUS_ERROR_NAMES:
+        return True
+    error_text = str(error)
+    return any(marker in error_text for marker in _EXPECTED_MISSING_DBUS_ERROR_TEXT)
+
+
 class _AutoInputHelperSourceDbusMixin:
     def _get_dbus_value(self: Any, service_name: str, path: str) -> float | int | None:
         last_error: Exception | None = None
@@ -28,6 +67,9 @@ class _AutoInputHelperSourceDbusMixin:
                 return cast(float | int | None, coerce_dbus_numeric(interface.GetValue(timeout=self.dbus_method_timeout_seconds)))
             except Exception as error:  # pylint: disable=broad-except
                 last_error = error
+                if _is_expected_missing_dbus_error(error):
+                    logging.debug("DBus value missing for %s %s: %s", service_name, path, error)
+                    raise
                 self._reset_system_bus()
                 if attempt == 0:
                     logging.debug("DBus read retry for %s %s after error: %s", service_name, path, error)
@@ -43,6 +85,9 @@ class _AutoInputHelperSourceDbusMixin:
                 return cast(list[str], self._child_nodes_from_introspection(interface.Introspect(timeout=self.dbus_method_timeout_seconds)))
             except Exception as error:  # pylint: disable=broad-except
                 last_error = error
+                if _is_expected_missing_dbus_error(error):
+                    logging.debug("DBus child nodes missing for %s %s: %s", service_name, path, error)
+                    raise
                 self._reset_system_bus()
                 if attempt == 0:
                     logging.debug("DBus introspection retry for %s %s after error: %s", service_name, path, error)
@@ -79,6 +124,9 @@ class _AutoInputHelperSourceDbusMixin:
                 error,
             )
             return []
+
+    def _dbus_service_name_available(self: Any, service_name: str) -> bool:
+        return bool(service_name and service_name in self._list_dbus_services())
 
     def _source_retry_ready(self: Any, key: str) -> bool:
         return time.time() >= float(self._source_retry_after.get(key, 0.0))
@@ -193,6 +241,8 @@ class _AutoInputHelperSourceDbusMixin:
         source = self._primary_energy_source()
         if not source.service_name:
             return None
+        if not self._dbus_service_name_available(source.service_name):
+            return None
         try:
             if self._energy_source_has_readable_data(source, source.service_name):
                 self._cache_energy_service(source.source_id, source.service_name, now, primary=True)
@@ -245,7 +295,9 @@ class _AutoInputHelperSourceDbusMixin:
         return None
 
     def _configured_energy_source_service(self: Any, source: EnergySourceDefinition, now: float) -> str | None:
-        if not source.service_name or not self._energy_source_has_readable_data(source, source.service_name):
+        if not source.service_name or not self._dbus_service_name_available(source.service_name):
+            return None
+        if not self._energy_source_has_readable_data(source, source.service_name):
             return None
         self._cache_energy_service(source.source_id, source.service_name, now)
         return source.service_name

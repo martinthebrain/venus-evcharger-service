@@ -105,6 +105,7 @@ class _AutoInputHelperBasicSnapshotCases:
 
     def test_configured_auto_battery_service_returns_none_when_soc_is_missing(self):
         helper = self._make_helper()
+        helper._list_dbus_services = MagicMock(return_value=[helper.auto_battery_service])
         helper._get_dbus_value = MagicMock(return_value=None)
         self.assertIsNone(helper._configured_auto_battery_service(100.0))
         self.assertIsNone(helper._resolved_auto_battery_service)
@@ -113,6 +114,7 @@ class _AutoInputHelperBasicSnapshotCases:
     def test_configured_auto_battery_service_returns_none_when_read_raises(self):
         helper = self._make_helper()
         helper.auto_battery_service = "configured-battery"
+        helper._list_dbus_services = MagicMock(return_value=["configured-battery"])
         helper._get_dbus_value = MagicMock(side_effect=RuntimeError("offline"))
         self.assertIsNone(helper._configured_auto_battery_service(100.0))
 

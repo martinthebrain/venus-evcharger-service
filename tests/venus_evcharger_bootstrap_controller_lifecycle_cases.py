@@ -32,10 +32,10 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
 
         self.assertEqual(
             calls,
-            ["config", "controllers", "virtual", "restore", "metadata", "loops", "dbus", "paths", "publish"],
+            ["config", "controllers", "virtual", "restore", "metadata", "dbus", "paths", "publish", "loops"],
         )
 
-    def test_initialize_service_does_not_publish_half_ready_dbus_service_when_loops_fail(self):
+    def test_initialize_service_does_not_start_runtime_loops_when_publish_fails(self):
         service = MagicMock()
         controller = self._controller(service)
         controller.load_runtime_configuration = MagicMock()
@@ -43,17 +43,18 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         controller.initialize_virtual_state = MagicMock()
         controller.restore_runtime_state = MagicMock()
         controller.apply_device_metadata = MagicMock()
-        controller.start_runtime_loops = MagicMock(side_effect=RuntimeError("boom"))
         controller.initialize_dbus_service = MagicMock()
         controller.register_paths = MagicMock()
-        controller.publish_dbus_service = MagicMock()
+        controller.publish_dbus_service = MagicMock(side_effect=RuntimeError("boom"))
+        controller.start_runtime_loops = MagicMock()
 
         with self.assertRaises(RuntimeError):
             controller.initialize_service()
 
-        controller.initialize_dbus_service.assert_not_called()
-        controller.register_paths.assert_not_called()
-        controller.publish_dbus_service.assert_not_called()
+        controller.initialize_dbus_service.assert_called_once_with()
+        controller.register_paths.assert_called_once_with()
+        controller.publish_dbus_service.assert_called_once_with()
+        controller.start_runtime_loops.assert_not_called()
 
     def test_request_mainloop_quit_uses_idle_add_when_available_and_falls_back(self):
         mainloop = MagicMock()
@@ -148,7 +149,8 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
 
         with patch("venus_evcharger.bootstrap.controller._setup_dbus_mainloop", side_effect=RuntimeError("boom")):
             with patch("venus_evcharger.bootstrap.controller.logging.critical") as critical_mock:
-                run_service_main(lambda: None, "/tmp/does-not-matter.ini", gobject_module)
+                with self.assertRaises(RuntimeError):
+                    run_service_main(lambda: None, "/tmp/does-not-matter.ini", gobject_module)
         critical_mock.assert_called_once()
 
     def test_install_signal_logging_requests_clean_shutdown(self):
