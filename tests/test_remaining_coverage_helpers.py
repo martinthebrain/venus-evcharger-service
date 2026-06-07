@@ -25,6 +25,7 @@ from venus_evcharger.controllers.write_snapshot import (
 )
 from venus_evcharger.controllers.state_restore_support import _StateRuntimeRestoreVictronEssMixin
 from venus_evcharger.controllers import state_runtime_snapshot as runtime_snapshot_mod
+from venus_evcharger.core import common as common_mod
 from venus_evcharger.energy import aggregate as aggregate_mod
 from venus_evcharger.energy.aggregate import _effective_soc
 from venus_evcharger.energy.probe import _optional_detected_int
@@ -136,6 +137,13 @@ class RemainingCoverageHelperTests(unittest.TestCase):
     def test_auto_input_helper_parent_pid_parser_accepts_bool_like_int(self) -> None:
         self.assertEqual(AutoInputHelper._parsed_parent_pid(True), 1)
         self.assertEqual(AutoInputHelper._parsed_helper_generation("7"), 7)
+        self.assertEqual(AutoInputHelper._parsed_runtime_instance_id(" instance-1 "), "instance-1")
+        with patch("venus_evcharger_auto_input_helper.uuid.uuid4", return_value=SimpleNamespace(hex="generated")):
+            self.assertEqual(AutoInputHelper._parsed_runtime_instance_id(None), "generated")
+
+    def test_local_datetime_falls_back_when_zoneinfo_is_unavailable(self) -> None:
+        with patch.object(common_mod, "ZoneInfo", side_effect=common_mod.ZoneInfoNotFoundError):
+            self.assertEqual(common_mod.local_datetime_from_timestamp(0, "Missing/Zone").year, 1970)
 
     def test_wizard_render_helper_errors_and_empty_config_paths(self) -> None:
         self.assertEqual(_measurement_backend_lines(None, {}), ["MeterType=none"])
@@ -243,6 +251,119 @@ class RemainingCoverageHelperTests(unittest.TestCase):
         with patch("venus_evcharger.inputs.supervisor_process.os.unlink", side_effect=RuntimeError("blocked")):
             process_harness._remove_stale_snapshot_file()
         self.assertEqual(process_service._auto_input_snapshot_mtime_ns, 456)
+
+        empty_id_service = SimpleNamespace(
+            _ensure_worker_state=MagicMock(),
+            _time_now=MagicMock(return_value=1.0),
+            _auto_input_runtime_instance_id="",
+            _auto_input_helper_generation=0,
+            _auto_input_helper_path=MagicMock(return_value="/helper.py"),
+            _config_path=MagicMock(return_value="/config.ini"),
+            auto_input_snapshot_path="/run/venus-test/snapshot.json",
+        )
+        empty_id_harness = _SupervisorHarness(empty_id_service)
+        with (
+            patch("venus_evcharger.inputs.supervisor_process.uuid.uuid4", return_value=SimpleNamespace(hex="instance-x")),
+            patch.object(empty_id_harness, "_remove_stale_snapshot_file"),
+            patch.object(empty_id_harness, "_terminate_orphaned_helpers"),
+            patch("venus_evcharger.inputs.supervisor_process.subprocess.Popen", return_value=SimpleNamespace(pid=12)),
+        ):
+            empty_id_harness.spawn_helper(now=1.0)
+        self.assertEqual(empty_id_service._auto_input_runtime_instance_id, "instance-x")
+
+    def test_supervisor_orphan_helper_process_paths(self) -> None:
+        harness = _SupervisorHarness(SimpleNamespace(auto_input_snapshot_path="/run/snapshot.json"))
+        self.assertEqual(_SupervisorHarness(SimpleNamespace(auto_input_snapshot_path=""))._orphaned_helper_pids(), [])
+        with patch("venus_evcharger.inputs.supervisor_process.os.listdir", side_effect=OSError):
+            self.assertEqual(harness._orphaned_helper_pids(), [])
+        with (
+            patch("venus_evcharger.inputs.supervisor_process.os.getpid", return_value=10),
+            patch("venus_evcharger.inputs.supervisor_process.os.listdir", return_value=["abc", "10", "11"]),
+            patch.object(harness, "_helper_cmdline_matches", return_value=True),
+        ):
+            self.assertEqual(harness._orphaned_helper_pids(), [11])
+        with patch("venus_evcharger.inputs.supervisor_process.open", side_effect=OSError):
+            self.assertFalse(harness._helper_cmdline_matches(11, "/run/snapshot.json"))
+        with patch.object(harness, "_orphaned_helper_pids", return_value=[1, 2, 3]):
+            with patch("venus_evcharger.inputs.supervisor_process.os.kill", side_effect=[None, ProcessLookupError, RuntimeError("no")]) as kill:
+                harness._terminate_orphaned_helpers()
+        self.assertEqual(kill.call_count, 3)
+
+    def test_subscription_and_snapshot_validation_guard_paths(self) -> None:
+        subscription = _SubscriptionHarness()
+        subscription.auto_pv_service = ""
+        subscription.auto_pv_path = "/Ac/Power"
+        subscription.auto_use_dc_pv = False
+        subscription.auto_dc_pv_service = ""
+        subscription.auto_dc_pv_path = ""
+        subscription._resolve_auto_pv_services = MagicMock(return_value=["pv1"])
+        self.assertEqual(subscription._desired_pv_subscription_specs(), [("pv", "pv1", "/Ac/Power")])
+        self.assertIsNone(subscription._dc_pv_subscription_spec())
+
+        snapshot_service = SimpleNamespace(
+            auto_input_snapshot_path="/tmp/auto.json",
+            auto_input_helper_restart_seconds=1.0,
+            _warning_throttled=MagicMock(),
+        )
+        snapshot_harness = _SupervisorHarness(snapshot_service)
+        self.assertIsNone(
+            snapshot_harness._validate_snapshot_identity(
+                "/tmp/auto.json",
+                {"writer_pid": 1, "helper_generation": 1, "runtime_instance_id": 7},
+                {},
+            )
+        )
+
+    def test_auto_input_helper_liveness_loop_guard_paths(self) -> None:
+        helper = AutoInputHelper.__new__(AutoInputHelper)
+        helper.poll_interval_seconds = 1.0
+        helper._heartbeat_thread_stop = MagicMock()
+        helper._heartbeat_thread_stop.wait.side_effect = [False]
+        helper._stop_requested = True
+        helper._heartbeat_loop()
+
+        helper._heartbeat_thread_stop.wait.side_effect = [False, True]
+        helper._stop_requested = False
+        helper._heartbeat_snapshot = MagicMock(side_effect=RuntimeError("write failed"))
+        helper._heartbeat_loop()
+        helper._heartbeat_snapshot.assert_called_once()
+
+        helper._heartbeat_thread_stop.wait.side_effect = [False]
+        helper._stop_requested = True
+        helper._parent_watchdog_loop()
+
+        helper._heartbeat_thread_stop.wait.side_effect = [False, True]
+        helper._stop_requested = False
+        helper._parent_alive = MagicMock(return_value=True)
+        helper._parent_watchdog_loop()
+
+        helper._heartbeat_thread_stop.wait.side_effect = [False]
+        helper._parent_alive = MagicMock(return_value=False)
+        helper._main_loop = SimpleNamespace(quit=MagicMock())
+        with patch("venus_evcharger_auto_input_helper.GLib.idle_add") as idle_add:
+            helper._parent_watchdog_loop()
+        idle_add.assert_called_once_with(helper._main_loop.quit)
+
+        helper._heartbeat_thread_stop.wait.side_effect = [False]
+        helper._stop_requested = False
+        helper._parent_alive = MagicMock(return_value=False)
+        helper._main_loop = None
+        helper._parent_watchdog_loop()
+
+        helper._refresh_scheduled = False
+        helper._stop_requested = True
+        with patch("venus_evcharger_auto_input_helper.GLib.idle_add", side_effect=lambda callback: callback()):
+            helper._schedule_initial_dbus_refresh()
+
+    def test_auto_input_helper_main_accepts_runtime_instance_arg(self) -> None:
+        with patch("venus_evcharger_auto_input_helper.AutoInputHelper") as helper_class:
+            helper = helper_class.return_value
+            from venus_evcharger_auto_input_helper import main
+
+            self.assertEqual(main(["/config.ini", "/run/snapshot.json", "1", "2", "instance-1"]), 0)
+
+        helper_class.assert_called_once_with("/config.ini", "/run/snapshot.json", "1", "2", "instance-1")
+        helper.run.assert_called_once()
 
     def test_pm_runtime_and_aggregate_simple_guard_paths(self) -> None:
         service = SimpleNamespace()

@@ -2,7 +2,7 @@
 import math
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -22,6 +22,10 @@ def _phase_values(total_power, voltage, _phase, _voltage_mode):
         "L2": {"power": 0.0, "voltage": voltage, "current": 0.0},
         "L3": {"power": 0.0, "voltage": voltage, "current": 0.0},
     }
+
+
+def utc_timestamp(year: int, month: int, day: int, hour: int, minute: int = 0) -> float:
+    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
 
 
 class _FakeTemplateResponse:

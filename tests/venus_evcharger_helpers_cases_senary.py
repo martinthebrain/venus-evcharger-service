@@ -83,11 +83,11 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
 
-        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=datetime(2026, 4, 19, 21, 0).timestamp()):
+        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 19, 21, 0)):
             self.assertTrue(service._auto_decide_relay(False, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
 
-        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=datetime(2026, 4, 17, 21, 0).timestamp()):
+        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 17, 21, 0)):
             self.assertFalse(service._auto_decide_relay(False, 0.0, 45.0, 0.0))
         self.assertEqual(service._last_health_reason, "waiting-surplus")
 
@@ -122,11 +122,11 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
 
-        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=datetime(2026, 4, 20, 6, 15).timestamp()):
+        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 20, 6, 15)):
             self.assertTrue(service._auto_decide_relay(False, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
 
-        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=datetime(2026, 4, 20, 6, 45).timestamp()):
+        with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 20, 6, 45)):
             self.assertFalse(service._auto_decide_relay(False, 0.0, 45.0, 0.0))
         self.assertEqual(service._last_health_reason, "waiting-surplus")
 

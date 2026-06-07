@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import unittest
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +30,10 @@ def _mode_uses_auto_logic(mode) -> bool:
     return int(mode) in (1, 2)
 
 
+def utc_timestamp(year: int, month: int, day: int, hour: int, minute: int = 0) -> float:
+    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
+
+
 class AutoDecisionControllerTestCase(unittest.TestCase):
     def _make_controller(self):
         service = make_auto_controller_service()
@@ -54,4 +58,5 @@ __all__ = [
     "deque",
     "make_auto_controller_service",
     "patch",
+    "utc_timestamp",
 ]

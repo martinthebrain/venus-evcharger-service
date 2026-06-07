@@ -275,24 +275,50 @@ class _AutoInputSupervisorSnapshotValidationMixin:
         snapshot: dict[str, Any],
         normalized: dict[str, Any],
     ) -> dict[str, Any] | None:
+        if not self._normalize_snapshot_writer(path, snapshot, normalized):
+            return None
+        if not self._normalize_snapshot_generation(path, snapshot, normalized):
+            return None
+        return self._normalize_snapshot_runtime_instance(path, snapshot, normalized)
+
+    def _normalize_snapshot_writer(self, path: str, snapshot: dict[str, Any], normalized: dict[str, Any]) -> bool:
         writer_pid = self._coerce_snapshot_int(snapshot.get("writer_pid"))
         if writer_pid is None or writer_pid <= 0:
-            return self._invalid_snapshot(
+            self._invalid_snapshot(
                 "auto-input-helper-schema-invalid",
                 path,
                 "Auto input helper snapshot %s requires positive integer writer_pid field",
             )
+            return False
+        normalized["writer_pid"] = writer_pid
+        return True
 
+    def _normalize_snapshot_generation(self, path: str, snapshot: dict[str, Any], normalized: dict[str, Any]) -> bool:
         helper_generation = self._coerce_snapshot_int(snapshot.get("helper_generation"))
         if helper_generation is None or helper_generation < 0:
-            return self._invalid_snapshot(
+            self._invalid_snapshot(
                 "auto-input-helper-schema-invalid",
                 path,
                 "Auto input helper snapshot %s requires non-negative integer helper_generation field",
             )
-
-        normalized["writer_pid"] = writer_pid
+            return False
         normalized["helper_generation"] = helper_generation
+        return True
+
+    def _normalize_snapshot_runtime_instance(
+        self,
+        path: str,
+        snapshot: dict[str, Any],
+        normalized: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        runtime_instance_id = snapshot.get("runtime_instance_id")
+        if not isinstance(runtime_instance_id, str) or not runtime_instance_id.strip():
+            return self._invalid_snapshot(
+                "auto-input-helper-schema-invalid",
+                path,
+                "Auto input helper snapshot %s requires non-empty runtime_instance_id field",
+            )
+        normalized["runtime_instance_id"] = runtime_instance_id.strip()
         return normalized
 
     def _normalize_snapshot_count_fields(

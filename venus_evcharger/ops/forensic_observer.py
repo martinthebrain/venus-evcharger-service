@@ -60,6 +60,17 @@ def evcharger_service_name(defaults: configparser.SectionProxy) -> str:
     return f"{base or 'com.victronenergy.evcharger'}.http_{device_instance(defaults)}"
 
 
+def auto_input_snapshot_path(defaults: configparser.SectionProxy) -> str:
+    configured = str(defaults.get("AutoInputSnapshotPath", "")).strip()
+    if configured:
+        return configured
+    return f"/run/dbus-venus-evcharger-auto-{device_instance(defaults)}.json"
+
+
+def runtime_state_path(defaults: configparser.SectionProxy) -> str:
+    return f"/run/dbus-venus-evcharger-{device_instance(defaults)}.json"
+
+
 def configured_host(defaults: configparser.SectionProxy) -> str:
     backend_host = str(defaults.get("Host", "")).strip()
     return backend_host
@@ -218,20 +229,52 @@ def read_text_safe(path: str) -> str:
         return f"<unavailable: {error}>\n"
 
 
+def read_json_file(path: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as error:  # pylint: disable=broad-except
+        return {"ok": False, "path": path, "error": str(error)}
+    if not isinstance(payload, dict):
+        return {"ok": False, "path": path, "error": "not-a-json-object"}
+    payload["ok"] = True
+    payload["path"] = path
+    return payload
+
+
+def helper_processes(ps_text: str) -> list[dict[str, Any]]:
+    helpers: list[dict[str, Any]] = []
+    for line in ps_text.splitlines():
+        if "venus_evcharger_auto_input_helper.py" not in line:
+            continue
+        fields = line.split(None, 4)
+        helpers.append(
+            {
+                "pid": fields[0] if fields else "",
+                "line": line,
+            }
+        )
+    return helpers
+
+
 def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None = None) -> dict[str, Any]:
     defaults = load_defaults(config_path)
     service_name = evcharger_service_name(defaults)
     log_dir = "/var/volatile/log/dbus-venus-evcharger"
     runtime_log_tail = tail_log_dir(log_dir)
     runtime_log_text = "\n".join(runtime_log_tail.values())
+    ps_snapshot = command_output(["ps", "w"])
+    ps_text = str(ps_snapshot.get("stdout", "")) if isinstance(ps_snapshot, dict) else ""
     return {
         "timestamp": time.time(),
         "service_name": service_name,
         "config_path": config_path,
         "dbus": read_dbus_paths(service_name, bus_factory=bus_factory),
+        "auto_input_snapshot": read_json_file(auto_input_snapshot_path(defaults)),
+        "runtime_state": read_json_file(runtime_state_path(defaults)),
+        "helper_processes": helper_processes(ps_text),
         "shelly": fetch_shelly_status(configured_host(defaults)),
         "svstat": command_output(["svstat", "/service/dbus-venus-evcharger"]),
-        "ps": command_output(["ps", "w"]),
+        "ps": ps_snapshot,
         "uptime": command_output(["uptime"]),
         "runtime_logs": runtime_log_tail,
         "trace_markers": trace_markers_in_text(runtime_log_text),

@@ -23,6 +23,7 @@ from venus_evcharger.core.common import (
     auto_state_code as _auto_state_code,
     derive_auto_state as _derive_auto_state,
     fresh_confirmed_relay_output as _fresh_confirmed_relay_output,
+    local_datetime_from_timestamp as _local_datetime_from_timestamp,
     mode_uses_scheduled_logic as _mode_uses_scheduled_logic,
     scheduled_mode_snapshot as _scheduled_mode_snapshot,
 )
@@ -274,11 +275,11 @@ class _AutoDecisionSamplesMixin(_ComposableControllerMixin):
             return False
         current_time = self._learning_policy_now() if now is None else float(now)
         return _scheduled_mode_snapshot(
-            datetime.fromtimestamp(current_time),
+            _local_datetime_from_timestamp(current_time, getattr(svc, "auto_schedule_timezone", "UTC")),
             getattr(svc, "auto_month_windows", {}),
             getattr(svc, "auto_scheduled_enabled_days", "Mon,Tue,Wed,Thu,Fri"),
             delay_seconds=float(getattr(svc, "auto_scheduled_night_start_delay_seconds", 3600.0)),
-            latest_end_time=getattr(svc, "auto_scheduled_latest_end_time", "06:30"),
+            latest_end_time=getattr(svc, "auto_scheduled_latest_end_time", "04:30"),
         ).night_boost_active
 
     def _daytime_window_minutes_for_month(self, month: int) -> tuple[int, int]:

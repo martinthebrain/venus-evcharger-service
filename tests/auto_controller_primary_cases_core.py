@@ -45,7 +45,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: datetime(2026, 4, 20, 20, 45).timestamp()
+        service._time_now = lambda: utc_timestamp(2026, 4, 20, 20, 45)
 
         self.assertFalse(controller.auto_decide_relay(False, None, None, None))
         self.assertNotEqual(service._last_health_reason, "scheduled-night-charge")
@@ -59,7 +59,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: datetime(2026, 4, 20, 20, 45).timestamp()
+        service._time_now = lambda: utc_timestamp(2026, 4, 20, 20, 45)
 
         self.assertTrue(controller.auto_decide_relay(False, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
@@ -73,7 +73,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: datetime(2026, 4, 21, 3, 0).timestamp()
+        service._time_now = lambda: utc_timestamp(2026, 4, 21, 3, 0)
 
         self.assertTrue(controller.auto_decide_relay(True, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
@@ -87,7 +87,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: datetime(2026, 4, 17, 21, 0).timestamp()
+        service._time_now = lambda: utc_timestamp(2026, 4, 17, 21, 0)
 
         self.assertFalse(controller._scheduled_night_charge_active())
         self.assertFalse(controller.auto_decide_relay(False, None, None, None))
@@ -101,7 +101,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: datetime(2026, 4, 21, 6, 45).timestamp()
+        service._time_now = lambda: utc_timestamp(2026, 4, 21, 6, 45)
 
         self.assertFalse(controller._scheduled_night_charge_active())
 

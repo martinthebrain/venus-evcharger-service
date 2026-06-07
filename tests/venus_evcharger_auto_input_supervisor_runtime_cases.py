@@ -152,6 +152,7 @@ class TestAutoInputSupervisorRuntime(unittest.TestCase):
             auto_input_snapshot_path="/tmp/snapshot.json",
             _auto_input_helper_process=None,
             _auto_input_helper_generation=7,
+            _auto_input_runtime_instance_id="instance-1",
             _auto_input_helper_last_start_at=0.0,
             _auto_input_helper_restart_requested_at="pending",
             _auto_input_snapshot_last_seen=75.0,
@@ -159,6 +160,7 @@ class TestAutoInputSupervisorRuntime(unittest.TestCase):
             _auto_input_snapshot_mtime_ns=9,
             _auto_input_snapshot_writer_pid=2222,
             _auto_input_snapshot_generation=7,
+            _auto_input_snapshot_runtime_instance_id="old-instance",
             _stop_auto_input_helper=MagicMock(),
         )
         process = MagicMock(pid=5555)
@@ -167,7 +169,8 @@ class TestAutoInputSupervisorRuntime(unittest.TestCase):
             with patch("venus_evcharger.inputs.supervisor.subprocess.Popen", return_value=process) as popen:
                 controller.spawn_helper()
         popen.assert_called_once()
-        self.assertEqual(popen.call_args.args[0][-1], "8")
+        self.assertEqual(popen.call_args.args[0][-2], "8")
+        self.assertEqual(popen.call_args.args[0][-1], "instance-1")
         self.assertEqual(service._auto_input_helper_process, process)
         self.assertEqual(service._auto_input_helper_generation, 8)
         self.assertEqual(service._auto_input_helper_last_start_at, 100.0)
@@ -176,6 +179,7 @@ class TestAutoInputSupervisorRuntime(unittest.TestCase):
         self.assertFalse(service._auto_input_snapshot_seen_for_current_helper)
         self.assertIsNone(service._auto_input_snapshot_writer_pid)
         self.assertIsNone(service._auto_input_snapshot_generation)
+        self.assertIsNone(service._auto_input_snapshot_runtime_instance_id)
 
         process = MagicMock(pid=4444)
         service = SimpleNamespace(

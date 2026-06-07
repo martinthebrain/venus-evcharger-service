@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from venus_evcharger.core import common_schedule as _common_schedule_module
 from venus_evcharger.core.common_auto import (
@@ -89,6 +91,19 @@ fresh_confirmed_relay_output = _fresh_confirmed_relay_output
 _PATCH_EXPORTS = (time,)
 
 
+def local_datetime_from_timestamp(timestamp: float, timezone_name: str = "UTC") -> datetime:
+    """Return the configured local wall-clock time for schedule decisions."""
+    zone_name = str(timezone_name or "UTC").strip() or "UTC"
+    try:
+        zone = ZoneInfo(zone_name)
+    except ZoneInfoNotFoundError:
+        try:
+            zone = ZoneInfo("UTC")
+        except ZoneInfoNotFoundError:
+            return datetime.fromtimestamp(float(timestamp), timezone.utc).replace(tzinfo=None)
+    return datetime.fromtimestamp(float(timestamp), zone).replace(tzinfo=None)
+
+
 def scheduled_mode_snapshot(*args: object, **kwargs: object) -> ScheduledModeSnapshot:
     """Delegate through the wrapper so tests may patch local schedule helpers."""
     original = _common_schedule_module._scheduled_target_day
@@ -159,6 +174,7 @@ __all__ = [
     "evse_fault_reason",
     "fresh_confirmed_relay_output",
     "mode_uses_auto_logic",
+    "local_datetime_from_timestamp",
     "mode_uses_scheduled_logic",
     "month_in_ranges",
     "month_window",

@@ -9,6 +9,7 @@ import logging
 import os
 import subprocess
 import sys
+import uuid
 from typing import Any
 
 
@@ -35,11 +36,32 @@ class _AutoInputSupervisorProcessMixin:
         svc = self.service
         svc._ensure_worker_state()
         current = svc._time_now() if now is None else float(now)
+        self._ensure_runtime_instance_id()
         generation = int(getattr(svc, "_auto_input_helper_generation", 0) or 0) + 1
         svc._auto_input_helper_generation = generation
         self._reset_snapshot_liveness_for_new_helper()
         self._remove_stale_snapshot_file()
-        command = [
+        self._terminate_orphaned_helpers()
+        command = self._helper_command(generation)
+        process = subprocess.Popen(command)  # pylint: disable=consider-using-with
+        svc._auto_input_helper_process = process
+        svc._auto_input_helper_last_start_at = current
+        svc._auto_input_helper_restart_requested_at = None
+        logging.info(
+            "Started auto input helper pid=%s snapshot=%s instance=%s",
+            getattr(process, "pid", "na"),
+            svc.auto_input_snapshot_path,
+            getattr(svc, "_auto_input_runtime_instance_id", ""),
+        )
+
+    def _ensure_runtime_instance_id(self) -> None:
+        svc = self.service
+        if not str(getattr(svc, "_auto_input_runtime_instance_id", "") or "").strip():
+            svc._auto_input_runtime_instance_id = uuid.uuid4().hex
+
+    def _helper_command(self, generation: int) -> list[str]:
+        svc = self.service
+        return [
             sys.executable,
             "-u",
             svc._auto_input_helper_path(),
@@ -47,16 +69,8 @@ class _AutoInputSupervisorProcessMixin:
             svc.auto_input_snapshot_path,
             str(os.getpid()),
             str(generation),
+            str(getattr(svc, "_auto_input_runtime_instance_id", "") or ""),
         ]
-        process = subprocess.Popen(command)  # pylint: disable=consider-using-with
-        svc._auto_input_helper_process = process
-        svc._auto_input_helper_last_start_at = current
-        svc._auto_input_helper_restart_requested_at = None
-        logging.info(
-            "Started auto input helper pid=%s snapshot=%s",
-            getattr(process, "pid", "na"),
-            svc.auto_input_snapshot_path,
-        )
 
     def _reset_snapshot_liveness_for_new_helper(self) -> None:
         svc = self.service
@@ -64,6 +78,7 @@ class _AutoInputSupervisorProcessMixin:
         svc._auto_input_snapshot_seen_for_current_helper = False
         svc._auto_input_snapshot_writer_pid = None
         svc._auto_input_snapshot_generation = None
+        svc._auto_input_snapshot_runtime_instance_id = None
 
     def _remove_stale_snapshot_file(self) -> None:
         svc = self.service
@@ -86,6 +101,61 @@ class _AutoInputSupervisorProcessMixin:
     def _stale_snapshot_path_removable(self, path: str) -> bool:
         """Return whether a stale helper snapshot may be removed safely."""
         return bool(path) and self._snapshot_path_is_volatile(path)
+
+    def _terminate_orphaned_helpers(self) -> None:
+        """Stop stale helper processes for this snapshot before spawning a new one."""
+        for pid in self._orphaned_helper_pids():
+            try:
+                os.kill(pid, 15)
+                logging.info("Stopped orphaned auto input helper pid=%s", pid)
+            except ProcessLookupError:
+                continue
+            except Exception as error:  # pylint: disable=broad-except
+                logging.debug("Unable to stop orphaned auto input helper pid=%s: %s", pid, error)
+
+    def _orphaned_helper_pids(self) -> list[int]:
+        snapshot_path = self._orphan_snapshot_path()
+        if not snapshot_path:
+            return []
+        return [
+            pid
+            for pid in self._orphan_candidate_pids(os.getpid())
+            if self._helper_cmdline_matches(pid, snapshot_path)
+        ]
+
+    def _orphan_snapshot_path(self) -> str:
+        return str(getattr(self.service, "auto_input_snapshot_path", "") or "").strip()
+
+    def _orphan_candidate_pids(self, current_pid: int) -> list[int]:
+        return [
+            pid
+            for name in self._proc_entries()
+            for pid in (self._orphan_candidate_pid(name, current_pid),)
+            if pid is not None
+        ]
+
+    @staticmethod
+    def _proc_entries() -> list[str]:
+        try:
+            return os.listdir("/proc")
+        except OSError:
+            return []
+
+    @staticmethod
+    def _orphan_candidate_pid(name: str, current_pid: int) -> int | None:
+        if not name.isdigit():
+            return None
+        pid = int(name)
+        return None if pid == current_pid else pid
+
+    @staticmethod
+    def _helper_cmdline_matches(pid: int, snapshot_path: str) -> bool:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                cmdline = handle.read().decode("utf-8", "replace").replace("\x00", " ")
+        except OSError:
+            return False
+        return "venus_evcharger_auto_input_helper.py" in cmdline and snapshot_path in cmdline
 
     def _helper_snapshot_age(self, current: float) -> float | None:
         svc = self.service

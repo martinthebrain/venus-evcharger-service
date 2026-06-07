@@ -12,6 +12,7 @@ from collections.abc import Callable
 import logging
 import os
 import threading
+import uuid
 import time
 from typing import Any
 
@@ -93,6 +94,7 @@ class RuntimeSupportController(
             "_relay_sync_failure_reported": lambda: False,
             "_auto_input_helper_process": lambda: None,
             "_auto_input_helper_generation": lambda: 0,
+            "_auto_input_runtime_instance_id": lambda: uuid.uuid4().hex,
             "_auto_input_helper_last_start_at": lambda: 0.0,
             "_auto_input_helper_restart_requested_at": lambda: None,
             "_auto_input_snapshot_last_seen": lambda: None,
@@ -102,6 +104,7 @@ class RuntimeSupportController(
             "_auto_input_snapshot_version": lambda: None,
             "_auto_input_snapshot_writer_pid": lambda: None,
             "_auto_input_snapshot_generation": lambda: None,
+            "_auto_input_snapshot_runtime_instance_id": lambda: None,
             "auto_input_snapshot_path": lambda: (
                 f"/run/dbus-venus-evcharger-auto-{getattr(svc, 'deviceinstance', 0)}.json"
             ),

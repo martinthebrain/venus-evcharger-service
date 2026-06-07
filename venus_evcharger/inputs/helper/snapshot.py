@@ -122,44 +122,56 @@ class _AutoInputHelperSnapshotMixin:
         """Collect only the due Auto inputs and keep the last snapshot state for the others."""
         self._ensure_poll_state()
         current = time.time() if now is None else float(now)
-        snapshot = dict(self._last_snapshot_state)
+        timestamp_after_work = time.time if now is None else lambda: current
+        with self._snapshot_guard():
+            snapshot = dict(self._last_snapshot_state)
+            due_sources = self._due_snapshot_sources(current)
 
+        for source_name, interval_seconds, getter, value_key, captured_key in due_sources:
+            value = getter()
+            source_current = timestamp_after_work()
+            with self._snapshot_guard():
+                self._apply_source_snapshot_value(snapshot, source_name, value_key, captured_key, value, source_current)
+                self._next_source_poll_at[source_name] = source_current + float(interval_seconds)
+
+        with self._snapshot_guard():
+            final_current = timestamp_after_work()
+            snapshot["captured_at"] = final_current
+            snapshot["heartbeat_at"] = final_current
+            snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
+            self._stamp_snapshot_metadata(snapshot)
+            self._last_snapshot_state = dict(snapshot)
+        return snapshot
+
+    def _due_snapshot_sources(self: Any, current: float) -> tuple[tuple[str, float, Any, str, str], ...]:
         source_specs = (
             ("pv", self.auto_pv_poll_interval_seconds, self._get_pv_power, "pv_power", "pv_captured_at"),
             ("battery", self.auto_battery_poll_interval_seconds, self._get_battery_snapshot, "battery_soc", "battery_captured_at"),
             ("grid", self.auto_grid_poll_interval_seconds, self._get_grid_power, "grid_power", "grid_captured_at"),
         )
-
-        for source_name, interval_seconds, getter, value_key, captured_key in source_specs:
-            if current < float(self._next_source_poll_at.get(source_name, 0.0)):
-                continue
-            value = getter()
-            self._apply_source_snapshot_value(snapshot, source_name, value_key, captured_key, value, current)
-            self._next_source_poll_at[source_name] = current + float(interval_seconds)
-
-        snapshot["captured_at"] = current
-        snapshot["heartbeat_at"] = current
-        snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
-        self._stamp_snapshot_metadata(snapshot)
-        self._last_snapshot_state = dict(snapshot)
-        return snapshot
+        return tuple(
+            source_spec
+            for source_spec in source_specs
+            if current >= float(self._next_source_poll_at.get(source_spec[0], 0.0))
+        )
 
     def _set_source_value(self: Any, source_name: str, value: object, now: float | None = None) -> None:
         """Update one source in the snapshot and write it to RAM."""
         self._ensure_poll_state()
         current = time.time() if now is None else float(now)
-        snapshot = dict(self._last_snapshot_state)
-        snapshot_keys = self._source_snapshot_keys(source_name)
-        if snapshot_keys is None:
-            return
-        value_key, captured_key = snapshot_keys
-        self._apply_source_snapshot_value(snapshot, source_name, value_key, captured_key, value, current)
-        snapshot["captured_at"] = current
-        snapshot["heartbeat_at"] = current
-        snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
-        self._stamp_snapshot_metadata(snapshot)
-        self._last_snapshot_state = snapshot
-        self._write_snapshot(snapshot)
+        with self._snapshot_guard():
+            snapshot = dict(self._last_snapshot_state)
+            snapshot_keys = self._source_snapshot_keys(source_name)
+            if snapshot_keys is None:
+                return
+            value_key, captured_key = snapshot_keys
+            self._apply_source_snapshot_value(snapshot, source_name, value_key, captured_key, value, current)
+            snapshot["captured_at"] = current
+            snapshot["heartbeat_at"] = current
+            snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
+            self._stamp_snapshot_metadata(snapshot)
+            self._last_snapshot_state = snapshot
+            self._write_snapshot(snapshot)
 
     def _apply_source_snapshot_value(
         self: Any,
@@ -172,9 +184,17 @@ class _AutoInputHelperSnapshotMixin:
     ) -> None:
         if source_name == "battery" and isinstance(value, dict):
             self._apply_battery_snapshot_value(snapshot, value, captured_key, current)
+            self._set_source_status(snapshot, source_name, snapshot.get("battery_soc") is not None)
             return
         snapshot[value_key] = value
         snapshot[captured_key] = None if value is None else current
+        self._set_source_status(snapshot, source_name, value is not None)
+
+    @staticmethod
+    def _set_source_status(snapshot: dict[str, object], source_name: str, available: bool) -> None:
+        snapshot[f"{source_name}_status"] = "ok" if available else "missing"
+        snapshot["helper_state"] = "running"
+        snapshot["helper_status"] = snapshot["helper_state"]
 
     def _apply_battery_snapshot_value(
         self: Any,
@@ -204,18 +224,25 @@ class _AutoInputHelperSnapshotMixin:
         """Keep the RAM snapshot fresh without re-reading DBus values."""
         self._ensure_poll_state()
         current = time.time()
-        snapshot = dict(self._last_snapshot_state)
-        snapshot["heartbeat_at"] = current
-        snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
-        self._stamp_snapshot_metadata(snapshot)
-        self._last_snapshot_state = snapshot
-        self._write_snapshot(snapshot)
+        with self._snapshot_guard():
+            snapshot = dict(self._last_snapshot_state)
+            snapshot["heartbeat_at"] = current
+            snapshot.setdefault("helper_state", "running")
+            snapshot.setdefault("helper_status", snapshot["helper_state"])
+            snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
+            self._stamp_snapshot_metadata(snapshot)
+            self._last_snapshot_state = snapshot
+            self._write_snapshot(snapshot)
         return not self._stop_requested
+
+    def _snapshot_guard(self: Any) -> Any:
+        return getattr(self, "_snapshot_lock", _NullContext())
 
     def _stamp_snapshot_metadata(self: Any, snapshot: dict[str, object]) -> None:
         """Attach helper identity metadata used for supervisor liveness checks."""
         snapshot["writer_pid"] = os.getpid()
         snapshot["helper_generation"] = int(getattr(self, "helper_generation", 0) or 0)
+        snapshot["runtime_instance_id"] = str(getattr(self, "runtime_instance_id", "") or "")
 
     def _refresh_source(self: Any, source_name: str, now: float | None = None) -> None:
         """Refresh exactly one source on startup or when its DBus signal fires."""
@@ -240,3 +267,11 @@ class _AutoInputHelperSnapshotMixin:
         """Fallback poll to recover from silent subscription failures."""
         self._refresh_all_sources()
         return not self._stop_requested
+
+
+class _NullContext:
+    def __enter__(self) -> "_NullContext":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
