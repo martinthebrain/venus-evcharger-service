@@ -116,16 +116,36 @@ class _RuntimeSupportAsyncMainloopMixin(_ComposableControllerMixin):
         queued_at = time.time()
         with svc._dbus_publish_queue_lock:
             pending = cast("OrderedDict[str, QueuedPublishValue]", svc._dbus_publish_pending)
-            for path, value in values:
-                if path in pending:
-                    del pending[path]
-                pending[path] = (value, float(current), queued_at)
-            while len(pending) > int(getattr(svc, "_dbus_publish_max_paths", 256)):
-                pending.popitem(last=False)
-                svc._dbus_publish_dropped_count += 1
-            if pending:
-                svc._dbus_publish_oldest_queued_at = min(item[2] for item in pending.values())
+            self._coalesce_dbus_publish_values(pending, values, float(current), queued_at)
+            self._trim_dbus_publish_queue(svc, pending)
+            self._remember_oldest_dbus_publish(svc, pending)
         return True
+
+    @staticmethod
+    def _coalesce_dbus_publish_values(
+        pending: "OrderedDict[str, QueuedPublishValue]",
+        values: list[tuple[str, Any]],
+        current: float,
+        queued_at: float,
+    ) -> None:
+        """Coalesce queued DBus writes so the newest value wins."""
+        for path, value in values:
+            if path in pending:
+                del pending[path]
+            pending[path] = (value, current, queued_at)
+
+    @staticmethod
+    def _trim_dbus_publish_queue(svc: Any, pending: "OrderedDict[str, QueuedPublishValue]") -> None:
+        """Trim oldest queued DBus writes when the queue is full."""
+        while len(pending) > int(getattr(svc, "_dbus_publish_max_paths", 256)):
+            pending.popitem(last=False)
+            svc._dbus_publish_dropped_count += 1
+
+    @staticmethod
+    def _remember_oldest_dbus_publish(svc: Any, pending: "OrderedDict[str, QueuedPublishValue]") -> None:
+        """Remember the oldest queued publish time for queue-lag diagnostics."""
+        if pending:
+            svc._dbus_publish_oldest_queued_at = min(item[2] for item in pending.values())
 
     def enqueue_dbus_update_index_bump(self, current: float) -> None:
         """Queue an UpdateIndex bump for the GLib thread."""
@@ -159,6 +179,18 @@ class _RuntimeSupportAsyncMainloopMixin(_ComposableControllerMixin):
         self.assert_dbus_mainloop_thread("main DBus publish flush")
         started = time.monotonic()
         now = time.time()
+        values, bump_count, oldest_queued_at = self._drain_dbus_publish_queue(svc)
+        self._remember_dbus_publish_queue_lag(svc, now, oldest_queued_at)
+        failed_paths = self._apply_dbus_publish_values(svc, values)
+        self._report_dbus_publish_failures(svc, failed_paths)
+        self._flush_update_index_bumps(svc, now, bump_count)
+        self._record_publish_flush_duration(svc, started)
+        self.flush_companion_dbus_publish_queue()
+        return True
+
+    @staticmethod
+    def _drain_dbus_publish_queue(svc: Any) -> tuple[list[tuple[str, QueuedPublishValue]], int, float | None]:
+        """Drain queued DBus writes and return their diagnostics."""
         with svc._dbus_publish_queue_lock:
             pending = cast("OrderedDict[str, QueuedPublishValue]", svc._dbus_publish_pending)
             values = list(pending.items())
@@ -167,10 +199,17 @@ class _RuntimeSupportAsyncMainloopMixin(_ComposableControllerMixin):
             svc._dbus_publish_bump_pending = 0
             oldest_queued_at = getattr(svc, "_dbus_publish_oldest_queued_at", None)
             svc._dbus_publish_oldest_queued_at = None
+        return values, bump_count, oldest_queued_at
 
+    @staticmethod
+    def _remember_dbus_publish_queue_lag(svc: Any, now: float, oldest_queued_at: float | None) -> None:
+        """Record DBus publish queue lag from the oldest drained item."""
         if oldest_queued_at is not None:
             svc._last_dbus_publish_queue_lag_seconds = max(0.0, now - float(oldest_queued_at))
 
+    @staticmethod
+    def _apply_dbus_publish_values(svc: Any, values: list[tuple[str, QueuedPublishValue]]) -> list[str]:
+        """Apply drained DBus publish values and return failed paths."""
         failed_paths: list[str] = []
         for path, (value, current, _queued_at) in values:
             try:
@@ -178,25 +217,39 @@ class _RuntimeSupportAsyncMainloopMixin(_ComposableControllerMixin):
                 svc._dbus_publish_state[path] = {"value": value, "updated_at": current}
             except Exception:  # pylint: disable=broad-except
                 failed_paths.append(path)
-        if failed_paths:
-            mark_failure = getattr(svc, "_mark_failure", None)
-            if callable(mark_failure):
-                mark_failure("dbus")
-            logging.warning("DBus publish queue failed for paths %s", ",".join(failed_paths))
+        return failed_paths
 
+    @staticmethod
+    def _report_dbus_publish_failures(svc: Any, failed_paths: list[str]) -> None:
+        """Record and log DBus publish failures."""
+        if not failed_paths:
+            return
+        mark_failure = getattr(svc, "_mark_failure", None)
+        if callable(mark_failure):
+            mark_failure("dbus")
+        logging.warning("DBus publish queue failed for paths %s", ",".join(failed_paths))
+
+    def _flush_update_index_bumps(self, svc: Any, now: float, bump_count: int) -> None:
+        """Flush queued UpdateIndex bumps."""
         for _index in range(max(0, bump_count)):
-            try:
-                self._bump_update_index_direct(svc, now)
-            except Exception:  # pylint: disable=broad-except
-                logging.warning("DBus publish queue failed to bump /UpdateIndex")
+            if not self._bump_update_index_best_effort(svc, now):
                 break
 
+    def _bump_update_index_best_effort(self, svc: Any, now: float) -> bool:
+        """Bump UpdateIndex and report whether more bumps should be attempted."""
+        try:
+            self._bump_update_index_direct(svc, now)
+            return True
+        except Exception:  # pylint: disable=broad-except
+            logging.warning("DBus publish queue failed to bump /UpdateIndex")
+            return False
+
+    def _record_publish_flush_duration(self, svc: Any, started: float) -> None:
+        """Record and budget-check publish flush duration."""
         duration = time.monotonic() - started
         svc._last_publish_flush_duration_seconds = duration
         if duration > self._float_attr(getattr(svc, "_dbus_publish_budget_seconds", 0.1), 0.1):
             logging.warning("DBus publish flush exceeded budget: %.3fs", duration)
-        self.flush_companion_dbus_publish_queue()
-        return True
 
     def start_update_worker(self) -> None:
         """Enable periodic update cycles in the serialized runtime executor."""
@@ -243,17 +296,32 @@ class _RuntimeSupportAsyncMainloopMixin(_ComposableControllerMixin):
     def _runtime_executor_loop(self) -> None:
         svc = self.service
         while not self._runtime_executor_stop_requested():
-            svc._runtime_executor_event.wait(0.5)
-            svc._runtime_executor_event.clear()
-            svc._update_worker_event.clear()
-            svc._control_command_event.clear()
-            if self._runtime_executor_stop_requested():
+            self._runtime_executor_wait_for_work(svc)
+            if not self._runtime_executor_should_continue():
                 break
-            while not self._runtime_executor_stop_requested():
-                did_work = self._drain_control_commands_once()
-                did_work = self._run_pending_update_cycle_once() or did_work
-                if not did_work:
-                    break
+            self._runtime_executor_drain_available_work()
+
+    def _runtime_executor_should_continue(self) -> bool:
+        """Return whether the runtime executor should keep processing."""
+        return not self._runtime_executor_stop_requested()
+
+    def _runtime_executor_wait_for_work(self, svc: Any) -> None:
+        """Wait for and clear runtime executor wake events."""
+        svc._runtime_executor_event.wait(0.5)
+        svc._runtime_executor_event.clear()
+        svc._update_worker_event.clear()
+        svc._control_command_event.clear()
+
+    def _runtime_executor_drain_available_work(self) -> None:
+        """Drain commands and update cycles until no more work is pending."""
+        while self._runtime_executor_should_continue():
+            if not self._runtime_executor_run_once():
+                break
+
+    def _runtime_executor_run_once(self) -> bool:
+        """Run one serialized runtime executor pass."""
+        did_work = self._drain_control_commands_once()
+        return self._run_pending_update_cycle_once() or did_work
 
     def _run_pending_update_cycle_once(self) -> bool:
         svc = self.service

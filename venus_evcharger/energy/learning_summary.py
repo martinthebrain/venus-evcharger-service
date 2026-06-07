@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Iterable, Mapping
 
 from .models import EnergyLearningProfile
+from .numeric import sum_optional
 
 
 def _summarize_normalized_energy_learning_profiles(
@@ -111,11 +112,7 @@ def _sum_profile_int(normalized_profiles: tuple[EnergyLearningProfile, ...], fie
     return sum(int(getattr(profile, field_name)) for profile in normalized_profiles)
 
 
-def _sum_optional(values: Iterable[float | None]) -> float | None:
-    numeric_values = [float(value) for value in values if value is not None]
-    if not numeric_values:
-        return None
-    return sum(numeric_values)
+_sum_optional = sum_optional
 
 
 def _mean_optional(values: Iterable[float | None]) -> float | None:

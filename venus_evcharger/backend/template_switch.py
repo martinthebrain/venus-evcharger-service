@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .template_support import (
     TemplateHttpBackendBase,
@@ -15,6 +15,7 @@ from .template_support import (
     normalize_http_method,
     resolved_url,
 )
+from .config_file import backend_request_timeout_seconds
 from .models import (
     PhaseSelection,
     SwitchCapabilities,
@@ -22,8 +23,11 @@ from .models import (
     SwitchingMode,
     normalize_phase_selection,
     normalize_phase_selection_tuple,
+    normalize_switching_mode,
 )
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_binary_flag
+
+_normalize_switching_mode = normalize_switching_mode
 
 
 @dataclass(frozen=True)
@@ -60,24 +64,9 @@ class _TemplateSwitchUrls:
     phase_url: str | None
 
 
-def _normalize_switching_mode(value: object, default: SwitchingMode = "direct") -> SwitchingMode:
-    """Return one normalized switching mode."""
-    mode = str(value).strip().lower() if value is not None else ""
-    if mode == "contactor":
-        return "contactor"
-    if mode == "direct":
-        return "direct"
-    return default
-
-
 def _template_switch_timeout_seconds(adapter: object, service: object) -> float:
     """Return the normalized timeout used by the template-switch backend."""
-    timeout_seconds = finite_float_or_none(
-        getattr(adapter, "get")("RequestTimeoutSeconds", getattr(service, "shelly_request_timeout_seconds", 2.0))
-    )
-    if timeout_seconds is None or timeout_seconds <= 0.0:
-        return 2.0
-    return float(timeout_seconds)
+    return backend_request_timeout_seconds(adapter, service)
 
 
 def _template_switch_urls(
@@ -181,7 +170,7 @@ def load_template_switch_settings(service: object, config_path: str) -> Template
         capabilities.get("SupportedPhaseSelections", "P1"),
         ("P1",),
     )
-    switching_mode = _normalize_switching_mode(capabilities.get("SwitchingMode", "direct"))
+    switching_mode = normalize_switching_mode(capabilities.get("SwitchingMode", "direct"))
     max_direct_switch_power_w = (
         None
         if switching_mode == "contactor"
@@ -324,3 +313,20 @@ class TemplateSwitchBackend(TemplateHttpBackendBase):
                 json_template=self.settings.phase_json_template,
             )
         self._selected_phase_selection = selection
+
+
+def force_contactor_switch_settings(backend: TemplateSwitchBackend) -> None:
+    """Force one template-switch backend instance to contactor semantics."""
+    backend.settings = replace(
+        backend.settings,
+        switching_mode="contactor",
+        max_direct_switch_power_w=None,
+    )
+
+
+class TemplateContactorSwitchMixin:
+    """Mixin for template-switch aliases that are always external contactors."""
+
+    def __init__(self, service: object, config_path: str = "") -> None:
+        super().__init__(service, config_path=config_path)  # type: ignore[call-arg]
+        force_contactor_switch_settings(self)  # type: ignore[arg-type]

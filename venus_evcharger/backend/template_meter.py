@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
 
 from .shelly_support import (
     phase_currents_for_selection,
@@ -14,10 +13,12 @@ from .template_support import (
     TemplateHttpBackendBase,
     TemplateAuthSettings,
     config_section,
+    enabled_state_from_text,
     json_path_value,
     load_template_config,
     load_template_auth_settings,
     normalize_http_method,
+    payload_object,
     resolved_url,
 )
 from .models import MeterReading, PhaseSelection, normalize_phase_selection
@@ -91,12 +92,7 @@ def _payload_float(payload: object, path: str | None) -> float | None:
     """Return one optional numeric value from the template response payload."""
     if path is None:
         return None
-    return finite_float_or_none(json_path_value(_payload_object(payload), path))
-
-
-def _payload_object(payload: object) -> dict[str, object]:
-    """Return one typed JSON object payload for dotted-path lookups."""
-    return cast(dict[str, object], payload)
+    return finite_float_or_none(json_path_value(payload_object(payload), path))
 
 
 def _payload_energy_kwh(payload: object, settings: TemplateMeterSettings) -> float:
@@ -115,7 +111,7 @@ def _payload_phase_selection(payload: object, settings: TemplateMeterSettings) -
     if settings.phase_selection_path is None:
         return settings.phase_selection
     return normalize_phase_selection(
-        json_path_value(_payload_object(payload), settings.phase_selection_path),
+        json_path_value(payload_object(payload), settings.phase_selection_path),
         settings.phase_selection,
     )
 
@@ -124,7 +120,7 @@ def _payload_phase_vector(payload: object, path: str | None) -> tuple[float, flo
     """Return one optional explicit three-value phase vector from payload."""
     if path is None:
         return None
-    return _phase_vector(json_path_value(_payload_object(payload), path))
+    return _phase_vector(json_path_value(payload_object(payload), path))
 
 
 def _resolved_phase_powers(
@@ -234,16 +230,7 @@ class TemplateMeterBackend(TemplateHttpBackendBase):
             return value
         if isinstance(value, (int, float)):
             return bool(value)
-        return TemplateMeterBackend._enabled_state_from_text(str(value).strip().lower())
-
-    @staticmethod
-    def _enabled_state_from_text(text: str) -> bool | None:
-        """Return an optional enabled-state from normalized text tokens."""
-        if text in {"1", "true", "on", "yes", "enabled"}:
-            return True
-        if text in {"0", "false", "off", "no", "disabled"}:
-            return False
-        return None
+        return enabled_state_from_text(str(value).strip().lower())
 
     def read_meter(self) -> MeterReading:
         """Read one normalized meter reading from the configured template endpoint."""

@@ -157,20 +157,23 @@ class _DbusPublishDiagnosticsMixin:
     def _shelly_counter_values(self, now: float) -> dict[str, str | int]:
         """Return Shelly transport and retry diagnostics."""
         svc = self.service
-        retry_remaining = 0
-        source_retry_remaining = getattr(svc, "_source_retry_remaining", None)
-        if callable(source_retry_remaining):
-            retry_remaining = int(source_retry_remaining("shelly", now))
-        else:
-            retry_after = getattr(svc, "_shelly_retry_after", 0.0)
-            if isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool):
-                retry_remaining = max(0, int(float(retry_after) - float(now)))
         return {
             "/Auto/ShellyState": str(getattr(svc, "_shelly_state", "unknown") or "unknown"),
             "/Auto/ShellyLastError": str(getattr(svc, "_shelly_last_error_reason", "") or ""),
-            "/Auto/ShellyRetryRemaining": retry_remaining,
+            "/Auto/ShellyRetryRemaining": self._shelly_retry_remaining_value(svc, now),
             "/Auto/ShellyConsecutiveErrors": int(getattr(svc, "_shelly_consecutive_errors", 0) or 0),
         }
+
+    @staticmethod
+    def _shelly_retry_remaining_value(svc: Any, now: float) -> int:
+        """Return remaining Shelly retry delay in seconds."""
+        source_retry_remaining = getattr(svc, "_source_retry_remaining", None)
+        if callable(source_retry_remaining):
+            return int(source_retry_remaining("shelly", now))
+        retry_after = getattr(svc, "_shelly_retry_after", 0.0)
+        if not isinstance(retry_after, (int, float)) or isinstance(retry_after, bool):
+            return 0
+        return max(0, int(float(retry_after) - float(now)))
 
     def _phase_counter_values(self, now: float) -> dict[str, str | int | float]:
         """Return outward phase diagnostics and supported-layout information."""

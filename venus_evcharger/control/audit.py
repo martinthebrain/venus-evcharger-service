@@ -11,6 +11,8 @@ import time
 from collections import deque
 from typing import Any, Mapping
 
+from .runtime_paths import is_runtime_path
+
 
 class ControlApiAuditTrail:
     """Keep recent API audit entries in memory and optionally mirror them to /run."""
@@ -78,5 +80,4 @@ class ControlApiAuditTrail:
 
     @staticmethod
     def _is_runtime_path(path: str) -> bool:
-        normalized = os.path.abspath(path)
-        return normalized.startswith("/run/") or normalized.startswith("/tmp/")
+        return is_runtime_path(path)

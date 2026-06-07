@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from venus_evcharger.core.contracts import mutable_dict_attr
+
 from .victron_ess_balance_learning_profiles_support import (
+    _clear_victron_ess_balance_active_profile_state,
     _victron_ess_balance_action_direction_site_regime,
     _victron_ess_balance_active_profile_fields,
     _victron_ess_balance_adaptive_scalar_specs,
@@ -27,6 +30,7 @@ from .victron_ess_balance_learning_profiles_support import (
     _victron_ess_balance_profile_identity,
     _victron_ess_balance_profile_scalar_snapshot,
     _victron_ess_balance_pv_phase,
+    _victron_ess_balance_update_profile_sample,
 )
 
 
@@ -232,12 +236,7 @@ class _UpdateCycleVictronEssBalanceLearningProfilesMixin:
 
     @staticmethod
     def _victron_ess_balance_learning_profiles(svc: Any) -> dict[str, dict[str, Any]]:
-        profiles = getattr(svc, "_victron_ess_balance_learning_profiles", None)
-        if isinstance(profiles, dict):
-            return profiles
-        profiles = {}
-        svc._victron_ess_balance_learning_profiles = profiles
-        return profiles
+        return mutable_dict_attr(svc, "_victron_ess_balance_learning_profiles")
 
     def _victron_ess_balance_learning_profile_state(self, svc: Any, profile_key: str) -> dict[str, Any]:
         if not profile_key:
@@ -354,45 +353,35 @@ class _UpdateCycleVictronEssBalanceLearningProfilesMixin:
 
     @staticmethod
     def _clear_victron_ess_balance_active_profile(svc: Any) -> None:
-        svc._victron_ess_balance_active_learning_profile_key = ""
-        svc._victron_ess_balance_active_learning_profile_action_direction = ""
-        svc._victron_ess_balance_active_learning_profile_site_regime = ""
-        svc._victron_ess_balance_active_learning_profile_direction = ""
-        svc._victron_ess_balance_active_learning_profile_day_phase = ""
-        svc._victron_ess_balance_active_learning_profile_reserve_phase = ""
-        svc._victron_ess_balance_active_learning_profile_ev_phase = ""
-        svc._victron_ess_balance_active_learning_profile_pv_phase = ""
-        svc._victron_ess_balance_active_learning_profile_battery_limit_phase = ""
+        _clear_victron_ess_balance_active_profile_state(svc)
 
     def _victron_ess_balance_update_profile_delay(self, svc: Any, profile_key: str, sample: float) -> None:
         profile = self._ensure_victron_ess_balance_learning_profile_state(svc, profile_key)
         if not profile:
             return
-        samples = max(0, int(profile.get("delay_samples", 0) or 0))
-        current_delay = self._optional_float(profile.get("response_delay_seconds"))
-        if current_delay is not None:
-            profile["response_delay_mad_seconds"] = self._ewma_learned_value(
-                self._optional_float(profile.get("response_delay_mad_seconds")),
-                abs(float(sample) - float(current_delay)),
-                samples,
-            )
-        profile["response_delay_seconds"] = self._ewma_learned_value(current_delay, float(sample), samples)
-        profile["delay_samples"] = samples + 1
+        _victron_ess_balance_update_profile_sample(
+            profile,
+            sample,
+            samples_field="delay_samples",
+            value_field="response_delay_seconds",
+            deviation_field="response_delay_mad_seconds",
+            optional_float=self._optional_float,
+            ewma=self._ewma_learned_value,
+        )
 
     def _victron_ess_balance_update_profile_gain(self, svc: Any, profile_key: str, sample: float) -> None:
         profile = self._ensure_victron_ess_balance_learning_profile_state(svc, profile_key)
         if not profile:
             return
-        samples = max(0, int(profile.get("gain_samples", 0) or 0))
-        current_gain = self._optional_float(profile.get("estimated_gain"))
-        if current_gain is not None:
-            profile["gain_mad"] = self._ewma_learned_value(
-                self._optional_float(profile.get("gain_mad")),
-                abs(float(sample) - float(current_gain)),
-                samples,
-            )
-        profile["estimated_gain"] = self._ewma_learned_value(current_gain, float(sample), samples)
-        profile["gain_samples"] = samples + 1
+        _victron_ess_balance_update_profile_sample(
+            profile,
+            sample,
+            samples_field="gain_samples",
+            value_field="estimated_gain",
+            deviation_field="gain_mad",
+            optional_float=self._optional_float,
+            ewma=self._ewma_learned_value,
+        )
 
     def _victron_ess_balance_increment_profile_counter(self, svc: Any, profile_key: str, field: str) -> None:
         profile = self._ensure_victron_ess_balance_learning_profile_state(svc, profile_key)

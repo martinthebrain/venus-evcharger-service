@@ -10,6 +10,12 @@ import logging
 from typing import Any, cast
 
 from .victron_ess_balance_apply_support import _UpdateCycleVictronEssBalanceApplySupportMixin
+from .victron_ess_balance_learning_profiles_support import (
+    _clear_victron_ess_balance_tracking_episode_state,
+    _record_victron_ess_balance_tracking_command,
+    _reset_victron_ess_balance_pid_integral_state,
+    _reset_victron_ess_balance_pid_state,
+)
 
 
 class _UpdateCycleVictronEssBalanceApplyMixin(_UpdateCycleVictronEssBalanceApplySupportMixin):
@@ -139,17 +145,11 @@ class _UpdateCycleVictronEssBalanceApplyMixin(_UpdateCycleVictronEssBalanceApply
 
     @staticmethod
     def _reset_victron_ess_balance_pid(svc: Any) -> None:
-        svc._victron_ess_balance_pid_last_error_w = 0.0
-        svc._victron_ess_balance_pid_last_at = None
-        svc._victron_ess_balance_pid_integral_output_w = 0.0
-        svc._victron_ess_balance_pid_last_output_w = 0.0
+        _reset_victron_ess_balance_pid_state(svc)
 
     @staticmethod
     def _reset_victron_ess_balance_pid_integral(svc: Any, aggressive: bool = False) -> None:
-        svc._victron_ess_balance_pid_integral_output_w = 0.0
-        if aggressive:
-            svc._victron_ess_balance_pid_last_error_w = 0.0
-            svc._victron_ess_balance_pid_last_output_w = 0.0
+        _reset_victron_ess_balance_pid_integral_state(svc, aggressive)
 
     def _record_victron_ess_balance_command(
         self,
@@ -159,27 +159,11 @@ class _UpdateCycleVictronEssBalanceApplyMixin(_UpdateCycleVictronEssBalanceApply
         source_error_w: float,
         profile_key: str,
     ) -> None:
-        svc._victron_ess_balance_telemetry_last_command_at = float(now)
-        svc._victron_ess_balance_telemetry_last_command_setpoint_w = float(setpoint_w)
-        svc._victron_ess_balance_telemetry_last_command_error_w = float(source_error_w)
-        svc._victron_ess_balance_telemetry_last_command_profile_key = str(profile_key or "").strip()
-        svc._victron_ess_balance_telemetry_command_response_recorded = False
-        svc._victron_ess_balance_telemetry_command_overshoot_recorded = False
-        svc._victron_ess_balance_telemetry_command_settled_recorded = False
-        svc._victron_ess_balance_telemetry_overshoot_active = False
-        svc._victron_ess_balance_telemetry_settling_active = True
+        _record_victron_ess_balance_tracking_command(svc, now, setpoint_w, source_error_w, profile_key)
 
     @staticmethod
     def _clear_victron_ess_balance_tracking_episode(svc: Any) -> None:
-        svc._victron_ess_balance_telemetry_last_command_at = None
-        svc._victron_ess_balance_telemetry_last_command_setpoint_w = None
-        svc._victron_ess_balance_telemetry_last_command_error_w = None
-        svc._victron_ess_balance_telemetry_last_command_profile_key = ""
-        svc._victron_ess_balance_telemetry_command_response_recorded = False
-        svc._victron_ess_balance_telemetry_command_overshoot_recorded = False
-        svc._victron_ess_balance_telemetry_command_settled_recorded = False
-        svc._victron_ess_balance_telemetry_overshoot_active = False
-        svc._victron_ess_balance_telemetry_settling_active = False
+        _clear_victron_ess_balance_tracking_episode_state(svc)
 
     def _disable_victron_ess_balance(self, svc: Any, metrics: dict[str, Any]) -> None:
         self._merge_victron_ess_balance_metrics(svc, metrics)

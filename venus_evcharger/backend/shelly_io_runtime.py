@@ -15,7 +15,7 @@ from venus_evcharger.core.common import (
     _charger_transport_retry_delay_seconds,
     _fresh_charger_retry_until,
 )
-from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
 
 
 class ShellyIoRuntimeMixin:
@@ -164,8 +164,7 @@ class ShellyIoRuntimeMixin:
 
     @staticmethod
     def _charger_transport_detail(error: BaseException) -> str:
-        detail = str(error).strip()
-        return detail or error.__class__.__name__
+        return exception_detail(error)
 
     def _remember_charger_transport_issue(
         self,

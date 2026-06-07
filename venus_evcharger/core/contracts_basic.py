@@ -30,6 +30,28 @@ def finite_float_or_none(value: Any) -> float | None:
     return normalized
 
 
+def mutable_dict_attr(target: Any, attr_name: str) -> dict[str, Any]:
+    """Return a mutable dict attribute, initializing it when absent or invalid."""
+    current = getattr(target, attr_name, None)
+    if isinstance(current, dict):
+        return current
+    current = {}
+    setattr(target, attr_name, current)
+    return current
+
+
+def exception_detail(error: BaseException) -> str:
+    """Return one stable human-readable exception detail."""
+    detail = str(error).strip()
+    return detail or error.__class__.__name__
+
+
+def optional_text(value: object) -> str | None:
+    """Return trimmed text or ``None`` when empty."""
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
 def non_negative_float_or_none(value: Any) -> float | None:
     normalized = finite_float_or_none(value)
     if normalized is None or normalized < 0.0:

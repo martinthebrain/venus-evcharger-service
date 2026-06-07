@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .models import EnergyLearningProfile
+from .numeric import optional_float
 
 
 def _normalized_profile_iter(
@@ -107,9 +108,7 @@ def _coerced_learning_float_fields(raw_profile: Mapping[str, Any]) -> dict[str, 
 
 
 def _optional_float(value: object) -> float | None:
-    if not isinstance(value, (int, float)):
-        return None
-    return float(value)
+    return optional_float(value)
 
 
 def _coerced_int(raw_profile: Mapping[str, Any], key: str) -> int:

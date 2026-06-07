@@ -13,6 +13,7 @@ from venus_evcharger.backend.modbus_transport import create_modbus_transport
 from venus_evcharger.backend.modbus_transport_config import load_modbus_transport_settings, modbus_transport_issue_reason
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 from venus_evcharger.backend.template_support import load_template_config
+from venus_evcharger.energy.numeric import optional_int
 
 from .probe_cli import _payload_with_written_files, _render_payload
 from .probe_core import (
@@ -174,12 +175,7 @@ def _detected_candidate_transport(
 
 
 def _optional_detected_int(value: object) -> int | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
+    return optional_int(value)
 
 
 def _required_huawei_fields_ok(field_results: list[dict[str, object]]) -> bool:

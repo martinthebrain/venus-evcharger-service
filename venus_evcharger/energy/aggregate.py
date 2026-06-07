@@ -9,14 +9,11 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from .models import EnergyClusterSnapshot, EnergySourceDefinition, EnergySourceSnapshot
+from .numeric import non_negative_optional_float, optional_float, sum_optional
 from .profiles import energy_source_profile_details
 
 
-def _sum_optional(values: Iterable[float | None]) -> float | None:
-    numeric_values = [float(value) for value in values if value is not None]
-    if not numeric_values:
-        return None
-    return sum(numeric_values)
+_sum_optional = sum_optional
 
 
 def _scoped_numeric_value(
@@ -110,16 +107,11 @@ def _role_count(sources: tuple[EnergySourceSnapshot, ...], role: str) -> int:
 
 
 def _optional_float(value: Any) -> float | None:
-    if not isinstance(value, (int, float)):
-        return None
-    return float(value)
+    return optional_float(value)
 
 
 def _non_negative_optional_float(value: Any) -> float | None:
-    numeric = _optional_float(value)
-    if numeric is None:
-        return None
-    return max(0.0, numeric)
+    return non_negative_optional_float(value)
 
 
 def _balance_profile_for_source(

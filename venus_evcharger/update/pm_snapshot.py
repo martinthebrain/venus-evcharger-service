@@ -62,23 +62,42 @@ class _UpdateCyclePmSnapshotMixin:
         soft_fail_seconds: float,
     ) -> dict[str, Any] | None:
         """Return the last confirmed PM status when it is still inside soft-fail budget."""
-        confirmed_status = getattr(svc, "_last_confirmed_pm_status", None)
-        confirmed_at = getattr(svc, "_last_confirmed_pm_status_at", None)
-        if cls._cached_pm_status_usable(confirmed_status, confirmed_at, now, soft_fail_seconds):
-            pm_status = dict(cast(dict[str, Any], confirmed_status))
-            pm_status["_pm_confirmed"] = True
-            return pm_status
-        if not bool(getattr(svc, "_last_pm_status_confirmed", False)):
+        confirmed = cls._fresh_confirmed_pm_status(
+            getattr(svc, "_last_confirmed_pm_status", None),
+            getattr(svc, "_last_confirmed_pm_status_at", None),
+            now,
+            soft_fail_seconds,
+        )
+        if confirmed is not None:
+            return confirmed
+        if not cls._last_pm_status_marked_confirmed(svc):
             return None
-        if (
-            svc._last_pm_status is None
-            or svc._last_pm_status_at is None
-            or not cls._cached_pm_status_usable(svc._last_pm_status, svc._last_pm_status_at, now, soft_fail_seconds)
-        ):
+        return cls._fresh_confirmed_pm_status(
+            getattr(svc, "_last_pm_status", None),
+            getattr(svc, "_last_pm_status_at", None),
+            now,
+            soft_fail_seconds,
+        )
+
+    @staticmethod
+    def _last_pm_status_marked_confirmed(svc: Any) -> bool:
+        """Return whether the legacy last-PM cache is confirmed."""
+        return bool(getattr(svc, "_last_pm_status_confirmed", False))
+
+    @classmethod
+    def _fresh_confirmed_pm_status(
+        cls,
+        pm_status: Any,
+        captured_at: Any,
+        now: float,
+        soft_fail_seconds: float,
+    ) -> dict[str, Any] | None:
+        """Return one confirmed PM cache entry when it is fresh enough."""
+        if not cls._cached_pm_status_usable(pm_status, captured_at, now, soft_fail_seconds):
             return None
-        pm_status = dict(svc._last_pm_status)
-        pm_status["_pm_confirmed"] = True
-        return pm_status
+        confirmed = dict(cast(dict[str, Any], pm_status))
+        confirmed["_pm_confirmed"] = True
+        return confirmed
 
     @classmethod
     def _cached_pm_status_usable(
@@ -121,13 +140,10 @@ class _UpdateCyclePmSnapshotMixin:
         """Return the freshest Shelly status, including short soft-fail reuse."""
         soft_fail_seconds = float(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
         pm_status, pm_confirmed, snapshot_at = cls._worker_pm_snapshot_data(worker_snapshot, now)
-        if pm_status is None:
+        if not cls._worker_pm_snapshot_usable(pm_status, pm_confirmed, snapshot_at, now):
             return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
-        pm_status["_pm_confirmed"] = pm_confirmed
-        if not pm_confirmed:
-            return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
-        if cls._pm_snapshot_falls_back_to_cache(snapshot_at, now):
-            return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
+        pm_status = cast(dict[str, Any], pm_status)
+        pm_status["_pm_confirmed"] = True
         should_remember, within_soft_fail = cls._pm_snapshot_storage_decision(
             svc,
             now,
@@ -139,6 +155,19 @@ class _UpdateCyclePmSnapshotMixin:
         if within_soft_fail:
             return pm_status
         return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
+
+    @classmethod
+    def _worker_pm_snapshot_usable(
+        cls,
+        pm_status: dict[str, Any] | None,
+        pm_confirmed: bool,
+        snapshot_at: float,
+        now: float,
+    ) -> bool:
+        """Return whether worker PM data may be used directly."""
+        if pm_status is None or not pm_confirmed:
+            return False
+        return not cls._pm_snapshot_falls_back_to_cache(snapshot_at, now)
 
     @classmethod
     def _pm_snapshot_from_future(cls, snapshot_at: float, now: float) -> bool:

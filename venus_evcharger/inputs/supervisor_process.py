@@ -68,9 +68,7 @@ class _AutoInputSupervisorProcessMixin:
     def _remove_stale_snapshot_file(self) -> None:
         svc = self.service
         path = str(getattr(svc, "auto_input_snapshot_path", "") or "").strip()
-        if not path:
-            return
-        if not self._snapshot_path_is_volatile(path):
+        if not self._stale_snapshot_path_removable(path):
             return
         try:
             os.unlink(path)
@@ -84,6 +82,10 @@ class _AutoInputSupervisorProcessMixin:
     def _snapshot_path_is_volatile(path: str) -> bool:
         normalized = os.path.abspath(path)
         return normalized.startswith(("/run/", "/tmp/", "/var/volatile/"))
+
+    def _stale_snapshot_path_removable(self, path: str) -> bool:
+        """Return whether a stale helper snapshot may be removed safely."""
+        return bool(path) and self._snapshot_path_is_volatile(path)
 
     def _helper_snapshot_age(self, current: float) -> float | None:
         svc = self.service

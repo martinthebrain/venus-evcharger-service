@@ -367,3 +367,159 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
 
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], RuntimeError)
+
+    def test_async_publish_queue_covers_empty_trim_lag_failure_and_budget_paths(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.mark_mainloop_thread()
+        self.assertFalse(controller.enqueue_dbus_publish_values([], 100.0))
+
+        service._dbus_publish_max_paths = 1
+        self.assertTrue(controller.enqueue_dbus_publish_values([("/A", 1), ("/B", 2)], 100.0))
+        self.assertEqual(service._dbus_publish_dropped_count, 1)
+        self.assertEqual(list(service._dbus_publish_pending), ["/B"])
+
+        controller._remember_oldest_dbus_publish(service, service._dbus_publish_pending.__class__())
+        service._dbusservice = {"/UpdateIndex": 255}
+        service._dbus_publish_state = {}
+        controller.enqueue_dbus_update_index_bump(100.0)
+        self.assertIsNotNone(service._dbus_publish_oldest_queued_at)
+
+        class FailingDbus(dict):
+            def __setitem__(self, key: str, value: object) -> None:
+                if key == "/B":
+                    raise RuntimeError("dbus down")
+                super().__setitem__(key, value)
+
+        service._dbusservice = FailingDbus({"/UpdateIndex": 255})
+        service._mark_failure = MagicMock()
+        service._dbus_publish_budget_seconds = -1.0
+        with patch("venus_evcharger.runtime.async_mainloop.logging.warning") as warning:
+            self.assertTrue(controller.flush_dbus_publish_queue())
+
+        service._mark_failure.assert_called_once_with("dbus")
+        self.assertEqual(service._dbusservice["/UpdateIndex"], 0)
+        self.assertGreaterEqual(service._last_dbus_publish_queue_lag_seconds, 0.0)
+        self.assertGreaterEqual(warning.call_count, 2)
+
+    def test_async_publish_flush_returns_when_no_dbus_service_and_stops_failed_bumps(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        self.assertTrue(controller.flush_dbus_publish_queue())
+
+        service._dbusservice = {}
+        service._dbus_publish_state = {}
+        self.assertFalse(controller._bump_update_index_best_effort(service, 100.0))
+        controller._flush_update_index_bumps(service, 100.0, 2)
+
+        fresh_service = make_runtime_support_service()
+        fresh_controller = RuntimeSupportController(fresh_service, self._age_zero, self._health_zero)
+        fresh_controller.initialize_runtime_support()
+        fresh_controller.enqueue_dbus_update_index_bump(100.0)
+        self.assertIsNotNone(fresh_service._dbus_publish_oldest_queued_at)
+        fresh_controller._remember_dbus_publish_queue_lag(fresh_service, 100.0, None)
+        fresh_controller._report_dbus_publish_failures(SimpleNamespace(), ["/Path"])
+
+    def test_runtime_executor_covers_sync_fallbacks_errors_trimming_and_budget_warnings(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+
+        service._update = MagicMock(return_value=True)
+        self.assertTrue(controller.schedule_update_cycle())
+        service._update.assert_called_once_with()
+        controller._update_worker_loop = controller._update_worker_loop
+
+        command = ControlCommand(name="set_start_stop", path="/StartStop", value=1)
+        service._handle_control_command = MagicMock(return_value=SimpleNamespace(accepted=True))
+        self.assertTrue(controller.enqueue_control_command(command))
+        service._handle_control_command.assert_called_once_with(command)
+
+        service._control_command_async_enabled = True
+        service._control_command_max_paths = 1
+        first = ControlCommand(name="set_mode", path="/Mode", value=1)
+        second = ControlCommand(name="set_current", path="/Current", value=12)
+        third = ControlCommand(name="set_current", path="/Current", value=13)
+        self.assertTrue(controller.enqueue_control_command(first))
+        self.assertTrue(controller.enqueue_control_command(second))
+        self.assertTrue(controller.enqueue_control_command(third))
+        self.assertNotIn("/Mode", service._desired_control_values)
+        self.assertEqual(service._desired_control_values["/Current"], 13)
+
+        service._handle_control_command = MagicMock(side_effect=RuntimeError("boom"))
+        service._write_command_budget_seconds = -1.0
+        with patch("venus_evcharger.runtime.async_mainloop.logging.exception") as log_exception, patch(
+            "venus_evcharger.runtime.async_mainloop.logging.warning"
+        ) as log_warning:
+            self.assertTrue(controller._drain_control_commands_once())
+        log_exception.assert_called_once()
+        log_warning.assert_called_once()
+
+        service._update_worker_pending = True
+        service._update = MagicMock(side_effect=RuntimeError("update boom"))
+        service._update_worker_budget_seconds = -1.0
+        with patch("venus_evcharger.runtime.async_mainloop.logging.exception") as log_exception, patch(
+            "venus_evcharger.runtime.async_mainloop.logging.warning"
+        ) as log_warning:
+            self.assertTrue(controller._run_pending_update_cycle_once())
+        log_exception.assert_called_once()
+        log_warning.assert_called_once()
+
+    def test_runtime_executor_compatibility_loops_delegate_to_serialized_executor(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller._runtime_executor_loop = MagicMock()
+
+        controller._update_worker_loop()
+        controller._control_command_worker_loop()
+
+        self.assertEqual(controller._runtime_executor_loop.call_count, 2)
+
+    def test_companion_flush_heartbeat_watchdog_start_and_dump_paths(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+
+        self.assertFalse(controller.flush_companion_dbus_publish_queue())
+        self.assertTrue(controller.enqueue_companion_dbus_publish())
+        self.assertFalse(controller.flush_companion_dbus_publish_queue())
+        self.assertTrue(controller.mainloop_heartbeat_tick())
+        self.assertIsNotNone(service._mainloop_heartbeat_at)
+
+        fake_thread = SimpleNamespace(start=MagicMock())
+        with patch("venus_evcharger.runtime.async_mainloop.threading.Thread", return_value=fake_thread):
+            controller.start_mainloop_watchdog()
+            controller.start_mainloop_watchdog()
+        fake_thread.start.assert_called_once_with()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dump_path = os.path.join(temp_dir, "watchdog.log")
+            service._mainloop_watchdog_log_path = dump_path
+            controller._dump_mainloop_watchdog_traceback(service)
+            with open(dump_path, encoding="utf-8") as handle:
+                self.assertIn("mainloop watchdog dump", handle.read())
+
+        service._mainloop_watchdog_log_path = "/"
+        with patch("venus_evcharger.runtime.async_mainloop.logging.debug") as log_debug:
+            controller._dump_mainloop_watchdog_traceback(service)
+        log_debug.assert_called_once()
+
+    def test_mainloop_watchdog_loop_continues_for_fresh_or_disabled_heartbeat(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        service._mainloop_watchdog_stop_event = SimpleNamespace(wait=MagicMock(side_effect=[False, False, True]))
+        service._mainloop_watchdog_stale_seconds = 0.0
+        service._mainloop_heartbeat_at = 100.0
+
+        with patch.object(RuntimeSupportController, "_dump_mainloop_watchdog_traceback") as dump_traceback:
+            controller._mainloop_watchdog_loop()
+        dump_traceback.assert_not_called()
+
+    def test_exit_for_mainloop_watchdog_delegates_to_os_exit(self) -> None:
+        with patch("venus_evcharger.runtime.async_mainloop.os._exit", side_effect=SystemExit) as os_exit, self.assertRaises(SystemExit):
+            RuntimeSupportController._exit_for_mainloop_watchdog()
+        os_exit.assert_called_once_with(75)

@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-import configparser
 from dataclasses import dataclass
 
+from .config_file import load_required_backend_config
 from .modbus_client import ModbusClient
 from .modbus_profiles import GenericModbusChargerProfile, load_modbus_charger_profile
 from .modbus_transport import (
@@ -26,22 +26,13 @@ class ModbusChargerSettings:
     supported_phase_selections: tuple[PhaseSelection, ...]
 
 
-def _config(config_path: str) -> configparser.ConfigParser:
-    """Load one Modbus charger backend config file."""
-    parser = configparser.ConfigParser()
-    read_files = parser.read(str(config_path).strip())
-    if not read_files:
-        raise FileNotFoundError(config_path)
-    return parser
-
-
 class ModbusChargerBackend:
     """Direct charger backend driven by a Modbus transport plus register schema."""
 
     def __init__(self, service: object, config_path: str = "") -> None:
         self.service = service
         self.config_path = str(config_path).strip()
-        parser = _config(self.config_path)
+        parser = load_required_backend_config(self.config_path, "Modbus charger")
         self.transport_settings = load_modbus_transport_settings(parser, service)
         self.profile: GenericModbusChargerProfile = load_modbus_charger_profile(parser)
         self.settings = ModbusChargerSettings(

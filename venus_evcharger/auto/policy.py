@@ -22,6 +22,14 @@ from venus_evcharger.auto.policy_builders import (
 )
 
 
+def _clamp_non_negative_value(value: float, label: str) -> float:
+    """Return one non-negative float, logging when a configured value is invalid."""
+    if value >= 0:
+        return float(value)
+    logging.warning("%s %s invalid, clamping to 0", label, value)
+    return 0.0
+
+
 @dataclass
 class AutoThresholdProfile:
     """Start/stop surplus thresholds for one Auto charging profile."""
@@ -188,10 +196,7 @@ class AutoPhasePolicy:
 
     @staticmethod
     def _clamp_non_negative(value: float, label: str) -> float:
-        if value >= 0:
-            return float(value)
-        logging.warning("%s %s invalid, clamping to 0", label, value)
-        return 0.0
+        return _clamp_non_negative_value(value, label)
 
     @staticmethod
     def _clamp_non_negative_int(value: int, label: str) -> int:
@@ -273,10 +278,7 @@ class AutoPolicy:
 
     @staticmethod
     def _clamp_non_negative(value: float, label: str) -> float:
-        if value >= 0:
-            return float(value)
-        logging.warning("%s %s invalid, clamping to 0", label, value)
-        return 0.0
+        return _clamp_non_negative_value(value, label)
 
     @staticmethod
     def _warn_small_threshold_gap(

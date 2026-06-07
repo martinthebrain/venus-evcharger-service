@@ -16,6 +16,7 @@ from typing import Any
 from venus_evcharger.topology.config import legacy_topology_from_config, parse_topology_config
 from venus_evcharger.topology.schema import EvChargerTopologyConfig
 
+from .config_file import normalized_optional_lower_text, normalized_optional_path
 from .models import BackendMode, BackendRuntimeSummary
 
 
@@ -53,8 +54,7 @@ def normalize_backend_type(value: object, fallback: str) -> str:
 
 def normalize_optional_backend_type(value: object) -> str | None:
     """Return one optional backend type name."""
-    normalized = str(value).strip().lower() if value is not None else ""
-    return normalized or None
+    return normalized_optional_lower_text(value)
 
 
 def normalize_config_path(value: object) -> Path | None:
@@ -82,10 +82,7 @@ def _backends_section(config: configparser.ConfigParser) -> configparser.Section
 
 def _topology_path(value: str | None) -> Path | None:
     """Return one normalized optional topology config path."""
-    if value is None:
-        return None
-    text = value.strip()
-    return Path(text) if text else None
+    return normalized_optional_path(value)
 
 
 def _adapter_type_from_config_path(config_path: str | None) -> str | None:
@@ -114,8 +111,7 @@ def _adapter_type_from_parser(parser: configparser.ConfigParser) -> str | None:
 
 def _optional_lower_text(value: object) -> str | None:
     """Return trimmed lowercase text or ``None``."""
-    normalized = str(value).strip().lower() if value is not None else ""
-    return normalized or None
+    return normalized_optional_lower_text(value)
 
 
 def _runtime_role_from_legacy(mode: BackendMode, role: str, value: object) -> str | None:

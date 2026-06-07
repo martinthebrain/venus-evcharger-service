@@ -118,22 +118,31 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
 
     def _snapshot_matches_current_helper(self, snapshot: dict[str, Any], freshness_timestamp: float) -> bool:
         svc = self.service
+        return (
+            self._snapshot_after_current_helper_start(svc, freshness_timestamp)
+            and self._snapshot_generation_matches_current_helper(svc, snapshot)
+            and self._snapshot_pid_matches_current_helper(svc, snapshot)
+        )
+
+    @staticmethod
+    def _snapshot_after_current_helper_start(svc: Any, freshness_timestamp: float) -> bool:
+        """Return whether snapshot freshness is newer than the helper start."""
         helper_start = float(getattr(svc, "_auto_input_helper_last_start_at", 0.0) or 0.0)
-        if helper_start > 0.0 and freshness_timestamp < helper_start:
-            return False
+        return helper_start <= 0.0 or freshness_timestamp >= helper_start
 
-        expected_generation = self._coerce_snapshot_int(getattr(svc, "_auto_input_helper_generation", None))
-        snapshot_generation = self._coerce_snapshot_int(snapshot.get("helper_generation"))
-        if expected_generation is not None and expected_generation > 0:
-            if snapshot_generation != expected_generation:
-                return False
+    def _snapshot_generation_matches_current_helper(self, svc: Any, snapshot: dict[str, Any]) -> bool:
+        """Return whether snapshot generation matches the current helper."""
+        expected = self._coerce_snapshot_int(getattr(svc, "_auto_input_helper_generation", None))
+        if expected is None or expected <= 0:
+            return True
+        return self._coerce_snapshot_int(snapshot.get("helper_generation")) == expected
 
+    def _snapshot_pid_matches_current_helper(self, svc: Any, snapshot: dict[str, Any]) -> bool:
+        """Return whether snapshot writer pid matches the current helper process."""
         process = getattr(svc, "_auto_input_helper_process", None)
-        expected_pid = self._coerce_snapshot_int(getattr(process, "pid", None))
+        expected = self._coerce_snapshot_int(getattr(process, "pid", None))
         snapshot_pid = self._coerce_snapshot_int(snapshot.get("writer_pid"))
-        if expected_pid is not None and snapshot_pid is not None and snapshot_pid != expected_pid:
-            return False
-        return True
+        return expected is None or snapshot_pid is None or snapshot_pid == expected
 
     def _snapshot_timestamps_valid(
         self,

@@ -4,16 +4,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
 
+from .config_file import backend_request_timeout_seconds
 from .template_support import (
     TemplateHttpBackendBase,
     TemplateAuthSettings,
     config_section,
+    enabled_state_from_text,
     json_path_value,
     load_template_config,
     load_template_auth_settings,
     normalize_http_method,
+    payload_object,
     resolved_url,
 )
 from .models import (
@@ -92,19 +94,9 @@ def _optional_config_path(section: object, key: str) -> str | None:
     return str(getattr(section, "get")(key, "")).strip() or None
 
 
-def _payload_object(payload: object) -> dict[str, object]:
-    """Return one typed JSON object payload for dotted-path lookups."""
-    return cast(dict[str, object], payload)
-
-
 def _template_charger_timeout_seconds(adapter: object, service: object) -> float:
     """Return the normalized timeout used by the template-charger backend."""
-    timeout_seconds = finite_float_or_none(
-        getattr(adapter, "get")("RequestTimeoutSeconds", getattr(service, "shelly_request_timeout_seconds", 2.0))
-    )
-    if timeout_seconds is None or timeout_seconds <= 0.0:
-        return 2.0
-    return float(timeout_seconds)
+    return backend_request_timeout_seconds(adapter, service)
 
 
 def _template_charger_supported_phase_selections(capabilities: object) -> tuple[PhaseSelection, ...]:
@@ -269,16 +261,7 @@ class TemplateChargerBackend(TemplateHttpBackendBase):
             return value
         if isinstance(value, (int, float)):
             return bool(value)
-        return TemplateChargerBackend._enabled_state_from_text(str(value).strip().lower())
-
-    @staticmethod
-    def _enabled_state_from_text(text: str) -> bool | None:
-        """Return an optional enabled-state from normalized text tokens."""
-        if text in {"1", "true", "on", "yes", "enabled"}:
-            return True
-        if text in {"0", "false", "off", "no", "disabled"}:
-            return False
-        return None
+        return enabled_state_from_text(str(value).strip().lower())
 
     @staticmethod
     def _optional_text(value: object) -> str | None:
@@ -319,7 +302,7 @@ class TemplateChargerBackend(TemplateHttpBackendBase):
         """Return one optional numeric charger-state value from the payload."""
         if path is None:
             return None
-        return finite_float_or_none(json_path_value(_payload_object(payload), path))
+        return finite_float_or_none(json_path_value(payload_object(payload), path))
 
     def _payload_phase_selection(
         self,
@@ -331,7 +314,7 @@ class TemplateChargerBackend(TemplateHttpBackendBase):
         if path is None:
             return cached.phase_selection
         return self._normalized_phase_selection(
-            json_path_value(_payload_object(payload), path),
+            json_path_value(payload_object(payload), path),
             cached.phase_selection,
             self.settings.supported_phase_selections,
         )
@@ -340,7 +323,7 @@ class TemplateChargerBackend(TemplateHttpBackendBase):
         """Return one optional text value from the charger-state payload."""
         if path is None:
             return None
-        return self._optional_text(json_path_value(_payload_object(payload), path))
+        return self._optional_text(json_path_value(payload_object(payload), path))
 
     def _state_from_payload(
         self,
@@ -351,7 +334,7 @@ class TemplateChargerBackend(TemplateHttpBackendBase):
         enabled = cached.enabled
         if self.settings.state_enabled_path is not None:
             enabled = self._enabled_state(
-                json_path_value(_payload_object(payload), self.settings.state_enabled_path)
+                json_path_value(payload_object(payload), self.settings.state_enabled_path)
             )
         current_amps = (
             cached.current_amps

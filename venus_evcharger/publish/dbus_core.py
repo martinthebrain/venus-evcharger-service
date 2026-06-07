@@ -211,14 +211,7 @@ class _DbusPublishCoreMixin:
         self.ensure_state()
         current = time.time() if now is None else float(now)
         if self._should_enqueue_publish():
-            staged_values: list[tuple[str, Any]] = []
-            for path, value in values.items():
-                should_write, _entry = self._publish_decision(path, value, current, interval_seconds, force)
-                if should_write:
-                    staged_values.append((path, value))
-            if not staged_values:
-                return False
-            return self._enqueue_publish_values(staged_values, current)
+            return self._enqueue_transactional_publish(values, current, interval_seconds, force)
 
         staged_values, staged_entries, original_service_values = self._stage_publish_values(
             values,
@@ -238,6 +231,34 @@ class _DbusPublishCoreMixin:
         self._restore_group_publish_state(staged_entries)
         self._publish_group_failure(group_name, [failed_path], current)
         return False
+
+    def _enqueue_transactional_publish(
+        self,
+        values: Mapping[str, Any],
+        current: float,
+        interval_seconds: float | None,
+        force: bool,
+    ) -> bool:
+        """Stage and enqueue transactional publish values for the mainloop."""
+        staged_values = self._staged_values_for_enqueue(values, current, interval_seconds, force)
+        if not staged_values:
+            return False
+        return self._enqueue_publish_values(staged_values, current)
+
+    def _staged_values_for_enqueue(
+        self,
+        values: Mapping[str, Any],
+        current: float,
+        interval_seconds: float | None,
+        force: bool,
+    ) -> list[tuple[str, Any]]:
+        """Return only values that should be written by the publish queue."""
+        staged_values: list[tuple[str, Any]] = []
+        for path, value in values.items():
+            should_write, _entry = self._publish_decision(path, value, current, interval_seconds, force)
+            if should_write:
+                staged_values.append((path, value))
+        return staged_values
 
     def _publish_values(
         self,

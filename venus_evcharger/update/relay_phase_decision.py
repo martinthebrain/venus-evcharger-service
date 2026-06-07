@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
-from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.core.contracts import finite_float_or_none, mutable_dict_attr
 
 
 class _RelayPhaseDecisionMixin:
@@ -73,12 +73,7 @@ class _RelayPhaseDecisionMixin:
 
     @staticmethod
     def _auto_phase_metrics(svc: Any) -> dict[str, Any]:
-        metrics = getattr(svc, "_last_auto_metrics", None)
-        if isinstance(metrics, dict):
-            return metrics
-        metrics = {}
-        svc._last_auto_metrics = metrics
-        return metrics
+        return mutable_dict_attr(svc, "_last_auto_metrics")
 
     @classmethod
     def _record_auto_phase_metrics(

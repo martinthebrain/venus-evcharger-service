@@ -20,7 +20,7 @@ from venus_evcharger.core.common import (
     _fresh_charger_transport_reason,
 )
 
-from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
 
 
 class _RelayChargerHealthMixin:
@@ -98,8 +98,7 @@ class _RelayChargerHealthMixin:
 
     @staticmethod
     def _charger_transport_detail(error: BaseException) -> str:
-        detail = str(error).strip()
-        return detail or error.__class__.__name__
+        return exception_detail(error)
 
     @classmethod
     def _remember_charger_transport_issue(
