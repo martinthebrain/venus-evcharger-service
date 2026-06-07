@@ -20,6 +20,7 @@ def _snapshot(**overrides):
         "grid_power": -2100.0,
         "writer_pid": 4321,
         "helper_generation": 1,
+        "runtime_instance_id": "instance-1",
     }
     payload.update(overrides)
     return payload
@@ -38,6 +39,7 @@ class TestAutoInputSupervisorValidation(unittest.TestCase):
             _warning_throttled=MagicMock(),
             _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
             virtual_mode=1,
+            _auto_input_runtime_instance_id="instance-1",
             _auto_input_snapshot_mtime_ns=None,
             _auto_input_snapshot_last_seen=None,
             _auto_input_snapshot_seen_for_current_helper=False,
@@ -65,6 +67,7 @@ class TestAutoInputSupervisorValidation(unittest.TestCase):
             _warning_throttled=MagicMock(),
             _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
             virtual_mode=1,
+            _auto_input_runtime_instance_id="instance-1",
             _auto_input_helper_process=process,
             _auto_input_helper_generation=2,
             _auto_input_helper_last_start_at=120.0,
@@ -120,6 +123,7 @@ class TestAutoInputSupervisorValidation(unittest.TestCase):
             _warning_throttled=MagicMock(),
             _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
             virtual_mode=1,
+            _auto_input_runtime_instance_id="instance-1",
             _auto_input_helper_process=SimpleNamespace(pid=4321),
             _auto_input_helper_generation=2,
             _auto_input_helper_last_start_at=120.0,

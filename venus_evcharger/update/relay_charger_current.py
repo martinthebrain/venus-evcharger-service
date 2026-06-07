@@ -6,11 +6,10 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
 from typing import Any, cast
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.core.common import mode_uses_scheduled_logic, scheduled_mode_snapshot
+from venus_evcharger.core.common import local_datetime_from_timestamp, mode_uses_scheduled_logic, scheduled_mode_snapshot
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_learning_phase, normalize_learning_state
 
 
@@ -144,7 +143,7 @@ class _RelayChargerCurrentMixin:
         if not mode_uses_scheduled_logic(getattr(svc, "virtual_mode", 0)):
             return False
         return scheduled_mode_snapshot(
-            datetime.fromtimestamp(float(now)),
+            local_datetime_from_timestamp(float(now), getattr(svc, "auto_schedule_timezone", "Europe/Berlin")),
             getattr(svc, "auto_month_windows", {}),
             getattr(svc, "auto_scheduled_enabled_days", "Mon,Tue,Wed,Thu,Fri"),
             delay_seconds=float(getattr(svc, "auto_scheduled_night_start_delay_seconds", 3600.0)),

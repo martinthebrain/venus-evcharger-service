@@ -71,14 +71,14 @@ class _AutoInputHelperSourcesRuntimeCases:
         with patch.object(venus_evcharger_auto_input_helper, "dbus_glib_mainloop", fake_glib_mainloop):
             with patch("venus_evcharger_auto_input_helper.GLib.MainLoop", return_value=mainloop):
                 with patch("venus_evcharger_auto_input_helper.GLib.timeout_add") as timeout_add:
-                    with patch("venus_evcharger_auto_input_helper.signal.signal") as signal_mock:
-                        helper.run()
+                    with patch("venus_evcharger_auto_input_helper.GLib.idle_add", side_effect=lambda callback: callback()):
+                        with patch("venus_evcharger_auto_input_helper.signal.signal") as signal_mock:
+                            helper.run()
 
         fake_glib_mainloop.DBusGMainLoop.assert_called_once_with(set_as_default=True)
         self.assertTrue(signal_mock.called)
-        helper._get_system_bus.return_value.add_signal_receiver.assert_called_once()
         helper._refresh_subscriptions.assert_called_once_with()
-        self.assertEqual(timeout_add.call_count, 4)
+        self.assertEqual(timeout_add.call_count, 3)
         mainloop.run.assert_called_once_with()
 
     def test_run_ignores_signal_registration_failures_and_missing_signals(self):
@@ -97,8 +97,9 @@ class _AutoInputHelperSourcesRuntimeCases:
         with patch.object(venus_evcharger_auto_input_helper, "dbus_glib_mainloop", fake_glib_mainloop):
             with patch("venus_evcharger_auto_input_helper.GLib.MainLoop", return_value=mainloop):
                 with patch("venus_evcharger_auto_input_helper.GLib.timeout_add"):
-                    with patch.object(venus_evcharger_auto_input_helper, "signal", fake_signal):
-                        helper.run()
+                    with patch("venus_evcharger_auto_input_helper.GLib.idle_add", side_effect=lambda callback: callback()):
+                        with patch.object(venus_evcharger_auto_input_helper, "signal", fake_signal):
+                            helper.run()
 
         helper._refresh_subscriptions.assert_called_once_with()
 
@@ -117,8 +118,9 @@ class _AutoInputHelperSourcesRuntimeCases:
         with patch.object(venus_evcharger_auto_input_helper, "dbus_glib_mainloop", fake_glib_mainloop):
             with patch("venus_evcharger_auto_input_helper.GLib.MainLoop", return_value=mainloop):
                 with patch("venus_evcharger_auto_input_helper.GLib.timeout_add"):
-                    with patch("venus_evcharger_auto_input_helper.signal.signal"):
-                        helper.run()
+                    with patch("venus_evcharger_auto_input_helper.GLib.idle_add", side_effect=lambda callback: callback()):
+                        with patch("venus_evcharger_auto_input_helper.signal.signal"):
+                            helper.run()
 
         mainloop.run.assert_called_once_with()
         helper._reset_system_bus.assert_called_once_with()

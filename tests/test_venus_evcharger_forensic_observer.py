@@ -50,6 +50,8 @@ class ForensicObserverTests(unittest.TestCase):
             invalid_defaults = observer.load_defaults(str(config_path))
             self.assertEqual(observer.device_instance(invalid_defaults), 60)
             self.assertEqual(observer.evcharger_service_name(invalid_defaults), "com.victronenergy.evcharger.http_60")
+            self.assertEqual(observer.auto_input_snapshot_path(invalid_defaults), "/run/dbus-venus-evcharger-auto-60.json")
+            self.assertEqual(observer.runtime_state_path(invalid_defaults), "/run/dbus-venus-evcharger-60.json")
             self.assertEqual(
                 observer.mounted_storage_candidates(
                     "broken-line\n"
@@ -63,6 +65,8 @@ class ForensicObserverTests(unittest.TestCase):
             self.assertEqual(observer.first_writable_log_dir([str(Path(temp_dir) / "card")]), str(Path(temp_dir) / "card/venus-evcharger-forensics"))
             self.assertEqual(observer.first_writable_log_dir([str(config_path)]), "")
             self.assertEqual(observer.read_mounts(str(Path(temp_dir) / "missing-mounts")), "")
+            config_path.write_text("[DEFAULT]\nAutoInputSnapshotPath=/tmp/custom-auto.json\n", encoding="utf-8")
+            self.assertEqual(observer.auto_input_snapshot_path(observer.load_defaults(str(config_path))), "/tmp/custom-auto.json")
 
     def test_dbus_snapshot_and_incident_reasons(self):
         dbus_state = observer.read_dbus_paths(
@@ -162,7 +166,26 @@ class ForensicObserverTests(unittest.TestCase):
         self.assertEqual(snapshot["service_name"], "com.victronenergy.evcharger.http_70")
         self.assertEqual(snapshot["trace_markers"], ["NoReply"])
         self.assertFalse(snapshot["dbus"]["ok"])
+        self.assertIn("auto_input_snapshot", snapshot)
+        self.assertIn("runtime_state", snapshot)
+        self.assertIn("helper_processes", snapshot)
         self.assertEqual(observer.incident_reasons({"dbus": {"errors": {}}, "svstat": {"ok": False}, "trace_markers": []}), ["runit-status-failed"])
+
+    def test_json_file_and_helper_process_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            json_path = Path(temp_dir) / "state.json"
+            json_path.write_text('{"value": 1}', encoding="utf-8")
+            self.assertTrue(observer.read_json_file(str(json_path))["ok"])
+            json_path.write_text("[1]", encoding="utf-8")
+            self.assertEqual(observer.read_json_file(str(json_path))["error"], "not-a-json-object")
+            self.assertFalse(observer.read_json_file(str(Path(temp_dir) / "missing.json"))["ok"])
+
+        helpers = observer.helper_processes(
+            "123 root python3 venus_evcharger_auto_input_helper.py /config /run/snapshot\n"
+            "not-helper\n"
+        )
+        self.assertEqual(helpers, [{"pid": "123", "line": "123 root python3 venus_evcharger_auto_input_helper.py /config /run/snapshot"}])
+        self.assertEqual(observer.helper_processes("venus_evcharger_auto_input_helper.py\n"), [{"pid": "venus_evcharger_auto_input_helper.py", "line": "venus_evcharger_auto_input_helper.py"}])
 
     def test_observer_loop_skips_collection_without_removable_storage(self):
         with (

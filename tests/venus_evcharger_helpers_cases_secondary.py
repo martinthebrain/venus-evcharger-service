@@ -181,6 +181,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
         service.auto_input_snapshot_path = "/tmp/auto-helper.json"
         service.auto_input_helper_stale_seconds = 15
         service.auto_input_helper_restart_seconds = 5
+        service._auto_input_runtime_instance_id = "instance-1"
         helper_snapshot = {
             "snapshot_version": 1,
             "captured_at": 100.0,
@@ -193,6 +194,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
             "grid_power": -2100.0,
             "writer_pid": 4321,
             "helper_generation": 0,
+            "runtime_instance_id": "instance-1",
         }
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 1
@@ -237,6 +239,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
         service.auto_input_snapshot_path = "/tmp/auto-helper.json"
         service.auto_input_helper_stale_seconds = 15
         service.auto_input_helper_restart_seconds = 5
+        service._auto_input_runtime_instance_id = "instance-1"
         helper_snapshot = {
             "snapshot_version": 1,
             "captured_at": 100.0,
@@ -249,6 +252,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
             "grid_power": -2100.0,
             "writer_pid": 4321,
             "helper_generation": 0,
+            "runtime_instance_id": "instance-1",
         }
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 3
@@ -296,6 +300,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
         service.auto_input_snapshot_path = "/tmp/auto-helper.json"
         service.auto_input_helper_stale_seconds = 15
         service.auto_input_helper_restart_seconds = 5
+        service._auto_input_runtime_instance_id = "instance-1"
         helper_snapshot = {
             "snapshot_version": 1,
             "captured_at": 100.0,
@@ -308,6 +313,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
             "grid_power": -2100.0,
             "writer_pid": 4321,
             "helper_generation": 0,
+            "runtime_instance_id": "instance-1",
         }
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 2

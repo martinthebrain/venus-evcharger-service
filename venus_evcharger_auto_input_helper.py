@@ -12,7 +12,9 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
+import uuid
 from typing import Any
 
 import dbus
@@ -64,9 +66,17 @@ class AutoInputHelper(
         snapshot_path: str | None = None,
         parent_pid: object = None,
         helper_generation: object = None,
+        runtime_instance_id: object = None,
     ) -> None:
         parser = self._load_helper_parser(config_path)
-        self._init_helper_base_config(config_path, parser, snapshot_path, parent_pid, helper_generation)
+        self._init_helper_base_config(
+            config_path,
+            parser,
+            snapshot_path,
+            parent_pid,
+            helper_generation,
+            runtime_instance_id,
+        )
         self._init_helper_polling()
         self._init_helper_pv_config()
         self._init_helper_battery_config()
@@ -89,11 +99,13 @@ class AutoInputHelper(
         snapshot_path: str | None,
         parent_pid: object,
         helper_generation: object,
+        runtime_instance_id: object,
     ) -> None:
         self.config_path = config_path
         self.config = parser["DEFAULT"]
         self.parent_pid = self._parsed_parent_pid(parent_pid)
         self.helper_generation = self._parsed_helper_generation(helper_generation)
+        self.runtime_instance_id = self._parsed_runtime_instance_id(runtime_instance_id)
         self.snapshot_path = snapshot_path or self.config.get(
             "AutoInputSnapshotPath",
             "/run/dbus-venus-evcharger-auto.json",
@@ -111,6 +123,12 @@ class AutoInputHelper(
         if isinstance(helper_generation, (str, int)):
             return max(0, int(helper_generation))
         return 0
+
+    @staticmethod
+    def _parsed_runtime_instance_id(runtime_instance_id: object) -> str:
+        if isinstance(runtime_instance_id, str) and runtime_instance_id.strip():
+            return runtime_instance_id.strip()
+        return uuid.uuid4().hex
 
     def _init_helper_polling(self) -> None:
         auto_input_poll_interval_ms = self._auto_input_poll_interval_ms()
@@ -267,6 +285,10 @@ class AutoInputHelper(
         self._warning_state: dict[str, float] = {}
         self._last_payload: str | None = None
         self._last_snapshot_state: dict[str, object] = self._empty_snapshot()
+        self._snapshot_lock = threading.RLock()
+        self._heartbeat_thread_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
+        self._parent_watchdog_thread: threading.Thread | None = None
         self._next_source_poll_at = {
             "pv": 0.0,
             "battery": 0.0,
@@ -326,8 +348,12 @@ class AutoInputHelper(
             "snapshot_version": AutoInputHelper.SNAPSHOT_SCHEMA_VERSION,
             "captured_at": captured_at,
             "heartbeat_at": captured_at,
+            "helper_state": "starting",
+            "helper_status": "starting",
+            "pv_status": "missing",
             "pv_captured_at": None,
             "pv_power": None,
+            "battery_status": "missing",
             "battery_captured_at": None,
             "battery_soc": None,
             "battery_combined_soc": None,
@@ -341,6 +367,7 @@ class AutoInputHelper(
             "battery_valid_soc_source_count": 0,
             "battery_sources": [],
             "battery_learning_profiles": {},
+            "grid_status": "missing",
             "grid_captured_at": None,
             "grid_power": None,
         }
@@ -351,11 +378,27 @@ class AutoInputHelper(
         normalized_payload.setdefault("snapshot_version", self.SNAPSHOT_SCHEMA_VERSION)
         normalized_payload["writer_pid"] = os.getpid()
         normalized_payload["helper_generation"] = int(getattr(self, "helper_generation", 0) or 0)
+        normalized_payload["runtime_instance_id"] = str(getattr(self, "runtime_instance_id", "") or "")
         serialized = compact_json(normalized_payload)
         if serialized == self._last_payload:
             return
         write_text_atomically(self.snapshot_path, serialized)
         self._last_payload = serialized
+
+    def _write_lifecycle_snapshot(self, state: str, now: float | None = None) -> None:
+        """Write a fresh helper liveness snapshot independent of DBus reads."""
+        current = time.time() if now is None else float(now)
+        self._ensure_liveness_thread_state()
+        with self._snapshot_guard():
+            snapshot = dict(self._last_snapshot_state)
+            snapshot["captured_at"] = current
+            snapshot["heartbeat_at"] = current
+            snapshot["helper_state"] = state
+            snapshot["helper_status"] = state
+            snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
+            self._stamp_snapshot_metadata(snapshot)
+            self._last_snapshot_state = snapshot
+            self._write_snapshot(snapshot)
 
     @staticmethod
     def _require_dbus_glib_mainloop() -> Any:
@@ -396,10 +439,81 @@ class AutoInputHelper(
 
     def _install_main_loop_timers(self) -> None:
         """Install the periodic timers used by the helper main loop."""
-        GLib.timeout_add(max(500, int(self.poll_interval_seconds * 1000)), self._heartbeat_snapshot)
         GLib.timeout_add(max(5000, int(self.validation_poll_seconds * 1000)), self._validation_poll)
         GLib.timeout_add(max(1000, int(self.subscription_refresh_seconds * 1000)), self._refresh_subscriptions_timer)
         GLib.timeout_add(1000, self._parent_watchdog)
+
+    def _start_liveness_threads(self) -> None:
+        """Start RAM-only liveness workers before DBus work can block."""
+        self._ensure_liveness_thread_state()
+        self._heartbeat_thread_stop.clear()
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name="auto-input-heartbeat",
+            daemon=True,
+        )
+        self._parent_watchdog_thread = threading.Thread(
+            target=self._parent_watchdog_loop,
+            name="auto-input-parent-watchdog",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+        self._parent_watchdog_thread.start()
+
+    def _stop_liveness_threads(self) -> None:
+        self._ensure_liveness_thread_state()
+        self._heartbeat_thread_stop.set()
+        for thread in (self._heartbeat_thread, self._parent_watchdog_thread):
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=1.0)
+
+    def _ensure_liveness_thread_state(self) -> None:
+        """Ensure liveness threads can start in partial construction paths."""
+        defaults = (
+            ("_stop_requested", lambda: False),
+            ("_snapshot_lock", threading.RLock),
+            ("_heartbeat_thread_stop", threading.Event),
+            ("_heartbeat_thread", lambda: None),
+            ("_parent_watchdog_thread", lambda: None),
+        )
+        for name, factory in defaults:
+            if not hasattr(self, name):
+                setattr(self, name, factory())
+
+    def _heartbeat_loop(self) -> None:
+        interval = max(0.5, min(2.0, float(getattr(self, "poll_interval_seconds", 1.0) or 1.0)))
+        while not self._heartbeat_thread_stop.wait(interval):
+            if self._stop_requested:
+                return
+            try:
+                self._heartbeat_snapshot()
+            except Exception as error:  # pylint: disable=broad-except
+                logging.debug("Auto input helper heartbeat write failed: %s", error)
+
+    def _parent_watchdog_loop(self) -> None:
+        while not self._heartbeat_thread_stop.wait(1.0):
+            if self._stop_requested:
+                return
+            if self._parent_alive():
+                continue
+            self._stop_requested = True
+            if self._main_loop is not None:
+                GLib.idle_add(self._main_loop.quit)
+            return
+
+    def _schedule_initial_dbus_refresh(self) -> None:
+        """Defer DBus subscription work until heartbeat and parent timers exist."""
+        self._refresh_scheduled = True
+
+        def _run() -> bool:
+            self._refresh_scheduled = False
+            if self._stop_requested:
+                return False
+            self._write_lifecycle_snapshot("initializing")
+            self._refresh_subscriptions()
+            return False
+
+        GLib.idle_add(_run)
 
     def _build_main_loop(self) -> Any:
         """Create and remember the GLib main loop used by the helper."""
@@ -412,13 +526,16 @@ class AutoInputHelper(
         self._install_signal_handlers()
         self._log_helper_start()
         self._build_main_loop()
-        self._register_name_owner_subscription()
-        self._refresh_subscriptions()
+        self._write_lifecycle_snapshot("starting")
+        self._start_liveness_threads()
         self._install_main_loop_timers()
+        self._schedule_initial_dbus_refresh()
         assert self._main_loop is not None
         try:
             self._main_loop.run()
         finally:
+            self._stop_requested = True
+            self._stop_liveness_threads()
             self._reset_system_bus()
             logging.info("Auto input helper stopping pid=%s", os.getpid())
 
@@ -426,12 +543,15 @@ class AutoInputHelper(
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     argv = list(sys.argv[1:] if argv is None else argv)
-    config_path, snapshot_path, parent_pid, helper_generation = _main_args(argv)
+    config_path, snapshot_path, parent_pid, helper_generation, runtime_instance_id = _main_args(argv)
     logging.basicConfig(
         format="%(levelname)s [pid=%(process)d %(threadName)s] %(message)s",
         level=logging.INFO,
     )
-    helper = AutoInputHelper(config_path, snapshot_path, parent_pid, helper_generation)
+    if runtime_instance_id is None:
+        helper = AutoInputHelper(config_path, snapshot_path, parent_pid, helper_generation)
+    else:
+        helper = AutoInputHelper(config_path, snapshot_path, parent_pid, helper_generation, runtime_instance_id)
     helper.run()
     return 0
 
@@ -445,12 +565,10 @@ def _default_config_path() -> str:
     )
 
 
-def _main_args(argv: list[str]) -> tuple[str, str | None, str | None, str | None]:
-    config_path = argv[0] if argv else _default_config_path()
-    snapshot_path = argv[1] if len(argv) > 1 else None
-    parent_pid = argv[2] if len(argv) > 2 else None
-    helper_generation = argv[3] if len(argv) > 3 else None
-    return config_path, snapshot_path, parent_pid, helper_generation
+def _main_args(argv: list[str]) -> tuple[str, str | None, str | None, str | None, str | None]:
+    padded = [*argv[:5], None, None, None, None, None]
+    config_path = padded[0] or _default_config_path()
+    return config_path, padded[1], padded[2], padded[3], padded[4]
 
 
 if __name__ == "__main__":

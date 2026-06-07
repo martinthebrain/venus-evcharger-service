@@ -104,6 +104,7 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         svc._auto_input_snapshot_version = fields.get("snapshot_version")
         svc._auto_input_snapshot_writer_pid = fields.get("writer_pid")
         svc._auto_input_snapshot_generation = fields.get("helper_generation")
+        svc._auto_input_snapshot_runtime_instance_id = fields.get("runtime_instance_id")
         svc._update_worker_snapshot(**fields)
 
     def _snapshot_seen_for_current_helper(
@@ -120,6 +121,7 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         svc = self.service
         return (
             self._snapshot_after_current_helper_start(svc, freshness_timestamp)
+            and self._snapshot_runtime_instance_matches_current_service(svc, snapshot)
             and self._snapshot_generation_matches_current_helper(svc, snapshot)
             and self._snapshot_pid_matches_current_helper(svc, snapshot)
         )
@@ -136,6 +138,11 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         if expected is None or expected <= 0:
             return True
         return self._coerce_snapshot_int(snapshot.get("helper_generation")) == expected
+
+    @staticmethod
+    def _snapshot_runtime_instance_matches_current_service(svc: Any, snapshot: dict[str, Any]) -> bool:
+        expected = str(getattr(svc, "_auto_input_runtime_instance_id", "") or "").strip()
+        return bool(expected and str(snapshot.get("runtime_instance_id") or "").strip() == expected)
 
     def _snapshot_pid_matches_current_helper(self, svc: Any, snapshot: dict[str, Any]) -> bool:
         """Return whether snapshot writer pid matches the current helper process."""
@@ -208,11 +215,22 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         if not self._snapshot_timestamps_valid(path, captured_at, freshness_timestamp, current):
             return None
         fields = self._build_snapshot_fields(snapshot, current, captured_at, stale)
+        self._copy_snapshot_identity_fields(fields, snapshot)
+        self._copy_snapshot_diagnostic_fields(fields, snapshot)
+        seen_for_current_helper = self._snapshot_seen_for_current_helper(snapshot, freshness_timestamp, stale)
+        return mtime_ns, freshness_timestamp, seen_for_current_helper, fields
+
+    def _copy_snapshot_identity_fields(self, fields: dict[str, Any], snapshot: dict[str, Any]) -> None:
         fields["snapshot_version"] = snapshot["snapshot_version"]
         fields["writer_pid"] = self._coerce_snapshot_int(snapshot.get("writer_pid"))
         fields["helper_generation"] = self._coerce_snapshot_int(snapshot.get("helper_generation"))
-        seen_for_current_helper = self._snapshot_seen_for_current_helper(snapshot, freshness_timestamp, stale)
-        return mtime_ns, freshness_timestamp, seen_for_current_helper, fields
+        fields["runtime_instance_id"] = str(snapshot.get("runtime_instance_id") or "")
+
+    def _copy_snapshot_diagnostic_fields(self, fields: dict[str, Any], snapshot: dict[str, Any]) -> None:
+        for source_key in self.SNAPSHOT_SOURCE_KEYS:
+            fields[f"{source_key}_status"] = snapshot.get(f"{source_key}_status")
+        fields["helper_state"] = snapshot.get("helper_state")
+        fields["helper_status"] = snapshot.get("helper_status")
 
     def refresh_snapshot(self, now: float | None = None) -> None:
         svc = self.service

@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import uuid
 from typing import Any
 
 import dbus
@@ -221,6 +222,7 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._relay_sync_failure_reported = False
         svc._auto_input_helper_process = None
         svc._auto_input_helper_generation = 0
+        svc._auto_input_runtime_instance_id = uuid.uuid4().hex
         svc._auto_input_helper_last_start_at = 0.0
         svc._auto_input_helper_restart_requested_at = None
         svc._auto_input_snapshot_last_seen = None
@@ -230,4 +232,5 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._auto_input_snapshot_version = None
         svc._auto_input_snapshot_writer_pid = None
         svc._auto_input_snapshot_generation = None
+        svc._auto_input_snapshot_runtime_instance_id = None
 __all__ = ["_RuntimeSupportSetupMixin"]

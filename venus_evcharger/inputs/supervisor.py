@@ -36,6 +36,7 @@ class AutoInputSupervisor(
             "grid_power",
             "writer_pid",
             "helper_generation",
+            "runtime_instance_id",
         }
     )
 
