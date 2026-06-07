@@ -18,6 +18,10 @@ from gi.repository import GLib
 
 class _AutoInputHelperSubscriptionMixin:
     @staticmethod
+    def _dbus_module() -> Any:
+        return dbus
+
+    @staticmethod
     def _signal_spec_key(source_name: str, service_name: str, path: str) -> tuple[str, str, str]:
         """Return a stable key for one subscribed DBus path."""
         return (str(source_name), str(service_name), str(path))
@@ -296,7 +300,7 @@ class _AutoInputHelperSubscriptionMixin:
         """Return the current DBus connection for this helper process."""
         self._ensure_poll_state()
         if self._system_bus is None:
-            dbus_module = cast(Any, dbus)
+            dbus_module = cast(Any, self._dbus_module())
             self._system_bus = dbus_module.SystemBus(private=True)
             self._dbus_generation = int(getattr(self, "_dbus_generation", 0) or 0) + 1
             self._system_bus_generation = self._dbus_generation

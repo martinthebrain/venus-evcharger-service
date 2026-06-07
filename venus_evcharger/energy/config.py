@@ -32,6 +32,21 @@ def _float_or_none(value: Any) -> float | None:
     return numeric if numeric > 0.0 else None
 
 
+def _float_value(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        numeric = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+    return numeric if numeric > 0 else None
+
+
 def _bool(value: Any, default: bool) -> bool:
     if value is None:
         return default
@@ -47,6 +62,22 @@ def _legacy_primary_source(defaults: Mapping[str, Any]) -> EnergySourceDefinitio
         service_prefix=_text(defaults.get("AutoBatteryServicePrefix"), "com.victronenergy.battery"),
         soc_path=_text(defaults.get("AutoBatterySocPath"), "/Soc"),
         usable_capacity_wh=_float_or_none(defaults.get("AutoBatteryCapacityWh")),
+        battery_chemistry=_text(defaults.get("AutoBatteryChemistry"), "lfp").lower(),
+        capacity_auto_estimate=_bool(defaults.get("AutoBatteryCapacityAutoEstimate"), True),
+        capacity_wh_path=_text(defaults.get("AutoBatteryCapacityWhPath")),
+        capacity_ah_path=_text(defaults.get("AutoBatteryCapacityAhPath"), "/InstalledCapacity"),
+        voltage_path=_text(defaults.get("AutoBatteryVoltagePath"), "/Dc/0/Voltage"),
+        capacity_estimate_min_soc=max(0.0, _float_value(defaults.get("AutoBatteryCapacityEstimateMinSoc"), 95.0)),
+        capacity_startup_recheck_seconds=max(
+            0.0,
+            _float_value(defaults.get("AutoBatteryCapacityStartupRecheckSeconds"), 300.0),
+        ),
+        estimated_capacity_wh=_float_or_none(defaults.get("AutoBatteryCapacityEstimatedWh")),
+        estimated_capacity_ah=_float_or_none(defaults.get("AutoBatteryCapacityEstimatedAh")),
+        estimated_capacity_nominal_voltage_v=_float_or_none(
+            defaults.get("AutoBatteryCapacityEstimatedNominalVoltage")
+        ),
+        estimated_capacity_cell_count=_int_or_none(defaults.get("AutoBatteryCapacityEstimatedCellCount")),
         battery_power_path=_text(defaults.get("AutoBatteryPowerPath")),
         ac_power_path=_text(defaults.get("AutoBatteryAcPowerPath")),
         pv_power_path=_text(defaults.get("AutoBatteryPvPowerPath")),
@@ -77,6 +108,50 @@ def _configured_source(defaults: Mapping[str, Any], source_id: str) -> EnergySou
         service_prefix=_text(defaults.get(f"{prefix}ServicePrefix"), str(profile_defaults.get("ServicePrefix", ""))),
         soc_path=_text(defaults.get(f"{prefix}SocPath"), str(profile_defaults.get("SocPath", "/Soc"))),
         usable_capacity_wh=_float_or_none(defaults.get(f"{prefix}UsableCapacityWh")),
+        battery_chemistry=_text(
+            defaults.get(f"{prefix}Chemistry"),
+            _text(defaults.get("AutoBatteryChemistry"), str(profile_defaults.get("BatteryChemistry", "lfp"))),
+        ).lower(),
+        capacity_auto_estimate=_bool(
+            defaults.get(f"{prefix}CapacityAutoEstimate"),
+            _bool(defaults.get("AutoBatteryCapacityAutoEstimate"), bool(profile_defaults.get("CapacityAutoEstimate", True))),
+        ),
+        capacity_wh_path=_text(
+            defaults.get(f"{prefix}CapacityWhPath"),
+            _text(defaults.get("AutoBatteryCapacityWhPath"), str(profile_defaults.get("CapacityWhPath", ""))),
+        ),
+        capacity_ah_path=_text(
+            defaults.get(f"{prefix}CapacityAhPath"),
+            _text(defaults.get("AutoBatteryCapacityAhPath"), str(profile_defaults.get("CapacityAhPath", "/InstalledCapacity"))),
+        ),
+        voltage_path=_text(
+            defaults.get(f"{prefix}VoltagePath"),
+            _text(defaults.get("AutoBatteryVoltagePath"), str(profile_defaults.get("VoltagePath", "/Dc/0/Voltage"))),
+        ),
+        capacity_estimate_min_soc=max(
+            0.0,
+            _float_value(
+                defaults.get(f"{prefix}CapacityEstimateMinSoc"),
+                _float_value(
+                    defaults.get("AutoBatteryCapacityEstimateMinSoc"),
+                    float(profile_defaults.get("CapacityEstimateMinSoc", 95.0)),
+                ),
+            ),
+        ),
+        capacity_startup_recheck_seconds=max(
+            0.0,
+            _float_value(
+                defaults.get(f"{prefix}CapacityStartupRecheckSeconds"),
+                _float_value(
+                    defaults.get("AutoBatteryCapacityStartupRecheckSeconds"),
+                    float(profile_defaults.get("CapacityStartupRecheckSeconds", 300.0)),
+                ),
+            ),
+        ),
+        estimated_capacity_wh=_float_or_none(defaults.get(f"{prefix}CapacityEstimatedWh")),
+        estimated_capacity_ah=_float_or_none(defaults.get(f"{prefix}CapacityEstimatedAh")),
+        estimated_capacity_nominal_voltage_v=_float_or_none(defaults.get(f"{prefix}CapacityEstimatedNominalVoltage")),
+        estimated_capacity_cell_count=_int_or_none(defaults.get(f"{prefix}CapacityEstimatedCellCount")),
         battery_power_path=_text(
             defaults.get(f"{prefix}BatteryPowerPath"),
             str(profile_defaults.get("BatteryPowerPath", "")),

@@ -251,6 +251,16 @@ class _EnergyAggregateProfileCases:
                 "AutoBatteryServicePrefix": "com.victronenergy.battery",
                 "AutoBatterySocPath": "/Soc",
                 "AutoBatteryCapacityWh": "5120",
+                "AutoBatteryChemistry": "lfp",
+                "AutoBatteryCapacityAutoEstimate": "1",
+                "AutoBatteryCapacityAhPath": "/InstalledCapacity",
+                "AutoBatteryVoltagePath": "/Dc/0/Voltage",
+                "AutoBatteryCapacityEstimateMinSoc": "95",
+                "AutoBatteryCapacityStartupRecheckSeconds": "300",
+                "AutoBatteryCapacityEstimatedWh": "4800",
+                "AutoBatteryCapacityEstimatedAh": "100",
+                "AutoBatteryCapacityEstimatedNominalVoltage": "48",
+                "AutoBatteryCapacityEstimatedCellCount": "15",
             }
         )
         self.assertTrue(use_combined)
@@ -258,6 +268,16 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(legacy_sources[0].source_id, "primary_battery")
         self.assertEqual(legacy_sources[0].connector_type, "dbus")
         self.assertEqual(legacy_sources[0].usable_capacity_wh, 5120.0)
+        self.assertEqual(legacy_sources[0].battery_chemistry, "lfp")
+        self.assertTrue(legacy_sources[0].capacity_auto_estimate)
+        self.assertEqual(legacy_sources[0].capacity_ah_path, "/InstalledCapacity")
+        self.assertEqual(legacy_sources[0].voltage_path, "/Dc/0/Voltage")
+        self.assertEqual(legacy_sources[0].capacity_estimate_min_soc, 95.0)
+        self.assertEqual(legacy_sources[0].capacity_startup_recheck_seconds, 300.0)
+        self.assertEqual(legacy_sources[0].estimated_capacity_wh, 4800.0)
+        self.assertEqual(legacy_sources[0].estimated_capacity_ah, 100.0)
+        self.assertEqual(legacy_sources[0].estimated_capacity_nominal_voltage_v, 48.0)
+        self.assertEqual(legacy_sources[0].estimated_capacity_cell_count, 15)
 
         configured_sources, use_combined = load_energy_source_settings(
             {
@@ -267,6 +287,10 @@ class _EnergyAggregateProfileCases:
                 "AutoEnergySource.victron.Service": "com.victronenergy.battery.victron",
                 "AutoEnergySource.victron.SocPath": "/Soc",
                 "AutoEnergySource.victron.UsableCapacityWh": "5000",
+                "AutoEnergySource.victron.CapacityEstimatedWh": "9600",
+                "AutoEnergySource.victron.CapacityEstimatedAh": "200",
+                "AutoEnergySource.victron.CapacityEstimatedNominalVoltage": "48",
+                "AutoEnergySource.victron.CapacityEstimatedCellCount": "15",
                 "AutoEnergySource.hybrid.Role": "hybrid-inverter",
                 "AutoEnergySource.hybrid.Type": "template_http_energy",
                 "AutoEnergySource.hybrid.ConfigPath": "/data/etc/external-hybrid.ini",
@@ -282,6 +306,10 @@ class _EnergyAggregateProfileCases:
         )
         self.assertFalse(use_combined)
         self.assertEqual([source.source_id for source in configured_sources], ["victron", "hybrid"])
+        self.assertEqual(configured_sources[0].estimated_capacity_wh, 9600.0)
+        self.assertEqual(configured_sources[0].estimated_capacity_ah, 200.0)
+        self.assertEqual(configured_sources[0].estimated_capacity_nominal_voltage_v, 48.0)
+        self.assertEqual(configured_sources[0].estimated_capacity_cell_count, 15)
         self.assertEqual(configured_sources[1].role, "hybrid-inverter")
         self.assertEqual(configured_sources[1].connector_type, "template_http")
         self.assertEqual(configured_sources[1].config_path, "/data/etc/external-hybrid.ini")
@@ -340,6 +368,8 @@ class _EnergyAggregateProfileCases:
                 "AutoEnergySource.victron.Profile": "dbus-battery",
                 "AutoEnergySource.victron.Service": "com.victronenergy.battery.lynxparallel",
                 "AutoEnergySource.victron.UsableCapacityWh": "10240",
+                "AutoEnergySource.victron.Chemistry": "LFP",
+                "AutoEnergySource.victron.CapacityAutoEstimate": "1",
                 "AutoEnergySource.external.Profile": "http-hybrid",
                 "AutoEnergySource.external.ConfigPath": "/data/etc/external-energy.ini",
                 "AutoEnergySource.external.UsableCapacityWh": "14000",
@@ -353,6 +383,10 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(configured_sources[0].connector_type, "dbus")
         self.assertEqual(configured_sources[0].service_prefix, "com.victronenergy.battery")
         self.assertEqual(configured_sources[0].battery_power_path, "/Dc/0/Power")
+        self.assertEqual(configured_sources[0].battery_chemistry, "lfp")
+        self.assertTrue(configured_sources[0].capacity_auto_estimate)
+        self.assertEqual(configured_sources[0].capacity_ah_path, "/InstalledCapacity")
+        self.assertEqual(configured_sources[0].voltage_path, "/Dc/0/Voltage")
         self.assertEqual(configured_sources[1].profile_name, "template-http-hybrid")
         self.assertEqual(configured_sources[1].role, "hybrid-inverter")
         self.assertEqual(configured_sources[1].connector_type, "template_http")

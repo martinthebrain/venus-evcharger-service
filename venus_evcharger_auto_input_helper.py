@@ -54,6 +54,10 @@ class AutoInputHelper(
 ):
     SNAPSHOT_SCHEMA_VERSION = AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION
 
+    @staticmethod
+    def _dbus_module() -> Any:
+        return dbus
+
     def __init__(
         self,
         config_path: str,
@@ -151,17 +155,58 @@ class AutoInputHelper(
         self.auto_dc_pv_path = self.config.get("AutoDcPvPath", "/Dc/Pv/Power").strip()
 
     def _init_helper_battery_config(self) -> None:
+        self._init_helper_battery_identity_config()
+        self._init_helper_battery_capacity_config()
+        self._init_helper_battery_power_config()
+        self._init_helper_battery_discovery_config()
+        self.auto_energy_sources, self.auto_use_combined_battery_soc = load_energy_source_settings(self.config)
+        self.auto_energy_source_ids = tuple(source.source_id for source in self.auto_energy_sources)
+
+    def _init_helper_battery_identity_config(self) -> None:
         self.auto_battery_service = self.config.get(
             "AutoBatteryService",
             "com.victronenergy.battery.socketcan_can1",
         ).strip()
         self.auto_battery_soc_path = self.config.get("AutoBatterySocPath", "/Soc").strip()
+
+    def _init_helper_battery_capacity_config(self) -> None:
         self.auto_battery_capacity_wh = float(self.config.get("AutoBatteryCapacityWh", 0) or 0)
+        self.auto_battery_chemistry = self.config.get("AutoBatteryChemistry", "lfp").strip().lower()
+        self.auto_battery_capacity_auto_estimate = _as_bool(self.config.get("AutoBatteryCapacityAutoEstimate", "1"), True)
+        self.auto_battery_capacity_wh_path = self.config.get("AutoBatteryCapacityWhPath", "").strip()
+        self.auto_battery_capacity_ah_path = self.config.get("AutoBatteryCapacityAhPath", "/InstalledCapacity").strip()
+        self.auto_battery_voltage_path = self.config.get("AutoBatteryVoltagePath", "/Dc/0/Voltage").strip()
+        self._init_helper_battery_capacity_thresholds()
+        self._init_helper_battery_estimated_capacity_config()
+
+    def _init_helper_battery_capacity_thresholds(self) -> None:
+        self.auto_battery_capacity_estimate_min_soc = max(
+            0.0,
+            float(self.config.get("AutoBatteryCapacityEstimateMinSoc", 95) or 95),
+        )
+        self.auto_battery_capacity_startup_recheck_seconds = max(
+            0.0,
+            float(self.config.get("AutoBatteryCapacityStartupRecheckSeconds", 300) or 300),
+        )
+
+    def _init_helper_battery_estimated_capacity_config(self) -> None:
+        self.auto_battery_capacity_estimated_wh = float(self.config.get("AutoBatteryCapacityEstimatedWh", 0) or 0)
+        self.auto_battery_capacity_estimated_ah = float(self.config.get("AutoBatteryCapacityEstimatedAh", 0) or 0)
+        self.auto_battery_capacity_estimated_nominal_voltage = float(
+            self.config.get("AutoBatteryCapacityEstimatedNominalVoltage", 0) or 0
+        )
+        self.auto_battery_capacity_estimated_cell_count = int(
+            float(self.config.get("AutoBatteryCapacityEstimatedCellCount", 0) or 0)
+        )
+
+    def _init_helper_battery_power_config(self) -> None:
         self.auto_battery_power_path = self.config.get("AutoBatteryPowerPath", "").strip()
         self.auto_battery_ac_power_path = self.config.get("AutoBatteryAcPowerPath", "").strip()
         self.auto_battery_pv_power_path = self.config.get("AutoBatteryPvPowerPath", "").strip()
         self.auto_battery_grid_interaction_path = self.config.get("AutoBatteryGridInteractionPath", "").strip()
         self.auto_battery_operating_mode_path = self.config.get("AutoBatteryOperatingModePath", "").strip()
+
+    def _init_helper_battery_discovery_config(self) -> None:
         self.auto_battery_service_prefix = self.config.get(
             "AutoBatteryServicePrefix",
             "com.victronenergy.battery",
@@ -170,8 +215,6 @@ class AutoInputHelper(
             0.0,
             float(self.config.get("AutoBatteryScanIntervalSeconds", 60)),
         )
-        self.auto_energy_sources, self.auto_use_combined_battery_soc = load_energy_source_settings(self.config)
-        self.auto_energy_source_ids = tuple(source.source_id for source in self.auto_energy_sources)
 
     def _init_helper_grid_config(self) -> None:
         self.auto_grid_service = self.config.get("AutoGridService", "com.victronenergy.system").strip()
@@ -212,6 +255,13 @@ class AutoInputHelper(
         self._auto_battery_last_scan = 0.0
         self._resolved_auto_energy_services: dict[str, str] = {}
         self._auto_energy_last_scan: dict[str, float] = {}
+        self._auto_battery_capacity_estimates: dict[str, dict[str, object]] = {}
+        self._auto_battery_capacity_startup_recheck_at = (
+            time.time() + self.auto_battery_capacity_startup_recheck_seconds
+            if self.auto_battery_capacity_startup_recheck_seconds > 0.0
+            else 0.0
+        )
+        self._auto_battery_capacity_startup_rechecked: dict[str, bool] = {}
         self._energy_learning_profiles: dict[str, Any] = {}
         self._source_retry_after: dict[str, float] = {}
         self._warning_state: dict[str, float] = {}
@@ -376,15 +426,7 @@ class AutoInputHelper(
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     argv = list(sys.argv[1:] if argv is None else argv)
-    config_path = argv[0] if argv else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "deploy",
-        "venus",
-        "config.venus_evcharger.ini",
-    )
-    snapshot_path = argv[1] if len(argv) > 1 else None
-    parent_pid = argv[2] if len(argv) > 2 else None
-    helper_generation = argv[3] if len(argv) > 3 else None
+    config_path, snapshot_path, parent_pid, helper_generation = _main_args(argv)
     logging.basicConfig(
         format="%(levelname)s [pid=%(process)d %(threadName)s] %(message)s",
         level=logging.INFO,
@@ -392,6 +434,23 @@ def main(argv: list[str] | None = None) -> int:
     helper = AutoInputHelper(config_path, snapshot_path, parent_pid, helper_generation)
     helper.run()
     return 0
+
+
+def _default_config_path() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "deploy",
+        "venus",
+        "config.venus_evcharger.ini",
+    )
+
+
+def _main_args(argv: list[str]) -> tuple[str, str | None, str | None, str | None]:
+    config_path = argv[0] if argv else _default_config_path()
+    snapshot_path = argv[1] if len(argv) > 1 else None
+    parent_pid = argv[2] if len(argv) > 2 else None
+    helper_generation = argv[3] if len(argv) > 3 else None
+    return config_path, snapshot_path, parent_pid, helper_generation
 
 
 if __name__ == "__main__":

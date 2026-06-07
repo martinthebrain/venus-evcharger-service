@@ -19,6 +19,7 @@ from venus_evcharger_auto_input_helper import AutoInputHelper, _as_bool  # noqa:
 class AutoInputHelperTestCase(unittest.TestCase):
     def _make_helper(self):
         helper = AutoInputHelper.__new__(AutoInputHelper)
+        helper.config_path = ""
         helper.config = {}
         helper._warning_state = {}
         helper._source_retry_after = {}
@@ -31,6 +32,9 @@ class AutoInputHelperTestCase(unittest.TestCase):
         helper._auto_battery_last_scan = 0.0
         helper._resolved_auto_energy_services = {}
         helper._auto_energy_last_scan = {}
+        helper._auto_battery_capacity_estimates = {}
+        helper._auto_battery_capacity_startup_recheck_at = 0.0
+        helper._auto_battery_capacity_startup_rechecked = {}
         helper._energy_learning_profiles = {}
         helper._last_payload = None
         helper._last_snapshot_state = AutoInputHelper._empty_snapshot()
@@ -52,6 +56,17 @@ class AutoInputHelperTestCase(unittest.TestCase):
         helper.auto_battery_service = "com.victronenergy.battery.socketcan_can1"
         helper.auto_battery_soc_path = "/Soc"
         helper.auto_battery_capacity_wh = 0.0
+        helper.auto_battery_chemistry = "lfp"
+        helper.auto_battery_capacity_auto_estimate = True
+        helper.auto_battery_capacity_wh_path = ""
+        helper.auto_battery_capacity_ah_path = "/InstalledCapacity"
+        helper.auto_battery_voltage_path = "/Dc/0/Voltage"
+        helper.auto_battery_capacity_estimate_min_soc = 95.0
+        helper.auto_battery_capacity_startup_recheck_seconds = 300.0
+        helper.auto_battery_capacity_estimated_wh = 0.0
+        helper.auto_battery_capacity_estimated_ah = 0.0
+        helper.auto_battery_capacity_estimated_nominal_voltage = 0.0
+        helper.auto_battery_capacity_estimated_cell_count = 0
         helper.auto_battery_power_path = ""
         helper.auto_battery_ac_power_path = ""
         helper.auto_battery_service_prefix = "com.victronenergy.battery"
