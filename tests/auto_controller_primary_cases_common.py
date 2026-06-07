@@ -6,4 +6,5 @@ from tests.venus_evcharger_auto_controller_support import (
     datetime,
     deque,
     patch,
+    utc_timestamp,
 )

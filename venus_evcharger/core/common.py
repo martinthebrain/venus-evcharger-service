@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from venus_evcharger.core import common_schedule as _common_schedule_module
@@ -91,16 +91,16 @@ fresh_confirmed_relay_output = _fresh_confirmed_relay_output
 _PATCH_EXPORTS = (time,)
 
 
-def local_datetime_from_timestamp(timestamp: float, timezone_name: str = "Europe/Berlin") -> datetime:
+def local_datetime_from_timestamp(timestamp: float, timezone_name: str = "UTC") -> datetime:
     """Return the configured local wall-clock time for schedule decisions."""
-    zone_name = str(timezone_name or "Europe/Berlin").strip() or "Europe/Berlin"
+    zone_name = str(timezone_name or "UTC").strip() or "UTC"
     try:
         zone = ZoneInfo(zone_name)
     except ZoneInfoNotFoundError:
         try:
-            zone = ZoneInfo("Europe/Berlin")
+            zone = ZoneInfo("UTC")
         except ZoneInfoNotFoundError:
-            return datetime.fromtimestamp(float(timestamp))
+            return datetime.fromtimestamp(float(timestamp), timezone.utc).replace(tzinfo=None)
     return datetime.fromtimestamp(float(timestamp), zone).replace(tzinfo=None)
 
 

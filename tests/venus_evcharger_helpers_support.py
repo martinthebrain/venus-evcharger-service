@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 sys.modules["vedbus"] = MagicMock()
@@ -21,6 +21,10 @@ sys.modules["gi.repository.GLib"] = MagicMock()
 import venus_evcharger_service  # noqa: E402
 import venus_evcharger.runtime.support as runtime_support_module  # noqa: E402
 from venus_evcharger_service import ShellyWallboxService, mode_uses_auto_logic, month_in_ranges, month_window, normalize_mode, normalize_phase, parse_hhmm, phase_values  # noqa: E402
+
+
+def utc_timestamp(year: int, month: int, day: int, hour: int, minute: int = 0) -> float:
+    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
 
 
 

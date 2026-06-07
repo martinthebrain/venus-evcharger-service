@@ -143,11 +143,11 @@ class _RelayChargerCurrentMixin:
         if not mode_uses_scheduled_logic(getattr(svc, "virtual_mode", 0)):
             return False
         return scheduled_mode_snapshot(
-            local_datetime_from_timestamp(float(now), getattr(svc, "auto_schedule_timezone", "Europe/Berlin")),
+            local_datetime_from_timestamp(float(now), getattr(svc, "auto_schedule_timezone", "UTC")),
             getattr(svc, "auto_month_windows", {}),
             getattr(svc, "auto_scheduled_enabled_days", "Mon,Tue,Wed,Thu,Fri"),
             delay_seconds=float(getattr(svc, "auto_scheduled_night_start_delay_seconds", 3600.0)),
-            latest_end_time=getattr(svc, "auto_scheduled_latest_end_time", "06:30"),
+            latest_end_time=getattr(svc, "auto_scheduled_latest_end_time", "04:30"),
         ).night_boost_active
 
     @staticmethod

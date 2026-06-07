@@ -271,7 +271,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         applied = controller.apply_charger_current_target(
             service,
             True,
-            datetime(2026, 4, 20, 21, 0).timestamp(),
+            utc_timestamp(2026, 4, 20, 21, 0),
             True,
         )
 

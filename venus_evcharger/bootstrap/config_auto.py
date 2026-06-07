@@ -243,7 +243,7 @@ class _ServiceBootstrapAutoConfigMixin(_ComposableControllerMixin):
             "on",
         )
         svc.auto_month_windows = _seasonal_month_windows(svc.config, self._month_window)
-        svc.auto_schedule_timezone = defaults.get("AutoScheduleTimezone", "Europe/Berlin").strip() or "Europe/Berlin"
+        svc.auto_schedule_timezone = defaults.get("AutoScheduleTimezone", "UTC").strip() or "UTC"
         svc.auto_scheduled_night_start_delay_seconds = float(
             _config_value(defaults, "AutoScheduledNightStartDelaySeconds", 3600)
         )
@@ -252,8 +252,8 @@ class _ServiceBootstrapAutoConfigMixin(_ComposableControllerMixin):
             DEFAULT_SCHEDULED_ENABLED_DAYS,
         )
         svc.auto_scheduled_latest_end_time = normalize_hhmm_text(
-            defaults.get("AutoScheduledLatestEndTime", "06:30"),
-            "06:30",
+            defaults.get("AutoScheduledLatestEndTime", "04:30"),
+            "04:30",
         )
         svc.auto_scheduled_night_current_amps = float(
             _config_value(defaults, "AutoScheduledNightCurrentAmps", 0)
