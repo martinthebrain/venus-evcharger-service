@@ -236,6 +236,8 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                                     "battery_soc": 55.0,
                                     "grid_captured_at": float(index),
                                     "grid_power": -800.0,
+                                    "writer_pid": 4321,
+                                    "helper_generation": 1,
                                 }
                             )
                         else:
@@ -250,6 +252,8 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                                     "battery_soc": 50.0,
                                     "grid_captured_at": float(index - 100),
                                     "grid_power": -500.0,
+                                    "writer_pid": 4321,
+                                    "helper_generation": 1,
                                 }
                             )
                         write_text_atomically(snapshot_path, payload)
@@ -291,6 +295,8 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                         "battery_soc": 50.0,
                         "grid_captured_at": float(iterations - 100),
                         "grid_power": -500.0,
+                        "writer_pid": 4321,
+                        "helper_generation": 1,
                     }
                 ),
             )
@@ -309,6 +315,8 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                         "battery_soc": 55.0,
                         "grid_captured_at": float(iterations + 1),
                         "grid_power": -800.0,
+                        "writer_pid": 4321,
+                        "helper_generation": 1,
                     }
                 ),
             )

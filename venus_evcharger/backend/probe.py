@@ -26,17 +26,14 @@ from typing import Any, cast
 import requests
 
 from .config import compat_legacy_backend_view_from_runtime
+from .config_file import load_required_backend_config
 from .factory import build_service_backends
 from .registry import CHARGER_BACKENDS, METER_BACKENDS, SWITCH_BACKENDS
 
 
 def _config(path: str) -> configparser.ConfigParser:
     """Load one backend config file."""
-    parser = configparser.ConfigParser()
-    read_files = parser.read(path)
-    if not read_files:
-        raise FileNotFoundError(path)
-    return parser
+    return load_required_backend_config(path, "backend probe")
 
 
 def _adapter_type(path: str) -> str:

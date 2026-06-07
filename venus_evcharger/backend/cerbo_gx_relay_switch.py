@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from .config_file import config_section
 from .models import PhaseSelection, SwitchCapabilities, SwitchState, normalize_phase_selection_tuple
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_binary_flag
 
@@ -39,12 +40,6 @@ def _config(path: str) -> configparser.ConfigParser:
     return parser
 
 
-def _section(parser: configparser.ConfigParser, name: str) -> configparser.SectionProxy:
-    if parser.has_section(name):
-        return parser[name]
-    return parser["DEFAULT"]
-
-
 def _relay_index(value: object) -> int:
     try:
         index = int(str(value).strip())
@@ -74,8 +69,8 @@ def _positive_seconds(value: object, default: float) -> float:
 def load_cerbo_gx_relay_switch_settings(config_path: str) -> CerboGxRelaySwitchSettings:
     """Return normalized Cerbo GX relay switch settings."""
     parser = _config(config_path)
-    adapter = _section(parser, "Adapter")
-    capabilities = _section(parser, "Capabilities")
+    adapter = config_section(parser, "Adapter")
+    capabilities = config_section(parser, "Capabilities")
     return CerboGxRelaySwitchSettings(
         relay_index=_relay_index(adapter.get("RelayIndex", "0")),
         contact_mode=_contact_mode(adapter.get("ContactMode", "NO")),

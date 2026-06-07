@@ -98,6 +98,31 @@ class _AutoInputHelperSourcesDbusCases:
 
         self.assertEqual(helper._reset_system_bus.call_count, 2)
 
+    def test_get_dbus_value_and_child_nodes_do_not_reset_on_missing_services(self):
+        class MissingDbusError(Exception):
+            def get_dbus_name(self):
+                return "org.freedesktop.DBus.Error.ServiceUnknown"
+
+        helper = self._make_helper()
+        helper._get_system_bus = MagicMock(return_value=MagicMock(get_object=MagicMock(return_value=object())))
+        helper._reset_system_bus = MagicMock()
+        missing_error = MissingDbusError("The name com.example.missing was not provided by any .service files")
+        failing_interface = MagicMock()
+        failing_interface.GetValue.side_effect = missing_error
+        failing_interface.Introspect.side_effect = missing_error
+        original_interface = venus_evcharger_auto_input_helper.dbus.Interface
+        venus_evcharger_auto_input_helper.dbus.Interface = MagicMock(return_value=failing_interface)
+        try:
+            with self.assertRaises(MissingDbusError):
+                helper._get_dbus_value("com.example.missing", "/Soc")
+            with self.assertRaises(MissingDbusError):
+                helper._get_dbus_child_nodes("com.example.missing", "/")
+        finally:
+            venus_evcharger_auto_input_helper.dbus.Interface = original_interface
+
+        helper._reset_system_bus.assert_not_called()
+        self.assertEqual(helper._get_system_bus.call_count, 2)
+
     def test_get_dbus_value_and_child_nodes_raise_after_second_failure(self):
         helper = self._make_helper()
         helper._get_system_bus = MagicMock(return_value=MagicMock(get_object=MagicMock(return_value=object())))
@@ -225,6 +250,7 @@ class _AutoInputHelperSourcesDbusCases:
 
     def test_resolve_auto_battery_service_covers_configured_service_cache_and_failure(self):
         helper = self._make_helper()
+        helper._list_dbus_services = MagicMock(return_value=[helper.auto_battery_service])
         helper._get_dbus_value = MagicMock(return_value=60.0)
         with patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
             self.assertEqual(helper._resolve_auto_battery_service(), "com.victronenergy.battery.socketcan_can1")
@@ -232,6 +258,7 @@ class _AutoInputHelperSourcesDbusCases:
 
         helper = self._make_helper()
         helper.auto_battery_service = "configured-battery"
+        helper._list_dbus_services = MagicMock(return_value=["configured-battery"])
         helper._get_dbus_value = MagicMock(side_effect=RuntimeError("offline"))
         helper._resolved_auto_battery_service = "cached-battery"
         helper._auto_battery_last_scan = 100.0

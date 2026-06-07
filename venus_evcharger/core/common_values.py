@@ -13,15 +13,17 @@ from venus_evcharger.core.common_types import PhaseMeasurements
 
 def read_version(file_name: str) -> str:
     """Read the version file shipped with the script, if present."""
-    try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        file_path = os.path.join(current_dir, file_name)
-        with open(file_path, "r", encoding="utf-8") as file:
-            line = file.readline()
-            return line.split(":")[-1].strip()
-    except FileNotFoundError:
-        logging.error("File %s not found in the current directory.", file_name)
-        return "0.1"
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(module_dir, os.pardir, os.pardir))
+    for file_path in (os.path.join(repo_root, file_name), os.path.join(module_dir, file_name)):
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                line = file.readline()
+                return line.split(":")[-1].strip()
+        except FileNotFoundError:
+            continue
+    logging.warning("File %s not found in the service root.", file_name)
+    return "0.1"
 
 
 def phase_values(

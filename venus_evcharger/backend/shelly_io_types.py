@@ -12,60 +12,18 @@ from venus_evcharger.backend.models import (
     normalize_phase_selection,
     normalize_phase_selection_tuple,
 )
+from venus_evcharger.backend.shelly_support_phase import (
+    _distributed_phase_vector,
+    _single_phase_vector,
+    phase_currents_for_selection as _phase_currents_for_selection,
+    phase_powers_for_selection as _phase_powers_for_selection,
+)
 
 
 JsonObject = dict[str, object]
 ShellyRpcScalar = str | int | float | bool
 EncodedRpcScalar = str | int | float
 PendingRelayCommand = tuple[bool | None, float | None]
-
-
-def _single_phase_vector(total: float, single_phase_line: object) -> tuple[float, float, float]:
-    """Return one single-phase vector mapped to the configured display line."""
-    line = str(single_phase_line).strip().upper() if single_phase_line is not None else "L1"
-    if line == "L2":
-        return 0.0, float(total), 0.0
-    if line == "L3":
-        return 0.0, 0.0, float(total)
-    return float(total), 0.0, 0.0
-
-
-def _distributed_phase_vector(total: float, divisor: float) -> tuple[float, float, float]:
-    """Return evenly distributed per-phase values for two- or three-phase totals."""
-    per_phase = float(total) / float(divisor)
-    return per_phase, per_phase, per_phase
-
-
-def _phase_powers_for_selection(
-    power_w: float,
-    selection: PhaseSelection,
-    single_phase_line: object = "L1",
-) -> tuple[float, float, float]:
-    """Split total power across the selected active phases for display."""
-    total = float(power_w)
-    if selection == "P1_P2_P3":
-        return _distributed_phase_vector(total, 3.0)
-    if selection == "P1_P2":
-        distributed = _distributed_phase_vector(total, 2.0)
-        return distributed[0], distributed[1], 0.0
-    return _single_phase_vector(total, single_phase_line)
-
-
-def _phase_currents_for_selection(
-    current_a: float | None,
-    selection: PhaseSelection,
-    single_phase_line: object = "L1",
-) -> tuple[float, float, float] | None:
-    """Split total current across the selected active phases for display."""
-    if current_a is None:
-        return None
-    total = float(current_a)
-    if selection == "P1_P2_P3":
-        return _distributed_phase_vector(total, 3.0)
-    if selection == "P1_P2":
-        distributed = _distributed_phase_vector(total, 2.0)
-        return distributed[0], distributed[1], 0.0
-    return _single_phase_vector(total, single_phase_line)
 
 
 class ShellyEnergyData(TypedDict, total=False):

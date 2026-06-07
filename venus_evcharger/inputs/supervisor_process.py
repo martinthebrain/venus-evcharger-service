@@ -35,6 +35,10 @@ class _AutoInputSupervisorProcessMixin:
         svc = self.service
         svc._ensure_worker_state()
         current = svc._time_now() if now is None else float(now)
+        generation = int(getattr(svc, "_auto_input_helper_generation", 0) or 0) + 1
+        svc._auto_input_helper_generation = generation
+        self._reset_snapshot_liveness_for_new_helper()
+        self._remove_stale_snapshot_file()
         command = [
             sys.executable,
             "-u",
@@ -42,6 +46,7 @@ class _AutoInputSupervisorProcessMixin:
             svc._config_path(),
             svc.auto_input_snapshot_path,
             str(os.getpid()),
+            str(generation),
         ]
         process = subprocess.Popen(command)  # pylint: disable=consider-using-with
         svc._auto_input_helper_process = process
@@ -53,9 +58,41 @@ class _AutoInputSupervisorProcessMixin:
             svc.auto_input_snapshot_path,
         )
 
+    def _reset_snapshot_liveness_for_new_helper(self) -> None:
+        svc = self.service
+        svc._auto_input_snapshot_last_seen = None
+        svc._auto_input_snapshot_seen_for_current_helper = False
+        svc._auto_input_snapshot_writer_pid = None
+        svc._auto_input_snapshot_generation = None
+
+    def _remove_stale_snapshot_file(self) -> None:
+        svc = self.service
+        path = str(getattr(svc, "auto_input_snapshot_path", "") or "").strip()
+        if not self._stale_snapshot_path_removable(path):
+            return
+        try:
+            os.unlink(path)
+            svc._auto_input_snapshot_mtime_ns = None
+        except FileNotFoundError:
+            svc._auto_input_snapshot_mtime_ns = None
+        except Exception as error:  # pylint: disable=broad-except
+            logging.debug("Unable to remove stale auto input snapshot %s: %s", path, error)
+
+    @staticmethod
+    def _snapshot_path_is_volatile(path: str) -> bool:
+        normalized = os.path.abspath(path)
+        return normalized.startswith(("/run/", "/tmp/", "/var/volatile/"))
+
+    def _stale_snapshot_path_removable(self, path: str) -> bool:
+        """Return whether a stale helper snapshot may be removed safely."""
+        return bool(path) and self._snapshot_path_is_volatile(path)
+
     def _helper_snapshot_age(self, current: float) -> float | None:
         svc = self.service
-        if svc._auto_input_snapshot_last_seen is not None:
+        if (
+            svc._auto_input_snapshot_last_seen is not None
+            and getattr(svc, "_auto_input_snapshot_seen_for_current_helper", True)
+        ):
             return current - float(svc._auto_input_snapshot_last_seen)
         if svc._auto_input_helper_last_start_at > 0:
             return current - float(svc._auto_input_helper_last_start_at)

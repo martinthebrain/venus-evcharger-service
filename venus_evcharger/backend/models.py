@@ -35,6 +35,16 @@ def normalize_phase_selection(value: object, default: PhaseSelection = "P1") -> 
     return default
 
 
+def normalize_switching_mode(value: object, default: SwitchingMode = "direct") -> SwitchingMode:
+    """Return one normalized switch-backend switching mode."""
+    mode = str(value).strip().lower() if value is not None else ""
+    if mode == "contactor":
+        return "contactor"
+    if mode == "direct":
+        return "direct"
+    return default
+
+
 def normalize_phase_selection_tuple(
     values: object,
     default: tuple[PhaseSelection, ...] = ("P1",),

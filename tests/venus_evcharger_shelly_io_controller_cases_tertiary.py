@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from tests.venus_evcharger_shelly_io_controller_cases_tertiary_part2 import _TestShellyIoControllerTertiaryPart2
 from tests.venus_evcharger_shelly_io_controller_support import *
 
 
-class TestShellyIoControllerTertiary(ShellyIoControllerTestBase):
+class TestShellyIoControllerTertiary(_TestShellyIoControllerTertiaryPart2, ShellyIoControllerTestBase):
     def test_fetch_pm_status_keeps_pm_flow_when_native_charger_readback_fails(self):
         service = SimpleNamespace(
             host="192.168.178.76",
@@ -343,29 +344,3 @@ class TestShellyIoControllerTertiary(ShellyIoControllerTestBase):
                 "pm_confirmed": False,
             },
         )
-
-    def test_io_worker_loop_logs_cycle_failure_and_continues(self):
-        stop_event = MagicMock()
-        stop_event.is_set.side_effect = [False, False]
-        stop_event.wait.side_effect = [False, True]
-        service = SimpleNamespace(
-            _ensure_worker_state=MagicMock(),
-            _worker_stop_event=stop_event,
-            _time_now=MagicMock(side_effect=[100.0, 100.2, 101.0, 101.1]),
-            _worker_poll_interval_seconds=1.0,
-            _warning_throttled=MagicMock(),
-        )
-
-        controller = ShellyIoController(service)
-        controller.io_worker_once = MagicMock(side_effect=[RuntimeError("boom"), None])
-
-        controller.io_worker_loop()
-
-        service._ensure_worker_state.assert_called_once_with()
-        self.assertEqual(controller.io_worker_once.call_count, 2)
-        service._warning_throttled.assert_called_once()
-        args = service._warning_throttled.call_args[0]
-        self.assertEqual(args[0], "io-worker-cycle-failed")
-        self.assertEqual(args[1], 1.0)
-        self.assertEqual(args[2], "Background I/O worker cycle failed: %s")
-        self.assertEqual(str(args[3]), "boom")

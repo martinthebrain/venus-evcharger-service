@@ -2,9 +2,12 @@
 import tempfile
 import threading
 import unittest
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import requests
 
 from venus_evcharger.backend.modbus_transport import ModbusSlaveOfflineError
 from venus_evcharger.backend.shelly_io import (
@@ -19,6 +22,7 @@ from venus_evcharger.backend.models import ChargerState, MeterReading
 __all__ = [
     "ChargerState",
     "MagicMock",
+    "json",
     "MeterReading",
     "ModbusSlaveOfflineError",
     "Path",
@@ -26,6 +30,7 @@ __all__ = [
     "ShellyIoControllerTestBase",
     "SimpleNamespace",
     "SmartEvseChargerBackend",
+    "requests",
     "_runtime_bundle",
     "_phase_currents_for_selection",
     "_phase_powers_for_selection",

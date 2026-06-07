@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import requests
 from requests.auth import HTTPDigestAuth
 
+from .config_file import config_section, load_required_backend_config
 from venus_evcharger.core.contracts import normalize_binary_flag
 
 
@@ -77,16 +78,7 @@ def _validate_template_auth_settings(
 
 def load_template_config(config_path: str) -> configparser.ConfigParser:
     """Load one template backend config file."""
-    parser = configparser.ConfigParser()
-    read_files = parser.read(config_path)
-    if not read_files:
-        raise FileNotFoundError(config_path)
-    return parser
-
-
-def config_section(parser: configparser.ConfigParser, name: str) -> configparser.SectionProxy:
-    """Return one named section or DEFAULT when absent."""
-    return parser[name] if parser.has_section(name) else parser["DEFAULT"]
+    return load_required_backend_config(config_path, "template backend")
 
 
 def normalize_http_method(value: object, default: str) -> str:
@@ -118,6 +110,20 @@ def json_path_value(payload: dict[str, object], path: str) -> object:
             raise ValueError(f"Missing response path '{path}'")
         current = current[token]
     return current
+
+
+def payload_object(payload: object) -> dict[str, object]:
+    """Return one typed JSON object payload for dotted-path lookups."""
+    return cast(dict[str, object], payload)
+
+
+def enabled_state_from_text(text: str) -> bool | None:
+    """Return an optional enabled-state from normalized text tokens."""
+    if text in {"1", "true", "on", "yes", "enabled"}:
+        return True
+    if text in {"0", "false", "off", "no", "disabled"}:
+        return False
+    return None
 
 
 def render_json_payload(template_text: str | None, context: dict[str, str]) -> object | None:

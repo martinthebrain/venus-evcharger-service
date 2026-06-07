@@ -12,9 +12,10 @@ import requests
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.backend.shelly_io_types import PendingRelayCommand, ShellyEnergyData, ShellyPmStatus
+from venus_evcharger.backend.shelly_io_worker_transport import ShellyIoWorkerTransportMixin
 
 
-class ShellyIoWorkerMixin:
+class ShellyIoWorkerMixin(ShellyIoWorkerTransportMixin):
     """Handle optimistic PM publishing, queued relay writes, and the worker loop."""
 
     @staticmethod
@@ -107,9 +108,17 @@ class ShellyIoWorkerMixin:
             return None
         source_key = self._split_enable_source_key()
         current = self._runtime_now()
-        if source_key == "charger" and self._charger_retry_active(current):
+        if self._source_retry_blocks_pending_relay(source_key, current):
             return None
         return svc, bool(target_on), source_key, self._split_enable_source_label(), current
+
+    def _source_retry_blocks_pending_relay(self, source_key: str, current: float) -> bool:
+        """Return whether source backoff should defer the pending relay command."""
+        if source_key == "charger":
+            return self._charger_retry_active(current)
+        if source_key == "shelly":
+            return self._shelly_retry_active(current)
+        return False
 
     def _apply_pending_relay_target(self, svc: Any, target_on: bool) -> None:
         backend = self._split_enable_backend()
@@ -131,20 +140,66 @@ class ShellyIoWorkerMixin:
         current: float,
         error: BaseException,
     ) -> None:
+        reason = self._remember_pending_relay_command_error(source_key, current, error)
+        self._warn_pending_relay_command_error(svc, source_key, source_label, current, reason, error)
+
+    def _remember_pending_relay_command_error(
+        self,
+        source_key: str,
+        current: float,
+        error: BaseException,
+    ) -> str:
         if source_key == "charger":
             transport_reason = modbus_transport_issue_reason(error)
             if transport_reason is not None:
                 self._remember_charger_transport_issue(transport_reason, "enable", error, current)
                 self._remember_charger_retry(transport_reason, "enable", current)
+            return "error"
+        if source_key == "shelly":
+            shelly_reason = self._classify_shelly_error(error)
+            self._remember_shelly_failure(shelly_reason, "relay", error, current)
+            return shelly_reason
+        return "error"
+
+    def _warn_pending_relay_command_error(
+        self,
+        svc: Any,
+        source_key: str,
+        source_label: str,
+        current: float,
+        reason: str,
+        error: BaseException,
+    ) -> None:
         svc._mark_failure(source_key)
         svc._warning_throttled(
-            f"worker-{source_key}-switch-failed",
+            f"worker-{source_key}-switch-failed-{reason}",
             svc.auto_shelly_soft_fail_seconds,
-            "%s switch failed: %s",
+            "%s switch failed (%s, consecutive=%s, retry=%ss): %s",
             source_label,
+            reason,
+            self._pending_relay_shelly_error_count(svc, source_key),
+            self._pending_relay_shelly_retry_remaining(svc, source_key, current),
             error,
-            exc_info=error,
+            exc_info=self._pending_relay_error_exc_info(source_key, error),
         )
+
+    def _pending_relay_shelly_error_count(self, svc: Any, source_key: str) -> int:
+        """Return Shelly consecutive error count only for Shelly-backed commands."""
+        if source_key != "shelly":
+            return 0
+        return int(getattr(svc, "_shelly_consecutive_errors", 0))
+
+    def _pending_relay_shelly_retry_remaining(self, svc: Any, source_key: str, current: float) -> float:
+        """Return Shelly retry time remaining when the helper exists."""
+        if source_key != "shelly" or not hasattr(svc, "_source_retry_remaining"):
+            return 0.0
+        return cast(float, svc._source_retry_remaining("shelly", current))
+
+    def _pending_relay_error_exc_info(self, source_key: str, error: BaseException) -> BaseException | None:
+        """Suppress noisy tracebacks for common Shelly network failures."""
+        if source_key == "shelly" and self._is_shelly_common_network_error(error):
+            return None
+        return error
 
     def _finalize_pending_relay_command(
         self,
@@ -157,7 +212,7 @@ class ShellyIoWorkerMixin:
         svc._clear_pending_relay_command(bool(target_on))
         svc._mark_relay_changed(bool(target_on), completed_at)
         if source_key == "shelly":
-            svc._mark_recovery("shelly", "Shelly relay writes recovered")
+            self._remember_shelly_success(svc._time_now(), "Shelly relay writes recovered")
         else:
             self._clear_charger_transport_issue()
             self._clear_charger_retry()
@@ -174,10 +229,20 @@ class ShellyIoWorkerMixin:
         )
         svc._worker_apply_pending_relay_command()
 
+        if self._shelly_retry_active(now):
+            svc._update_worker_snapshot(
+                captured_at=now,
+                auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
+                pm_status=None,
+                pm_captured_at=None,
+                pm_confirmed=False,
+            )
+            return
+
         try:
             pm_status = svc._worker_fetch_pm_status()
             read_at = svc._time_now()
-            svc._mark_recovery("shelly", "Shelly status reads recovered")
+            self._remember_shelly_success(read_at, "Shelly status reads recovered")
             svc._update_worker_snapshot(
                 captured_at=read_at,
                 pm_captured_at=read_at,
@@ -186,13 +251,19 @@ class ShellyIoWorkerMixin:
                 pm_confirmed=True,
             )
         except Exception as error:
+            reason = self._classify_shelly_error(error)
+            self._remember_shelly_failure(reason, "read", error, now)
             svc._mark_failure("shelly")
+            exc_info = None if self._is_shelly_common_network_error(error) else error
             svc._warning_throttled(
-                "worker-shelly-read-failed",
+                f"worker-shelly-read-failed-{reason}",
                 svc.auto_shelly_soft_fail_seconds,
-                "Shelly status read failed: %s",
+                "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
+                reason,
+                int(getattr(svc, "_shelly_consecutive_errors", 0)),
+                svc._source_retry_remaining("shelly", now) if hasattr(svc, "_source_retry_remaining") else 0,
                 error,
-                exc_info=error,
+                exc_info=exc_info,
             )
             svc._update_worker_snapshot(
                 captured_at=now,

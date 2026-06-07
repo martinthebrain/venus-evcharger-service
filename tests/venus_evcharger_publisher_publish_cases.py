@@ -272,6 +272,57 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         self.assertEqual(service._dbusservice["/Path"], 5)
         self.assertEqual(service._dbus_publish_state["/Path"], {"value": 5, "updated_at": 95.0})
 
+    def test_off_mainloop_publish_is_queued_without_touching_dbus_service(self) -> None:
+        service = SimpleNamespace(
+            _dbusservice={"/Path": 1},
+            _dbus_publish_state={},
+            _dbus_live_publish_interval_seconds=1.0,
+            _dbus_slow_publish_interval_seconds=5.0,
+            _dbus_publish_direct_allowed=MagicMock(return_value=False),
+            _enqueue_dbus_publish_values=MagicMock(return_value=True),
+        )
+        controller = DbusPublishController(service, self._age_seconds)
+
+        changed = controller._publish_values({"/Path": 2, "/Other": 3}, 100.0, force=True)
+
+        self.assertTrue(changed)
+        self.assertEqual(service._dbusservice["/Path"], 1)
+        service._enqueue_dbus_publish_values.assert_called_once_with(
+            [("/Path", 2), ("/Other", 3)],
+            100.0,
+        )
+
+    def test_off_mainloop_update_index_bump_is_queued(self) -> None:
+        service = SimpleNamespace(
+            _dbusservice={"/UpdateIndex": 7},
+            _dbus_publish_state={},
+            _dbus_live_publish_interval_seconds=1.0,
+            _dbus_slow_publish_interval_seconds=5.0,
+            _dbus_publish_direct_allowed=MagicMock(return_value=False),
+            _enqueue_dbus_publish_values=MagicMock(return_value=True),
+            _enqueue_dbus_update_index_bump=MagicMock(),
+        )
+        controller = DbusPublishController(service, self._age_seconds)
+
+        controller.bump_update_index(100.0)
+
+        self.assertEqual(service._dbusservice["/UpdateIndex"], 7)
+        service._enqueue_dbus_update_index_bump.assert_called_once_with(100.0)
+
+    def test_direct_dbus_publish_guard_fails_when_wrong_thread_touches_service(self) -> None:
+        service = SimpleNamespace(
+            _dbusservice={"/Path": 1},
+            _dbus_publish_state={},
+            _dbus_live_publish_interval_seconds=1.0,
+            _dbus_slow_publish_interval_seconds=5.0,
+            _dbus_publish_direct_allowed=MagicMock(return_value=True),
+            _assert_dbus_mainloop_thread=MagicMock(side_effect=RuntimeError("wrong thread")),
+        )
+        controller = DbusPublishController(service, self._age_seconds)
+
+        with self.assertRaisesRegex(RuntimeError, "wrong thread"):
+            controller.publish_path("/Path", 2, now=100.0, force=True)
+
     def test_publish_values_ignores_restore_failure_after_group_write_error(self) -> None:
         class FlakyRestoreDbusService(dict[str, int]):
             def __init__(self) -> None:

@@ -123,6 +123,15 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._last_pm_status_at = None
         svc._last_pm_status_confirmed = False
         svc._last_shelly_warning = None
+        svc._shelly_state = "unknown"
+        svc._shelly_last_error_reason = ""
+        svc._shelly_last_error_detail = ""
+        svc._shelly_last_error_at = None
+        svc._shelly_consecutive_errors = 0
+        svc._shelly_last_ok_at = None
+        svc._shelly_retry_after = 0.0
+        svc._shelly_session_reset_count = 0
+        svc._shelly_offline_since = None
         svc._last_auto_metrics = default_auto_metrics()
         initialize_victron_balance_runtime_state(svc)
         svc._last_voltage = None
@@ -138,6 +147,7 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
             current_version=self._read_local_version(repo_root),
             boot_auto_due_at=self._boot_delayed_update_due_at(started_at, 3600.0),
         )
+        self.initialize_async_runtime_state()
 
     def reset_system_bus(self) -> None:
         """Invalidate cached DBus connections so each thread reconnects cleanly."""
@@ -210,10 +220,14 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._relay_sync_deadline_at = None
         svc._relay_sync_failure_reported = False
         svc._auto_input_helper_process = None
+        svc._auto_input_helper_generation = 0
         svc._auto_input_helper_last_start_at = 0.0
         svc._auto_input_helper_restart_requested_at = None
         svc._auto_input_snapshot_last_seen = None
+        svc._auto_input_snapshot_seen_for_current_helper = False
         svc._auto_input_snapshot_mtime_ns = None
         svc._auto_input_snapshot_last_captured_at = None
         svc._auto_input_snapshot_version = None
+        svc._auto_input_snapshot_writer_pid = None
+        svc._auto_input_snapshot_generation = None
 __all__ = ["_RuntimeSupportSetupMixin"]

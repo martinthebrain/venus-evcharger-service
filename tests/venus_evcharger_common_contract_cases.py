@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import configparser
 from datetime import datetime
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import mock_open, patch
 
@@ -116,6 +118,16 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
             self.assertEqual(read_version("version.txt"), "1.2.3")
         with patch("builtins.open", side_effect=FileNotFoundError):
             self.assertEqual(read_version("missing.txt"), "0.1")
+
+    def test_read_version_prefers_service_root_version_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            module_dir = root / "venus_evcharger" / "core"
+            module_dir.mkdir(parents=True)
+            (root / "version.txt").write_text("version: 2.3.4\n", encoding="utf-8")
+            fake_module_file = module_dir / "common_values.py"
+            with patch("venus_evcharger.core.common_values.__file__", str(fake_module_file)):
+                self.assertEqual(read_version("version.txt"), "2.3.4")
 
     def test_common_auto_helpers_cover_transport_retry_and_confirmed_relay_edges(self):
         service = type(

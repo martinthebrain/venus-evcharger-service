@@ -102,6 +102,27 @@ class _AutoInputHelperSourcesRuntimeCases:
 
         helper._refresh_subscriptions.assert_called_once_with()
 
+    def test_run_cleans_up_dbus_connection_after_mainloop_exits(self):
+        helper = self._make_helper()
+        helper.snapshot_path = "/tmp/auto.json"
+        helper.parent_pid = 1234
+        helper.validation_poll_seconds = 30.0
+        helper.subscription_refresh_seconds = 60.0
+        helper._get_system_bus = MagicMock(return_value=MagicMock(add_signal_receiver=MagicMock()))
+        helper._refresh_subscriptions = MagicMock()
+        helper._reset_system_bus = MagicMock()
+        mainloop = MagicMock()
+
+        fake_glib_mainloop = MagicMock()
+        with patch.object(venus_evcharger_auto_input_helper, "dbus_glib_mainloop", fake_glib_mainloop):
+            with patch("venus_evcharger_auto_input_helper.GLib.MainLoop", return_value=mainloop):
+                with patch("venus_evcharger_auto_input_helper.GLib.timeout_add"):
+                    with patch("venus_evcharger_auto_input_helper.signal.signal"):
+                        helper.run()
+
+        mainloop.run.assert_called_once_with()
+        helper._reset_system_bus.assert_called_once_with()
+
     def test_run_requires_dbus_glib_mainloop_and_main_invokes_helper(self):
         helper = self._make_helper()
         with patch.object(venus_evcharger_auto_input_helper, "dbus_glib_mainloop", None):
@@ -114,7 +135,7 @@ class _AutoInputHelperSourcesRuntimeCases:
                 venus_evcharger_auto_input_helper.main(["/tmp/config.ini", "/tmp/snapshot.json", "1234"]),
                 0,
             )
-        helper_cls.assert_called_once_with("/tmp/config.ini", "/tmp/snapshot.json", "1234")
+        helper_cls.assert_called_once_with("/tmp/config.ini", "/tmp/snapshot.json", "1234", None)
         fake_helper.run.assert_called_once_with()
 
     def test_main_uses_default_config_path_when_argv_missing(self):
@@ -123,4 +144,4 @@ class _AutoInputHelperSourcesRuntimeCases:
             with patch("venus_evcharger_auto_input_helper.os.path.abspath", return_value="/repo/venus_evcharger_auto_input_helper.py"):
                 self.assertEqual(venus_evcharger_auto_input_helper.main([]), 0)
 
-        helper_cls.assert_called_once_with("/repo/deploy/venus/config.venus_evcharger.ini", None, None)
+        helper_cls.assert_called_once_with("/repo/deploy/venus/config.venus_evcharger.ini", None, None, None)

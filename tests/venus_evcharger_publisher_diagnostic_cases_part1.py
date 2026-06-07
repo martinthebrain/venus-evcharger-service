@@ -43,6 +43,12 @@ class _TestDbusPublishControllerDiagnosticsPart1:
             _charger_retry_reason="offline",
             _charger_retry_source="read",
             _charger_retry_until=current_time + 5.0,
+            _shelly_state="offline",
+            _shelly_last_error_reason="no-route",
+            _shelly_consecutive_errors=3,
+            _shelly_retry_after=current_time + 30.0,
+            _shelly_last_ok_at=current_time - 11.0,
+            _pending_relay_requested_at=current_time - 9.0,
             _last_confirmed_pm_status={"_phase_selection": "P1"},
             _last_switch_feedback_closed=False,
             _last_switch_interlock_ok=True,
@@ -155,6 +161,10 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         self.assertEqual(counter_values["/Auto/ChargerWriteErrors"], 2)
         self.assertEqual(counter_values["/Auto/ErrorCount"], 4)
         self.assertEqual(counter_values["/Auto/ChargerCurrentTarget"], 13.0)
+        self.assertEqual(counter_values["/Auto/ShellyState"], "offline")
+        self.assertEqual(counter_values["/Auto/ShellyLastError"], "no-route")
+        self.assertEqual(counter_values["/Auto/ShellyRetryRemaining"], 30)
+        self.assertEqual(counter_values["/Auto/ShellyConsecutiveErrors"], 3)
         self.assertEqual(counter_values["/Auto/PhaseCurrent"], "P1")
         self.assertEqual(counter_values["/Auto/PhaseObserved"], "P1")
         self.assertEqual(counter_values["/Auto/PhaseTarget"], "P1_P2")
@@ -186,6 +196,8 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         self.assertEqual(age_values["/Auto/LastChargerEstimateAge"], 1.0)
         self.assertEqual(age_values["/Auto/LastChargerTransportAge"], 2.0)
         self.assertEqual(age_values["/Auto/ChargerRetryRemaining"], 5.0)
+        self.assertEqual(age_values["/Auto/ShellyLastOkAge"], 11.0)
+        self.assertEqual(age_values["/Auto/PendingRelayAge"], 9.0)
         self.assertEqual(age_values["/Auto/SoftwareUpdateLastCheckAge"], 60.0)
         self.assertEqual(age_values["/Auto/SoftwareUpdateLastRunAge"], 3600.0)
 
@@ -300,5 +312,4 @@ class _TestDbusPublishControllerDiagnosticsPart1:
 
         self.assertEqual(age_values["/Auto/SoftwareUpdateLastCheckAge"], -1.0)
         self.assertEqual(age_values["/Auto/SoftwareUpdateLastRunAge"], -1.0)
-
 

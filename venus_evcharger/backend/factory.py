@@ -6,12 +6,13 @@ from __future__ import annotations
 import configparser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, TypeVar, cast
 
 from .base import ChargerBackend, MeterBackend, SwitchBackend
 from .config import (
     runtime_summary_from_service,
 )
+from .config_file import normalized_optional_path
 from .models import BackendRuntimeSummary
 from .registry import (
     create_charger_backend,
@@ -22,6 +23,8 @@ from .shelly_contactor_switch import ShellyContactorSwitchBackend
 from .shelly_meter import ShellyMeterBackend
 from venus_evcharger.topology.config import parse_topology_config
 from venus_evcharger.topology.schema import EvChargerTopologyConfig
+
+_BackendT = TypeVar("_BackendT")
 
 
 @dataclass(frozen=True)
@@ -53,10 +56,7 @@ def _config_path_arg(config_path: object) -> str:
 
 def _normalized_path(config_path: str | None) -> Path | None:
     """Return one normalized optional config path."""
-    if config_path is None:
-        return None
-    text = config_path.strip()
-    return Path(text) if text else None
+    return normalized_optional_path(config_path)
 
 
 def _adapter_type_from_config_path(config_path: str | None) -> str:
@@ -182,25 +182,31 @@ def _runtime_from_topology_roles(roles: _TopologyBackendRoles) -> BackendRuntime
     )
 
 
-def _direct_meter_backend(role_type: str | None, config_path: Path | None, service: Any) -> MeterBackend | None:
-    """Instantiate one meter backend directly from topology-resolved role data."""
+def _backend_from_role(
+    role_type: str | None,
+    config_path: object,
+    service: Any,
+    creator: Callable[[str, Any, str], _BackendT],
+) -> _BackendT | None:
+    """Instantiate one backend from normalized role data."""
     if role_type is None:
         return None
-    return cast(MeterBackend, create_meter_backend(role_type, service, _config_path_arg(config_path)))
+    return creator(role_type, service, _config_path_arg(config_path))
+
+
+def _direct_meter_backend(role_type: str | None, config_path: Path | None, service: Any) -> MeterBackend | None:
+    """Instantiate one meter backend directly from topology-resolved role data."""
+    return _backend_from_role(role_type, config_path, service, create_meter_backend)
 
 
 def _direct_switch_backend(role_type: str | None, config_path: Path | None, service: Any) -> SwitchBackend | None:
     """Instantiate one switch backend directly from topology-resolved role data."""
-    if role_type is None:
-        return None
-    return cast(SwitchBackend, create_switch_backend(role_type, service, _config_path_arg(config_path)))
+    return _backend_from_role(role_type, config_path, service, create_switch_backend)
 
 
 def _direct_charger_backend(role_type: str | None, config_path: Path | None, service: Any) -> ChargerBackend | None:
     """Instantiate one charger backend directly from topology-resolved role data."""
-    if role_type is None:
-        return None
-    return cast(ChargerBackend, create_charger_backend(role_type, service, _config_path_arg(config_path)))
+    return _backend_from_role(role_type, config_path, service, create_charger_backend)
 
 
 def _resolved_from_topology(service: Any) -> ResolvedBackends | None:
@@ -220,32 +226,17 @@ def _resolved_from_topology(service: Any) -> ResolvedBackends | None:
 
 def _resolved_meter_backend(runtime: BackendRuntimeSummary, service: Any) -> MeterBackend | None:
     """Return the configured meter backend or validate that meterless mode is allowed."""
-    if runtime.meter_type is None:
-        return None
-    return cast(
-        MeterBackend,
-        create_meter_backend(runtime.meter_type, service, _config_path_arg(runtime.meter_config_path)),
-    )
+    return _backend_from_role(runtime.meter_type, runtime.meter_config_path, service, create_meter_backend)
 
 
 def _resolved_switch_backend(runtime: BackendRuntimeSummary, service: Any) -> SwitchBackend | None:
     """Return the configured switch backend or validate that switchless mode is allowed."""
-    if runtime.switch_type is None:
-        return None
-    return cast(
-        SwitchBackend,
-        create_switch_backend(runtime.switch_type, service, _config_path_arg(runtime.switch_config_path)),
-    )
+    return _backend_from_role(runtime.switch_type, runtime.switch_config_path, service, create_switch_backend)
 
 
 def _resolved_charger_backend(runtime: BackendRuntimeSummary, service: Any) -> ChargerBackend | None:
     """Return the configured charger backend when present."""
-    if runtime.charger_type is None:
-        return None
-    return cast(
-        ChargerBackend,
-        create_charger_backend(runtime.charger_type, service, _config_path_arg(runtime.charger_config_path)),
-    )
+    return _backend_from_role(runtime.charger_type, runtime.charger_config_path, service, create_charger_backend)
 
 
 def build_service_backends(service: Any) -> ResolvedBackends:

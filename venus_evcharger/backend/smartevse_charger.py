@@ -7,6 +7,7 @@ import configparser
 import math
 from dataclasses import dataclass
 
+from .config_file import fixed_supported_phase_selections, load_required_backend_config, validate_fixed_phase_selection
 from .modbus_client import ModbusClient
 from .modbus_transport import (
     ModbusTransport,
@@ -17,9 +18,8 @@ from .modbus_transport import (
 from .models import (
     ChargerState,
     PhaseSelection,
-    normalize_phase_selection,
-    normalize_phase_selection_tuple,
 )
+from .native_modbus_backend import initialize_native_modbus_backend, native_modbus_client
 
 
 _SMARTEVSE_SUPPORTED_PHASE_SELECTIONS: tuple[PhaseSelection, ...] = ("P1",)
@@ -62,33 +62,14 @@ class SmartEvseChargerSettings:
     max_current_register: int
 
 
-def _config(config_path: str) -> configparser.ConfigParser:
-    """Load one SmartEVSE backend config file."""
-    parser = configparser.ConfigParser()
-    read_files = parser.read(str(config_path).strip())
-    if not read_files:
-        raise FileNotFoundError(config_path)
-    return parser
-
-
 def _supported_phase_selections(parser: configparser.ConfigParser) -> tuple[PhaseSelection, ...]:
     """Return one fixed configured phase layout for SmartEVSE-backed installations."""
-    raw_value = (
-        parser["Capabilities"].get("SupportedPhaseSelections", "P1")
-        if parser.has_section("Capabilities")
-        else "P1"
-    )
-    normalized = normalize_phase_selection_tuple(raw_value, _SMARTEVSE_SUPPORTED_PHASE_SELECTIONS)
-    if len(normalized) != 1:
-        raise ValueError(
-            "SmartEVSE charger backend requires exactly one fixed [Capabilities] SupportedPhaseSelections value"
-        )
-    return normalized
+    return fixed_supported_phase_selections(parser, _SMARTEVSE_SUPPORTED_PHASE_SELECTIONS, "SmartEVSE")
 
 
 def load_smartevse_charger_settings(service: object, config_path: str) -> SmartEvseChargerSettings:
     """Return normalized SmartEVSE charger settings."""
-    parser = _config(config_path)
+    parser = load_required_backend_config(config_path, "SmartEVSE charger")
     return SmartEvseChargerSettings(
         transport_settings=load_modbus_transport_settings(parser, service),
         profile_name="smartevse",
@@ -195,24 +176,18 @@ def _smartevse_waiting_for_solar(error_bits: int, mode_value: int) -> bool:
 class SmartEvseChargerBackend:
     """Native Modbus backend for SmartEVSE controllers."""
 
+    service: object
+    config_path: str
+    settings: SmartEvseChargerSettings
+    _transport: ModbusTransport | None
+    _client_cache: ModbusClient | None
+
     def __init__(self, service: object, config_path: str = "") -> None:
-        self.service = service
-        self.config_path = str(config_path).strip()
-        self.settings = load_smartevse_charger_settings(service, self.config_path)
-        self._transport: ModbusTransport | None = None
-        self._client_cache: ModbusClient | None = None
+        initialize_native_modbus_backend(self, service, config_path, load_smartevse_charger_settings)
 
     def _client(self) -> ModbusClient:
         """Return the lazily created Modbus client for this backend instance."""
-        if self._client_cache is None:
-            if self._transport is None:
-                self._transport = create_modbus_transport(self.settings.transport_settings)
-            self._client_cache = ModbusClient(
-                self._transport,
-                self.settings.transport_settings.unit_id,
-                self.settings.transport_settings.timeout_seconds,
-            )
-        return self._client_cache
+        return native_modbus_client(self)
 
     def _read_register(self, address: int) -> int:
         """Read one 16-bit holding register from the SmartEVSE."""
@@ -256,10 +231,4 @@ class SmartEvseChargerBackend:
 
     def set_phase_selection(self, selection: PhaseSelection) -> None:
         """Reject native phase writes, except for the already configured fixed layout."""
-        fixed_phase_selection = self.settings.supported_phase_selections[0]
-        normalized = normalize_phase_selection(selection, fixed_phase_selection)
-        if normalized != fixed_phase_selection:
-            raise ValueError(
-                "SmartEVSE charger backend does not support native phase switching "
-                f"(configured fixed phase selection: {fixed_phase_selection})"
-            )
+        validate_fixed_phase_selection(selection, self.settings.supported_phase_selections[0], "SmartEVSE")

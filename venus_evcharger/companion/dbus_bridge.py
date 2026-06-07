@@ -54,15 +54,38 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServicesMixin, _Energy
         svc = self.service
         if not bool(getattr(svc, "companion_dbus_bridge_enabled", False)):
             return False
-        current_time = float(now) if isinstance(now, (int, float)) else time.monotonic()
+        if self._companion_publish_should_enqueue(svc):
+            return bool(svc._enqueue_companion_dbus_publish(now))
+        current_time = self._companion_publish_time(now)
+        normalized_snapshot = self._companion_worker_snapshot(svc)
+        return self._publish_companion_snapshot(normalized_snapshot, current_time)
+
+    @staticmethod
+    def _companion_publish_should_enqueue(svc: Any) -> bool:
+        """Return whether companion DBus publish must run on the mainloop."""
+        direct_allowed = getattr(svc, "_dbus_publish_direct_allowed", None)
+        enqueue_publish = getattr(svc, "_enqueue_companion_dbus_publish", None)
+        return callable(direct_allowed) and callable(enqueue_publish) and not bool(direct_allowed())
+
+    @staticmethod
+    def _companion_publish_time(now: float | None) -> float:
+        """Return publish timestamp for companion snapshots."""
+        return float(now) if isinstance(now, (int, float)) else time.monotonic()
+
+    @staticmethod
+    def _companion_worker_snapshot(svc: Any) -> dict[str, Any]:
+        """Return a normalized worker snapshot mapping."""
         get_snapshot = getattr(svc, "_get_worker_snapshot", None)
         snapshot = get_snapshot() if callable(get_snapshot) else {}
-        normalized_snapshot = dict(snapshot) if isinstance(snapshot, Mapping) else {}
+        return dict(snapshot) if isinstance(snapshot, Mapping) else {}
+
+    def _publish_companion_snapshot(self, snapshot: dict[str, Any], current_time: float) -> bool:
+        """Publish one normalized companion snapshot."""
         publish_results = (
-            self._publish_battery_snapshot(normalized_snapshot),
-            self._publish_pvinverter_snapshot(normalized_snapshot),
-            self._publish_grid_snapshot(normalized_snapshot, current_time),
-            self._publish_source_snapshots(normalized_snapshot, current_time),
+            self._publish_battery_snapshot(snapshot),
+            self._publish_pvinverter_snapshot(snapshot),
+            self._publish_grid_snapshot(snapshot, current_time),
+            self._publish_source_snapshots(snapshot, current_time),
         )
         return any(publish_results)
 
@@ -104,6 +127,9 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServicesMixin, _Energy
         dbus_service: Any,
         values: Mapping[str, Any],
     ) -> bool:
+        assert_allowed = getattr(self.service, "_assert_dbus_mainloop_thread", None)
+        if callable(assert_allowed):
+            assert_allowed(f"companion DBus publish {service_key}")
         previous_values = self._published_values.setdefault(service_key, {})
         changed = False
         for path, value in values.items():

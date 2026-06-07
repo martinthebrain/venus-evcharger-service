@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from venus_evcharger.control import ControlCommand
+
 from .factory import ServiceControllerFactoryMixin
 
 
@@ -42,6 +44,58 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
     def _ensure_worker_state(self) -> None:
         self._ensure_runtime_support_controller()
         self._runtime_support_controller.ensure_worker_state()
+
+    def _mark_mainloop_thread(self) -> None:
+        self._ensure_runtime_support_controller()
+        self._runtime_support_controller.mark_mainloop_thread()
+
+    def _dbus_publish_direct_allowed(self) -> bool:
+        self._ensure_runtime_support_controller()
+        return cast(bool, self._runtime_support_controller.dbus_publish_direct_allowed())
+
+    def _assert_dbus_mainloop_thread(self, operation: str = "dbus access") -> None:
+        self._ensure_runtime_support_controller()
+        self._runtime_support_controller.assert_dbus_mainloop_thread(operation)
+
+    def _enqueue_dbus_publish_values(self, values: list[tuple[str, Any]], current: float) -> bool:
+        self._ensure_runtime_support_controller()
+        return cast(bool, self._runtime_support_controller.enqueue_dbus_publish_values(values, current))
+
+    def _enqueue_dbus_update_index_bump(self, current: float) -> None:
+        self._ensure_runtime_support_controller()
+        self._runtime_support_controller.enqueue_dbus_update_index_bump(current)
+
+    def _enqueue_companion_dbus_publish(self, now: float | None = None) -> bool:
+        self._ensure_runtime_support_controller()
+        return cast(bool, self._runtime_support_controller.enqueue_companion_dbus_publish(now))
+
+    def _flush_dbus_publish_queue(self) -> bool:
+        self._ensure_runtime_support_controller()
+        return cast(bool, self._runtime_support_controller.flush_dbus_publish_queue())
+
+    def _start_update_worker(self) -> None:
+        self._ensure_runtime_support_controller()
+        self._runtime_support_controller.start_update_worker()
+
+    def _schedule_update_cycle(self) -> bool:
+        self._ensure_runtime_support_controller()
+        return cast(bool, self._runtime_support_controller.schedule_update_cycle())
+
+    def _start_control_command_worker(self) -> None:
+        self._ensure_runtime_support_controller()
+        self._runtime_support_controller.start_control_command_worker()
+
+    def _enqueue_control_command(self, command: ControlCommand) -> bool:
+        self._ensure_runtime_support_controller()
+        return cast(bool, self._runtime_support_controller.enqueue_control_command(command))
+
+    def _mainloop_heartbeat_tick(self) -> bool:
+        self._ensure_runtime_support_controller()
+        return cast(bool, self._runtime_support_controller.mainloop_heartbeat_tick())
+
+    def _start_mainloop_watchdog(self) -> None:
+        self._ensure_runtime_support_controller()
+        self._runtime_support_controller.start_mainloop_watchdog()
 
     def _set_worker_snapshot(self, snapshot: dict[str, Any]) -> None:
         self._ensure_runtime_support_controller()

@@ -6,6 +6,18 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
     def test_snapshot_dbus_paths_returns_empty_mapping_without_dbusservice(self) -> None:
         self.assertEqual(_snapshot_dbus_paths(SimpleNamespace(), ("/Mode",)), {})
 
+    def test_snapshot_dbus_paths_uses_publish_state_without_touching_dbusservice(self) -> None:
+        class FailingDbusService(dict[str, object]):
+            def __getitem__(self, key: str) -> object:
+                raise RuntimeError("must not touch dbus")
+
+        service = SimpleNamespace(
+            _dbusservice=FailingDbusService({"/Mode": 99}),
+            _dbus_publish_state={"/Mode": {"value": 1, "updated_at": 100.0}},
+        )
+
+        self.assertEqual(_snapshot_dbus_paths(service, ("/Mode",)), {"/Mode": 1})
+
     def test_handle_mode_write_manual_to_auto_queues_clean_cutover(self) -> None:
         service = SimpleNamespace(
             virtual_mode=0,

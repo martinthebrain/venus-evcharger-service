@@ -9,16 +9,18 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import requests
-from requests.auth import HTTPDigestAuth
 
 from venus_evcharger.core.contracts import finite_float_or_none
 
+from .config_file import backend_request_timeout_seconds
 from .models import ChargerState, PhaseSelection, normalize_phase_selection
 from .template_support import (
     TemplateAuthSettings,
     config_section,
     load_template_auth_settings,
     load_template_config,
+    _request_auth,
+    _request_headers,
     resolved_url,
 )
 
@@ -70,12 +72,7 @@ class GoEChargerSettings:
 
 def _goe_timeout_seconds(adapter: object, service: object) -> float:
     """Return the normalized request timeout for the go-e HTTP API."""
-    timeout_seconds = finite_float_or_none(
-        getattr(adapter, "get")("RequestTimeoutSeconds", getattr(service, "shelly_request_timeout_seconds", 2.0))
-    )
-    if timeout_seconds is None or timeout_seconds <= 0.0:
-        return 2.0
-    return float(timeout_seconds)
+    return backend_request_timeout_seconds(adapter, service)
 
 
 def load_goe_charger_settings(service: object, config_path: str) -> GoEChargerSettings:
@@ -100,20 +97,12 @@ def load_goe_charger_settings(service: object, config_path: str) -> GoEChargerSe
 
 def _goe_auth(auth_settings: TemplateAuthSettings) -> object | None:
     """Return one optional requests-compatible auth object for the go-e API."""
-    if not auth_settings.username:
-        return None
-    if auth_settings.use_digest_auth:
-        return cast(object, HTTPDigestAuth(auth_settings.username, auth_settings.password))
-    return (auth_settings.username, auth_settings.password)
+    return _request_auth(auth_settings)
 
 
 def _goe_headers(auth_settings: TemplateAuthSettings) -> dict[str, str] | None:
     """Return optional extra headers for the go-e HTTP requests."""
-    if auth_settings.auth_header_name is None or auth_settings.auth_header_value is None:
-        return None
-    return {
-        auth_settings.auth_header_name: auth_settings.auth_header_value,
-    }
+    return _request_headers(auth_settings)
 
 
 def _goe_query_value(value: object) -> str:

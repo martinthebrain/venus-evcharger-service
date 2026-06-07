@@ -21,6 +21,23 @@ class _DbusPublishCoreMixin:
         if not hasattr(self.service, "_dbus_slow_publish_interval_seconds"):
             self.service._dbus_slow_publish_interval_seconds = 5.0
 
+    def _should_enqueue_publish(self) -> bool:
+        """Return whether DBus writes must be handed to the GLib thread."""
+        direct_allowed = getattr(self.service, "_dbus_publish_direct_allowed", None)
+        enqueue = getattr(self.service, "_enqueue_dbus_publish_values", None)
+        return callable(direct_allowed) and callable(enqueue) and not bool(direct_allowed())
+
+    def _enqueue_publish_values(self, staged_values: Sequence[tuple[str, Any]], current: float) -> bool:
+        enqueue = getattr(self.service, "_enqueue_dbus_publish_values", None)
+        if not callable(enqueue):
+            return False
+        return bool(enqueue(list(staged_values), current))
+
+    def _assert_dbus_access_allowed(self, operation: str) -> None:
+        assert_allowed = getattr(self.service, "_assert_dbus_mainloop_thread", None)
+        if callable(assert_allowed):
+            assert_allowed(operation)
+
     def publish_path(
         self,
         path: str,
@@ -36,6 +53,10 @@ class _DbusPublishCoreMixin:
         if not should_write:
             return False
 
+        if self._should_enqueue_publish():
+            return self._enqueue_publish_values([(path, value)], current)
+
+        self._assert_dbus_access_allowed(f"publish {path}")
         self.service._dbusservice[path] = value
         self.service._dbus_publish_state[path] = {"value": value, "updated_at": current}
         return True
@@ -102,6 +123,7 @@ class _DbusPublishCoreMixin:
 
     def _service_value_snapshot(self, path: str) -> PublishServiceValueSnapshot:
         """Return whether one DBus path existed before publishing plus its previous value."""
+        self._assert_dbus_access_allowed(f"snapshot {path}")
         try:
             return True, self.service._dbusservice[path]
         except Exception:  # pylint: disable=broad-except
@@ -136,6 +158,7 @@ class _DbusPublishCoreMixin:
         changed = False
         published_paths: list[str] = []
         for path, value in staged_values:
+            self._assert_dbus_access_allowed(f"publish {path}")
             try:
                 self.service._dbusservice[path] = value
             except Exception:  # pylint: disable=broad-except
@@ -154,11 +177,13 @@ class _DbusPublishCoreMixin:
         for path in published_paths:
             had_original, original_value = original_service_values.get(path, (False, None))
             if not had_original:
+                self._assert_dbus_access_allowed(f"delete {path}")
                 try:
                     del self.service._dbusservice[path]
                 except Exception:  # pylint: disable=broad-except
                     pass
                 continue
+            self._assert_dbus_access_allowed(f"restore {path}")
             try:
                 self.service._dbusservice[path] = original_value
             except Exception:  # pylint: disable=broad-except
@@ -185,6 +210,9 @@ class _DbusPublishCoreMixin:
         """
         self.ensure_state()
         current = time.time() if now is None else float(now)
+        if self._should_enqueue_publish():
+            return self._enqueue_transactional_publish(values, current, interval_seconds, force)
+
         staged_values, staged_entries, original_service_values = self._stage_publish_values(
             values,
             current,
@@ -203,6 +231,34 @@ class _DbusPublishCoreMixin:
         self._restore_group_publish_state(staged_entries)
         self._publish_group_failure(group_name, [failed_path], current)
         return False
+
+    def _enqueue_transactional_publish(
+        self,
+        values: Mapping[str, Any],
+        current: float,
+        interval_seconds: float | None,
+        force: bool,
+    ) -> bool:
+        """Stage and enqueue transactional publish values for the mainloop."""
+        staged_values = self._staged_values_for_enqueue(values, current, interval_seconds, force)
+        if not staged_values:
+            return False
+        return self._enqueue_publish_values(staged_values, current)
+
+    def _staged_values_for_enqueue(
+        self,
+        values: Mapping[str, Any],
+        current: float,
+        interval_seconds: float | None,
+        force: bool,
+    ) -> list[tuple[str, Any]]:
+        """Return only values that should be written by the publish queue."""
+        staged_values: list[tuple[str, Any]] = []
+        for path, value in values.items():
+            should_write, _entry = self._publish_decision(path, value, current, interval_seconds, force)
+            if should_write:
+                staged_values.append((path, value))
+        return staged_values
 
     def _publish_values(
         self,
@@ -224,6 +280,12 @@ class _DbusPublishCoreMixin:
         """Increment UpdateIndex when a set of published values changed."""
         self.ensure_state()
         current = time.time() if now is None else float(now)
+        if self._should_enqueue_publish():
+            enqueue_bump = getattr(self.service, "_enqueue_dbus_update_index_bump", None)
+            if callable(enqueue_bump):
+                enqueue_bump(current)
+                return
+        self._assert_dbus_access_allowed("bump /UpdateIndex")
         index = int(self.service._dbusservice["/UpdateIndex"]) + 1
         next_index = 0 if index > 255 else index
         self.service._dbusservice["/UpdateIndex"] = next_index

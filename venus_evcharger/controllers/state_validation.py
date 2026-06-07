@@ -31,6 +31,7 @@ class _StateValidationMixin:
         "auto_shelly_soft_fail_seconds",
         "auto_watchdog_stale_seconds",
         "auto_watchdog_recovery_seconds",
+        "auto_watchdog_restart_attempts",
         "auto_startup_warmup_seconds",
         "auto_manual_override_seconds",
         "auto_phase_upshift_delay_seconds",

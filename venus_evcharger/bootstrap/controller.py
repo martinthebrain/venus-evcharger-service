@@ -174,10 +174,10 @@ class ServiceBootstrapController(
             ("initialize-virtual-state", self.initialize_virtual_state),
             ("restore-runtime-state", self.restore_runtime_state),
             ("apply-device-metadata", self.apply_device_metadata),
-            ("start-runtime-loops", self.start_runtime_loops),
             ("initialize-dbus-service", self.initialize_dbus_service),
             ("register-dbus-paths", self.register_paths),
             ("publish-dbus-service", self.publish_dbus_service),
+            ("start-runtime-loops", self.start_runtime_loops),
         )
         for step_name, step_func in bootstrap_steps:
             logging.info("Bootstrap step start: %s", step_name)
@@ -242,3 +242,4 @@ def run_service_main(service_class: Callable[[], Any], config_path: str, gobject
         _run_service_loop(service_class, gobject_module)
     except Exception as error:  # pylint: disable=broad-except
         logging.critical("Error at main pid=%s", os.getpid(), exc_info=error)
+        raise

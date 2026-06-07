@@ -101,3 +101,16 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
             backend.settings = SimpleNamespace(username="user", password="secret", use_digest_auth=False, timeout_seconds=2.0)
             self.assertEqual(backend._auth(), ("user", "secret"))
+
+    def test_shelly_backend_base_can_reset_transport_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "shelly.ini"
+            config_path.write_text("[Adapter]\nHost=192.168.1.20\n", encoding="utf-8")
+            old_session = MagicMock()
+            new_session = MagicMock()
+            backend = ShellyBackendBase(SimpleNamespace(session=old_session), str(config_path))
+
+            backend.reset_transport_session(new_session)
+
+            old_session.close.assert_called_once_with()
+            self.assertIs(backend._session, new_session)

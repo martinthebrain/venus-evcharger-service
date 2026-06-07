@@ -176,6 +176,12 @@ def _age_counter_diagnostic_defaults() -> PathMap:
         "/Auto/ErrorCount": (0, None),
         "/Auto/DbusReadErrors": (0, None),
         "/Auto/ShellyReadErrors": (0, None),
+        "/Auto/ShellyState": ("unknown", None),
+        "/Auto/ShellyLastError": ("", None),
+        "/Auto/ShellyRetryRemaining": (0, None),
+        "/Auto/ShellyConsecutiveErrors": (0, None),
+        "/Auto/ShellyLastOkAge": (-1, None),
+        "/Auto/PendingRelayAge": (-1, None),
         "/Auto/ChargerWriteErrors": (0, None),
         "/Auto/PvReadErrors": (0, None),
         "/Auto/BatteryReadErrors": (0, None),
@@ -191,6 +197,21 @@ def _age_counter_diagnostic_defaults() -> PathMap:
         "/Auto/Stale": (0, None),
         "/Auto/StaleSeconds": (0, None),
         "/Auto/RecoveryAttempts": (0, None),
+    }
+
+
+def _runtime_timing_diagnostic_defaults() -> PathMap:
+    """Return async-runtime timing diagnostics initialized to neutral values."""
+    return {
+        "/Auto/UpdateWorkerDurationSeconds": (0.0, None),
+        "/Auto/UpdateWorkerPending": (0, None),
+        "/Auto/UpdateWorkerSkipped": (0, None),
+        "/Auto/PublishFlushDurationSeconds": (0.0, None),
+        "/Auto/PublishQueueLagSeconds": (0.0, None),
+        "/Auto/PublishQueueDropped": (0, None),
+        "/Auto/WriteCommandDurationSeconds": (0.0, None),
+        "/Auto/WriteCommandQueueLagSeconds": (0.0, None),
+        "/Auto/MainloopHeartbeatAge": (0.0, None),
     }
 
 
@@ -362,6 +383,7 @@ class _ServiceBootstrapPathMixin(_ComposableControllerMixin):
             **_software_update_diagnostic_defaults(svc),
             **_phase_diagnostic_defaults(svc),
             **_age_counter_diagnostic_defaults(),
+            **_runtime_timing_diagnostic_defaults(),
         }
 
     def _all_service_paths(self) -> PathMap:

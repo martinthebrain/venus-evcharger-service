@@ -154,6 +154,27 @@ class _DbusPublishDiagnosticsMixin:
             "/Auto/InputCacheHits": int(error_state.get("cache_hits", 0)),
         }
 
+    def _shelly_counter_values(self, now: float) -> dict[str, str | int]:
+        """Return Shelly transport and retry diagnostics."""
+        svc = self.service
+        return {
+            "/Auto/ShellyState": str(getattr(svc, "_shelly_state", "unknown") or "unknown"),
+            "/Auto/ShellyLastError": str(getattr(svc, "_shelly_last_error_reason", "") or ""),
+            "/Auto/ShellyRetryRemaining": self._shelly_retry_remaining_value(svc, now),
+            "/Auto/ShellyConsecutiveErrors": int(getattr(svc, "_shelly_consecutive_errors", 0) or 0),
+        }
+
+    @staticmethod
+    def _shelly_retry_remaining_value(svc: Any, now: float) -> int:
+        """Return remaining Shelly retry delay in seconds."""
+        source_retry_remaining = getattr(svc, "_source_retry_remaining", None)
+        if callable(source_retry_remaining):
+            return int(source_retry_remaining("shelly", now))
+        retry_after = getattr(svc, "_shelly_retry_after", 0.0)
+        if not isinstance(retry_after, (int, float)) or isinstance(retry_after, bool):
+            return 0
+        return max(0, int(float(retry_after) - float(now)))
+
     def _phase_counter_values(self, now: float) -> dict[str, str | int | float]:
         """Return outward phase diagnostics and supported-layout information."""
         return {
@@ -184,6 +205,27 @@ class _DbusPublishDiagnosticsMixin:
             "/Auto/ContactorLockoutActive": self._contactor_lockout_active(self.service),
             "/Auto/ContactorLockoutReason": self._contactor_lockout_reason(self.service),
             "/Auto/ContactorLockoutSource": self._contactor_lockout_source(self.service),
+        }
+
+    def _runtime_timing_values(self, now: float) -> dict[str, int | float]:
+        """Return timing and queue diagnostics for async runtime health."""
+        svc = self.service
+        mainloop_heartbeat_at = getattr(svc, "_mainloop_heartbeat_at", None)
+        heartbeat_age = (
+            max(0.0, now - float(mainloop_heartbeat_at))
+            if isinstance(mainloop_heartbeat_at, (int, float))
+            else -1.0
+        )
+        return {
+            "/Auto/UpdateWorkerDurationSeconds": float(getattr(svc, "_last_update_cycle_duration_seconds", 0.0)),
+            "/Auto/UpdateWorkerPending": int(bool(getattr(svc, "_update_worker_pending", False))),
+            "/Auto/UpdateWorkerSkipped": int(getattr(svc, "_update_worker_skipped_count", 0)),
+            "/Auto/PublishFlushDurationSeconds": float(getattr(svc, "_last_publish_flush_duration_seconds", 0.0)),
+            "/Auto/PublishQueueLagSeconds": float(getattr(svc, "_last_dbus_publish_queue_lag_seconds", 0.0)),
+            "/Auto/PublishQueueDropped": int(getattr(svc, "_dbus_publish_dropped_count", 0)),
+            "/Auto/WriteCommandDurationSeconds": float(getattr(svc, "_last_write_command_duration_seconds", 0.0)),
+            "/Auto/WriteCommandQueueLagSeconds": float(getattr(svc, "_last_write_command_queue_lag_seconds", 0.0)),
+            "/Auto/MainloopHeartbeatAge": heartbeat_age,
         }
 
     @staticmethod
@@ -261,8 +303,10 @@ class _DbusPublishDiagnosticsMixin:
             **self._software_update_counter_values(),
             **self._charger_counter_values(now),
             **self._error_counter_values(error_state),
+            **self._shelly_counter_values(now),
             **self._phase_counter_values(now),
             **self._contactor_counter_values(),
+            **self._runtime_timing_values(now),
         }
 
     def _diagnostic_age_values(self, now: float) -> dict[str, float]:
@@ -281,6 +325,8 @@ class _DbusPublishDiagnosticsMixin:
         )
         return {
             "/Auto/LastShellyReadAge": self._age_seconds(last_shelly_read_at, now),
+            "/Auto/ShellyLastOkAge": self._age_seconds(getattr(svc, "_shelly_last_ok_at", None), now),
+            "/Auto/PendingRelayAge": self._age_seconds(getattr(svc, "_pending_relay_requested_at", None), now),
             "/Auto/LastPvReadAge": self._age_seconds(svc._last_pv_at, now),
             "/Auto/LastBatteryReadAge": self._age_seconds(svc._last_battery_soc_at, now),
             "/Auto/LastGridReadAge": self._age_seconds(svc._last_grid_at, now),

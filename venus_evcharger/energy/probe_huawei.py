@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
+from .numeric import optional_int
 from .profiles import resolve_energy_source_profile
 from .recommendation_schema import RECOMMENDATION_BUNDLE_SCHEMA_TYPE, RECOMMENDATION_BUNDLE_SCHEMA_VERSION
 
@@ -208,9 +209,4 @@ def _recommendation_hint_values(detected: Mapping[str, object]) -> tuple[str, st
 
 
 def _optional_int(value: object) -> int | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
+    return optional_int(value)

@@ -31,11 +31,13 @@ _TEST_PATCH_EXPORTS = (logging, os, dbus, write_text_atomically)
 
 
 from venus_evcharger.runtime.audit import _RuntimeSupportAuditMixin
+from venus_evcharger.runtime.async_mainloop import _RuntimeSupportAsyncMainloopMixin
 from venus_evcharger.runtime.health import _RuntimeSupportHealthMixin
 from venus_evcharger.runtime.setup import _RuntimeSupportSetupMixin
 
 
 class RuntimeSupportController(
+    _RuntimeSupportAsyncMainloopMixin,
     _RuntimeSupportSetupMixin,
     _RuntimeSupportAuditMixin,
     _RuntimeSupportHealthMixin,
@@ -90,12 +92,16 @@ class RuntimeSupportController(
             "_relay_sync_deadline_at": lambda: None,
             "_relay_sync_failure_reported": lambda: False,
             "_auto_input_helper_process": lambda: None,
+            "_auto_input_helper_generation": lambda: 0,
             "_auto_input_helper_last_start_at": lambda: 0.0,
             "_auto_input_helper_restart_requested_at": lambda: None,
             "_auto_input_snapshot_last_seen": lambda: None,
+            "_auto_input_snapshot_seen_for_current_helper": lambda: False,
             "_auto_input_snapshot_mtime_ns": lambda: None,
             "_auto_input_snapshot_last_captured_at": lambda: None,
             "_auto_input_snapshot_version": lambda: None,
+            "_auto_input_snapshot_writer_pid": lambda: None,
+            "_auto_input_snapshot_generation": lambda: None,
             "auto_input_snapshot_path": lambda: (
                 f"/run/dbus-venus-evcharger-auto-{getattr(svc, 'deviceinstance', 0)}.json"
             ),
@@ -124,6 +130,15 @@ class RuntimeSupportController(
             "_last_pm_status_confirmed": lambda: False,
             "_last_confirmed_pm_status": lambda: None,
             "_last_confirmed_pm_status_at": lambda: None,
+            "_shelly_state": lambda: "unknown",
+            "_shelly_last_error_reason": lambda: "",
+            "_shelly_last_error_detail": lambda: "",
+            "_shelly_last_error_at": lambda: None,
+            "_shelly_consecutive_errors": lambda: 0,
+            "_shelly_last_ok_at": lambda: None,
+            "_shelly_retry_after": lambda: 0.0,
+            "_shelly_session_reset_count": lambda: 0,
+            "_shelly_offline_since": lambda: None,
             "_last_charger_state_enabled": lambda: None,
             "_last_charger_state_current_amps": lambda: None,
             "_last_charger_state_phase_selection": lambda: None,
@@ -184,6 +199,7 @@ class RuntimeSupportController(
             "started_at": time.time,
             "auto_watchdog_stale_seconds": lambda: 180.0,
             "auto_watchdog_recovery_seconds": lambda: 60.0,
+            "auto_watchdog_restart_attempts": lambda: 5,
             "auto_audit_log": lambda: False,
             "auto_audit_log_path": lambda: "/var/volatile/log/dbus-venus-evcharger/auto-reasons.log",
             "auto_audit_log_max_age_hours": lambda: 168.0,

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .audit import _RuntimeSupportAuditMixin
+from .async_mainloop import _RuntimeSupportAsyncMainloopMixin
 from .health import _RuntimeSupportHealthMixin
 from .setup import _RuntimeSupportSetupMixin
 
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
 __all__ = [
     "RuntimeSupportController",
     "_RuntimeSupportAuditMixin",
+    "_RuntimeSupportAsyncMainloopMixin",
     "_RuntimeSupportHealthMixin",
     "_RuntimeSupportSetupMixin",
 ]

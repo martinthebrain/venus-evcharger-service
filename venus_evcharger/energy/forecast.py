@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from .numeric import non_negative_optional_float, optional_float
+
 
 def derive_energy_forecast(
     cluster_payload: Mapping[str, Any] | None,
@@ -200,13 +202,8 @@ def _positive_bias(value: object, *, fallback: object | None = None) -> float:
 
 
 def _non_negative_optional_float(value: object) -> float | None:
-    normalized = _optional_float(value)
-    if normalized is None:
-        return None
-    return max(0.0, float(normalized))
+    return non_negative_optional_float(value)
 
 
 def _optional_float(value: object) -> float | None:
-    if not isinstance(value, (int, float)):
-        return None
-    return float(value)
+    return optional_float(value)

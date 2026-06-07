@@ -12,6 +12,8 @@ from __future__ import annotations
 import configparser
 from typing import cast
 
+from venus_evcharger.core.contracts import optional_text
+
 from .schema import (
     BindingRole,
     CapabilityKind,
@@ -453,8 +455,7 @@ def _required_text(section: configparser.SectionProxy, key: str) -> str:
 
 
 def _optional_text(value: object) -> str | None:
-    text = str(value).strip() if value is not None else ""
-    return text or None
+    return optional_text(value)
 
 
 def _as_bool(value: object) -> bool:

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 
 def _victron_ess_balance_grid_site_regime(grid_interaction_w: float | None) -> str:
@@ -86,6 +86,45 @@ def _victron_ess_balance_profile_counter(profile: dict[str, Any], field: str) ->
     return max(0, int(profile.get(field, 0) or 0))
 
 
+def _victron_ess_balance_update_profile_sample(
+    profile: dict[str, Any],
+    sample: float,
+    *,
+    samples_field: str,
+    value_field: str,
+    deviation_field: str,
+    optional_float: Callable[[Any], float | None],
+    ewma: Callable[[float | None, float, int], float],
+) -> None:
+    """Update one learned profile sample value and its mean absolute deviation."""
+    samples = _victron_ess_balance_profile_counter(profile, samples_field)
+    current_value = optional_float(profile.get(value_field))
+    if current_value is not None:
+        profile[deviation_field] = ewma(
+            optional_float(profile.get(deviation_field)),
+            abs(float(sample) - float(current_value)),
+            samples,
+        )
+    profile[value_field] = ewma(current_value, float(sample), samples)
+    profile[samples_field] = samples + 1
+
+
+def _victron_ess_balance_update_service_sample(
+    svc: Any,
+    sample: float,
+    *,
+    samples_attr: str,
+    value_attr: str,
+    optional_float: Callable[[Any], float | None],
+    ewma: Callable[[float | None, float, int], float],
+) -> None:
+    """Update one service-level telemetry sample value and its counter."""
+    samples = max(0, int(getattr(svc, samples_attr, 0) or 0))
+    current_value = optional_float(getattr(svc, value_attr, None))
+    setattr(svc, value_attr, ewma(current_value, float(sample), samples))
+    setattr(svc, samples_attr, samples + 1)
+
+
 def _victron_ess_balance_profile_scalar_snapshot(
     profile: dict[str, Any],
     scalar_fields: tuple[str, ...],
@@ -118,6 +157,60 @@ def _victron_ess_balance_active_profile_fields() -> tuple[tuple[str, str], ...]:
         ("_victron_ess_balance_active_learning_profile_pv_phase", "pv_phase"),
         ("_victron_ess_balance_active_learning_profile_battery_limit_phase", "battery_limit_phase"),
     )
+
+
+def _reset_victron_ess_balance_pid_state(svc: Any) -> None:
+    """Reset Victron ESS balance PID state."""
+    svc._victron_ess_balance_pid_last_error_w = 0.0
+    svc._victron_ess_balance_pid_last_at = None
+    svc._victron_ess_balance_pid_integral_output_w = 0.0
+    svc._victron_ess_balance_pid_last_output_w = 0.0
+
+
+def _reset_victron_ess_balance_pid_integral_state(svc: Any, aggressive: bool = False) -> None:
+    """Reset Victron ESS balance PID integral state."""
+    svc._victron_ess_balance_pid_integral_output_w = 0.0
+    if aggressive:
+        svc._victron_ess_balance_pid_last_error_w = 0.0
+        svc._victron_ess_balance_pid_last_output_w = 0.0
+
+
+def _record_victron_ess_balance_tracking_command(
+    svc: Any,
+    now: float,
+    setpoint_w: float,
+    source_error_w: float,
+    profile_key: str,
+) -> None:
+    """Record one Victron ESS balance tracking command."""
+    svc._victron_ess_balance_telemetry_last_command_at = float(now)
+    svc._victron_ess_balance_telemetry_last_command_setpoint_w = float(setpoint_w)
+    svc._victron_ess_balance_telemetry_last_command_error_w = float(source_error_w)
+    svc._victron_ess_balance_telemetry_last_command_profile_key = str(profile_key or "").strip()
+    svc._victron_ess_balance_telemetry_command_response_recorded = False
+    svc._victron_ess_balance_telemetry_command_overshoot_recorded = False
+    svc._victron_ess_balance_telemetry_command_settled_recorded = False
+    svc._victron_ess_balance_telemetry_overshoot_active = False
+    svc._victron_ess_balance_telemetry_settling_active = True
+
+
+def _clear_victron_ess_balance_tracking_episode_state(svc: Any) -> None:
+    """Clear one Victron ESS balance telemetry tracking episode."""
+    svc._victron_ess_balance_telemetry_last_command_at = None
+    svc._victron_ess_balance_telemetry_last_command_setpoint_w = None
+    svc._victron_ess_balance_telemetry_last_command_error_w = None
+    svc._victron_ess_balance_telemetry_last_command_profile_key = ""
+    svc._victron_ess_balance_telemetry_command_response_recorded = False
+    svc._victron_ess_balance_telemetry_command_overshoot_recorded = False
+    svc._victron_ess_balance_telemetry_command_settled_recorded = False
+    svc._victron_ess_balance_telemetry_overshoot_active = False
+    svc._victron_ess_balance_telemetry_settling_active = False
+
+
+def _clear_victron_ess_balance_active_profile_state(svc: Any) -> None:
+    """Clear the active Victron ESS balance learning-profile identity."""
+    for attr_name, _field_name in _victron_ess_balance_active_profile_fields():
+        setattr(svc, attr_name, "")
 
 
 def _victron_ess_balance_energy_ids(svc: Any) -> list[str]:

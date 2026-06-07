@@ -7,6 +7,7 @@ service. It periodically writes a compact JSON snapshot that the main process
 can consume safely, even if DBus becomes slow or temporarily inconsistent.
 """
 
+import os
 import time
 from typing import Any
 
@@ -85,6 +86,11 @@ class _AutoInputHelperSnapshotMixin:
         default_values = {
             "_last_snapshot_state": self._empty_snapshot,
             "_next_source_poll_at": self._default_source_poll_schedule,
+            "_system_bus": None,
+            "_dbus_generation": 0,
+            "_system_bus_generation": 0,
+            "_name_owner_match": None,
+            "_dbus_subscription_backoff_until": 0.0,
             "_signal_matches": dict,
             "_monitored_specs": dict,
             "_refresh_scheduled": False,
@@ -125,6 +131,7 @@ class _AutoInputHelperSnapshotMixin:
         snapshot["captured_at"] = current
         snapshot["heartbeat_at"] = current
         snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
+        self._stamp_snapshot_metadata(snapshot)
         self._last_snapshot_state = dict(snapshot)
         return snapshot
 
@@ -141,6 +148,7 @@ class _AutoInputHelperSnapshotMixin:
         snapshot["captured_at"] = current
         snapshot["heartbeat_at"] = current
         snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
+        self._stamp_snapshot_metadata(snapshot)
         self._last_snapshot_state = snapshot
         self._write_snapshot(snapshot)
 
@@ -190,9 +198,15 @@ class _AutoInputHelperSnapshotMixin:
         snapshot = dict(self._last_snapshot_state)
         snapshot["heartbeat_at"] = current
         snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
+        self._stamp_snapshot_metadata(snapshot)
         self._last_snapshot_state = snapshot
         self._write_snapshot(snapshot)
         return not self._stop_requested
+
+    def _stamp_snapshot_metadata(self: Any, snapshot: dict[str, object]) -> None:
+        """Attach helper identity metadata used for supervisor liveness checks."""
+        snapshot["writer_pid"] = os.getpid()
+        snapshot["helper_generation"] = int(getattr(self, "helper_generation", 0) or 0)
 
     def _refresh_source(self: Any, source_name: str, now: float | None = None) -> None:
         """Refresh exactly one source on startup or when its DBus signal fires."""

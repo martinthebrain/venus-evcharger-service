@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .config_file import normalized_optional_lower_text
 from .models import PhaseSelection
 
 
@@ -39,8 +40,7 @@ _SHELLY_PROFILES: dict[str, ShellyProfileDefaults] = {
 
 def normalize_shelly_profile_name(value: object) -> str | None:
     """Return one normalized optional Shelly family preset name."""
-    profile_name = str(value).strip().lower() if value is not None else ""
-    return profile_name or None
+    return normalized_optional_lower_text(value)
 
 
 def resolve_shelly_profile(profile_name: str | None) -> ShellyProfileDefaults | None:

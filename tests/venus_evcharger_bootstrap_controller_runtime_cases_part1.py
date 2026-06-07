@@ -317,4 +317,51 @@ class _TestServiceBootstrapControllerRuntimePart1:
         service._start_control_api_server.assert_called_once_with()
         gobject_module.timeout_add.assert_any_call(1000, service._update)
 
+    def test_start_runtime_loops_uses_async_runtime_hooks_when_available(self):
+        gobject_module = MagicMock()
+        service = SimpleNamespace(
+            _mark_mainloop_thread=MagicMock(),
+            _start_io_worker=MagicMock(),
+            _start_control_api_server=MagicMock(),
+            _start_update_worker=MagicMock(),
+            _start_control_command_worker=MagicMock(),
+            _start_mainloop_watchdog=MagicMock(),
+            _start_companion_dbus_bridge=MagicMock(),
+            _schedule_update_cycle=MagicMock(),
+            _flush_dbus_publish_queue=MagicMock(),
+            _mainloop_heartbeat_tick=MagicMock(),
+            _dbus_publish_flush_interval_ms=123,
+            topology_configured=True,
+            runtime_state_path="/run/state.json",
+            _state_summary=MagicMock(return_value="mode=1"),
+            poll_interval_ms=1000,
+            sign_of_life_minutes=10,
+            _update=MagicMock(),
+            _sign_of_life=MagicMock(),
+        )
+        controller = ServiceBootstrapController(
+            service,
+            normalize_phase_func=lambda value: value,
+            normalize_mode_func=lambda value: int(value),
+            mode_uses_auto_logic_func=lambda mode: int(mode) in (1, 2),
+            month_window_func=lambda *_args, **_kwargs: ((8, 0), (18, 0)),
+            age_seconds_func=lambda *_args, **_kwargs: 0,
+            health_code_func=lambda reason: {"init": 0}.get(reason, 99),
+            phase_values_func=lambda *_args, **_kwargs: {},
+            read_version_func=lambda _name: "1.0",
+            gobject_module=gobject_module,
+            script_path="/tmp/venus_evcharger_service.py",
+            formatters={"kwh": None, "a": None, "w": None, "v": None, "status": None},
+        )
+
+        controller.start_runtime_loops()
+
+        service._mark_mainloop_thread.assert_called_once_with()
+        service._start_update_worker.assert_called_once_with()
+        service._start_control_command_worker.assert_called_once_with()
+        service._start_mainloop_watchdog.assert_called_once_with()
+        gobject_module.timeout_add.assert_any_call(1000, service._schedule_update_cycle)
+        gobject_module.timeout_add.assert_any_call(123, service._flush_dbus_publish_queue)
+        gobject_module.timeout_add.assert_any_call(1000, service._mainloop_heartbeat_tick)
+        self.assertFalse(any(call.args == (1000, service._update) for call in gobject_module.timeout_add.call_args_list))
 

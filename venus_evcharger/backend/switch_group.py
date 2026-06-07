@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, cast
 
 from .base import SwitchBackend
+from .config_file import config_section, load_required_backend_config
 from .models import (
     PhaseSelection,
     SwitchCapabilities,
@@ -48,16 +49,7 @@ class SwitchGroupSettings:
 
 def _config(config_path: str) -> configparser.ConfigParser:
     """Load one switch-group config file."""
-    parser = configparser.ConfigParser()
-    read_files = parser.read(config_path)
-    if not read_files:
-        raise FileNotFoundError(config_path)
-    return parser
-
-
-def _section(parser: configparser.ConfigParser, name: str) -> configparser.SectionProxy:
-    """Return one named section or DEFAULT when absent."""
-    return parser[name] if parser.has_section(name) else parser["DEFAULT"]
+    return load_required_backend_config(config_path, "switch group")
 
 
 def _normalized_phase_label(raw_key: object) -> str | None:
@@ -234,8 +226,8 @@ def load_switch_group_settings(service: Any, config_path: str = "") -> SwitchGro
     if not normalized_path:
         raise ValueError("Switch group backend requires a config path")
     parser = _config(normalized_path)
-    capabilities = _section(parser, "Capabilities")
-    members = _section(parser, "Members")
+    capabilities = config_section(parser, "Capabilities")
+    members = config_section(parser, "Members")
     phase_members = _phase_members(normalized_path, members)
     child_backends = {
         label: _child_switch_backend(service, member)

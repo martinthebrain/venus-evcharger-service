@@ -289,6 +289,7 @@ class _ServiceBootstrapAutoConfigMixin(_ComposableControllerMixin):
         svc.auto_contactor_fault_latch_seconds = float(_config_value(defaults, "AutoContactorFaultLatchSeconds", 60))
         svc.auto_watchdog_stale_seconds = float(_config_value(defaults, "AutoWatchdogStaleSeconds", 180))
         svc.auto_watchdog_recovery_seconds = float(_config_value(defaults, "AutoWatchdogRecoverySeconds", 60))
+        svc.auto_watchdog_restart_attempts = int(_config_value(defaults, "AutoWatchdogRestartAttempts", 5))
         svc.auto_startup_warmup_seconds = float(_config_value(defaults, "AutoStartupWarmupSeconds", 15))
         svc.auto_manual_override_seconds = float(_config_value(defaults, "AutoManualOverrideSeconds", 300))
         svc.startup_device_info_retries = int(_config_value(defaults, "StartupDeviceInfoRetries", 3))

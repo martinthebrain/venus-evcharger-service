@@ -7,6 +7,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from .victron_ess_balance_learning_profiles_support import (
+    _clear_victron_ess_balance_tracking_episode_state,
+    _record_victron_ess_balance_tracking_command,
+    _reset_victron_ess_balance_pid_integral_state,
+    _reset_victron_ess_balance_pid_state,
+    _victron_ess_balance_update_service_sample,
+)
+
 
 class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
     @staticmethod
@@ -83,14 +91,14 @@ class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
         command_profile_key: str,
         response_delay_seconds: float,
     ) -> None:
-        samples = int(getattr(svc, "_victron_ess_balance_telemetry_delay_samples", 0) or 0)
-        current_delay = self._optional_float(getattr(svc, "_victron_ess_balance_telemetry_response_delay_seconds", None))
-        svc._victron_ess_balance_telemetry_response_delay_seconds = self._ewma_learned_value(
-            current_delay,
+        _victron_ess_balance_update_service_sample(
+            svc,
             response_delay_seconds,
-            samples,
+            samples_attr="_victron_ess_balance_telemetry_delay_samples",
+            value_attr="_victron_ess_balance_telemetry_response_delay_seconds",
+            optional_float=self._optional_float,
+            ewma=self._ewma_learned_value,
         )
-        svc._victron_ess_balance_telemetry_delay_samples = samples + 1
         self._victron_ess_balance_update_profile_delay(svc, command_profile_key, response_delay_seconds)
 
     def _victron_ess_balance_update_gain(
@@ -99,10 +107,14 @@ class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
         command_profile_key: str,
         gain_sample: float,
     ) -> None:
-        samples = int(getattr(svc, "_victron_ess_balance_telemetry_gain_samples", 0) or 0)
-        current_gain = self._optional_float(getattr(svc, "_victron_ess_balance_telemetry_estimated_gain", None))
-        svc._victron_ess_balance_telemetry_estimated_gain = self._ewma_learned_value(current_gain, gain_sample, samples)
-        svc._victron_ess_balance_telemetry_gain_samples = samples + 1
+        _victron_ess_balance_update_service_sample(
+            svc,
+            gain_sample,
+            samples_attr="_victron_ess_balance_telemetry_gain_samples",
+            value_attr="_victron_ess_balance_telemetry_estimated_gain",
+            optional_float=self._optional_float,
+            ewma=self._ewma_learned_value,
+        )
         self._victron_ess_balance_update_profile_gain(svc, command_profile_key, gain_sample)
 
     def _victron_ess_balance_mark_overshoot(
@@ -394,41 +406,19 @@ class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
         source_error_w: float,
         profile_key: str,
     ) -> None:
-        svc._victron_ess_balance_telemetry_last_command_at = float(now)
-        svc._victron_ess_balance_telemetry_last_command_setpoint_w = float(setpoint_w)
-        svc._victron_ess_balance_telemetry_last_command_error_w = float(source_error_w)
-        svc._victron_ess_balance_telemetry_last_command_profile_key = str(profile_key or "").strip()
-        svc._victron_ess_balance_telemetry_command_response_recorded = False
-        svc._victron_ess_balance_telemetry_command_overshoot_recorded = False
-        svc._victron_ess_balance_telemetry_command_settled_recorded = False
-        svc._victron_ess_balance_telemetry_overshoot_active = False
-        svc._victron_ess_balance_telemetry_settling_active = True
+        _record_victron_ess_balance_tracking_command(svc, now, setpoint_w, source_error_w, profile_key)
 
     @staticmethod
     def _clear_victron_ess_balance_tracking_episode(svc: Any) -> None:
-        svc._victron_ess_balance_telemetry_last_command_at = None
-        svc._victron_ess_balance_telemetry_last_command_setpoint_w = None
-        svc._victron_ess_balance_telemetry_last_command_error_w = None
-        svc._victron_ess_balance_telemetry_last_command_profile_key = ""
-        svc._victron_ess_balance_telemetry_command_response_recorded = False
-        svc._victron_ess_balance_telemetry_command_overshoot_recorded = False
-        svc._victron_ess_balance_telemetry_command_settled_recorded = False
-        svc._victron_ess_balance_telemetry_overshoot_active = False
-        svc._victron_ess_balance_telemetry_settling_active = False
+        _clear_victron_ess_balance_tracking_episode_state(svc)
 
     @staticmethod
     def _reset_victron_ess_balance_pid(svc: Any) -> None:
-        svc._victron_ess_balance_pid_last_error_w = 0.0
-        svc._victron_ess_balance_pid_last_at = None
-        svc._victron_ess_balance_pid_integral_output_w = 0.0
-        svc._victron_ess_balance_pid_last_output_w = 0.0
+        _reset_victron_ess_balance_pid_state(svc)
 
     @staticmethod
     def _reset_victron_ess_balance_pid_integral(svc: Any, aggressive: bool = False) -> None:
-        svc._victron_ess_balance_pid_integral_output_w = 0.0
-        if aggressive:
-            svc._victron_ess_balance_pid_last_error_w = 0.0
-            svc._victron_ess_balance_pid_last_output_w = 0.0
+        _reset_victron_ess_balance_pid_integral_state(svc, aggressive)
 
 
 def _victron_ess_balance_settle_ratio(settled_count: int, total_outcomes: int) -> float:

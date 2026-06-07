@@ -7,6 +7,8 @@ import configparser
 from dataclasses import dataclass
 from typing import Mapping, cast
 
+from venus_evcharger.core.contracts import optional_text
+
 from .schema import (
     ActuatorConfig,
     ActuatorType,
@@ -199,8 +201,7 @@ def _policy(config: configparser.ConfigParser) -> PolicyConfig:
 
 
 def _optional_text(value: object) -> str | None:
-    text = str(value).strip() if value is not None else ""
-    return text or None
+    return optional_text(value)
 
 
 def _as_bool(value: object) -> bool:

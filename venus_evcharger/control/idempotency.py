@@ -10,6 +10,8 @@ import threading
 from collections import OrderedDict
 from typing import Any
 
+from .runtime_paths import is_runtime_path
+
 
 class ControlApiIdempotencyStore:
     """Persist recent idempotency responses in memory and under /run when configured."""
@@ -114,5 +116,4 @@ class ControlApiIdempotencyStore:
 
     @staticmethod
     def _is_runtime_path(path: str) -> bool:
-        normalized = os.path.abspath(path)
-        return normalized.startswith("/run/") or normalized.startswith("/tmp/")
+        return is_runtime_path(path)

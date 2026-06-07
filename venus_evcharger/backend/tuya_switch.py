@@ -3,22 +3,12 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
-from .template_switch import TemplateSwitchBackend
+from .template_switch import TemplateContactorSwitchMixin, TemplateSwitchBackend
 
 
 class TuyaSwitchBackend(TemplateSwitchBackend):
     """Template-backed switch alias for Tuya-compatible local HTTP bridges."""
 
 
-class TuyaContactorSwitchBackend(TuyaSwitchBackend):
+class TuyaContactorSwitchBackend(TemplateContactorSwitchMixin, TuyaSwitchBackend):
     """Tuya switch backend treated as an external contactor by default."""
-
-    def __init__(self, service: object, config_path: str = "") -> None:
-        super().__init__(service, config_path=config_path)
-        self.settings = replace(
-            self.settings,
-            switching_mode="contactor",
-            max_direct_switch_power_w=None,
-        )
