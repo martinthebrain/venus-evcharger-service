@@ -168,6 +168,12 @@ class _AutoInputSupervisorProcessMixin:
             return current - float(svc._auto_input_helper_last_start_at)
         return None
 
+    def _refresh_snapshot_for_liveness_check(self, current: float) -> None:
+        """Read the latest helper heartbeat before deciding whether it is stale."""
+        if not str(getattr(self.service, "auto_input_snapshot_path", "") or "").strip():
+            return
+        self.refresh_snapshot(current)
+
     def _handle_stale_running_helper(self, process: Any, current: float, snapshot_age: float | None) -> bool:
         svc = self.service
         if snapshot_age is None or snapshot_age <= svc.auto_input_helper_stale_seconds:
@@ -189,6 +195,7 @@ class _AutoInputSupervisorProcessMixin:
         svc = self.service
         return_code = process.poll()
         if return_code is None:
+            self._refresh_snapshot_for_liveness_check(current)
             snapshot_age = self._helper_snapshot_age(current)
             if self._handle_stale_running_helper(process, current, snapshot_age):
                 return True

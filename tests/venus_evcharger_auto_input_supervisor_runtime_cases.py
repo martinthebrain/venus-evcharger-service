@@ -67,6 +67,38 @@ class TestAutoInputSupervisorRuntime(unittest.TestCase):
         self.assertEqual(service._auto_input_helper_restart_requested_at, 100.0)
         service._spawn_auto_input_helper.assert_not_called()
 
+    def test_ensure_helper_process_refreshes_snapshot_before_stale_decision(self):
+        process = MagicMock()
+        process.poll.return_value = None
+        process.pid = 4321
+        service = SimpleNamespace(
+            _ensure_worker_state=MagicMock(),
+            _auto_input_helper_process=process,
+            _auto_input_helper_last_start_at=10.0,
+            _auto_input_helper_restart_requested_at=None,
+            _auto_input_snapshot_last_seen=70.0,
+            _auto_input_snapshot_seen_for_current_helper=True,
+            auto_input_snapshot_path="/tmp/auto-helper.json",
+            auto_input_helper_stale_seconds=15.0,
+            auto_input_helper_restart_seconds=5.0,
+            _time_now=MagicMock(return_value=100.0),
+            _stop_auto_input_helper=MagicMock(),
+            _spawn_auto_input_helper=MagicMock(),
+            _warning_throttled=MagicMock(),
+        )
+        controller = AutoInputSupervisor(service)
+
+        def refresh_snapshot(_current):
+            service._auto_input_snapshot_last_seen = 100.0
+
+        with patch.object(controller, "refresh_snapshot", side_effect=refresh_snapshot) as refresh_mock:
+            controller.ensure_helper_process()
+
+        refresh_mock.assert_called_once_with(100.0)
+        service._stop_auto_input_helper.assert_not_called()
+        self.assertIsNone(service._auto_input_helper_restart_requested_at)
+        service._spawn_auto_input_helper.assert_not_called()
+
     def test_stop_helper_covers_none_exited_running_and_force_paths(self):
         service = SimpleNamespace(_ensure_worker_state=MagicMock(), _auto_input_helper_process=None, _auto_input_helper_restart_requested_at="pending")
         controller = AutoInputSupervisor(service)
