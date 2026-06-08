@@ -3,7 +3,7 @@ from tests.venus_evcharger_update_cycle_controller_support import *
 
 
 class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
-    def test_prepare_update_cycle_supervises_io_worker_only_when_topology_is_configured(self):
+    def test_prepare_update_cycle_supervises_introspection_worker_even_without_topology(self):
         configured_service = SimpleNamespace(
             topology_configured=True,
             _start_io_worker=MagicMock(),
@@ -33,7 +33,7 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
         self.assertEqual(UpdateCycleController.prepare_update_cycle(unconfigured_service, 101.0), {})
 
         unconfigured_service._start_io_worker.assert_not_called()
-        unconfigured_service._ensure_dbus_introspection_worker_process.assert_not_called()
+        unconfigured_service._ensure_dbus_introspection_worker_process.assert_called_once_with(101.0)
 
     def test_publish_online_update_prefers_fresh_native_charger_measurements(self):
         service = SimpleNamespace(

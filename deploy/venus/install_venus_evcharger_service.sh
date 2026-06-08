@@ -113,9 +113,30 @@ chmod 755 "$SERVICE_DIR/log/run"
 chmod a+x "$OBSERVER_SERVICE_DIR/run"
 chmod 755 "$OBSERVER_SERVICE_DIR/run"
 
+cleanup_duplicate_supervisors() {
+    service_name="$1"
+    pids=$(ps w 2>/dev/null | awk -v name="$service_name" '$5 == "supervise" && $6 == name {print $1}')
+    keep_pid=""
+    count=0
+    for pid in $pids; do
+        keep_pid="$pid"
+        count=$((count + 1))
+    done
+    if [ "$count" -le 1 ]; then
+        return
+    fi
+    for pid in $pids; do
+        if [ "$pid" != "$keep_pid" ]; then
+            kill "$pid" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
 # Register or update the runit service symlink.
 ln -sfn "$SERVICE_DIR" "/service/$SERVICE_NAME"
 ln -sfn "$OBSERVER_SERVICE_DIR" "/service/$OBSERVER_SERVICE_NAME"
+cleanup_duplicate_supervisors "$SERVICE_NAME"
+cleanup_duplicate_supervisors "$OBSERVER_SERVICE_NAME"
 
 remove_rc_local_line() {
     line="$1"

@@ -309,7 +309,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
         if topology_configured and callable(start_io_worker):
             start_io_worker()
         ensure_introspection_worker = getattr(svc, "_ensure_dbus_introspection_worker_process", None)
-        if topology_configured and callable(ensure_introspection_worker):
+        if callable(ensure_introspection_worker):
             ensure_introspection_worker(now)
         svc._watchdog_recover(now)
         svc._ensure_auto_input_helper_process(now)

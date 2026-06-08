@@ -6,6 +6,8 @@ class _TestServiceBootstrapControllerRuntimePart2:
         gobject_module = MagicMock()
         service = SimpleNamespace(
             _start_io_worker=MagicMock(),
+            _ensure_dbus_introspection_worker_process=MagicMock(),
+            _time_now=MagicMock(return_value=123.0),
             _start_control_api_server=MagicMock(),
             _start_companion_dbus_bridge=MagicMock(),
             topology_configured=False,
@@ -35,6 +37,7 @@ class _TestServiceBootstrapControllerRuntimePart2:
         controller.start_runtime_loops()
 
         service._start_io_worker.assert_not_called()
+        service._ensure_dbus_introspection_worker_process.assert_called_once_with(123.0)
         service._start_control_api_server.assert_called_once_with()
         service._start_companion_dbus_bridge.assert_called_once_with()
         gobject_module.timeout_add.assert_any_call(1000, service._update)
@@ -44,6 +47,8 @@ class _TestServiceBootstrapControllerRuntimePart2:
         gobject_module = MagicMock()
         service = SimpleNamespace(
             _start_io_worker=MagicMock(),
+            _ensure_dbus_introspection_worker_process=MagicMock(),
+            _time_now=MagicMock(return_value=456.0),
             _start_control_api_server=MagicMock(),
             _start_companion_dbus_bridge=MagicMock(),
             topology_configured=True,
@@ -73,6 +78,7 @@ class _TestServiceBootstrapControllerRuntimePart2:
         controller.start_runtime_loops()
 
         service._start_io_worker.assert_called_once_with()
+        service._ensure_dbus_introspection_worker_process.assert_called_once_with(456.0)
         service._start_control_api_server.assert_called_once_with()
         service._start_companion_dbus_bridge.assert_called_once_with()
 
@@ -204,4 +210,3 @@ class _TestServiceBootstrapControllerRuntimePart2:
                 controller.register_paths()
 
         error_mock.assert_called_once()
-
