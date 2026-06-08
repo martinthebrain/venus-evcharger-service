@@ -12,6 +12,7 @@ class _ServiceMixinsRuntimeUpdateCases:
         service._runtime_support_controller = MagicMock()
         service._runtime_support_controller.assert_dbus_mainloop_thread = MagicMock()
         service._auto_input_supervisor = MagicMock()
+        service._dbus_introspection_supervisor = MagicMock()
         service._shelly_io_controller = MagicMock()
 
         service._reset_system_bus()
@@ -51,6 +52,8 @@ class _ServiceMixinsRuntimeUpdateCases:
         service._stop_auto_input_helper(force=True)
         service._spawn_auto_input_helper(12.0)
         service._ensure_auto_input_helper_process(12.0)
+        service._stop_dbus_introspection_worker(force=True)
+        service._ensure_dbus_introspection_worker_process(12.0)
         service._refresh_auto_input_snapshot(12.0)
         service._request_with_session("sess", "http://example.invalid")
         service._rpc_call_with_session("sess", "Switch.Set", on=True)
@@ -110,6 +113,8 @@ class _ServiceMixinsRuntimeUpdateCases:
         service._auto_input_supervisor.stop_helper.assert_called_once_with(True)
         service._auto_input_supervisor.spawn_helper.assert_called_once_with(12.0)
         service._auto_input_supervisor.ensure_helper_process.assert_called_once_with(12.0)
+        service._dbus_introspection_supervisor.stop_worker.assert_called_once_with(True)
+        service._dbus_introspection_supervisor.ensure_worker_process.assert_called_once_with(12.0)
         service._auto_input_supervisor.refresh_snapshot.assert_called_once_with(12.0)
         io = service._shelly_io_controller
         io.request_with_session.assert_called_once_with("sess", "http://example.invalid")
@@ -259,6 +264,7 @@ class _ServiceMixinsRuntimeUpdateCases:
         service._state_controller = existing
         service._write_controller = existing
         service._auto_input_supervisor = existing
+        service._dbus_introspection_supervisor = existing
         service._runtime_support_controller = existing
         service._dbus_input_controller = existing
         service._bootstrap_controller = existing
@@ -271,6 +277,7 @@ class _ServiceMixinsRuntimeUpdateCases:
         service._ensure_state_controller()
         service._ensure_write_controller()
         service._ensure_auto_input_supervisor()
+        service._ensure_dbus_introspection_supervisor()
         service._ensure_runtime_support_controller()
         service._ensure_dbus_input_controller()
         service._ensure_bootstrap_controller()
@@ -283,6 +290,7 @@ class _ServiceMixinsRuntimeUpdateCases:
         self.assertIs(service._state_controller, existing)
         self.assertIs(service._write_controller, existing)
         self.assertIs(service._auto_input_supervisor, existing)
+        self.assertIs(service._dbus_introspection_supervisor, existing)
         self.assertIs(service._runtime_support_controller, existing)
         self.assertIs(service._dbus_input_controller, existing)
         self.assertIs(service._bootstrap_controller, existing)
@@ -298,6 +306,16 @@ class _ServiceMixinsRuntimeUpdateCases:
 
         factory.assert_called_once_with(service, "")
         self.assertEqual(service._companion_dbus_bridge, "bridge")
+
+    def test_service_controller_factory_creates_dbus_introspection_supervisor_once(self):
+        service = _FactoryService()
+
+        with patch("venus_evcharger.service.factory.DbusIntrospectionSupervisor", return_value="introspection") as factory:
+            service._ensure_dbus_introspection_supervisor()
+            service._ensure_dbus_introspection_supervisor()
+
+        factory.assert_called_once_with(service)
+        self.assertEqual(service._dbus_introspection_supervisor, "introspection")
 
     def test_auto_logic_mixin_delegates_and_exposes_static_helpers(self):
         service = _AutoService()

@@ -110,6 +110,17 @@ class RuntimeSupportController(
             ),
             "auto_input_helper_restart_seconds": lambda: 5.0,
             "auto_input_helper_stale_seconds": lambda: 15.0,
+            "dbus_introspection_enabled": lambda: True,
+            "dbus_introspection_snapshot_path": lambda: (
+                f"/run/dbus-venus-evcharger-dbus-map-{getattr(svc, 'deviceinstance', 0)}.json"
+            ),
+            "dbus_introspection_request_path": lambda: (
+                f"/run/dbus-venus-evcharger-dbus-map-requests-{getattr(svc, 'deviceinstance', 0)}.json"
+            ),
+            "dbus_introspection_max_age_seconds": lambda: 900.0,
+            "dbus_introspection_restart_seconds": lambda: 30.0,
+            "_dbus_introspection_worker_process": lambda: None,
+            "_dbus_introspection_worker_last_start_at": lambda: 0.0,
             "_auto_mode_cutover_pending": lambda: False,
             "_ignore_min_offtime_once": lambda: False,
         }

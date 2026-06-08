@@ -13,6 +13,7 @@ from venus_evcharger.controllers.auto import AutoDecisionController
 from venus_evcharger.companion import EnergyCompanionDbusBridge
 from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.inputs.dbus import DbusInputController
+from venus_evcharger.inputs.introspection_supervisor import DbusIntrospectionSupervisor
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
 from venus_evcharger.controllers.write import DbusWriteController
 from venus_evcharger.ports import AutoDecisionPort, DbusInputPort, UpdateCyclePort, WriteControllerPort
@@ -43,6 +44,7 @@ class ServiceControllerFactoryMixin:
     _state_controller: Any = None
     _write_controller: Any = None
     _auto_input_supervisor: Any = None
+    _dbus_introspection_supervisor: Any = None
     _runtime_support_controller: Any = None
     _dbus_input_controller: Any = None
     _bootstrap_controller: Any = None
@@ -76,6 +78,10 @@ class ServiceControllerFactoryMixin:
     def _ensure_auto_input_supervisor(self) -> None:
         if not hasattr(self, "_auto_input_supervisor") or self._auto_input_supervisor is None:
             self._auto_input_supervisor = AutoInputSupervisor(self)
+
+    def _ensure_dbus_introspection_supervisor(self) -> None:
+        if not hasattr(self, "_dbus_introspection_supervisor") or self._dbus_introspection_supervisor is None:
+            self._dbus_introspection_supervisor = DbusIntrospectionSupervisor(self)
 
     def _ensure_runtime_support_controller(self) -> None:
         if not hasattr(self, "_runtime_support_controller") or self._runtime_support_controller is None:

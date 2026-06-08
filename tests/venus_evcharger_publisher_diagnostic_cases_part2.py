@@ -1,7 +1,41 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_publisher_diagnostic_cases_support import *  # noqa: F401,F403
+from unittest.mock import patch
 
 class _TestDbusPublishControllerDiagnosticsPart2:
+    def test_diagnostic_values_include_dbus_introspection_map_counts(self) -> None:
+        service = SimpleNamespace()
+        controller = DbusPublishController(service, self._real_age_seconds)
+        snapshot = {
+            "worker_state": "running",
+            "queue_depth": 3,
+            "services": {
+                "svc.good": {"paths": {"/A": {"status": "fresh"}}},
+                "svc.bad": {
+                    "paths": {
+                        "/Missing": {"status": "known-missing"},
+                        "/Slow": {"status": "unresponsive-backoff"},
+                    }
+                },
+                "svc.odd": {"paths": []},
+                "svc.list": [],
+            },
+        }
+
+        with patch("venus_evcharger.publish.dbus_diagnostics.load_owner_introspection_snapshot", return_value=snapshot):
+            values = controller._dbus_introspection_counter_values(100.0)
+
+        self.assertEqual(values["/Auto/DbusIntrospectionState"], "running")
+        self.assertEqual(values["/Auto/DbusIntrospectionQueueDepth"], 3)
+        self.assertEqual(values["/Auto/DbusIntrospectionServiceCount"], 4)
+        self.assertEqual(values["/Auto/DbusIntrospectionUnusablePathCount"], 2)
+
+        with patch("venus_evcharger.publish.dbus_diagnostics.load_owner_introspection_snapshot", return_value={"services": []}):
+            odd_values = controller._dbus_introspection_counter_values(101.0)
+
+        self.assertEqual(odd_values["/Auto/DbusIntrospectionServiceCount"], 0)
+        self.assertEqual(odd_values["/Auto/DbusIntrospectionUnusablePathCount"], 0)
+
     def test_diagnostic_values_keep_fault_and_recovery_visible_while_scheduled_and_retry_are_also_active(self) -> None:
         current_time = 1776718800.0
         service = _with_backends_config(SimpleNamespace(
@@ -194,4 +228,3 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         self.assertEqual(counter_values["/Auto/StatusSource"], "charger-status-charging")
         self.assertEqual(counter_values["/Auto/PhaseObserved"], "P1_P2")
         self.assertEqual(counter_values["/Auto/PhaseMismatchActive"], 1)
-

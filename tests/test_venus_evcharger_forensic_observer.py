@@ -28,7 +28,7 @@ class _FakeDbusBus:
     def __init__(self):
         self.values = {"/Mode": 1, "/Ac/Power": object()}
 
-    def get_object(self, _service_name, path):
+    def get_object(self, _service_name, path, introspect=True):
         return _FakeDbusObject(self.values, path)
 
 
@@ -67,6 +67,8 @@ class ForensicObserverTests(unittest.TestCase):
             self.assertEqual(observer.read_mounts(str(Path(temp_dir) / "missing-mounts")), "")
             config_path.write_text("[DEFAULT]\nAutoInputSnapshotPath=/tmp/custom-auto.json\n", encoding="utf-8")
             self.assertEqual(observer.auto_input_snapshot_path(observer.load_defaults(str(config_path))), "/tmp/custom-auto.json")
+            config_path.write_text("[DEFAULT]\nDbusIntrospectionSnapshotPath=/tmp/custom-map.json\n", encoding="utf-8")
+            self.assertEqual(observer.dbus_introspection_snapshot_path(observer.load_defaults(str(config_path))), "/tmp/custom-map.json")
 
     def test_dbus_snapshot_and_incident_reasons(self):
         dbus_state = observer.read_dbus_paths(

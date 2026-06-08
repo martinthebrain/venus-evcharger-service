@@ -56,6 +56,8 @@ class _AutoInputHelperSourcePvGridMixin:
         total = 0.0
         seen_value = False
         for service_name in service_names:
+            if self._dbus_introspection_says_skip(service_name, self.auto_pv_path):
+                continue
             try:
                 value = self._get_dbus_value(service_name, self.auto_pv_path)
             except Exception as error:  # pylint: disable=broad-except

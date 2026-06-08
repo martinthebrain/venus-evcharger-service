@@ -197,6 +197,11 @@ def _age_counter_diagnostic_defaults() -> PathMap:
         "/Auto/Stale": (0, None),
         "/Auto/StaleSeconds": (0, None),
         "/Auto/RecoveryAttempts": (0, None),
+        "/Auto/DbusIntrospectionState": ("unknown", None),
+        "/Auto/DbusIntrospectionQueueDepth": (0, None),
+        "/Auto/DbusIntrospectionServiceCount": (0, None),
+        "/Auto/DbusIntrospectionUnusablePathCount": (0, None),
+        "/Auto/DbusIntrospectionSnapshotAge": (-1, None),
     }
 
 

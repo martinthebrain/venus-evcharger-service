@@ -46,7 +46,7 @@ class _FakeBus:
         self.missing_get_paths: set[tuple[str, str]] = set()
         self.ignore_set_paths: set[tuple[str, str]] = set()
 
-    def get_object(self, service: str, path: str) -> _FakeBusItem:
+    def get_object(self, service: str, path: str, introspect: bool = True) -> _FakeBusItem:
         return _FakeBusItem(self, service, path)
 
 
@@ -155,7 +155,7 @@ class TestCerboGxRelaySwitchBackend(unittest.TestCase):
         original_get_object = bus.get_object
         reads = {"count": 0}
 
-        def get_object(service: str, path: str) -> _FakeBusItem:
+        def get_object(service: str, path: str, introspect: bool = True) -> _FakeBusItem:
             item = original_get_object(service, path)
             if service == "com.victronenergy.system" and path == "/Relay/0/State":
                 original_get = item.GetValue
@@ -266,7 +266,7 @@ class TestCerboGxRelaySwitchBackend(unittest.TestCase):
 
         class _FakeDbusModule:
             class SystemBus:
-                def get_object(self, service: str, path: str) -> _FakeBusItem:
+                def get_object(self, service: str, path: str, introspect: bool = True) -> _FakeBusItem:
                     return bus.get_object(service, path)
 
             @staticmethod
@@ -280,7 +280,7 @@ class TestCerboGxRelaySwitchBackend(unittest.TestCase):
         raw_obj = object()
 
         class _ObjectBus:
-            def get_object(self, _service: str, _path: str) -> object:
+            def get_object(self, _service: str, _path: str, introspect: bool = True) -> object:
                 return raw_obj
 
         backend = CerboGxRelaySwitchBackend(

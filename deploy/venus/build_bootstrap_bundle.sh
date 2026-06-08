@@ -51,6 +51,7 @@ for rel_path in \
     venus_evcharger_service.py \
     venus_evcharger_observer.py \
     venus_evcharger_auto_input_helper.py \
+    venus_evcharger_dbus_introspection_worker.py \
     deploy/venus \
     venus_evcharger \
     scripts/ops

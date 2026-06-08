@@ -124,7 +124,7 @@ class _BranchCoverageVictronApplyCasesPart1:
             def __init__(self, interface: _FakeInterface) -> None:
                 self.interface = interface
 
-            def get_object(self, normalized_service: str, normalized_path: str) -> object:
+            def get_object(self, normalized_service: str, normalized_path: str, introspect: bool = True) -> object:
                 return (normalized_service, normalized_path)
 
         fake_interface = _FakeInterface()
@@ -361,5 +361,4 @@ class _BranchCoverageVictronApplyCasesPart1:
 
         controller._merge_victron_ess_balance_metrics(service, {"x": 1})
         self.assertEqual(service._last_auto_metrics, {"x": 1})
-
 

@@ -38,6 +38,7 @@ write_managed_layout() {
     chmod 755 "${destination_root}/venus_evcharger_service.py" 2>/dev/null || true
     chmod 755 "${destination_root}/venus_evcharger_observer.py" 2>/dev/null || true
     chmod 755 "${destination_root}/venus_evcharger_auto_input_helper.py" 2>/dev/null || true
+    chmod 755 "${destination_root}/venus_evcharger_dbus_introspection_worker.py" 2>/dev/null || true
     chmod 755 "${destination_root}/deploy/venus/install_venus_evcharger_service.sh" 2>/dev/null || true
     chmod 755 "${destination_root}/deploy/venus/boot_venus_evcharger_service.sh" 2>/dev/null || true
     chmod 744 "${destination_root}/deploy/venus/restart_venus_evcharger_service.sh" 2>/dev/null || true

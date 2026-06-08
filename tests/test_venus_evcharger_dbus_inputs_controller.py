@@ -174,6 +174,35 @@ class TestDbusInputController(unittest.TestCase):
             self.assertIsNone(controller._handle_missing_grid_values(False, [], 100.0))
         handle_failure.assert_called_once()
 
+    def test_introspection_map_skip_paths_cover_main_storage_and_grid_reads(self) -> None:
+        service = self._make_service()
+        service.dbus_introspection_request_path = "/tmp/request.json"
+        service.dbus_introspection_snapshot_path = "/tmp/map.json"
+        service._get_dbus_value = MagicMock(return_value=12.0)
+        controller = DbusInputController(service)
+
+        with (
+            patch("venus_evcharger.inputs.pv.owner_path_unusable", return_value=(True, "known-missing")),
+            patch("venus_evcharger.inputs.pv.request_owner_introspection") as request_main,
+        ):
+            self.assertIsNone(controller.get_dbus_value("svc", "/Path"))
+        request_main.assert_called_once()
+
+        with (
+            patch("venus_evcharger.inputs.storage_support.owner_path_unusable", return_value=(True, "known-missing")),
+            patch("venus_evcharger.inputs.storage_support.request_owner_introspection") as request_storage,
+        ):
+            self.assertFalse(controller._battery_service_has_soc("battery"))
+            self.assertFalse(controller._energy_service_has_readable_field("battery", "/Soc"))
+            self.assertIsNone(controller._read_optional_energy_value("battery", "/Soc"))
+            self.assertEqual(controller._read_optional_energy_text("battery", "/Mode"), "")
+            total, seen_value, missing_paths = controller._read_grid_phase_values(["/Ac/Grid/L1/Power"])
+
+        self.assertEqual(total, 0.0)
+        self.assertFalse(seen_value)
+        self.assertEqual(missing_paths, ["/Ac/Grid/L1/Power"])
+        self.assertGreaterEqual(request_storage.call_count, 5)
+
     def test_battery_override_cached_resolution_and_nonnumeric_grid_values(self) -> None:
         service = self._make_service()
         controller = DbusInputController(service)

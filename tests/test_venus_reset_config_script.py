@@ -22,6 +22,7 @@ class TestVenusResetConfigScript(unittest.TestCase):
             "venus_evcharger",
             "venus_evcharger_service.py",
             "venus_evcharger_auto_input_helper.py",
+            "venus_evcharger_dbus_introspection_worker.py",
         ):
             source = REPO_ROOT / rel_path
             target = repo_copy / rel_path

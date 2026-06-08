@@ -212,7 +212,7 @@ class ServiceBootstrapController(
         if dbus_conn is None or not service_name:
             return False
         try:
-            bus = dbus_conn.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+            bus = dbus_conn.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
             owner = bus.GetNameOwner(service_name, dbus_interface="org.freedesktop.DBus")
             owner_pid = int(bus.GetConnectionUnixProcessID(owner, dbus_interface="org.freedesktop.DBus"))
         except Exception as error:  # pylint: disable=broad-except
