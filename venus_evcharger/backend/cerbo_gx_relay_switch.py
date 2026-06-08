@@ -211,7 +211,7 @@ class CerboGxRelaySwitchBackend:
         return dbus.SystemBus()
 
     def _busitem(self, service: str, path: str) -> Any:
-        obj = self._system_bus().get_object(service, path)
+        obj = self._system_bus().get_object(service, path, introspect=False)
         if hasattr(obj, "GetValue") and hasattr(obj, "SetValue"):
             return obj
         import dbus

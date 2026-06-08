@@ -150,6 +150,14 @@ class ShellyWallboxService(ControlApiMixin, StatePublishMixin, RuntimeHelperMixi
         )
 
     @staticmethod
+    def _dbus_introspection_worker_path() -> str:
+        """Return the advisory DBus introspection worker script path."""
+        return os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            "venus_evcharger_dbus_introspection_worker.py",
+        )
+
+    @staticmethod
     def _stat_path(path: str) -> stat_result:
         """Return `os.stat(path)`.
 

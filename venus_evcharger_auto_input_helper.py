@@ -110,6 +110,12 @@ class AutoInputHelper(
             "AutoInputSnapshotPath",
             "/run/dbus-venus-evcharger-auto.json",
         ).strip()
+        self.dbus_introspection_snapshot_path = self.config.get("DbusIntrospectionSnapshotPath", "").strip()
+        self.dbus_introspection_request_path = self.config.get("DbusIntrospectionRequestPath", "").strip()
+        self.dbus_introspection_max_age_seconds = max(
+            0.0,
+            float(self.config.get("DbusIntrospectionMaxAgeSeconds", 900.0) or 900.0),
+        )
         self.dbus_method_timeout_seconds = float(self.config.get("DbusMethodTimeoutSeconds", 1.0))
 
     @staticmethod

@@ -118,7 +118,7 @@ class TestDisableGenericShellyOnce(unittest.TestCase):
             iface.GetValue.return_value = 17
             value = disable_generic_shelly_once.get_dbus_value(bus, "svc", "/Value", timeout=2.5)
             self.assertEqual(value, 17)
-            bus.get_object.assert_called_with("svc", "/Value")
+            bus.get_object.assert_called_with("svc", "/Value", introspect=False)
             interface_factory.assert_called_with("object", "com.victronenergy.BusItem")
             iface.GetValue.assert_called_once_with(timeout=2.5)
 
@@ -138,6 +138,7 @@ class TestDisableGenericShellyOnce(unittest.TestCase):
             iface.Introspect.return_value = "<node><node name='a'/><node/><node name='b'/></node>"
             children = disable_generic_shelly_once.get_dbus_child_nodes(bus, "svc", "/Devices", timeout=0.5)
             self.assertEqual(children, ["a", "b"])
+            bus.get_object.assert_called_with("svc", "/Devices", introspect=False)
             interface_factory.assert_called_with("object", "org.freedesktop.DBus.Introspectable")
             iface.Introspect.assert_called_once_with(timeout=0.5)
 

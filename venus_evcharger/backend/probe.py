@@ -29,6 +29,7 @@ from .config import compat_legacy_backend_view_from_runtime
 from .config_file import load_required_backend_config
 from .factory import build_service_backends
 from .registry import CHARGER_BACKENDS, METER_BACKENDS, SWITCH_BACKENDS
+from venus_evcharger.dbus_introspection import load_introspection_snapshot
 
 
 def _config(path: str) -> configparser.ConfigParser:
@@ -145,6 +146,7 @@ def validate_wallbox_config(path: str) -> dict[str, object]:
     config = _config(path)
     service = _probe_service_from_wallbox_config(config)
     resolved = build_service_backends(service)
+    defaults = config["DEFAULT"]
     return {
         "path": path,
         "runtime": _json_ready(resolved.runtime),
@@ -154,6 +156,26 @@ def validate_wallbox_config(path: str) -> dict[str, object]:
             "switch": resolved.switch is not None,
             "charger": resolved.charger is not None,
         },
+        "dbus_introspection": _dbus_introspection_probe_summary(defaults),
+    }
+
+
+def _dbus_introspection_probe_summary(defaults: configparser.SectionProxy) -> dict[str, object]:
+    deviceinstance = int(float(defaults.get("DeviceInstance", "60") or 60))
+    snapshot_path = defaults.get(
+        "DbusIntrospectionSnapshotPath",
+        f"/run/dbus-venus-evcharger-dbus-map-{deviceinstance}.json",
+    ).strip()
+    max_age_seconds = float(defaults.get("DbusIntrospectionMaxAgeSeconds", "900") or 900)
+    snapshot = load_introspection_snapshot(snapshot_path, max_age_seconds=max_age_seconds)
+    services = snapshot.get("services", {}) if isinstance(snapshot, dict) else {}
+    return {
+        "enabled": defaults.get("DbusIntrospectionEnabled", "1").strip().lower() in ("1", "true", "yes", "on"),
+        "snapshot_path": snapshot_path,
+        "snapshot_fresh": bool(snapshot),
+        "worker_state": str(snapshot.get("worker_state", "")) if snapshot else "",
+        "queue_depth": int(snapshot.get("queue_depth", 0) or 0) if snapshot else 0,
+        "service_count": len(services) if isinstance(services, dict) else 0,
     }
 
 

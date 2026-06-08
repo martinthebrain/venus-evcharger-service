@@ -17,6 +17,7 @@ from venus_evcharger.core.shared import (
     sum_dbus_numeric,
 )
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.dbus_introspection import owner_path_unusable, request_owner_introspection
 
 
 class _DbusInputPvMixin(_ComposableControllerMixin):
@@ -75,13 +76,25 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
     def get_dbus_value(self, service_name: str, path: str) -> float | int | None:
         """Read a DBus value via com.victronenergy.BusItem."""
         svc = self.service
+        skip, reason = owner_path_unusable(svc, service_name, path)
+        if skip:
+            logging.debug("Skipping %s %s from DBus introspection cache: %s", service_name, path, reason)
+            request_owner_introspection(
+                svc,
+                service_name,
+                path,
+                priority=90,
+                reason="main input read skipped known-unusable path",
+                source="evcharger-inputs",
+            )
+            return None
         last_error: Exception | None = None
         timeout = getattr(svc, "dbus_method_timeout_seconds", 1.0)
         dbus_module = self._dbus_module()
         for attempt in range(2):
             try:
                 bus = svc._get_system_bus()
-                obj = bus.get_object(service_name, path)
+                obj = bus.get_object(service_name, path, introspect=False)
                 interface = dbus_module.Interface(obj, "com.victronenergy.BusItem")
                 value = interface.GetValue(timeout=timeout)
                 self._mark_dbus_success(svc)
@@ -98,6 +111,14 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
                         error,
                     )
         assert last_error is not None
+        request_owner_introspection(
+            svc,
+            service_name,
+            path,
+            priority=100,
+            reason="main input DBus read failed",
+            source="evcharger-inputs",
+        )
         raise last_error
 
     def list_dbus_services(self) -> list[str]:
@@ -140,7 +161,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         """Return the raw DBus name list through the freedesktop DBus interface."""
         svc = self.service
         bus = svc._get_system_bus()
-        dbus_obj = bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+        dbus_obj = bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
         dbus_module = self._dbus_module()
         dbus_if = dbus_module.Interface(dbus_obj, "org.freedesktop.DBus")
         return [str(name) for name in dbus_if.ListNames(timeout=svc.dbus_method_timeout_seconds)]

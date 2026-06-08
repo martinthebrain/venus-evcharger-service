@@ -13,6 +13,7 @@ from venus_evcharger.core.shared import (
     first_matching_prefixed_service,
     grid_values_complete_enough,
 )
+from venus_evcharger.dbus_introspection import owner_path_unusable, request_owner_introspection
 from venus_evcharger.energy import EnergySourceDefinition
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
@@ -80,17 +81,23 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
 
     def _battery_service_has_soc(self, service_name: str) -> bool:
         try:
+            if self._introspection_says_skip(service_name, self.service.auto_battery_soc_path, priority=80):
+                return False
             soc_value = self.service._get_dbus_value(service_name, self.service.auto_battery_soc_path)
         except Exception:
+            self._request_introspection(service_name, self.service.auto_battery_soc_path, priority=95, reason="battery SOC probe failed")
             return False
         return soc_value is not None
 
     def _energy_service_has_readable_field(self, service_name: str, path: str) -> bool:
         if not path:
             return False
+        if self._introspection_says_skip(service_name, path, priority=85):
+            return False
         try:
             return self.service._get_dbus_value(service_name, path) is not None
         except Exception:
+            self._request_introspection(service_name, path, priority=95, reason="energy-source field probe failed")
             return False
 
     def _energy_source_has_readable_data(self, source: EnergySourceDefinition, service_name: str) -> bool:
@@ -222,10 +229,14 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         seen_value = False
         missing_paths = []
         for path in configured_paths:
+            if self._introspection_says_skip(svc.auto_grid_service, path, priority=85):
+                missing_paths.append(path)
+                continue
             try:
                 value = svc._get_dbus_value(svc.auto_grid_service, path)
             except Exception as error:  # pylint: disable=broad-except
                 logging.debug("Auto grid read failed for %s %s: %s", svc.auto_grid_service, path, error)
+                self._request_introspection(svc.auto_grid_service, path, priority=95, reason="grid phase read failed")
                 missing_paths.append(path)
                 continue
             if value is not None:
@@ -238,6 +249,23 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
             else:
                 missing_paths.append(path)
         return total, seen_value, missing_paths
+
+    def _introspection_says_skip(self, service_name: str, path: str, *, priority: int) -> bool:
+        skip, reason = owner_path_unusable(self.service, service_name, path)
+        if skip:
+            logging.debug("Skipping %s %s from DBus introspection cache: %s", service_name, path, reason)
+            self._request_introspection(service_name, path, priority=priority, reason="known-unusable input path")
+        return bool(skip)
+
+    def _request_introspection(self, service_name: str, path: str, *, priority: int, reason: str) -> None:
+        request_owner_introspection(
+            self.service,
+            service_name,
+            path,
+            priority=priority,
+            reason=reason,
+            source="evcharger-inputs",
+        )
 
     def _grid_values_complete_enough(self, seen_value: bool, missing_paths: list[str]) -> bool:
         return grid_values_complete_enough(

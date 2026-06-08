@@ -67,6 +67,13 @@ def auto_input_snapshot_path(defaults: configparser.SectionProxy) -> str:
     return f"/run/dbus-venus-evcharger-auto-{device_instance(defaults)}.json"
 
 
+def dbus_introspection_snapshot_path(defaults: configparser.SectionProxy) -> str:
+    configured = str(defaults.get("DbusIntrospectionSnapshotPath", "")).strip()
+    if configured:
+        return configured
+    return f"/run/dbus-venus-evcharger-dbus-map-{device_instance(defaults)}.json"
+
+
 def runtime_state_path(defaults: configparser.SectionProxy) -> str:
     return f"/run/dbus-venus-evcharger-{device_instance(defaults)}.json"
 
@@ -139,7 +146,7 @@ def command_output(args: list[str], timeout: float = 3.0) -> dict[str, Any]:
 
 
 def dbus_value(bus: Any, service_name: str, path: str, timeout: float = 1.0) -> Any:
-    obj = bus.get_object(service_name, path)
+    obj = bus.get_object(service_name, path, introspect=False)
     iface = obj.get_dbus_method("GetValue", "com.victronenergy.BusItem")
     return iface(timeout=timeout)
 
@@ -241,19 +248,27 @@ def read_json_file(path: str) -> dict[str, Any]:
     return payload
 
 
-def helper_processes(ps_text: str) -> list[dict[str, Any]]:
-    helpers: list[dict[str, Any]] = []
+def matching_processes(ps_text: str, marker: str) -> list[dict[str, Any]]:
+    processes: list[dict[str, Any]] = []
     for line in ps_text.splitlines():
-        if "venus_evcharger_auto_input_helper.py" not in line:
+        if marker not in line:
             continue
         fields = line.split(None, 4)
-        helpers.append(
+        processes.append(
             {
                 "pid": fields[0] if fields else "",
                 "line": line,
             }
         )
-    return helpers
+    return processes
+
+
+def helper_processes(ps_text: str) -> list[dict[str, Any]]:
+    return matching_processes(ps_text, "venus_evcharger_auto_input_helper.py")
+
+
+def dbus_introspection_worker_processes(ps_text: str) -> list[dict[str, Any]]:
+    return matching_processes(ps_text, "venus_evcharger_dbus_introspection_worker.py")
 
 
 def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None = None) -> dict[str, Any]:
@@ -270,8 +285,10 @@ def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None 
         "config_path": config_path,
         "dbus": read_dbus_paths(service_name, bus_factory=bus_factory),
         "auto_input_snapshot": read_json_file(auto_input_snapshot_path(defaults)),
+        "dbus_introspection_snapshot": read_json_file(dbus_introspection_snapshot_path(defaults)),
         "runtime_state": read_json_file(runtime_state_path(defaults)),
         "helper_processes": helper_processes(ps_text),
+        "dbus_introspection_worker_processes": dbus_introspection_worker_processes(ps_text),
         "shelly": fetch_shelly_status(configured_host(defaults)),
         "svstat": command_output(["svstat", "/service/dbus-venus-evcharger"]),
         "ps": ps_snapshot,

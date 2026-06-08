@@ -15,6 +15,11 @@ from venus_evcharger.core.shared import (
     discovery_cache_valid,
     first_matching_prefixed_service,
 )
+from venus_evcharger.dbus_introspection import (
+    owner_path_children,
+    owner_path_unusable,
+    request_owner_introspection,
+)
 from venus_evcharger.energy import EnergySourceDefinition, EnergySourceSnapshot
 from venus_evcharger.inputs.helper.capacity_persistence import (
     configured_estimated_capacity_payload,
@@ -67,20 +72,50 @@ class _AutoInputHelperSourceDbusMixin:
         return dbus
 
     def _get_dbus_value(self: Any, service_name: str, path: str) -> float | int | None:
+        if self._dbus_introspection_says_skip(service_name, path):
+            self._request_dbus_introspection(service_name, path, priority=80, reason="helper skipped known-unusable path")
+            return None
+
         def _read() -> float | int | None:
-            obj = self._get_system_bus().get_object(service_name, path)
+            obj = self._get_system_bus().get_object(service_name, path, introspect=False)
             interface = cast(Any, self._dbus_module()).Interface(obj, "com.victronenergy.BusItem")
             return cast(float | int | None, coerce_dbus_numeric(interface.GetValue(timeout=self.dbus_method_timeout_seconds)))
 
-        return cast(float | int | None, self._dbus_retry_read(service_name, path, "DBus read", _read))
+        try:
+            return cast(float | int | None, self._dbus_retry_read(service_name, path, "DBus read", _read))
+        except Exception:
+            self._request_dbus_introspection(service_name, path, priority=90, reason="helper DBus read failed")
+            raise
 
     def _get_dbus_child_nodes(self: Any, service_name: str, path: str) -> list[str]:
-        def _read() -> list[str]:
-            obj = self._get_system_bus().get_object(service_name, path)
-            interface = cast(Any, self._dbus_module()).Interface(obj, "org.freedesktop.DBus.Introspectable")
-            return cast(list[str], self._child_nodes_from_introspection(interface.Introspect(timeout=self.dbus_method_timeout_seconds)))
+        children = owner_path_children(self, service_name, path)
+        if children:
+            return children
+        self._request_dbus_introspection(service_name, path, priority=60, reason="helper child-node discovery requested")
+        return []
 
-        return cast(list[str], self._dbus_retry_read(service_name, path, "DBus introspection", _read))
+    def _dbus_introspection_says_skip(self: Any, service_name: str, path: str) -> bool:
+        skip, reason = owner_path_unusable(self, service_name, path)
+        if skip:
+            logging.debug("Auto helper skipping %s %s from DBus introspection cache: %s", service_name, path, reason)
+        return bool(skip)
+
+    def _request_dbus_introspection(
+        self: Any,
+        service_name: str,
+        path: str,
+        *,
+        priority: int,
+        reason: str,
+    ) -> None:
+        request_owner_introspection(
+            self,
+            service_name,
+            path,
+            priority=priority,
+            reason=reason,
+            source="auto-input-helper",
+        )
 
     def _dbus_retry_read(self: Any, service_name: str, path: str, label: str, read: Any) -> Any:
         last_error: Exception | None = None
@@ -118,7 +153,7 @@ class _AutoInputHelperSourceDbusMixin:
         if now < self._dbus_list_backoff_until:
             return []
         try:
-            dbus_proxy = self._get_system_bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+            dbus_proxy = self._get_system_bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
             dbus_iface = cast(Any, self._dbus_module()).Interface(dbus_proxy, "org.freedesktop.DBus")
             names = list(dbus_iface.ListNames(timeout=self.dbus_method_timeout_seconds))
             self._dbus_list_failures = 0

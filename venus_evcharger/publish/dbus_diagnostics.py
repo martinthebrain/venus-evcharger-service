@@ -19,6 +19,7 @@ from venus_evcharger.core.contracts import (
     normalized_status_source,
     sanitized_auto_metrics,
 )
+from venus_evcharger.dbus_introspection import load_owner_introspection_snapshot
 
 class _DbusPublishDiagnosticsMixin:
     @classmethod
@@ -307,6 +308,30 @@ class _DbusPublishDiagnosticsMixin:
             **self._phase_counter_values(now),
             **self._contactor_counter_values(),
             **self._runtime_timing_values(now),
+            **self._dbus_introspection_counter_values(now),
+        }
+
+    def _dbus_introspection_counter_values(self, now: float) -> dict[str, str | int | float]:
+        """Return compact diagnostics for the advisory DBus introspection map."""
+        snapshot = load_owner_introspection_snapshot(self.service, now=now)
+        services = snapshot.get("services", {}) if isinstance(snapshot, dict) else {}
+        unusable_count = 0
+        if isinstance(services, dict):
+            for service_payload in services.values():
+                paths = service_payload.get("paths", {}) if isinstance(service_payload, dict) else {}
+                if not isinstance(paths, dict):
+                    continue
+                unusable_count += sum(
+                    1
+                    for finding in paths.values()
+                    if isinstance(finding, dict)
+                    and str(finding.get("status", "") or "") in ("known-missing", "unresponsive-backoff")
+                )
+        return {
+            "/Auto/DbusIntrospectionState": str(snapshot.get("worker_state", "missing") if snapshot else "missing"),
+            "/Auto/DbusIntrospectionQueueDepth": int(snapshot.get("queue_depth", 0) or 0) if snapshot else 0,
+            "/Auto/DbusIntrospectionServiceCount": len(services) if isinstance(services, dict) else 0,
+            "/Auto/DbusIntrospectionUnusablePathCount": int(unusable_count),
         }
 
     def _diagnostic_age_values(self, now: float) -> dict[str, float]:
@@ -371,6 +396,10 @@ class _DbusPublishDiagnosticsMixin:
                 now,
             ),
             "/Auto/StaleSeconds": self._age_seconds(stale_base, now),
+            "/Auto/DbusIntrospectionSnapshotAge": self._age_seconds(
+                load_owner_introspection_snapshot(svc, now=now).get("heartbeat_at"),
+                now,
+            ),
         }
 
     def publish_diagnostic_paths(self, now: float) -> bool:

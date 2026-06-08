@@ -171,6 +171,14 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
         self._ensure_auto_input_supervisor()
         self._auto_input_supervisor.ensure_helper_process(now)
 
+    def _stop_dbus_introspection_worker(self, force: bool = False) -> None:
+        self._ensure_dbus_introspection_supervisor()
+        self._dbus_introspection_supervisor.stop_worker(force)
+
+    def _ensure_dbus_introspection_worker_process(self, now: float | None = None) -> None:
+        self._ensure_dbus_introspection_supervisor()
+        self._dbus_introspection_supervisor.ensure_worker_process(now)
+
     def _refresh_auto_input_snapshot(self, now: float | None = None) -> Any:
         self._ensure_auto_input_supervisor()
         return self._auto_input_supervisor.refresh_snapshot(now)

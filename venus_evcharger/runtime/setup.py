@@ -225,6 +225,8 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._auto_input_runtime_instance_id = uuid.uuid4().hex
         svc._auto_input_helper_last_start_at = 0.0
         svc._auto_input_helper_restart_requested_at = None
+        svc._dbus_introspection_worker_process = None
+        svc._dbus_introspection_worker_last_start_at = 0.0
         svc._auto_input_snapshot_last_seen = None
         svc._auto_input_snapshot_seen_for_current_helper = False
         svc._auto_input_snapshot_mtime_ns = None

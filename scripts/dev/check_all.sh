@@ -12,6 +12,7 @@ python3 -m py_compile \
     venus_evcharger_service.py \
     venus_evcharger_observer.py \
     venus_evcharger/bootstrap/controller.py \
+    venus_evcharger_dbus_introspection_worker.py \
     venus_evcharger/core/common.py \
     venus_evcharger/ports/__init__.py \
     venus_evcharger/controllers/auto.py \

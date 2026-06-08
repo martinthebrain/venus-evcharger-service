@@ -28,11 +28,15 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
     def _read_optional_energy_value(self, service_name: str, path: str) -> float | None:
         if not path:
             return None
+        if self._introspection_says_skip(service_name, path, priority=85):
+            return None
         value = self.service._get_dbus_value(service_name, path)
         return self._battery_soc_numeric(value)
 
     def _read_optional_energy_text(self, service_name: str, path: str) -> str:
         if not path:
+            return ""
+        if self._introspection_says_skip(service_name, path, priority=85):
             return ""
         value = self.service._get_dbus_value(service_name, path)
         return "" if value is None else str(value).strip()

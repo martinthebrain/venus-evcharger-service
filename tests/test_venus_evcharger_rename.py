@@ -37,6 +37,7 @@ class TestVenusEvchargerRename(unittest.TestCase):
             repo_root / "venus_evcharger",
             repo_root / "venus_evcharger_service.py",
             repo_root / "venus_evcharger_auto_input_helper.py",
+            repo_root / "venus_evcharger_dbus_introspection_worker.py",
             repo_root / "deploy" / "venus" / "config.venus_evcharger.ini",
             repo_root / "deploy" / "venus" / "install_venus_evcharger_service.sh",
             repo_root / "deploy" / "venus" / "configure_venus_evcharger_service.sh",

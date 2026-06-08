@@ -126,7 +126,7 @@ def get_system_bus() -> Any:
 
 
 def _bus_item_interface(bus: Any, service_name: str, path: str) -> Any:
-    obj = bus.get_object(service_name, path)
+    obj = bus.get_object(service_name, path, introspect=False)
     return dbus.Interface(obj, "com.victronenergy.BusItem")
 
 
@@ -149,7 +149,7 @@ def set_dbus_value(
 
 def get_dbus_child_nodes(bus: Any, service_name: str, path: str, timeout: float = 1.0) -> list[str]:
     """Return child nodes under a DBus path using introspection."""
-    obj = bus.get_object(service_name, path)
+    obj = bus.get_object(service_name, path, introspect=False)
     interface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
     xml_data = interface.Introspect(timeout=timeout)
     root = xml_et.fromstring(str(xml_data))

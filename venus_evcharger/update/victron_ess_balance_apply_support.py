@@ -302,7 +302,7 @@ class _UpdateCycleVictronEssBalanceApplySupportMixin:
         value: float,
     ) -> None:
         bus = svc._get_system_bus()
-        obj = bus.get_object(normalized_service, normalized_path)
+        obj = bus.get_object(normalized_service, normalized_path, introspect=False)
         dbus_module = cast(Any, self._victron_ess_balance_dbus_module())
         interface = dbus_module.Interface(obj, "com.victronenergy.BusItem")
         interface.SetValue(

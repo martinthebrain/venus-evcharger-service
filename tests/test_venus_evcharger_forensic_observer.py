@@ -28,7 +28,7 @@ class _FakeDbusBus:
     def __init__(self):
         self.values = {"/Mode": 1, "/Ac/Power": object()}
 
-    def get_object(self, _service_name, path):
+    def get_object(self, _service_name, path, introspect=True):
         return _FakeDbusObject(self.values, path)
 
 
