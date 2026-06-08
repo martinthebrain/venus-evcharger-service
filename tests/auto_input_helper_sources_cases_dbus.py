@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.auto_input_helper_sources_cases_common import *
+import json
 import os
 import tempfile
 from venus_evcharger.core.shared import compact_json
@@ -151,6 +152,43 @@ class _AutoInputHelperSourcesDbusCases:
         self.assertTrue(seen)
         self.assertEqual(total, 123.0)
         helper._get_dbus_value.assert_called_once_with("svc.live", "/Ac/Power")
+
+    def test_get_dbus_value_skips_known_unusable_introspection_finding(self):
+        helper = self._make_helper()
+        helper._get_system_bus = MagicMock()
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as snapshot:
+            snapshot.write(
+                compact_json(
+                    {
+                        "schema_version": 1,
+                        "captured_at": 100.0,
+                        "heartbeat_at": 100.0,
+                        "services": {
+                            "svc.dead": {
+                                "paths": {
+                                    "/Soc": {
+                                        "status": "known-missing",
+                                        "retry_after": 0.0,
+                                    }
+                                }
+                            }
+                        },
+                    }
+                )
+            )
+            helper.dbus_introspection_snapshot_path = snapshot.name
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as requests:
+            helper.dbus_introspection_request_path = requests.name
+        try:
+            with patch("venus_evcharger.dbus_introspection.time.time", return_value=120.0):
+                self.assertIsNone(helper._get_dbus_value("svc.dead", "/Soc"))
+            with open(helper.dbus_introspection_request_path, "r", encoding="utf-8") as request_handle:
+                request_payload = json.load(request_handle)
+        finally:
+            os.unlink(snapshot.name)
+            os.unlink(requests.name)
+        helper._get_system_bus.assert_not_called()
+        self.assertEqual(request_payload["requests"][0]["source"], "auto-input-helper")
 
     def test_get_dbus_value_and_child_nodes_do_not_reset_on_missing_services(self):
         class MissingDbusError(Exception):
