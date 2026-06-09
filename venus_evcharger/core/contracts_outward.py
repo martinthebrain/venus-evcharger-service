@@ -9,27 +9,12 @@ from venus_evcharger.core.contracts_basic import (
     finite_float_or_none,
     normalize_binary_flag,
     normalize_learning_state,
+    non_negative_float_or_none,
     thresholds_ordered,
     timestamp_not_future,
     valid_battery_soc,
 )
-
-SCHEDULED_STATE_CODES = {
-    "disabled": 0,
-    "auto-window": 1,
-    "inactive-day": 2,
-    "waiting-fallback": 3,
-    "night-boost": 4,
-    "after-latest-end": 5,
-}
-SCHEDULED_REASON_CODES = {
-    "disabled": 0,
-    "daytime-auto": 1,
-    "target-day-disabled": 2,
-    "waiting-fallback-delay": 3,
-    "night-boost-window": 4,
-    "latest-end-reached": 5,
-}
+from venus_evcharger.core.common_types import SCHEDULED_REASON_CODES, SCHEDULED_STATE_CODES
 SOFTWARE_UPDATE_STATE_CODES = {
     "idle": 0,
     "checking": 1,
@@ -188,8 +173,6 @@ def _sanitize_soc_metric(sanitized: dict[str, Any]) -> None:
 
 
 def _sanitize_learning_metrics(sanitized: dict[str, Any]) -> None:
-    from venus_evcharger.core.contracts_basic import non_negative_float_or_none
-
     sanitized["learned_charge_power"] = non_negative_float_or_none(sanitized.get("learned_charge_power"))
     learned_state = sanitized.get("learned_charge_power_state")
     sanitized["learned_charge_power_state"] = (

@@ -35,11 +35,11 @@ def phase_values(
     """Split total power into per-phase values and currents."""
     total_power = float(total_power)
     voltage = float(voltage)
+    if not voltage:
+        raise ValueError("Invalid voltage")
     if phase == "3P":
         per_phase_power = total_power / 3.0
         phase_voltage = voltage if voltage_mode == "phase" else voltage / math.sqrt(3)
-        if not phase_voltage:
-            raise ValueError("Invalid 3-phase voltage")
         phase_current = per_phase_power / phase_voltage
         return {
             "L1": {"power": per_phase_power, "voltage": phase_voltage, "current": phase_current},
@@ -51,7 +51,7 @@ def phase_values(
         "L2": {"power": 0.0, "voltage": voltage, "current": 0.0},
         "L3": {"power": 0.0, "voltage": voltage, "current": 0.0},
     }
-    result[phase] = {"power": total_power, "voltage": voltage, "current": total_power / voltage if voltage else 0.0}
+    result[phase] = {"power": total_power, "voltage": voltage, "current": total_power / voltage}
     return result
 
 

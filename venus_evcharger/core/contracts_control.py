@@ -156,8 +156,6 @@ def _normalized_control_flag(raw: Mapping[str, Any], key: str, default: int = 0)
 def normalized_control_result_fields(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = dict(payload or {})
     status = normalized_control_command_status(raw.get("status"))
-    accepted = _normalized_control_flag(raw, "accepted", int(status != "rejected"))
-    applied = _normalized_control_flag(raw, "applied", int(status == "applied"))
     persisted = _normalized_control_flag(raw, "persisted", int(status == "applied"))
     reversible_failure = _normalized_control_flag(raw, "reversible_failure", int(status == "rejected"))
     external_side_effect_started = _normalized_control_flag(
@@ -197,12 +195,7 @@ def normalized_control_result_fields(payload: Mapping[str, Any] | None) -> dict[
 
 def normalized_control_api_health_fields(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = dict(payload or {})
-    read_auth_required = _normalized_control_flag(raw, "read_auth_required", int(_normalized_control_flag(raw, "auth_required")))
-    control_auth_required = _normalized_control_flag(
-        raw,
-        "control_auth_required",
-        int(read_auth_required),
-    )
+    read_auth_required, control_auth_required = _normalized_control_auth_flags(raw)
     return {
         "ok": _normalized_control_flag(raw, "ok", 1),
         "api_version": normalized_control_api_version(raw.get("api_version")),

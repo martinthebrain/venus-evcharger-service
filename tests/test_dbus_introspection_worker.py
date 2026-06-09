@@ -25,7 +25,7 @@ from venus_evcharger.dbus_introspection import (
 )
 from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbusMixin
 from venus_evcharger.inputs.introspection_supervisor import DbusIntrospectionSupervisor
-from venus_evcharger_dbus_introspection_worker import DbusIntrospectionWorker
+from venus_evcharger_dbus_introspection_worker import DbusIntrospectionWorker, IntrospectionJob
 
 
 class _FakeDbusInterface:
@@ -79,6 +79,7 @@ class DbusIntrospectionWorkerTests(unittest.TestCase):
             "AutoBatterySocPath=/Soc\n"
             "DbusIntrospectionFullScanIntervalSeconds=60\n"
             "DbusIntrospectionMinJobIntervalSeconds=0.1\n"
+            "DbusIntrospectionLoadAvgMax=0\n"
             "DbusIntrospectionMinMemAvailableKb=0\n"
             "DbusIntrospectionPvQuietHours=\n"
             f"{extra}",
@@ -117,7 +118,7 @@ class DbusIntrospectionWorkerTests(unittest.TestCase):
             bus = _FakeBus(["com.victronenergy.pvinverter.http_48"])
             bus.objects[("svc.priority", "/Fast")] = "<node><interface name='x.Fast'/></node>"
             bus.objects[("com.victronenergy.pvinverter.http_48", "/Ac/Power")] = "<node/>"
-            request_introspection(request_path, "svc.priority", "/Fast", priority=10, now=100.0)
+            request_introspection(request_path, "svc.priority", "/Fast", priority=100, now=100.0)
             with patch.object(worker_module, "dbus", _FakeDbus(bus)):
                 worker = DbusIntrospectionWorker(self._config(temp_dir), snapshot_path, request_path)
                 worker.run_once(100.0)
@@ -134,10 +135,11 @@ class DbusIntrospectionWorkerTests(unittest.TestCase):
             bus.objects[("com.victronenergy.pvinverter.http_48", "/Ac/Power")] = "<node/>"
             with patch.object(worker_module, "dbus", _FakeDbus(bus)):
                 worker = DbusIntrospectionWorker(
-                    self._config(temp_dir, "DbusIntrospectionLoadAvgMax=1\n"),
+                    self._config(temp_dir),
                     snapshot_path,
                     request_path,
                 )
+                worker.load_avg_max = 1.0
                 with patch.object(worker_module.os, "getloadavg", return_value=(10.0, 0.0, 0.0)):
                     snapshot = worker.run_once(100.0)
 
@@ -326,10 +328,19 @@ class DbusIntrospectionWorkerTests(unittest.TestCase):
             Path(request_path).write_text(json.dumps({"requests": {}}), encoding="utf-8")
             worker._enqueue_request_file_jobs(101.0)
             with patch.object(worker_module, "write_text_atomically", side_effect=RuntimeError("clear")):
-                worker._clear_request_payload()
+                with self.assertLogs(level="DEBUG") as log_ctx:
+                    worker._clear_request_payload()
+            self.assertIn("Unable to clear DBus introspection request payload", "\n".join(log_ctx.output))
             worker._enqueue_job("svc", "/p", priority=50, source="old", reason="old", due_at=200.0)
             worker._enqueue_job("svc", "/p", priority=60, source="later", reason="later", due_at=300.0)
             self.assertEqual(worker._jobs[("svc", "/p")].source, "request")
+            worker._enqueue_job("svc", "/same", priority=30, source="background", reason="old", due_at=100.0)
+            worker._enqueue_job("svc", "/same", priority=100, source="request", reason="fresh", due_at=100.0)
+            self.assertEqual(worker._jobs[("svc", "/same")].source, "request")
+            worker._jobs.pop(("svc", "/same"))
+            worker._enqueue_job("svc", "/old", priority=30, source="background", reason="old", due_at=90.0)
+            worker._enqueue_job("svc", "/high", priority=100, source="request", reason="fresh", due_at=100.0)
+            self.assertEqual(worker._next_due_job(100.0).key, ("svc", "/high"))
             self.assertIsNone(DbusIntrospectionWorker(config, snapshot_path, request_path)._next_due_job(100.0))
 
             class MissingError(Exception):
@@ -351,6 +362,15 @@ class DbusIntrospectionWorkerTests(unittest.TestCase):
             worker._services["svc"] = {"paths": []}
             worker._store_finding("svc", "/ignored", {"status": "fresh"})
             self.assertEqual(worker._services["svc"]["last_updated_at"], worker._services["svc"]["last_updated_at"])
+            worker._services["gone"] = {"paths": {"/p": {"status": "fresh"}}}
+            worker._failures[("gone", "/p")] = 2
+            worker._jobs[("gone", "/p")] = IntrospectionJob("gone", "/p", 30, "background", "old", 100.0, 1.0)
+            worker._jobs[("gone-request", "/p")] = IntrospectionJob("gone-request", "/p", 100, "request", "keep", 100.0, 1.0)
+            worker._prune_missing_services(["svc", "gone-request"])
+            self.assertNotIn("gone", worker._services)
+            self.assertNotIn(("gone", "/p"), worker._failures)
+            self.assertNotIn(("gone", "/p"), worker._jobs)
+            self.assertIn(("gone-request", "/p"), worker._jobs)
             with patch.object(worker_module, "write_text_atomically", side_effect=RuntimeError("snapshot")):
                 self.assertEqual(worker._write_snapshot("x")["worker_state"], "x")
             bus = _FakeBus(["svc"])

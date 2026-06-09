@@ -251,8 +251,10 @@ class ForensicObserverTests(unittest.TestCase):
         module_path = Path(__file__).resolve().parents[1] / "venus_evcharger_observer.py"
         with patch("venus_evcharger.ops.forensic_observer.observer_loop") as observer_loop:
             with patch.object(sys, "argv", [str(module_path), "/tmp/config.ini", "--start-delay", "1", "--interval", "2", "--cooldown", "3"]):
-                runpy.run_path(str(module_path), run_name="__main__")
+                with self.assertRaises(SystemExit) as exit_ctx:
+                    runpy.run_path(str(module_path), run_name="__main__")
 
+        self.assertEqual(exit_ctx.exception.code, 0)
         observer_loop.assert_called_once_with("/tmp/config.ini", start_delay=1.0, interval=2.0, incident_cooldown=3.0)
 
     def test_observer_entrypoint_import_does_not_start_loop(self):

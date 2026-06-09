@@ -126,6 +126,13 @@ def prefixed_service_names(
     return names
 
 
+def parse_config_bool(value: object, default: bool = False) -> bool:
+    """Parse a config-style truthy value."""
+    if value is None:
+        return bool(default)
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 def first_matching_prefixed_service(
     service_names: Iterable[object],
     prefix: str,
