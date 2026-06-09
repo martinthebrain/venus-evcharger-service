@@ -10,12 +10,12 @@ freshness/confidence hint, but must never wait for it.
 
 from __future__ import annotations
 
+import argparse
 import configparser
 import json
 import logging
 import os
 import signal
-import sys
 import time
 import xml.etree.ElementTree as xml_et
 from dataclasses import dataclass, field
@@ -23,13 +23,13 @@ from typing import Any
 
 import dbus
 
-from venus_evcharger.core.shared import compact_json, prefixed_service_names, write_text_atomically
+from venus_evcharger.core.shared import compact_json, parse_config_bool, prefixed_service_names, write_text_atomically
 from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
 
 
 @dataclass(order=True)
 class IntrospectionJob:
-    sort_key: tuple[float, int, float] = field(init=False, repr=False)
+    sort_key: tuple[int, float, float] = field(init=False, repr=False)
     service: str
     path: str
     priority: int = 0
@@ -39,7 +39,7 @@ class IntrospectionJob:
     requested_at: float = 0.0
 
     def __post_init__(self) -> None:
-        self.sort_key = (float(self.due_at), -int(self.priority), float(self.requested_at))
+        self.sort_key = (-int(self.priority), float(self.due_at), float(self.requested_at))
 
     @property
     def key(self) -> tuple[str, str]:
@@ -96,11 +96,7 @@ class DbusIntrospectionWorker:
             raise ValueError(f"Unable to read config file: {config_path}")
         return parser["DEFAULT"]
 
-    @staticmethod
-    def _as_bool(value: object, default: bool = False) -> bool:
-        if value is None:
-            return bool(default)
-        return str(value).strip().lower() in ("1", "true", "yes", "on")
+    _as_bool = staticmethod(parse_config_bool)
 
     def stop(self, *_args: object) -> None:
         self._stop_requested = True
@@ -172,11 +168,24 @@ class DbusIntrospectionWorker:
             return
         self._last_service_names = names
         self._last_full_scan_at = now
+        self._prune_missing_services(names)
         for service, path, priority, source, reason in self._background_specs(names):
             if source == "pv" and self._pv_quiet_now(now):
                 self._enqueue_job(service, path, priority=1, source=source, reason="pv-quiet-hours", due_at=now + self.retry_base_seconds)
                 continue
             self._enqueue_job(service, path, priority=priority, source=source, reason=reason, due_at=now)
+
+    def _prune_missing_services(self, names: list[str]) -> None:
+        current_names = set(names)
+        for service in list(self._services):
+            if service not in current_names:
+                self._services.pop(service, None)
+        for key in list(self._failures):
+            if key[0] not in current_names:
+                self._failures.pop(key, None)
+        for key, job in list(self._jobs.items()):
+            if key[0] not in current_names and job.source != "request":
+                self._jobs.pop(key, None)
 
     def _background_specs(self, names: list[str]) -> list[tuple[str, str, int, str, str]]:
         specs: list[tuple[str, str, int, str, str]] = []
@@ -248,8 +257,8 @@ class DbusIntrospectionWorker:
     def _clear_request_payload(self) -> None:
         try:
             write_text_atomically(self.request_path, compact_json({"requests": []}))
-        except Exception:
-            pass
+        except Exception as error:  # pylint: disable=broad-except
+            logging.debug("Unable to clear DBus introspection request payload %s: %s", self.request_path, error)
 
     def _enqueue_job(
         self,
@@ -263,15 +272,18 @@ class DbusIntrospectionWorker:
     ) -> None:
         key = (service, path)
         existing = self._jobs.get(key)
-        if existing is not None and existing.priority <= priority and existing.due_at <= due_at:
-            return
+        if existing is not None:
+            existing_due = float(existing.due_at)
+            new_due = float(due_at)
+            if existing_due < new_due or (existing_due <= new_due and existing.priority >= priority):
+                return
         self._jobs[key] = IntrospectionJob(service, path, priority, source, reason, due_at, time.time())
 
     def _next_due_job(self, now: float) -> IntrospectionJob | None:
         due = [job for job in self._jobs.values() if job.due_at <= now]
         if not due:
             return None
-        due.sort(key=lambda job: (job.priority, job.due_at, job.requested_at))
+        due.sort(key=lambda job: job.sort_key)
         job = due[0]
         self._jobs.pop(job.key, None)
         return job
@@ -414,14 +426,16 @@ class DbusIntrospectionWorker:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    config_path = args[0] if len(args) >= 1 else os.path.join(script_dir, "deploy/venus/config.venus_evcharger.ini")
-    snapshot_path = args[1] if len(args) >= 2 else None
-    request_path = args[2] if len(args) >= 3 else None
-    parent_pid = args[3] if len(args) >= 4 else None
+    default_config_path = os.path.join(script_dir, "deploy/venus/config.venus_evcharger.ini")
+    parser = argparse.ArgumentParser(description="Run the advisory Venus EV charger DBus introspection worker.")
+    parser.add_argument("config_path", nargs="?", default=default_config_path)
+    parser.add_argument("snapshot_path", nargs="?")
+    parser.add_argument("request_path", nargs="?")
+    parser.add_argument("parent_pid", nargs="?")
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
-    return DbusIntrospectionWorker(config_path, snapshot_path, request_path, parent_pid).run_forever()
+    return DbusIntrospectionWorker(args.config_path, args.snapshot_path, args.request_path, args.parent_pid).run_forever()
 
 
 if __name__ == "__main__":

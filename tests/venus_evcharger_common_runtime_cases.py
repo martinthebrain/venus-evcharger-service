@@ -46,6 +46,8 @@ class TestShellyWallboxCommonRuntime(unittest.TestCase):
         self.assertAlmostEqual(values["L2"]["power"], 1000.0)
         with self.assertRaises(ValueError):
             phase_values(3000, 0, "3P", "phase")
+        with self.assertRaises(ValueError):
+            phase_values(2300, 0, "L1", "phase")
 
     def test_normalizers_and_time_helpers_cover_fallbacks(self):
         self.assertEqual(normalize_phase("1P"), "L1")

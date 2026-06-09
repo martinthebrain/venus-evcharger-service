@@ -6,16 +6,10 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from venus_evcharger.core.common_types import AUTO_STATE_CODES
+
 LEARNED_CHARGE_POWER_STATES = frozenset({"unknown", "learning", "stable", "stale"})
 LEARNED_CHARGE_POWER_PHASES = frozenset({"L1", "L2", "L3", "3P"})
-AUTO_STATE_CODES = {
-    "idle": 0,
-    "waiting": 1,
-    "learning": 2,
-    "charging": 3,
-    "blocked": 4,
-    "recovery": 5,
-}
 
 
 def finite_float_or_none(value: Any) -> float | None:
@@ -134,16 +128,9 @@ def normalize_auto_state(value: Any) -> str:
     return state if state in AUTO_STATE_CODES else "idle"
 
 
-def normalized_auto_state_pair(state: Any, code: Any) -> tuple[str, int]:
+def normalized_auto_state_pair(state: Any, _code: Any) -> tuple[str, int]:
     normalized_state = normalize_auto_state(state)
-    normalized_code = AUTO_STATE_CODES[normalized_state]
-    try:
-        supplied_code = int(code)
-    except (TypeError, ValueError):
-        supplied_code = None
-    if supplied_code != normalized_code:
-        return normalized_state, normalized_code
-    return normalized_state, normalized_code
+    return normalized_state, AUTO_STATE_CODES[normalized_state]
 
 
 def normalized_status_source(value: Any) -> str:

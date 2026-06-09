@@ -11,6 +11,7 @@ class _AutoInputHelperBasicSubscriptionCases:
                 ("grid", "com.victronenergy.system", "/Ac/Grid/L1/Power"),
             ]
         )
+        helper._register_name_owner_subscription = MagicMock()
         helper._subscribe_busitem_path = MagicMock()
         helper._clear_missing_subscriptions = MagicMock()
         helper._refresh_all_sources = MagicMock()

@@ -104,6 +104,8 @@ class _AutoInputHelperBasicCoreCases:
     def test_helper_module_import_fallback_sets_dbus_glib_mainloop_to_none(self):
         helper_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "venus_evcharger_auto_input_helper.py")
         fake_dbus = ModuleType("dbus")
+        fake_dbus_mainloop = ModuleType("dbus.mainloop")
+        fake_dbus_glib_mainloop = ModuleType("dbus.mainloop.glib")
         fake_glib = __import__("unittest.mock").mock.MagicMock()
         fake_gi = ModuleType("gi")
         fake_repository = ModuleType("gi.repository")
@@ -114,6 +116,8 @@ class _AutoInputHelperBasicCoreCases:
             sys.modules,
             {
                 "dbus": fake_dbus,
+                "dbus.mainloop": fake_dbus_mainloop,
+                "dbus.mainloop.glib": fake_dbus_glib_mainloop,
                 "gi": fake_gi,
                 "gi.repository": fake_repository,
                 "gi.repository.GLib": fake_glib,

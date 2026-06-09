@@ -20,10 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import dbus
 
-if sys.version_info.major == 2:
-    import gobject  # pylint: disable=import-error
-else:
-    from gi.repository import GLib as gobject  # pylint: disable=import-error
+from gi.repository import GLib as gobject  # pylint: disable=import-error
 
 sys.path.insert(
     1,
@@ -99,7 +96,6 @@ class ShellyWallboxService(ControlApiMixin, StatePublishMixin, RuntimeHelperMixi
     }
     _state_controller: ServiceStateController
     _bootstrap_controller: ServiceBootstrapController
-    _system_bus: Any
     _system_bus_state: threading.local
     _system_bus_generation: int
 
@@ -187,7 +183,6 @@ class ShellyWallboxService(ControlApiMixin, StatePublishMixin, RuntimeHelperMixi
             cached_bus = self._create_system_bus()
             self._system_bus_state.bus = cached_bus
             self._system_bus_state.generation = current_generation
-            self._system_bus = cached_bus
         return cached_bus
 
 

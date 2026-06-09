@@ -8,6 +8,7 @@ can consume safely, even if DBus becomes slow or temporarily inconsistent.
 """
 
 import configparser
+import argparse
 import logging
 import os
 import signal
@@ -22,31 +23,22 @@ from gi.repository import GLib
 from venus_evcharger.core.shared import (
     AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION,
     compact_json,
+    parse_config_bool as _as_bool,
     write_text_atomically,
 )
 from venus_evcharger.energy import load_energy_source_settings
-
-try:
-    import dbus.mainloop.glib as dbus_glib_mainloop
-except Exception:  # pylint: disable=broad-except
-    dbus_glib_mainloop = None
-
-
-_TEST_PATCH_EXPORTS = (dbus, GLib, time)
-
-
-def _as_bool(value: object, default: bool = False) -> bool:
-    """Parse a config-style truthy value."""
-    if value is None:
-        return bool(default)
-    return str(value).strip().lower() in ("1", "true", "yes", "on")
-
-
 from venus_evcharger.inputs.helper import (
     _AutoInputHelperSnapshotMixin,
     _AutoInputHelperSourceMixin,
     _AutoInputHelperSubscriptionMixin,
 )
+
+try:
+    import dbus.mainloop.glib as dbus_glib_mainloop
+    if not hasattr(dbus, "mainloop"):
+        dbus_glib_mainloop = None
+except Exception:  # pylint: disable=broad-except
+    dbus_glib_mainloop = None
 
 
 class AutoInputHelper(
@@ -354,6 +346,7 @@ class AutoInputHelper(
             "snapshot_version": AutoInputHelper.SNAPSHOT_SCHEMA_VERSION,
             "captured_at": captured_at,
             "heartbeat_at": captured_at,
+            "writer_pid": os.getpid(),
             "helper_state": "starting",
             "helper_status": "starting",
             "pv_status": "missing",
@@ -548,16 +541,21 @@ class AutoInputHelper(
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
-    argv = list(sys.argv[1:] if argv is None else argv)
-    config_path, snapshot_path, parent_pid, helper_generation, runtime_instance_id = _main_args(argv)
+    args = _main_args(sys.argv[1:] if argv is None else argv)
     logging.basicConfig(
         format="%(levelname)s [pid=%(process)d %(threadName)s] %(message)s",
         level=logging.INFO,
     )
-    if runtime_instance_id is None:
-        helper = AutoInputHelper(config_path, snapshot_path, parent_pid, helper_generation)
+    if args.runtime_instance_id is None:
+        helper = AutoInputHelper(args.config_path, args.snapshot_path, args.parent_pid, args.helper_generation)
     else:
-        helper = AutoInputHelper(config_path, snapshot_path, parent_pid, helper_generation, runtime_instance_id)
+        helper = AutoInputHelper(
+            args.config_path,
+            args.snapshot_path,
+            args.parent_pid,
+            args.helper_generation,
+            args.runtime_instance_id,
+        )
     helper.run()
     return 0
 
@@ -571,10 +569,14 @@ def _default_config_path() -> str:
     )
 
 
-def _main_args(argv: list[str]) -> tuple[str, str | None, str | None, str | None, str | None]:
-    padded = [*argv[:5], None, None, None, None, None]
-    config_path = padded[0] or _default_config_path()
-    return config_path, padded[1], padded[2], padded[3], padded[4]
+def _main_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the Venus EV charger Auto input helper.")
+    parser.add_argument("config_path", nargs="?", default=_default_config_path())
+    parser.add_argument("snapshot_path", nargs="?")
+    parser.add_argument("parent_pid", nargs="?")
+    parser.add_argument("helper_generation", nargs="?")
+    parser.add_argument("runtime_instance_id", nargs="?")
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":

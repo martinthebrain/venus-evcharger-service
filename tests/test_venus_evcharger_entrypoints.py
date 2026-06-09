@@ -97,17 +97,14 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
             "gi.repository.GLib": fake_glib,
         }, bootstrap_module
 
-    def test_main_module_python2_import_branch_uses_gobject(self):
+    def test_main_module_uses_glib_gobject_alias(self):
         module_path = self._repo_file("venus_evcharger_service.py")
         fake_modules, _bootstrap_module = self._fake_main_module_dependencies()
-        fake_gobject = MagicMock()
-        fake_modules["gobject"] = fake_gobject
 
         with patch.dict(sys.modules, fake_modules, clear=False):
-            with patch.object(sys, "version_info", SimpleNamespace(major=2)):
-                module_globals = runpy.run_path(module_path, run_name="venus_evcharger_service_py2_test")
+            module_globals = runpy.run_path(module_path, run_name="venus_evcharger_service_import_test")
 
-        self.assertIs(module_globals["gobject"], fake_gobject)
+        self.assertIs(module_globals["gobject"], fake_modules["gi.repository"].GLib)
 
     def test_main_module_main_guard_delegates_to_run_service_main(self):
         module_path = self._repo_file("venus_evcharger_service.py")
