@@ -17,8 +17,17 @@ import os
 import select
 import signal
 import socket
+import sys
 import time
 from typing import Any, Callable, Mapping
+
+sys.path.insert(
+    1,
+    os.path.join(
+        os.path.dirname(__file__),
+        "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python",
+    ),
+)
 
 import dbus
 from dbus.mainloop.glib import DBusGMainLoop
@@ -35,6 +44,8 @@ from venus_evcharger.dbus_adapter_components import (
     DbusOperationDeferred,
     DbusRateLimiter,
     DbusReadScheduler,
+    ResourceMonitor,
+    TickHealth,
 )
 from venus_evcharger.dbus_adapter_read import DbusReadExecutor
 from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
@@ -91,12 +102,17 @@ class DbusAdapter:
         self._last_tick_at = 0.0
         self._last_tick_monotonic = 0.0
         self._last_tick_duration_ms = 0.0
+        self.resource_monitor = ResourceMonitor()
+        self.tick_health = TickHealth()
+        self._prefer_read_next = True
 
     @staticmethod
     def _load_config(path: str) -> configparser.ConfigParser:
         parser = configparser.ConfigParser()
         parser.optionxform = str  # type: ignore[method-assign]
-        parser.read(path)
+        loaded = parser.read(path)
+        if not loaded:
+            raise ValueError(f"Unable to read config file: {path}")
         return parser
 
     @staticmethod
@@ -171,14 +187,29 @@ class DbusAdapter:
             logging.exception("DBus adapter tick failed: %s", error)
         finally:
             self._last_tick_duration_ms = (time.monotonic() - tick_started) * 1000.0
+            self.tick_health.record(
+                duration_ms=self._last_tick_duration_ms,
+                expected_interval_s=self.tick_seconds,
+                now=tick_started,
+            )
         return not self._stop
 
     def _process_one_dbus_operation_once(self) -> bool:
-        return (
-            self.write_scheduler.process_one()
-            or self._poll_one_due_read_once()
-            or self._refresh_services_if_due_once()
-        )
+        if self._prefer_read_next:
+            if self._poll_one_due_read_once():
+                self._prefer_read_next = False
+                return True
+            if self.write_scheduler.process_one():
+                self._prefer_read_next = True
+                return True
+        else:
+            if self.write_scheduler.process_one():
+                self._prefer_read_next = True
+                return True
+            if self._poll_one_due_read_once():
+                self._prefer_read_next = False
+                return True
+        return self._refresh_services_if_due_once()
 
     def _install_signal_handlers(self) -> None:
         def _stop(_signum: int, _frame: object) -> None:
@@ -300,7 +331,7 @@ class DbusAdapter:
             self.read_scheduler.record_success(key, now=now, interval=interval)
         elif outcome == "dropped":
             self.read_scheduler.record_error(key, now=now, interval=interval)
-        return True
+        return outcome != "deferred" or bool(self.read_executor.last_operation_performed)
 
     def _maybe_refresh_services(self) -> None:
         self._refresh_services_if_due_once()
@@ -316,7 +347,6 @@ class DbusAdapter:
         except DbusOperationDeferred:
             return False
         except Exception as error:  # pylint: disable=broad-except
-            self.circuit.record_error(error)
             self.discovery.record_error(error, now=now)
             return True
 
@@ -333,10 +363,10 @@ class DbusAdapter:
         started = time.monotonic()
         try:
             result = operation()
-            self.circuit.record_success((time.monotonic() - started) * 1000.0)
+            self.circuit.record_success((time.monotonic() - started) * 1000.0, kind=kind)
             return result
         except Exception as error:
-            self.circuit.record_error(error)
+            self.circuit.record_error(error, kind=kind)
             raise
 
     def _publish_cache(self) -> None:
@@ -354,22 +384,77 @@ class DbusAdapter:
 
     def _health_snapshot(self) -> dict[str, Any]:
         current_monotonic = time.monotonic()
+        current_time = time.time()
+        pending = self.commands.load_pending()
+        core_pending = self.core_commands.load_pending()
+        heartbeat_age = (
+            max(0.0, current_monotonic - self._last_tick_monotonic)
+            if self._last_tick_monotonic > 0.0
+            else 0.0
+        )
         return {
             **self.circuit.health(),
-            "pending_command_count": len(self.commands.load_pending()),
-            "core_command_count": len(self.core_commands.load_pending()),
+            "pending_command_count": len(pending),
+            "core_command_count": len(core_pending),
             "registered_path_count": len(self.write_scheduler.registered_paths),
             "last_tick_at": self._last_tick_at,
             "tick_duration_ms": self._last_tick_duration_ms,
             "discovery_last_success_at": self.discovery.last_success_at,
             "discovery_last_error": self.discovery.last_error,
             "discovery_next_scan_at": self.discovery.next_scan_at,
-            "mainloop_heartbeat_age_s": (
-                max(0.0, current_monotonic - self._last_tick_monotonic)
-                if self._last_tick_monotonic > 0.0
-                else 0.0
-            ),
+            "mainloop_heartbeat_age_s": heartbeat_age,
+            "queues": self._queue_health(pending, core_pending, current_time),
+            "cache_freshness": self._cache_freshness(current_time),
+            "resources": self.resource_monitor.snapshot(),
+            "eventloop": {
+                "last_tick_at": self._last_tick_at,
+                "tick_duration_ms": self._last_tick_duration_ms,
+                "mainloop_heartbeat_age_s": heartbeat_age,
+                **self.tick_health.snapshot(now=current_monotonic),
+            },
         }
+
+    @staticmethod
+    def _queue_health(
+        pending: list[tuple[str, dict[str, Any]]],
+        core_pending: list[tuple[str, dict[str, Any]]],
+        now: float,
+    ) -> dict[str, Any]:
+        return {
+            "pending_command_count": len(pending),
+            "oldest_command_age_s": DbusAdapter._oldest_command_age(pending, now),
+            "core_command_count": len(core_pending),
+            "oldest_core_command_age_s": DbusAdapter._oldest_command_age(core_pending, now),
+        }
+
+    @staticmethod
+    def _oldest_command_age(commands: list[tuple[str, dict[str, Any]]], now: float) -> float:
+        ages = [
+            max(0.0, now - float(command.get("created_at", now) or now))
+            for _path, command in commands
+        ]
+        return max(ages) if ages else 0.0
+
+    def _cache_freshness(self, now: float) -> dict[str, Any]:
+        values = {
+            key: self.cache._value_snapshot(value, now)  # pylint: disable=protected-access
+            for key, value in self.cache.values.items()
+        }
+        status_counts: dict[str, int] = {}
+        for value in values.values():
+            status = str(value.get("status", "unknown"))
+            status_counts[status] = status_counts.get(status, 0) + 1
+        important = {
+            f"{key}_age_s": float(values.get(key, {}).get("age_s", 0.0) or 0.0)
+            for key in ("grid_power_w", "pv_power_w", "battery_soc")
+        }
+        important.update(
+            {
+                f"{key}_status": str(values.get(key, {}).get("status", "missing"))
+                for key in ("grid_power_w", "pv_power_w", "battery_soc")
+            }
+        )
+        return {"value_count": len(values), "status_counts": status_counts, **important}
 
     @staticmethod
     def _json_ready(value: Any) -> Any:

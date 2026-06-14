@@ -31,7 +31,6 @@ class DbusWriteScheduler:
         except DbusOperationDeferred:
             outcome = "deferred"
         except Exception as error:  # pylint: disable=broad-except
-            self.adapter.circuit.record_error(error)
             logging.exception("Gateway command failed; keeping for retry path=%s: %s", path, error)
             outcome = "deferred"
         if outcome in ("applied", "dropped"):

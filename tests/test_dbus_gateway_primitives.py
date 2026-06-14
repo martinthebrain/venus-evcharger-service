@@ -76,6 +76,10 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             second = inbox.enqueue({"kind": "set_value", "created_at": 2.0, "priority": "diagnostic", "coalesce_key": "k"})
             self.assertEqual(first, second)
             self.assertEqual(inbox.load_pending()[0][1]["created_at"], 2.0)
+            services_first = inbox.enqueue({"kind": "refresh_services", "created_at": 3.0})
+            services_second = inbox.enqueue({"kind": "refresh_services", "created_at": 4.0})
+            self.assertEqual(services_first, services_second)
+            self.assertEqual(inbox.load_pending()[1][1]["coalesce_key"], "refresh:services")
 
             commands = [
                 ("a", {"id": "a", "created_at": "bad", "priority": "diagnostic"}),

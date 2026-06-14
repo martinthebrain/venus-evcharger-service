@@ -152,6 +152,47 @@ cleanup_duplicate_supervisors "$SERVICE_NAME"
 cleanup_duplicate_supervisors "$DBUS_ADAPTER_SERVICE_NAME"
 cleanup_duplicate_supervisors "$OBSERVER_SERVICE_NAME"
 
+service_registered() {
+    service_name="$1"
+    service_path="/service/$service_name"
+    [ -e "$service_path" ] && command -v svc >/dev/null 2>&1
+}
+
+service_down_if_registered() {
+    service_name="$1"
+    if ! service_registered "$service_name"; then
+        return
+    fi
+    svc -d "/service/$service_name" >/dev/null 2>&1 || true
+}
+
+service_up_if_registered() {
+    service_name="$1"
+    if ! service_registered "$service_name"; then
+        return
+    fi
+    svc -u "/service/$service_name" >/dev/null 2>&1 || true
+}
+
+service_restart_if_registered() {
+    service_name="$1"
+    if ! service_registered "$service_name"; then
+        return
+    fi
+    svc -t "/service/$service_name" >/dev/null 2>&1 || true
+}
+
+# During upgrades from the pre-gateway layout the main service may still own
+# the EV charger DBus name. Restart the adapter and then the main service so
+# the adapter becomes the only DBus owner and the core re-registers via gateway
+# commands. Best effort only: on first install runit may still be starting.
+service_down_if_registered "$OBSERVER_SERVICE_NAME"
+service_down_if_registered "$SERVICE_NAME"
+service_restart_if_registered "$DBUS_ADAPTER_SERVICE_NAME"
+sleep 1
+service_up_if_registered "$SERVICE_NAME"
+service_up_if_registered "$OBSERVER_SERVICE_NAME"
+
 remove_rc_local_line() {
     line="$1"
     if [ ! -f "$RC_LOCAL_FILE" ]; then

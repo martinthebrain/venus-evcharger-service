@@ -222,16 +222,40 @@ class DbusCommandInbox:
 
     def enqueue(self, command: Mapping[str, Any]) -> str:
         os.makedirs(self.command_dir, exist_ok=True)
-        command_id = self._command_id(command)
+        normalized = self._normalized_command(command)
+        command_id = self._command_id(normalized)
         payload = {
             "schema_version": DBUS_GATEWAY_SCHEMA_VERSION,
             "id": command_id,
-            "created_at": float(command.get("created_at", _now())),
-            **dict(command),
+            "created_at": float(normalized.get("created_at", _now())),
+            **normalized,
         }
         target = os.path.join(self.command_dir, f"{command_id}.json")
+        if str(normalized.get("coalesce_key") or "").strip() and not self._should_replace_existing(target, payload):
+            return target
         write_json_file(target, payload)
         return target
+
+    @staticmethod
+    def _should_replace_existing(path: str, payload: Mapping[str, Any]) -> bool:
+        existing = read_json_file(path, {})
+        if not isinstance(existing, Mapping):
+            return True
+        existing_rank = _priority_rank(existing.get("priority"))
+        new_rank = _priority_rank(payload.get("priority"))
+        if new_rank < existing_rank:
+            return True
+        if new_rank > existing_rank:
+            return False
+        return _float_or_zero(payload.get("created_at")) >= _float_or_zero(existing.get("created_at"))
+
+    @staticmethod
+    def _normalized_command(command: Mapping[str, Any]) -> dict[str, Any]:
+        payload = dict(command)
+        kind = str(payload.get("kind") or payload.get("type") or "")
+        if kind == "refresh_services" and not str(payload.get("coalesce_key") or "").strip():
+            payload["coalesce_key"] = "refresh:services"
+        return payload
 
     @staticmethod
     def _command_id(command: Mapping[str, Any]) -> str:

@@ -18,6 +18,8 @@ class DbusReadExecutor:
 
     def __init__(self, adapter: Any) -> None:
         self.adapter = adapter
+        self._aggregate_state: dict[str, dict[str, Any]] = {}
+        self.last_operation_performed = False
 
     def refresh_requested_value(self, command: Mapping[str, Any]) -> CommandOutcome:
         key = str(command.get("key") or "")
@@ -32,19 +34,12 @@ class DbusReadExecutor:
         return "dropped"
 
     def poll_read_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
+        self.last_operation_performed = False
         try:
             if spec.get("aggregate") == "sum":
-                value = sum(
-                    float(self.read_busitem(str(spec.get("service")), str(path)) or 0.0)
-                    for path in spec.get("paths", ())
-                )
-                paths = [str(path) for path in spec.get("paths", ())]
-                self.adapter.cache.update_value(key, value, source=f"{spec.get('service')}:{','.join(paths)}")
-                return "applied"
+                return self._poll_sum_step(key, spec)
             if spec.get("aggregate") == "services-sum":
-                value, sources = self.read_prefixed_service_sum(spec)
-                self.adapter.cache.update_value(key, value, source=",".join(sources) if sources else str(spec.get("prefix", "")))
-                return "applied"
+                return self._poll_services_sum_step(key, spec)
             service = str(spec.get("service") or "")
             path = str(spec.get("path") or "")
             value = self.read_busitem(service, path)
@@ -53,38 +48,63 @@ class DbusReadExecutor:
         except DbusOperationDeferred:
             return "deferred"
         except Exception as error:  # pylint: disable=broad-except
+            self._aggregate_state.pop(key, None)
             self.adapter.cache.mark_error(key, source=str(spec.get("service") or spec.get("prefix") or ""), error=error)
-            self.adapter.circuit.record_error(error)
             logging.debug("DBus adapter read failed key=%s: %s", key, error)
             return "applied"
 
-    def read_prefixed_service_sum(self, spec: Mapping[str, Any]) -> tuple[float, list[str]]:
+    def _poll_sum_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
+        service = str(spec.get("service"))
+        members = [(service, str(path)) for path in spec.get("paths", ()) if str(path)]
+        if not members:
+            self.adapter.cache.update_value(key, 0.0, source=str(spec.get("service", "")))
+            return "applied"
+        return self._poll_aggregate_step(key, ("sum", tuple(members)), members)
+
+    def _poll_services_sum_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
+        path = str(spec.get("path") or "")
         explicit = str(spec.get("service") or "")
         if explicit:
             services = [explicit]
         else:
             prefix = str(spec.get("prefix") or "")
-            services = [name for name in self.adapter.cache.services if name.startswith(prefix)]
+            services = sorted(name for name in self.adapter.cache.services if name.startswith(prefix))
         if not services:
             raise RuntimeError(f"No cached services for prefix '{spec.get('prefix', '')}'")
-        path = str(spec.get("path") or "")
-        total = 0.0
-        sources: list[str] = []
-        for service in services:
-            value = self.read_busitem(service, path)
-            if value is None:
-                continue
-            total += float(value)
-            sources.append(f"{service}{path}")
-        return total, sources
+        return self._poll_aggregate_step(key, ("services-sum", path, tuple(services)), [(service, path) for service in services])
+
+    def _poll_aggregate_step(
+        self,
+        key: str,
+        signature: tuple[Any, ...],
+        members: list[tuple[str, str]],
+    ) -> CommandOutcome:
+        state = self._aggregate_state.get(key)
+        if state is None or state.get("signature") != signature:
+            state = {"signature": signature, "index": 0, "total": 0.0, "sources": []}
+            self._aggregate_state[key] = state
+        index = int(state.get("index", 0))
+        service, path = members[index]
+        value = self.read_busitem(service, path)
+        self.last_operation_performed = True
+        if value is not None:
+            state["total"] = float(state.get("total", 0.0)) + float(value)
+            state["sources"] = [*list(state.get("sources", [])), f"{service}{path}"]
+        state["index"] = index + 1
+        if state["index"] < len(members):
+            return "deferred"
+        sources = list(state.get("sources", []))
+        self.adapter.cache.update_value(key, state.get("total", 0.0), source=",".join(sources) if sources else key)
+        self._aggregate_state.pop(key, None)
+        return "applied"
 
     def read_busitem(self, service: str, path: str) -> Any:
         if not service or not path:
             return None
 
-        def _read() -> Any:
-            obj = self.adapter.connection.bus().get_object(service, path, introspect=False)
-            iface = dbus.Interface(obj, "com.victronenergy.BusItem")
-            return coerce_dbus_numeric(iface.GetValue(timeout=1.0))
+        return self.adapter._timed("read", lambda: self._read_busitem_now(service, path))
 
-        return self.adapter._timed("read", _read)
+    def _read_busitem_now(self, service: str, path: str) -> Any:
+        obj = self.adapter.connection.bus().get_object(service, path, introspect=False)
+        iface = dbus.Interface(obj, "com.victronenergy.BusItem")
+        return coerce_dbus_numeric(iface.GetValue(timeout=1.0))
