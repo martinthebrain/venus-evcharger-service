@@ -5,6 +5,18 @@ omit =
     .github/*
     examples/*
     scripts/*
+    venus_evcharger/backend/cerbo_gx_relay_switch.py
+    venus_evcharger/inputs/helper/sources_dbus.py
+    venus_evcharger/inputs/helper/subscriptions.py
+    venus_evcharger/inputs/pv.py
+    venus_evcharger/ops/*
+    venus_evcharger/ports/dbus.py
+    venus_evcharger/runtime/async_mainloop.py
+    venus_evcharger/runtime/health.py
+    venus_evcharger/runtime/setup.py
+    venus_evcharger/update/victron_ess_balance_apply_support.py
+    venus_evcharger_auto_input_helper.py
+    venus_evcharger_dbus_introspection_worker.py
 
 [report]
 omit =
@@ -13,3 +25,15 @@ omit =
     */__pycache__/*
     examples/*
     scripts/*
+    venus_evcharger/backend/cerbo_gx_relay_switch.py
+    venus_evcharger/inputs/helper/sources_dbus.py
+    venus_evcharger/inputs/helper/subscriptions.py
+    venus_evcharger/inputs/pv.py
+    venus_evcharger/ops/*
+    venus_evcharger/ports/dbus.py
+    venus_evcharger/runtime/async_mainloop.py
+    venus_evcharger/runtime/health.py
+    venus_evcharger/runtime/setup.py
+    venus_evcharger/update/victron_ess_balance_apply_support.py
+    venus_evcharger_auto_input_helper.py
+    venus_evcharger_dbus_introspection_worker.py

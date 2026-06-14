@@ -6,11 +6,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import dbus
 from venus_evcharger.inputs.pv import _DbusInputPvMixin
 from venus_evcharger.inputs.storage import _DbusInputStorageMixin
 
-_TEST_PATCH_EXPORTS = (dbus, time)
+_TEST_PATCH_EXPORTS = (time,)
 
 
 class DbusInputController(_DbusInputPvMixin, _DbusInputStorageMixin):

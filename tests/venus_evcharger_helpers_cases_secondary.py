@@ -1,53 +1,35 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_helpers_support import *
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
 
 
 class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
-    def test_get_dbus_value_retries_once_after_error(self):
+    def test_get_dbus_value_uses_gateway_cache_and_requests_missing_value(self):
         service = ShellyWallboxService.__new__(ShellyWallboxService)
-        service.dbus_method_timeout_seconds = 1.25
-        first_interface = MagicMock()
-        second_interface = MagicMock()
-        first_interface.GetValue.side_effect = RuntimeError("temporary dbus error")
-        second_interface.GetValue.return_value = 42.0
-        first_bus = MagicMock()
-        second_bus = MagicMock()
-        first_bus.get_object.return_value = object()
-        second_bus.get_object.return_value = object()
-        service._get_system_bus = MagicMock(side_effect=[first_bus, second_bus])
-        service._reset_system_bus = MagicMock()
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        paths = gateway_paths(f"{temp_dir.name}/run")
+        store = DbusCacheStore(paths)
+        store.update_value(dbus_path_key("com.victronenergy.system", "/Dc/Pv/Power"), 42.0, source="test")
+        store.write_snapshot_files()
+        service.dbus_gateway_run_dir = paths.run_dir
+        service.dbus_gateway_cache_path = paths.cache_path
+        service._mark_recovery = MagicMock()
+        service._mark_failure = MagicMock()
+        service._dbus_input_controller = None
 
-        original_interface = venus_evcharger_service.dbus.Interface
-        venus_evcharger_service.dbus.Interface = MagicMock(side_effect=[first_interface, second_interface])
-        try:
-            self.assertEqual(service._get_dbus_value("com.victronenergy.system", "/Dc/Pv/Power"), 42.0)
-        finally:
-            venus_evcharger_service.dbus.Interface = original_interface
+        self.assertEqual(service._get_dbus_value("com.victronenergy.system", "/Dc/Pv/Power"), 42.0)
+        self.assertIsNone(service._get_dbus_value("com.victronenergy.system", "/Missing"))
+        commands = [payload for _path, payload in DbusCommandInbox(paths.command_dir).load_pending()]
+        self.assertTrue(any(command.get("kind") == "refresh_value" and command.get("path") == "/Missing" for command in commands))
+        service._mark_recovery.assert_called()
+        service._mark_failure.assert_called_with("dbus")
 
-        self.assertEqual(service._get_system_bus.call_count, 2)
-        second_interface.GetValue.assert_called_once_with(timeout=1.25)
-        service._reset_system_bus.assert_called()
-
-    def test_system_bus_reset_recreates_cached_connection(self):
+    def test_system_bus_access_is_disabled(self):
         service = ShellyWallboxService.__new__(ShellyWallboxService)
-        first_bus = object()
-        second_bus = object()
-
-        original_system_bus = runtime_support_module.dbus.SystemBus
-        original_session_bus = runtime_support_module.dbus.SessionBus
-        runtime_support_module.dbus.SystemBus = MagicMock(side_effect=[first_bus, second_bus])
-        runtime_support_module.dbus.SessionBus = MagicMock(
-            side_effect=AssertionError("session bus not expected")
-        )
-        try:
-            with unittest.mock.patch.dict(venus_evcharger_service.os.environ, {}, clear=True):
-                self.assertIs(service._get_system_bus(), first_bus)
-                self.assertIs(service._get_system_bus(), first_bus)
-                service._reset_system_bus()
-                self.assertIs(service._get_system_bus(), second_bus)
-        finally:
-            runtime_support_module.dbus.SystemBus = original_system_bus
-            runtime_support_module.dbus.SessionBus = original_session_bus
+        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
+            service._get_system_bus()
+        service._reset_system_bus()
 
     def test_request_uses_configured_shelly_timeout(self):
         service = ShellyWallboxService.__new__(ShellyWallboxService)

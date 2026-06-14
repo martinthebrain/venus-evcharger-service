@@ -16,7 +16,6 @@ import uuid
 import time
 from typing import Any
 
-import dbus
 import requests
 
 from venus_evcharger.core.shared import write_text_atomically
@@ -28,7 +27,7 @@ FailureState = dict[str, bool]
 DefaultFactory = Callable[[], Any]
 
 # Tests patch these module-level symbols directly to exercise failure paths.
-_TEST_PATCH_EXPORTS = (logging, os, dbus, write_text_atomically)
+_TEST_PATCH_EXPORTS = (logging, os, write_text_atomically)
 
 
 from venus_evcharger.runtime.audit import _RuntimeSupportAuditMixin

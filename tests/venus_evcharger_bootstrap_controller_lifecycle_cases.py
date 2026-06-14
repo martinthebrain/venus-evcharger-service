@@ -89,7 +89,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         with patch("venus_evcharger.bootstrap.controller.faulthandler.enable", side_effect=RuntimeError("nope")):
             _enable_fault_diagnostics()
 
-    def test_setup_dbus_mainloop_initializes_threads_and_tolerates_missing_threads_init(self):
+    def test_setup_dbus_mainloop_is_core_compatibility_hook(self):
         dbus_module = ModuleType("dbus")
         mainloop_module = ModuleType("dbus.mainloop")
         glib_module = ModuleType("dbus.mainloop.glib")
@@ -113,8 +113,8 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
 
             _setup_dbus_mainloop()
 
-        glib_module.threads_init.assert_called_once_with()
-        glib_module.DBusGMainLoop.assert_called_once_with(set_as_default=True)
+        glib_module.threads_init.assert_not_called()
+        glib_module.DBusGMainLoop.assert_not_called()
 
         glib_module = ModuleType("dbus.mainloop.glib")
         glib_module.DBusGMainLoop = MagicMock()
@@ -134,7 +134,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
             mainloop_module.glib = glib_module
             _setup_dbus_mainloop()
 
-        glib_module.DBusGMainLoop.assert_called_once_with(set_as_default=True)
+        glib_module.DBusGMainLoop.assert_not_called()
 
     def test_run_service_main_runs_loop_and_logs_critical_on_failure(self):
         gobject_module = MagicMock()

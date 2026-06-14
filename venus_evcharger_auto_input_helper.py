@@ -18,7 +18,6 @@ import time
 import uuid
 from typing import Any
 
-import dbus
 from gi.repository import GLib
 from venus_evcharger.core.shared import (
     AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION,
@@ -33,13 +32,6 @@ from venus_evcharger.inputs.helper import (
     _AutoInputHelperSubscriptionMixin,
 )
 
-try:
-    import dbus.mainloop.glib as dbus_glib_mainloop
-    if not hasattr(dbus, "mainloop"):
-        dbus_glib_mainloop = None
-except Exception:  # pylint: disable=broad-except
-    dbus_glib_mainloop = None
-
 
 class AutoInputHelper(
     _AutoInputHelperSnapshotMixin,
@@ -50,7 +42,7 @@ class AutoInputHelper(
 
     @staticmethod
     def _dbus_module() -> Any:
-        return dbus
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     def __init__(
         self,
@@ -107,6 +99,15 @@ class AutoInputHelper(
         self.dbus_introspection_max_age_seconds = max(
             0.0,
             float(self.config.get("DbusIntrospectionMaxAgeSeconds", 900.0) or 900.0),
+        )
+        self.dbus_gateway_run_dir = self.config.get("DbusGatewayRunDir", "/run/venus-evcharger").strip()
+        self.dbus_gateway_cache_path = self.config.get(
+            "DbusGatewayCachePath",
+            os.path.join(self.dbus_gateway_run_dir, "dbus-cache.json"),
+        ).strip()
+        self.dbus_gateway_max_age_seconds = max(
+            0.0,
+            float(self.config.get("DbusGatewayMaxAgeSeconds", 10.0) or 10.0),
         )
         self.dbus_method_timeout_seconds = float(self.config.get("DbusMethodTimeoutSeconds", 1.0))
 
@@ -400,11 +401,9 @@ class AutoInputHelper(
             self._write_snapshot(snapshot)
 
     @staticmethod
-    def _require_dbus_glib_mainloop() -> Any:
-        """Return the DBus GLib mainloop module or fail with a clear helper error."""
-        if dbus_glib_mainloop is None:
-            raise RuntimeError("dbus.mainloop.glib is required for the auto input helper")
-        return dbus_glib_mainloop
+    def _require_dbus_glib_mainloop() -> None:
+        """Compatibility hook; DBus mainloop setup now belongs to the gateway."""
+        return None
 
     @staticmethod
     def _signal_values() -> tuple[int, ...]:
@@ -520,8 +519,8 @@ class AutoInputHelper(
         return self._main_loop
 
     def run(self) -> None:
-        """Main helper loop using DBus subscriptions plus a small RAM heartbeat."""
-        self._require_dbus_glib_mainloop().DBusGMainLoop(set_as_default=True)
+        """Main helper loop using gateway cache refreshes plus a small RAM heartbeat."""
+        self._require_dbus_glib_mainloop()
         self._install_signal_handlers()
         self._log_helper_start()
         self._build_main_loop()

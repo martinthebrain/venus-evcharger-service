@@ -18,8 +18,6 @@ from collections.abc import Callable
 from os import stat_result
 from typing import TYPE_CHECKING, Any
 
-import dbus
-
 from gi.repository import GLib as gobject  # pylint: disable=import-error
 
 sys.path.insert(
@@ -63,7 +61,6 @@ if TYPE_CHECKING:
 __all__ = [
     "ShellyWallboxService",
     "main",
-    "dbus",
     "gobject",
     "mode_uses_auto_logic",
     "month_in_ranges",
@@ -168,22 +165,8 @@ class ShellyWallboxService(ControlApiMixin, StatePublishMixin, RuntimeHelperMixi
             return json.load(handle)
 
     def _get_system_bus(self) -> Any:
-        """Get the system DBus for the current thread.
-
-        dbus-python connections are safer when they are not shared across
-        worker threads. Each thread keeps its own cached connection, while a
-        generation counter lets recovery logic invalidate all thread-local
-        connections lazily.
-        """
-        self._ensure_system_bus_state()
-        current_generation = self._system_bus_generation
-        cached_generation = getattr(self._system_bus_state, "generation", None)
-        cached_bus = getattr(self._system_bus_state, "bus", None)
-        if cached_bus is None or cached_generation != current_generation:
-            cached_bus = self._create_system_bus()
-            self._system_bus_state.bus = cached_bus
-            self._system_bus_state.generation = current_generation
-        return cached_bus
+        """Direct DBus access is isolated in the gateway adapter."""
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
 
 def main() -> None:

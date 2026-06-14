@@ -23,34 +23,31 @@ class _AutoInputHelperBasicSubscriptionCases:
 
     def test_signal_spec_key_and_subscribe_busitem_path_deduplicate_subscriptions(self):
         helper = self._make_helper()
-        bus = MagicMock()
-        bus.add_signal_receiver.return_value = "match"
-        helper._get_system_bus = MagicMock(return_value=bus)
+        helper._request_gateway_value = MagicMock()
 
         self.assertEqual(helper._signal_spec_key("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power"), ("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power"))
         helper._subscribe_busitem_path("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power")
         helper._subscribe_busitem_path("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power")
-        bus.add_signal_receiver.assert_called_once()
+        helper._request_gateway_value.assert_called_once_with(
+            "com.victronenergy.pvinverter.http_40",
+            "/Ac/Power",
+            priority=80,
+            reason="pv subscription refresh",
+        )
         self.assertIn(("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power"), helper._signal_matches)
         self.assertIn(("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power"), helper._monitored_specs)
 
-    def test_busitem_subscription_callback_is_bound_to_current_dbus_generation(self):
+    def test_busitem_subscription_records_gateway_interest_without_dbus_callback(self):
         helper = self._make_helper()
         helper._dbus_generation = 7
         helper._system_bus_generation = 7
-        bus = MagicMock()
-        helper._system_bus = bus
-        helper._refresh_source = MagicMock()
+        helper._request_gateway_value = MagicMock()
 
         helper._subscribe_busitem_path("pv", "com.victronenergy.pvinverter.http_40", "/Ac/Power")
-        callback = bus.add_signal_receiver.call_args.args[0]
 
-        callback(sender="svc", path="/Ac/Power")
-        helper._refresh_source.assert_called_once_with("pv")
-
-        helper._dbus_generation = 8
-        callback(sender="svc", path="/Ac/Power")
-        helper._refresh_source.assert_called_once_with("pv")
+        self.assertEqual(helper._system_bus_generation, 7)
+        self.assertEqual(helper._dbus_generation, 7)
+        helper._request_gateway_value.assert_called_once()
 
     def test_clear_missing_subscriptions_removes_stale_entries_and_ignores_remove_errors(self):
         helper = self._make_helper()
@@ -106,21 +103,16 @@ class _AutoInputHelperBasicSubscriptionCases:
 
     def test_register_name_owner_subscription_tracks_match_and_deduplicates(self):
         helper = self._make_helper()
-        bus = MagicMock()
-        bus.add_signal_receiver.return_value = "name-match"
-        helper._system_bus = bus
+        gateway_client = MagicMock()
+        helper._gateway_client = MagicMock(return_value=gateway_client)
         helper._dbus_generation = 5
         helper._system_bus_generation = 5
 
         helper._register_name_owner_subscription()
         helper._register_name_owner_subscription()
 
-        bus.add_signal_receiver.assert_called_once()
-        self.assertEqual(helper._name_owner_match, "name-match")
-        callback = bus.add_signal_receiver.call_args.args[0]
-        helper._schedule_refresh_subscriptions = MagicMock()
-        callback("com.victronenergy.system", "", ":1.2")
-        helper._schedule_refresh_subscriptions.assert_called_once_with()
+        self.assertIsNotNone(helper._name_owner_match)
+        gateway_client.enqueue_command.assert_called_once_with({"kind": "refresh_services", "priority": "normal"})
 
     def test_desired_subscription_specs_combines_pv_battery_and_grid_sources(self):
         helper = self._make_helper()

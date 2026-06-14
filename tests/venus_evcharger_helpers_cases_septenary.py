@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_helpers_support import *
+from venus_evcharger.dbus_gateway import DbusCacheStore, gateway_paths
 
 
 class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
@@ -229,15 +230,24 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
 
     def test_list_dbus_services(self):
         service = ShellyWallboxService.__new__(ShellyWallboxService)
-        service._get_system_bus = MagicMock()
-        venus_evcharger_service.dbus.Interface.return_value.ListNames.return_value = [
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        paths = gateway_paths(f"{temp_dir.name}/run")
+        store = DbusCacheStore(paths)
+        store.update_services([
             "com.victronenergy.system",
             "com.victronenergy.pvinverter.http_40",
-        ]
+        ])
+        store.write_snapshot_files()
+        service.dbus_gateway_run_dir = paths.run_dir
+        service.dbus_gateway_cache_path = paths.cache_path
+        service._mark_recovery = MagicMock()
+        service._mark_failure = MagicMock()
+        service._dbus_input_controller = None
 
         self.assertEqual(
-            service._list_dbus_services(),
-            ["com.victronenergy.system", "com.victronenergy.pvinverter.http_40"],
+            sorted(service._list_dbus_services()),
+            ["com.victronenergy.pvinverter.http_40", "com.victronenergy.system"],
         )
 
 

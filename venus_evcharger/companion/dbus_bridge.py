@@ -7,8 +7,7 @@ import platform
 import time
 from typing import Any, Mapping, cast
 
-from vedbus import VeDbusService
-
+from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy, gateway_paths
 from .dbus_bridge_grid import _EnergyCompanionDbusBridgeGridMixin
 from .dbus_bridge_services import _EnergyCompanionDbusBridgeServicesMixin
 
@@ -96,7 +95,8 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServicesMixin, _Energy
         product_label: str,
         specific_paths: Mapping[str, Any],
     ) -> Any:
-        service = VeDbusService(service_name, register=False)
+        run_dir = str(getattr(self.service, "dbus_gateway_run_dir", "") or "")
+        service = GatewayDbusServiceProxy(service_name, paths=gateway_paths(run_dir or None))
         self._register_common_paths(service, device_instance, product_label)
         for path, initial in specific_paths.items():
             service.add_path(path, initial)

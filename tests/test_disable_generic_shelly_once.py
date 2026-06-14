@@ -1,6 +1,7 @@
 """Unit tests for the one-shot generic Shelly disable helper."""
 
 import os
+from pathlib import Path
 import runpy
 import sys
 import tempfile
@@ -11,6 +12,7 @@ sys.modules["dbus"] = MagicMock()
 
 from venus_evcharger.ops import disable_generic_shelly_once  # noqa: E402
 from venus_evcharger.ops.disable_generic_shelly_once import disable_matching_device, load_settings, matches_device  # noqa: E402
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths  # noqa: E402
 
 
 class TestDisableGenericShellyOnce(unittest.TestCase):
@@ -98,49 +100,33 @@ class TestDisableGenericShellyOnce(unittest.TestCase):
         self.assertEqual(settings["channel"], 1)
         self.assertEqual(settings["delay_seconds"], 180.0)
 
-    def test_get_system_bus_prefers_session_bus_when_available(self):
-        with patch.dict(os.environ, {"DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/test-bus"}, clear=True):
-            with patch.object(disable_generic_shelly_once.dbus, "SessionBus", return_value="session") as session_bus:
-                self.assertEqual(disable_generic_shelly_once.get_system_bus(), "session")
-        session_bus.assert_called_once_with()
+    def test_get_system_bus_rejects_direct_dbus_access(self):
+        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
+            disable_generic_shelly_once.get_system_bus()
 
-        with patch.dict(os.environ, {}, clear=True):
-            with patch.object(disable_generic_shelly_once.dbus, "SystemBus", return_value="system") as system_bus:
-                self.assertEqual(disable_generic_shelly_once.get_system_bus(), "system")
-        system_bus.assert_called_once_with(private=True)
+    def test_dbus_helper_functions_use_gateway_cache_and_commands(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = gateway_paths(str(Path(temp_dir) / "run"))
+            store = DbusCacheStore(paths)
+            store.update_value(dbus_path_key("svc", "/Value"), 17, source="test")
+            store.update_value(
+                "introspection:svc:/Devices",
+                "<node><node name='a'/><node/><node name='b'/></node>",
+                source="test",
+            )
+            store.write_snapshot_files()
 
-    def test_dbus_helper_functions_cover_bus_item_and_introspection_paths(self):
-        bus = MagicMock()
-        bus.get_object.return_value = "object"
-        iface = MagicMock()
+            self.assertEqual(disable_generic_shelly_once.get_dbus_value(paths.cache_path, "svc", "/Value", timeout=2.5), 17)
+            self.assertTrue(disable_generic_shelly_once.set_dbus_value(paths.run_dir, "svc", "/Value", 7, timeout=1.5))
+            self.assertTrue(disable_generic_shelly_once.set_dbus_value(paths.run_dir, "svc", "/Other", "raw", timeout=1.0))
+            self.assertEqual(disable_generic_shelly_once.get_dbus_child_nodes(paths.run_dir, "svc", "/Devices", timeout=0.5), ["a", "b"])
 
-        with patch.object(disable_generic_shelly_once.dbus, "Interface", return_value=iface) as interface_factory:
-            iface.GetValue.return_value = 17
-            value = disable_generic_shelly_once.get_dbus_value(bus, "svc", "/Value", timeout=2.5)
-            self.assertEqual(value, 17)
-            bus.get_object.assert_called_with("svc", "/Value", introspect=False)
-            interface_factory.assert_called_with("object", "com.victronenergy.BusItem")
-            iface.GetValue.assert_called_once_with(timeout=2.5)
-
-            iface.reset_mock()
-            interface_factory.reset_mock()
-            with patch.object(disable_generic_shelly_once.dbus, "Int32", side_effect=lambda v: f"i{v}") as int32_ctor:
-                disable_generic_shelly_once.set_dbus_value(bus, "svc", "/Value", 7, timeout=1.5)
-            int32_ctor.assert_called_once_with(7)
-            iface.SetValue.assert_called_once_with("i7", timeout=1.5)
-
-            iface.reset_mock()
-            disable_generic_shelly_once.set_dbus_value(bus, "svc", "/Value", "raw", timeout=1.0)
-            iface.SetValue.assert_called_once_with("raw", timeout=1.0)
-
-            iface.reset_mock()
-            interface_factory.reset_mock()
-            iface.Introspect.return_value = "<node><node name='a'/><node/><node name='b'/></node>"
-            children = disable_generic_shelly_once.get_dbus_child_nodes(bus, "svc", "/Devices", timeout=0.5)
-            self.assertEqual(children, ["a", "b"])
-            bus.get_object.assert_called_with("svc", "/Devices", introspect=False)
-            interface_factory.assert_called_with("object", "org.freedesktop.DBus.Introspectable")
-            iface.Introspect.assert_called_once_with(timeout=0.5)
+            commands = [payload for _path, payload in DbusCommandInbox(paths.command_dir).load_pending()]
+            self.assertTrue(any(command.get("kind") == "set_value" and command.get("path") == "/Value" and command.get("value") == 7 for command in commands))
+            self.assertTrue(any(command.get("kind") == "set_value" and command.get("path") == "/Other" and command.get("value") == "raw" for command in commands))
+            self.assertEqual(disable_generic_shelly_once.get_dbus_child_nodes(paths.run_dir, "svc", "/Missing", timeout=0.5), [])
+            commands = [payload for _path, payload in DbusCommandInbox(paths.command_dir).load_pending()]
+            self.assertTrue(any(command.get("kind") == "introspect" and command.get("path") == "/Missing" for command in commands))
 
     def test_disable_matching_device_writes_only_when_enabled(self):
         settings = {
@@ -277,8 +263,9 @@ class TestDisableGenericShellyOnce(unittest.TestCase):
             "target_mac": "",
             "channel": 1,
             "delay_seconds": 2.0,
+            "gateway_run_dir": "/tmp/gateway-run",
+            "gateway_cache_path": "/tmp/gateway-cache.json",
         }
-        bus = MagicMock()
         set_value = MagicMock()
 
         def fake_get_value(_bus, _service, path, timeout=1.0):
@@ -290,18 +277,18 @@ class TestDisableGenericShellyOnce(unittest.TestCase):
             return values[path]
 
         with patch.object(disable_generic_shelly_once, "load_settings", return_value=settings):
-            with patch.object(disable_generic_shelly_once, "get_system_bus", return_value=bus):
-                with patch.object(disable_generic_shelly_once.time, "sleep") as sleep_mock:
-                    with patch.object(disable_generic_shelly_once, "get_dbus_child_nodes", return_value=["SERIAL"]) as list_nodes:
-                        with patch.object(disable_generic_shelly_once, "get_dbus_value", side_effect=fake_get_value) as get_value:
-                            with patch.object(disable_generic_shelly_once, "set_dbus_value", side_effect=set_value) as set_value_func:
-                                result = disable_generic_shelly_once.run_once("/tmp/config.ini")
+            with patch.object(disable_generic_shelly_once.time, "sleep") as sleep_mock:
+                with patch.object(disable_generic_shelly_once, "get_dbus_child_nodes", return_value=["SERIAL"]) as list_nodes:
+                    with patch.object(disable_generic_shelly_once, "get_dbus_value", side_effect=fake_get_value) as get_value:
+                        with patch.object(disable_generic_shelly_once, "set_dbus_value", side_effect=set_value) as set_value_func:
+                            result = disable_generic_shelly_once.run_once("/tmp/config.ini")
 
         self.assertEqual(result, "disabled")
         sleep_mock.assert_called_once_with(2.0)
-        list_nodes.assert_called_once_with(bus, "svc", "/Devices", timeout=1.0)
+        list_nodes.assert_called_once_with("/tmp/gateway-run", "svc", "/Devices", timeout=1.0)
         self.assertEqual(get_value.call_count, 3)
-        set_value_func.assert_called_once_with(bus, "svc", "/Devices/SERIAL/1/Enabled", 0, timeout=1.0)
+        get_value.assert_any_call("/tmp/gateway-cache.json", "svc", "/Devices/SERIAL/Ip", timeout=1.0)
+        set_value_func.assert_called_once_with("/tmp/gateway-run", "svc", "/Devices/SERIAL/1/Enabled", 0, timeout=1.0)
 
     def test_main_returns_status_for_success_and_failure(self):
         with patch.object(disable_generic_shelly_once, "run_once", return_value="disabled") as run_once:

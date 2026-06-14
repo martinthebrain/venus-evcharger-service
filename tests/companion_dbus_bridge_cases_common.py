@@ -10,7 +10,7 @@ from venus_evcharger.companion import EnergyCompanionDbusBridge
 
 
 class _FakeVeDbusService:
-    def __init__(self, name: str, register: bool = False) -> None:
+    def __init__(self, name: str, register: bool = False, **_kwargs: object) -> None:
         self.name = name
         self.register_requested = register
         self.paths: dict[str, object] = {}

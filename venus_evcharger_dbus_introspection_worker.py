@@ -21,10 +21,12 @@ import xml.etree.ElementTree as xml_et
 from dataclasses import dataclass, field
 from typing import Any
 
-import dbus
-
 from venus_evcharger.core.shared import compact_json, parse_config_bool, prefixed_service_names, write_text_atomically
 from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
+from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, gateway_paths
+
+# Compatibility patch target for older tests. The worker never dereferences this.
+dbus: Any = None
 
 
 @dataclass(order=True)
@@ -87,6 +89,9 @@ class DbusIntrospectionWorker:
         self._failures: dict[tuple[str, str], int] = {}
         self._services: dict[str, dict[str, Any]] = {}
         self._last_service_names: list[str] = []
+        run_dir = self.config.get("DbusGatewayRunDir", "/run/venus-evcharger").strip()
+        self.gateway_paths = gateway_paths(run_dir or None)
+        self.gateway_client = GatewayClient(self.gateway_paths)
 
     @staticmethod
     def _load_config(config_path: str) -> configparser.SectionProxy:
@@ -140,24 +145,20 @@ class DbusIntrospectionWorker:
         return True
 
     def _get_system_bus(self) -> Any:
-        if self._system_bus is None:
-            self._system_bus = dbus.SystemBus(private=True)
-        return self._system_bus
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     def _reset_system_bus(self) -> None:
-        bus = self._system_bus
         self._system_bus = None
-        close = getattr(bus, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                pass
 
     def _list_dbus_services(self) -> list[str]:
-        obj = self._get_system_bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
-        iface = dbus.Interface(obj, "org.freedesktop.DBus")
-        return [str(name) for name in iface.ListNames(timeout=self.timeout_seconds)]
+        snapshot = DbusCacheStore.load_snapshot(self.gateway_paths.cache_path)
+        services = snapshot.get("services", [])
+        if isinstance(services, list) and services:
+            return [str(name) for name in services]
+        if isinstance(services, dict) and services:
+            return [str(name) for name in services]
+        self.gateway_client.enqueue_command({"kind": "refresh_services", "source": "introspection-worker", "priority": "discovery"})
+        return []
 
     def _enqueue_background_jobs(self, now: float) -> None:
         try:
@@ -297,21 +298,31 @@ class DbusIntrospectionWorker:
         self._store_finding(job.service, job.path, finding)
 
     def _introspect(self, job: IntrospectionJob, now: float) -> dict[str, Any]:
-        obj = self._get_system_bus().get_object(job.service, job.path, introspect=False)
-        iface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
-        xml_data = iface.Introspect(timeout=self.timeout_seconds)
-        interfaces, children = self._parse_introspection_xml(xml_data)
+        self.gateway_client.enqueue_command(
+            {
+                "kind": "introspect",
+                "service": job.service,
+                "path": job.path,
+                "priority": "discovery",
+                "source": job.source,
+                "reason": job.reason,
+                "timeout": self.timeout_seconds,
+                "coalesce_key": f"introspect:{job.service}:{job.path}",
+            }
+        )
+        interfaces: list[str] = []
+        children: list[str] = []
         self._failures.pop(job.key, None)
         return {
-            "status": "fresh",
-            "confidence": 1.0,
+            "status": "requested",
+            "confidence": 0.5,
             "interfaces": interfaces,
             "children": children,
             "source": job.source,
             "reason": job.reason,
-            "last_success_at": now,
+            "last_success_at": None,
             "last_error": "",
-            "retry_after": now + self.full_scan_interval_seconds,
+            "retry_after": now + self.min_job_interval_seconds,
         }
 
     @staticmethod

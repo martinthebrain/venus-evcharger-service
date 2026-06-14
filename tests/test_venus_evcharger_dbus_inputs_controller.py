@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import os
+import tempfile
 import unittest
 from types import SimpleNamespace
 from typing import Any, cast
@@ -6,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import venus_evcharger.inputs.dbus as wallbox_dbus_inputs
 from venus_evcharger.inputs.dbus import DbusInputController
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
 from venus_evcharger.energy import EnergyLearningProfile, EnergySourceDefinition, EnergySourceSnapshot
 
 
@@ -50,23 +53,36 @@ class TestDbusInputController(unittest.TestCase):
         )
         return service
 
+    def _prepare_gateway(self, service: SimpleNamespace):
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        paths = gateway_paths(os.path.join(tempdir.name, "run"))
+        service.dbus_gateway_run_dir = paths.run_dir
+        service.dbus_gateway_cache_path = paths.cache_path
+        return paths
+
+    def _write_gateway_cache(self, service: SimpleNamespace, *, values=None, services=None):
+        paths = self._prepare_gateway(service)
+        store = DbusCacheStore(paths)
+        for (service_name, path), value in (values or {}).items():
+            store.update_value(dbus_path_key(service_name, path), value, source=f"{service_name}{path}")
+        if services is not None:
+            store.update_services(list(services))
+        store.write_snapshot_files()
+        return paths
+
     def test_get_dbus_value_and_list_services_cover_retry_and_failure_paths(self) -> None:
         service = self._make_service()
         controller = DbusInputController(service)
-        module: Any = wallbox_dbus_inputs
 
-        service._get_system_bus.return_value = MagicMock(get_object=MagicMock(return_value=object()))
-        failing_interface = MagicMock()
-        failing_interface.GetValue.side_effect = [RuntimeError("boom"), RuntimeError("boom")]
-        original_interface = module.dbus.Interface
-        module.dbus.Interface = MagicMock(return_value=failing_interface)
-        try:
-            with self.assertRaises(RuntimeError):
-                controller.get_dbus_value("svc", "/Path")
-        finally:
-            module.dbus.Interface = original_interface
+        paths = self._prepare_gateway(service)
+        self.assertIsNone(controller.get_dbus_value("svc", "/Path"))
+        service._reset_system_bus.assert_not_called()
+        commands = [command for _, command in DbusCommandInbox(paths.command_dir).load_pending()]
+        self.assertEqual(commands[0]["kind"], "refresh_value")
 
-        self.assertEqual(service._reset_system_bus.call_count, 2)
+        self._write_gateway_cache(service, values={("svc", "/Path"): 42.0})
+        self.assertEqual(controller.get_dbus_value("svc", "/Path"), 42.0)
 
         with patch("venus_evcharger.inputs.dbus.time.time", return_value=10.0):
             service._dbus_list_backoff_until = 20.0
@@ -74,19 +90,21 @@ class TestDbusInputController(unittest.TestCase):
                 controller.list_dbus_services()
 
         service._dbus_list_backoff_until = 0.0
-        service._get_system_bus.return_value = MagicMock(get_object=MagicMock(return_value=object()))
-        failing_interface = MagicMock()
-        failing_interface.ListNames.side_effect = RuntimeError("dbus down")
-        module.dbus.Interface = MagicMock(return_value=failing_interface)
-        try:
-            with patch("venus_evcharger.inputs.dbus.time.time", return_value=100.0):
-                with self.assertRaises(RuntimeError):
-                    controller.list_dbus_services()
-        finally:
-            module.dbus.Interface = original_interface
+        service._dbus_list_failures = 0
+        paths = self._prepare_gateway(service)
+        with patch("venus_evcharger.inputs.dbus.time.time", return_value=100.0):
+            self.assertEqual(controller.list_dbus_services(), [])
 
         self.assertEqual(service._dbus_list_failures, 1)
         self.assertEqual(service._dbus_list_backoff_until, 105.0)
+        commands = [command for _, command in DbusCommandInbox(paths.command_dir).load_pending()]
+        self.assertEqual(commands[0]["kind"], "refresh_services")
+
+        service._dbus_list_backoff_until = 0.0
+        service._dbus_list_failures = 1
+        self._write_gateway_cache(service, services=["com.victronenergy.system"])
+        self.assertEqual(controller.list_dbus_services(), ["com.victronenergy.system"])
+        self.assertEqual(service._dbus_list_failures, 0)
 
     def test_pv_resolution_and_missing_pv_paths_cover_explicit_cached_and_rescan_failures(self) -> None:
         service = self._make_service()
@@ -181,12 +199,10 @@ class TestDbusInputController(unittest.TestCase):
         service._get_dbus_value = MagicMock(return_value=12.0)
         controller = DbusInputController(service)
 
-        with (
-            patch("venus_evcharger.inputs.pv.owner_path_unusable", return_value=(True, "known-missing")),
-            patch("venus_evcharger.inputs.pv.request_owner_introspection") as request_main,
-        ):
-            self.assertIsNone(controller.get_dbus_value("svc", "/Path"))
-        request_main.assert_called_once()
+        paths = self._prepare_gateway(service)
+        self.assertIsNone(controller.get_dbus_value("svc", "/Path"))
+        commands = [command for _, command in DbusCommandInbox(paths.command_dir).load_pending()]
+        self.assertEqual(commands[0]["kind"], "refresh_value")
 
         with (
             patch("venus_evcharger.inputs.storage_support.owner_path_unusable", return_value=(True, "known-missing")),

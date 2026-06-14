@@ -22,7 +22,6 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from vedbus import VeDbusService
 from venus_evcharger.app.bootstrap_support import (
     enable_fault_diagnostics as _enable_fault_diagnostics_impl,
     install_signal_logging as _install_signal_logging_impl,
@@ -31,6 +30,7 @@ from venus_evcharger.app.bootstrap_support import (
     run_service_loop as _run_service_loop_impl,
     setup_dbus_mainloop as _setup_dbus_mainloop_impl,
 )
+from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy
 from venus_evcharger.bootstrap.config import (
     MONTH_WINDOW_DEFAULTS as _MONTH_WINDOW_DEFAULTS,
     _config_value as _config_value_impl,
@@ -185,44 +185,19 @@ class ServiceBootstrapController(
             logging.info("Bootstrap step complete: %s", step_name)
 
     def initialize_dbus_service(self) -> None:
-        """Create the EV charger DBus service using the bootstrap module factory."""
+        """Create the EV charger DBus service proxy used by the gateway."""
         svc = self.service
-        svc._dbusservice = VeDbusService(f"{svc.service_name}.http_{svc.deviceinstance}", register=False)
+        svc._dbusservice = GatewayDbusServiceProxy(f"{svc.service_name}.http_{svc.deviceinstance}")
 
     def publish_dbus_service(self) -> None:
-        """Publish the DBus service only after the full bootstrap sequence completed."""
+        """Tell the gateway to publish the DBus service."""
         dbus_service = self.service._dbusservice
-        try:
-            dbus_service.register()
-        except Exception as error:  # pylint: disable=broad-except
-            if error.__class__.__name__ != "NameExistsException":
-                raise
-            if not self._dbus_service_owned_by_current_process(dbus_service):
-                raise
-            logging.info(
-                "DBus service %s already belongs to pid=%s; continuing without explicit register()",
-                getattr(dbus_service, "name", "<unknown>"),
-                os.getpid(),
-            )
+        dbus_service.register()
 
     def _dbus_service_owned_by_current_process(self, dbus_service: Any) -> bool:
-        """Return whether the DBus service name is already owned by this process."""
-        dbus_conn = getattr(dbus_service, "_dbusconn", None)
-        service_name = str(getattr(dbus_service, "name", "") or "")
-        if dbus_conn is None or not service_name:
-            return False
-        try:
-            bus = dbus_conn.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
-            owner = bus.GetNameOwner(service_name, dbus_interface="org.freedesktop.DBus")
-            owner_pid = int(bus.GetConnectionUnixProcessID(owner, dbus_interface="org.freedesktop.DBus"))
-        except Exception as error:  # pylint: disable=broad-except
-            logging.warning(
-                "Unable to verify DBus owner for %s after NameExistsException: %s",
-                service_name,
-                error,
-            )
-            return False
-        return owner_pid == os.getpid()
+        """Compatibility hook: the DBus adapter, not the core, owns DBus names."""
+        del dbus_service
+        return False
 
 
 def run_service_main(service_class: Callable[[], Any], config_path: str, gobject_module: Any) -> None:

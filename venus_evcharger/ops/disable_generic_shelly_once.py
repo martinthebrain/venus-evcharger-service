@@ -16,7 +16,7 @@ import time
 import xml.etree.ElementTree as xml_et
 from typing import Any, cast
 
-import dbus
+from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 
 
 DEFAULT_CONFIG_PATH = os.path.join(
@@ -80,6 +80,8 @@ def load_settings(config_path: str) -> dict[str, Any]:
         "target_mac": _normalize_mac(section.get("GenericShellyDisableMac", "")),
         "channel": channel,
         "delay_seconds": delay_seconds,
+        "gateway_run_dir": section.get("DbusGatewayRunDir", "/run/venus-evcharger").strip(),
+        "gateway_cache_path": section.get("DbusGatewayCachePath", "").strip(),
     }
 
 
@@ -119,20 +121,21 @@ def matches_device(
 
 
 def get_system_bus() -> Any:
-    """Return the appropriate DBus bus for the current environment."""
-    if "DBUS_SESSION_BUS_ADDRESS" in os.environ:
-        return dbus.SessionBus()
-    return dbus.SystemBus(private=True)
+    """Direct DBus connections are forbidden outside the gateway."""
+    raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
 
 def _bus_item_interface(bus: Any, service_name: str, path: str) -> Any:
-    obj = bus.get_object(service_name, path, introspect=False)
-    return dbus.Interface(obj, "com.victronenergy.BusItem")
+    del bus, service_name, path
+    raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
 
 def get_dbus_value(bus: Any, service_name: str, path: str, timeout: float = 1.0) -> Any:
-    """Read a DBus value from com.victronenergy.BusItem."""
-    return _bus_item_interface(bus, service_name, path).GetValue(timeout=timeout)
+    """Read a DBus value from the gateway cache."""
+    del timeout
+    cache_path = str(bus)
+    entry = DbusCacheStore.value_entry(DbusCacheStore.load_snapshot(cache_path), dbus_path_key(service_name, path))
+    return None if entry is None else entry.get("value")
 
 
 def set_dbus_value(
@@ -142,16 +145,43 @@ def set_dbus_value(
     value: Any,
     timeout: float = 1.0,
 ) -> Any:
-    """Write a DBus value to com.victronenergy.BusItem."""
-    payload = dbus.Int32(value) if hasattr(dbus, "Int32") and isinstance(value, int) else value
-    return _bus_item_interface(bus, service_name, path).SetValue(payload, timeout=timeout)
+    """Queue a DBus write through the gateway."""
+    del timeout
+    run_dir = str(bus)
+    GatewayClient(gateway_paths(run_dir or None)).enqueue_command(
+        {
+            "kind": "set_value",
+            "source": "disable-generic-shelly-once",
+            "service": service_name,
+            "path": path,
+            "value": value,
+            "priority": "user",
+            "coalesce_key": f"{service_name}:{path}",
+        }
+    )
+    return True
 
 
 def get_dbus_child_nodes(bus: Any, service_name: str, path: str, timeout: float = 1.0) -> list[str]:
-    """Return child nodes under a DBus path using introspection."""
-    obj = bus.get_object(service_name, path, introspect=False)
-    interface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
-    xml_data = interface.Introspect(timeout=timeout)
+    """Return child nodes from gateway-owned introspection cache."""
+    del timeout
+    run_dir = str(bus)
+    paths = gateway_paths(run_dir or None)
+    snapshot = DbusCacheStore.load_snapshot(paths.cache_path)
+    entry = DbusCacheStore.value_entry(snapshot, f"introspection:{service_name}:{path}")
+    if entry is None:
+        GatewayClient(paths).enqueue_command(
+            {
+                "kind": "introspect",
+                "source": "disable-generic-shelly-once",
+                "service": service_name,
+                "path": path,
+                "priority": "discovery",
+                "coalesce_key": f"introspect:{service_name}:{path}",
+            }
+        )
+        return []
+    xml_data = entry.get("value", "")
     root = xml_et.fromstring(str(xml_data))
     child_nodes: list[str] = []
     for node in root.findall("node"):
@@ -264,13 +294,14 @@ def run_once(config_path: str = DEFAULT_CONFIG_PATH) -> str:
         logging.info("Waiting %.0f seconds before generic Shelly one-shot check", delay_seconds)
         time.sleep(delay_seconds)
 
-    bus = get_system_bus()
+    run_dir = str(settings.get("gateway_run_dir") or "/run/venus-evcharger")
+    cache_path = str(settings.get("gateway_cache_path") or gateway_paths(run_dir or None).cache_path)
     timeout = 1.0
     return disable_matching_device(
         settings,
-        lambda service_name, path: get_dbus_child_nodes(bus, service_name, path, timeout=timeout),
-        lambda service_name, path: get_dbus_value(bus, service_name, path, timeout=timeout),
-        lambda service_name, path, value: set_dbus_value(bus, service_name, path, value, timeout=timeout),
+        lambda service_name, path: get_dbus_child_nodes(run_dir, service_name, path, timeout=timeout),
+        lambda service_name, path: get_dbus_value(cache_path, service_name, path, timeout=timeout),
+        lambda service_name, path, value: set_dbus_value(run_dir, service_name, path, value, timeout=timeout),
     )
 
 

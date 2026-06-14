@@ -126,4 +126,4 @@ class _AutoInputHelperBasicCoreCases:
         ):
             module_globals = runpy.run_path(helper_path, run_name="venus_evcharger_auto_input_helper_import_test")
 
-        self.assertIsNone(module_globals["dbus_glib_mainloop"])
+        self.assertNotIn("dbus_glib_mainloop", module_globals)

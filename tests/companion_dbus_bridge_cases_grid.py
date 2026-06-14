@@ -23,7 +23,7 @@ class _CompanionDbusBridgeGridCases:
             },
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             changed = bridge.publish(100.0)
@@ -67,7 +67,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(next(snapshots)),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             first_changed = bridge.publish(100.0)
@@ -110,7 +110,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(next(snapshots)),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             bridge.publish(100.0)
@@ -148,7 +148,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(next(snapshots)),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             bridge.publish(100.0)
@@ -186,7 +186,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(next(snapshots)),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             bridge.publish(100.0)
@@ -230,7 +230,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(snapshot),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             changed = bridge.publish(100.0)
@@ -295,7 +295,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(next(snapshots)),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             first_changed = bridge.publish(100.0)
@@ -363,7 +363,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(next(snapshots)),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             first_changed = bridge.publish(100.0)
@@ -427,7 +427,7 @@ class _CompanionDbusBridgeGridCases:
             _get_worker_snapshot=lambda: dict(next(snapshots)),
         )
 
-        with patch("venus_evcharger.companion.dbus_bridge.VeDbusService", _FakeVeDbusService):
+        with patch("venus_evcharger.companion.dbus_bridge.GatewayDbusServiceProxy", _FakeVeDbusService):
             bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
             bridge.start()
             bridge.publish(100.0)

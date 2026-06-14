@@ -1,53 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from venus_evcharger.backend.cerbo_gx_relay_switch import (
     CerboGxRelaySwitchBackend,
     load_cerbo_gx_relay_switch_settings,
 )
 from venus_evcharger.backend.registry import create_switch_backend
-
-
-class _FakeBusItem:
-    def __init__(self, bus: "_FakeBus", service: str, path: str) -> None:
-        self.bus = bus
-        self.service = service
-        self.path = path
-
-    def GetValue(self) -> object:
-        self.bus.get_calls.append((self.service, self.path))
-        if self.bus.fail_next_get:
-            self.bus.fail_next_get = False
-            raise RuntimeError("dbus down")
-        if (self.service, self.path) in self.bus.missing_get_paths:
-            raise KeyError(self.path)
-        return self.bus.values.get((self.service, self.path), 0)
-
-    def SetValue(self, value: int) -> object:
-        self.bus.set_calls.append((self.service, self.path, int(value)))
-        if (self.service, self.path) in self.bus.ignore_set_paths:
-            return self.bus.set_result
-        self.bus.values[(self.service, self.path)] = int(value)
-        return self.bus.set_result
-
-
-class _FakeBus:
-    def __init__(self) -> None:
-        self.values: dict[tuple[str, str], object] = {}
-        self.get_calls: list[tuple[str, str]] = []
-        self.set_calls: list[tuple[str, str, int]] = []
-        self.set_result: object = 0
-        self.fail_next_get = False
-        self.missing_get_paths: set[tuple[str, str]] = set()
-        self.ignore_set_paths: set[tuple[str, str]] = set()
-
-    def get_object(self, service: str, path: str, introspect: bool = True) -> _FakeBusItem:
-        return _FakeBusItem(self, service, path)
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
 
 
 class TestCerboGxRelaySwitchBackend(unittest.TestCase):
@@ -57,125 +22,142 @@ class TestCerboGxRelaySwitchBackend(unittest.TestCase):
             temp.write(text)
         return temp.name
 
-    def _service(self, bus: _FakeBus) -> SimpleNamespace:
+    def _service(self, directory: str, *, run_dir: str | None = None) -> SimpleNamespace:
+        paths = gateway_paths(run_dir or str(Path(directory) / "run"))
         return SimpleNamespace(
-            _get_system_bus=lambda: bus,
-            _reset_system_bus=lambda: setattr(bus, "reset_called", True),
+            dbus_gateway_run_dir=paths.run_dir,
+            dbus_gateway_cache_path=paths.cache_path,
             requested_phase_selection="P1",
         )
 
-    def test_no_contact_sets_manual_function_and_relay_on(self) -> None:
-        config_path = self._config(
-            "[Adapter]\n"
-            "Type=cerbo_gx_relay_switch\n"
-            "RelayIndex=0\n"
-            "ContactMode=NO\n"
-            "VerifySettleSeconds=0\n"
-            "VerifyRetrySeconds=0\n"
+    def _store(self, directory: str, *, run_dir: str | None = None) -> DbusCacheStore:
+        return DbusCacheStore(gateway_paths(run_dir or str(Path(directory) / "run")))
+
+    def _seed_cache(self, directory: str, values: dict[tuple[str, str], object], *, run_dir: str | None = None) -> None:
+        store = self._store(directory, run_dir=run_dir)
+        for (service, path), value in values.items():
+            store.update_value(dbus_path_key(service, path), value, source=f"{service}{path}")
+        store.write_snapshot_files()
+
+    def _commands(self, directory: str, *, run_dir: str | None = None) -> list[dict[str, object]]:
+        paths = gateway_paths(run_dir or str(Path(directory) / "run"))
+        return [payload for _path, payload in DbusCommandInbox(paths.command_dir).load_pending()]
+
+    def _has_command(self, commands: list[dict[str, object]], service: str, path: str, value: int) -> bool:
+        return any(
+            command.get("kind") == "set_value"
+            and command.get("service") == service
+            and command.get("path") == path
+            and command.get("value") == value
+            for command in commands
         )
-        bus = _FakeBus()
-        bus.values[("com.victronenergy.settings", "/Settings/Relay/0/Function")] = 0
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
 
-        backend.set_enabled(True)
-        state = backend.read_switch_state()
+    def test_no_contact_enqueues_manual_function_and_relay_on(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._config(
+                "[Adapter]\n"
+                "Type=cerbo_gx_relay_switch\n"
+                "RelayIndex=0\n"
+                "ContactMode=NO\n"
+                "VerifySettleSeconds=0\n"
+                "VerifyRetrySeconds=0\n"
+            )
+            self._seed_cache(
+                temp_dir,
+                {("com.victronenergy.settings", "/Settings/Relay/0/Function"): 0},
+            )
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), config_path)
 
-        self.assertTrue(state.enabled)
-        self.assertEqual(state.phase_selection, "P1")
-        self.assertIn(("com.victronenergy.settings", "/Settings/Relay/0/Function", 2), bus.set_calls)
-        self.assertIn(("com.victronenergy.system", "/Relay/0/State", 1), bus.set_calls)
+            backend.set_enabled(True)
+            self._seed_cache(temp_dir, {("com.victronenergy.system", "/Relay/0/State"): 1})
+            state = backend.read_switch_state()
+
+            commands = self._commands(temp_dir)
+            self.assertTrue(state.enabled)
+            self.assertEqual(state.phase_selection, "P1")
+            self.assertTrue(self._has_command(commands, "com.victronenergy.settings", "/Settings/Relay/0/Function", 2))
+            self.assertTrue(self._has_command(commands, "com.victronenergy.system", "/Relay/0/State", 1))
 
     def test_nc_contact_inverts_enabled_mapping_and_supports_relay_two(self) -> None:
-        config_path = self._config(
-            "[Adapter]\n"
-            "Type=cerbo_gx_relay_switch\n"
-            "RelayIndex=1\n"
-            "ContactMode=NC\n"
-            "VerifySettleSeconds=0\n"
-            "VerifyRetrySeconds=0\n"
-        )
-        bus = _FakeBus()
-        bus.values[("com.victronenergy.settings", "/Settings/Relay/1/Function")] = 2
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._config(
+                "[Adapter]\n"
+                "Type=cerbo_gx_relay_switch\n"
+                "RelayIndex=1\n"
+                "ContactMode=NC\n"
+                "VerifySettleSeconds=0\n"
+                "VerifyRetrySeconds=0\n"
+            )
+            self._seed_cache(
+                temp_dir,
+                {
+                    ("com.victronenergy.settings", "/Settings/Relay/1/Function"): 2,
+                    ("com.victronenergy.system", "/Relay/1/State"): 0,
+                },
+            )
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), config_path)
 
-        backend.set_enabled(True)
-        self.assertTrue(backend.read_switch_state().enabled)
-        backend.set_enabled(False)
+            self.assertTrue(backend.read_switch_state().enabled)
+            backend.set_enabled(False)
 
-        self.assertIn(("com.victronenergy.system", "/Relay/1/State", 0), bus.set_calls)
-        self.assertIn(("com.victronenergy.system", "/Relay/1/State", 1), bus.set_calls)
-        self.assertNotIn(("com.victronenergy.settings", "/Settings/Relay/Function", 2), bus.set_calls)
+            commands = self._commands(temp_dir)
+            self.assertTrue(self._has_command(commands, "com.victronenergy.system", "/Relay/1/State", 1))
+            self.assertFalse(self._has_command(commands, "com.victronenergy.settings", "/Settings/Relay/Function", 2))
 
-    def test_relay_zero_uses_legacy_manual_function_fallback(self) -> None:
-        config_path = self._config(
-            "[Adapter]\n"
-            "Type=cerbo_gx_relay_switch\n"
-            "RelayIndex=0\n"
-            "VerifySettleSeconds=0\n"
-            "VerifyRetrySeconds=0\n"
-        )
-        bus = _FakeBus()
-        bus.missing_get_paths.add(("com.victronenergy.settings", "/Settings/Relay/0/Function"))
-        bus.values[("com.victronenergy.settings", "/Settings/Relay/Function")] = 0
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
+    def test_manual_function_cache_hit_avoids_settings_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._config("[Adapter]\nRelayIndex=0\nVerifySettleSeconds=0\nVerifyRetrySeconds=0\n")
+            self._seed_cache(temp_dir, {("com.victronenergy.settings", "/Settings/Relay/0/Function"): 2})
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), config_path)
 
-        backend.set_enabled(False)
+            backend.set_enabled(False)
 
-        self.assertIn(("com.victronenergy.settings", "/Settings/Relay/Function", 2), bus.set_calls)
+            commands = self._commands(temp_dir)
+            self.assertFalse(self._has_command(commands, "com.victronenergy.settings", "/Settings/Relay/0/Function", 2))
+            self.assertTrue(self._has_command(commands, "com.victronenergy.system", "/Relay/0/State", 0))
 
-    def test_relay_zero_uses_legacy_manual_function_when_specific_path_readback_does_not_update(self) -> None:
-        config_path = self._config(
-            "[Adapter]\n"
-            "Type=cerbo_gx_relay_switch\n"
-            "RelayIndex=0\n"
-            "VerifySettleSeconds=0\n"
-            "VerifyRetrySeconds=0\n"
-        )
-        bus = _FakeBus()
-        bus.values[("com.victronenergy.settings", "/Settings/Relay/0/Function")] = 0
-        bus.values[("com.victronenergy.settings", "/Settings/Relay/Function")] = 0
-        bus.ignore_set_paths.add(("com.victronenergy.settings", "/Settings/Relay/0/Function"))
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
+    def test_missing_manual_function_cache_enqueues_gateway_refresh_and_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._config("[Adapter]\nRelayIndex=0\nVerifySettleSeconds=0\nVerifyRetrySeconds=0\n")
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), config_path)
 
-        backend.set_enabled(False)
+            backend.set_enabled(False)
 
-        self.assertIn(("com.victronenergy.settings", "/Settings/Relay/0/Function", 2), bus.set_calls)
-        self.assertIn(("com.victronenergy.settings", "/Settings/Relay/Function", 2), bus.set_calls)
+            commands = self._commands(temp_dir)
+            self.assertTrue(
+                any(
+                    command.get("kind") == "refresh_value"
+                    and command.get("service") == "com.victronenergy.settings"
+                    and command.get("path") == "/Settings/Relay/0/Function"
+                    for command in commands
+                )
+            )
+            self.assertTrue(self._has_command(commands, "com.victronenergy.settings", "/Settings/Relay/0/Function", 2))
 
-    def test_set_retries_when_verify_readback_still_differs_once(self) -> None:
-        config_path = self._config(
-            "[Adapter]\n"
-            "Type=cerbo_gx_relay_switch\n"
-            "RelayIndex=0\n"
-            "EnsureManualFunction=0\n"
-            "VerifySettleSeconds=0\n"
-            "VerifyRetrySeconds=0\n"
-        )
-        bus = _FakeBus()
-        original_get_object = bus.get_object
-        reads = {"count": 0}
+    def test_set_retries_and_raises_when_verify_readback_stays_wrong(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._config(
+                "[Adapter]\nEnsureManualFunction=0\nVerifySettleSeconds=0.01\nVerifyRetrySeconds=0.02\n"
+            )
+            self._seed_cache(temp_dir, {("com.victronenergy.system", "/Relay/0/State"): 0})
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), config_path)
 
-        def get_object(service: str, path: str, introspect: bool = True) -> _FakeBusItem:
-            item = original_get_object(service, path)
-            if service == "com.victronenergy.system" and path == "/Relay/0/State":
-                original_get = item.GetValue
+            with patch.object(backend, "_cache_entry_is_stale_for_write", return_value=False), patch(
+                "venus_evcharger.backend.cerbo_gx_relay_switch.time.sleep"
+            ) as sleep_mock:
+                with self.assertRaisesRegex(RuntimeError, "stayed at"):
+                    backend.set_enabled(True)
 
-                def get_value() -> object:
-                    reads["count"] += 1
-                    if reads["count"] == 1:
-                        return 0
-                    return original_get()
+            self.assertEqual([call.args[0] for call in sleep_mock.call_args_list], [0.01, 0.02, 0.01])
 
-                item.GetValue = get_value  # type: ignore[method-assign]
-            return item
+    def test_verify_skips_when_gateway_cache_has_no_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._config("[Adapter]\nEnsureManualFunction=0\nVerifySettleSeconds=0\nVerifyRetrySeconds=0\n")
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), config_path)
 
-        bus.get_object = get_object  # type: ignore[method-assign]
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
+            backend.set_enabled(True)
 
-        backend.set_enabled(True)
-
-        relay_sets = [call for call in bus.set_calls if call[:2] == ("com.victronenergy.system", "/Relay/0/State")]
-        self.assertEqual(relay_sets, [("com.victronenergy.system", "/Relay/0/State", 1)] * 2)
+            self.assertTrue(self._has_command(self._commands(temp_dir), "com.victronenergy.system", "/Relay/0/State", 1))
 
     def test_config_validation_and_registry(self) -> None:
         with self.assertRaises(ValueError):
@@ -193,131 +175,53 @@ class TestCerboGxRelaySwitchBackend(unittest.TestCase):
         self.assertEqual(settings.verify_settle_seconds, 0.1)
         self.assertEqual(settings.verify_retry_seconds, 0.2)
 
-        backend = create_switch_backend("cerbo_gx_relay_switch", self._service(_FakeBus()), "")
+        backend = create_switch_backend("cerbo_gx_relay_switch", self._service(tempfile.gettempdir()), "")
         self.assertIsInstance(backend, CerboGxRelaySwitchBackend)
         self.assertEqual(backend.capabilities().switching_mode, "contactor")
 
-    def test_dbus_retry_resets_service_bus(self) -> None:
-        config_path = self._config("[Adapter]\nType=cerbo_gx_relay_switch\nEnsureManualFunction=0\n")
-        bus = _FakeBus()
-        bus.fail_next_get = True
-        service = self._service(bus)
-        backend = CerboGxRelaySwitchBackend(service, config_path)
-
-        backend.read_switch_state()
-
-        self.assertTrue(getattr(bus, "reset_called", False))
-
     def test_default_config_and_phase_validation(self) -> None:
-        backend = CerboGxRelaySwitchBackend(self._service(_FakeBus()), "")
-        self.assertEqual(backend.settings.relay_index, 0)
-        backend.set_phase_selection("P1")
-        with self.assertRaises(ValueError):
-            backend.set_phase_selection("P1_P2")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), "")
+            self.assertEqual(backend.settings.relay_index, 0)
+            backend.set_phase_selection("P1")
+            with self.assertRaises(ValueError):
+                backend.set_phase_selection("P1_P2")
 
-    def test_set_enabled_raises_when_relay_write_fails(self) -> None:
-        config_path = self._config(
-            "[Adapter]\nEnsureManualFunction=0\nVerifySettleSeconds=0\nVerifyRetrySeconds=0\n"
-        )
-        bus = _FakeBus()
-        bus.set_result = False
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
+    def test_set_enabled_raises_when_gateway_command_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir_file = str(Path(temp_dir) / "not-a-dir")
+            Path(run_dir_file).write_text("x", encoding="utf-8")
+            config_path = self._config("[Adapter]\nEnsureManualFunction=0\nVerifySettleSeconds=0\nVerifyRetrySeconds=0\n")
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir, run_dir=run_dir_file), config_path)
 
-        with self.assertRaisesRegex(RuntimeError, "DBus SetValue failed"):
-            backend.set_enabled(True)
-
-    def test_verify_retries_with_sleep_and_raises_when_readback_stays_wrong(self) -> None:
-        config_path = self._config(
-            "[Adapter]\nEnsureManualFunction=0\nVerifySettleSeconds=0.01\nVerifyRetrySeconds=0.02\n"
-        )
-        bus = _FakeBus()
-        bus.ignore_set_paths.add(("com.victronenergy.system", "/Relay/0/State"))
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
-
-        with patch("venus_evcharger.backend.cerbo_gx_relay_switch.time.sleep") as sleep_mock:
-            with self.assertRaisesRegex(RuntimeError, "stayed at"):
+            with self.assertRaisesRegex(RuntimeError, "DBus SetValue failed"):
                 backend.set_enabled(True)
 
-        self.assertEqual([call.args[0] for call in sleep_mock.call_args_list], [0.01, 0.02, 0.01])
+    def test_gateway_helpers_and_value_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._config("[Adapter]\nEnsureManualFunction=0\n")
+            backend = CerboGxRelaySwitchBackend(SimpleNamespace(requested_phase_selection="P1"), config_path)
+            with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
+                backend._system_bus()
+            with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
+                backend._busitem("svc", "/path")
 
-    def test_manual_function_failure_paths_are_reported(self) -> None:
-        config_path = self._config("[Adapter]\nRelayIndex=0\nVerifySettleSeconds=0\nVerifyRetrySeconds=0\n")
-        bus = _FakeBus()
-        bus.set_result = False
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
-        with self.assertRaisesRegex(RuntimeError, "Unable to set Cerbo GX relay"):
-            backend.set_enabled(True)
+            backend = CerboGxRelaySwitchBackend(self._service(temp_dir), config_path)
+            self.assertIs(backend._with_dbus_retry(lambda: True), True)
+            self.assertIsNone(backend._dbus_get_value("svc", "/path"))
+            commands = self._commands(temp_dir)
+            self.assertTrue(
+                any(command.get("kind") == "refresh_value" and command.get("service") == "svc" and command.get("path") == "/path" for command in commands)
+            )
 
-        bus = _FakeBus()
-        bus.missing_get_paths.update(
-            {
-                ("com.victronenergy.settings", "/Settings/Relay/0/Function"),
-                ("com.victronenergy.settings", "/Settings/Relay/Function"),
-            }
-        )
-        backend = CerboGxRelaySwitchBackend(self._service(bus), config_path)
-        with self.assertRaisesRegex(RuntimeError, "Unable to set Cerbo GX relay"):
-            backend.set_enabled(True)
+            class _TextValue:
+                def __str__(self) -> str:
+                    return "text-value"
 
-    def test_dbus_helpers_cover_native_bus_interface_and_value_shapes(self) -> None:
-        config_path = self._config("[Adapter]\nEnsureManualFunction=0\n")
-        bus = _FakeBus()
-        backend = CerboGxRelaySwitchBackend(SimpleNamespace(requested_phase_selection="P1"), config_path)
+            self.assertEqual(backend._normalized_dbus_value("x"), "x")
+            self.assertEqual(backend._normalized_dbus_value(1), 1)
+            self.assertEqual(backend._normalized_dbus_value(_TextValue()), "text-value")
 
-        class _FakeDbusModule:
-            class SystemBus:
-                def get_object(self, service: str, path: str, introspect: bool = True) -> _FakeBusItem:
-                    return bus.get_object(service, path)
-
-            @staticmethod
-            def Interface(obj: object, _name: str) -> object:
-                return obj
-
-        with patch.dict("sys.modules", {"dbus": _FakeDbusModule}):
-            self.assertIsInstance(backend._system_bus(), _FakeDbusModule.SystemBus)
-            self.assertIsInstance(backend._busitem("svc", "/path"), _FakeBusItem)
-
-        raw_obj = object()
-
-        class _ObjectBus:
-            def get_object(self, _service: str, _path: str, introspect: bool = True) -> object:
-                return raw_obj
-
-        backend = CerboGxRelaySwitchBackend(
-            SimpleNamespace(_get_system_bus=lambda: _ObjectBus(), requested_phase_selection="P1"),
-            config_path,
-        )
-        with patch.dict("sys.modules", {"dbus": _FakeDbusModule}):
-            self.assertIs(backend._busitem("svc", "/path"), raw_obj)
-
-        class _TextValue:
-            def __str__(self) -> str:
-                return "text-value"
-
-        self.assertEqual(backend._normalized_dbus_value("x"), "x")
-        self.assertEqual(backend._normalized_dbus_value(1), 1)
-        self.assertEqual(backend._normalized_dbus_value(_TextValue()), "text-value")
-
-    def test_dbus_retry_without_reset_and_setvalue_result_shapes(self) -> None:
-        config_path = self._config("[Adapter]\nEnsureManualFunction=0\n")
-        bus = _FakeBus()
-        calls = {"count": 0}
-
-        def flaky_bus() -> _FakeBus:
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise RuntimeError("temporary")
-            return bus
-
-        backend = CerboGxRelaySwitchBackend(SimpleNamespace(_get_system_bus=flaky_bus, requested_phase_selection="P1"), config_path)
-        with patch("venus_evcharger.backend.cerbo_gx_relay_switch.time.sleep") as sleep_mock:
-            self.assertEqual(backend._dbus_get_value("svc", "/path"), 0)
-        sleep_mock.assert_called_once_with(0.1)
-
-        bus.set_result = "0"
-        self.assertTrue(backend._dbus_set_value("svc", "/path", 1))
-        bus.set_result = ""
-        self.assertFalse(backend._dbus_set_value("svc", "/path", 1))
 
 if __name__ == "__main__":
     unittest.main()
