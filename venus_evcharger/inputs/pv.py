@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from typing import Any, cast
 
-import dbus
 from venus_evcharger.core.shared import (
     coerce_dbus_numeric,
     discovery_cache_valid,
@@ -17,19 +15,13 @@ from venus_evcharger.core.shared import (
     sum_dbus_numeric,
 )
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
-from venus_evcharger.dbus_introspection import owner_path_unusable, request_owner_introspection
+from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 
 
 class _DbusInputPvMixin(_ComposableControllerMixin):
     def _dbus_module(self) -> Any:
-        """Prefer the DBus module from the service entrypoint for legacy test patches."""
-        host = getattr(self.service, "_service", self.service)
-        module_name = getattr(type(host), "__module__", "")
-        service_module = sys.modules.get(module_name)
-        service_dbus = getattr(service_module, "dbus", None) if service_module is not None else None
-        if service_dbus is not None:
-            return service_dbus
-        return cast(Any, dbus)
+        """Direct DBus access is forbidden outside the gateway adapter."""
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     @staticmethod
     def _coerce_dbus_value(value: Any) -> float | int | None:
@@ -74,73 +66,44 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         return None
 
     def get_dbus_value(self, service_name: str, path: str) -> float | int | None:
-        """Read a DBus value via com.victronenergy.BusItem."""
+        """Read one value from the gateway cache and request refresh when needed."""
         svc = self.service
-        skip, reason = owner_path_unusable(svc, service_name, path)
-        if skip:
-            logging.debug("Skipping %s %s from DBus introspection cache: %s", service_name, path, reason)
-            request_owner_introspection(
-                svc,
-                service_name,
-                path,
-                priority=90,
-                reason="main input read skipped known-unusable path",
-                source="evcharger-inputs",
-            )
-            return None
-        last_error: Exception | None = None
-        timeout = getattr(svc, "dbus_method_timeout_seconds", 1.0)
-        dbus_module = self._dbus_module()
-        for attempt in range(2):
-            try:
-                bus = svc._get_system_bus()
-                obj = bus.get_object(service_name, path, introspect=False)
-                interface = dbus_module.Interface(obj, "com.victronenergy.BusItem")
-                value = interface.GetValue(timeout=timeout)
+        snapshot = self._gateway_snapshot()
+        entry = DbusCacheStore.value_entry(snapshot, dbus_path_key(service_name, path))
+        if entry is not None:
+            status = str(entry.get("status") or "")
+            if status in ("fresh", "stale"):
+                value = entry.get("value")
                 self._mark_dbus_success(svc)
                 return self._coerce_dbus_value(value)
-            except Exception as error:  # pylint: disable=broad-except
-                last_error = error
-                svc._reset_system_bus()
-                if attempt == 0:
-                    svc._mark_failure("dbus")
-                    logging.debug(
-                        "DBus read retry for %s %s after error: %s",
-                        service_name,
-                        path,
-                        error,
-                    )
-        assert last_error is not None
-        request_owner_introspection(
-            svc,
+        self._gateway_client().request_read(
             service_name,
             path,
-            priority=100,
-            reason="main input DBus read failed",
+            priority="read",
+            reason="main input cache miss",
             source="evcharger-inputs",
         )
-        raise last_error
+        svc._mark_failure("dbus")
+        return None
 
     def list_dbus_services(self) -> list[str]:
-        """List DBus services with exponential backoff for unstable buses."""
+        """List DBus services from the gateway cache."""
         svc = self.service
         self._ensure_dbus_list_state()
         now = time.time()
         if now < svc._dbus_list_backoff_until:
             raise RuntimeError("DBus list backoff active")
-        try:
-            names = self._list_dbus_names()
+        names = self._list_dbus_names()
+        if names:
             svc._dbus_list_failures = 0
             svc._dbus_list_backoff_until = 0.0
             self._mark_dbus_success(svc)
             return names
-        except Exception:  # pylint: disable=broad-except
-            svc._reset_system_bus()
-            svc._dbus_list_failures += 1
-            svc._mark_failure("dbus")
-            delay = self._dbus_list_backoff_delay()
-            svc._dbus_list_backoff_until = now + delay
-            raise
+        self._gateway_client().enqueue_command({"kind": "refresh_services", "source": "evcharger-inputs", "priority": "read"})
+        svc._dbus_list_failures += 1
+        svc._mark_failure("dbus")
+        svc._dbus_list_backoff_until = now + self._dbus_list_backoff_delay()
+        return []
 
     def _ensure_dbus_list_state(self) -> None:
         """Populate DBus-list retry/backoff defaults used by list_dbus_services()."""
@@ -158,13 +121,30 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
             setattr(svc, attr_name, default)
 
     def _list_dbus_names(self) -> list[str]:
-        """Return the raw DBus name list through the freedesktop DBus interface."""
-        svc = self.service
-        bus = svc._get_system_bus()
-        dbus_obj = bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
-        dbus_module = self._dbus_module()
-        dbus_if = dbus_module.Interface(dbus_obj, "org.freedesktop.DBus")
-        return [str(name) for name in dbus_if.ListNames(timeout=svc.dbus_method_timeout_seconds)]
+        """Return DBus names from the gateway cache."""
+        services = self._gateway_snapshot().get("services", [])
+        if isinstance(services, list):
+            return [str(name) for name in services]
+        if isinstance(services, dict):
+            return [str(name) for name in services]
+        return []
+
+    def _gateway_snapshot(self) -> dict[str, Any]:
+        svc = self._gateway_owner()
+        cache_path = str(getattr(svc, "dbus_gateway_cache_path", "") or "")
+        if not cache_path:
+            run_dir = str(getattr(svc, "dbus_gateway_run_dir", "") or "")
+            cache_path = gateway_paths(run_dir or None).cache_path
+        return DbusCacheStore.load_snapshot(cache_path)
+
+    def _gateway_client(self) -> GatewayClient:
+        svc = self._gateway_owner()
+        run_dir = str(getattr(svc, "dbus_gateway_run_dir", "") or "")
+        return GatewayClient(gateway_paths(run_dir or None))
+
+    def _gateway_owner(self) -> Any:
+        port_or_service = self.service
+        return getattr(port_or_service, "_service", port_or_service)
 
     def _dbus_list_backoff_delay(self) -> float:
         """Return the current exponential-backoff delay for DBus name listing."""

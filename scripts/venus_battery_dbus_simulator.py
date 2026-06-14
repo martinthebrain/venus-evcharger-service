@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Publish a small simulated Victron battery service on Venus OS DBus."""
+"""Retired DBus simulator entrypoint.
+
+Direct DBus access is intentionally centralized in ``venus_evcharger_dbus_adapter.py``.
+This legacy simulator remains only to print a clear migration error when called.
+"""
 
 from __future__ import annotations
 
 import argparse
 import os
 import platform
-import signal
 import sys
-import time
 from typing import Any
 
 for _path in (
@@ -18,14 +20,6 @@ for _path in (
 ):
     if os.path.isdir(_path) and _path not in sys.path:
         sys.path.insert(0, _path)
-
-try:
-    import dbus.mainloop.glib
-    from gi.repository import GLib
-    from vedbus import VeDbusService
-except Exception as error:  # pragma: no cover - exercised on Venus OS
-    print(f"Unable to import Venus DBus dependencies: {error}", file=sys.stderr)
-    sys.exit(2)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -90,31 +84,17 @@ def _schedule_update(loop: Any, service: Any, update_spec: str) -> None:
     except (TypeError, ValueError):
         print(f"Ignoring invalid --set-after value: {update_spec}", file=sys.stderr)
         return
-    GLib.timeout_add(int(delay_seconds * 1000), _apply_update, service, update_spec)
+    del loop, service, delay_seconds
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-    service = VeDbusService(args.service_name, register=False)
-    _add_common_paths(service, args)
-    _add_battery_paths(service, args)
-    service.register()
-    loop = GLib.MainLoop()
-    _schedule_update(loop, service, args.set_after)
-
-    def _stop(_signum: int, _frame: object) -> None:
-        loop.quit()
-
-    signal.signal(signal.SIGTERM, _stop)
-    signal.signal(signal.SIGINT, _stop)
+    _parser().parse_args(argv)
     print(
-        f"Battery simulator {args.service_name} running "
-        f"soc={args.soc} ah={args.installed_capacity_ah} voltage={args.voltage}",
-        flush=True,
+        "scripts/venus_battery_dbus_simulator.py is retired: direct DBus publishing "
+        "is only allowed in venus_evcharger_dbus_adapter.py.",
+        file=sys.stderr,
     )
-    loop.run()
-    return 0
+    return 2
 
 
 if __name__ == "__main__":  # pragma: no cover - command line entrypoint

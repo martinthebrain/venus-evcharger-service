@@ -7,9 +7,11 @@ from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscrip
 
 
 class _AutoInputHelperSourcesEnergyCases:
-    def test_mixin_default_dbus_module_fallbacks_are_available(self):
-        self.assertIsNotNone(_AutoInputHelperSourceDbusMixin._dbus_module())
-        self.assertIsNotNone(_AutoInputHelperSubscriptionMixin._dbus_module())
+    def test_mixin_default_dbus_module_fallbacks_are_disabled(self):
+        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
+            _AutoInputHelperSourceDbusMixin._dbus_module()
+        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
+            _AutoInputHelperSubscriptionMixin._dbus_module()
 
     def test_dynamic_energy_source_resolution_and_battery_snapshot_cover_new_paths(self):
         helper = self._make_helper()

@@ -31,7 +31,7 @@ from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.controllers.write import DbusWriteController
 from venus_evcharger.ports import AutoDecisionPort, UpdateCyclePort, WriteControllerPort
 from venus_evcharger.runtime import RuntimeSupportController
-from vedbus import VeDbusService
+from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy
 
 
 def _backend_capabilities_unavailable(backend: Any) -> bool:
@@ -167,9 +167,9 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
         svc._init_worker_state()
 
     def initialize_dbus_service(self) -> None:  # pragma: no cover
-        """Create the Venus EV charger DBus service shell."""
+        """Create the Venus EV charger gateway service proxy."""
         svc = self.service
-        svc._dbusservice = VeDbusService(f"{svc.service_name}.http_{svc.deviceinstance}", register=False)
+        svc._dbusservice = GatewayDbusServiceProxy(f"{svc.service_name}.http_{svc.deviceinstance}")
 
     def apply_device_metadata(self) -> None:
         """Fetch Shelly metadata and apply UI-facing identity fields."""

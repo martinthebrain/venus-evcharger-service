@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+exec 2>&1
+LOG_DIR=/var/volatile/log/dbus-venus-evcharger-dbus-adapter
+mkdir -p "$LOG_DIR"
+exec multilog t s153600 n2 "$LOG_DIR"

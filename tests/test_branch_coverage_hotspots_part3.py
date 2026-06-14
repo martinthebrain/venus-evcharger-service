@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.test_branch_coverage_hotspots_support import *  # noqa: F401,F403
+from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths
 
 class _BranchCoverageVictronApplyCasesPart1:
     def test_victron_apply_helper_branches(self) -> None:
         controller = _controller()
+        gateway_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(gateway_temp.cleanup)
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_min_update_seconds=10.0,
             auto_battery_discharge_balance_victron_bias_support_mode="weird",
@@ -28,6 +31,7 @@ class _BranchCoverageVictronApplyCasesPart1:
             _victron_ess_balance_pid_integral_output_w=10.0,
             _victron_ess_balance_pid_last_error_w=15.0,
             _victron_ess_balance_pid_last_at=100.0,
+            dbus_gateway_run_dir=str(Path(gateway_temp.name) / "run"),
         )
         metrics: dict[str, object] = {}
 
@@ -103,7 +107,7 @@ class _BranchCoverageVictronApplyCasesPart1:
         ), patch.object(controller, "_victron_ess_balance_log_write_retry") as log_retry:
             self.assertIsNone(controller._victron_ess_balance_write_error(service, "svc", "/path", 10.0))
             log_retry.assert_called_once()
-            service._reset_system_bus.assert_called()
+            service._reset_system_bus.assert_not_called()
         with patch.object(
             controller,
             "_victron_ess_balance_try_write_setpoint",
@@ -113,35 +117,17 @@ class _BranchCoverageVictronApplyCasesPart1:
             self.assertEqual(str(last_error), "second")
             log_retry.assert_called_once()
 
-        class _FakeInterface:
-            def __init__(self) -> None:
-                self.calls: list[tuple[object, float]] = []
-
-            def SetValue(self, value: object, timeout: float) -> None:
-                self.calls.append((value, timeout))
-
-        class _FakeBus:
-            def __init__(self, interface: _FakeInterface) -> None:
-                self.interface = interface
-
-            def get_object(self, normalized_service: str, normalized_path: str, introspect: bool = True) -> object:
-                return (normalized_service, normalized_path)
-
-        fake_interface = _FakeInterface()
-
-        class _FakeDbus:
-            @staticmethod
-            def Double(value: float) -> tuple[str, float]:
-                return ("double", value)
-
-            @staticmethod
-            def Interface(_obj: object, _name: str) -> _FakeInterface:
-                return fake_interface
-
-        service._get_system_bus = MagicMock(return_value=_FakeBus(fake_interface))
-        with patch("venus_evcharger.update.victron_ess_balance_apply.dbus", _FakeDbus):
-            controller._victron_ess_balance_try_write_setpoint(service, "svc", "/path", 12.0)
-        self.assertEqual(fake_interface.calls[0], (("double", 12.0), 1.0))
+        controller._victron_ess_balance_try_write_setpoint(service, "svc", "/path", 12.0)
+        commands = DbusCommandInbox(gateway_paths(service.dbus_gateway_run_dir).command_dir).load_pending()
+        self.assertTrue(
+            any(
+                payload.get("kind") == "set_value"
+                and payload.get("service") == "svc"
+                and payload.get("path") == "/path"
+                and payload.get("value") == 12.0
+                for _path, payload in commands
+            )
+        )
 
         with patch("venus_evcharger.update.victron_ess_balance_apply.logging.debug") as debug_log:
             controller._victron_ess_balance_log_write_retry("svc", "/path", RuntimeError("boom"))
@@ -361,4 +347,3 @@ class _BranchCoverageVictronApplyCasesPart1:
 
         controller._merge_victron_ess_balance_metrics(service, {"x": 1})
         self.assertEqual(service._last_auto_metrics, {"x": 1})
-

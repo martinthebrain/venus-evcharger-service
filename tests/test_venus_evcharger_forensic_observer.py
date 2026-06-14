@@ -2,12 +2,14 @@
 import runpy
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from venus_evcharger.ops import forensic_observer as observer
+from venus_evcharger.dbus_gateway import DbusCacheStore, dbus_path_key, gateway_paths
 
 
 class _FakeDbusObject:
@@ -33,6 +35,14 @@ class _FakeDbusBus:
 
 
 class ForensicObserverTests(unittest.TestCase):
+    def _write_gateway_cache(self, temp_dir: str, service_name: str, values: dict[str, object]) -> str:
+        paths = gateway_paths(str(Path(temp_dir) / "run"))
+        store = DbusCacheStore(paths)
+        for path, value in values.items():
+            store.update_value(dbus_path_key(service_name, path), value, source=f"{service_name}{path}", now=time.time())
+        store.write_snapshot_files()
+        return paths.cache_path
+
     def test_config_identity_redaction_mounts_and_writable_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -71,11 +81,17 @@ class ForensicObserverTests(unittest.TestCase):
             self.assertEqual(observer.dbus_introspection_snapshot_path(observer.load_defaults(str(config_path))), "/tmp/custom-map.json")
 
     def test_dbus_snapshot_and_incident_reasons(self):
-        dbus_state = observer.read_dbus_paths(
-            "com.example.ev.http_70",
-            paths=("/Mode", "/StartStop", "/Ac/Power"),
-            bus_factory=_FakeDbusBus,
-        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = self._write_gateway_cache(
+                temp_dir,
+                "com.example.ev.http_70",
+                {"/Mode": 1, "/Ac/Power": object()},
+            )
+            dbus_state = observer.read_dbus_paths(
+                "com.example.ev.http_70",
+                paths=("/Mode", "/StartStop", "/Ac/Power"),
+                cache_path=cache_path,
+            )
 
         self.assertFalse(dbus_state["ok"])
         self.assertEqual(dbus_state["values"]["/Mode"], 1)
@@ -100,10 +116,9 @@ class ForensicObserverTests(unittest.TestCase):
         self.assertEqual(json_payload["a"][1], 1)
 
     def test_default_dbus_import_path_and_successful_fetches(self):
-        fake_dbus = ModuleType("dbus")
-        setattr(fake_dbus, "SystemBus", _FakeDbusBus)
-        with patch.dict(sys.modules, {"dbus": fake_dbus}):
-            dbus_state = observer.read_dbus_paths("com.example.ev.http_70", paths=("/Mode",))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = self._write_gateway_cache(temp_dir, "com.example.ev.http_70", {"/Mode": 1})
+            dbus_state = observer.read_dbus_paths("com.example.ev.http_70", paths=("/Mode",), cache_path=cache_path)
 
         self.assertTrue(dbus_state["ok"])
         self.assertEqual(dbus_state["values"]["/Mode"], 1)
@@ -157,7 +172,13 @@ class ForensicObserverTests(unittest.TestCase):
     def test_collect_snapshot_uses_helpers_and_open_failures_are_reported(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\nDeviceInstance=70\nHost=\n", encoding="utf-8")
+            run_dir = Path(temp_dir) / "run"
+            cache_path = self._write_gateway_cache(temp_dir, "com.victronenergy.evcharger.http_70", {"/Mode": 1})
+            config_path.write_text(
+                "[DEFAULT]\nDeviceInstance=70\nHost=\n"
+                f"DbusGatewayRunDir={run_dir}\nDbusGatewayCachePath={cache_path}\n",
+                encoding="utf-8",
+            )
 
             with (
                 patch.object(observer, "tail_log_dir", return_value={"current": "NoReply\n"}),

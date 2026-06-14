@@ -4,9 +4,33 @@ import json
 import os
 import tempfile
 from venus_evcharger.core.shared import compact_json
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
 
 
 class _AutoInputHelperSourcesDbusCases:
+    def _prepare_gateway(self, helper):
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        paths = gateway_paths(os.path.join(tempdir.name, "run"))
+        helper.dbus_gateway_run_dir = paths.run_dir
+        helper.dbus_gateway_cache_path = paths.cache_path
+        helper.dbus_gateway_max_age_seconds = 30.0
+        helper._gateway_client_instance = None
+        return paths
+
+    def _write_gateway_cache(self, helper, *, values=None, services=None):
+        paths = self._prepare_gateway(helper)
+        store = DbusCacheStore(paths)
+        for (service_name, path), value in (values or {}).items():
+            store.update_value(dbus_path_key(service_name, path), value, source=f"{service_name}{path}", now=100.0)
+        if services is not None:
+            store.update_services(list(services), now=100.0)
+        store.write_snapshot_files()
+        return paths
+
+    def _gateway_commands(self, paths):
+        return [command for _, command in DbusCommandInbox(paths.command_dir).load_pending()]
+
     def test_parent_watchdog_quits_mainloop_when_parent_disappears(self):
         helper = self._make_helper()
         helper._stop_requested = False
@@ -23,19 +47,12 @@ class _AutoInputHelperSourcesDbusCases:
 
     def test_list_dbus_services_returns_empty_and_sets_backoff_on_failure(self):
         helper = self._make_helper()
-        helper._reset_system_bus = MagicMock()
-        helper._get_system_bus = MagicMock(return_value=MagicMock(get_object=MagicMock(return_value=object())))
-        failing_interface = MagicMock()
-        failing_interface.ListNames.side_effect = RuntimeError("dbus down")
-        original_interface = venus_evcharger_auto_input_helper.dbus.Interface
-        venus_evcharger_auto_input_helper.dbus.Interface = MagicMock(return_value=failing_interface)
-        try:
-            with unittest.mock.patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
-                self.assertEqual(helper._list_dbus_services(), [])
-        finally:
-            venus_evcharger_auto_input_helper.dbus.Interface = original_interface
+        paths = self._prepare_gateway(helper)
+        with unittest.mock.patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            self.assertEqual(helper._list_dbus_services(), [])
 
-        helper._reset_system_bus.assert_called_once_with()
+        commands = self._gateway_commands(paths)
+        self.assertEqual(commands[0]["kind"], "refresh_services")
         self.assertEqual(helper._dbus_list_failures, 1)
         self.assertEqual(helper._dbus_list_backoff_until, 105.0)
 
@@ -43,50 +60,20 @@ class _AutoInputHelperSourcesDbusCases:
         helper = self._make_helper()
         helper.auto_dbus_backoff_base_seconds = 5.0
         helper.auto_dbus_backoff_max_seconds = 0.0
-        helper._reset_system_bus = MagicMock()
-        helper._get_system_bus = MagicMock(return_value=MagicMock(get_object=MagicMock(return_value=object())))
-        failing_interface = MagicMock()
-        failing_interface.ListNames.side_effect = RuntimeError("dbus down")
-        original_interface = venus_evcharger_auto_input_helper.dbus.Interface
-        venus_evcharger_auto_input_helper.dbus.Interface = MagicMock(return_value=failing_interface)
-        try:
-            with unittest.mock.patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
-                self.assertEqual(helper._list_dbus_services(), [])
-        finally:
-            venus_evcharger_auto_input_helper.dbus.Interface = original_interface
+        self._prepare_gateway(helper)
+        with unittest.mock.patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            self.assertEqual(helper._list_dbus_services(), [])
 
         self.assertEqual(helper._dbus_list_backoff_until, 105.0)
 
-    def test_get_system_bus_always_caches_system_bus(self):
+    def test_get_system_bus_is_disabled_for_helper_process(self):
         helper = self._make_helper()
-        original_session_bus = venus_evcharger_auto_input_helper.dbus.SessionBus
-        original_system_bus = venus_evcharger_auto_input_helper.dbus.SystemBus
-        try:
-            venus_evcharger_auto_input_helper.dbus.SessionBus = MagicMock(return_value="session-bus")
-            venus_evcharger_auto_input_helper.dbus.SystemBus = MagicMock(return_value="system-bus")
-            with patch.dict("venus_evcharger_auto_input_helper.os.environ", {"DBUS_SESSION_BUS_ADDRESS": "x"}, clear=True):
-                self.assertEqual(helper._get_system_bus(), "system-bus")
-                self.assertEqual(helper._get_system_bus(), "system-bus")
-            helper._reset_system_bus()
-            with patch.dict("venus_evcharger_auto_input_helper.os.environ", {}, clear=True):
-                self.assertEqual(helper._get_system_bus(), "system-bus")
-            venus_evcharger_auto_input_helper.dbus.SessionBus.assert_not_called()
-        finally:
-            venus_evcharger_auto_input_helper.dbus.SessionBus = original_session_bus
-            venus_evcharger_auto_input_helper.dbus.SystemBus = original_system_bus
+        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
+            helper._get_system_bus()
 
-    def test_get_dbus_value_retries_after_reset_and_child_nodes_use_introspection_snapshot(self):
+    def test_get_dbus_value_reads_gateway_cache_and_child_nodes_use_introspection_snapshot(self):
         helper = self._make_helper()
-        first_bus = MagicMock()
-        second_bus = MagicMock()
-        helper._get_system_bus = MagicMock(side_effect=[first_bus, second_bus])
-        helper._reset_system_bus = MagicMock()
-        first_bus.get_object.return_value = object()
-        second_bus.get_object.return_value = object()
-        read_interface = MagicMock()
-        read_interface.GetValue.side_effect = [RuntimeError("boom"), 42.0]
-        original_interface = venus_evcharger_auto_input_helper.dbus.Interface
-        venus_evcharger_auto_input_helper.dbus.Interface = MagicMock(side_effect=[read_interface, read_interface])
+        self._write_gateway_cache(helper, values={("svc", "/Path"): 42.0})
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
             handle.write(
                 compact_json(
@@ -115,10 +102,6 @@ class _AutoInputHelperSourcesDbusCases:
                 self.assertEqual(helper._get_dbus_child_nodes("svc", "/Ac/Grid"), ["L1", "L2"])
         finally:
             os.unlink(helper.dbus_introspection_snapshot_path)
-            venus_evcharger_auto_input_helper.dbus.Interface = original_interface
-
-        first_bus.get_object.assert_any_call("svc", "/Path", introspect=False)
-        self.assertEqual(helper._reset_system_bus.call_count, 1)
 
     def test_ac_pv_read_skips_fresh_unresponsive_introspection_finding(self):
         helper = self._make_helper()
@@ -155,7 +138,7 @@ class _AutoInputHelperSourcesDbusCases:
 
     def test_get_dbus_value_skips_known_unusable_introspection_finding(self):
         helper = self._make_helper()
-        helper._get_system_bus = MagicMock()
+        paths = self._prepare_gateway(helper)
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as snapshot:
             snapshot.write(
                 compact_json(
@@ -177,60 +160,36 @@ class _AutoInputHelperSourcesDbusCases:
                 )
             )
             helper.dbus_introspection_snapshot_path = snapshot.name
-        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as requests:
-            helper.dbus_introspection_request_path = requests.name
         try:
             with patch("venus_evcharger.dbus_introspection.time.time", return_value=120.0):
                 self.assertIsNone(helper._get_dbus_value("svc.dead", "/Soc"))
-            with open(helper.dbus_introspection_request_path, "r", encoding="utf-8") as request_handle:
-                request_payload = json.load(request_handle)
         finally:
             os.unlink(snapshot.name)
-            os.unlink(requests.name)
-        helper._get_system_bus.assert_not_called()
-        self.assertEqual(request_payload["requests"][0]["source"], "auto-input-helper")
+        commands = self._gateway_commands(paths)
+        self.assertEqual(commands[0]["source"], "auto-input-helper")
+        self.assertEqual(commands[0]["kind"], "introspect")
 
     def test_get_dbus_value_and_child_nodes_do_not_reset_on_missing_services(self):
-        class MissingDbusError(Exception):
-            def get_dbus_name(self):
-                return "org.freedesktop.DBus.Error.ServiceUnknown"
-
         helper = self._make_helper()
-        helper._get_system_bus = MagicMock(return_value=MagicMock(get_object=MagicMock(return_value=object())))
         helper._reset_system_bus = MagicMock()
-        missing_error = MissingDbusError("The name com.example.missing was not provided by any .service files")
-        failing_interface = MagicMock()
-        failing_interface.GetValue.side_effect = missing_error
-        failing_interface.Introspect.side_effect = missing_error
-        original_interface = venus_evcharger_auto_input_helper.dbus.Interface
-        venus_evcharger_auto_input_helper.dbus.Interface = MagicMock(return_value=failing_interface)
-        try:
-            with self.assertRaises(MissingDbusError):
-                helper._get_dbus_value("com.example.missing", "/Soc")
-            self.assertEqual(helper._get_dbus_child_nodes("com.example.missing", "/"), [])
-        finally:
-            venus_evcharger_auto_input_helper.dbus.Interface = original_interface
+        paths = self._prepare_gateway(helper)
+        self.assertIsNone(helper._get_dbus_value("com.example.missing", "/Soc"))
+        self.assertEqual(helper._get_dbus_child_nodes("com.example.missing", "/"), [])
 
         helper._reset_system_bus.assert_not_called()
-        self.assertEqual(helper._get_system_bus.call_count, 1)
+        kinds = [command["kind"] for command in self._gateway_commands(paths)]
+        self.assertCountEqual(kinds, ["refresh_value", "introspect"])
 
-    def test_get_dbus_value_and_child_nodes_raise_after_second_failure(self):
+    def test_get_dbus_value_and_child_nodes_request_gateway_on_cache_miss(self):
         helper = self._make_helper()
-        helper._get_system_bus = MagicMock(return_value=MagicMock(get_object=MagicMock(return_value=object())))
         helper._reset_system_bus = MagicMock()
-        failing_interface = MagicMock()
-        failing_interface.GetValue.side_effect = RuntimeError("dbus read failed")
-        failing_interface.Introspect.side_effect = RuntimeError("dbus introspect failed")
-        original_interface = venus_evcharger_auto_input_helper.dbus.Interface
-        venus_evcharger_auto_input_helper.dbus.Interface = MagicMock(return_value=failing_interface)
-        try:
-            with self.assertRaises(RuntimeError):
-                helper._get_dbus_value("svc", "/Path")
-            self.assertEqual(helper._get_dbus_child_nodes("svc", "/Path"), [])
-        finally:
-            venus_evcharger_auto_input_helper.dbus.Interface = original_interface
+        paths = self._prepare_gateway(helper)
+        self.assertIsNone(helper._get_dbus_value("svc", "/Path"))
+        self.assertEqual(helper._get_dbus_child_nodes("svc", "/Path"), [])
 
-        self.assertEqual(helper._reset_system_bus.call_count, 2)
+        helper._reset_system_bus.assert_not_called()
+        kinds = [command["kind"] for command in self._gateway_commands(paths)]
+        self.assertCountEqual(kinds, ["refresh_value", "introspect"])
 
     def test_list_dbus_services_short_circuits_during_backoff_and_resets_on_success(self):
         helper = self._make_helper()
@@ -240,16 +199,9 @@ class _AutoInputHelperSourcesDbusCases:
 
         helper._dbus_list_backoff_until = 0.0
         helper._dbus_list_failures = 2
-        helper._get_system_bus = MagicMock(return_value=MagicMock(get_object=MagicMock(return_value=object())))
-        dbus_iface = MagicMock()
-        dbus_iface.ListNames.return_value = ["com.victronenergy.system"]
-        original_interface = venus_evcharger_auto_input_helper.dbus.Interface
-        venus_evcharger_auto_input_helper.dbus.Interface = MagicMock(return_value=dbus_iface)
-        try:
-            with patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
-                self.assertEqual(helper._list_dbus_services(), ["com.victronenergy.system"])
-        finally:
-            venus_evcharger_auto_input_helper.dbus.Interface = original_interface
+        self._write_gateway_cache(helper, services=["com.victronenergy.system"])
+        with patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            self.assertEqual(helper._list_dbus_services(), ["com.victronenergy.system"])
 
         self.assertEqual(helper._dbus_list_failures, 0)
         self.assertEqual(helper._dbus_list_backoff_until, 0.0)

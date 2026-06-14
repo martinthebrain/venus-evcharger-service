@@ -14,8 +14,8 @@ import time
 import uuid
 from typing import Any
 
-import dbus
 import requests
+from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.runtime.setup_support import (
     _first_existing_version_line,
@@ -82,6 +82,8 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._system_bus_state = threading.local()
         svc._system_bus_generation = 0
         svc._system_bus_generation_lock = threading.Lock()
+        svc._gateway_paths = gateway_paths(getattr(svc, "dbus_gateway_run_dir", ""))
+        svc._gateway_core_commands = DbusCommandInbox(svc._gateway_paths.core_command_dir)
         svc._resolved_auto_pv_services = []
         svc._auto_pv_last_scan = 0.0
         svc._last_pv_missing_warning = None
@@ -172,8 +174,8 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
 
     @staticmethod
     def create_system_bus() -> Any:
-        """Create a fresh DBus connection for the current thread."""
-        return dbus.SystemBus(private=True)
+        """Reject direct DBus access from the core service."""
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     def get_system_bus(self) -> Any:
         """Return the current thread-local DBus connection, reconnecting after resets."""

@@ -1,8 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_helpers_support import *
+from venus_evcharger.dbus_gateway import DbusCacheStore, gateway_paths
 
 
 class TestShellyWallboxHelpersPrimary(ShellyWallboxHelpersTestBase):
+    def _seed_gateway_services(self, service, names):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        paths = gateway_paths(f"{temp_dir.name}/run")
+        store = DbusCacheStore(paths)
+        store.update_services(names)
+        store.write_snapshot_files()
+        service.dbus_gateway_run_dir = paths.run_dir
+        service.dbus_gateway_cache_path = paths.cache_path
+        service._mark_recovery = MagicMock()
+        service._mark_failure = MagicMock()
+        service._dbus_input_controller = None
+
     def test_normalize_phase_accepts_1p_alias(self):
         self.assertEqual(normalize_phase("1P"), "L1")
 
@@ -257,11 +271,10 @@ class TestShellyWallboxHelpersPrimary(ShellyWallboxHelpersTestBase):
         service.auto_pv_scan_interval_seconds = 60
         service._resolved_auto_pv_services = []
         service._auto_pv_last_scan = 0.0
-        service._get_system_bus = MagicMock()
-        venus_evcharger_service.dbus.Interface.return_value.ListNames.return_value = [
+        self._seed_gateway_services(service, [
             "com.victronenergy.pvinverter.http_1",
             "com.victronenergy.pvinverter.http_2",
-        ]
+        ])
 
         services = service._resolve_auto_pv_services()
         self.assertEqual(services, ["com.victronenergy.pvinverter.http_1"])
@@ -274,11 +287,10 @@ class TestShellyWallboxHelpersPrimary(ShellyWallboxHelpersTestBase):
         service.auto_battery_soc_path = "/Soc"
         service._resolved_auto_battery_service = None
         service._auto_battery_last_scan = 0.0
-        service._get_system_bus = MagicMock()
-        venus_evcharger_service.dbus.Interface.return_value.ListNames.return_value = [
+        self._seed_gateway_services(service, [
             "com.victronenergy.system",
             "com.victronenergy.battery.test",
-        ]
+        ])
         service._get_dbus_value = MagicMock(return_value=55.0)
 
         self.assertEqual(service._resolve_auto_battery_service(), "com.victronenergy.battery.test")
@@ -352,11 +364,10 @@ class TestShellyWallboxHelpersPrimary(ShellyWallboxHelpersTestBase):
         service.auto_battery_soc_path = "/Soc"
         service._resolved_auto_battery_service = None
         service._auto_battery_last_scan = 0.0
-        service._get_system_bus = MagicMock()
-        venus_evcharger_service.dbus.Interface.return_value.ListNames.return_value = [
+        self._seed_gateway_services(service, [
             "com.victronenergy.system",
             "com.victronenergy.battery.test",
-        ]
+        ])
 
         def fake_get_value(service_name, path):
             if service_name == "com.victronenergy.battery.explicit":

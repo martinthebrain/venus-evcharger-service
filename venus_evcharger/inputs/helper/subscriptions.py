@@ -8,18 +8,22 @@ can consume safely, even if DBus becomes slow or temporarily inconsistent.
 """
 
 import time
-from functools import partial
-from typing import Any, cast
+from typing import Any
 
-import dbus
 from gi.repository import GLib
 
+
+class _GatewaySignalMatch:
+    """Compatibility match object for gateway-managed cache refresh interests."""
+
+    def remove(self) -> None:
+        return
 
 
 class _AutoInputHelperSubscriptionMixin:
     @staticmethod
     def _dbus_module() -> Any:
-        return dbus
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     @staticmethod
     def _signal_spec_key(source_name: str, service_name: str, path: str) -> tuple[str, str, str]:
@@ -27,28 +31,20 @@ class _AutoInputHelperSubscriptionMixin:
         return (str(source_name), str(service_name), str(path))
 
     def _subscribe_busitem_path(self: Any, source_name: str, service_name: str, path: str) -> None:
-        """Subscribe to BusItem changes for one source path."""
+        """Register interest in one source path without touching DBus directly."""
         self._ensure_poll_state()
         key = self._signal_spec_key(source_name, service_name, path)
         if key in self._signal_matches:
             return
-        bus = self._get_system_bus()
-        generation = int(getattr(self, "_system_bus_generation", 0) or 0)
-        match = bus.add_signal_receiver(
-            partial(self._on_source_signal, source_name, generation),
-            signal_name="PropertiesChanged",
-            dbus_interface="com.victronenergy.BusItem",
-            bus_name=service_name,
-            path=path,
-            sender_keyword="sender",
-            path_keyword="path",
-        )
-        self._signal_matches[key] = match
+        self._signal_matches[key] = _GatewaySignalMatch()
         self._monitored_specs[key] = {
             "source": source_name,
             "service_name": service_name,
             "path": path,
         }
+        request_gateway_value = getattr(self, "_request_gateway_value", None)
+        if callable(request_gateway_value):
+            request_gateway_value(service_name, path, priority=80, reason=f"{source_name} subscription refresh")
 
     def _clear_missing_subscriptions(self: Any, desired_keys: set[tuple[str, str, str]]) -> None:
         """Remove subscriptions that are no longer needed."""
@@ -297,29 +293,21 @@ class _AutoInputHelperSubscriptionMixin:
         self._dbus_generation = int(getattr(self, "_dbus_generation", 0) or 0) + 1
 
     def _get_system_bus(self: Any) -> Any:
-        """Return the current DBus connection for this helper process."""
-        self._ensure_poll_state()
-        if self._system_bus is None:
-            dbus_module = cast(Any, self._dbus_module())
-            self._system_bus = dbus_module.SystemBus(private=True)
-            self._dbus_generation = int(getattr(self, "_dbus_generation", 0) or 0) + 1
-            self._system_bus_generation = self._dbus_generation
-        return self._system_bus
+        """Direct DBus connections are forbidden outside the gateway."""
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     def _register_name_owner_subscription(self: Any) -> None:
-        """Subscribe to DBus name-owner changes for dynamic service tracking."""
+        """Record that topology refresh is gateway-driven."""
         self._ensure_poll_state()
         if self._name_owner_match is not None:
             return
-        bus = self._get_system_bus()
-        generation = int(getattr(self, "_system_bus_generation", 0) or 0)
-        self._name_owner_match = bus.add_signal_receiver(
-            partial(self._on_name_owner_changed, generation),
-            signal_name="NameOwnerChanged",
-            dbus_interface="org.freedesktop.DBus",
-            bus_name="org.freedesktop.DBus",
-            path="/org/freedesktop/DBus",
-        )
+        self._name_owner_match = _GatewaySignalMatch()
+        gateway_client = getattr(self, "_gateway_client", None)
+        if callable(gateway_client):
+            try:
+                gateway_client().enqueue_command({"kind": "refresh_services", "priority": "normal"})
+            except Exception:  # pylint: disable=broad-except
+                pass
 
     def _clear_all_signal_matches(self: Any) -> None:
         for key in list(getattr(self, "_signal_matches", {})):

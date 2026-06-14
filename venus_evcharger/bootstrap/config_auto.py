@@ -295,6 +295,27 @@ class _ServiceBootstrapAutoConfigMixin(_ComposableControllerMixin):
             "AutoInputSnapshotPath",
             f"/run/dbus-venus-evcharger-auto-{svc.deviceinstance}.json",
         ).strip()
+        svc.dbus_gateway_run_dir = defaults.get("DbusGatewayRunDir", "/run/venus-evcharger").strip()
+        svc.dbus_gateway_cache_path = defaults.get(
+            "DbusGatewayCachePath",
+            f"{svc.dbus_gateway_run_dir}/dbus-cache.json",
+        ).strip()
+        svc.dbus_gateway_health_path = defaults.get(
+            "DbusGatewayHealthPath",
+            f"{svc.dbus_gateway_run_dir}/dbus-health.json",
+        ).strip()
+        svc.dbus_gateway_socket_path = defaults.get(
+            "DbusGatewaySocketPath",
+            f"{svc.dbus_gateway_run_dir}/gateway.sock",
+        ).strip()
+        svc.dbus_gateway_command_dir = defaults.get(
+            "DbusGatewayCommandDir",
+            f"{svc.dbus_gateway_run_dir}/dbus-commands",
+        ).strip()
+        svc.dbus_gateway_core_command_dir = defaults.get(
+            "DbusGatewayCoreCommandDir",
+            f"{svc.dbus_gateway_run_dir}/core-commands",
+        ).strip()
         svc.dbus_introspection_enabled = (
             str(_config_value(defaults, "DbusIntrospectionEnabled", "1")).strip().lower() in ("1", "true", "yes", "on")
         )

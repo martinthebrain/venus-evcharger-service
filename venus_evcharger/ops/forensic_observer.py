@@ -18,6 +18,8 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+from venus_evcharger.dbus_gateway import DbusCacheStore, dbus_path_key, gateway_paths
+
 
 EVCHARGER_PATHS = (
     "/Mode",
@@ -72,6 +74,14 @@ def dbus_introspection_snapshot_path(defaults: configparser.SectionProxy) -> str
     if configured:
         return configured
     return f"/run/dbus-venus-evcharger-dbus-map-{device_instance(defaults)}.json"
+
+
+def dbus_gateway_cache_path(defaults: configparser.SectionProxy) -> str:
+    configured = str(defaults.get("DbusGatewayCachePath", "")).strip()
+    if configured:
+        return configured
+    run_dir = str(defaults.get("DbusGatewayRunDir", "/run/venus-evcharger")).strip()
+    return gateway_paths(run_dir or None).cache_path
 
 
 def runtime_state_path(defaults: configparser.SectionProxy) -> str:
@@ -145,12 +155,6 @@ def command_output(args: list[str], timeout: float = 3.0) -> dict[str, Any]:
         return {"ok": False, "error": str(error)}
 
 
-def dbus_value(bus: Any, service_name: str, path: str, timeout: float = 1.0) -> Any:
-    obj = bus.get_object(service_name, path, introspect=False)
-    iface = obj.get_dbus_method("GetValue", "com.victronenergy.BusItem")
-    return iface(timeout=timeout)
-
-
 def json_ready(value: Any) -> Any:
     """Return one JSON-serializable representation of DBus or Python values."""
     if _is_json_scalar(value):
@@ -175,22 +179,18 @@ def read_dbus_paths(
     paths: Iterable[str] = EVCHARGER_PATHS,
     *,
     bus_factory: Callable[[], Any] | None = None,
+    cache_path: str = "",
 ) -> dict[str, Any]:
-    try:
-        if bus_factory is None:
-            import dbus  # pylint: disable=import-outside-toplevel
-
-            bus_factory = dbus.SystemBus
-        bus = bus_factory()
-    except Exception as error:  # pylint: disable=broad-except
-        return {"ok": False, "error": f"dbus-open-failed: {error}", "values": {}, "errors": {}}
+    del bus_factory
+    snapshot = DbusCacheStore.load_snapshot(cache_path or gateway_paths().cache_path)
     values: dict[str, Any] = {}
     errors: dict[str, str] = {}
     for path in paths:
-        try:
-            values[path] = json_ready(dbus_value(bus, service_name, path))
-        except Exception as error:  # pylint: disable=broad-except
-            errors[path] = str(error)
+        entry = DbusCacheStore.value_entry(snapshot, dbus_path_key(service_name, path))
+        if entry is None:
+            errors[path] = "missing-from-gateway-cache"
+            continue
+        values[path] = json_ready(entry.get("value"))
     return {"ok": not errors, "values": values, "errors": errors}
 
 
@@ -283,7 +283,7 @@ def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None 
         "timestamp": time.time(),
         "service_name": service_name,
         "config_path": config_path,
-        "dbus": read_dbus_paths(service_name, bus_factory=bus_factory),
+        "dbus": read_dbus_paths(service_name, bus_factory=bus_factory, cache_path=dbus_gateway_cache_path(defaults)),
         "auto_input_snapshot": read_json_file(auto_input_snapshot_path(defaults)),
         "dbus_introspection_snapshot": read_json_file(dbus_introspection_snapshot_path(defaults)),
         "runtime_state": read_json_file(runtime_state_path(defaults)),

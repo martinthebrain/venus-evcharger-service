@@ -11,6 +11,7 @@ from typing import Any, Literal
 from .config_file import config_section
 from .models import PhaseSelection, SwitchCapabilities, SwitchState, normalize_phase_selection_tuple
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_binary_flag
+from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 
 ContactMode = Literal["NO", "NC"]
 
@@ -100,6 +101,7 @@ class CerboGxRelaySwitchBackend:
         self._selected_phase_selection: PhaseSelection = (
             requested_selection if requested_selection in self.settings.supported_phase_selections else default_selection
         )
+        self._last_gateway_write_at: dict[tuple[str, str], float] = {}
 
     def capabilities(self) -> SwitchCapabilities:
         """Return the configured relay capabilities."""
@@ -162,13 +164,23 @@ class CerboGxRelaySwitchBackend:
 
     def _verify_relay_state(self, target_state: int) -> None:
         self._sleep_if_configured(self.settings.verify_settle_seconds)
-        read_back = self._read_relay_state()
+        if self._cache_entry_is_stale_for_write(self._SYSTEM_SERVICE, self._relay_state_path()):
+            return
+        read_back = self._dbus_get_value(self._SYSTEM_SERVICE, self._relay_state_path())
+        if read_back is None:
+            return
+        read_back = int(read_back)
         if read_back == target_state:
             return
         self._sleep_if_configured(self.settings.verify_retry_seconds)
         self._set_relay_state(target_state)
         self._sleep_if_configured(self.settings.verify_settle_seconds)
-        read_back = self._read_relay_state()
+        if self._cache_entry_is_stale_for_write(self._SYSTEM_SERVICE, self._relay_state_path()):
+            return
+        read_back = self._dbus_get_value(self._SYSTEM_SERVICE, self._relay_state_path())
+        if read_back is None:
+            return
+        read_back = int(read_back)
         if read_back != target_state:
             raise RuntimeError(f"Cerbo GX relay {self.settings.relay_index} stayed at {read_back}, expected {target_state}")
 
@@ -190,11 +202,11 @@ class CerboGxRelaySwitchBackend:
             time.sleep(seconds)
 
     def _manual_function_matches(self, path: str) -> bool:
-        return int(self._dbus_get_value(self._SETTINGS_SERVICE, path)) == self.settings.manual_function_value
+        value = self._dbus_get_value(self._SETTINGS_SERVICE, path)
+        return value is not None and int(value) == self.settings.manual_function_value
 
     def _set_manual_function_path(self, path: str) -> bool:
-        ok = self._dbus_set_value(self._SETTINGS_SERVICE, path, self.settings.manual_function_value)
-        return ok and self._manual_function_matches(path)
+        return self._dbus_set_value(self._SETTINGS_SERVICE, path, self.settings.manual_function_value)
 
     def _raise_manual_function_error(self, last_error: Exception | None) -> None:
         message = f"Unable to set Cerbo GX relay {self.settings.relay_index} to manual function"
@@ -203,45 +215,77 @@ class CerboGxRelaySwitchBackend:
         raise RuntimeError(message)
 
     def _system_bus(self) -> Any:
-        bus_factory = getattr(self.service, "_get_system_bus", None)
-        if callable(bus_factory):
-            return bus_factory()
-        import dbus
-
-        return dbus.SystemBus()
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     def _busitem(self, service: str, path: str) -> Any:
-        obj = self._system_bus().get_object(service, path, introspect=False)
-        if hasattr(obj, "GetValue") and hasattr(obj, "SetValue"):
-            return obj
-        import dbus
-
-        return dbus.Interface(obj, "com.victronenergy.BusItem")
+        del service, path
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     def _with_dbus_retry(self, call: Any) -> Any:
-        try:
-            return call()
-        except Exception:
-            reset_bus = getattr(self.service, "_reset_system_bus", None)
-            if callable(reset_bus):
-                reset_bus()
-            time.sleep(0.1)
-            return call()
+        return call()
 
     def _dbus_get_value(self, service: str, path: str) -> Any:
-        return self._with_dbus_retry(lambda: self._normalized_dbus_value(self._busitem(service, path).GetValue()))
+        entry = self._dbus_value_entry(service, path)
+        if entry is None:
+            try:
+                self._gateway_client().request_read(
+                    service,
+                    path,
+                    priority="read",
+                    reason="cerbo gx relay cache miss",
+                    source="cerbo-gx-relay-switch",
+                )
+            except OSError:
+                return None
+            return None
+        return self._normalized_dbus_value(entry.get("value"))
+
+    def _dbus_value_entry(self, service: str, path: str) -> dict[str, Any] | None:
+        snapshot = DbusCacheStore.load_snapshot(self._gateway_cache_path())
+        return DbusCacheStore.value_entry(snapshot, dbus_path_key(service, path))
+
+    def _cache_entry_is_stale_for_write(self, service: str, path: str) -> bool:
+        written_at = self._last_gateway_write_at.get((service, path), 0.0)
+        if written_at <= 0.0:
+            return False
+        entry = self._dbus_value_entry(service, path)
+        if entry is None:
+            return True
+        try:
+            return float(entry.get("updated_at", 0.0) or 0.0) <= written_at
+        except (TypeError, ValueError):
+            return True
 
     def _dbus_set_value(self, service: str, path: str, value: int) -> bool:
-        def _set() -> bool:
-            raw = self._busitem(service, path).SetValue(int(value))
-            if isinstance(raw, bool):
-                return raw is True
-            try:
-                return int(str(raw)) == 0
-            except (TypeError, ValueError):
-                return bool(raw) is True
+        try:
+            self._gateway_client().enqueue_command(
+                {
+                    "kind": "set_value",
+                    "source": "cerbo-gx-relay-switch",
+                    "service": service,
+                    "path": path,
+                    "value": int(value),
+                    "priority": "user",
+                    "coalesce_key": f"{service}:{path}",
+                }
+            )
+            self._last_gateway_write_at[(service, path)] = time.time()
+            return True
+        except OSError:
+            return False
 
-        return bool(self._with_dbus_retry(_set))
+    def _gateway_client(self) -> GatewayClient:
+        return GatewayClient(gateway_paths(self._gateway_run_dir()))
+
+    def _gateway_cache_path(self) -> str:
+        configured = str(getattr(self.service, "dbus_gateway_cache_path", "") or "")
+        if configured:
+            return configured
+        return gateway_paths(self._gateway_run_dir()).cache_path
+
+    def _gateway_run_dir(self) -> str:
+        configured = str(getattr(self.service, "dbus_gateway_run_dir", "") or "")
+        return configured or "/tmp/venus-evcharger"
 
     @staticmethod
     def _normalized_dbus_value(value: Any) -> Any:

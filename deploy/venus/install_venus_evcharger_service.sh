@@ -14,13 +14,16 @@
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 SERVICE_NAME="dbus-venus-evcharger"
+DBUS_ADAPTER_SERVICE_NAME="dbus-venus-evcharger-dbus-adapter"
 OBSERVER_SERVICE_NAME="dbus-venus-evcharger-observer"
 SERVICE_DIR="$SCRIPT_DIR/service_venus_evcharger"
+DBUS_ADAPTER_SERVICE_DIR="$SCRIPT_DIR/service_venus_evcharger_dbus_adapter"
 OBSERVER_SERVICE_DIR="$SCRIPT_DIR/service_venus_evcharger_observer"
 CONFIG_PATH="$SCRIPT_DIR/config.venus_evcharger.ini"
 GENERIC_SHELLY_HELPER="$REPO_DIR/venus_evcharger/ops/disable_generic_shelly_once.py"
 BOOT_HELPER="$SCRIPT_DIR/boot_venus_evcharger_service.sh"
 MAIN_ENTRYPOINT="$REPO_DIR/venus_evcharger_service.py"
+DBUS_ADAPTER_ENTRYPOINT="$REPO_DIR/venus_evcharger_dbus_adapter.py"
 OBSERVER_ENTRYPOINT="$REPO_DIR/venus_evcharger_observer.py"
 AUTO_INPUT_HELPER="$REPO_DIR/venus_evcharger_auto_input_helper.py"
 DBUS_INTROSPECTION_WORKER="$REPO_DIR/venus_evcharger_dbus_introspection_worker.py"
@@ -33,7 +36,7 @@ GX_SMOKE_HELPER="$SCRIPT_DIR/gx_api_smoke_test_skeleton.sh"
 SOAK_HELPER="$REPO_DIR/scripts/ops/cerbo_soak_check.sh"
 RC_LOCAL_FILE=/data/rc.local
 
-mkdir -p "$SERVICE_DIR/log"
+mkdir -p "$SERVICE_DIR/log" "$DBUS_ADAPTER_SERVICE_DIR/log"
 
 # The service is intentionally config-driven. Fail early if the config file is
 # missing so the user notices a broken deployment immediately.
@@ -45,6 +48,11 @@ fi
 # Restore execute bits for all directly launched entrypoints.
 chmod a+x "$MAIN_ENTRYPOINT"
 chmod 755 "$MAIN_ENTRYPOINT"
+
+if [ -f "$DBUS_ADAPTER_ENTRYPOINT" ]; then
+    chmod a+x "$DBUS_ADAPTER_ENTRYPOINT"
+    chmod 755 "$DBUS_ADAPTER_ENTRYPOINT"
+fi
 
 if [ -f "$GENERIC_SHELLY_HELPER" ]; then
     chmod a+x "$GENERIC_SHELLY_HELPER"
@@ -110,6 +118,10 @@ chmod a+x "$SERVICE_DIR/run"
 chmod 755 "$SERVICE_DIR/run"
 chmod a+x "$SERVICE_DIR/log/run"
 chmod 755 "$SERVICE_DIR/log/run"
+chmod a+x "$DBUS_ADAPTER_SERVICE_DIR/run"
+chmod 755 "$DBUS_ADAPTER_SERVICE_DIR/run"
+chmod a+x "$DBUS_ADAPTER_SERVICE_DIR/log/run"
+chmod 755 "$DBUS_ADAPTER_SERVICE_DIR/log/run"
 chmod a+x "$OBSERVER_SERVICE_DIR/run"
 chmod 755 "$OBSERVER_SERVICE_DIR/run"
 
@@ -134,9 +146,52 @@ cleanup_duplicate_supervisors() {
 
 # Register or update the runit service symlink.
 ln -sfn "$SERVICE_DIR" "/service/$SERVICE_NAME"
+ln -sfn "$DBUS_ADAPTER_SERVICE_DIR" "/service/$DBUS_ADAPTER_SERVICE_NAME"
 ln -sfn "$OBSERVER_SERVICE_DIR" "/service/$OBSERVER_SERVICE_NAME"
 cleanup_duplicate_supervisors "$SERVICE_NAME"
+cleanup_duplicate_supervisors "$DBUS_ADAPTER_SERVICE_NAME"
 cleanup_duplicate_supervisors "$OBSERVER_SERVICE_NAME"
+
+service_registered() {
+    service_name="$1"
+    service_path="/service/$service_name"
+    [ -e "$service_path" ] && command -v svc >/dev/null 2>&1
+}
+
+service_down_if_registered() {
+    service_name="$1"
+    if ! service_registered "$service_name"; then
+        return
+    fi
+    svc -d "/service/$service_name" >/dev/null 2>&1 || true
+}
+
+service_up_if_registered() {
+    service_name="$1"
+    if ! service_registered "$service_name"; then
+        return
+    fi
+    svc -u "/service/$service_name" >/dev/null 2>&1 || true
+}
+
+service_restart_if_registered() {
+    service_name="$1"
+    if ! service_registered "$service_name"; then
+        return
+    fi
+    svc -t "/service/$service_name" >/dev/null 2>&1 || true
+}
+
+# During upgrades from the pre-gateway layout the main service may still own
+# the EV charger DBus name. Restart the adapter and then the main service so
+# the adapter becomes the only DBus owner and the core re-registers via gateway
+# commands. Best effort only: on first install runit may still be starting.
+service_down_if_registered "$OBSERVER_SERVICE_NAME"
+service_down_if_registered "$SERVICE_NAME"
+service_restart_if_registered "$DBUS_ADAPTER_SERVICE_NAME"
+sleep 1
+service_up_if_registered "$SERVICE_NAME"
+service_up_if_registered "$OBSERVER_SERVICE_NAME"
 
 remove_rc_local_line() {
     line="$1"

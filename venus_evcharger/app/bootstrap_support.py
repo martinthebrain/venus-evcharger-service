@@ -55,16 +55,8 @@ def install_signal_logging(
 
 
 def setup_dbus_mainloop(logging_module: Any) -> None:
-    """Prepare dbus-python and GLib to run the Venus event loop."""
-    from dbus.mainloop.glib import DBusGMainLoop  # pylint: disable=import-error
-    import dbus.mainloop.glib as dbus_glib_mainloop  # pylint: disable=import-error
-
-    try:
-        dbus_glib_mainloop.threads_init()
-    except AttributeError:
-        logging_module.debug("dbus.mainloop.glib.threads_init() not available on this runtime")
-
-    DBusGMainLoop(set_as_default=True)
+    """Compatibility hook; DBus setup is isolated in the gateway adapter."""
+    logging_module.debug("Skipping DBus mainloop setup in the core service; gateway owns DBus")
 
 
 def request_mainloop_quit(gobject_module: Any, mainloop: Any, logging_module: Any) -> None:

@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 from venus_evcharger.control import ControlCommand
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
@@ -320,8 +320,38 @@ class _RuntimeSupportAsyncMainloopMixin(_ComposableControllerMixin):
 
     def _runtime_executor_run_once(self) -> bool:
         """Run one serialized runtime executor pass."""
+        gateway_work = self._drain_gateway_core_commands_once()
         did_work = self._drain_control_commands_once()
-        return self._run_pending_update_cycle_once() or did_work
+        return self._run_pending_update_cycle_once() or did_work or gateway_work
+
+    def _drain_gateway_core_commands_once(self) -> bool:
+        """Handle GUI/user commands delivered by the DBus gateway."""
+        svc = self.service
+        inbox = getattr(svc, "_gateway_core_commands", None)
+        if inbox is None:
+            return False
+        pending = inbox.load_pending()
+        if not pending:
+            return False
+        for path, payload in inbox.coalesce(pending):
+            try:
+                self._handle_gateway_core_command(payload)
+            finally:
+                inbox.remove(path)
+        return True
+
+    def _handle_gateway_core_command(self, payload: Mapping[str, Any]) -> None:
+        """Translate one gateway command file into an existing control command."""
+        svc = self.service
+        kind = str(payload.get("kind") or payload.get("type") or "")
+        if kind != "user_command":
+            return
+        path = str(payload.get("path") or "")
+        apply_gateway_write = getattr(getattr(svc, "_dbusservice", None), "apply_gateway_write", None)
+        if callable(apply_gateway_write) and apply_gateway_write(path, payload.get("value")):
+            return
+        command = svc._control_command_from_write(path, payload.get("value"), source="dbus")
+        svc._handle_control_command(command)
 
     def _run_pending_update_cycle_once(self) -> bool:
         svc = self.service

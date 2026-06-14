@@ -26,8 +26,7 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
         return self._runtime_support_controller.create_system_bus()
 
     def _get_system_bus(self) -> Any:
-        self._ensure_runtime_support_controller()
-        return self._runtime_support_controller.get_system_bus()
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     def _init_worker_state(self) -> None:
         self._ensure_runtime_support_controller()

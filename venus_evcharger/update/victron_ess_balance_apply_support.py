@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any, cast
+from typing import Any
 
-import dbus
+from venus_evcharger.dbus_gateway import GatewayClient, gateway_paths
 
 
 class _UpdateCycleVictronEssBalanceApplySupportMixin:
@@ -292,7 +292,8 @@ class _UpdateCycleVictronEssBalanceApplySupportMixin:
 
     @staticmethod
     def _victron_ess_balance_write_payload(dbus_module: Any, value: float) -> Any:
-        return dbus_module.Double(float(value)) if hasattr(dbus_module, "Double") else float(value)
+        del dbus_module
+        return float(value)
 
     def _victron_ess_balance_try_write_setpoint(
         self,
@@ -301,13 +302,16 @@ class _UpdateCycleVictronEssBalanceApplySupportMixin:
         normalized_path: str,
         value: float,
     ) -> None:
-        bus = svc._get_system_bus()
-        obj = bus.get_object(normalized_service, normalized_path, introspect=False)
-        dbus_module = cast(Any, self._victron_ess_balance_dbus_module())
-        interface = dbus_module.Interface(obj, "com.victronenergy.BusItem")
-        interface.SetValue(
-            self._victron_ess_balance_write_payload(dbus_module, value),
-            timeout=svc.dbus_method_timeout_seconds,
+        GatewayClient(gateway_paths(str(getattr(svc, "dbus_gateway_run_dir", "") or "") or None)).enqueue_command(
+            {
+                "kind": "set_value",
+                "source": "victron-ess-balance",
+                "service": normalized_service,
+                "path": normalized_path,
+                "value": self._victron_ess_balance_write_payload(None, value),
+                "priority": "user",
+                "coalesce_key": f"{normalized_service}:{normalized_path}",
+            }
         )
 
     @staticmethod
@@ -370,7 +374,6 @@ class _UpdateCycleVictronEssBalanceApplySupportMixin:
                 return None
             except Exception as error:  # pylint: disable=broad-except
                 last_error = error
-                svc._reset_system_bus()
                 if attempt == 0:
                     self._victron_ess_balance_log_write_retry(normalized_service, normalized_path, error)
         return last_error
@@ -387,8 +390,8 @@ class _UpdateCycleVictronEssBalanceApplySupportMixin:
 
     @classmethod
     def _victron_ess_balance_dbus_module(cls) -> Any:
-        module = cls._victron_ess_balance_apply_module()
-        return getattr(module, "dbus", dbus)
+        del cls
+        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
     @classmethod
     def _victron_ess_balance_logging_module(cls) -> Any:
