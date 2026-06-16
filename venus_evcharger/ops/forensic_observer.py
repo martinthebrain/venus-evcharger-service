@@ -267,10 +267,6 @@ def helper_processes(ps_text: str) -> list[dict[str, Any]]:
     return matching_processes(ps_text, "venus_evcharger_auto_input_helper.py")
 
 
-def dbus_introspection_worker_processes(ps_text: str) -> list[dict[str, Any]]:
-    return matching_processes(ps_text, "venus_evcharger_dbus_introspection_worker.py")
-
-
 def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None = None) -> dict[str, Any]:
     defaults = load_defaults(config_path)
     service_name = evcharger_service_name(defaults)
@@ -288,7 +284,6 @@ def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None 
         "dbus_introspection_snapshot": read_json_file(dbus_introspection_snapshot_path(defaults)),
         "runtime_state": read_json_file(runtime_state_path(defaults)),
         "helper_processes": helper_processes(ps_text),
-        "dbus_introspection_worker_processes": dbus_introspection_worker_processes(ps_text),
         "shelly": fetch_shelly_status(configured_host(defaults)),
         "svstat": command_output(["svstat", "/service/dbus-venus-evcharger"]),
         "ps": ps_snapshot,

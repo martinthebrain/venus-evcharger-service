@@ -518,9 +518,5 @@ class RemainingCoverageHelperTests(unittest.TestCase):
         close_raises = SimpleNamespace(close=MagicMock(side_effect=RuntimeError("close failed")))
         owner._close_system_bus(close_raises)
 
-    def test_service_entrypoint_exposes_dbus_introspection_worker_path(self) -> None:
-        self.assertTrue(ShellyWallboxService._dbus_introspection_worker_path().endswith("venus_evcharger_dbus_introspection_worker.py"))
-
-
 if __name__ == "__main__":
     unittest.main()

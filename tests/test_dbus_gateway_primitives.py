@@ -14,6 +14,8 @@ from venus_evcharger.dbus_gateway import (
     GatewayClient,
     GatewayDbusServiceProxy,
     LatencyWindow,
+    command_allowed_by_backpressure,
+    command_queue_class,
     dbus_path_key,
     gateway_paths,
     gateway_value,
@@ -75,11 +77,26 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             first = inbox.enqueue({"kind": "set_value", "created_at": 1.0, "priority": "diagnostic", "coalesce_key": "k"})
             second = inbox.enqueue({"kind": "set_value", "created_at": 2.0, "priority": "diagnostic", "coalesce_key": "k"})
             self.assertEqual(first, second)
-            self.assertEqual(inbox.load_pending()[0][1]["created_at"], 2.0)
+            pending_set_value = inbox.load_pending()[0][1]
+            self.assertEqual(pending_set_value["created_at"], 1.0)
+            self.assertEqual(pending_set_value["queue_class"], "remote-write")
+            self.assertEqual(pending_set_value["lifecycle_state"], "coalesced")
+            self.assertGreaterEqual(pending_set_value["updated_at"], 2.0)
             services_first = inbox.enqueue({"kind": "refresh_services", "created_at": 3.0})
             services_second = inbox.enqueue({"kind": "refresh_services", "created_at": 4.0})
             self.assertEqual(services_first, services_second)
             self.assertEqual(inbox.load_pending()[1][1]["coalesce_key"], "refresh:services")
+            legacy_refresh = Path(temp_dir) / "commands" / "legacy-refresh.json"
+            legacy_refresh.write_text(
+                '{"kind":"refresh_services","created_at":2.0,"coalesce_key":"refresh-services"}',
+                encoding="utf-8",
+            )
+            legacy_loaded = [
+                command
+                for _path, command in inbox.load_pending()
+                if command.get("kind") == "refresh_services" and command.get("created_at") == 2.0
+            ][0]
+            self.assertEqual(legacy_loaded["coalesce_key"], "refresh:services")
 
             commands = [
                 ("a", {"id": "a", "created_at": "bad", "priority": "diagnostic"}),
@@ -169,8 +186,57 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
 
             store = DbusCacheStore(paths)
             store.update_value("grid_power_w", 12.0, source="svc/path")
+            store.health["backpressure"] = {"state": "slow"}
             store.write_snapshot_files()
             self.assertEqual(client.load_cache()["values"]["grid_power_w"]["value"], 12.0)
+            self.assertEqual(client.load_health()["backpressure"]["state"], "slow")
+            self.assertEqual(client.backpressure_state(), "slow")
+            client.publish_path("/Auto/Reason", "optional")
+            self.assertEqual(len(DbusCommandInbox(paths.command_dir).load_pending()), 5)
+            client.publish_path("/Mode", 2, priority="user")
+            pending = DbusCommandInbox(paths.command_dir).load_pending()
+            self.assertEqual(len(pending), 5)
+            mode = [
+                command
+                for _path, command in pending
+                if command.get("path") == "/Mode" and command.get("kind") == "publish_value"
+            ][0]
+            self.assertEqual(mode["value"], 2)
+
+    def test_command_queue_class_maps_gateway_workloads(self) -> None:
+        self.assertEqual(command_queue_class({"kind": "register_path"}), "startup/register")
+        self.assertEqual(command_queue_class({"kind": "publish_value", "path": "/Mode"}), "gui-critical-publish")
+        self.assertEqual(command_queue_class({"kind": "publish_desired", "paths": {"/Session/Time": 1}}), "gui-critical-publish")
+        self.assertEqual(command_queue_class({"kind": "publish_value", "path": "/Auto/Reason"}), "local-publish")
+        self.assertEqual(command_queue_class({"kind": "set_value"}), "remote-write")
+        self.assertEqual(command_queue_class({"kind": "refresh_value", "key": "grid_power_w"}), "read-fast")
+        self.assertEqual(command_queue_class({"kind": "refresh_value", "key": "optional"}), "read-slow")
+        self.assertEqual(command_queue_class({"kind": "refresh_services"}), "discovery")
+        self.assertEqual(command_queue_class({"kind": "introspect"}), "introspection")
+        self.assertEqual(command_queue_class({"kind": "unknown"}), "diagnostic")
+
+    def test_backpressure_command_filter_keeps_critical_work(self) -> None:
+        self.assertTrue(command_allowed_by_backpressure({"kind": "publish_value", "path": "/Auto/Reason"}, "ok"))
+        self.assertFalse(
+            command_allowed_by_backpressure(
+                {"kind": "publish_value", "path": "/Auto/Reason", "priority": "diagnostic"},
+                "congested",
+            )
+        )
+        self.assertTrue(command_allowed_by_backpressure({"kind": "publish_value", "path": "/Mode"}, "slow"))
+        self.assertFalse(command_allowed_by_backpressure({"kind": "publish_value", "path": "/Auto/Reason"}, "slow"))
+        self.assertTrue(
+            command_allowed_by_backpressure(
+                {"kind": "publish_value", "path": "/StartStop", "priority": "user"},
+                "protective",
+            )
+        )
+        self.assertFalse(
+            command_allowed_by_backpressure(
+                {"kind": "publish_value", "path": "/StartStop", "priority": "publish"},
+                "protective",
+            )
+        )
 
     def test_gateway_proxy_gateway_value_and_latency_window(self) -> None:
         fake_client = MagicMock()

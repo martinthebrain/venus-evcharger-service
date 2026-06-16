@@ -181,6 +181,8 @@ class DbusReadScheduler:
     def __init__(self, specs: Mapping[str, Mapping[str, Any]]) -> None:
         self.specs: dict[str, dict[str, Any]] = {str(key): dict(value) for key, value in specs.items()}
         self.next_read_at: dict[str, float] = {key: 0.0 for key in self.specs}
+        self.failure_counts: dict[str, int] = {key: 0 for key in self.specs}
+        self._order: dict[str, int] = {key: index for index, key in enumerate(self.specs)}
 
     def next_due(
         self,
@@ -189,20 +191,38 @@ class DbusReadScheduler:
         circuit_state: str,
         priority_allowed: Callable[[str], bool],
     ) -> tuple[str, Mapping[str, Any], float] | None:
-        for key, spec in self.specs.items():
+        due_keys = [
+            key
+            for key in self.specs
+            if now >= self.next_read_at.get(key, 0.0)
+        ]
+        due_keys.sort(key=lambda key: (self.next_read_at.get(key, 0.0), self._order.get(key, 0)))
+        for key in due_keys:
+            spec = self.specs[key]
             interval = self._effective_interval(spec, circuit_state)
-            if now < self.next_read_at.get(key, 0.0):
-                continue
             if priority_allowed(str(spec.get("priority", "read"))):
                 return key, spec, interval
             return None
         return None
 
     def record_success(self, key: str, *, now: float, interval: float) -> None:
-        self.next_read_at[str(key)] = float(now) + max(0.0, float(interval))
+        normalized = str(key)
+        self.failure_counts[normalized] = 0
+        self.next_read_at[normalized] = float(now) + max(0.0, float(interval))
 
     def record_error(self, key: str, *, now: float, interval: float) -> None:
-        self.record_success(key, now=now, interval=interval)
+        normalized = str(key)
+        failures = min(6, self.failure_counts.get(normalized, 0) + 1)
+        self.failure_counts[normalized] = failures
+        base = max(float(interval) * 10.0, 30.0)
+        self.next_read_at[normalized] = float(now) + min(300.0, base * (2 ** (failures - 1)))
+
+    def force_due(self, keys: set[str] | tuple[str, ...] | list[str]) -> None:
+        """Make selected read specs due as soon as the DBus rate limiter allows."""
+        for key in keys:
+            normalized = str(key)
+            if normalized in self.specs:
+                self.next_read_at[normalized] = 0.0
 
     @staticmethod
     def _effective_interval(spec: Mapping[str, Any], circuit_state: str) -> float:

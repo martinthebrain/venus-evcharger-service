@@ -19,7 +19,6 @@ python3 -m py_compile \
     venus_evcharger/dbus_adapter_read.py \
     venus_evcharger/dbus_adapter_write.py \
     venus_evcharger/bootstrap/controller.py \
-    venus_evcharger_dbus_introspection_worker.py \
     venus_evcharger/dbus_gateway.py \
     venus_evcharger/core/common.py \
     venus_evcharger/ports/__init__.py \

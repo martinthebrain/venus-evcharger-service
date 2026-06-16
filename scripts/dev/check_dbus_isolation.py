@@ -20,7 +20,6 @@ ADAPTER_FILES = {
 ROOT_FILES = (
     "venus_evcharger_service.py",
     "venus_evcharger_auto_input_helper.py",
-    "venus_evcharger_dbus_introspection_worker.py",
     "venus_evcharger_observer.py",
     "venus_evchargerctl.py",
 )

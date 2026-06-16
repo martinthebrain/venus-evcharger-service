@@ -3,11 +3,10 @@ from tests.venus_evcharger_update_cycle_controller_support import *
 
 
 class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
-    def test_prepare_update_cycle_supervises_introspection_worker_even_without_topology(self):
+    def test_prepare_update_cycle_runs_runtime_hooks_without_extra_discovery_process(self):
         configured_service = SimpleNamespace(
             topology_configured=True,
             _start_io_worker=MagicMock(),
-            _ensure_dbus_introspection_worker_process=MagicMock(),
             _watchdog_recover=MagicMock(),
             _ensure_auto_input_helper_process=MagicMock(),
             _refresh_auto_input_snapshot=MagicMock(),
@@ -17,13 +16,11 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
         self.assertEqual(UpdateCycleController.prepare_update_cycle(configured_service, 100.0), {"ok": True})
 
         configured_service._start_io_worker.assert_called_once_with()
-        configured_service._ensure_dbus_introspection_worker_process.assert_called_once_with(100.0)
         configured_service._watchdog_recover.assert_called_once_with(100.0)
 
         unconfigured_service = SimpleNamespace(
             topology_configured=False,
             _start_io_worker=MagicMock(),
-            _ensure_dbus_introspection_worker_process=MagicMock(),
             _watchdog_recover=MagicMock(),
             _ensure_auto_input_helper_process=MagicMock(),
             _refresh_auto_input_snapshot=MagicMock(),
@@ -33,7 +30,7 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
         self.assertEqual(UpdateCycleController.prepare_update_cycle(unconfigured_service, 101.0), {})
 
         unconfigured_service._start_io_worker.assert_not_called()
-        unconfigured_service._ensure_dbus_introspection_worker_process.assert_called_once_with(101.0)
+        unconfigured_service._watchdog_recover.assert_called_once_with(101.0)
 
     def test_publish_online_update_prefers_fresh_native_charger_measurements(self):
         service = SimpleNamespace(

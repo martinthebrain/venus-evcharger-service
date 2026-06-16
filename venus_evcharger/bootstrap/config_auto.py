@@ -328,7 +328,6 @@ class _ServiceBootstrapAutoConfigMixin(_ComposableControllerMixin):
             f"/run/dbus-venus-evcharger-dbus-map-requests-{svc.deviceinstance}.json",
         ).strip()
         svc.dbus_introspection_max_age_seconds = float(_config_value(defaults, "DbusIntrospectionMaxAgeSeconds", 900))
-        svc.dbus_introspection_restart_seconds = float(_config_value(defaults, "DbusIntrospectionRestartSeconds", 30))
         svc.auto_input_helper_restart_seconds = float(_config_value(defaults, "AutoInputHelperRestartSeconds", 5))
         svc.auto_input_helper_stale_seconds = float(_config_value(defaults, "AutoInputHelperStaleSeconds", 15))
         svc.auto_shelly_soft_fail_seconds = float(_config_value(defaults, "AutoShellySoftFailSeconds", 10))

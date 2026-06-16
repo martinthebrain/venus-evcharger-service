@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import os
+from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -36,6 +37,7 @@ class TestShellyWallboxShared(unittest.TestCase):
 
         self.assertEqual(coerce_dbus_numeric(5), 5.0)
         self.assertIsNone(coerce_dbus_numeric(True))
+        self.assertIsNone(coerce_dbus_numeric([]))
         self.assertEqual(coerce_dbus_numeric([7]), 7.0)
         self.assertEqual(coerce_dbus_numeric([True]), [True])
         self.assertEqual(coerce_dbus_numeric([1, 2]), [1, 2])
@@ -78,7 +80,7 @@ class TestShellyWallboxShared(unittest.TestCase):
             with patch("os.replace", side_effect=RuntimeError("boom")):
                 with self.assertRaises(RuntimeError):
                     write_text_atomically(failing_path, "payload")
-            self.assertFalse(os.path.exists(f"{failing_path}.tmp"))
+            self.assertEqual(list(Path(failing_path).parent.glob("state.json.tmp.*")), [])
 
             with patch("os.replace", side_effect=RuntimeError("boom")):
                 with patch("os.path.exists", return_value=True):

@@ -40,6 +40,8 @@ class DbusReadExecutor:
                 return self._poll_sum_step(key, spec)
             if spec.get("aggregate") == "services-sum":
                 return self._poll_services_sum_step(key, spec)
+            if spec.get("aggregate") == "first-service":
+                return self._poll_first_service(key, spec)
             service = str(spec.get("service") or "")
             path = str(spec.get("path") or "")
             value = self.read_busitem(service, path)
@@ -51,7 +53,7 @@ class DbusReadExecutor:
             self._aggregate_state.pop(key, None)
             self.adapter.cache.mark_error(key, source=str(spec.get("service") or spec.get("prefix") or ""), error=error)
             logging.debug("DBus adapter read failed key=%s: %s", key, error)
-            return "applied"
+            return "dropped"
 
     def _poll_sum_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
         service = str(spec.get("service"))
@@ -72,6 +74,17 @@ class DbusReadExecutor:
         if not services:
             raise RuntimeError(f"No cached services for prefix '{spec.get('prefix', '')}'")
         return self._poll_aggregate_step(key, ("services-sum", path, tuple(services)), [(service, path) for service in services])
+
+    def _poll_first_service(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
+        path = str(spec.get("path") or "")
+        prefix = str(spec.get("prefix") or "")
+        services = sorted(name for name in self.adapter.cache.services if name.startswith(prefix))
+        if not services:
+            raise RuntimeError(f"No cached services for prefix '{prefix}'")
+        service = services[0]
+        value = self.read_busitem(service, path)
+        self.adapter.cache.update_value(key, value, source=f"{service}{path}")
+        return "applied"
 
     def _poll_aggregate_step(
         self,

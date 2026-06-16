@@ -40,6 +40,46 @@ PRIORITY_VALUES = {
     "diagnostic": 6,
 }
 
+PUBLISH_PATH_RANKS = {
+    "/Mode": 0,
+    "/StartStop": 0,
+    "/AutoStart": 0,
+    "/SetCurrent": 0,
+    "/Current": 0,
+    "/Status": 0,
+    "/Ac/Power": 0,
+    "/Ac/Current": 0,
+    "/Session/Time": 0,
+    "/Session/Energy": 0,
+    "/ChargingTime": 0,
+    "/Ac/L1/Power": 0,
+    "/Ac/L1/Current": 0,
+    "/Ac/Energy/Forward": 2,
+    "/Ac/L1/Energy/Forward": 2,
+    "/Ac/L2/Power": 3,
+    "/Ac/L2/Current": 3,
+    "/Ac/L2/Energy/Forward": 3,
+    "/Ac/L3/Power": 3,
+    "/Ac/L3/Current": 3,
+    "/Ac/L3/Energy/Forward": 3,
+}
+
+GUI_CRITICAL_PUBLISH_PATHS = {
+    "/Mode",
+    "/StartStop",
+    "/Enable",
+    "/AutoStart",
+    "/Status",
+    "/SetCurrent",
+    "/Ac/Power",
+    "/Ac/Current",
+    "/Ac/Energy/Forward",
+    "/Session/Time",
+    "/Session/Energy",
+}
+
+FAST_READ_KEYS = {"grid_power_w", "pv_power_w", "battery_soc"}
+
 @dataclass(frozen=True)
 class GatewayPaths:
     """Runtime paths shared by gateway, core, and observer processes."""
@@ -229,10 +269,19 @@ class DbusCommandInbox:
             "id": command_id,
             "created_at": float(normalized.get("created_at", _now())),
             **normalized,
+            "queue_class": command_queue_class(normalized),
         }
         target = os.path.join(self.command_dir, f"{command_id}.json")
-        if str(normalized.get("coalesce_key") or "").strip() and not self._should_replace_existing(target, payload):
-            return target
+        if str(normalized.get("coalesce_key") or "").strip() and os.path.exists(target):
+            existing = read_json_file(target, {})
+            if isinstance(existing, Mapping):
+                if not self._should_replace_existing_payload(existing, payload):
+                    return target
+                payload["lifecycle_state"] = "coalesced"
+                if _priority_rank(existing.get("priority")) == _priority_rank(payload.get("priority")):
+                    payload["created_at"] = _float_or_zero(existing.get("created_at")) or payload["created_at"]
+                    payload["updated_at"] = _now()
+        payload.setdefault("lifecycle_state", "queued")
         write_json_file(target, payload)
         return target
 
@@ -241,6 +290,10 @@ class DbusCommandInbox:
         existing = read_json_file(path, {})
         if not isinstance(existing, Mapping):
             return True
+        return DbusCommandInbox._should_replace_existing_payload(existing, payload)
+
+    @staticmethod
+    def _should_replace_existing_payload(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
         existing_rank = _priority_rank(existing.get("priority"))
         new_rank = _priority_rank(payload.get("priority"))
         if new_rank < existing_rank:
@@ -253,7 +306,7 @@ class DbusCommandInbox:
     def _normalized_command(command: Mapping[str, Any]) -> dict[str, Any]:
         payload = dict(command)
         kind = str(payload.get("kind") or payload.get("type") or "")
-        if kind == "refresh_services" and not str(payload.get("coalesce_key") or "").strip():
+        if kind == "refresh_services":
             payload["coalesce_key"] = "refresh:services"
         return payload
 
@@ -274,7 +327,7 @@ class DbusCommandInbox:
         for path in paths:
             payload = read_json_file(str(path), {})
             if isinstance(payload, dict):
-                pending.append((str(path), payload))
+                pending.append((str(path), self._normalized_command(payload)))
         return pending
 
     def remove(self, path: str) -> None:
@@ -325,12 +378,32 @@ def _float_or_zero(value: object) -> float:
         return 0.0
 
 
-def _command_order_key(command: Mapping[str, Any]) -> tuple[int, float, str]:
+def _command_order_key(command: Mapping[str, Any]) -> tuple[int, int, float, int, str]:
     return (
         _priority_rank(command.get("priority")),
+        _command_kind_rank(command),
         _float_or_zero(command.get("created_at")),
+        _publish_path_rank(command),
         str(command.get("id") or ""),
     )
+
+
+def _command_kind_rank(command: Mapping[str, Any]) -> int:
+    kind = str(command.get("kind") or command.get("type") or "")
+    if kind == "register_service":
+        return 0
+    if kind == "register_path":
+        return 1
+    return 2
+
+
+def _publish_path_rank(command: Mapping[str, Any]) -> int:
+    if str(command.get("priority") or "").strip().lower() != "publish":
+        return 0
+    kind = str(command.get("kind") or command.get("type") or "")
+    if kind != "publish_value":
+        return 0
+    return PUBLISH_PATH_RANKS.get(str(command.get("path") or ""), 3)
 
 
 class GatewayClient:
@@ -340,6 +413,7 @@ class GatewayClient:
         self.paths = paths or gateway_paths()
         self.timeout_seconds = max(0.05, float(timeout_seconds))
         self.commands = DbusCommandInbox(self.paths.command_dir)
+        self._backpressure_cache: tuple[float, str] = (0.0, "unknown")
 
     def send(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         try:
@@ -356,6 +430,8 @@ class GatewayClient:
             return {"ok": False, "error": str(error)}
 
     def enqueue_command(self, command: Mapping[str, Any]) -> str:
+        if not command_allowed_by_backpressure(command, self.backpressure_state(max_age_seconds=2.0)):
+            return ""
         return self.commands.enqueue(command)
 
     def publish_path(self, path: str, value: Any, *, priority: str = "publish", source: str = "core") -> None:
@@ -414,6 +490,25 @@ class GatewayClient:
 
     def load_cache(self, *, max_age_seconds: float = 10.0) -> dict[str, Any]:
         return DbusCacheStore.load_snapshot(self.paths.cache_path, max_age_seconds=max_age_seconds)
+
+    def load_health(self, *, max_age_seconds: float = 10.0) -> dict[str, Any]:
+        payload = DbusCacheStore.load_snapshot(self.paths.health_path, max_age_seconds=max_age_seconds)
+        health = payload.get("dbus_health") if isinstance(payload, Mapping) else None
+        return dict(health) if isinstance(health, Mapping) else payload
+
+    def backpressure_state(self, *, max_age_seconds: float = 10.0) -> str:
+        cached_at, cached_state = self._backpressure_cache
+        now = _now()
+        if now - cached_at < 1.0 and cached_state != "unknown":
+            return cached_state
+        health = self.load_health(max_age_seconds=max_age_seconds)
+        backpressure = health.get("backpressure") if isinstance(health, Mapping) else None
+        if isinstance(backpressure, Mapping):
+            state = str(backpressure.get("state", "unknown") or "unknown")
+            self._backpressure_cache = (now, state)
+            return state
+        self._backpressure_cache = (now, "unknown")
+        return "unknown"
 
 
 class GatewayDbusServiceProxy:
@@ -480,6 +575,53 @@ def gateway_value(snapshot: Mapping[str, Any], key: str, *, max_age_seconds: flo
     if float(entry.get("age_s", 0.0) or 0.0) > float(max_age_seconds):
         return None
     return entry.get("value")
+
+
+def command_queue_class(command: Mapping[str, Any]) -> str:
+    kind = str(command.get("kind") or command.get("type") or "")
+    if kind in {"register_path", "register_service"}:
+        return "startup/register"
+    if kind in {"publish_value", "publish_desired"}:
+        if _is_gui_critical_publish(command):
+            return "gui-critical-publish"
+        return "local-publish"
+    if kind == "set_value":
+        return "remote-write"
+    if kind == "refresh_value":
+        key = str(command.get("key") or "")
+        return "read-fast" if key in FAST_READ_KEYS else "read-slow"
+    if kind == "refresh_services":
+        return "discovery"
+    if kind == "introspect":
+        return "introspection"
+    return "diagnostic"
+
+
+def command_allowed_by_backpressure(command: Mapping[str, Any], state: str) -> bool:
+    normalized_state = str(state or "unknown")
+    if normalized_state in {"ok", "unknown"}:
+        return True
+    priority = str(command.get("priority") or "diagnostic").strip().lower()
+    queue_class = str(command.get("queue_class") or command_queue_class(command))
+    if queue_class == "startup/register":
+        return True
+    if normalized_state == "congested":
+        return priority not in {"optional", "diagnostic"} and queue_class != "diagnostic"
+    if normalized_state == "slow":
+        return queue_class == "gui-critical-publish" or priority in {"safety", "user"}
+    if normalized_state == "protective":
+        return priority == "safety" or (priority == "user" and queue_class == "gui-critical-publish")
+    return True
+
+
+def _is_gui_critical_publish(command: Mapping[str, Any]) -> bool:
+    path = str(command.get("path") or "")
+    if path in GUI_CRITICAL_PUBLISH_PATHS:
+        return True
+    paths = command.get("paths")
+    if isinstance(paths, Mapping):
+        return any(str(item) in GUI_CRITICAL_PUBLISH_PATHS for item in paths)
+    return False
 
 
 class LatencyWindow:
