@@ -5,22 +5,31 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 ADAPTER = REPO / "venus_evcharger_dbus_adapter.py"
 ADAPTER_FILES = {
     ADAPTER,
+    REPO / "venus_evcharger" / "dbus_adapter_process.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_health.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_introspection.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_introspection_snapshot.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_io.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_loop.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_runtime.py",
     REPO / "venus_evcharger" / "dbus_adapter_components.py",
+    REPO / "venus_evcharger" / "dbus_adapter_components_rate.py",
+    REPO / "venus_evcharger" / "dbus_adapter_components_resource.py",
+    REPO / "venus_evcharger" / "dbus_adapter_components_scheduler.py",
     REPO / "venus_evcharger" / "dbus_adapter_read.py",
     REPO / "venus_evcharger" / "dbus_adapter_write.py",
+    REPO / "venus_evcharger" / "dbus_adapter_write_health.py",
 }
 ROOT_FILES = (
     "venus_evcharger_service.py",
     "venus_evcharger_auto_input_helper.py",
-    "venus_evcharger_dbus_introspection_worker.py",
     "venus_evcharger_observer.py",
     "venus_evchargerctl.py",
 )
@@ -40,14 +49,24 @@ FORBIDDEN_NAMES = {"VeDbusService"}
 
 
 def _production_files() -> list[Path]:
+    files = _root_production_files() + _package_production_files()
+    return sorted(path for path in files if path not in ADAPTER_FILES and "__pycache__" not in path.parts)
+
+
+def _root_production_files() -> list[Path]:
     files: list[Path] = []
     for relative in ROOT_FILES:
         path = REPO / relative
         if path.exists():
             files.append(path)
+    return files
+
+
+def _package_production_files() -> list[Path]:
+    files: list[Path] = []
     for root in PRODUCTION_ROOTS:
         files.extend((REPO / root).rglob("*.py"))
-    return sorted(path for path in files if path not in ADAPTER_FILES and "__pycache__" not in path.parts)
+    return files
 
 
 def _absolute_import_forbidden(module: str) -> bool:

@@ -43,5 +43,3 @@ class AutoInputSupervisor(
     def __init__(self, service: Any) -> None:
         self.service = service
 
-
-_PATCH_EXPORTS = (logging, os, subprocess, sys)

@@ -26,10 +26,6 @@ ErrorState = dict[str, int]
 FailureState = dict[str, bool]
 DefaultFactory = Callable[[], Any]
 
-# Tests patch these module-level symbols directly to exercise failure paths.
-_TEST_PATCH_EXPORTS = (logging, os, write_text_atomically)
-
-
 from venus_evcharger.runtime.audit import _RuntimeSupportAuditMixin
 from venus_evcharger.runtime.async_mainloop import _RuntimeSupportAsyncMainloopMixin
 from venus_evcharger.runtime.health import _RuntimeSupportHealthMixin
@@ -117,9 +113,6 @@ class RuntimeSupportController(
                 f"/run/dbus-venus-evcharger-dbus-map-requests-{getattr(svc, 'deviceinstance', 0)}.json"
             ),
             "dbus_introspection_max_age_seconds": lambda: 900.0,
-            "dbus_introspection_restart_seconds": lambda: 30.0,
-            "_dbus_introspection_worker_process": lambda: None,
-            "_dbus_introspection_worker_last_start_at": lambda: 0.0,
             "_auto_mode_cutover_pending": lambda: False,
             "_ignore_min_offtime_once": lambda: False,
         }

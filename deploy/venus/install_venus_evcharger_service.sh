@@ -26,7 +26,6 @@ MAIN_ENTRYPOINT="$REPO_DIR/venus_evcharger_service.py"
 DBUS_ADAPTER_ENTRYPOINT="$REPO_DIR/venus_evcharger_dbus_adapter.py"
 OBSERVER_ENTRYPOINT="$REPO_DIR/venus_evcharger_observer.py"
 AUTO_INPUT_HELPER="$REPO_DIR/venus_evcharger_auto_input_helper.py"
-DBUS_INTROSPECTION_WORKER="$REPO_DIR/venus_evcharger_dbus_introspection_worker.py"
 CONFIGURE_HELPER="$SCRIPT_DIR/configure_venus_evcharger_service.sh"
 RESTART_HELPER="$SCRIPT_DIR/restart_venus_evcharger_service.sh"
 RESET_CONFIG_HELPER="$SCRIPT_DIR/reset_venus_evcharger_config.sh"
@@ -62,11 +61,6 @@ fi
 if [ -f "$AUTO_INPUT_HELPER" ]; then
     chmod a+x "$AUTO_INPUT_HELPER"
     chmod 755 "$AUTO_INPUT_HELPER"
-fi
-
-if [ -f "$DBUS_INTROSPECTION_WORKER" ]; then
-    chmod a+x "$DBUS_INTROSPECTION_WORKER"
-    chmod 755 "$DBUS_INTROSPECTION_WORKER"
 fi
 
 if [ -f "$OBSERVER_ENTRYPOINT" ]; then

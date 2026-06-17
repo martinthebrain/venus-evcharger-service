@@ -119,6 +119,12 @@ class __ControlApiHttpTailCasesPart2:
         )
         self.assertEqual(
             LocalControlApiHttpServer._result_error_code(
+                ControlResult.rejected_result(update_command, detail="Update rejected by policy")
+            ),
+            "command_rejected",
+        )
+        self.assertEqual(
+            LocalControlApiHttpServer._result_error_code(
                 ControlResult.rejected_result(health_command, detail="Health fault lockout active")
             ),
             "blocked_by_health",
@@ -128,6 +134,12 @@ class __ControlApiHttpTailCasesPart2:
                 ControlResult.rejected_result(mode_command, detail="Mode blocked while charging")
             ),
             "blocked_by_mode",
+        )
+        self.assertEqual(
+            LocalControlApiHttpServer._result_error_code(
+                ControlResult.rejected_result(mode_command, detail="Mode changed externally")
+            ),
+            "command_rejected",
         )
         self.assertEqual(
             LocalControlApiHttpServer._result_error_code(
@@ -176,4 +188,3 @@ class __ControlApiHttpTailCasesPart2:
         critical_allowed, critical_retry = limiter.allow_command("local", "trigger_software_update", now=21.0)
         self.assertFalse(critical_allowed)
         self.assertEqual(critical_retry, 2.0)
-

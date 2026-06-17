@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable, Sequence
 import json
 import os
 from os import PathLike
+import threading
 from typing import Any, TypeAlias, cast
 
 
@@ -58,6 +59,8 @@ def _coerce_numeric_container_value(value: Any) -> Any:
     items = _iter_numeric_container_items(value)
     if items is None:
         return _UNCOERCED
+    if not items:
+        return None
     numeric_items = _coerce_numeric_items(items)
     if numeric_items is None:
         return value
@@ -180,10 +183,10 @@ def compact_json(data: Any) -> str:
 def write_text_atomically(path: str | PathLike[str], payload: str, encoding: str = "utf-8") -> None:
     """Atomically replace a text file, cleaning up the temp file on failure."""
     path_str = os.fspath(path)
-    tmp_path = f"{path_str}.tmp"
     target_dir = os.path.dirname(path_str)
     if target_dir:
         os.makedirs(target_dir, exist_ok=True)
+    tmp_path = f"{path_str}.tmp.{os.getpid()}.{threading.get_ident()}"
     try:
         with open(tmp_path, "w", encoding=encoding) as handle:
             handle.write(payload)

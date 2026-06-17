@@ -184,7 +184,10 @@ def _required_huawei_fields_ok(field_results: list[dict[str, object]]) -> bool:
 
 
 def _huawei_meter_block_detected(field_results: list[dict[str, object]]) -> bool:
-    return any(bool(result.get("ok")) for result in field_results if _is_huawei_meter_result(result))
+    for result in field_results:
+        if _is_huawei_meter_result(result) and bool(result.get("ok")):
+            return True
+    return False
 
 
 def _is_huawei_meter_result(result: Mapping[str, object]) -> bool:

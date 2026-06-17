@@ -6,6 +6,7 @@ from tests.energy_probe_cases_common import (
     tempfile,
     validate_huawei_energy_source,
 )
+from venus_evcharger.energy import probe as probe_mod
 
 
 class _EnergyProbeValidateCases(_EnergyProbeBase):
@@ -68,6 +69,17 @@ class _EnergyProbeValidateCases(_EnergyProbeBase):
         self.assertEqual(sections["GridInteractionRead"]["scaled_value"], 76560.0)
         self.assertTrue(sections["HuaweiMeterActivePowerRead"]["ok"])
         self.assertEqual(sections["HuaweiMeterActivePowerRead"]["scaled_value"], 1000.0)
+
+    def test_huawei_meter_block_detected_rejects_missing_or_failed_meter_fields(self) -> None:
+        self.assertFalse(
+            probe_mod._huawei_meter_block_detected(
+                [
+                    {"section": "SocRead", "ok": True},
+                    {"section": "HuaweiMeterActivePowerRead", "ok": False},
+                    {"section": "MeterStatusRead", "ok": False},
+                ]
+            )
+        )
 
     def test_validate_huawei_energy_source_uses_family_templates_for_unit_and_smartlogger_variants(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -45,6 +45,15 @@ class _ControlApiHttpStorageServerCases:
         self.assertEqual(entry["result"], {})
         self.assertEqual(entry["error"], {})
 
+    def test_audit_trail_logs_runtime_write_errors(self) -> None:
+        with (
+            patch("venus_evcharger.control.audit.open", side_effect=OSError("readonly"), create=True),
+            patch("venus_evcharger.control.audit.logging.debug") as debug_log,
+        ):
+            ControlApiAuditTrail(history_limit=2, path="/run/control-audit.jsonl").append({"command": {"name": "set_mode"}})
+
+        debug_log.assert_called_once()
+
     def test_idempotency_store_persists_only_to_runtime_paths_and_survives_restart(self) -> None:
         with patch("venus_evcharger.control.idempotency.open", create=True) as open_mock:
             store = ControlApiIdempotencyStore(history_limit=2, path="/data/not-allowed.json")
@@ -111,6 +120,20 @@ class _ControlApiHttpStorageServerCases:
         self.assertIsNone(store.get("idem-1"))
         self.assertEqual(store.get("idem-2"), ("fp-2", 201, {"ok": 2}))
         self.assertEqual(store.get("idem-3"), ("fp-3", 202, {"ok": 3}))
+
+    def test_idempotency_store_logs_runtime_write_errors(self) -> None:
+        with (
+            patch("venus_evcharger.control.idempotency.open", side_effect=OSError("readonly"), create=True),
+            patch("venus_evcharger.control.idempotency.logging.debug") as debug_log,
+        ):
+            ControlApiIdempotencyStore(history_limit=2, path="/run/control-idempotency.json").put(
+                "idem-1",
+                "fp",
+                200,
+                {"ok": True},
+            )
+
+        debug_log.assert_called_once()
 
     def test_start_initializes_server_and_background_thread(self) -> None:
         service = SimpleNamespace(

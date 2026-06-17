@@ -224,31 +224,30 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         return configured_grid_paths(svc.auto_grid_l1_path, svc.auto_grid_l2_path, svc.auto_grid_l3_path)
 
     def _read_grid_phase_values(self, configured_paths: list[str]) -> tuple[float, bool, list[str]]:
-        svc = self.service
         total = 0.0
         seen_value = False
         missing_paths = []
         for path in configured_paths:
-            if self._introspection_says_skip(svc.auto_grid_service, path, priority=85):
+            numeric_value = self._read_one_grid_phase(path)
+            if numeric_value is None:
                 missing_paths.append(path)
                 continue
-            try:
-                value = svc._get_dbus_value(svc.auto_grid_service, path)
-            except Exception as error:  # pylint: disable=broad-except
-                logging.debug("Auto grid read failed for %s %s: %s", svc.auto_grid_service, path, error)
-                self._request_introspection(svc.auto_grid_service, path, priority=95, reason="grid phase read failed")
-                missing_paths.append(path)
-                continue
-            if value is not None:
-                numeric_value = self._numeric_sum(value)
-                if numeric_value is not None:
-                    total += numeric_value
-                    seen_value = True
-                else:
-                    missing_paths.append(path)
-            else:
-                missing_paths.append(path)
+            total += numeric_value
+            seen_value = True
         return total, seen_value, missing_paths
+
+    def _read_one_grid_phase(self, path: str) -> float | None:
+        """Read one configured grid phase path as a numeric contribution."""
+        svc = self.service
+        if self._introspection_says_skip(svc.auto_grid_service, path, priority=85):
+            return None
+        try:
+            value = svc._get_dbus_value(svc.auto_grid_service, path)
+        except Exception as error:  # pylint: disable=broad-except
+            logging.debug("Auto grid read failed for %s %s: %s", svc.auto_grid_service, path, error)
+            self._request_introspection(svc.auto_grid_service, path, priority=95, reason="grid phase read failed")
+            return None
+        return self._numeric_sum(value) if value is not None else None
 
     def _introspection_says_skip(self, service_name: str, path: str, *, priority: int) -> bool:
         skip, reason = owner_path_unusable(self.service, service_name, path)

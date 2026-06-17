@@ -40,7 +40,6 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
             "scripts/ops",
             "venus_evcharger_service.py",
             "venus_evcharger_auto_input_helper.py",
-            "venus_evcharger_dbus_introspection_worker.py",
             "venus_evchargerctl.py",
         ):
             source = REPO_ROOT / rel_path

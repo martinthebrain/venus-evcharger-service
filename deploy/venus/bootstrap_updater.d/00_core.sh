@@ -72,7 +72,6 @@ require_source_layout() {
     src_dir="$1"
     [ -f "${src_dir}/venus_evcharger_service.py" ] || return 1
     [ -f "${src_dir}/venus_evcharger_auto_input_helper.py" ] || return 1
-    [ -f "${src_dir}/venus_evcharger_dbus_introspection_worker.py" ] || return 1
     [ -f "${src_dir}/deploy/venus/install_venus_evcharger_service.sh" ] || return 1
     [ -d "${src_dir}/venus_evcharger" ] || return 1
     return 0
@@ -292,7 +291,6 @@ managed_layout_paths() {
         venus_evcharger_service.py \
         venus_evcharger_observer.py \
         venus_evcharger_auto_input_helper.py \
-        venus_evcharger_dbus_introspection_worker.py \
         deploy/venus \
         venus_evcharger \
         scripts/ops

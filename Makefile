@@ -1,9 +1,30 @@
 PYTHON ?= python3
 
-.PHONY: test typecheck check stress soakcheck
+.PHONY: test lint pylint-audit security-audit spellcheck shell-audit quality-audit audit typecheck check stress soakcheck
 
 test:
 	$(PYTHON) -m unittest
+
+lint:
+	./scripts/dev/run_lint.sh
+
+pylint-audit:
+	./scripts/dev/run_pylint_audit.sh
+
+security-audit:
+	./scripts/dev/run_security_audit.sh
+
+spellcheck:
+	./scripts/dev/run_spellcheck.sh
+
+shell-audit:
+	./scripts/dev/run_shell_audit.sh
+
+quality-audit:
+	./scripts/dev/run_quality_audit.sh
+
+audit:
+	./scripts/dev/run_optional_audits.sh
 
 typecheck:
 	./scripts/dev/run_typecheck.sh

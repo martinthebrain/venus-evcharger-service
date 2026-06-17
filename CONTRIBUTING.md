@@ -27,12 +27,30 @@ bash ./scripts/dev/check_all.sh
 Useful extra commands:
 
 ```bash
+./scripts/dev/run_lint.sh
+./scripts/dev/run_pylint_audit.sh
+./scripts/dev/run_security_audit.sh
+./scripts/dev/run_spellcheck.sh
+./scripts/dev/run_quality_audit.sh
+./scripts/dev/run_optional_audits.sh
 ./scripts/dev/run_typecheck.sh
 ./scripts/dev/run_stress_tests.sh
+make lint
+make pylint-audit
+make security-audit
+make spellcheck
+make shell-audit
+make quality-audit
+make audit
 make check
 make typecheck
 make stress
 ```
+
+The optional audit target runs the focused pylint audit, a high-severity Bandit
+security audit, spellcheck, and the shell audit when `shellcheck` and `shfmt`
+are installed. The individual `make shell-audit` target requires both system
+tools explicitly.
 
 For documentation-only changes, mention that the change is documentation-only
 and whether runtime verification was skipped.

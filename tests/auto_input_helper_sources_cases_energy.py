@@ -2,6 +2,10 @@
 import tempfile
 
 from tests.auto_input_helper_sources_cases_common import *
+from venus_evcharger.inputs.helper.sources_dbus_common import (
+    _dbus_error_name,
+    _is_expected_missing_dbus_error,
+)
 from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbusMixin
 from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscriptionMixin
 
@@ -12,6 +16,56 @@ class _AutoInputHelperSourcesEnergyCases:
             _AutoInputHelperSourceDbusMixin._dbus_module()
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
             _AutoInputHelperSubscriptionMixin._dbus_module()
+
+    def test_dbus_gateway_common_error_helpers_cover_name_and_text_matching(self):
+        class NamedDbusError(Exception):
+            def get_dbus_name(self):
+                return "org.freedesktop.DBus.Error.ServiceUnknown"
+
+        class AttributeDbusError(Exception):
+            _dbus_error_name = "org.freedesktop.DBus.Error.UnknownObject"
+
+        self.assertEqual(_dbus_error_name(NamedDbusError("missing")), "org.freedesktop.DBus.Error.ServiceUnknown")
+        self.assertEqual(_dbus_error_name(AttributeDbusError("missing")), "org.freedesktop.DBus.Error.UnknownObject")
+        self.assertTrue(_is_expected_missing_dbus_error(NamedDbusError("missing")))
+        self.assertTrue(_is_expected_missing_dbus_error(RuntimeError("NameHasNoOwner")))
+        self.assertFalse(_is_expected_missing_dbus_error(RuntimeError("temporary timeout")))
+
+    def test_gateway_request_retry_and_introspection_helpers_cover_edge_paths(self):
+        helper = self._make_helper()
+        helper._gateway_client = MagicMock()
+        helper._gateway_client.return_value.enqueue_command.side_effect = OSError("socket down")
+
+        helper._request_dbus_introspection("svc", "/Path", priority=80, reason="test")
+        helper._request_gateway_value("svc", "/Path", priority=90, reason="test")
+        self.assertEqual(helper._gateway_client.return_value.enqueue_command.call_count, 2)
+
+        calls: list[int] = []
+
+        def flaky_read():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("temporary")
+            return 7
+
+        helper._reset_system_bus = MagicMock()
+        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.logging.debug") as debug:
+            self.assertEqual(helper._dbus_retry_read("svc", "/Value", "read", flaky_read), 7)
+        helper._reset_system_bus.assert_called_once_with()
+        debug.assert_called_once()
+
+        with self.assertRaisesRegex(RuntimeError, "ServiceUnknown"):
+            helper._dbus_retry_read("svc", "/Missing", "read", lambda: (_ for _ in ()).throw(RuntimeError("ServiceUnknown")))
+
+        with self.assertRaisesRegex(RuntimeError, "temporary"):
+            helper._dbus_retry_read("svc", "/Flaky", "read", lambda: (_ for _ in ()).throw(RuntimeError("temporary")))
+
+        helper._reset_system_bus_after_retryable_error(1, "read", "svc", "/Value", RuntimeError("later"))
+
+        self.assertEqual(
+            helper._child_nodes_from_introspection("<node><node name='A'/><node/><node name='B'/></node>"),
+            ["A", "B"],
+        )
 
     def test_dynamic_energy_source_resolution_and_battery_snapshot_cover_new_paths(self):
         helper = self._make_helper()
@@ -538,15 +592,15 @@ class _AutoInputHelperSourcesEnergyCases:
     def test_dbus_capacity_persistence_handles_disabled_and_failed_writes(self):
         helper = self._make_helper()
         source = EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus")
-        with patch("venus_evcharger.inputs.helper.sources_dbus.persist_estimated_capacity_if_ah_changed") as persist:
+        with patch("venus_evcharger.inputs.helper.sources_dbus_snapshot.persist_estimated_capacity_if_ah_changed") as persist:
             helper._persist_dbus_capacity_payload_if_needed(source, {"installed_capacity_ah": 100.0}, False)
             persist.assert_not_called()
 
         with patch(
-            "venus_evcharger.inputs.helper.sources_dbus.persist_estimated_capacity_if_ah_changed",
+            "venus_evcharger.inputs.helper.sources_dbus_snapshot.persist_estimated_capacity_if_ah_changed",
             side_effect=RuntimeError("boom"),
         ):
-            with patch("venus_evcharger.inputs.helper.sources_dbus.logging.warning") as warning:
+            with patch("venus_evcharger.inputs.helper.sources_dbus_snapshot.logging.warning") as warning:
                 helper._persist_dbus_capacity_payload_if_needed(source, {"installed_capacity_ah": 100.0}, True)
         warning.assert_called_once()
 

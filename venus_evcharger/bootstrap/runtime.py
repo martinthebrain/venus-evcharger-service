@@ -216,9 +216,6 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
             svc._start_io_worker()
         else:
             logging.info("No load topology is configured yet; skipping runtime I/O worker startup")
-        ensure_introspection_worker = getattr(svc, "_ensure_dbus_introspection_worker_process", None)
-        if callable(ensure_introspection_worker):
-            ensure_introspection_worker(svc._time_now())
         svc._start_control_api_server()
         self._start_runtime_optional_hooks()
         logging.info(

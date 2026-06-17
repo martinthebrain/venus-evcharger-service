@@ -251,7 +251,9 @@ class _RelayPhaseSwitchPolicyMixin:
         relay_on: bool,
         now: float,
     ) -> bool:
-        if not bool(getattr(svc, "_phase_selection_requires_pause", lambda: False)()):
+        requires_pause_func = getattr(svc, "_phase_selection_requires_pause", None)
+        requires_pause = bool(requires_pause_func()) if requires_pause_func is not None else False
+        if not requires_pause:
             return False
         pending_relay_state, _requested_at = svc._peek_pending_relay_command()
         if pending_relay_state is not None:

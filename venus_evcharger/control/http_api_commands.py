@@ -349,7 +349,12 @@ class _LocalControlApiCommandMixin:
 
     @staticmethod
     def _is_update_progress_error(_result: ControlResult, detail: str) -> bool:
-        return "update" in detail and any(token in detail for token in ("progress", "running", "busy", "already"))
+        if "update" not in detail:
+            return False
+        for token in ("progress", "running", "busy", "already"):
+            if token in detail:
+                return True
+        return False
 
     @staticmethod
     def _is_health_error(_result: ControlResult, detail: str) -> bool:
@@ -357,7 +362,12 @@ class _LocalControlApiCommandMixin:
 
     @staticmethod
     def _is_mode_block_error(_result: ControlResult, detail: str) -> bool:
-        return "mode" in detail and any(token in detail for token in ("blocked", "cannot", "while", "unsupported"))
+        if "mode" not in detail:
+            return False
+        for token in ("blocked", "cannot", "while", "unsupported"):
+            if token in detail:
+                return True
+        return False
 
     @staticmethod
     def _error_response_payload(code: str, message: str) -> dict[str, Any]:

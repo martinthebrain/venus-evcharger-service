@@ -19,9 +19,6 @@ from venus_evcharger.auto.logic_gates import _AutoDecisionGatesMixin
 from venus_evcharger.auto.logic_samples import _AutoDecisionSamplesMixin
 from venus_evcharger.auto.logic_types import NO_RELAY_DECISION, RelayDecisionState
 
-# Tests patch `venus_evcharger.auto.workflow.time.time` to cover default clock paths.
-_TEST_PATCH_EXPORTS = (time,)
-
 __all__ = ("AutoDecisionWorkflowMixin", "NO_RELAY_DECISION", "RelayDecisionState")
 
 
