@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -188,7 +188,7 @@ class DbusWriteSchedulerPublishMixin:
         if path not in self.registered_paths:
             logging.debug("Dropping publish for unregistered DBus path %s", path)
             return "dropped"
-        self.adapter._timed_local_publish(lambda: self.adapter._dbusservice.__setitem__(path, value))
+        self._timed_local_publish(lambda: self.adapter._dbusservice.__setitem__(path, value))
         self.last_values[path] = value
         source = f"{self.adapter.service_name}{path}"
         self.adapter.cache.update_value(
@@ -198,6 +198,19 @@ class DbusWriteSchedulerPublishMixin:
             confidence=1.0,
         )
         return "applied"
+
+    def _timed_local_publish(self, operation: Callable[[], Any]) -> Any:
+        adapter_timer = getattr(self.adapter, "_timed_local_publish", None)
+        if callable(adapter_timer):
+            return adapter_timer(operation)
+        started = time.monotonic()
+        try:
+            result = operation()
+            self.adapter.circuit.record_success((time.monotonic() - started) * 1000.0, kind="local_publish")
+            return result
+        except Exception as error:
+            self.adapter.circuit.record_error(error, kind="local_publish")
+            raise
 
     def _record_processed(self) -> None:
         now = time.time()

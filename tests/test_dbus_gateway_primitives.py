@@ -112,6 +112,8 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 if command.get("kind") == "refresh_services" and command.get("created_at") == 2.0
             ][0]
             self.assertEqual(legacy_loaded["coalesce_key"], "refresh:services")
+            self.assertEqual(inbox.remove_coalesced("refresh:services"), 2)
+            self.assertFalse(any(command.get("kind") == "refresh_services" for _path, command in inbox.load_pending()))
 
             commands = [
                 ("a", {"id": "a", "created_at": "bad", "priority": "diagnostic"}),
@@ -225,6 +227,10 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(mode["value"], 2)
 
     def test_command_queue_class_maps_gateway_workloads(self) -> None:
+        self.assertLess(
+            dbus_gateway.PRIORITY_VALUES["normal"],
+            dbus_gateway.PRIORITY_VALUES["diagnostic"],
+        )
         self.assertEqual(command_queue_class({"kind": "register_path"}), "startup/register")
         self.assertEqual(command_queue_class({"kind": "publish_value", "path": "/Mode"}), "gui-critical-publish")
         self.assertEqual(command_queue_class({"kind": "publish_desired", "paths": {"/Session/Time": 1}}), "gui-critical-publish")

@@ -26,7 +26,8 @@ PRIORITY_VALUES = {
     "user": 1,
     "publish": 2,
     "read": 3,
-    "optional": 4,
+    "normal": 4,
+    "optional": 5,
     "discovery": 5,
     "diagnostic": 6,
 }

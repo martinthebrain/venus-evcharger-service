@@ -1638,9 +1638,12 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.discovery.next_scan_at = time.time() + 1000
             self.assertFalse(adapter._refresh_services_if_due_once())
             adapter.discovery.next_scan_at = 0.0
+            refresh_path = adapter.commands.enqueue({"kind": "refresh_services", "priority": "normal"})
+            self.assertTrue(Path(refresh_path).exists())
             adapter._list_services = MagicMock(return_value=["svc"])  # type: ignore[method-assign]
             self.assertTrue(adapter._refresh_services_if_due_once())
             self.assertIn("svc", adapter.cache.services)
+            self.assertFalse(Path(refresh_path).exists())
             adapter.discovery.next_scan_at = 0.0
             adapter._list_services = MagicMock(side_effect=DbusOperationDeferred("read"))  # type: ignore[method-assign]
             self.assertFalse(adapter._refresh_services_if_due_once())

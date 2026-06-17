@@ -154,6 +154,7 @@ class DbusAdapterIntrospectionMixin:
         if self.circuit.state() != "ok":
             return "deferred"
         self.cache.update_services(self._list_services())
+        self.commands.remove_coalesced("refresh:services")
         return "applied"
 
     def _introspect_command_if_healthy(
