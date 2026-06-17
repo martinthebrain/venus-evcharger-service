@@ -1124,6 +1124,20 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 adapter.commands.remove(command_path)
             self.assertIsNone(adapter.write_scheduler._next_local_publish_command())
 
+    def test_local_publish_timer_fallback_records_success_and_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter._timed_local_publish = None  # type: ignore[method-assign]
+
+            self.assertEqual(adapter.write_scheduler._timed_local_publish(lambda: "ok"), "ok")
+            self.assertGreater(adapter.circuit.health()["successes_60s"], 0)
+
+            with self.assertRaises(RuntimeError):
+                adapter.write_scheduler._timed_local_publish(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+            self.assertGreater(adapter.circuit.health()["errors_60s"], 0)
+
     def test_startup_registration_batch_stops_at_tick_time_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -1638,9 +1652,12 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.discovery.next_scan_at = time.time() + 1000
             self.assertFalse(adapter._refresh_services_if_due_once())
             adapter.discovery.next_scan_at = 0.0
+            refresh_path = adapter.commands.enqueue({"kind": "refresh_services", "priority": "normal"})
+            self.assertTrue(Path(refresh_path).exists())
             adapter._list_services = MagicMock(return_value=["svc"])  # type: ignore[method-assign]
             self.assertTrue(adapter._refresh_services_if_due_once())
             self.assertIn("svc", adapter.cache.services)
+            self.assertFalse(Path(refresh_path).exists())
             adapter.discovery.next_scan_at = 0.0
             adapter._list_services = MagicMock(side_effect=DbusOperationDeferred("read"))  # type: ignore[method-assign]
             self.assertFalse(adapter._refresh_services_if_due_once())

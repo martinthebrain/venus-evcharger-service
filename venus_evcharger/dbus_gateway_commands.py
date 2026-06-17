@@ -117,6 +117,22 @@ class DbusCommandInbox:
         except FileNotFoundError:
             return
 
+    def remove_coalesced(self, coalesce_key: str) -> int:
+        normalized_key = str(coalesce_key or "").strip()
+        paths = self._coalesced_paths(normalized_key)
+        for path in paths:
+            self.remove(path)
+        return len(paths)
+
+    def _coalesced_paths(self, coalesce_key: str) -> list[str]:
+        if not coalesce_key:
+            return []
+        return [
+            path
+            for path, command in self.load_pending()
+            if str(command.get("coalesce_key") or "") == coalesce_key
+        ]
+
     @staticmethod
     def coalesce(commands: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
         """Return commands with latest command per coalesce key, priority-aware."""
@@ -205,4 +221,3 @@ def _publish_priority(command: Mapping[str, Any]) -> bool:
 
 def _command_kind(command: Mapping[str, Any]) -> str:
     return str(command.get("kind") or command.get("type") or "")
-

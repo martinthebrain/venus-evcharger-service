@@ -45,6 +45,7 @@ class DbusAdapterIoMixin:
             return False
         try:
             self.cache.update_services(self._list_services())
+            self.commands.remove_coalesced("refresh:services")
             self.discovery.record_success(now=now)
             return True
         except DbusOperationDeferred:
