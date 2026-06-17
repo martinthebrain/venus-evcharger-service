@@ -153,7 +153,14 @@ class DbusAdapterIntrospectionMixin:
     def _refresh_services_command(self: DbusAdapterIntrospectionContext, _command: Mapping[str, Any]) -> CommandOutcome:
         if self.circuit.state() != "ok":
             return "deferred"
-        self.cache.update_services(self._list_services())
+        try:
+            self.cache.update_services(self._list_services())
+        except DbusOperationDeferred:
+            return "deferred"
+        except Exception as error:  # pylint: disable=broad-except
+            self.discovery.record_error(error, now=time.time())
+            self.commands.remove_coalesced("refresh:services")
+            return "dropped"
         self.commands.remove_coalesced("refresh:services")
         return "applied"
 

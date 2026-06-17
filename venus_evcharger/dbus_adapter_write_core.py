@@ -175,25 +175,49 @@ class DbusWriteSchedulerCoreMixin:
         pending_commands: list[tuple[str, dict[str, Any]]] | None = None,
     ) -> CommandOutcome:
         if self._is_expired(command):
-            self.adapter.commands.remove(path)
-            self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
-            self._record_lifecycle(command, "expired")
-            self._record_processed()
-            return "dropped"
+            return self._drop_expired_command(path, command, pending_commands=pending_commands)
+        outcome = self._command_outcome(path, command)
+        self._apply_command_outcome(path, command, outcome, pending_commands=pending_commands)
+        self._record_lifecycle(command, outcome)
+        return outcome
+
+    def _drop_expired_command(
+        self,
+        path: str,
+        command: Mapping[str, Any],
+        *,
+        pending_commands: list[tuple[str, dict[str, Any]]] | None,
+    ) -> CommandOutcome:
+        self.adapter.commands.remove(path)
+        self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
+        self._record_lifecycle(command, "expired")
+        self._record_processed()
+        return "dropped"
+
+    def _command_outcome(self, path: str, command: Mapping[str, Any]) -> CommandOutcome:
         try:
-            outcome = self.process_command(command, command_file=path)
+            return self.process_command(command, command_file=path)
         except DbusOperationDeferred:
-            outcome = "deferred"
+            return "deferred"
         except Exception as error:  # pylint: disable=broad-except
             logging.exception("Gateway command failed; keeping for retry path=%s: %s", path, error)
-            outcome = "deferred"
+            return "deferred"
+
+    def _apply_command_outcome(
+        self,
+        path: str,
+        command: Mapping[str, Any],
+        outcome: CommandOutcome,
+        *,
+        pending_commands: list[tuple[str, dict[str, Any]]] | None,
+    ) -> None:
+        if outcome == "deferred":
+            self._record_budget(command)
         if outcome in ("applied", "dropped"):
             self.adapter.commands.remove(path)
             self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
             self._record_processed()
             self._record_budget(command)
-        self._record_lifecycle(command, outcome)
-        return outcome
 
     @staticmethod
     def _is_expired(command: Mapping[str, Any]) -> bool:

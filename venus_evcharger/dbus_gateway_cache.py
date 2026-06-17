@@ -110,6 +110,7 @@ class DbusCacheStore:
             "value": current_value.get("value"),
             "source": str(source),
             "updated_at": float(current_value.get("updated_at", 0.0) or 0.0),
+            "error_at": current,
             "age_s": max(0.0, current - float(current_value.get("updated_at", 0.0) or 0.0)),
             "status": "error",
             "last_error": str(error),

@@ -53,7 +53,9 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertIn("object object", stale["values"]["nested"]["value"]["tuple"][0])
 
             store.mark_error("nested", source="svc/path", error="bad", now=13.0)
-            self.assertEqual(store.snapshot(now=13.0)["values"]["nested"]["status"], "error")
+            error_entry = store.snapshot(now=13.0)["values"]["nested"]
+            self.assertEqual(error_entry["status"], "error")
+            self.assertEqual(error_entry["error_at"], 13.0)
             store.update_services(["svc.a"], now=14.0)
             store.write_snapshot_files()
 

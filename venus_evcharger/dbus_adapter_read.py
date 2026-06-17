@@ -29,12 +29,31 @@ class DbusReadExecutor:
         return self._refresh_direct_value(command)
 
     def _refresh_direct_value(self, command: Mapping[str, Any]) -> CommandOutcome:
+        target = self._direct_refresh_target(command)
+        if target is None:
+            return "dropped"
+        service, path, key, source = target
+        return self._read_direct_refresh(service, path, key, source)
+
+    @staticmethod
+    def _direct_refresh_target(command: Mapping[str, Any]) -> tuple[str, str, str, str] | None:
         service = str(command.get("service") or "")
         path = str(command.get("path") or "")
         if not service or not path:
+            return None
+        key = dbus_path_key(service, path)
+        return service, path, key, f"{service}{path}"
+
+    def _read_direct_refresh(self, service: str, path: str, key: str, source: str) -> CommandOutcome:
+        try:
+            value = self.read_busitem(service, path)
+        except DbusOperationDeferred:
+            return "deferred"
+        except Exception as error:  # pylint: disable=broad-except
+            self.adapter.cache.mark_error(key, source=source, error=error)
+            logging.debug("DBus adapter direct refresh failed key=%s: %s", key, error)
             return "dropped"
-        value = self.read_busitem(service, path)
-        self.adapter.cache.update_value(dbus_path_key(service, path), value, source=f"{service}{path}")
+        self.adapter.cache.update_value(key, value, source=source)
         return "applied"
 
     def poll_read_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:

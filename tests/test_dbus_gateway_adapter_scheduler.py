@@ -51,6 +51,7 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
     adapter_module = sys.modules["venus_evcharger_dbus_adapter"]
     adapter_process_module = sys.modules["venus_evcharger.dbus_adapter_process"]
     write_module = sys.modules["venus_evcharger.dbus_adapter_write"]
+    write_health_module = sys.modules["venus_evcharger.dbus_adapter_write_health"]
 
 
 class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
@@ -421,12 +422,19 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertFalse(stale.exists())
 
             commands = [
-                ("fresh-publish", {"priority": "publish", "created_at": 990.0}),
-                ("old-discovery", {"priority": "discovery", "created_at": 900.0}),
+                ("fresh-publish", {"kind": "publish_value", "priority": "publish", "created_at": 999.0}),
+                ("old-discovery", {"kind": "refresh_services", "priority": "discovery", "created_at": 990.0}),
             ]
-            self.assertEqual(adapter.write_scheduler._select_next_command(commands)[0], "fresh-publish")
+            with patch.object(write_health_module.time, "time", return_value=1000.0):
+                prioritized = adapter.write_scheduler._prioritized_commands(commands)
+                self.assertEqual(adapter.write_scheduler._select_next_command(prioritized)[0], "fresh-publish")
+            with patch.object(write_health_module.time, "time", return_value=1010.0):
+                prioritized = adapter.write_scheduler._prioritized_commands(commands)
+                self.assertEqual(adapter.write_scheduler._select_next_command(prioritized)[0], "old-discovery")
             protected = [("fresh-user", {"priority": "user", "created_at": 999.0}), *commands]
-            self.assertEqual(adapter.write_scheduler._select_next_command(protected)[0], "fresh-user")
+            with patch.object(write_health_module.time, "time", return_value=1010.0):
+                prioritized = adapter.write_scheduler._prioritized_commands(protected)
+                self.assertEqual(adapter.write_scheduler._select_next_command(prioritized)[0], "fresh-user")
             adapter.write_scheduler.queue_class_budgets["diagnostic"] = 0
             self.assertIsNone(adapter.write_scheduler._select_next_command([("diag", {"kind": "unknown"})]))
             self.assertFalse(adapter.write_scheduler._budget_available({"queue_class": "diagnostic"}, time.time()))
@@ -603,11 +611,13 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
             self.assertTrue(adapter.write_scheduler.process_one())
             self.assertTrue(Path(path).exists())
+            adapter.write_scheduler._budget_events.clear()
 
             adapter.circuit.protective_until = 0
             adapter.write_scheduler.process_command = MagicMock(side_effect=DbusOperationDeferred("write"))  # type: ignore[method-assign]
             self.assertTrue(adapter.write_scheduler.process_one())
             self.assertTrue(Path(path).exists())
+            adapter.write_scheduler._budget_events.clear()
 
             adapter.write_scheduler.process_command = MagicMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
             self.assertTrue(adapter.write_scheduler.process_one())
@@ -780,9 +790,34 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(adapter.read_executor.refresh_requested_value({}), "dropped")
 
             adapter.read_executor.read_busitem = MagicMock(side_effect=RuntimeError("read failed"))  # type: ignore[method-assign]
+            self.assertEqual(adapter.read_executor.refresh_requested_value({"service": "svc", "path": "/Broken"}), "dropped")
+            self.assertEqual(adapter.cache.values["path:svc/Broken"]["status"], "error")
+            refresh_path = adapter.commands.enqueue(
+                {
+                    "kind": "refresh_value",
+                    "service": "svc",
+                    "path": "/Broken",
+                    "priority": "read",
+                    "coalesce_key": "refresh:svc:/Broken",
+                }
+            )
+            self.assertTrue(adapter.write_scheduler.process_one())
+            self.assertFalse(Path(refresh_path).exists())
             self.assertEqual(adapter.read_executor.poll_read_spec("bad", {"service": "svc", "path": "/Bad"}), "dropped")
             self.assertEqual(adapter.cache.values["bad"]["status"], "error")
             adapter.read_executor.read_busitem = MagicMock(side_effect=DbusOperationDeferred("read"))  # type: ignore[method-assign]
+            self.assertEqual(adapter.read_executor.refresh_requested_value({"service": "svc", "path": "/Deferred"}), "deferred")
+            deferred_refresh_path = adapter.commands.enqueue(
+                {
+                    "kind": "refresh_value",
+                    "service": "svc",
+                    "path": "/Deferred",
+                    "priority": "read",
+                    "coalesce_key": "refresh:svc:/Deferred",
+                }
+            )
+            self.assertTrue(adapter.write_scheduler.process_one())
+            self.assertTrue(Path(deferred_refresh_path).exists())
             self.assertEqual(adapter.read_executor.poll_read_spec("later", {"service": "svc", "path": "/Later"}), "deferred")
             self.assertEqual(adapter.read_executor.poll_read_spec("empty", {"aggregate": "sum", "service": "svc", "paths": []}), "applied")
             self.assertEqual(adapter.cache.values["empty"]["value"], 0.0)
@@ -1242,6 +1277,11 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             health = adapter.write_scheduler.health(now=time.time())
             self.assertEqual(health["queue_class_budgets"]["remote-write"], 1)
 
+            adapter.write_scheduler._budget_events.clear()
+            adapter.write_scheduler.process_command = MagicMock(return_value="deferred")  # type: ignore[method-assign]
+            self.assertEqual(adapter.write_scheduler._process_loaded_command("deferred.json", first), "deferred")
+            self.assertFalse(adapter.write_scheduler._budget_available(first, time.time()))
+
     def test_slo_regulation_adjusts_burst_reads_and_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -1661,9 +1701,19 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.discovery.next_scan_at = 0.0
             adapter._list_services = MagicMock(side_effect=DbusOperationDeferred("read"))  # type: ignore[method-assign]
             self.assertFalse(adapter._refresh_services_if_due_once())
+            deferred_path = adapter.commands.enqueue({"kind": "refresh_services", "priority": "normal"})
+            self.assertEqual(adapter._process_non_write_command({"kind": "refresh_services"}), "deferred")
+            self.assertTrue(Path(deferred_path).exists())
+            adapter.commands.remove(deferred_path)
             adapter._list_services = MagicMock(side_effect=RuntimeError("dbus down"))  # type: ignore[method-assign]
+            failed_path = adapter.commands.enqueue({"kind": "refresh_services", "priority": "normal"})
+            self.assertEqual(adapter._process_non_write_command({"kind": "refresh_services"}), "dropped")
+            self.assertFalse(Path(failed_path).exists())
+            adapter.discovery.next_scan_at = 0.0
+            failed_background_path = adapter.commands.enqueue({"kind": "refresh_services", "priority": "normal"})
             self.assertTrue(adapter._refresh_services_if_due_once())
             self.assertEqual(adapter.discovery.last_error, "dbus down")
+            self.assertFalse(Path(failed_background_path).exists())
             adapter._maybe_refresh_services()
 
     def test_cache_publish_interval_throttles_unchanged_snapshots(self) -> None:

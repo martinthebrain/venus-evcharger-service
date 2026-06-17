@@ -32,6 +32,11 @@ _QUEUE_CLASS_RANKS = {
     "diagnostic": 8,
 }
 
+_AGED_REFRESH_SECONDS = 15.0
+_AGED_REFRESH_PRIORITY_RANK = 1.5
+_AGING_QUEUE_CLASSES = {"read-fast", "read-slow", "discovery", "introspection"}
+
+
 class DbusWriteSchedulerHealthMixin:
     def health(self, *, now: float | None = None) -> dict[str, Any]:
         current = time.time() if now is None else float(now)
@@ -114,10 +119,11 @@ class DbusWriteSchedulerHealthMixin:
 
     @staticmethod
     def _prioritized_commands(commands: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
+        now = time.time()
         return sorted(
             commands,
             key=lambda item: (
-                _priority_rank(item[1].get("priority")),
+                _effective_command_priority_rank(item[1], now),
                 _QUEUE_CLASS_RANKS.get(str(item[1].get("queue_class") or command_queue_class(item[1])), 99),
                 _float_or_zero(item[1].get("created_at")),
             ),
@@ -185,3 +191,16 @@ class DbusWriteSchedulerHealthMixin:
             confidence=0.9,
         )
         return "applied"
+
+
+def _effective_command_priority_rank(command: Mapping[str, Any], now: float) -> float:
+    rank = float(_priority_rank(command.get("priority")))
+    if _aged_refresh_command(command, now):
+        return min(rank, _AGED_REFRESH_PRIORITY_RANK)
+    return rank
+
+
+def _aged_refresh_command(command: Mapping[str, Any], now: float) -> bool:
+    queue_class = str(command.get("queue_class") or command_queue_class(command))
+    created_at = _float_or_zero(command.get("created_at"))
+    return queue_class in _AGING_QUEUE_CLASSES and created_at > 0.0 and now - created_at >= _AGED_REFRESH_SECONDS
