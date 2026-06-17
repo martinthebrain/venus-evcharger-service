@@ -233,6 +233,39 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
         self.assertIsNone(service._phase_switch_pending_selection)
         service._save_runtime_state.assert_called_once()
 
+    def test_auto_phase_selection_keeps_unrelated_lockout_after_successful_apply(self):
+        service = _auto_phase_service(
+            requested_phase_selection="P1_P2",
+            active_phase_selection="P1_P2",
+            _last_auto_metrics={"surplus": 400.0},
+            _last_confirmed_pm_status={"output": False},
+            _last_confirmed_pm_status_at=99.5,
+            _auto_phase_target_candidate="P1",
+            _auto_phase_target_since=90.0,
+            _apply_phase_selection=MagicMock(return_value="P1"),
+            _phase_switch_lockout_selection="P1_P2",
+            _phase_switch_lockout_reason="mismatch-threshold",
+            _phase_switch_lockout_at=80.0,
+            _phase_switch_lockout_until=140.0,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        override = controller.maybe_apply_auto_phase_selection(
+            service,
+            False,
+            False,
+            230.0,
+            100.0,
+            True,
+        )
+
+        self.assertIsNone(override)
+        service._apply_phase_selection.assert_called_once_with("P1")
+        self.assertEqual(service.requested_phase_selection, "P1")
+        self.assertEqual(service.active_phase_selection, "P1")
+        self.assertEqual(service._phase_switch_lockout_selection, "P1_P2")
+        self.assertEqual(service._phase_switch_lockout_until, 140.0)
+
     def test_auto_phase_helper_edges_cover_fallbacks_thresholds_and_lockouts(self):
         service = _auto_phase_service(
             requested_phase_selection="P1_P2_P3",

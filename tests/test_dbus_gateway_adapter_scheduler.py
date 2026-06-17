@@ -1497,6 +1497,27 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.dbus_introspection_enabled = False
             adapter._write_introspection_snapshot()
 
+    def test_gateway_introspection_snapshot_logs_write_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "map.json"
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                f"DbusIntrospectionSnapshotPath={snapshot_path}\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.dbus_introspection_enabled = True
+            method_globals = adapter._write_introspection_snapshot.__globals__
+
+            with (
+                patch.dict(method_globals, {"write_text_atomically": MagicMock(side_effect=OSError("readonly"))}),
+                patch.object(method_globals["logging"], "debug") as debug_log,
+            ):
+                adapter._write_introspection_snapshot()
+
+        debug_log.assert_called_once()
+
     def test_tick_and_dbus_operation_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"

@@ -83,6 +83,10 @@ def run_service_loop(
     service_class()
     logging_module.info("Service bootstrap completed; preparing GLib main loop")
     mainloop = gobject_module.MainLoop()
-    install_signal_logging_func(lambda: request_mainloop_quit_func(gobject_module, mainloop))
+
+    def request_shutdown() -> None:
+        request_mainloop_quit_func(gobject_module, mainloop)
+
+    install_signal_logging_func(request_shutdown)
     logging_module.info("Connected to dbus, and switching over to gobject.MainLoop() (= event based)")
     mainloop.run()

@@ -83,6 +83,8 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
 
         service_factory.assert_called_once_with()
         install_signal_logging.assert_called_once()
+        install_signal_logging.call_args.args[0]()
+        gobject_module.idle_add.assert_called_once_with(mainloop.quit)
         mainloop.run.assert_called_once_with()
 
     def test_enable_fault_diagnostics_swallows_failures(self):
