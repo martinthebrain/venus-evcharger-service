@@ -10,7 +10,7 @@ gateway files/socket and never direct DBus access.
 from __future__ import annotations
 
 import argparse
-from typing import Sequence
+from collections.abc import Sequence
 
 from pi_gateway_release_gate_support import (
     PiSession,

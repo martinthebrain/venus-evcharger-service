@@ -8,8 +8,8 @@ adapter process, plus a small ``VeDbusService``-like proxy for the core.
 
 from __future__ import annotations
 
-from pathlib import Path
 import socket
+from pathlib import Path
 
 from venus_evcharger.dbus_gateway_cache import DbusCacheStore
 from venus_evcharger.dbus_gateway_client import GatewayClient, GatewayDbusServiceProxy, gateway_value
@@ -28,12 +28,6 @@ from venus_evcharger.dbus_gateway_core import (
     PRIORITY_VALUES,
     PUBLISH_PATH_RANKS,
     GatewayPaths,
-    _float_or_zero,
-    _is_json_scalar,
-    _json_ready,
-    _json_ready_mapping,
-    _now,
-    _priority_rank,
     dbus_path_key,
     gateway_paths,
     read_json_file,

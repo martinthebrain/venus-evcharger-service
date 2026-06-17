@@ -6,11 +6,9 @@ from __future__ import annotations
 import os
 import time
 from collections import deque
-from typing import Any, Callable, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-import dbus
-
-from venus_evcharger.dbus_gateway import LatencyWindow, write_json_file
 
 class TickHealth:
     """Rolling event-loop tick diagnostics without touching DBus."""
@@ -146,7 +144,7 @@ class ResourceMonitor:
     @staticmethod
     def _read_system_cpu() -> tuple[int, int]:
         try:
-            with open("/proc/stat", "r", encoding="utf-8") as handle:
+            with open("/proc/stat", encoding="utf-8") as handle:
                 parts = handle.readline().split()[1:]
         except OSError:
             return 0, 0
@@ -156,7 +154,7 @@ class ResourceMonitor:
 
     def _read_process_cpu_seconds(self) -> float:
         try:
-            with open(f"/proc/{self.pid}/stat", "r", encoding="utf-8") as handle:
+            with open(f"/proc/{self.pid}/stat", encoding="utf-8") as handle:
                 parts = handle.read().split()
             ticks = float(parts[13]) + float(parts[14])
             return ticks / float(os.sysconf(os.sysconf_names["SC_CLK_TCK"]))
@@ -167,7 +165,7 @@ class ResourceMonitor:
     def _read_meminfo() -> dict[str, float]:
         values: dict[str, float] = {}
         try:
-            with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            with open("/proc/meminfo", encoding="utf-8") as handle:
                 for line in handle:
                     key, raw_value = line.split(":", 1)
                     values[key] = float(raw_value.strip().split()[0])
@@ -178,7 +176,7 @@ class ResourceMonitor:
     def _read_process_status(self) -> dict[str, float]:
         values: dict[str, float] = {}
         try:
-            with open(f"/proc/{self.pid}/status", "r", encoding="utf-8") as handle:
+            with open(f"/proc/{self.pid}/status", encoding="utf-8") as handle:
                 for line in handle:
                     key, raw_value = line.split(":", 1)
                     token = raw_value.strip().split()[0]

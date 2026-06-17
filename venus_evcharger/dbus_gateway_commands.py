@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 import hashlib
 import os
-from pathlib import Path
 import time
 import uuid
-from typing import Any, Mapping
+from collections import OrderedDict
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 from venus_evcharger.dbus_gateway_core import (
     DBUS_GATEWAY_SCHEMA_VERSION,
@@ -21,6 +22,7 @@ from venus_evcharger.dbus_gateway_core import (
     write_json_file,
 )
 from venus_evcharger.dbus_gateway_policy import command_queue_class
+
 
 class DbusCommandInbox:
     """Atomic JSON command directory used for writes toward the DBus adapter."""
@@ -118,7 +120,7 @@ class DbusCommandInbox:
     @staticmethod
     def coalesce(commands: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
         """Return commands with latest command per coalesce key, priority-aware."""
-        selected: "OrderedDict[str, tuple[str, dict[str, Any]]]" = OrderedDict()
+        selected: OrderedDict[str, tuple[str, dict[str, Any]]] = OrderedDict()
         passthrough: list[tuple[str, dict[str, Any]]] = []
         for path, command in commands:
             key = str(command.get("coalesce_key") or "")

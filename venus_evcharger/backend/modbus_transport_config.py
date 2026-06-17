@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import configparser
+from typing import cast
 
 from venus_evcharger.backend.modbus_transport import (
     ModbusParity,
@@ -102,7 +103,7 @@ def _normalized_parity(value: object) -> ModbusParity:
     parity = str(value).strip().upper() or "N"
     if parity not in {"N", "E", "O"}:
         raise ValueError(f"Unsupported Modbus parity '{value}'")
-    return parity  # type: ignore[return-value]
+    return cast(ModbusParity, parity)
 
 
 def _normalized_stopbits(value: object) -> int:

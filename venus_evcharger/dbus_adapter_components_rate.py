@@ -3,14 +3,15 @@
 
 from __future__ import annotations
 
-import os
 import time
 from collections import deque
-from typing import Any, Callable, Mapping
+from contextlib import suppress
+from typing import Any
 
 import dbus
 
-from venus_evcharger.dbus_gateway import LatencyWindow, write_json_file
+from venus_evcharger.dbus_gateway import LatencyWindow
+
 
 class DbusOperationDeferred(RuntimeError):
     """Raised when rate limiting defers one DBus operation without blocking."""
@@ -158,10 +159,8 @@ class DbusConnectionManager:
     def reset(self) -> None:
         close = getattr(self._bus, "close", None)
         if callable(close):
-            try:
+            with suppress(Exception):
                 close()
-            except Exception:  # pylint: disable=broad-except
-                pass
         self._bus = None
 
 
@@ -173,4 +172,3 @@ def _dbus_error_name(error: BaseException) -> str:
         return str(getter()).lower()
     except Exception:  # pylint: disable=broad-except
         return ""
-

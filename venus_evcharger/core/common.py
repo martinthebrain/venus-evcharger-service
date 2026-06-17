@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from venus_evcharger.core import common_schedule as _common_schedule_module
@@ -103,11 +104,26 @@ def local_datetime_from_timestamp(timestamp: float, timezone_name: str = "UTC") 
     return datetime.fromtimestamp(float(timestamp), zone).replace(tzinfo=None)
 
 
-def scheduled_mode_snapshot(*args: object, **kwargs: object) -> ScheduledModeSnapshot:
+def scheduled_mode_snapshot(
+    when: datetime,
+    month_windows: dict[int, tuple[TimeWindow, TimeWindow]] | None,
+    enabled_days: object,
+    delay_seconds: float = 3600.0,
+    latest_end_time: object = "06:30",
+    target_day_func: Callable[
+        [datetime, dict[int, tuple[TimeWindow, TimeWindow]] | None],
+        date,
+    ] = _scheduled_target_day,
+) -> ScheduledModeSnapshot:
     """Delegate through the wrapper so tests may patch local schedule helpers."""
-    snapshot_kwargs = dict(kwargs)
-    snapshot_kwargs.setdefault("target_day_func", _scheduled_target_day)
-    return _common_schedule_module.scheduled_mode_snapshot(*args, **snapshot_kwargs)  # type: ignore[arg-type]
+    return _common_schedule_module.scheduled_mode_snapshot(
+        when,
+        month_windows,
+        enabled_days,
+        delay_seconds=delay_seconds,
+        latest_end_time=latest_end_time,
+        target_day_func=target_day_func,
+    )
 
 
 __all__ = [

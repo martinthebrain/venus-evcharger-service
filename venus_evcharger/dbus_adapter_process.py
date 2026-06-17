@@ -10,17 +10,15 @@ rate limiting, circuit breaking, and the RAM cache published to files.
 from __future__ import annotations
 
 import configparser
-import json
+import json  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
 import logging
 import os
-import platform
-import select
-import signal
+import select  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
+import signal  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
 import socket
 import sys
-import time
-import xml.etree.ElementTree as xml_et
-from typing import Any, Callable, Mapping
+import time  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
+from typing import Any
 
 sys.path.insert(
     1,
@@ -30,37 +28,19 @@ sys.path.insert(
     ),
 )
 
-import dbus
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib
-from vedbus import VeDbusService
+import dbus  # noqa: F401
+from dbus.mainloop.glib import DBusGMainLoop  # noqa: F401
+from gi.repository import GLib  # noqa: F401
 
-from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
 from venus_evcharger.dbus_adapter_components import (
     AtomicJsonWriter,
-    CommandOutcome,
     DbusCircuitBreaker,
     DbusConnectionManager,
     DbusDiscoveryManager,
-    DbusOperationDeferred,
     DbusRateLimiter,
     DbusReadScheduler,
     ResourceMonitor,
     TickHealth,
-)
-from venus_evcharger.dbus_adapter_read import DbusReadExecutor
-from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
-from venus_evcharger.dbus_gateway import (
-    DBUS_GATEWAY_SCHEMA_VERSION,
-    DbusCacheStore,
-    DbusCommandInbox,
-    FAST_READ_KEYS,
-    GUI_CRITICAL_PUBLISH_PATHS,
-    GatewayPaths,
-    command_queue_class,
-    dbus_path_key,
-    gateway_paths,
 )
 from venus_evcharger.dbus_adapter_process_health import DbusAdapterHealthMixin
 from venus_evcharger.dbus_adapter_process_introspection import DbusAdapterIntrospectionMixin
@@ -68,7 +48,21 @@ from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdap
 from venus_evcharger.dbus_adapter_process_io import DbusAdapterIoMixin
 from venus_evcharger.dbus_adapter_process_loop import DbusAdapterLoopMixin
 from venus_evcharger.dbus_adapter_process_runtime import DbusAdapterRuntimeMixin
+from venus_evcharger.dbus_adapter_read import DbusReadExecutor
+from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
+from venus_evcharger.dbus_gateway import (
+    DbusCacheStore,
+    DbusCommandInbox,
+    GatewayPaths,
+    gateway_paths,
+)
 
+
+class _CasePreservingConfigParser(configparser.ConfigParser):
+    """Config parser that keeps DBus path and option casing intact."""
+
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
 
 
 class DbusAdapter(
@@ -175,8 +169,7 @@ class DbusAdapter(
 
     @staticmethod
     def _load_config(path: str) -> configparser.ConfigParser:
-        parser = configparser.ConfigParser()
-        parser.optionxform = str  # type: ignore[method-assign]
+        parser = _CasePreservingConfigParser()
         loaded = parser.read(path)
         if not loaded:
             raise ValueError(f"Unable to read config file: {path}")

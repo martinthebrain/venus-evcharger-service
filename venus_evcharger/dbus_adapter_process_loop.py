@@ -8,35 +8,18 @@ is intentionally isolated to the gateway adapter modules only.
 
 from __future__ import annotations
 
-import configparser
-import json
 import logging
 import os
-import select
-import signal
-import socket
 import time
-import xml.etree.ElementTree as xml_et
-from typing import Any, Callable, Mapping
 
-import dbus
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
-from vedbus import VeDbusService
 
-from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
-from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
-from venus_evcharger.dbus_gateway import (
-    DBUS_GATEWAY_SCHEMA_VERSION,
-    FAST_READ_KEYS,
-    GUI_CRITICAL_PUBLISH_PATHS,
-    command_queue_class,
-    dbus_path_key,
-)
+from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterLoopContext
+
 
 class DbusAdapterLoopMixin:
-    def run(self) -> None:  # pragma: no cover - Venus DBus/GLib process loop
+    def run(self: DbusAdapterLoopContext) -> None:  # pragma: no cover - Venus DBus/GLib process loop
         DBusGMainLoop(set_as_default=True)
         self._install_signal_handlers()
         os.makedirs(self.paths.run_dir, exist_ok=True)
@@ -52,7 +35,7 @@ class DbusAdapterLoopMixin:
             self._stop = True
             self._close_socket()
 
-    def _tick(self) -> bool:
+    def _tick(self: DbusAdapterLoopContext) -> bool:
         tick_started = time.monotonic()
         if self._stop:
             self._close_socket()
@@ -80,7 +63,7 @@ class DbusAdapterLoopMixin:
             self._next_work_tick_monotonic = time.monotonic() + self.tick_seconds
         return not self._stop
 
-    def _update_adaptive_tick(self) -> None:
+    def _update_adaptive_tick(self: DbusAdapterLoopContext) -> None:
         resources = self.resource_monitor.snapshot()
         self._last_resource_snapshot = resources
         self._apply_slo_regulation()
@@ -92,7 +75,12 @@ class DbusAdapterLoopMixin:
             resource_state=resource_state,
         )
 
-    def _adaptive_tick_seconds(self, *, circuit_state: str, resource_state: str) -> float:
+    def _adaptive_tick_seconds(
+        self: DbusAdapterLoopContext,
+        *,
+        circuit_state: str,
+        resource_state: str,
+    ) -> float:
         if circuit_state == "protective" or resource_state == "constrained":
             return self.max_tick_seconds
         if circuit_state == "degraded":
@@ -101,7 +89,7 @@ class DbusAdapterLoopMixin:
             return min(self.max_tick_seconds, max(self.min_tick_seconds * 1.5, 0.3))
         return self.min_tick_seconds
 
-    def _process_one_dbus_operation_once(self) -> bool:
+    def _process_one_dbus_operation_once(self: DbusAdapterLoopContext) -> bool:
         if not self.cache.services and self._refresh_services_if_due_once():
             return True
         self._enqueue_background_introspection_if_due()
@@ -110,18 +98,18 @@ class DbusAdapterLoopMixin:
             return True
         return self._refresh_services_if_due_once() or local_publish_count > 0
 
-    def _process_preferred_read_or_write(self) -> bool:
+    def _process_preferred_read_or_write(self: DbusAdapterLoopContext) -> bool:
         if self._prefer_read_next:
             return self._try_read_then_write()
         return self._try_write_then_read()
 
-    def _try_read_then_write(self) -> bool:
+    def _try_read_then_write(self: DbusAdapterLoopContext) -> bool:
         if self._poll_one_due_read_once():
             self._prefer_read_next = False
             return True
         return self._try_scheduled_write(prefer_read_next=True)
 
-    def _try_write_then_read(self) -> bool:
+    def _try_write_then_read(self: DbusAdapterLoopContext) -> bool:
         if self._try_scheduled_write(prefer_read_next=True):
             return True
         if self._poll_one_due_read_once():
@@ -129,9 +117,8 @@ class DbusAdapterLoopMixin:
             return True
         return False
 
-    def _try_scheduled_write(self, *, prefer_read_next: bool) -> bool:
+    def _try_scheduled_write(self: DbusAdapterLoopContext, *, prefer_read_next: bool) -> bool:
         if not self.write_scheduler.process_one(include_local_publish=False):
             return False
         self._prefer_read_next = prefer_read_next
         return True
-

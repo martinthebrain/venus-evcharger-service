@@ -20,7 +20,16 @@ class TestVenusEvchargerRename(unittest.TestCase):
 
     @staticmethod
     def _ignored_project_path(path: Path) -> bool:
-        ignored_parts = {".git", "__pycache__", ".mypy_cache", ".pytest_cache", ".coverage"}
+        ignored_parts = {
+            ".git",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+            ".venv-ruff",
+            "__pycache__",
+            ".coverage",
+        }
         return any(part in ignored_parts for part in path.parts)
 
     @staticmethod

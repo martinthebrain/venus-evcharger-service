@@ -8,35 +8,18 @@ is intentionally isolated to the gateway adapter modules only.
 
 from __future__ import annotations
 
-import configparser
-import json
-import logging
-import os
-import select
-import signal
-import socket
 import time
-import xml.etree.ElementTree as xml_et
-from typing import Any, Callable, Mapping
+from collections.abc import Callable
+from typing import Any, cast
 
 import dbus
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib
-from vedbus import VeDbusService
 
-from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
-from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
-from venus_evcharger.dbus_gateway import (
-    DBUS_GATEWAY_SCHEMA_VERSION,
-    FAST_READ_KEYS,
-    GUI_CRITICAL_PUBLISH_PATHS,
-    command_queue_class,
-    dbus_path_key,
-)
+from venus_evcharger.dbus_adapter_components import DbusOperationDeferred
+from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterIoContext
+
 
 class DbusAdapterIoMixin:
-    def _poll_one_due_read_once(self) -> bool:
+    def _poll_one_due_read_once(self: DbusAdapterIoContext) -> bool:
         now = time.time()
         due = self.read_scheduler.next_due(
             now=now,
@@ -53,10 +36,10 @@ class DbusAdapterIoMixin:
             self.read_scheduler.record_error(key, now=now, interval=interval)
         return outcome != "deferred" or bool(self.read_executor.last_operation_performed)
 
-    def _maybe_refresh_services(self) -> None:
+    def _maybe_refresh_services(self: DbusAdapterIoContext) -> None:
         self._refresh_services_if_due_once()
 
-    def _refresh_services_if_due_once(self) -> bool:
+    def _refresh_services_if_due_once(self: DbusAdapterIoContext) -> bool:
         now = time.time()
         if not self.discovery.due(now=now, priority_allowed=self.circuit.allows_priority):
             return False
@@ -70,15 +53,15 @@ class DbusAdapterIoMixin:
             self.discovery.record_error(error, now=now)
             return True
 
-    def _list_services(self) -> list[str]:
+    def _list_services(self: DbusAdapterIoContext) -> list[str]:
         def _read() -> list[str]:
             obj = self.connection.bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
             iface = dbus.Interface(obj, "org.freedesktop.DBus")
             return [str(name) for name in iface.ListNames()]
 
-        return self._timed("read", _read)
+        return cast(list[str], self._timed("read", _read))
 
-    def _timed(self, kind: str, operation: Callable[[], Any]) -> Any:
+    def _timed(self: DbusAdapterIoContext, kind: str, operation: Callable[[], Any]) -> Any:
         self.rate_limiter.require_due(kind)
         started = time.monotonic()
         try:
@@ -89,7 +72,7 @@ class DbusAdapterIoMixin:
             self.circuit.record_error(error, kind=kind)
             raise
 
-    def _timed_local_publish(self, operation: Callable[[], Any]) -> Any:
+    def _timed_local_publish(self: DbusAdapterIoContext, operation: Callable[[], Any]) -> Any:
         started = time.monotonic()
         try:
             result = operation()
@@ -99,7 +82,7 @@ class DbusAdapterIoMixin:
             self.circuit.record_error(error, kind="local_publish")
             raise
 
-    def _publish_cache(self) -> None:
+    def _publish_cache(self: DbusAdapterIoContext) -> None:
         health = self._health_snapshot()
         self.cache.health.update(health)
         if self.cache_publish_interval_seconds > 0.0:
@@ -114,4 +97,3 @@ class DbusAdapterIoMixin:
         self.cache.write_snapshot_files()
         self._append_health_log(health)
         self._write_introspection_snapshot()
-

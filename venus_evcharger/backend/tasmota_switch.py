@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
-from .template_switch import TemplateContactorSwitchMixin, TemplateSwitchBackend
+from .template_switch import TemplateSwitchBackend, force_contactor_switch_settings
 
 
 class TasmotaSwitchBackend(TemplateSwitchBackend):
     """Template-backed switch alias for Tasmota HTTP/JSON devices."""
 
 
-class TasmotaContactorSwitchBackend(TemplateContactorSwitchMixin, TasmotaSwitchBackend):
+class TasmotaContactorSwitchBackend(TasmotaSwitchBackend):
     """Tasmota switch backend treated as an external contactor by default."""
+
+    def __init__(self, service: object, config_path: str = "") -> None:
+        super().__init__(service, config_path=config_path)
+        force_contactor_switch_settings(self)

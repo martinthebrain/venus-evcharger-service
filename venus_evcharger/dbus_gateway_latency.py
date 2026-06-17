@@ -8,6 +8,7 @@ from typing import Any
 
 from venus_evcharger.dbus_gateway_core import _now
 
+
 class LatencyWindow:
     """Rolling latency/error window used by the adapter circuit breaker."""
 

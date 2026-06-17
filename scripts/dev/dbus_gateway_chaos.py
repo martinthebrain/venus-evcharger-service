@@ -14,8 +14,8 @@ import json
 import sys
 import tempfile
 import time
-from types import ModuleType
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,7 +37,7 @@ class _FakeDbusService(dict[str, Any]):
 
 
 fake_vedbus = ModuleType("vedbus")
-fake_vedbus.VeDbusService = _FakeDbusService  # type: ignore[attr-defined]
+fake_vedbus.VeDbusService = _FakeDbusService
 sys.modules.setdefault("vedbus", fake_vedbus)
 
 from venus_evcharger_dbus_adapter import DbusAdapter
@@ -68,9 +68,9 @@ def _assert(condition: bool, message: str) -> None:
 
 def scenario_dbus_hang(temp_dir: str) -> None:
     adapter = _adapter(temp_dir)
-    adapter._process_socket_once = lambda: None  # type: ignore[method-assign]
-    adapter._process_one_dbus_operation_once = lambda: (_ for _ in ()).throw(TimeoutError("simulated 5s DBus hang"))  # type: ignore[method-assign]
-    adapter._publish_cache = lambda: None  # type: ignore[method-assign]
+    adapter._process_socket_once = lambda: None
+    adapter._process_one_dbus_operation_once = lambda: (_ for _ in ()).throw(TimeoutError("simulated 5s DBus hang"))
+    adapter._publish_cache = lambda: None
     _assert(adapter._tick(), "tick should survive simulated DBus timeout")
     _assert(adapter.circuit.last_error, "circuit should record the simulated DBus timeout")
 

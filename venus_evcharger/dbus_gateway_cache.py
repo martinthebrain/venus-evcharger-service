@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.dbus_gateway_core import (
@@ -16,6 +17,7 @@ from venus_evcharger.dbus_gateway_core import (
     read_json_file,
     write_json_file,
 )
+
 
 def _value_age(updated_at: float, now: float) -> float:
     return max(0.0, now - updated_at) if updated_at else 0.0

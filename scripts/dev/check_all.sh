@@ -7,10 +7,10 @@ REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 
 cd "$REPO_DIR"
 
-echo "[1/4] DBus isolation guard"
+echo "[1/5] DBus isolation guard"
 python3 scripts/dev/check_dbus_isolation.py
 
-echo "[2/4] Syntax check"
+echo "[2/5] Syntax check"
 python3 -m py_compile \
     venus_evcharger_service.py \
     venus_evcharger_observer.py \
@@ -21,6 +21,7 @@ python3 -m py_compile \
     venus_evcharger/dbus_adapter_process_introspection_snapshot.py \
     venus_evcharger/dbus_adapter_process_io.py \
     venus_evcharger/dbus_adapter_process_loop.py \
+    venus_evcharger/dbus_adapter_process_protocols.py \
     venus_evcharger/dbus_adapter_process_runtime.py \
     venus_evcharger/dbus_adapter_components.py \
     venus_evcharger/dbus_adapter_components_rate.py \
@@ -70,10 +71,13 @@ python3 -m py_compile \
     venus_evcharger/controllers/write.py \
     venus_evcharger/update/controller.py
 
-echo "[3/4] Unit tests"
+echo "[3/5] Lint"
+bash "$SCRIPT_DIR/run_lint.sh"
+
+echo "[4/5] Unit tests"
 python3 -m unittest discover -s tests -p 'test_*.py'
 
-echo "[4/4] Type check"
+echo "[5/5] Type check"
 bash "$SCRIPT_DIR/run_typecheck.sh"
 
 echo "All checks passed."

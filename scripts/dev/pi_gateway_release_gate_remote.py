@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 
-from pi_gateway_release_gate_common import GateFailure, PiSession, ROOT
+from pi_gateway_release_gate_common import ROOT, GateFailure, PiSession
 
 
 def deploy_repo(pi: PiSession, remote_dir: str) -> None:

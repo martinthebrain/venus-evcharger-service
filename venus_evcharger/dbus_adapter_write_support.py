@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-import os
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-from venus_evcharger.core.shared import compact_json
 from venus_evcharger.dbus_adapter_components import CommandOutcome
-from venus_evcharger.dbus_gateway import DbusCommandInbox, command_queue_class
 
 _PRIORITY_RANKS = {
     "safety": 0,

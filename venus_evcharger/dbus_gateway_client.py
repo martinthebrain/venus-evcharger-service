@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import json
 import socket
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from venus_evcharger.core.shared import compact_json
 from venus_evcharger.dbus_gateway_cache import DbusCacheStore
 from venus_evcharger.dbus_gateway_commands import DbusCommandInbox
 from venus_evcharger.dbus_gateway_core import GatewayPaths, _json_ready, _now, gateway_paths
 from venus_evcharger.dbus_gateway_policy import command_allowed_by_backpressure
+
 
 class GatewayClient:
     """Small Unix-socket and command-file client used by non-DBus processes."""

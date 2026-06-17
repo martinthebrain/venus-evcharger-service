@@ -27,8 +27,10 @@ bash ./scripts/dev/check_all.sh
 Useful extra commands:
 
 ```bash
+./scripts/dev/run_lint.sh
 ./scripts/dev/run_typecheck.sh
 ./scripts/dev/run_stress_tests.sh
+make lint
 make check
 make typecheck
 make stress

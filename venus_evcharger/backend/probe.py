@@ -169,7 +169,7 @@ def _dbus_introspection_probe_summary(defaults: configparser.SectionProxy) -> di
         "enabled": _dbus_introspection_enabled(defaults),
         "snapshot_path": snapshot_path,
         "snapshot_fresh": bool(snapshot),
-        "worker_state": _dbus_introspection_worker_state(snapshot),
+        "worker_state": _dbus_introspection_gateway_state(snapshot),
         "queue_depth": _dbus_introspection_queue_depth(snapshot),
         "service_count": _dbus_introspection_service_count(services),
     }
@@ -191,7 +191,7 @@ def _dbus_introspection_enabled(defaults: configparser.SectionProxy) -> bool:
     return defaults.get("DbusIntrospectionEnabled", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _dbus_introspection_worker_state(snapshot: object) -> str:
+def _dbus_introspection_gateway_state(snapshot: object) -> str:
     return str(snapshot.get("worker_state", "")) if isinstance(snapshot, dict) else ""
 
 

@@ -8,36 +8,26 @@ is intentionally isolated to the gateway adapter modules only.
 
 from __future__ import annotations
 
-import configparser
 import json
 import logging
 import os
-import select
-import signal
-import socket
 import time
-import xml.etree.ElementTree as xml_et
-from typing import Any, Callable, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-import dbus
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib
-from vedbus import VeDbusService
-
-from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
-from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
+from venus_evcharger.core.shared import compact_json
+from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterHealthContext
 from venus_evcharger.dbus_gateway import (
-    DBUS_GATEWAY_SCHEMA_VERSION,
-    DbusCommandInbox,
     FAST_READ_KEYS,
     GUI_CRITICAL_PUBLISH_PATHS,
+    DbusCommandInbox,
     command_queue_class,
     dbus_path_key,
 )
 
+
 class DbusAdapterHealthMixin:
-    def _append_health_log(self, health: Mapping[str, Any]) -> None:
+    def _append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, Any]) -> None:
         if not self._health_log_due():
             return
         self._last_health_log_monotonic = time.monotonic()
@@ -49,12 +39,12 @@ class DbusAdapterHealthMixin:
         except Exception:  # pylint: disable=broad-except
             logging.debug("Unable to append DBus gateway health history", exc_info=True)
 
-    def _health_log_due(self) -> bool:
+    def _health_log_due(self: DbusAdapterHealthContext) -> bool:
         if not self.health_log_path or self.health_log_interval_seconds <= 0.0:
             return False
-        return time.monotonic() - self._last_health_log_monotonic >= self.health_log_interval_seconds
+        return bool(time.monotonic() - self._last_health_log_monotonic >= self.health_log_interval_seconds)
 
-    def _health_snapshot(self) -> dict[str, Any]:
+    def _health_snapshot(self: DbusAdapterHealthContext) -> dict[str, Any]:
         current_monotonic = time.monotonic()
         current_time = time.time()
         pending = self.commands.load_pending()
@@ -119,7 +109,8 @@ class DbusAdapterHealthMixin:
             entry["pending"] = int(entry["pending"]) + 1
             entry["oldest_age_s"] = max(
                 float(entry["oldest_age_s"]),
-                max(0.0, now - DbusAdapterHealthMixin._command_activity_at(command, now)),
+                0.0,
+                now - DbusAdapterHealthMixin._command_activity_at(command, now),
             )
         return dict(sorted(classes.items()))
 
@@ -160,7 +151,7 @@ class DbusAdapterHealthMixin:
         except (TypeError, ValueError):
             return now
 
-    def _cache_freshness(self, now: float) -> dict[str, Any]:
+    def _cache_freshness(self: DbusAdapterHealthContext, now: float) -> dict[str, Any]:
         values = {
             key: self.cache._value_snapshot(value, now)  # pylint: disable=protected-access
             for key, value in self.cache.values.items()
@@ -168,7 +159,7 @@ class DbusAdapterHealthMixin:
         return {"value_count": len(values), "status_counts": _status_counts(values), **_important_freshness(values)}
 
     def _slo_snapshot(
-        self,
+        self: DbusAdapterHealthContext,
         *,
         queue_health: Mapping[str, Any],
         cache_freshness: Mapping[str, Any],
@@ -180,7 +171,7 @@ class DbusAdapterHealthMixin:
         return _slo_payload(checks, self._slo_targets(), observed)
 
     def _slo_observed(
-        self,
+        self: DbusAdapterHealthContext,
         queue_health: Mapping[str, Any],
         cache_freshness: Mapping[str, Any],
         now: float,
@@ -194,7 +185,10 @@ class DbusAdapterHealthMixin:
             "mainloop_max_gap_ms_60s": float(eventloop.get("max_tick_gap_ms_60s", 0.0) or 0.0),
         }
 
-    def _slo_checks_from_observed(self, observed: Mapping[str, float]) -> dict[str, bool]:
+    def _slo_checks_from_observed(
+        self: DbusAdapterHealthContext,
+        observed: Mapping[str, float],
+    ) -> dict[str, bool]:
         return self._slo_checks(
             float(observed.get("gui_max_age_s", 0.0)),
             float(observed.get("core_read_max_age_s", 0.0)),
@@ -202,7 +196,7 @@ class DbusAdapterHealthMixin:
             float(observed.get("mainloop_max_gap_ms_60s", 0.0)),
         )
 
-    def _slo_targets(self) -> dict[str, float]:
+    def _slo_targets(self: DbusAdapterHealthContext) -> dict[str, float]:
         return {
             "gui_max_age_s": self.slo_gui_max_age_seconds,
             "core_read_max_age_s": self.slo_core_read_max_age_seconds,
@@ -210,7 +204,13 @@ class DbusAdapterHealthMixin:
             "mainloop_gap_max_ms": self.slo_mainloop_gap_max_ms,
         }
 
-    def _slo_checks(self, gui_age: float, core_read_age: float, queue_age: float, eventloop_gap_ms: float) -> dict[str, bool]:
+    def _slo_checks(
+        self: DbusAdapterHealthContext,
+        gui_age: float,
+        core_read_age: float,
+        queue_age: float,
+        eventloop_gap_ms: float,
+    ) -> dict[str, bool]:
         return {
             "gui_fresh": gui_age <= self.slo_gui_max_age_seconds,
             "core_reads_fresh": core_read_age <= self.slo_core_read_max_age_seconds,
@@ -219,7 +219,7 @@ class DbusAdapterHealthMixin:
         }
 
     def _backpressure_snapshot(
-        self,
+        self: DbusAdapterHealthContext,
         *,
         slo: Mapping[str, Any],
         queue_health: Mapping[str, Any],
@@ -236,21 +236,31 @@ class DbusAdapterHealthMixin:
             "reason": ",".join(dict.fromkeys(reasons)) if reasons else "ok",
         }
 
-    def _backpressure_reasons(self, circuit_state: str, queue_age: float, slo: Mapping[str, Any]) -> list[str]:
+    def _backpressure_reasons(
+        self: DbusAdapterHealthContext,
+        circuit_state: str,
+        queue_age: float,
+        slo: Mapping[str, Any],
+    ) -> list[str]:
         reasons = [f"dbus-{circuit_state}"] if circuit_state != "ok" else []
         if queue_age > self.slo_queue_max_age_seconds:
             reasons.append("queue-age")
         reasons.extend(str(item) for item in list(slo.get("violated", []) or []))
         return reasons
 
-    def _backpressure_state(self, circuit_state: str, queue_age: float, reasons: list[str]) -> str:
+    def _backpressure_state(
+        self: DbusAdapterHealthContext,
+        circuit_state: str,
+        queue_age: float,
+        reasons: list[str],
+    ) -> str:
         if circuit_state == "protective":
             return "protective"
         if circuit_state == "degraded" or queue_age > self.slo_queue_max_age_seconds * 2.0:
             return "slow"
         return "congested" if reasons else "ok"
 
-    def _apply_slo_regulation(self) -> None:
+    def _apply_slo_regulation(self: DbusAdapterHealthContext) -> None:
         now = time.time()
         pending = DbusCommandInbox.coalesce(self.commands.load_pending())
         queue_age = self._oldest_command_age(pending, now)
@@ -263,20 +273,24 @@ class DbusAdapterHealthMixin:
         if self.circuit.state() != "ok":
             self._quiet_discovery_and_introspection(now)
 
-    def _regulated_publish_burst(self, queue_age: float, eventloop_gap_ms: float) -> int:
+    def _regulated_publish_burst(
+        self: DbusAdapterHealthContext,
+        queue_age: float,
+        eventloop_gap_ms: float,
+    ) -> int:
         burst = self.write_scheduler.local_publish_burst_limit
         if queue_age > self.slo_queue_max_age_seconds:
             burst = min(max(burst * 3, burst + 4), 50)
         if eventloop_gap_ms > self.slo_mainloop_gap_max_ms:
             burst = max(1, min(burst, max(1, self.write_scheduler.local_publish_burst_limit // 2)))
-        return burst
+        return int(burst)
 
-    def _quiet_discovery_and_introspection(self, now: float) -> None:
+    def _quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:
         quiet_until = now + 60.0
         self.discovery.next_scan_at = max(self.discovery.next_scan_at, quiet_until)
         self._last_introspection_full_scan_at = max(self._last_introspection_full_scan_at, now)
 
-    def _max_cached_path_age(self, paths: set[str], now: float) -> float:
+    def _max_cached_path_age(self: DbusAdapterHealthContext, paths: set[str], now: float) -> float:
         ages = [_cached_entry_age(self.cache.values.get(dbus_path_key(self.service_name, path)), now) for path in paths]
         ages = [age for age in ages if age > 0.0]
         return max(ages) if ages else 0.0
@@ -355,7 +369,9 @@ def _status_counts(values: Mapping[str, Mapping[str, Any]]) -> dict[str, int]:
 
 
 def _important_freshness(values: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    important = {f"{key}_age_s": float(values.get(key, {}).get("age_s", 0.0) or 0.0) for key in FAST_READ_KEYS}
+    important: dict[str, Any] = {
+        f"{key}_age_s": float(values.get(key, {}).get("age_s", 0.0) or 0.0) for key in FAST_READ_KEYS
+    }
     important.update({f"{key}_status": str(values.get(key, {}).get("status", "missing")) for key in FAST_READ_KEYS})
     return important
 

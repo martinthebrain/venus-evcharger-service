@@ -8,35 +8,20 @@ is intentionally isolated to the gateway adapter modules only.
 
 from __future__ import annotations
 
-import configparser
-import json
 import logging
 import os
-import select
-import signal
-import socket
 import time
 import xml.etree.ElementTree as xml_et
-from typing import Any, Callable, Mapping
-
-import dbus
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib
-from vedbus import VeDbusService
+from collections.abc import Mapping
+from typing import Any
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
+from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterIntrospectionSnapshotContext
 from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
-from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
-from venus_evcharger.dbus_gateway import (
-    DBUS_GATEWAY_SCHEMA_VERSION,
-    FAST_READ_KEYS,
-    GUI_CRITICAL_PUBLISH_PATHS,
-    command_queue_class,
-    dbus_path_key,
-)
+
 
 class DbusAdapterIntrospectionSnapshotMixin:
-    def _write_introspection_snapshot(self) -> None:
+    def _write_introspection_snapshot(self: DbusAdapterIntrospectionSnapshotContext) -> None:
         if not self.dbus_introspection_enabled or not self.dbus_introspection_snapshot_path:
             return
         now = time.time()
@@ -55,14 +40,14 @@ class DbusAdapterIntrospectionSnapshotMixin:
         except Exception as error:  # pylint: disable=broad-except
             logging.debug("Unable to write DBus introspection snapshot %s: %s", self.dbus_introspection_snapshot_path, error)
 
-    def _introspection_services_snapshot(self, now: float) -> dict[str, Any]:
+    def _introspection_services_snapshot(self: DbusAdapterIntrospectionSnapshotContext, now: float) -> dict[str, Any]:
         services: dict[str, Any] = {}
         for key, entry in self._introspection_cache_entries():
             service, path = self._split_introspection_cache_key(key)
             self._add_introspection_service_entry(services, service, path, entry, now)
         return services
 
-    def _introspection_cache_entries(self) -> list[tuple[str, dict[str, Any]]]:
+    def _introspection_cache_entries(self: DbusAdapterIntrospectionSnapshotContext) -> list[tuple[str, dict[str, Any]]]:
         return [
             (key, entry)
             for key, entry in self.cache.values.items()
@@ -70,7 +55,7 @@ class DbusAdapterIntrospectionSnapshotMixin:
         ]
 
     def _add_introspection_service_entry(
-        self,
+        self: DbusAdapterIntrospectionSnapshotContext,
         services: dict[str, Any],
         service: str,
         path: str,

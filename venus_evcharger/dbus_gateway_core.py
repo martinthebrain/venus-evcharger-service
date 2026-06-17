@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
 import time
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 
@@ -124,12 +125,12 @@ def _json_ready_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:
 
 def dbus_path_key(service_name: str, path: str) -> str:
     """Return the canonical cache key for one raw Victron DBus path."""
-    return f"path:{str(service_name)}{str(path)}"
+    return f"path:{service_name!s}{path!s}"
 
 
 def read_json_file(path: str, default: Any = None) -> Any:
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return json.load(handle)
     except (OSError, json.JSONDecodeError):
         return default
@@ -146,7 +147,7 @@ def _float_or_zero(value: object) -> float:
         except ValueError:
             return 0.0
     try:
-        method = getattr(value, "__float__")
+        method = getattr(value, "__float__")  # noqa: B009 - object protocol probe accepted by mypy
     except AttributeError:
         return 0.0
     try:

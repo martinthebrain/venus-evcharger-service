@@ -1,4 +1,6 @@
 .coverage
+.ruff_cache/
+.venv-ruff/
 __pycache__/
 tests/__pycache__/
 docs/

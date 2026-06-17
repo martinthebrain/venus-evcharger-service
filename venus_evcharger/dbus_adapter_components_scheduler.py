@@ -3,22 +3,19 @@
 
 from __future__ import annotations
 
-import os
-import time
-from collections import deque
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
-import dbus
+from venus_evcharger.dbus_gateway import write_json_file
 
-from venus_evcharger.dbus_gateway import LatencyWindow, write_json_file
 
 class DbusReadScheduler:
     """Track due times for fixed DBus read groups."""
 
     def __init__(self, specs: Mapping[str, Mapping[str, Any]]) -> None:
         self.specs: dict[str, dict[str, Any]] = {str(key): dict(value) for key, value in specs.items()}
-        self.next_read_at: dict[str, float] = {key: 0.0 for key in self.specs}
-        self.failure_counts: dict[str, int] = {key: 0 for key in self.specs}
+        self.next_read_at: dict[str, float] = dict.fromkeys(self.specs, 0.0)
+        self.failure_counts: dict[str, int] = dict.fromkeys(self.specs, 0)
         self._order: dict[str, int] = {key: index for index, key in enumerate(self.specs)}
 
     def next_due(
@@ -98,4 +95,3 @@ class AtomicJsonWriter:
 
     def write(self, path: str, payload: Mapping[str, Any]) -> None:
         write_json_file(path, payload)
-

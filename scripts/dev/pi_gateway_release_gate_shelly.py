@@ -12,7 +12,7 @@ import time
 from typing import Any
 from urllib.request import urlopen
 
-from pi_gateway_release_gate_common import GateFailure, ROOT
+from pi_gateway_release_gate_common import ROOT, GateFailure
 
 
 def route_local_ip(remote_host: str) -> str:

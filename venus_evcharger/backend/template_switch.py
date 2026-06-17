@@ -322,11 +322,3 @@ def force_contactor_switch_settings(backend: TemplateSwitchBackend) -> None:
         switching_mode="contactor",
         max_direct_switch_power_w=None,
     )
-
-
-class TemplateContactorSwitchMixin:
-    """Mixin for template-switch aliases that are always external contactors."""
-
-    def __init__(self, service: object, config_path: str = "") -> None:
-        super().__init__(service, config_path=config_path)  # type: ignore[call-arg]
-        force_contactor_switch_settings(self)  # type: ignore[arg-type]

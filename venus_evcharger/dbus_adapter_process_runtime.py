@@ -16,28 +16,21 @@ import platform
 import select
 import signal
 import socket
-import time
-import xml.etree.ElementTree as xml_et
-from typing import Any, Callable, Mapping
+from collections.abc import Callable
+from contextlib import suppress
+from typing import Any
 
-import dbus
-from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 from vedbus import VeDbusService
 
-from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
-from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
-from venus_evcharger.dbus_gateway import (
-    DBUS_GATEWAY_SCHEMA_VERSION,
-    FAST_READ_KEYS,
-    GUI_CRITICAL_PUBLISH_PATHS,
-    command_queue_class,
-    dbus_path_key,
-)
+from venus_evcharger.core.shared import compact_json
+from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterRuntimeContext
+
 
 class DbusAdapterRuntimeMixin:
-    def _install_signal_handlers(self) -> None:
+    _server: socket.socket | None
+
+    def _install_signal_handlers(self: DbusAdapterRuntimeContext) -> None:
         def _stop(_signum: int, _frame: object) -> None:
             self._stop = True
             if self._main_loop is not None:
@@ -46,27 +39,23 @@ class DbusAdapterRuntimeMixin:
         signal.signal(signal.SIGTERM, _stop)
         signal.signal(signal.SIGINT, _stop)
 
-    def _start_socket(self) -> None:
-        try:
+    def _start_socket(self: DbusAdapterRuntimeContext) -> None:
+        with suppress(FileNotFoundError):
             os.unlink(self.paths.socket_path)
-        except FileNotFoundError:
-            pass
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(self.paths.socket_path)
         server.listen(8)
         server.setblocking(False)
         self._server = server
 
-    def _close_socket(self) -> None:
+    def _close_socket(self: DbusAdapterRuntimeContext) -> None:
         if self._server is not None:
             self._server.close()
             self._server = None
-        try:
+        with suppress(FileNotFoundError):
             os.unlink(self.paths.socket_path)
-        except FileNotFoundError:
-            pass
 
-    def _process_socket_once(self) -> None:
+    def _process_socket_once(self: DbusAdapterRuntimeContext) -> None:
         if self._server is None:
             return
         readable, _writable, _errors = select.select([self._server], [], [], 0.0)
@@ -80,13 +69,13 @@ class DbusAdapterRuntimeMixin:
             conn.settimeout(0.1)
             try:
                 data = conn.recv(65536).decode("utf-8", errors="replace").strip()
-            except socket.timeout:
+            except TimeoutError:
                 logging.debug("Gateway socket client connected without sending a request")
                 return
             response = self._handle_socket_payload(data)
             conn.sendall((compact_json(response) + "\n").encode("utf-8"))
 
-    def _handle_socket_payload(self, data: str) -> dict[str, Any]:
+    def _handle_socket_payload(self: DbusAdapterRuntimeContext, data: str) -> dict[str, Any]:
         try:
             payload = json.loads(data)
         except json.JSONDecodeError as error:
@@ -94,9 +83,10 @@ class DbusAdapterRuntimeMixin:
         if not isinstance(payload, dict):
             return {"ok": False, "error": "request must be an object"}
         request_type = str(payload.get("type") or payload.get("kind") or "")
-        return self._socket_handlers().get(request_type, self._unsupported_socket_request)(payload, request_type)
+        handler = self._socket_handlers().get(request_type, self._unsupported_socket_request)
+        return handler(payload, request_type)
 
-    def _socket_handlers(self) -> dict[str, Callable[[dict[str, Any], str], dict[str, Any]]]:
+    def _socket_handlers(self: DbusAdapterRuntimeContext) -> dict[str, Callable[[dict[str, Any], str], dict[str, Any]]]:
         return {
             "snapshot": self._socket_snapshot,
             "health": self._socket_health,
@@ -107,13 +97,25 @@ class DbusAdapterRuntimeMixin:
             "set_value": self._socket_enqueue,
         }
 
-    def _socket_snapshot(self, _payload: dict[str, Any], _request_type: str) -> dict[str, Any]:
+    def _socket_snapshot(
+        self: DbusAdapterRuntimeContext,
+        _payload: dict[str, Any],
+        _request_type: str,
+    ) -> dict[str, Any]:
         return {"ok": True, "snapshot": self.cache.snapshot()}
 
-    def _socket_health(self, _payload: dict[str, Any], _request_type: str) -> dict[str, Any]:
+    def _socket_health(
+        self: DbusAdapterRuntimeContext,
+        _payload: dict[str, Any],
+        _request_type: str,
+    ) -> dict[str, Any]:
         return {"ok": True, "dbus_health": self._health_snapshot()}
 
-    def _socket_enqueue(self, payload: dict[str, Any], request_type: str) -> dict[str, Any]:
+    def _socket_enqueue(
+        self: DbusAdapterRuntimeContext,
+        payload: dict[str, Any],
+        request_type: str,
+    ) -> dict[str, Any]:
         self.commands.enqueue({**payload, "kind": request_type, "source": payload.get("source", "socket")})
         return {"ok": True}
 
@@ -121,13 +123,13 @@ class DbusAdapterRuntimeMixin:
     def _unsupported_socket_request(_payload: dict[str, Any], request_type: str) -> dict[str, Any]:
         return {"ok": False, "error": f"unsupported request type: {request_type}"}
 
-    def _ensure_dbus_service(self) -> None:
+    def _ensure_dbus_service(self: DbusAdapterRuntimeContext) -> None:
         if self._dbusservice is not None:
             return
         self._dbusservice = VeDbusService(self.service_name, register=False)
         self._register_identity_paths()
 
-    def _register_dbus_service_name(self) -> None:
+    def _register_dbus_service_name(self: DbusAdapterRuntimeContext) -> None:
         self._ensure_dbus_service()
         if self._dbusservice_registered:
             return
@@ -135,12 +137,15 @@ class DbusAdapterRuntimeMixin:
         self._dbusservice_registered = True
         logging.info("DBus adapter owns service %s", self.service_name)
 
-    def _register_identity_paths(self) -> None:
+    def _register_identity_paths(self: DbusAdapterRuntimeContext) -> None:
         defaults = self.config["DEFAULT"]
         for path, value in self._identity_path_values(defaults).items():
             self._add_owned_path(path, value)
 
-    def _identity_path_values(self, defaults: configparser.SectionProxy) -> dict[str, Any]:
+    def _identity_path_values(
+        self: DbusAdapterRuntimeContext,
+        defaults: configparser.SectionProxy,
+    ) -> dict[str, Any]:
         device_instance = self._device_instance(defaults)
         return {
             "/Mgmt/ProcessName": os.path.join(os.path.dirname(__file__), "venus_evcharger_service.py"),
@@ -174,7 +179,7 @@ class DbusAdapterRuntimeMixin:
             for key in ("MeterConfigPath", "SwitchConfigPath", "ChargerConfigPath")
         )
 
-    def _add_owned_path(self, path: str, value: Any) -> None:
+    def _add_owned_path(self: DbusAdapterRuntimeContext, path: str, value: Any) -> None:
         self._dbusservice.add_path(path, value)
         self.write_scheduler.registered_paths.add(path)
         self.write_scheduler.last_values[path] = value
