@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from venus_evcharger import dbus_gateway
 from venus_evcharger.dbus_gateway import (
+    CacheValueMetadata,
     DbusCacheStore,
     DbusCommandInbox,
     GatewayClient,
@@ -31,10 +32,24 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             store = DbusCacheStore(paths, stale_after_seconds=1.0)
 
             store.update_value("nested", {"tuple": (object(),)}, source="svc/path", now=10.0)
+            store.update_value(
+                "metadata",
+                2,
+                metadata=CacheValueMetadata(source="svc/metadata", status="cached", confidence=0.7, now=9.0),
+            )
+            store.update_value(
+                "metadata",
+                3,
+                metadata=CacheValueMetadata(source="old/source", now=9.5),
+                source="new/source",
+                confidence=0.8,
+            )
             fresh = store.snapshot(now=10.5)
             stale = store.snapshot(now=12.0)
             self.assertEqual(fresh["values"]["nested"]["status"], "fresh")
             self.assertEqual(stale["values"]["nested"]["status"], "stale")
+            self.assertEqual(fresh["values"]["metadata"]["source"], "new/source")
+            self.assertEqual(fresh["values"]["metadata"]["confidence"], 0.8)
             self.assertIn("object object", stale["values"]["nested"]["value"]["tuple"][0])
 
             store.mark_error("nested", source="svc/path", error="bad", now=13.0)

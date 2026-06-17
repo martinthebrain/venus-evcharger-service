@@ -23,6 +23,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from venus_evcharger.dbus_gateway import gateway_paths
 
+GUI_BURST_COMMAND_COUNT = 200
+GUI_BURST_DRAIN_TICKS = 50
+RESOURCE_PRESSURE_MIN_TICK_SECONDS = 0.3
+
 
 class _FakeDbusService(dict[str, Any]):
     def __init__(self) -> None:
@@ -77,7 +81,7 @@ def scenario_dbus_hang(temp_dir: str) -> None:
 
 def scenario_gui_burst(temp_dir: str) -> None:
     adapter = _adapter(temp_dir, "DbusGatewayLocalPublishTickBudgetMs=10\n")
-    for index in range(200):
+    for index in range(GUI_BURST_COMMAND_COUNT):
         path = f"/Chaos/{index}"
         adapter.write_scheduler.registered_paths.add(path)
         adapter.commands.enqueue(
@@ -89,14 +93,20 @@ def scenario_gui_burst(temp_dir: str) -> None:
                 "coalesce_key": f"publish:{path}",
             }
         )
-    first_tick = adapter.write_scheduler.process_local_publish_burst(200)
-    _assert(0 < first_tick < 200, f"first GUI burst tick should be bounded, got {first_tick}")
+    first_tick = adapter.write_scheduler.process_local_publish_burst(GUI_BURST_COMMAND_COUNT)
+    _assert(
+        0 < first_tick < GUI_BURST_COMMAND_COUNT,
+        f"first GUI burst tick should be bounded, got {first_tick}",
+    )
     processed = first_tick
-    for _index in range(50):
+    for _index in range(GUI_BURST_DRAIN_TICKS):
         if not adapter.commands.load_pending():
             break
-        processed += adapter.write_scheduler.process_local_publish_burst(200)
-    _assert(processed == 200, f"expected 200 GUI publishes across bounded ticks, got {processed}")
+        processed += adapter.write_scheduler.process_local_publish_burst(GUI_BURST_COMMAND_COUNT)
+    _assert(
+        processed == GUI_BURST_COMMAND_COUNT,
+        f"expected {GUI_BURST_COMMAND_COUNT} GUI publishes across bounded ticks, got {processed}",
+    )
     _assert(not adapter.commands.load_pending(), "GUI burst queue should drain")
 
 
@@ -133,7 +143,10 @@ def scenario_resource_pressure(temp_dir: str) -> None:
     adapter.tick_health.record(duration_ms=250.0, expected_interval_s=0.1, now=now)
     adapter._last_resource_snapshot = {"state": "ok"}
     adapter._update_adaptive_tick()
-    _assert(adapter.tick_seconds >= 0.3, "long tick pressure should slow adaptive tick")
+    _assert(
+        adapter.tick_seconds >= RESOURCE_PRESSURE_MIN_TICK_SECONDS,
+        "long tick pressure should slow adaptive tick",
+    )
 
 
 def run() -> dict[str, str]:

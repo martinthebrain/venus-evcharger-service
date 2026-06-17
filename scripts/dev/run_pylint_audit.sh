@@ -7,28 +7,21 @@ REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 
 cd "$REPO_DIR"
 
-if python3 -m ruff --version >/dev/null 2>&1; then
-    RUFF=(python3 -m ruff)
-elif [ -x "$REPO_DIR/.venv-ruff/bin/python" ]; then
-    RUFF=("$REPO_DIR/.venv-ruff/bin/python" -m ruff)
+if python3 -m pylint --version >/dev/null 2>&1; then
+    PYLINT=(python3 -m pylint)
+elif [ -x "$REPO_DIR/.venv-ruff/bin/python" ] && "$REPO_DIR/.venv-ruff/bin/python" -m pylint --version >/dev/null 2>&1; then
+    PYLINT=("$REPO_DIR/.venv-ruff/bin/python" -m pylint)
 else
-    echo "ruff is required for linting. Install it with: python3 -m venv .venv-ruff && .venv-ruff/bin/python -m pip install ruff" >&2
+    echo "pylint is required for the optional audit. Install it with: .venv-ruff/bin/python -m pip install pylint" >&2
     exit 1
 fi
 
-"${RUFF[@]}" check .
-"${RUFF[@]}" check \
-    --select ARG,B,C4,DTZ,E9,F,I,PIE,PLC,PLE,PLR0913,PLR2004,PLW,PERF,RET,RUF,SIM,UP \
-    --ignore B007,B904,RUF100 \
-    scripts/dev/check_dbus_isolation.py \
-    scripts/dev/dbus_gateway_chaos.py \
-    scripts/dev/pi_gateway_release_gate.py \
-    scripts/dev/pi_gateway_release_gate_assertions.py \
-    scripts/dev/pi_gateway_release_gate_common.py \
-    scripts/dev/pi_gateway_release_gate_health.py \
-    scripts/dev/pi_gateway_release_gate_remote.py \
-    scripts/dev/pi_gateway_release_gate_shelly.py \
-    scripts/dev/pi_gateway_release_gate_support.py \
+"${PYLINT[@]}" \
+    --persistent=n \
+    --reports=n \
+    --score=n \
+    --disable=all \
+    --enable=undefined-variable,used-before-assignment,unreachable,redefined-builtin,broad-exception-raised \
     venus_evcharger_dbus_adapter.py \
     venus_evcharger/dbus_adapter_components.py \
     venus_evcharger/dbus_adapter_components_rate.py \

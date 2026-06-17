@@ -9,6 +9,15 @@ from collections import deque
 from collections.abc import Mapping
 from typing import Any
 
+CPU_IDLE_INDEX = 3
+CPU_IOWAIT_INDEX = 4
+CONSTRAINED_LOAD_PER_CPU = 1.5
+CONSTRAINED_CPU_PERCENT = 90.0
+CONSTRAINED_MEM_AVAILABLE_KB = 32768.0
+BUSY_LOAD_PER_CPU = 1.0
+BUSY_CPU_PERCENT = 80.0
+BUSY_MEM_AVAILABLE_KB = 65536.0
+
 
 class TickHealth:
     """Rolling event-loop tick diagnostics without touching DBus."""
@@ -149,7 +158,9 @@ class ResourceMonitor:
         except OSError:
             return 0, 0
         values = [int(float(part)) for part in parts]
-        idle = (values[3] if len(values) > 3 else 0) + (values[4] if len(values) > 4 else 0)
+        idle = (values[CPU_IDLE_INDEX] if len(values) > CPU_IDLE_INDEX else 0) + (
+            values[CPU_IOWAIT_INDEX] if len(values) > CPU_IOWAIT_INDEX else 0
+        )
         return sum(values), idle
 
     def _read_process_cpu_seconds(self) -> float:
@@ -214,9 +225,16 @@ def _resource_state(load_per_cpu: float, cpu_pct: float, mem_available_kb: float
 
 
 def _resource_constrained(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> bool:
-    return load_per_cpu >= 1.5 or cpu_pct >= 90.0 or mem_available_kb < 32768.0
+    return (
+        load_per_cpu >= CONSTRAINED_LOAD_PER_CPU
+        or cpu_pct >= CONSTRAINED_CPU_PERCENT
+        or mem_available_kb < CONSTRAINED_MEM_AVAILABLE_KB
+    )
 
 
 def _resource_busy(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> bool:
-    return load_per_cpu >= 1.0 or cpu_pct >= 80.0 or mem_available_kb < 65536.0
-
+    return (
+        load_per_cpu >= BUSY_LOAD_PER_CPU
+        or cpu_pct >= BUSY_CPU_PERCENT
+        or mem_available_kb < BUSY_MEM_AVAILABLE_KB
+    )

@@ -12,6 +12,21 @@ import dbus
 
 from venus_evcharger.dbus_gateway import LatencyWindow
 
+DBUS_DEGRADED_TIMEOUTS_PER_MINUTE = 3
+DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE = 5
+PRIORITY_RANKS = {
+    "safety": 0,
+    "user": 1,
+    "publish": 2,
+    "read": 3,
+    "optional": 4,
+    "discovery": 5,
+    "diagnostic": 6,
+}
+PROTECTIVE_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["read"]
+DEGRADED_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["optional"]
+DEFAULT_PRIORITY_RANK = PRIORITY_RANKS["diagnostic"]
+
 
 class DbusOperationDeferred(RuntimeError):
     """Raised when rate limiting defers one DBus operation without blocking."""
@@ -83,9 +98,9 @@ class DbusCircuitBreaker:
             self.latencies.record_timeout(now=now)
             self._kind_window(kind).record_timeout(now=now)
             count = int(self.latencies.summary(now=now)["timeouts_60s"])
-            if count > 5:
+            if count > DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE:
                 self.protective_until = max(self.protective_until, now + self.protective_seconds)
-            elif count >= 3:
+            elif count >= DBUS_DEGRADED_TIMEOUTS_PER_MINUTE:
                 self.degraded_until = max(self.degraded_until, now + self.degraded_seconds)
 
     def state(self, *, now: float | None = None) -> str:
@@ -97,15 +112,12 @@ class DbusCircuitBreaker:
         return "ok"
 
     def allows_priority(self, priority: str) -> bool:
-        rank = {"safety": 0, "user": 1, "publish": 2, "read": 3, "optional": 4, "discovery": 5, "diagnostic": 6}.get(
-            str(priority or "diagnostic"),
-            6,
-        )
+        rank = PRIORITY_RANKS.get(str(priority or "diagnostic"), DEFAULT_PRIORITY_RANK)
         state = self.state()
         if state == "protective":
-            return rank <= 3
+            return rank <= PROTECTIVE_MAX_ALLOWED_PRIORITY_RANK
         if state == "degraded":
-            return rank <= 4
+            return rank <= DEGRADED_MAX_ALLOWED_PRIORITY_RANK
         return True
 
     def health(self) -> dict[str, Any]:

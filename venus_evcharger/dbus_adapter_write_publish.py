@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome
@@ -28,6 +29,15 @@ _QUEUE_CLASS_RANKS = {
     "diagnostic": 8,
 }
 
+
+@dataclass(frozen=True)
+class _LocalPublishCandidate:
+    processed: int
+    remaining_budget: int
+    pending_commands: list[tuple[str, dict[str, Any]]]
+    started: float
+
+
 class DbusWriteSchedulerPublishMixin:
     def process_local_publish_burst(self, limit: int | None = None) -> int:
         if not self.adapter._dbusservice_registered:
@@ -41,10 +51,12 @@ class DbusWriteSchedulerPublishMixin:
             action = self._process_local_publish_candidate(
                 path,
                 command,
-                processed=processed,
-                remaining_budget=remaining_budget,
-                pending_commands=pending_commands,
-                started=started,
+                _LocalPublishCandidate(
+                    processed=processed,
+                    remaining_budget=remaining_budget,
+                    pending_commands=pending_commands,
+                    started=started,
+                ),
             )
             processed, stop = _local_publish_action_result(processed, action)
             if stop:
@@ -55,17 +67,13 @@ class DbusWriteSchedulerPublishMixin:
         self,
         path: str,
         command: Mapping[str, Any],
-        *,
-        processed: int,
-        remaining_budget: int,
-        pending_commands: list[tuple[str, dict[str, Any]]],
-        started: float,
+        candidate: _LocalPublishCandidate,
     ) -> str:
-        if self._local_publish_burst_done(processed, remaining_budget, started):
+        if self._local_publish_burst_done(candidate.processed, candidate.remaining_budget, candidate.started):
             return "break"
         if self._skip_local_publish_command(command):
             return "skip"
-        outcome = self._process_loaded_command(path, command, pending_commands=pending_commands)
+        outcome = self._process_loaded_command(path, command, pending_commands=candidate.pending_commands)
         return "processed" if outcome in ("applied", "dropped") else "break"
 
     def _local_publish_burst_done(self, processed: int, remaining_budget: int, started: float) -> bool:

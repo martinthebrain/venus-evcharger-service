@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from venus_evcharger.core.shared import write_text_atomically
@@ -35,6 +36,35 @@ def _snapshot_too_old(captured_at: float, current: float, max_age_seconds: float
     return max_age_seconds >= 0.0 and current - captured_at > float(max_age_seconds)
 
 
+@dataclass(frozen=True)
+class CacheValueMetadata:
+    source: str
+    status: str = "fresh"
+    confidence: float = 1.0
+    last_error: str = ""
+    now: float | None = None
+
+
+def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[str, Any]) -> CacheValueMetadata:
+    if metadata is not None:
+        if fields:
+            return CacheValueMetadata(
+                source=str(fields.get("source", metadata.source)),
+                status=str(fields.get("status", metadata.status)),
+                confidence=float(fields.get("confidence", metadata.confidence)),
+                last_error=str(fields.get("last_error", metadata.last_error)),
+                now=fields.get("now", metadata.now),
+            )
+        return metadata
+    return CacheValueMetadata(
+        source=str(fields.get("source", "")),
+        status=str(fields.get("status", "fresh")),
+        confidence=float(fields.get("confidence", 1.0)),
+        last_error=str(fields.get("last_error", "")),
+        now=fields.get("now"),
+    )
+
+
 class DbusCacheStore:
     """RAM-owned DBus value cache with freshness and health metadata."""
 
@@ -57,21 +87,19 @@ class DbusCacheStore:
         key: str,
         value: Any,
         *,
-        source: str,
-        status: str = "fresh",
-        confidence: float = 1.0,
-        last_error: str = "",
-        now: float | None = None,
+        metadata: CacheValueMetadata | None = None,
+        **metadata_fields: Any,
     ) -> None:
-        current = _now() if now is None else float(now)
+        details = _cache_value_metadata(metadata, metadata_fields)
+        current = _now() if details.now is None else float(details.now)
         self.values[str(key)] = {
             "value": _json_ready(value),
-            "source": str(source),
+            "source": str(details.source),
             "updated_at": current,
             "age_s": 0.0,
-            "status": str(status),
-            "last_error": str(last_error),
-            "confidence": float(confidence),
+            "status": str(details.status),
+            "last_error": str(details.last_error),
+            "confidence": float(details.confidence),
         }
         self.sequence += 1
 
@@ -155,4 +183,3 @@ class DbusCacheStore:
             return None
         item = values.get(key)
         return dict(item) if isinstance(item, Mapping) else None
-

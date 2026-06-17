@@ -11,7 +11,7 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 
-from venus_evcharger.dbus_gateway_cache import DbusCacheStore
+from venus_evcharger.dbus_gateway_cache import CacheValueMetadata, DbusCacheStore
 from venus_evcharger.dbus_gateway_client import GatewayClient, GatewayDbusServiceProxy, gateway_value
 from venus_evcharger.dbus_gateway_commands import DbusCommandInbox
 from venus_evcharger.dbus_gateway_core import (
@@ -49,6 +49,7 @@ __all__ = [
     "GUI_CRITICAL_PUBLISH_PATHS",
     "PRIORITY_VALUES",
     "PUBLISH_PATH_RANKS",
+    "CacheValueMetadata",
     "DbusCacheStore",
     "DbusCommandInbox",
     "GatewayClient",

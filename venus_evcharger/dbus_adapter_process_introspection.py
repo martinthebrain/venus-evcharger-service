@@ -20,6 +20,8 @@ from venus_evcharger.core.shared import compact_json, write_text_atomically
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterIntrospectionContext
 
+OPTIONAL_INTROSPECTION_PRIORITY_MIN = 90
+
 
 class DbusAdapterIntrospectionMixin:
     def _process_introspection_requests_once(self: DbusAdapterIntrospectionContext) -> None:
@@ -78,7 +80,7 @@ class DbusAdapterIntrospectionMixin:
                 "kind": "introspect",
                 "service": service,
                 "path": path,
-                "priority": "discovery" if priority < 90 else "optional",
+                "priority": "discovery" if priority < OPTIONAL_INTROSPECTION_PRIORITY_MIN else "optional",
                 "source": source,
                 "reason": reason,
                 "timeout": float(self.config["DEFAULT"].get("DbusIntrospectionTimeoutSeconds", 1.0) or 1.0),

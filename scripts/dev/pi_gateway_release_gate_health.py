@@ -9,6 +9,11 @@ from typing import Any
 
 from pi_gateway_release_gate_common import GateFailure, PiSession
 
+MAX_OLD_COMMAND_AGE_SECONDS = 30.0
+MAX_PENDING_COMMANDS = 80
+MAX_TICK_GAP_MS = 1500.0
+MAX_FRESH_CORE_VALUE_AGE_SECONDS = 10.0
+
 
 def wait_for_healthy_gateway(pi: PiSession, run_dir: str, *, timeout: float, poll_seconds: float) -> dict[str, Any]:
     deadline = time.time() + max(0.1, float(timeout))
@@ -52,15 +57,15 @@ def _health_state_failures(health: dict[str, Any]) -> list[str]:
 
 def _health_queue_failures(queues: dict[str, Any]) -> list[str]:
     failures: list[str] = []
-    if float(queues.get("oldest_command_age_s", 0.0) or 0.0) > 30.0:
+    if float(queues.get("oldest_command_age_s", 0.0) or 0.0) > MAX_OLD_COMMAND_AGE_SECONDS:
         failures.append(f"old command age {queues.get('oldest_command_age_s')}s")
-    if int(queues.get("pending_command_count", 0) or 0) > 80:
+    if int(queues.get("pending_command_count", 0) or 0) > MAX_PENDING_COMMANDS:
         failures.append(f"too many pending commands {queues.get('pending_command_count')}")
     return failures
 
 
 def _health_eventloop_failures(eventloop: dict[str, Any]) -> list[str]:
-    if float(eventloop.get("max_tick_gap_ms_60s", 0.0) or 0.0) <= 1500.0:
+    if float(eventloop.get("max_tick_gap_ms_60s", 0.0) or 0.0) <= MAX_TICK_GAP_MS:
         return []
     return [f"event-loop gap {eventloop.get('max_tick_gap_ms_60s')}ms"]
 
@@ -77,4 +82,4 @@ def _health_freshness_failures(freshness: dict[str, Any]) -> list[str]:
 def _health_freshness_failure(freshness: dict[str, Any], key: str) -> str:
     status = freshness.get(f"{key}_status")
     age = float(freshness.get(f"{key}_age_s", 0.0) or 0.0)
-    return f"{key} age {age}s" if status == "fresh" and age > 10.0 else ""
+    return f"{key} age {age}s" if status == "fresh" and age > MAX_FRESH_CORE_VALUE_AGE_SECONDS else ""
