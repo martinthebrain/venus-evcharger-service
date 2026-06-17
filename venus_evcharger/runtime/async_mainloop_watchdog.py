@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
 """Companion publishing and mainloop watchdog helpers."""
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from typing import Any
 
 
 class _RuntimeSupportAsyncMainloopWatchdogMixin:
-    def flush_companion_dbus_publish_queue(self) -> bool:
+    def flush_companion_dbus_publish_queue(self: Any) -> bool:
         """Run any coalesced companion-service publish in the GLib thread."""
         svc = self.service
         with svc._companion_publish_lock:
@@ -28,12 +27,12 @@ class _RuntimeSupportAsyncMainloopWatchdogMixin:
         self.assert_dbus_mainloop_thread("companion DBus publish flush")
         return bool(bridge.publish(publish_now))
 
-    def mainloop_heartbeat_tick(self) -> bool:
+    def mainloop_heartbeat_tick(self: Any) -> bool:
         """Update an in-RAM heartbeat from the GLib thread."""
         self.service._mainloop_heartbeat_at = time.time()
         return True
 
-    def start_mainloop_watchdog(self) -> None:
+    def start_mainloop_watchdog(self: Any) -> None:
         """Start a companion thread that proves and recovers GLib mainloop hangs."""
         svc = self.service
         if getattr(svc, "_mainloop_watchdog_thread", None) is not None:
@@ -42,7 +41,7 @@ class _RuntimeSupportAsyncMainloopWatchdogMixin:
         svc._mainloop_watchdog_thread = thread
         thread.start()
 
-    def _mainloop_watchdog_loop(self) -> None:
+    def _mainloop_watchdog_loop(self: Any) -> None:
         svc = self.service
         while not svc._mainloop_watchdog_stop_event.wait(
             self._float_attr(getattr(svc, "_mainloop_watchdog_interval_seconds", 1.0), 1.0)

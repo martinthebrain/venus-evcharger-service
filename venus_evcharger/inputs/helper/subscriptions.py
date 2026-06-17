@@ -7,6 +7,7 @@ service. It periodically writes a compact JSON snapshot that the main process
 can consume safely, even if DBus becomes slow or temporarily inconsistent.
 """
 
+import logging
 import time
 from typing import Any
 
@@ -301,13 +302,16 @@ class _AutoInputHelperSubscriptionMixin:
         self._ensure_poll_state()
         if self._name_owner_match is not None:
             return
-        self._name_owner_match = _GatewaySignalMatch()
         gateway_client = getattr(self, "_gateway_client", None)
-        if callable(gateway_client):
-            try:
-                gateway_client().enqueue_command({"kind": "refresh_services", "priority": "normal"})
-            except Exception:  # pylint: disable=broad-except
-                pass
+        if not callable(gateway_client):
+            logging.debug("Gateway service refresh request skipped; gateway client is unavailable")
+            return
+        try:
+            gateway_client().enqueue_command({"kind": "refresh_services", "priority": "normal"})
+        except Exception as error:  # pylint: disable=broad-except
+            logging.debug("Gateway service refresh request failed: %s", error)
+            return
+        self._name_owner_match = _GatewaySignalMatch()
 
     def _clear_all_signal_matches(self: Any) -> None:
         for key in list(getattr(self, "_signal_matches", {})):

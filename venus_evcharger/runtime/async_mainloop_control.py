@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
 """Async control command queue helpers."""
 
 from __future__ import annotations
@@ -8,14 +7,14 @@ from collections import OrderedDict
 import logging
 import threading
 import time
-from typing import cast
+from typing import Any, cast
 
 from venus_evcharger.control import ControlCommand
 from venus_evcharger.runtime.async_mainloop_types import QueuedControlCommand
 
 
 class _RuntimeSupportAsyncMainloopControlMixin:
-    def enqueue_control_command(self, command: ControlCommand) -> bool:
+    def enqueue_control_command(self: Any, command: ControlCommand) -> bool:
         """Coalesce DBus control commands for a background worker."""
         svc = self.service
         if not bool(getattr(svc, "_control_command_async_enabled", False)):
@@ -36,17 +35,17 @@ class _RuntimeSupportAsyncMainloopControlMixin:
             svc._runtime_executor_event.set()
         return True
 
-    def start_control_command_worker(self) -> None:
+    def start_control_command_worker(self: Any) -> None:
         """Enable DBus command execution in the serialized runtime executor."""
         svc = self.service
         svc._control_command_async_enabled = True
         self._start_runtime_executor()
 
-    def _control_command_worker_loop(self) -> None:
+    def _control_command_worker_loop(self: Any) -> None:
         """Compatibility entry point for older tests; use the serialized executor."""
         self._runtime_executor_loop()
 
-    def _drain_control_commands_once(self) -> bool:
+    def _drain_control_commands_once(self: Any) -> bool:
         svc = self.service
         with svc._control_command_lock:
             pending = cast("OrderedDict[str, QueuedControlCommand]", svc._control_command_pending)

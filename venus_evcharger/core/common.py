@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import threading
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -89,7 +88,6 @@ confirmed_relay_state_max_age_seconds = _confirmed_relay_state_max_age_seconds
 derive_auto_state = _derive_auto_state
 evse_fault_reason = _evse_fault_reason
 fresh_confirmed_relay_output = _fresh_confirmed_relay_output
-_SCHEDULED_MODE_SNAPSHOT_LOCK = threading.Lock()
 
 
 def local_datetime_from_timestamp(timestamp: float, timezone_name: str = "UTC") -> datetime:
@@ -107,13 +105,9 @@ def local_datetime_from_timestamp(timestamp: float, timezone_name: str = "UTC") 
 
 def scheduled_mode_snapshot(*args: object, **kwargs: object) -> ScheduledModeSnapshot:
     """Delegate through the wrapper so tests may patch local schedule helpers."""
-    with _SCHEDULED_MODE_SNAPSHOT_LOCK:
-        original = _common_schedule_module._scheduled_target_day
-        _common_schedule_module._scheduled_target_day = _scheduled_target_day
-        try:
-            return _common_schedule_module.scheduled_mode_snapshot(*args, **kwargs)  # type: ignore[arg-type]
-        finally:
-            _common_schedule_module._scheduled_target_day = original
+    snapshot_kwargs = dict(kwargs)
+    snapshot_kwargs.setdefault("target_day_func", _scheduled_target_day)
+    return _common_schedule_module.scheduled_mode_snapshot(*args, **snapshot_kwargs)  # type: ignore[arg-type]
 
 
 __all__ = [

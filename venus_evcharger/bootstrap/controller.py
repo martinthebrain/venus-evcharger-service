@@ -81,9 +81,6 @@ from venus_evcharger.bootstrap.config import _ServiceBootstrapConfigMixin
 from venus_evcharger.bootstrap.paths import _ServiceBootstrapPathMixin
 from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntimeMixin
 
-_TEST_PATCH_EXPORTS = (time,)
-
-
 class ServiceBootstrapController(
     _ServiceBootstrapConfigMixin,
     _ServiceBootstrapRuntimeMixin,

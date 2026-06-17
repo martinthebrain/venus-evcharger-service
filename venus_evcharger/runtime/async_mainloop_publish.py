@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
 """Coalesced DBus publish queue helpers."""
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from venus_evcharger.runtime.async_mainloop_types import QueuedPublishValue
 
 
 class _RuntimeSupportAsyncMainloopPublishMixin:
-    def enqueue_dbus_publish_values(self, values: list[tuple[str, Any]], current: float) -> bool:
+    def enqueue_dbus_publish_values(self: Any, values: list[tuple[str, Any]], current: float) -> bool:
         """Coalesce DBus path writes for the GLib thread."""
         svc = self.service
         if not values:
@@ -52,7 +51,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
         if pending:
             svc._dbus_publish_oldest_queued_at = min(item[2] for item in pending.values())
 
-    def enqueue_dbus_update_index_bump(self, current: float) -> None:
+    def enqueue_dbus_update_index_bump(self: Any, current: float) -> None:
         """Queue an UpdateIndex bump for the GLib thread."""
         svc = self.service
         with svc._dbus_publish_queue_lock:
@@ -60,7 +59,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             if getattr(svc, "_dbus_publish_oldest_queued_at", None) is None:
                 svc._dbus_publish_oldest_queued_at = time.time()
 
-    def enqueue_companion_dbus_publish(self, now: float | None = None) -> bool:
+    def enqueue_companion_dbus_publish(self: Any, now: float | None = None) -> bool:
         """Coalesce optional companion-service publishes for the GLib thread."""
         svc = self.service
         with svc._companion_publish_lock:
@@ -76,7 +75,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
         svc._dbusservice["/UpdateIndex"] = next_index
         svc._dbus_publish_state["/UpdateIndex"] = {"value": next_index, "updated_at": current}
 
-    def flush_dbus_publish_queue(self) -> bool:
+    def flush_dbus_publish_queue(self: Any) -> bool:
         """Apply queued DBus writes quickly from the GLib thread."""
         svc = self.service
         if not hasattr(svc, "_dbusservice"):
@@ -134,13 +133,13 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             mark_failure("dbus")
         logging.warning("DBus publish queue failed for paths %s", ",".join(failed_paths))
 
-    def _flush_update_index_bumps(self, svc: Any, now: float, bump_count: int) -> None:
+    def _flush_update_index_bumps(self: Any, svc: Any, now: float, bump_count: int) -> None:
         """Flush queued UpdateIndex bumps."""
         for _index in range(max(0, bump_count)):
             if not self._bump_update_index_best_effort(svc, now):
                 break
 
-    def _bump_update_index_best_effort(self, svc: Any, now: float) -> bool:
+    def _bump_update_index_best_effort(self: Any, svc: Any, now: float) -> bool:
         """Bump UpdateIndex and report whether more bumps should be attempted."""
         try:
             self._bump_update_index_direct(svc, now)
@@ -149,7 +148,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             logging.warning("DBus publish queue failed to bump /UpdateIndex")
             return False
 
-    def _record_publish_flush_duration(self, svc: Any, started: float) -> None:
+    def _record_publish_flush_duration(self: Any, svc: Any, started: float) -> None:
         """Record and budget-check publish flush duration."""
         duration = time.monotonic() - started
         svc._last_publish_flush_duration_seconds = duration

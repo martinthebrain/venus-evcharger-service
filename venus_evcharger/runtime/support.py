@@ -26,10 +26,6 @@ ErrorState = dict[str, int]
 FailureState = dict[str, bool]
 DefaultFactory = Callable[[], Any]
 
-# Tests patch these module-level symbols directly to exercise failure paths.
-_TEST_PATCH_EXPORTS = (logging, os, write_text_atomically)
-
-
 from venus_evcharger.runtime.audit import _RuntimeSupportAuditMixin
 from venus_evcharger.runtime.async_mainloop import _RuntimeSupportAsyncMainloopMixin
 from venus_evcharger.runtime.health import _RuntimeSupportHealthMixin

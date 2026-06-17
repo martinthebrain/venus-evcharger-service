@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
 """Async runtime state and DBus-thread guards."""
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ class _RuntimeSupportAsyncMainloopStateMixin:
     def _float_attr(value: Any, default: float = 0.0) -> float:
         return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float(default)
 
-    def initialize_async_runtime_state(self) -> None:
+    def initialize_async_runtime_state(self: Any) -> None:
         """Initialize RAM-only queues, worker flags, and timing diagnostics."""
         svc = self.service
         now = time.time()
@@ -76,13 +75,13 @@ class _RuntimeSupportAsyncMainloopStateMixin:
         )
         svc._mainloop_watchdog_log_path = "/run/dbus-venus-evcharger-mainloop-hang.log"
 
-    def mark_mainloop_thread(self) -> None:
+    def mark_mainloop_thread(self: Any) -> None:
         """Remember which thread owns VeDbusService writes."""
         svc = self.service
         svc._dbus_mainloop_thread_id = threading.get_ident()
         svc._dbus_async_publish_enabled = True
 
-    def dbus_publish_direct_allowed(self) -> bool:
+    def dbus_publish_direct_allowed(self: Any) -> bool:
         """Return whether the caller may touch ``VeDbusService`` directly."""
         svc = self.service
         if not bool(getattr(svc, "_dbus_async_publish_enabled", False)):
@@ -90,7 +89,7 @@ class _RuntimeSupportAsyncMainloopStateMixin:
         mainloop_thread_id = getattr(svc, "_dbus_mainloop_thread_id", None)
         return mainloop_thread_id is None or threading.get_ident() == int(mainloop_thread_id)
 
-    def assert_dbus_mainloop_thread(self, operation: str = "dbus access") -> None:
+    def assert_dbus_mainloop_thread(self: Any, operation: str = "dbus access") -> None:
         """Raise when code tries to touch a DBus service outside the GLib thread."""
         if self.dbus_publish_direct_allowed():
             return

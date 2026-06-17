@@ -41,6 +41,11 @@ python3 -m py_compile \
     venus_evcharger/dbus_gateway_latency.py \
     venus_evcharger/dbus_gateway_policy.py \
     scripts/dev/pi_gateway_release_gate.py \
+    scripts/dev/pi_gateway_release_gate_assertions.py \
+    scripts/dev/pi_gateway_release_gate_common.py \
+    scripts/dev/pi_gateway_release_gate_health.py \
+    scripts/dev/pi_gateway_release_gate_remote.py \
+    scripts/dev/pi_gateway_release_gate_shelly.py \
     scripts/dev/pi_gateway_release_gate_support.py \
     venus_evcharger/core/common.py \
     venus_evcharger/ports/__init__.py \

@@ -9,8 +9,6 @@ from typing import Any
 from venus_evcharger.inputs.pv import _DbusInputPvMixin
 from venus_evcharger.inputs.storage import _DbusInputStorageMixin
 
-_TEST_PATCH_EXPORTS = (time,)
-
 
 class DbusInputController(_DbusInputPvMixin, _DbusInputStorageMixin):
     """Encapsulate PV, battery, and grid DBus discovery/reads for the main service."""

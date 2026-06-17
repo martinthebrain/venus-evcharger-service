@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from configparser import ConfigParser
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -201,8 +201,9 @@ def _scheduled_snapshot_context(
     enabled_days: Any,
     delay_seconds: float,
     latest_end_time: Any,
+    target_day_func: Callable[[datetime, dict[int, tuple[TimeWindow, TimeWindow]] | None], date] = _scheduled_target_day,
 ) -> _ScheduledSnapshotContext:
-    target_date = _scheduled_target_day(when, month_windows)
+    target_date = target_day_func(when, month_windows)
     target_day_index = int(target_date.weekday())
     enabled_tuple = normalize_scheduled_enabled_days(enabled_days)
     start_minutes, end_minutes = _window_minutes_for_date(target_date, month_windows)
@@ -289,8 +290,16 @@ def scheduled_mode_snapshot(
     enabled_days: Any,
     delay_seconds: float = 3600.0,
     latest_end_time: Any = "06:30",
+    target_day_func: Callable[[datetime, dict[int, tuple[TimeWindow, TimeWindow]] | None], date] = _scheduled_target_day,
 ) -> ScheduledModeSnapshot:
-    context = _scheduled_snapshot_context(when, month_windows, enabled_days, delay_seconds, latest_end_time)
+    context = _scheduled_snapshot_context(
+        when,
+        month_windows,
+        enabled_days,
+        delay_seconds,
+        latest_end_time,
+        target_day_func,
+    )
     if _scheduled_daytime_window_active(when, context):
         return _scheduled_snapshot(context, "auto-window", "daytime-auto", target_day_enabled=context.target_enabled)
     if not context.target_enabled:

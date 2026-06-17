@@ -60,15 +60,3 @@ class ServiceStateController(
             )
         return self._apply_runtime_overrides_to_config(self.service, config)
 
-
-_PATCH_EXPORTS = (
-    time,
-    compact_json,
-    write_text_atomically,
-    RuntimeOverrideSpec,
-    RUNTIME_OVERRIDE_SPECS,
-    RUNTIME_OVERRIDE_BY_PATH,
-    RUNTIME_OVERRIDE_BY_CONFIG_KEY,
-    RUNTIME_OVERRIDE_SECTION,
-    _CasePreservingConfigParser,
-)
