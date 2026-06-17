@@ -118,16 +118,20 @@ class DbusCommandInbox:
             return
 
     def remove_coalesced(self, coalesce_key: str) -> int:
-        removed = 0
         normalized_key = str(coalesce_key or "").strip()
-        if not normalized_key:
-            return removed
-        for path, command in self.load_pending():
-            if str(command.get("coalesce_key") or "") != normalized_key:
-                continue
+        paths = self._coalesced_paths(normalized_key)
+        for path in paths:
             self.remove(path)
-            removed += 1
-        return removed
+        return len(paths)
+
+    def _coalesced_paths(self, coalesce_key: str) -> list[str]:
+        if not coalesce_key:
+            return []
+        return [
+            path
+            for path, command in self.load_pending()
+            if str(command.get("coalesce_key") or "") == coalesce_key
+        ]
 
     @staticmethod
     def coalesce(commands: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
