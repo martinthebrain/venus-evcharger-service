@@ -6,6 +6,7 @@ omit =
     examples/*
     scripts/*
     venus_evcharger/backend/cerbo_gx_relay_switch.py
+    venus_evcharger/dbus_adapter_process_protocols.py
     venus_evcharger/inputs/helper/sources_dbus.py
     venus_evcharger/inputs/helper/subscriptions.py
     venus_evcharger/inputs/pv.py
@@ -25,6 +26,7 @@ omit =
     examples/*
     scripts/*
     venus_evcharger/backend/cerbo_gx_relay_switch.py
+    venus_evcharger/dbus_adapter_process_protocols.py
     venus_evcharger/inputs/helper/sources_dbus.py
     venus_evcharger/inputs/helper/subscriptions.py
     venus_evcharger/inputs/pv.py
