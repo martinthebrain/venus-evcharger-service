@@ -15,6 +15,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
                     "paths": {
                         "/Missing": {"status": "known-missing"},
                         "/Slow": {"status": "unresponsive-backoff"},
+                        "/Odd": [],
                     }
                 },
                 "svc.odd": {"paths": []},

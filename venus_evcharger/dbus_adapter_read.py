@@ -25,35 +25,48 @@ class DbusReadExecutor:
         key = str(command.get("key") or "")
         if key in self.adapter.read_scheduler.specs:
             return self.poll_read_spec(key, self.adapter.read_scheduler.specs[key])
+        return self._refresh_direct_value(command)
+
+    def _refresh_direct_value(self, command: Mapping[str, Any]) -> CommandOutcome:
         service = str(command.get("service") or "")
         path = str(command.get("path") or "")
-        if service and path:
-            value = self.read_busitem(service, path)
-            self.adapter.cache.update_value(dbus_path_key(service, path), value, source=f"{service}{path}")
-            return "applied"
-        return "dropped"
+        if not service or not path:
+            return "dropped"
+        value = self.read_busitem(service, path)
+        self.adapter.cache.update_value(dbus_path_key(service, path), value, source=f"{service}{path}")
+        return "applied"
 
     def poll_read_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
         self.last_operation_performed = False
         try:
-            if spec.get("aggregate") == "sum":
-                return self._poll_sum_step(key, spec)
-            if spec.get("aggregate") == "services-sum":
-                return self._poll_services_sum_step(key, spec)
-            if spec.get("aggregate") == "first-service":
-                return self._poll_first_service(key, spec)
-            service = str(spec.get("service") or "")
-            path = str(spec.get("path") or "")
-            value = self.read_busitem(service, path)
-            self.adapter.cache.update_value(key, value, source=f"{service}{path}")
-            return "applied"
+            return self._poll_read_spec_unchecked(key, spec)
         except DbusOperationDeferred:
             return "deferred"
         except Exception as error:  # pylint: disable=broad-except
-            self._aggregate_state.pop(key, None)
-            self.adapter.cache.mark_error(key, source=str(spec.get("service") or spec.get("prefix") or ""), error=error)
-            logging.debug("DBus adapter read failed key=%s: %s", key, error)
+            self._mark_read_error(key, spec, error)
             return "dropped"
+
+    def _poll_read_spec_unchecked(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
+        aggregate = str(spec.get("aggregate") or "")
+        handlers = {
+            "sum": self._poll_sum_step,
+            "services-sum": self._poll_services_sum_step,
+            "first-service": self._poll_first_service,
+        }
+        handler = handlers.get(aggregate)
+        return handler(key, spec) if handler else self._poll_direct_spec(key, spec)
+
+    def _poll_direct_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
+        service = str(spec.get("service") or "")
+        path = str(spec.get("path") or "")
+        value = self.read_busitem(service, path)
+        self.adapter.cache.update_value(key, value, source=f"{service}{path}")
+        return "applied"
+
+    def _mark_read_error(self, key: str, spec: Mapping[str, Any], error: BaseException) -> None:
+        self._aggregate_state.pop(key, None)
+        self.adapter.cache.mark_error(key, source=str(spec.get("service") or spec.get("prefix") or ""), error=error)
+        logging.debug("DBus adapter read failed key=%s: %s", key, error)
 
     def _poll_sum_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
         service = str(spec.get("service"))
@@ -65,12 +78,7 @@ class DbusReadExecutor:
 
     def _poll_services_sum_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
         path = str(spec.get("path") or "")
-        explicit = str(spec.get("service") or "")
-        if explicit:
-            services = [explicit]
-        else:
-            prefix = str(spec.get("prefix") or "")
-            services = sorted(name for name in self.adapter.cache.services if name.startswith(prefix))
+        services = self._services_for_sum(spec)
         if not services:
             raise RuntimeError(f"No cached services for prefix '{spec.get('prefix', '')}'")
         return self._poll_aggregate_step(key, ("services-sum", path, tuple(services)), [(service, path) for service in services])
@@ -78,13 +86,20 @@ class DbusReadExecutor:
     def _poll_first_service(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:
         path = str(spec.get("path") or "")
         prefix = str(spec.get("prefix") or "")
-        services = sorted(name for name in self.adapter.cache.services if name.startswith(prefix))
+        services = self._prefixed_services(prefix)
         if not services:
             raise RuntimeError(f"No cached services for prefix '{prefix}'")
         service = services[0]
         value = self.read_busitem(service, path)
         self.adapter.cache.update_value(key, value, source=f"{service}{path}")
         return "applied"
+
+    def _services_for_sum(self, spec: Mapping[str, Any]) -> list[str]:
+        explicit = str(spec.get("service") or "")
+        return [explicit] if explicit else self._prefixed_services(str(spec.get("prefix") or ""))
+
+    def _prefixed_services(self, prefix: str) -> list[str]:
+        return sorted(name for name in self.adapter.cache.services if name.startswith(prefix))
 
     def _poll_aggregate_step(
         self,
@@ -100,16 +115,24 @@ class DbusReadExecutor:
         service, path = members[index]
         value = self.read_busitem(service, path)
         self.last_operation_performed = True
-        if value is not None:
-            state["total"] = float(state.get("total", 0.0)) + float(value)
-            state["sources"] = [*list(state.get("sources", [])), f"{service}{path}"]
+        self._record_aggregate_member(state, service, path, value)
         state["index"] = index + 1
         if state["index"] < len(members):
             return "deferred"
+        self._complete_aggregate(key, state)
+        return "applied"
+
+    @staticmethod
+    def _record_aggregate_member(state: dict[str, Any], service: str, path: str, value: Any) -> None:
+        if value is None:
+            return
+        state["total"] = float(state.get("total", 0.0)) + float(value)
+        state["sources"] = [*list(state.get("sources", [])), f"{service}{path}"]
+
+    def _complete_aggregate(self, key: str, state: Mapping[str, Any]) -> None:
         sources = list(state.get("sources", []))
         self.adapter.cache.update_value(key, state.get("total", 0.0), source=",".join(sources) if sources else key)
         self._aggregate_state.pop(key, None)
-        return "applied"
 
     def read_busitem(self, service: str, path: str) -> Any:
         if not service or not path:

@@ -162,21 +162,45 @@ def validate_wallbox_config(path: str) -> dict[str, object]:
 
 def _dbus_introspection_probe_summary(defaults: configparser.SectionProxy) -> dict[str, object]:
     deviceinstance = int(float(defaults.get("DeviceInstance", "60") or 60))
-    snapshot_path = defaults.get(
+    snapshot_path = _dbus_introspection_snapshot_path(defaults, deviceinstance)
+    snapshot = _dbus_introspection_snapshot(defaults, snapshot_path)
+    services = snapshot.get("services", {}) if isinstance(snapshot, dict) else {}
+    return {
+        "enabled": _dbus_introspection_enabled(defaults),
+        "snapshot_path": snapshot_path,
+        "snapshot_fresh": bool(snapshot),
+        "worker_state": _dbus_introspection_worker_state(snapshot),
+        "queue_depth": _dbus_introspection_queue_depth(snapshot),
+        "service_count": _dbus_introspection_service_count(services),
+    }
+
+
+def _dbus_introspection_snapshot_path(defaults: configparser.SectionProxy, deviceinstance: int) -> str:
+    return defaults.get(
         "DbusIntrospectionSnapshotPath",
         f"/run/dbus-venus-evcharger-dbus-map-{deviceinstance}.json",
     ).strip()
+
+
+def _dbus_introspection_snapshot(defaults: configparser.SectionProxy, snapshot_path: str) -> dict[str, object]:
     max_age_seconds = float(defaults.get("DbusIntrospectionMaxAgeSeconds", "900") or 900)
-    snapshot = load_introspection_snapshot(snapshot_path, max_age_seconds=max_age_seconds)
-    services = snapshot.get("services", {}) if isinstance(snapshot, dict) else {}
-    return {
-        "enabled": defaults.get("DbusIntrospectionEnabled", "1").strip().lower() in ("1", "true", "yes", "on"),
-        "snapshot_path": snapshot_path,
-        "snapshot_fresh": bool(snapshot),
-        "worker_state": str(snapshot.get("worker_state", "")) if snapshot else "",
-        "queue_depth": int(snapshot.get("queue_depth", 0) or 0) if snapshot else 0,
-        "service_count": len(services) if isinstance(services, dict) else 0,
-    }
+    return load_introspection_snapshot(snapshot_path, max_age_seconds=max_age_seconds)
+
+
+def _dbus_introspection_enabled(defaults: configparser.SectionProxy) -> bool:
+    return defaults.get("DbusIntrospectionEnabled", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _dbus_introspection_worker_state(snapshot: object) -> str:
+    return str(snapshot.get("worker_state", "")) if isinstance(snapshot, dict) else ""
+
+
+def _dbus_introspection_queue_depth(snapshot: object) -> int:
+    return int(snapshot.get("queue_depth", 0) or 0) if isinstance(snapshot, dict) else 0
+
+
+def _dbus_introspection_service_count(services: object) -> int:
+    return len(services) if isinstance(services, dict) else 0
 
 
 def probe_meter_backend(path: str) -> dict[str, object]:

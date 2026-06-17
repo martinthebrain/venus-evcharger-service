@@ -326,7 +326,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         service._mainloop_watchdog_stop_event = SimpleNamespace(wait=MagicMock(return_value=False))
 
         with (
-            patch("venus_evcharger.runtime.async_mainloop.time.time", return_value=10.0),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=10.0),
             patch.object(RuntimeSupportController, "_dump_mainloop_watchdog_traceback") as dump_traceback,
             patch.object(RuntimeSupportController, "_exit_for_mainloop_watchdog", side_effect=SystemExit) as exit_restart,
             self.assertRaises(SystemExit),
@@ -354,15 +354,19 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         controller.initialize_runtime_support()
         controller.mark_mainloop_thread()
         errors: list[Exception] = []
+        done = threading.Event()
 
         def worker() -> None:
             try:
                 controller.assert_dbus_mainloop_thread("test dbus write")
             except Exception as error:  # pylint: disable=broad-except
                 errors.append(error)
+            finally:
+                done.set()
 
         thread = threading.Thread(target=worker)
         thread.start()
+        self.assertTrue(done.wait(1.0))
         thread.join(1.0)
 
         self.assertEqual(len(errors), 1)
@@ -395,7 +399,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         service._dbusservice = FailingDbus({"/UpdateIndex": 255})
         service._mark_failure = MagicMock()
         service._dbus_publish_budget_seconds = -1.0
-        with patch("venus_evcharger.runtime.async_mainloop.logging.warning") as warning:
+        with patch("venus_evcharger.runtime.async_mainloop_publish.logging.warning") as warning:
             self.assertTrue(controller.flush_dbus_publish_queue())
 
         service._mark_failure.assert_called_once_with("dbus")
@@ -450,8 +454,8 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
 
         service._handle_control_command = MagicMock(side_effect=RuntimeError("boom"))
         service._write_command_budget_seconds = -1.0
-        with patch("venus_evcharger.runtime.async_mainloop.logging.exception") as log_exception, patch(
-            "venus_evcharger.runtime.async_mainloop.logging.warning"
+        with patch("venus_evcharger.runtime.async_mainloop_control.logging.exception") as log_exception, patch(
+            "venus_evcharger.runtime.async_mainloop_control.logging.warning"
         ) as log_warning:
             self.assertTrue(controller._drain_control_commands_once())
         log_exception.assert_called_once()
@@ -460,12 +464,45 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         service._update_worker_pending = True
         service._update = MagicMock(side_effect=RuntimeError("update boom"))
         service._update_worker_budget_seconds = -1.0
-        with patch("venus_evcharger.runtime.async_mainloop.logging.exception") as log_exception, patch(
-            "venus_evcharger.runtime.async_mainloop.logging.warning"
+        with patch("venus_evcharger.runtime.async_mainloop_executor.logging.exception") as log_exception, patch(
+            "venus_evcharger.runtime.async_mainloop_executor.logging.warning"
         ) as log_warning:
             self.assertTrue(controller._run_pending_update_cycle_once())
         log_exception.assert_called_once()
         log_warning.assert_called_once()
+
+    def test_runtime_executor_gateway_core_command_paths(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+
+        service._gateway_core_commands = None
+        self.assertFalse(controller._drain_gateway_core_commands_once())
+
+        inbox = SimpleNamespace(load_pending=MagicMock(return_value=[]))
+        service._gateway_core_commands = inbox
+        self.assertFalse(controller._drain_gateway_core_commands_once())
+
+        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=True))
+        inbox.load_pending = MagicMock(return_value=[("first", {"kind": "user_command", "path": "/Mode", "value": 2})])
+        inbox.coalesce = MagicMock(return_value=[("first", {"kind": "user_command", "path": "/Mode", "value": 2})])
+        inbox.remove = MagicMock()
+        self.assertTrue(controller._drain_gateway_core_commands_once())
+        service._dbusservice.apply_gateway_write.assert_called_once_with("/Mode", 2)
+        inbox.remove.assert_called_once_with("first")
+
+        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=False))
+        service._control_command_from_write = MagicMock(return_value=ControlCommand(name="set_mode", path="/Mode", value=1))
+        service._handle_control_command = MagicMock()
+        inbox.coalesce.return_value = [
+            ("ignored", {"kind": "refresh_value", "path": "/Mode", "value": 3}),
+            ("second", {"kind": "user_command", "path": "/Mode", "value": 1}),
+        ]
+        self.assertTrue(controller._drain_gateway_core_commands_once())
+        service._control_command_from_write.assert_called_once_with("/Mode", 1, source="dbus")
+        service._handle_control_command.assert_called_once()
+        self.assertEqual(inbox.remove.call_args_list[-2][0][0], "ignored")
+        self.assertEqual(inbox.remove.call_args_list[-1][0][0], "second")
 
     def test_runtime_executor_compatibility_loops_delegate_to_serialized_executor(self) -> None:
         service = make_runtime_support_service()
@@ -490,7 +527,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         self.assertIsNotNone(service._mainloop_heartbeat_at)
 
         fake_thread = SimpleNamespace(start=MagicMock())
-        with patch("venus_evcharger.runtime.async_mainloop.threading.Thread", return_value=fake_thread):
+        with patch("venus_evcharger.runtime.async_mainloop_watchdog.threading.Thread", return_value=fake_thread):
             controller.start_mainloop_watchdog()
             controller.start_mainloop_watchdog()
         fake_thread.start.assert_called_once_with()
@@ -503,7 +540,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
                 self.assertIn("mainloop watchdog dump", handle.read())
 
         service._mainloop_watchdog_log_path = "/"
-        with patch("venus_evcharger.runtime.async_mainloop.logging.debug") as log_debug:
+        with patch("venus_evcharger.runtime.async_mainloop_watchdog.logging.debug") as log_debug:
             controller._dump_mainloop_watchdog_traceback(service)
         log_debug.assert_called_once()
 
@@ -520,6 +557,6 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         dump_traceback.assert_not_called()
 
     def test_exit_for_mainloop_watchdog_delegates_to_os_exit(self) -> None:
-        with patch("venus_evcharger.runtime.async_mainloop.os._exit", side_effect=SystemExit) as os_exit, self.assertRaises(SystemExit):
+        with patch("venus_evcharger.runtime.async_mainloop_watchdog.os._exit", side_effect=SystemExit) as os_exit, self.assertRaises(SystemExit):
             RuntimeSupportController._exit_for_mainloop_watchdog()
         os_exit.assert_called_once_with(75)

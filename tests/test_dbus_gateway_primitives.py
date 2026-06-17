@@ -130,6 +130,12 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             inbox.remove(str(Path(inbox.command_dir) / "missing.json"))
             with patch.object(dbus_gateway.Path, "glob", side_effect=OSError("boom")):
                 self.assertEqual(inbox.load_pending(), [])
+            self.assertTrue(DbusCommandInbox._should_replace_existing(str(Path(inbox.command_dir) / "bad.json"), {}))
+            self.assertTrue(DbusCommandInbox._should_replace_existing(str(Path(inbox.command_dir) / "list.json"), {}))
+            weird_existing = inbox.enqueue({"kind": "set_value", "value": 1, "coalesce_key": "weird"})
+            Path(weird_existing).write_text("[]", encoding="utf-8")
+            self.assertEqual(inbox.enqueue({"kind": "set_value", "value": 2, "coalesce_key": "weird"}), weird_existing)
+            self.assertEqual(read_json_file(weird_existing, {})["value"], 2)
 
             keep_old = DbusCommandInbox.coalesce(
                 [
@@ -214,6 +220,8 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertEqual(command_queue_class({"kind": "refresh_services"}), "discovery")
         self.assertEqual(command_queue_class({"kind": "introspect"}), "introspection")
         self.assertEqual(command_queue_class({"kind": "unknown"}), "diagnostic")
+        self.assertTrue(command_allowed_by_backpressure({"kind": "register_path"}, "slow"))
+        self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, "mystery"))
 
     def test_backpressure_command_filter_keeps_critical_work(self) -> None:
         self.assertTrue(command_allowed_by_backpressure({"kind": "publish_value", "path": "/Auto/Reason"}, "ok"))

@@ -32,21 +32,31 @@ def load_introspection_snapshot(path: str, *, max_age_seconds: float, now: float
     normalized_path = str(path or "").strip()
     if not normalized_path:
         return {}
+    payload = _read_snapshot_payload(normalized_path)
+    if not _snapshot_schema_valid(payload):
+        return {}
+    return payload if _snapshot_fresh(payload, max_age_seconds=max_age_seconds, now=now) else {}
+
+
+def _read_snapshot_payload(path: str) -> dict[str, Any]:
     try:
-        with open(normalized_path, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
     except Exception:  # pylint: disable=broad-except
         return {}
-    if not isinstance(payload, dict):
-        return {}
-    if int(payload.get("schema_version", 0) or 0) != DBUS_INTROSPECTION_SCHEMA_VERSION:
-        return {}
-    current = time.time() if now is None else float(now)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _snapshot_schema_valid(payload: dict[str, Any]) -> bool:
+    return int(payload.get("schema_version", 0) or 0) == DBUS_INTROSPECTION_SCHEMA_VERSION
+
+
+def _snapshot_fresh(payload: dict[str, Any], *, max_age_seconds: float, now: float | None) -> bool:
     heartbeat = _optional_float(payload.get("heartbeat_at", payload.get("captured_at")))
     if heartbeat is None:
-        return {}
-    age = current - heartbeat
-    return payload if 0.0 <= age <= max(0.0, float(max_age_seconds)) else {}
+        return False
+    age = (time.time() if now is None else float(now)) - heartbeat
+    return 0.0 <= age <= max(0.0, float(max_age_seconds))
 
 
 def service_path_finding(snapshot: dict[str, Any], service_name: str, path: str) -> dict[str, Any]:
@@ -70,11 +80,14 @@ def path_unusable_until(snapshot: dict[str, Any], service_name: str, path: str, 
     status = str(finding.get("status", "") or "")
     if status not in UNUSABLE_PATH_STATUSES:
         return False, ""
-    current = time.time() if now is None else float(now)
-    retry_at = _optional_float(finding.get("retry_after")) or 0.0
-    if retry_at > current:
+    if _retry_after_pending(finding, now):
         return True, status
     return status == "known-missing", status if status == "known-missing" else ""
+
+
+def _retry_after_pending(finding: dict[str, Any], now: float | None) -> bool:
+    current = time.time() if now is None else float(now)
+    return (_optional_float(finding.get("retry_after")) or 0.0) > current
 
 
 def path_children(snapshot: dict[str, Any], service_name: str, path: str) -> list[str]:
@@ -82,7 +95,10 @@ def path_children(snapshot: dict[str, Any], service_name: str, path: str) -> lis
     finding = service_path_finding(snapshot, service_name, path)
     if str(finding.get("status", "") or "") != "fresh":
         return []
-    children = finding.get("children", [])
+    return _normalized_children(finding.get("children", []))
+
+
+def _normalized_children(children: Any) -> list[str]:
     if not isinstance(children, list):
         return []
     return [str(child) for child in children if str(child or "").strip()]
@@ -90,21 +106,41 @@ def path_children(snapshot: dict[str, Any], service_name: str, path: str) -> lis
 
 def load_owner_introspection_snapshot(owner: Any, *, now: float | None = None) -> dict[str, Any]:
     """Load and briefly cache the advisory snapshot for a service/helper object."""
-    snapshot_path = str(getattr(owner, "dbus_introspection_snapshot_path", "") or "").strip()
+    snapshot_path = _owner_snapshot_path(owner)
     if not snapshot_path:
         return {}
     current = time.time() if now is None else float(now)
-    cache_loaded_at = float(getattr(owner, "_dbus_introspection_snapshot_loaded_at", 0.0) or 0.0)
-    if current - cache_loaded_at > 5.0:
-        snapshot = load_introspection_snapshot(
-            snapshot_path,
-            max_age_seconds=float(getattr(owner, "dbus_introspection_max_age_seconds", 900.0) or 900.0),
-            now=current,
-        )
-        owner._dbus_introspection_snapshot_cache = snapshot
-        owner._dbus_introspection_snapshot_loaded_at = current
+    _refresh_owner_snapshot_if_due(owner, snapshot_path, current)
+    return _owner_cached_snapshot(owner)
+
+
+def _owner_snapshot_path(owner: Any) -> str:
+    return str(getattr(owner, "dbus_introspection_snapshot_path", "") or "").strip()
+
+
+def _refresh_owner_snapshot_if_due(owner: Any, snapshot_path: str, current: float) -> None:
+    if _owner_snapshot_reload_due(owner, current):
+        _reload_owner_snapshot(owner, snapshot_path, current)
+
+
+def _owner_cached_snapshot(owner: Any) -> dict[str, Any]:
     cached_snapshot = getattr(owner, "_dbus_introspection_snapshot_cache", {})
     return cached_snapshot if isinstance(cached_snapshot, dict) else {}
+
+
+def _owner_snapshot_reload_due(owner: Any, current: float) -> bool:
+    cache_loaded_at = float(getattr(owner, "_dbus_introspection_snapshot_loaded_at", 0.0) or 0.0)
+    return current - cache_loaded_at > 5.0
+
+
+def _reload_owner_snapshot(owner: Any, snapshot_path: str, current: float) -> None:
+    snapshot = load_introspection_snapshot(
+        snapshot_path,
+        max_age_seconds=float(getattr(owner, "dbus_introspection_max_age_seconds", 900.0) or 900.0),
+        now=current,
+    )
+    owner._dbus_introspection_snapshot_cache = snapshot
+    owner._dbus_introspection_snapshot_loaded_at = current
 
 
 def owner_path_unusable(owner: Any, service_name: str, path: str, *, now: float | None = None) -> tuple[bool, str]:
@@ -154,28 +190,61 @@ def request_introspection(
     now: float | None = None,
 ) -> bool:
     """Queue a best-effort priority introspection request for the background worker."""
-    normalized_request_path = str(request_path or "").strip()
-    normalized_service = str(service_name or "").strip()
-    normalized_path = str(path or "").strip()
-    if not normalized_request_path or not normalized_service or not normalized_path:
+    target = _request_target(request_path, service_name, path)
+    if not target:
         return False
-    payload = _load_request_payload(normalized_request_path)
-    requests = payload.setdefault("requests", [])
-    if not isinstance(requests, list):
-        requests = []
-        payload["requests"] = requests
-    requests.append(
+    request_file, service, dbus_path = target
+    payload = _load_request_payload(request_file)
+    _append_request(payload, service, dbus_path, priority=priority, reason=reason, source=source, now=now)
+    return _write_request_payload(request_file, payload)
+
+
+def _request_target(request_path: str, service_name: str, path: str) -> tuple[str, str, str] | None:
+    request_file, service, dbus_path = (_normalized_text(request_path), _normalized_text(service_name), _normalized_text(path))
+    return (request_file, service, dbus_path) if _valid_request_target(request_file, service, dbus_path) else None
+
+
+def _normalized_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _valid_request_target(request_path: str, service_name: str, path: str) -> bool:
+    return bool(request_path and service_name and path)
+
+
+def _append_request(
+    payload: dict[str, Any],
+    service: str,
+    path: str,
+    *,
+    priority: int,
+    reason: str,
+    source: str,
+    now: float | None,
+) -> None:
+    _request_list(payload).append(
         {
-            "service": normalized_service,
-            "path": normalized_path,
+            "service": service,
+            "path": path,
             "priority": int(priority),
             "reason": str(reason or ""),
             "source": str(source or ""),
             "requested_at": time.time() if now is None else float(now),
         }
     )
+
+
+def _request_list(payload: dict[str, Any]) -> list[Any]:
+    requests = payload.setdefault("requests", [])
+    if isinstance(requests, list):
+        return requests
+    payload["requests"] = []
+    return payload["requests"]
+
+
+def _write_request_payload(request_path: str, payload: dict[str, Any]) -> bool:
     try:
-        write_text_atomically(normalized_request_path, compact_json(payload))
+        write_text_atomically(request_path, compact_json(payload))
         return True
     except Exception:  # pylint: disable=broad-except
         return False

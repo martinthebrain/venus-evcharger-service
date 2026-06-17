@@ -164,25 +164,26 @@ class CerboGxRelaySwitchBackend:
 
     def _verify_relay_state(self, target_state: int) -> None:
         self._sleep_if_configured(self.settings.verify_settle_seconds)
+        read_back = self._verified_relay_readback_or_none()
+        if read_back is None or read_back == target_state:
+            return
+        self._retry_relay_state(target_state)
+        read_back = self._verified_relay_readback_or_none()
+        if read_back is not None and read_back != target_state:
+            raise RuntimeError(f"Cerbo GX relay {self.settings.relay_index} stayed at {read_back}, expected {target_state}")
+
+    def _verified_relay_readback_or_none(self) -> int | None:
+        """Read relay state when the gateway cache is fresh enough to verify writes."""
         if self._cache_entry_is_stale_for_write(self._SYSTEM_SERVICE, self._relay_state_path()):
-            return
+            return None
         read_back = self._dbus_get_value(self._SYSTEM_SERVICE, self._relay_state_path())
-        if read_back is None:
-            return
-        read_back = int(read_back)
-        if read_back == target_state:
-            return
+        return int(read_back) if read_back is not None else None
+
+    def _retry_relay_state(self, target_state: int) -> None:
+        """Retry one relay state write after the configured verification delay."""
         self._sleep_if_configured(self.settings.verify_retry_seconds)
         self._set_relay_state(target_state)
         self._sleep_if_configured(self.settings.verify_settle_seconds)
-        if self._cache_entry_is_stale_for_write(self._SYSTEM_SERVICE, self._relay_state_path()):
-            return
-        read_back = self._dbus_get_value(self._SYSTEM_SERVICE, self._relay_state_path())
-        if read_back is None:
-            return
-        read_back = int(read_back)
-        if read_back != target_state:
-            raise RuntimeError(f"Cerbo GX relay {self.settings.relay_index} stayed at {read_back}, expected {target_state}")
 
     def _ensure_manual_function(self) -> None:
         last_error: Exception | None = None

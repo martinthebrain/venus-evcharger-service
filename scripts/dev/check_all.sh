@@ -15,17 +15,53 @@ python3 -m py_compile \
     venus_evcharger_service.py \
     venus_evcharger_observer.py \
     venus_evcharger_dbus_adapter.py \
+    venus_evcharger/dbus_adapter_process.py \
+    venus_evcharger/dbus_adapter_process_health.py \
+    venus_evcharger/dbus_adapter_process_introspection.py \
+    venus_evcharger/dbus_adapter_process_introspection_snapshot.py \
+    venus_evcharger/dbus_adapter_process_io.py \
+    venus_evcharger/dbus_adapter_process_loop.py \
+    venus_evcharger/dbus_adapter_process_runtime.py \
     venus_evcharger/dbus_adapter_components.py \
+    venus_evcharger/dbus_adapter_components_rate.py \
+    venus_evcharger/dbus_adapter_components_resource.py \
+    venus_evcharger/dbus_adapter_components_scheduler.py \
     venus_evcharger/dbus_adapter_read.py \
     venus_evcharger/dbus_adapter_write.py \
+    venus_evcharger/dbus_adapter_write_core.py \
+    venus_evcharger/dbus_adapter_write_health.py \
+    venus_evcharger/dbus_adapter_write_publish.py \
+    venus_evcharger/dbus_adapter_write_support.py \
     venus_evcharger/bootstrap/controller.py \
     venus_evcharger/dbus_gateway.py \
+    venus_evcharger/dbus_gateway_cache.py \
+    venus_evcharger/dbus_gateway_client.py \
+    venus_evcharger/dbus_gateway_commands.py \
+    venus_evcharger/dbus_gateway_core.py \
+    venus_evcharger/dbus_gateway_latency.py \
+    venus_evcharger/dbus_gateway_policy.py \
+    scripts/dev/pi_gateway_release_gate.py \
+    scripts/dev/pi_gateway_release_gate_support.py \
     venus_evcharger/core/common.py \
     venus_evcharger/ports/__init__.py \
     venus_evcharger/controllers/auto.py \
     venus_evcharger/auto/workflow.py \
     venus_evcharger/inputs/dbus.py \
+    venus_evcharger/inputs/helper/config_runtime.py \
+    venus_evcharger/inputs/helper/sources_dbus.py \
+    venus_evcharger/inputs/helper/sources_dbus_common.py \
+    venus_evcharger/inputs/helper/sources_dbus_gateway.py \
+    venus_evcharger/inputs/helper/sources_dbus_primary.py \
+    venus_evcharger/inputs/helper/sources_dbus_resolve.py \
+    venus_evcharger/inputs/helper/sources_dbus_snapshot.py \
     venus_evcharger/runtime/support.py \
+    venus_evcharger/runtime/async_mainloop.py \
+    venus_evcharger/runtime/async_mainloop_control.py \
+    venus_evcharger/runtime/async_mainloop_executor.py \
+    venus_evcharger/runtime/async_mainloop_publish.py \
+    venus_evcharger/runtime/async_mainloop_state.py \
+    venus_evcharger/runtime/async_mainloop_types.py \
+    venus_evcharger/runtime/async_mainloop_watchdog.py \
     venus_evcharger/controllers/write.py \
     venus_evcharger/update/controller.py
 

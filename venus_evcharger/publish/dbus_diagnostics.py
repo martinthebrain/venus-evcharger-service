@@ -315,24 +315,43 @@ class _DbusPublishDiagnosticsMixin:
         """Return compact diagnostics for the advisory DBus introspection map."""
         snapshot = load_owner_introspection_snapshot(self.service, now=now)
         services = snapshot.get("services", {}) if isinstance(snapshot, dict) else {}
-        unusable_count = 0
-        if isinstance(services, dict):
-            for service_payload in services.values():
-                paths = service_payload.get("paths", {}) if isinstance(service_payload, dict) else {}
-                if not isinstance(paths, dict):
-                    continue
-                unusable_count += sum(
-                    1
-                    for finding in paths.values()
-                    if isinstance(finding, dict)
-                    and str(finding.get("status", "") or "") in ("known-missing", "unresponsive-backoff")
-                )
         return {
-            "/Auto/DbusIntrospectionState": str(snapshot.get("worker_state", "missing") if snapshot else "missing"),
-            "/Auto/DbusIntrospectionQueueDepth": int(snapshot.get("queue_depth", 0) or 0) if snapshot else 0,
-            "/Auto/DbusIntrospectionServiceCount": len(services) if isinstance(services, dict) else 0,
-            "/Auto/DbusIntrospectionUnusablePathCount": int(unusable_count),
+            "/Auto/DbusIntrospectionState": self._dbus_introspection_state(snapshot),
+            "/Auto/DbusIntrospectionQueueDepth": self._dbus_introspection_queue_depth(snapshot),
+            "/Auto/DbusIntrospectionServiceCount": self._dbus_introspection_service_count(services),
+            "/Auto/DbusIntrospectionUnusablePathCount": self._dbus_introspection_unusable_count(services),
         }
+
+    def _dbus_introspection_state(self, snapshot: object) -> str:
+        """Return the introspection worker state for diagnostics."""
+        return str(snapshot.get("worker_state", "missing")) if isinstance(snapshot, dict) else "missing"
+
+    def _dbus_introspection_queue_depth(self, snapshot: object) -> int:
+        """Return the pending introspection request count."""
+        return int(snapshot.get("queue_depth", 0) or 0) if isinstance(snapshot, dict) else 0
+
+    def _dbus_introspection_service_count(self, services: object) -> int:
+        """Return the number of services in an introspection snapshot."""
+        return len(services) if isinstance(services, dict) else 0
+
+    def _dbus_introspection_unusable_count(self, services: object) -> int:
+        """Count introspection findings that say a path should not be queried now."""
+        if not isinstance(services, dict):
+            return 0
+        return sum(self._dbus_introspection_unusable_paths(service_payload) for service_payload in services.values())
+
+    def _dbus_introspection_unusable_paths(self, service_payload: object) -> int:
+        """Count unusable path findings in one introspection service payload."""
+        paths = service_payload.get("paths", {}) if isinstance(service_payload, dict) else {}
+        if not isinstance(paths, dict):
+            return 0
+        return sum(1 for finding in paths.values() if self._dbus_introspection_finding_unusable(finding))
+
+    def _dbus_introspection_finding_unusable(self, finding: object) -> bool:
+        """Return whether one introspection path finding is currently unusable."""
+        if not isinstance(finding, dict):
+            return False
+        return str(finding.get("status", "") or "") in ("known-missing", "unresponsive-backoff")
 
     def _diagnostic_age_values(self, now: float) -> dict[str, float]:
         """Return slower-changing age-like diagnostic values keyed by DBus path."""

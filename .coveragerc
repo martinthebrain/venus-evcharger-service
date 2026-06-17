@@ -16,7 +16,6 @@ omit =
     venus_evcharger/runtime/setup.py
     venus_evcharger/update/victron_ess_balance_apply_support.py
     venus_evcharger_auto_input_helper.py
-    venus_evcharger_dbus_introspection_worker.py
 
 [report]
 omit =
@@ -36,4 +35,3 @@ omit =
     venus_evcharger/runtime/setup.py
     venus_evcharger/update/victron_ess_balance_apply_support.py
     venus_evcharger_auto_input_helper.py
-    venus_evcharger_dbus_introspection_worker.py
