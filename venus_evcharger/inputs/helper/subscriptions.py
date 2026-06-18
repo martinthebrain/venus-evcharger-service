@@ -69,7 +69,10 @@ class _AutoInputHelperSubscriptionMixin:
     def _resolved_pv_subscription_services(self: Any) -> list[str]:
         """Return AC PV services that should currently be monitored."""
         try:
-            return [self.auto_pv_service] if self.auto_pv_service else self._resolve_auto_pv_services()
+            configured_service = str(getattr(self, "auto_pv_service", "") or "")
+            if configured_service:
+                return [configured_service]
+            return list(self._resolve_auto_pv_services())
         except Exception:  # pylint: disable=broad-except
             return []
 

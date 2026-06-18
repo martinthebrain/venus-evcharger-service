@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from gi.repository import GLib
 from venus_evcharger.core.shared import (
@@ -307,7 +307,7 @@ class AutoInputHelper(
 
     def _ensure_liveness_thread_state(self) -> None:
         """Ensure liveness threads can start in partial construction paths."""
-        defaults = (
+        defaults: tuple[tuple[str, Callable[[], object]], ...] = (
             ("_stop_requested", lambda: False),
             ("_snapshot_lock", threading.RLock),
             ("_heartbeat_thread_stop", threading.Event),

@@ -97,7 +97,7 @@ def resolved_primary_host(
 ) -> str:
     for candidate in (getattr(namespace, "host"), imported.host_input, charger_host, meter_host, switch_host):
         if candidate:
-            return candidate
+            return str(candidate)
     return "192.168.1.50"
 
 

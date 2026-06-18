@@ -68,10 +68,10 @@ def normalize_phase(phase: Any) -> str:
 def normalize_mode(mode: Any) -> int:
     """Normalize supported charger modes to a known integer range."""
     try:
-        mode = int(mode)
+        mode_int = int(mode)
     except (TypeError, ValueError):
         return 0
-    return mode if mode in (0, 1, 2) else 0
+    return mode_int if mode_int in (0, 1, 2) else 0
 
 
 def mode_uses_auto_logic(mode: Any) -> bool:
