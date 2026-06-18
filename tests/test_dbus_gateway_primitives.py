@@ -298,6 +298,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
 
             client.publish_path("/Mode", 1)
             client.publish_paths({"/Ac/Power": 1200.0, "/Auto/Reason": "ok", "": "ignored"})
+            client.publish_paths({"": "ignored"})
             client.register_path("/Mode", 1, writeable=True)
             client.request_read("grid_power_w")
             client.request_read("svc", "/Path", reason="freshen")
