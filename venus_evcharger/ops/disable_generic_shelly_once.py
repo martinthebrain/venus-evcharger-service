@@ -65,8 +65,8 @@ def load_settings(config_path: str) -> dict[str, Any]:
 
     section = parser["DEFAULT"]
     host = _required_host(section)
-    channel = _normalized_channel(section.get("GenericShellyDisableChannel", 1))
-    delay_seconds = _normalized_delay_seconds(section.get("GenericShellyDisableDelaySeconds", 180))
+    channel = _normalized_channel(section.get("GenericShellyDisableChannel", "1"))
+    delay_seconds = _normalized_delay_seconds(section.get("GenericShellyDisableDelaySeconds", "180"))
 
     return {
         "enabled": _as_bool(section.get("DisableGenericShellyDevice", "1"), True),
