@@ -22,6 +22,7 @@ from gi.repository import GLib
 from venus_evcharger.core.shared import (
     AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION,
     compact_json,
+    config_get_float,
     parse_config_bool as _as_bool,
     write_text_atomically,
 )
@@ -149,8 +150,8 @@ class AutoInputHelper(
         """Return a slow service refresh interval for DBus subscription bookkeeping."""
         candidates = [60.0]
         for value in (
-            float(self.config.get("AutoPvScanIntervalSeconds", 60)),
-            float(self.config.get("AutoBatteryScanIntervalSeconds", 60)),
+            config_get_float(self.config, "AutoPvScanIntervalSeconds", 60.0),
+            config_get_float(self.config, "AutoBatteryScanIntervalSeconds", 60.0),
         ):
             if value > 0:
                 candidates.append(value)

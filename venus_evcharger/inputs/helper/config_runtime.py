@@ -7,7 +7,7 @@ import os
 import configparser
 from collections.abc import Callable
 
-from venus_evcharger.core.shared import parse_config_bool as _as_bool
+from venus_evcharger.core.shared import config_get_float, parse_config_bool as _as_bool
 from venus_evcharger.energy import load_energy_source_settings
 
 
@@ -39,7 +39,7 @@ class _AutoInputHelperConfigMixin:
         self.dbus_introspection_request_path = self.config.get("DbusIntrospectionRequestPath", "").strip()
         self.dbus_introspection_max_age_seconds = max(
             0.0,
-            float(self.config.get("DbusIntrospectionMaxAgeSeconds", 900.0) or 900.0),
+            config_get_float(self.config, "DbusIntrospectionMaxAgeSeconds", 900.0),
         )
         self.dbus_gateway_run_dir = self.config.get("DbusGatewayRunDir", "/run/venus-evcharger").strip()
         self.dbus_gateway_cache_path = self.config.get(
@@ -48,9 +48,9 @@ class _AutoInputHelperConfigMixin:
         ).strip()
         self.dbus_gateway_max_age_seconds = max(
             0.0,
-            float(self.config.get("DbusGatewayMaxAgeSeconds", 10.0) or 10.0),
+            config_get_float(self.config, "DbusGatewayMaxAgeSeconds", 10.0),
         )
-        self.dbus_method_timeout_seconds = float(self.config.get("DbusMethodTimeoutSeconds", 1.0))
+        self.dbus_method_timeout_seconds = config_get_float(self.config, "DbusMethodTimeoutSeconds", 1.0)
 
     def _init_helper_polling(self) -> None:
         auto_input_poll_interval_ms = self._auto_input_poll_interval_ms()
@@ -74,22 +74,18 @@ class _AutoInputHelperConfigMixin:
         )
 
     def _auto_input_poll_interval_ms(self) -> float:
-        return float(
-            self.config.get(
-                "AutoInputPollIntervalMs",
-                self.config.get("PollIntervalMs", 1000),
-            )
-        )
+        fallback_ms = config_get_float(self.config, "PollIntervalMs", 1000.0)
+        return config_get_float(self.config, "AutoInputPollIntervalMs", fallback_ms)
 
     def _poll_interval_seconds(self, key: str, fallback_ms: float) -> float:
-        return max(0.2, float(self.config.get(key, fallback_ms)) / 1000.0)
+        return max(0.2, config_get_float(self.config, key, fallback_ms) / 1000.0)
 
     def _init_helper_pv_config(self) -> None:
         self.auto_pv_service = self.config.get("AutoPvService", "").strip()
         self.auto_pv_service_prefix = self.config.get("AutoPvServicePrefix", "com.victronenergy.pvinverter").strip()
         self.auto_pv_path = self.config.get("AutoPvPath", "/Ac/Power").strip()
-        self.auto_pv_max_services = max(1, int(self.config.get("AutoPvMaxServices", 10)))
-        self.auto_pv_scan_interval_seconds = max(0.0, float(self.config.get("AutoPvScanIntervalSeconds", 60)))
+        self.auto_pv_max_services = max(1, int(config_get_float(self.config, "AutoPvMaxServices", 10.0)))
+        self.auto_pv_scan_interval_seconds = max(0.0, config_get_float(self.config, "AutoPvScanIntervalSeconds", 60.0))
         self.auto_use_dc_pv = _as_bool(self.config.get("AutoUseDcPv", "1"), True)
         self.auto_dc_pv_service = self.config.get("AutoDcPvService", "com.victronenergy.system").strip()
         self.auto_dc_pv_path = self.config.get("AutoDcPvPath", "/Dc/Pv/Power").strip()
@@ -110,7 +106,7 @@ class _AutoInputHelperConfigMixin:
         self.auto_battery_soc_path = self.config.get("AutoBatterySocPath", "/Soc").strip()
 
     def _init_helper_battery_capacity_config(self) -> None:
-        self.auto_battery_capacity_wh = float(self.config.get("AutoBatteryCapacityWh", 0) or 0)
+        self.auto_battery_capacity_wh = config_get_float(self.config, "AutoBatteryCapacityWh", 0.0)
         self.auto_battery_chemistry = self.config.get("AutoBatteryChemistry", "lfp").strip().lower()
         self.auto_battery_capacity_auto_estimate = _as_bool(self.config.get("AutoBatteryCapacityAutoEstimate", "1"), True)
         self.auto_battery_capacity_wh_path = self.config.get("AutoBatteryCapacityWhPath", "").strip()
@@ -122,21 +118,23 @@ class _AutoInputHelperConfigMixin:
     def _init_helper_battery_capacity_thresholds(self) -> None:
         self.auto_battery_capacity_estimate_min_soc = max(
             0.0,
-            float(self.config.get("AutoBatteryCapacityEstimateMinSoc", 95) or 95),
+            config_get_float(self.config, "AutoBatteryCapacityEstimateMinSoc", 95.0),
         )
         self.auto_battery_capacity_startup_recheck_seconds = max(
             0.0,
-            float(self.config.get("AutoBatteryCapacityStartupRecheckSeconds", 300) or 300),
+            config_get_float(self.config, "AutoBatteryCapacityStartupRecheckSeconds", 300.0),
         )
 
     def _init_helper_battery_estimated_capacity_config(self) -> None:
-        self.auto_battery_capacity_estimated_wh = float(self.config.get("AutoBatteryCapacityEstimatedWh", 0) or 0)
-        self.auto_battery_capacity_estimated_ah = float(self.config.get("AutoBatteryCapacityEstimatedAh", 0) or 0)
-        self.auto_battery_capacity_estimated_nominal_voltage = float(
-            self.config.get("AutoBatteryCapacityEstimatedNominalVoltage", 0) or 0
+        self.auto_battery_capacity_estimated_wh = config_get_float(self.config, "AutoBatteryCapacityEstimatedWh", 0.0)
+        self.auto_battery_capacity_estimated_ah = config_get_float(self.config, "AutoBatteryCapacityEstimatedAh", 0.0)
+        self.auto_battery_capacity_estimated_nominal_voltage = config_get_float(
+            self.config,
+            "AutoBatteryCapacityEstimatedNominalVoltage",
+            0.0,
         )
         self.auto_battery_capacity_estimated_cell_count = int(
-            float(self.config.get("AutoBatteryCapacityEstimatedCellCount", 0) or 0)
+            config_get_float(self.config, "AutoBatteryCapacityEstimatedCellCount", 0.0)
         )
 
     def _init_helper_battery_power_config(self) -> None:
@@ -153,7 +151,7 @@ class _AutoInputHelperConfigMixin:
         ).strip()
         self.auto_battery_scan_interval_seconds = max(
             0.0,
-            float(self.config.get("AutoBatteryScanIntervalSeconds", 60)),
+            config_get_float(self.config, "AutoBatteryScanIntervalSeconds", 60.0),
         )
 
     def _init_helper_grid_config(self) -> None:
@@ -169,14 +167,14 @@ class _AutoInputHelperConfigMixin:
     def _init_helper_runtime_config(self) -> None:
         self.auto_dbus_backoff_base_seconds = max(
             0.0,
-            float(self.config.get("AutoDbusBackoffBaseSeconds", 5)),
+            config_get_float(self.config, "AutoDbusBackoffBaseSeconds", 5.0),
         )
         self.auto_dbus_backoff_max_seconds = max(
             0.0,
-            float(self.config.get("AutoDbusBackoffMaxSeconds", 60)),
+            config_get_float(self.config, "AutoDbusBackoffMaxSeconds", 60.0),
         )
         self.validation_poll_seconds = max(
             5.0,
-            float(self.config.get("AutoInputValidationPollSeconds", 30)),
+            config_get_float(self.config, "AutoInputValidationPollSeconds", 30.0),
         )
         self.subscription_refresh_seconds = self._derive_subscription_refresh_seconds()

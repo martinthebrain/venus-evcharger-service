@@ -12,7 +12,7 @@ from typing import Any
 
 import dbus
 
-from venus_evcharger.core.shared import compact_json
+from venus_evcharger.core.shared import compact_json, config_get_float
 from venus_evcharger.dbus_adapter_components import CommandOutcome
 from venus_evcharger.dbus_adapter_write_support import (
     _float_or_zero,
@@ -95,15 +95,15 @@ class DbusWriteSchedulerHealthMixin:
     @staticmethod
     def _queue_class_budgets(defaults: Mapping[str, Any]) -> dict[str, int]:  # pragma: no mutate block
         return {
-            "startup/register": max(1, int(float(defaults.get("DbusGatewayQueueBudgetStartupRegister", 100)))),  # pragma: no mutate
-            "gui-critical-publish": max(1, int(float(defaults.get("DbusGatewayQueueBudgetGuiCriticalPublish", 50)))),  # pragma: no mutate
-            "local-publish": max(1, int(float(defaults.get("DbusGatewayQueueBudgetLocalPublish", 30)))),  # pragma: no mutate
-            "remote-write": max(1, int(float(defaults.get("DbusGatewayQueueBudgetRemoteWrite", 2)))),  # pragma: no mutate
-            "read-fast": max(1, int(float(defaults.get("DbusGatewayQueueBudgetReadFast", 4)))),  # pragma: no mutate
-            "read-slow": max(0, int(float(defaults.get("DbusGatewayQueueBudgetReadSlow", 2)))),  # pragma: no mutate
-            "discovery": max(0, int(float(defaults.get("DbusGatewayQueueBudgetDiscovery", 1)))),  # pragma: no mutate
-            "introspection": max(0, int(float(defaults.get("DbusGatewayQueueBudgetIntrospection", 1)))),  # pragma: no mutate
-            "diagnostic": max(0, int(float(defaults.get("DbusGatewayQueueBudgetDiagnostic", 1)))),  # pragma: no mutate
+            "startup/register": max(1, int(config_get_float(defaults, "DbusGatewayQueueBudgetStartupRegister", 100.0))),  # pragma: no mutate
+            "gui-critical-publish": max(1, int(config_get_float(defaults, "DbusGatewayQueueBudgetGuiCriticalPublish", 50.0))),  # pragma: no mutate
+            "local-publish": max(1, int(config_get_float(defaults, "DbusGatewayQueueBudgetLocalPublish", 30.0))),  # pragma: no mutate
+            "remote-write": max(1, int(config_get_float(defaults, "DbusGatewayQueueBudgetRemoteWrite", 2.0))),  # pragma: no mutate
+            "read-fast": max(1, int(config_get_float(defaults, "DbusGatewayQueueBudgetReadFast", 4.0))),  # pragma: no mutate
+            "read-slow": max(0, int(config_get_float(defaults, "DbusGatewayQueueBudgetReadSlow", 2.0))),  # pragma: no mutate
+            "discovery": max(0, int(config_get_float(defaults, "DbusGatewayQueueBudgetDiscovery", 1.0))),  # pragma: no mutate
+            "introspection": max(0, int(config_get_float(defaults, "DbusGatewayQueueBudgetIntrospection", 1.0))),  # pragma: no mutate
+            "diagnostic": max(0, int(config_get_float(defaults, "DbusGatewayQueueBudgetDiagnostic", 1.0))),  # pragma: no mutate
         }
 
     def _budget_available(self, command: Mapping[str, Any], now: float) -> bool:  # pragma: no mutate block

@@ -136,6 +136,12 @@ def parse_config_bool(value: object, default: bool = False) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def config_get_float(section: Any, key: str, default: float) -> float:
+    """Return one float from a config section with a string default."""
+    raw_value = str(section.get(key, str(default))).strip()
+    return float(raw_value or str(default))
+
+
 def first_matching_prefixed_service(
     service_names: Iterable[object],
     prefix: str,

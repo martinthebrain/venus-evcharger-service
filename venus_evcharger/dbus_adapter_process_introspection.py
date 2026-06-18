@@ -16,7 +16,7 @@ from typing import Any
 
 import dbus
 
-from venus_evcharger.core.shared import compact_json, write_text_atomically
+from venus_evcharger.core.shared import compact_json, config_get_float, write_text_atomically
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterIntrospectionContext
 
@@ -83,7 +83,7 @@ class DbusAdapterIntrospectionMixin:
                 "priority": "discovery" if priority < OPTIONAL_INTROSPECTION_PRIORITY_MIN else "optional",
                 "source": source,
                 "reason": reason,
-                "timeout": float(self.config["DEFAULT"].get("DbusIntrospectionTimeoutSeconds", 1.0) or 1.0),
+                "timeout": config_get_float(self.config["DEFAULT"], "DbusIntrospectionTimeoutSeconds", 1.0),
                 "coalesce_key": f"introspect:{service}:{path}",
             }
         )
@@ -97,7 +97,10 @@ class DbusAdapterIntrospectionMixin:
             self._enqueue_introspection_command(service, path, priority=priority, source=source, reason=reason)
 
     def _background_introspection_due(self: DbusAdapterIntrospectionContext, now: float) -> bool:
-        interval = max(60.0, float(self.config["DEFAULT"].get("DbusIntrospectionFullScanIntervalSeconds", 21600.0)))
+        interval = max(
+            60.0,
+            config_get_float(self.config["DEFAULT"], "DbusIntrospectionFullScanIntervalSeconds", 21600.0),
+        )
         return (
             self.dbus_introspection_enabled
             and now - self._last_introspection_full_scan_at >= interval
