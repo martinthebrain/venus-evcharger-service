@@ -39,6 +39,20 @@ class _LocalPublishCandidate:
 
 
 class DbusWriteSchedulerPublishMixin:
+    adapter: Any
+    dynamic_local_publish_burst_limit: int
+    last_processed_at: float
+    last_values: dict[str, Any]
+    local_publish_burst_limit: int
+    local_publish_tick_budget_seconds: float
+    registered_paths: set[str]
+    _budget_available: Callable[[Mapping[str, Any], float], bool]
+    _prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
+    _process_loaded_command: Callable[..., CommandOutcome]
+    _processed_events: Any
+    _prune_budget: Callable[[float], None]
+    _prune_processed: Callable[[float], None]
+
     def process_local_publish_burst(self, limit: int | None = None) -> int:  # pragma: no mutate block
         if not self.adapter._dbusservice_registered:
             return 0

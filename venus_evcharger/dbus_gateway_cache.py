@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.dbus_gateway_core import (
@@ -175,7 +175,7 @@ class DbusCacheStore:
         current = _now() if now is None else float(now)  # pragma: no mutate
         if _snapshot_too_old(captured_at, current, max_age_seconds):
             return {}
-        return payload  # pragma: no mutate
+        return cast(dict[str, Any], payload)  # pragma: no mutate
 
     @staticmethod
     def value_entry(snapshot: Mapping[str, Any], key: str) -> dict[str, Any] | None:

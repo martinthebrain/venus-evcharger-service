@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 
 class _RuntimeSupportAsyncMainloopExecutorMixin:
@@ -81,7 +81,7 @@ class _RuntimeSupportAsyncMainloopExecutorMixin:
         """Run one serialized runtime executor pass."""
         gateway_work = self._drain_gateway_core_commands_once()
         did_work = self._drain_control_commands_once()
-        return self._run_pending_update_cycle_once() or did_work or gateway_work
+        return bool(self._run_pending_update_cycle_once() or did_work or gateway_work)
 
     def _drain_gateway_core_commands_once(self: Any) -> bool:
         """Handle GUI/user commands delivered by the DBus gateway."""
@@ -117,7 +117,7 @@ class _RuntimeSupportAsyncMainloopExecutorMixin:
         svc = self.service
         path = str(payload.get("path") or "")
         apply_gateway_write = getattr(getattr(svc, "_dbusservice", None), "apply_gateway_write", None)
-        return bool(callable(apply_gateway_write) and apply_gateway_write(path, payload.get("value")))
+        return bool(callable(apply_gateway_write) and cast(bool, apply_gateway_write(path, payload.get("value"))))
 
     def _dispatch_gateway_control_command(self: Any, payload: Mapping[str, Any]) -> None:
         """Dispatch a gateway command through the existing control command path."""

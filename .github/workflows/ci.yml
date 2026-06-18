@@ -38,7 +38,7 @@ jobs:
         run: |
           python3 -m venv .venv-ruff
           .venv-ruff/bin/python -m pip install --upgrade pip
-          .venv-ruff/bin/python -m pip install ruff pylint bandit codespell radon
+          .venv-ruff/bin/python -m pip install ruff pylint bandit codespell radon 'pyright[nodejs]' shellcheck-py shfmt-py
 
       - name: Run syntax, tests, and typecheck
         run: bash ./scripts/dev/check_all.sh

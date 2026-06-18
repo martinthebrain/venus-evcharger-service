@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import venus_evcharger.inputs.dbus as wallbox_dbus_inputs
 from venus_evcharger.inputs.dbus import DbusInputController
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, GatewayPaths, dbus_path_key, gateway_paths
 from venus_evcharger.energy import EnergyLearningProfile, EnergySourceDefinition, EnergySourceSnapshot
 
 
@@ -53,7 +53,7 @@ class TestDbusInputController(unittest.TestCase):
         )
         return service
 
-    def _prepare_gateway(self, service: SimpleNamespace):
+    def _prepare_gateway(self, service: SimpleNamespace) -> GatewayPaths:
         tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
         paths = gateway_paths(os.path.join(tempdir.name, "run"))
@@ -61,7 +61,13 @@ class TestDbusInputController(unittest.TestCase):
         service.dbus_gateway_cache_path = paths.cache_path
         return paths
 
-    def _write_gateway_cache(self, service: SimpleNamespace, *, values=None, services=None):
+    def _write_gateway_cache(
+        self,
+        service: SimpleNamespace,
+        *,
+        values: dict[tuple[str, str], object] | None = None,
+        services: list[str] | None = None,
+    ) -> GatewayPaths:
         paths = self._prepare_gateway(service)
         store = DbusCacheStore(paths)
         for (service_name, path), value in (values or {}).items():

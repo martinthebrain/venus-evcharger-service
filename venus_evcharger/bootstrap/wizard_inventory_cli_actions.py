@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import TypedDict
 
 from venus_evcharger.bootstrap.wizard_inventory_editor import (
     add_inventory_capability,
@@ -26,12 +27,21 @@ from venus_evcharger.bootstrap.wizard_inventory_support import (
     parse_inventory_phases,
     parse_inventory_switching_mode,
 )
-from venus_evcharger.inventory import DeviceInventory
+from venus_evcharger.inventory import DeviceInventory, SwitchingMode
 
 from venus_evcharger.bootstrap.wizard_inventory_cli_support import save_and_payload
 
 
-def _inventory_capability_fields(namespace: argparse.Namespace) -> dict[str, object]:
+class _InventoryCapabilityFields(TypedDict):
+    channel: str | None
+    measures_power: bool
+    measures_energy: bool
+    switching_mode: SwitchingMode | None
+    supports_feedback: bool
+    supports_phase_selection: bool
+
+
+def _inventory_capability_fields(namespace: argparse.Namespace) -> _InventoryCapabilityFields:
     return {
         "channel": inventory_optional_field(namespace, "inventory_channel", "Channel"),
         "measures_power": inventory_bool_field(namespace, "inventory_measures_power", "Measures power"),
@@ -59,6 +69,7 @@ def _run_add_profile_action(
     kind = parse_inventory_kind(inventory_field(namespace, "inventory_kind", "Capability kind"))
     adapter_type = inventory_field(namespace, "inventory_adapter_type", "Adapter type")
     supported_phases = parse_inventory_phases(inventory_field(namespace, "inventory_supported_phases", "Supported phases"))
+    capability_fields = _inventory_capability_fields(namespace)
     updated = add_inventory_profile(
         inventory,
         profile_id=profile_id,
@@ -70,7 +81,12 @@ def _run_add_profile_action(
         vendor=inventory_optional_field(namespace, "inventory_vendor", "Vendor"),
         model=inventory_optional_field(namespace, "inventory_model", "Model"),
         description=inventory_optional_field(namespace, "inventory_description", "Description"),
-        **_inventory_capability_fields(namespace),
+        channel=capability_fields["channel"],
+        measures_power=capability_fields["measures_power"],
+        measures_energy=capability_fields["measures_energy"],
+        switching_mode=capability_fields["switching_mode"],
+        supports_feedback=capability_fields["supports_feedback"],
+        supports_phase_selection=capability_fields["supports_phase_selection"],
     )
     return save_and_payload("add-profile", inventory_path, updated, profile_id=profile_id)
 
@@ -85,6 +101,7 @@ def _run_add_capability_action(
     kind = parse_inventory_kind(inventory_field(namespace, "inventory_kind", "Capability kind"))
     adapter_type = inventory_field(namespace, "inventory_adapter_type", "Adapter type")
     supported_phases = parse_inventory_phases(inventory_field(namespace, "inventory_supported_phases", "Supported phases"))
+    capability_fields = _inventory_capability_fields(namespace)
     updated = add_inventory_capability(
         inventory,
         profile_id=profile_id,
@@ -92,7 +109,12 @@ def _run_add_capability_action(
         kind=kind,
         adapter_type=adapter_type,
         supported_phases=supported_phases,
-        **_inventory_capability_fields(namespace),
+        channel=capability_fields["channel"],
+        measures_power=capability_fields["measures_power"],
+        measures_energy=capability_fields["measures_energy"],
+        switching_mode=capability_fields["switching_mode"],
+        supports_feedback=capability_fields["supports_feedback"],
+        supports_phase_selection=capability_fields["supports_phase_selection"],
     )
     return save_and_payload(
         "add-capability",

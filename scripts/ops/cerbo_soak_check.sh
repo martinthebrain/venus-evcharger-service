@@ -9,35 +9,35 @@ AUTO_SNAPSHOT_PATH="${AUTO_SNAPSHOT_PATH:-/run/dbus-venus-evcharger-auto-60.json
 TAIL_LINES="${TAIL_LINES:-40}"
 
 section() {
-    printf '\n== %s ==\n' "$1"
+	printf '\n== %s ==\n' "$1"
 }
 
 run_cmd() {
-    label="$1"
-    shift
-    printf '\n$ %s\n' "$label"
-    if ! command -v "$1" >/dev/null 2>&1; then
-        printf 'Command not available: %s\n' "$1"
-        return 0
-    fi
-    "$@"
-    status=$?
-    if [ $status -ne 0 ]; then
-        printf '[exit %s]\n' "$status"
-    fi
-    return 0
+	label="$1"
+	shift
+	printf '\n$ %s\n' "$label"
+	if ! command -v "$1" >/dev/null 2>&1; then
+		printf 'Command not available: %s\n' "$1"
+		return 0
+	fi
+	"$@"
+	status=$?
+	if [ $status -ne 0 ]; then
+		printf '[exit %s]\n' "$status"
+	fi
+	return 0
 }
 
 run_shell() {
-    label="$1"
-    cmd="$2"
-    printf '\n$ %s\n' "$label"
-    sh -c "$cmd"
-    status=$?
-    if [ $status -ne 0 ]; then
-        printf '[exit %s]\n' "$status"
-    fi
-    return 0
+	label="$1"
+	cmd="$2"
+	printf '\n$ %s\n' "$label"
+	sh -c "$cmd"
+	status=$?
+	if [ $status -ne 0 ]; then
+		printf '[exit %s]\n' "$status"
+	fi
+	return 0
 }
 
 section "Time"
@@ -51,7 +51,7 @@ run_cmd "ls -l $SERVICE_PATH" ls -l "$SERVICE_PATH"
 
 section "Processes"
 run_shell "ps | grep -E 'venus_evcharger|venus-evcharger|dbus-venus-evcharger' | grep -v grep" \
-    "ps | grep -E 'venus_evcharger|venus-evcharger|dbus-venus-evcharger' | grep -v grep"
+	"ps | grep -E 'venus_evcharger|venus-evcharger|dbus-venus-evcharger' | grep -v grep"
 
 section "DBus"
 run_cmd "dbus -y $DBUS_NAME /ProductName GetValue" dbus -y "$DBUS_NAME" /ProductName GetValue
@@ -63,17 +63,17 @@ run_cmd "dbus -y $DBUS_NAME /Ac/Power GetValue" dbus -y "$DBUS_NAME" /Ac/Power G
 
 section "Snapshot"
 if [ -f "$AUTO_SNAPSHOT_PATH" ]; then
-    run_cmd "ls -l $AUTO_SNAPSHOT_PATH" ls -l "$AUTO_SNAPSHOT_PATH"
-    run_cmd "cat $AUTO_SNAPSHOT_PATH" cat "$AUTO_SNAPSHOT_PATH"
+	run_cmd "ls -l $AUTO_SNAPSHOT_PATH" ls -l "$AUTO_SNAPSHOT_PATH"
+	run_cmd "cat $AUTO_SNAPSHOT_PATH" cat "$AUTO_SNAPSHOT_PATH"
 else
-    printf 'Snapshot file missing: %s\n' "$AUTO_SNAPSHOT_PATH"
+	printf 'Snapshot file missing: %s\n' "$AUTO_SNAPSHOT_PATH"
 fi
 
 section "Auto Audit"
 if [ -f "$AUTO_REASON_LOG" ]; then
-    run_cmd "tail -n $TAIL_LINES $AUTO_REASON_LOG" tail -n "$TAIL_LINES" "$AUTO_REASON_LOG"
+	run_cmd "tail -n $TAIL_LINES $AUTO_REASON_LOG" tail -n "$TAIL_LINES" "$AUTO_REASON_LOG"
 else
-    printf 'Auto audit log missing: %s\n' "$AUTO_REASON_LOG"
+	printf 'Auto audit log missing: %s\n' "$AUTO_REASON_LOG"
 fi
 
 section "Hints"

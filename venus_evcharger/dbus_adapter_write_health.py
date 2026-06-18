@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections import deque
 from collections.abc import Mapping
 from typing import Any
 
@@ -38,6 +39,20 @@ _AGING_QUEUE_CLASSES = {"read-fast", "read-slow", "discovery", "introspection"}
 
 
 class DbusWriteSchedulerHealthMixin:
+    adapter: Any
+    base_queue_class_budgets: dict[str, int]
+    dynamic_local_publish_burst_limit: int
+    last_processed_at: float
+    local_publish_burst_limit: int
+    local_publish_tick_budget_seconds: float
+    queue_class_budgets: dict[str, int]
+    startup_registration_batch_limit: int
+    startup_registration_tick_budget_seconds: float
+    _budget_events: deque[tuple[float, str]]
+    _lifecycle_counts: dict[str, int]
+    _lifecycle_events: deque[tuple[float, str, str]]
+    _processed_events: deque[float]
+
     def health(self, *, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
         current = time.time() if now is None else float(now)  # pragma: no mutate
         self._prune_processed(current)

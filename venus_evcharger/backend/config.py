@@ -459,3 +459,21 @@ from .config_service import (  # noqa: E402
     compat_legacy_backend_view_from_runtime,
     runtime_summary_from_service,
 )
+
+
+__all__ = [
+    "DEFAULT_COMBINED_METER_TYPE",
+    "DEFAULT_COMBINED_SWITCH_TYPE",
+    "backend_mode_for_service",
+    "backend_type_for_service",
+    "compat_legacy_backend_view_from_config",
+    "compat_legacy_backend_view_from_runtime",
+    "load_runtime_backend_summary",
+    "normalize_backend_mode",
+    "normalize_backend_type",
+    "normalize_config_path",
+    "normalize_optional_backend_type",
+    "runtime_summary_from_service",
+    "runtime_summary_is_configured",
+    "runtime_summary_uses_legacy_primary_rpc",
+]

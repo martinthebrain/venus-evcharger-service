@@ -32,6 +32,8 @@ from venus_evcharger.inputs.helper import (
 )
 from venus_evcharger.inputs.helper.config_runtime import _AutoInputHelperConfigMixin
 
+__all__ = ["AutoInputHelper", "_as_bool", "main"]
+
 
 class AutoInputHelper(
     _AutoInputHelperConfigMixin,
@@ -99,13 +101,13 @@ class AutoInputHelper(
         self._system_bus = None
         self._dbus_generation = 0
         self._system_bus_generation = 0
-        self._name_owner_match = None
+        self._name_owner_match: Any = None
         self._dbus_subscription_backoff_until = 0.0
         self._dbus_list_backoff_until = 0.0
         self._dbus_list_failures = 0
         self._resolved_auto_pv_services = []
         self._auto_pv_last_scan = 0.0
-        self._resolved_auto_battery_service = None
+        self._resolved_auto_battery_service: str | None = None
         self._auto_battery_last_scan = 0.0
         self._resolved_auto_energy_services: dict[str, str] = {}
         self._auto_energy_last_scan: dict[str, float] = {}

@@ -115,9 +115,9 @@ class ShellyIoWorkerMixin(ShellyIoWorkerTransportMixin):
     def _source_retry_blocks_pending_relay(self, source_key: str, current: float) -> bool:
         """Return whether source backoff should defer the pending relay command."""
         if source_key == "charger":
-            return self._charger_retry_active(current)
+            return bool(self._charger_retry_active(current))
         if source_key == "shelly":
-            return self._shelly_retry_active(current)
+            return bool(self._shelly_retry_active(current))
         return False
 
     def _apply_pending_relay_target(self, svc: Any, target_on: bool) -> None:

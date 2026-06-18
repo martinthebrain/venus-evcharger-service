@@ -12,12 +12,15 @@ from typing import Any, cast
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 from venus_evcharger.dbus_introspection import owner_path_children, owner_path_unusable
-from venus_evcharger.inputs.helper.sources_dbus_common import _is_expected_missing_dbus_error
+from venus_evcharger.inputs.helper.sources_dbus_common import (
+    _ResolvedAutoBatteryServiceState,
+    _is_expected_missing_dbus_error,
+)
 
 _CACHE_VALUE_MISSING = object()
 
 
-class _AutoInputHelperSourceDbusGatewayMixin:
+class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
     @staticmethod
     def _dbus_module() -> Any:
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")

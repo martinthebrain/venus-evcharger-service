@@ -55,8 +55,11 @@ def _native_device_files(
     answers: WizardAnswers,
     role_hosts: dict[str, str],
 ) -> dict[str, str]:
+    charger = topology_config.charger
+    if charger is None:
+        return {}
     files = {
-        "wizard-charger.ini": _charger_config_text(topology_config.charger.type, answers, role_hosts),
+        "wizard-charger.ini": _charger_config_text(charger.type, answers, role_hosts),
     }
     if topology_config.measurement is not None and topology_config.measurement.type == "external_meter":
         files["wizard-meter.ini"] = _measurement_config_text(answers, role_hosts)
@@ -68,8 +71,11 @@ def _hybrid_topology_files(
     answers: WizardAnswers,
     role_hosts: dict[str, str],
 ) -> dict[str, str]:
+    charger = topology_config.charger
+    if charger is None:
+        return {}
     files = {
-        "wizard-charger.ini": _charger_config_text(topology_config.charger.type, answers, role_hosts),
+        "wizard-charger.ini": _charger_config_text(charger.type, answers, role_hosts),
     }
     if topology_config.measurement is not None and topology_config.measurement.type == "external_meter":
         files["wizard-meter.ini"] = _measurement_config_text(answers, role_hosts)

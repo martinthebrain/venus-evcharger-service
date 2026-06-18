@@ -166,7 +166,7 @@ class _AutoInputHelperSubscriptionMixin:
             GLib.idle_add(_run)
 
     def _subscription_refresh_backoff_active(self: Any) -> bool:
-        return self._subscription_refresh_delay_seconds() > 0.0
+        return bool(self._subscription_refresh_delay_seconds() > 0.0)
 
     def _subscription_refresh_delay_seconds(self: Any) -> float:
         backoff_until = float(getattr(self, "_dbus_subscription_backoff_until", 0.0) or 0.0)

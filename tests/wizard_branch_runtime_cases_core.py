@@ -401,6 +401,24 @@ class _WizardBranchRuntimeCoreCases:
                 "ChargerConfigPath=wizard-charger.ini",
             ],
         )
+        from venus_evcharger.topology.schema import EvChargerTopologyConfig, TopologyConfig
+
+        self.assertEqual(
+            wizard_render.render_adapter_files_from_topology(
+                EvChargerTopologyConfig(topology=TopologyConfig(type="native_device")),
+                topology_answers,
+                {},
+            ),
+            {},
+        )
+        self.assertEqual(
+            wizard_render.render_adapter_files_from_topology(
+                EvChargerTopologyConfig(topology=TopologyConfig(type="hybrid_topology")),
+                topology_answers,
+                {},
+            ),
+            {},
+        )
 
     def _assert_wizard_main_guard_paths(self) -> None:
         stdout = io.StringIO()

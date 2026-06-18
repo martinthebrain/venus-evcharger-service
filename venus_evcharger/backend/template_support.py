@@ -234,3 +234,19 @@ class TemplateHttpBackendBase:
         response = _request_method_callable(self._session, method)(**kwargs)
         response.raise_for_status()
         return _response_payload_dict(response)
+
+
+__all__ = [
+    "TemplateAuthSettings",
+    "TemplateHttpBackendBase",
+    "config_section",
+    "enabled_state_from_text",
+    "json_path_value",
+    "load_required_backend_config",
+    "load_template_auth_settings",
+    "load_template_config",
+    "normalize_http_method",
+    "payload_object",
+    "render_json_payload",
+    "resolved_url",
+]

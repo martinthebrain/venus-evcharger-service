@@ -122,7 +122,7 @@ class GatewayClient:
 
     def load_health(self, *, max_age_seconds: float = 10.0) -> dict[str, Any]:  # pragma: no mutate block
         payload = DbusCacheStore.load_snapshot(self.paths.health_path, max_age_seconds=max_age_seconds)
-        health = payload.get("dbus_health") if isinstance(payload, Mapping) else None
+        health = payload.get("dbus_health")
         return dict(health) if isinstance(health, Mapping) else payload
 
     def backpressure_state(self, *, max_age_seconds: float = 10.0) -> str:  # pragma: no mutate block
@@ -215,7 +215,7 @@ def _backpressure_cache_fresh(cached_at: float, cached_state: str, now: float) -
 
 
 def _backpressure_state_from_health(health: Mapping[str, Any]) -> str:  # pragma: no mutate block
-    backpressure = health.get("backpressure") if isinstance(health, Mapping) else None
+    backpressure = health.get("backpressure")
     if not isinstance(backpressure, Mapping):
         return "unknown"
     return str(backpressure.get("state", "unknown") or "unknown")

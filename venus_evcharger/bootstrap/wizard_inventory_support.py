@@ -197,7 +197,7 @@ def _parse_phase_label(item: str, raw_part: str) -> PhaseLabel:
     """Parse and validate one normalized phase label."""
     if item not in PHASE_ORDER:
         raise ValueError(f"Unknown phase label: {raw_part}")
-    return cast(PhaseLabel, item)
+    return item
 
 
 def parse_inventory_kind(raw_value: str) -> CapabilityKind:

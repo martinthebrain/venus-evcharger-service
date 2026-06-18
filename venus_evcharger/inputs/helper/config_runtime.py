@@ -4,20 +4,27 @@
 from __future__ import annotations
 
 import os
+import configparser
+from collections.abc import Callable
 
 from venus_evcharger.core.shared import parse_config_bool as _as_bool
 from venus_evcharger.energy import load_energy_source_settings
 
 
 class _AutoInputHelperConfigMixin:
+    _derive_subscription_refresh_seconds: Callable[[], float]
+    _parsed_helper_generation: Callable[[object], int]
+    _parsed_parent_pid: Callable[[object], int | None]
+    _parsed_runtime_instance_id: Callable[[object], str]
+
     def _init_helper_base_config(
         self,
-        config_path,
-        parser,
-        snapshot_path,
-        parent_pid,
-        helper_generation,
-        runtime_instance_id,
+        config_path: str,
+        parser: configparser.ConfigParser,
+        snapshot_path: str | None,
+        parent_pid: object,
+        helper_generation: object,
+        runtime_instance_id: object,
     ) -> None:
         self.config_path = config_path
         self.config = parser["DEFAULT"]

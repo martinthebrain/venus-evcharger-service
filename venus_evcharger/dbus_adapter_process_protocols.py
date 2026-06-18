@@ -112,6 +112,7 @@ class DbusAdapterIoContext(Protocol):
     rate_limiter: DbusRateLimiter
     circuit: DbusCircuitBreaker
     cache: DbusCacheStore
+    commands: DbusCommandInbox
     discovery: DbusDiscoveryManager
     read_scheduler: DbusReadScheduler
     read_executor: DbusReadExecutor
@@ -195,6 +196,7 @@ class DbusAdapterHealthContext(Protocol):
     def _charging_session_active_for_gui(self, now: float) -> bool: ...
     def _fresh_cached_path_float(self, path: str, now: float) -> float: ...
     def _backpressure_snapshot(self, *, slo: Mapping[str, Any], queue_health: Mapping[str, Any]) -> dict[str, Any]: ...
+    def _backpressure_slo_reasons(self, slo: Mapping[str, Any]) -> list[str]: ...
     def _backpressure_reasons(self, circuit_state: str, queue_age: float, slo: Mapping[str, Any]) -> list[str]: ...
     def _backpressure_state(self, circuit_state: str, queue_age: float, reasons: list[str]) -> str: ...
     def _apply_slo_regulation(self) -> None: ...
@@ -214,6 +216,7 @@ class DbusAdapterIntrospectionContext(Protocol):
     circuit: DbusCircuitBreaker
     cache: DbusCacheStore
     commands: DbusCommandInbox
+    discovery: DbusDiscoveryManager
     read_executor: DbusReadExecutor
     dbus_introspection_enabled: bool
     dbus_introspection_request_path: str

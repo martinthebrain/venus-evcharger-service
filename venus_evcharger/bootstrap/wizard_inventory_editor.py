@@ -25,6 +25,18 @@ from venus_evcharger.bootstrap.wizard_inventory_editor_bindings import (
     set_inventory_binding_member,
 )
 
+__all__ = [
+    "add_inventory_capability",
+    "add_inventory_device",
+    "add_inventory_profile",
+    "inventory_role_capability_choices",
+    "remove_inventory_binding",
+    "remove_inventory_binding_member",
+    "remove_inventory_device",
+    "set_inventory_binding_member",
+    "set_inventory_device_endpoint",
+]
+
 
 def remove_inventory_binding(inventory: DeviceInventory, *, binding_id: str) -> DeviceInventory:
     """Return one inventory without one whole binding."""
@@ -362,4 +374,3 @@ def _binding_capability_kind_for_role(role: BindingRole) -> CapabilityKind:
     if role == "charger":
         return "charger"
     return "meter"
-
