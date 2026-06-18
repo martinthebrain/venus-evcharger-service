@@ -37,7 +37,11 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
 
     def _battery_snapshot_effective_soc(self: Any, cluster: Any) -> float | None:
         primary_soc = cluster.sources[0].soc if cluster.sources else None
-        return cluster.effective_soc if bool(getattr(self, "auto_use_combined_battery_soc", True)) else primary_soc
+        selected_soc = cluster.effective_soc if bool(getattr(self, "auto_use_combined_battery_soc", True)) else primary_soc
+        numeric_soc: object = coerce_dbus_numeric(selected_soc)
+        if isinstance(numeric_soc, bool) or not isinstance(numeric_soc, (int, float)):
+            return None
+        return float(numeric_soc)
 
     def _battery_snapshot_learning_bundle(self: Any, cluster: Any, now: float) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
         self._energy_learning_profiles = update_energy_learning_profiles(

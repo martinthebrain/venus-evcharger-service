@@ -38,6 +38,16 @@ AUTO_METRIC_NUMERIC_FIELDS = (
 )
 AUTO_METRIC_TEXT_FIELDS = ("profile", "threshold_mode", "stop_alpha_stage")
 
+__all__ = [
+    "AUTO_METRIC_NUMERIC_FIELDS",
+    "AUTO_METRIC_TEXT_FIELDS",
+    "SCHEDULED_REASON_CODES",
+    "SCHEDULED_STATE_CODES",
+    "SOFTWARE_UPDATE_STATE_CODES",
+    "normalized_scheduled_state_fields",
+    "normalized_software_update_state_fields",
+]
+
 
 def _normalized_scheduled_label(value: Any, allowed_codes: dict[str, int]) -> str:
     normalized = str(value).strip().lower() if value is not None else "disabled"

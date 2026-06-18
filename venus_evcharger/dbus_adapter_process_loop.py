@@ -90,13 +90,41 @@ class DbusAdapterLoopMixin:
         return self.min_tick_seconds
 
     def _process_one_dbus_operation_once(self: DbusAdapterLoopContext) -> bool:
-        if not self.cache.services and self._refresh_services_if_due_once():
+        if self._refresh_initial_services_once():
             return True
         self._enqueue_background_introspection_if_due()
+        if self._priority_read_performed():
+            return True
+        return self._process_standard_operation_once()
+
+    def _refresh_initial_services_once(self: DbusAdapterLoopContext) -> bool:
+        return not self.cache.services and self._refresh_services_if_due_once()
+
+    def _priority_read_performed(self: DbusAdapterLoopContext) -> bool:
+        return self._reads_need_priority() and self._poll_one_due_read_once()
+
+    def _process_standard_operation_once(self: DbusAdapterLoopContext) -> bool:
         local_publish_count = self.write_scheduler.process_local_publish_burst()
         if self._process_preferred_read_or_write():
             return True
         return self._refresh_services_if_due_once() or local_publish_count > 0
+
+    def _reads_need_priority(self: DbusAdapterLoopContext) -> bool:
+        return self.read_executor.has_pending_aggregate() or self._core_reads_stale()
+
+    def _core_reads_stale(self: DbusAdapterLoopContext) -> bool:
+        now = time.time()
+        for key in ("grid_power_w", "pv_power_w", "battery_soc"):
+            if self._core_read_age(key, now) > self.slo_core_read_max_age_seconds:
+                return True
+        return False
+
+    def _core_read_age(self: DbusAdapterLoopContext, key: str, now: float) -> float:
+        entry = self.cache.values.get(key)
+        if not entry:
+            return self.slo_core_read_max_age_seconds + 1.0
+        updated_at = float(entry.get("updated_at", 0.0) or 0.0)
+        return now - updated_at if updated_at > 0.0 else self.slo_core_read_max_age_seconds + 1.0
 
     def _process_preferred_read_or_write(self: DbusAdapterLoopContext) -> bool:
         if self._prefer_read_next:
@@ -105,7 +133,7 @@ class DbusAdapterLoopMixin:
 
     def _try_read_then_write(self: DbusAdapterLoopContext) -> bool:
         if self._poll_one_due_read_once():
-            self._prefer_read_next = False
+            self._prefer_read_next = self._reads_need_priority()
             return True
         return self._try_scheduled_write(prefer_read_next=True)
 

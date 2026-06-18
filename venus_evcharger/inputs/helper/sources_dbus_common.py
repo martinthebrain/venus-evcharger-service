@@ -23,6 +23,12 @@ _EXPECTED_MISSING_DBUS_ERROR_TEXT = (
 )
 
 
+class _ResolvedAutoBatteryServiceState:
+    """Shared state contract for DBus source-resolution mixins."""
+
+    _resolved_auto_battery_service: str | None
+
+
 def _dbus_error_name(error: BaseException) -> str:
     getter = getattr(error, "get_dbus_name", None)
     if callable(getter):

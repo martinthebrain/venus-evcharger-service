@@ -216,8 +216,8 @@ class LocalControlApiHttpServer(
             def do_POST(self) -> None:  # noqa: N802
                 owner._handle_post(self)
 
-            def log_message(self, format: str, *args: Any) -> None:
-                logging.debug("Control API HTTP: " + format, *args)
+            def log_message(self, message_format: str, *args: Any) -> None:
+                logging.debug("Control API HTTP: " + message_format, *args)
 
         return _Handler
 

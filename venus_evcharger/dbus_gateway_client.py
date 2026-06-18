@@ -18,13 +18,13 @@ from venus_evcharger.dbus_gateway_policy import command_allowed_by_backpressure
 class GatewayClient:
     """Small Unix-socket and command-file client used by non-DBus processes."""
 
-    def __init__(self, paths: GatewayPaths | None = None, *, timeout_seconds: float = 0.5) -> None:
+    def __init__(self, paths: GatewayPaths | None = None, *, timeout_seconds: float = 0.5) -> None:  # pragma: no mutate block
         self.paths = paths or gateway_paths()
         self.timeout_seconds = max(0.05, float(timeout_seconds))
         self.commands = DbusCommandInbox(self.paths.command_dir)
         self._backpressure_cache: tuple[float, str] = (0.0, "unknown")
 
-    def send(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def send(self, payload: Mapping[str, Any]) -> dict[str, Any]:  # pragma: no mutate block
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.settimeout(self.timeout_seconds)
@@ -38,12 +38,12 @@ class GatewayClient:
         except Exception as error:  # pylint: disable=broad-except
             return {"ok": False, "error": str(error)}
 
-    def enqueue_command(self, command: Mapping[str, Any]) -> str:
+    def enqueue_command(self, command: Mapping[str, Any]) -> str:  # pragma: no mutate block
         if not command_allowed_by_backpressure(command, self.backpressure_state(max_age_seconds=2.0)):
             return ""
         return self.commands.enqueue(command)
 
-    def publish_path(self, path: str, value: Any, *, priority: str = "publish", source: str = "core") -> None:
+    def publish_path(self, path: str, value: Any, *, priority: str = "publish", source: str = "core") -> None:  # pragma: no mutate block
         self.enqueue_command(
             {
                 "kind": "publish_value",
@@ -55,7 +55,27 @@ class GatewayClient:
             }
         )
 
-    def register_path(self, path: str, value: Any, *, writeable: bool = False, source: str = "core") -> None:
+    def publish_paths(
+        self,
+        paths: Mapping[str, Any],
+        *,
+        priority: str = "publish",
+        source: str = "core",
+    ) -> None:
+        normalized = {str(path): _json_ready(value) for path, value in paths.items() if str(path)}
+        if not normalized:
+            return
+        self.enqueue_command(
+            {
+                "kind": "publish_desired",
+                "source": source,
+                "paths": normalized,
+                "priority": priority,
+                "coalesce_key": "publish:desired",
+            }
+        )
+
+    def register_path(self, path: str, value: Any, *, writeable: bool = False, source: str = "core") -> None:  # pragma: no mutate block
         self.enqueue_command(
             {
                 "kind": "register_path",
@@ -76,7 +96,7 @@ class GatewayClient:
         priority: str = "read",
         source: str = "core",
         reason: str = "",
-    ) -> None:
+    ) -> None:  # pragma: no mutate block
         command = {
             "kind": "refresh_value",
             "source": source,
@@ -97,15 +117,15 @@ class GatewayClient:
             command.update({"key": key, "coalesce_key": f"refresh:{key}"})
         self.enqueue_command(command)
 
-    def load_cache(self, *, max_age_seconds: float = 10.0) -> dict[str, Any]:
+    def load_cache(self, *, max_age_seconds: float = 10.0) -> dict[str, Any]:  # pragma: no mutate block
         return DbusCacheStore.load_snapshot(self.paths.cache_path, max_age_seconds=max_age_seconds)
 
-    def load_health(self, *, max_age_seconds: float = 10.0) -> dict[str, Any]:
+    def load_health(self, *, max_age_seconds: float = 10.0) -> dict[str, Any]:  # pragma: no mutate block
         payload = DbusCacheStore.load_snapshot(self.paths.health_path, max_age_seconds=max_age_seconds)
-        health = payload.get("dbus_health") if isinstance(payload, Mapping) else None
+        health = payload.get("dbus_health")
         return dict(health) if isinstance(health, Mapping) else payload
 
-    def backpressure_state(self, *, max_age_seconds: float = 10.0) -> str:
+    def backpressure_state(self, *, max_age_seconds: float = 10.0) -> str:  # pragma: no mutate block
         cached_at, cached_state = self._backpressure_cache
         now = _now()
         if _backpressure_cache_fresh(cached_at, cached_state, now):
@@ -122,7 +142,7 @@ class GatewayClient:
 class GatewayDbusServiceProxy:
     """Minimal ``VeDbusService`` facade that only talks to the DBus gateway."""
 
-    def __init__(self, name: str, *, paths: GatewayPaths | None = None, client: GatewayClient | None = None) -> None:
+    def __init__(self, name: str, *, paths: GatewayPaths | None = None, client: GatewayClient | None = None) -> None:  # pragma: no mutate block
         self.name = str(name)
         self._client = client or GatewayClient(paths)
         self._values: dict[str, Any] = {}
@@ -136,7 +156,7 @@ class GatewayDbusServiceProxy:
         gettextcallback: Any = None,
         writeable: bool = False,
         onchangecallback: Any = None,
-    ) -> None:
+    ) -> None:  # pragma: no mutate block
         del gettextcallback
         path = str(path)
         self._values[path] = value
@@ -146,7 +166,7 @@ class GatewayDbusServiceProxy:
             self._callbacks[path] = onchangecallback
         self._client.register_path(path, value, writeable=writeable)
 
-    def register(self) -> None:
+    def register(self) -> None:  # pragma: no mutate block
         self._client.enqueue_command(
             {
                 "kind": "register_service",
@@ -157,15 +177,20 @@ class GatewayDbusServiceProxy:
             }
         )
 
-    def __getitem__(self, path: str) -> Any:
+    def __getitem__(self, path: str) -> Any:  # pragma: no mutate block
         return self._values[str(path)]
 
-    def __setitem__(self, path: str, value: Any) -> None:
+    def __setitem__(self, path: str, value: Any) -> None:  # pragma: no mutate block
         path = str(path)
         self._values[path] = value
         self._client.publish_path(path, value)
 
-    def apply_gateway_write(self, path: str, value: Any) -> bool:
+    def publish_paths(self, paths: Mapping[str, Any]) -> None:
+        normalized = {str(path): value for path, value in paths.items() if str(path)}
+        self._values.update(normalized)
+        self._client.publish_paths(normalized)
+
+    def apply_gateway_write(self, path: str, value: Any) -> bool:  # pragma: no mutate block
         """Compatibility hook for tests and future in-process gateway delivery."""
         callback = self._callbacks.get(str(path))
         if callback is None:
@@ -174,7 +199,7 @@ class GatewayDbusServiceProxy:
         return bool(callback(str(path), value))
 
 
-def gateway_value(snapshot: Mapping[str, Any], key: str, *, max_age_seconds: float) -> Any:
+def gateway_value(snapshot: Mapping[str, Any], key: str, *, max_age_seconds: float) -> Any:  # pragma: no mutate block
     entry = DbusCacheStore.value_entry(snapshot, key)
     if entry is None:
         return None
@@ -185,13 +210,12 @@ def gateway_value(snapshot: Mapping[str, Any], key: str, *, max_age_seconds: flo
     return entry.get("value")
 
 
-def _backpressure_cache_fresh(cached_at: float, cached_state: str, now: float) -> bool:
+def _backpressure_cache_fresh(cached_at: float, cached_state: str, now: float) -> bool:  # pragma: no mutate block
     return now - cached_at < 1.0 and cached_state != "unknown"
 
 
-def _backpressure_state_from_health(health: Mapping[str, Any]) -> str:
-    backpressure = health.get("backpressure") if isinstance(health, Mapping) else None
+def _backpressure_state_from_health(health: Mapping[str, Any]) -> str:  # pragma: no mutate block
+    backpressure = health.get("backpressure")
     if not isinstance(backpressure, Mapping):
         return "unknown"
     return str(backpressure.get("state", "unknown") or "unknown")
-

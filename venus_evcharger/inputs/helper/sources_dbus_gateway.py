@@ -6,15 +6,21 @@ from __future__ import annotations
 import logging
 import time
 import xml.etree.ElementTree as xml_et
+from collections.abc import Mapping
 from typing import Any, cast
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 from venus_evcharger.dbus_introspection import owner_path_children, owner_path_unusable
-from venus_evcharger.inputs.helper.sources_dbus_common import _is_expected_missing_dbus_error
+from venus_evcharger.inputs.helper.sources_dbus_common import (
+    _ResolvedAutoBatteryServiceState,
+    _is_expected_missing_dbus_error,
+)
+
+_CACHE_VALUE_MISSING = object()
 
 
-class _AutoInputHelperSourceDbusGatewayMixin:
+class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
     @staticmethod
     def _dbus_module() -> Any:
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
@@ -26,8 +32,12 @@ class _AutoInputHelperSourceDbusGatewayMixin:
         cache_key = dbus_path_key(service_name, path)
         snapshot = self._gateway_cache_snapshot()
         entry = DbusCacheStore.value_entry(snapshot, cache_key)
-        if entry is not None and str(entry.get("status", "")) in ("fresh", "stale"):
-            return cast(float | int | None, coerce_dbus_numeric(entry.get("value")))
+        cached_value = self._cached_gateway_value(entry)
+        if cached_value is not _CACHE_VALUE_MISSING:
+            return cast(float | int | None, cached_value)
+        if self._cached_gateway_error_recent(entry):
+            logging.debug("Auto helper suppressing fresh DBus cache error for %s %s", service_name, path)
+            return None
         self._request_gateway_value(service_name, path, priority=90, reason="helper DBus cache miss")
         return None
 
@@ -95,6 +105,25 @@ class _AutoInputHelperSourceDbusGatewayMixin:
             str(getattr(self, "dbus_gateway_cache_path", "") or self._gateway_client().paths.cache_path),
             max_age_seconds=max(0.0, float(getattr(self, "dbus_gateway_max_age_seconds", 10.0) or 10.0)),
         )
+
+    @staticmethod
+    def _cached_gateway_value(entry: Mapping[str, Any] | None) -> object:
+        if entry is None or str(entry.get("status", "")) not in ("fresh", "stale"):
+            return _CACHE_VALUE_MISSING
+        return coerce_dbus_numeric(entry.get("value"))
+
+    def _cached_gateway_error_recent(self: Any, entry: Mapping[str, Any] | None) -> bool:
+        return bool(entry is not None and self._gateway_error_recent(entry))
+
+    def _gateway_error_recent(self: Any, entry: Mapping[str, Any]) -> bool:
+        if str(entry.get("status", "")) != "error":
+            return False
+        error_at = float(entry.get("error_at", 0.0) or 0.0)
+        return error_at > 0.0 and time.time() - error_at < self._gateway_error_retry_seconds()
+
+    def _gateway_error_retry_seconds(self: Any) -> float:
+        configured = float(getattr(self, "dbus_gateway_error_retry_seconds", 30.0) or 30.0)
+        return max(1.0, min(300.0, configured))
 
     def _dbus_retry_read(self: Any, service_name: str, path: str, label: str, read: Any) -> Any:
         last_error: Exception | None = None

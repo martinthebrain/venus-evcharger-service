@@ -137,7 +137,7 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         expected = self._coerce_snapshot_int(getattr(svc, "_auto_input_helper_generation", None))
         if expected is None or expected <= 0:
             return True
-        return self._coerce_snapshot_int(snapshot.get("helper_generation")) == expected
+        return bool(self._coerce_snapshot_int(snapshot.get("helper_generation")) == expected)
 
     @staticmethod
     def _snapshot_runtime_instance_matches_current_service(svc: Any, snapshot: dict[str, Any]) -> bool:

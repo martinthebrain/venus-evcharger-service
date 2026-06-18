@@ -114,6 +114,9 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
     @staticmethod
     def _apply_dbus_publish_values(svc: Any, values: list[tuple[str, QueuedPublishValue]]) -> list[str]:
         """Apply drained DBus publish values and return failed paths."""
+        batch_publish = getattr(svc._dbusservice, "publish_paths", None)
+        if callable(batch_publish):
+            return _RuntimeSupportAsyncMainloopPublishMixin._apply_gateway_publish_values(svc, values, batch_publish)
         failed_paths: list[str] = []
         for path, (value, current, _queued_at) in values:
             try:
@@ -122,6 +125,30 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             except Exception:  # pylint: disable=broad-except
                 failed_paths.append(path)
         return failed_paths
+
+    @staticmethod
+    def _apply_gateway_publish_values(
+        svc: Any,
+        values: list[tuple[str, QueuedPublishValue]],
+        batch_publish: Any,
+    ) -> list[str]:
+        if not values:
+            return []
+        try:
+            batch_publish(_RuntimeSupportAsyncMainloopPublishMixin._gateway_publish_payload(values))
+        except Exception:  # pylint: disable=broad-except
+            return [path for path, _item in values]
+        _RuntimeSupportAsyncMainloopPublishMixin._remember_gateway_publish_success(svc, values)
+        return []
+
+    @staticmethod
+    def _gateway_publish_payload(values: list[tuple[str, QueuedPublishValue]]) -> dict[str, Any]:
+        return {path: value for path, (value, _current, _queued_at) in values}
+
+    @staticmethod
+    def _remember_gateway_publish_success(svc: Any, values: list[tuple[str, QueuedPublishValue]]) -> None:
+        for path, (value, current, _queued_at) in values:
+            svc._dbus_publish_state[path] = {"value": value, "updated_at": current}
 
     @staticmethod
     def _report_dbus_publish_failures(svc: Any, failed_paths: list[str]) -> None:

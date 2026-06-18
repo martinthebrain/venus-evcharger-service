@@ -26,7 +26,7 @@ def _priority_rank(priority: object) -> int:
 
 def _float_or_zero(value: object) -> float:
     try:
-        return float(value) if value is not None else 0.0
+        return float(str(value)) if value is not None else 0.0
     except (TypeError, ValueError):
         return 0.0
 

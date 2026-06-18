@@ -3,16 +3,26 @@
 
 from __future__ import annotations
 
+from typing import TypedDict, cast
+
 from venus_evcharger.bootstrap.wizard_models import WizardAnswers
 from venus_evcharger.topology import (
     ActuatorConfig,
+    ActuatorType,
     ChargerConfig,
+    ChargerType,
     EvChargerTopologyConfig,
     MeasurementConfig,
     PolicyConfig,
     TopologyConfig,
     validate_topology_config,
 )
+
+
+class _HybridExternalMeterOptions(TypedDict):
+    actuator_type: ActuatorType
+    switch_config_name: str
+    charger_type: ChargerType
 
 
 def build_wizard_topology_config(
@@ -55,7 +65,7 @@ def _native_charger_topology(
             actuator=None,
             measurement=MeasurementConfig(type="charger_native"),
             charger=ChargerConfig(
-                type=answers.charger_backend or "goe_charger",
+                type=_charger_type_or_default(answers.charger_backend, "goe_charger"),
                 config_path="wizard-charger.ini",
             ),
             policy=_policy(answers),
@@ -75,7 +85,7 @@ def _phase_switch_topology(
             ),
             measurement=MeasurementConfig(type="charger_native"),
             charger=ChargerConfig(
-                type=answers.charger_backend or "simpleevse_charger",
+                type=_charger_type_or_default(answers.charger_backend, "simpleevse_charger"),
                 config_path="wizard-charger.ini",
             ),
             policy=_policy(answers),
@@ -155,9 +165,9 @@ def _cerbo_relay_external_meter_topology(
     )
 
 
-def _hybrid_external_meter_options(topology_preset: str) -> dict[str, str] | None:
+def _hybrid_external_meter_options(topology_preset: str) -> _HybridExternalMeterOptions | None:
     """Return hybrid external-meter builder options for one topology preset."""
-    return {
+    options: dict[str, _HybridExternalMeterOptions] = {
         "template-stack": {
             "actuator_type": "template_switch",
             "switch_config_name": "wizard-switch.ini",
@@ -208,12 +218,13 @@ def _hybrid_external_meter_options(topology_preset: str) -> dict[str, str] | Non
             "switch_config_name": "wizard-switch-group.ini",
             "charger_type": "modbus_charger",
         },
-    }.get(topology_preset)
+    }
+    return options.get(topology_preset)
 
 
-def _native_external_meter_charger_type(topology_preset: str) -> str | None:
+def _native_external_meter_charger_type(topology_preset: str) -> ChargerType | None:
     """Return charger type for native-device external-meter presets."""
-    return {
+    charger_type = {
         "shelly-meter-goe": "goe_charger",
         "shelly-meter-modbus-charger": "modbus_charger",
         "tuya-meter-goe": "goe_charger",
@@ -221,19 +232,21 @@ def _native_external_meter_charger_type(topology_preset: str) -> str | None:
         "tasmota-meter-goe": "goe_charger",
         "tasmota-meter-modbus-charger": "modbus_charger",
     }.get(topology_preset)
+    return cast(ChargerType | None, charger_type)
 
 
-def _hybrid_charger_native_type(topology_preset: str) -> str | None:
+def _hybrid_charger_native_type(topology_preset: str) -> ChargerType | None:
     """Return charger type for hybrid charger-native presets."""
-    return {
+    charger_type = {
         "goe-external-switch-group": "goe_charger",
     }.get(topology_preset)
+    return cast(ChargerType | None, charger_type)
 
 
 def _native_external_meter_topology(
     answers: WizardAnswers,
     *,
-    charger_type: str,
+    charger_type: ChargerType,
 ) -> EvChargerTopologyConfig:
     return validate_topology_config(
         EvChargerTopologyConfig(
@@ -255,7 +268,7 @@ def _native_external_meter_topology(
 def _hybrid_charger_native_topology(
     answers: WizardAnswers,
     *,
-    charger_type: str,
+    charger_type: ChargerType,
 ) -> EvChargerTopologyConfig:
     return validate_topology_config(
         EvChargerTopologyConfig(
@@ -277,9 +290,9 @@ def _hybrid_charger_native_topology(
 def _hybrid_external_meter_topology(
     answers: WizardAnswers,
     *,
-    actuator_type: str,
+    actuator_type: ActuatorType,
     switch_config_name: str,
-    charger_type: str,
+    charger_type: ChargerType,
 ) -> EvChargerTopologyConfig:
     return validate_topology_config(
         EvChargerTopologyConfig(
@@ -299,3 +312,8 @@ def _hybrid_external_meter_topology(
             policy=_policy(answers),
         )
     )
+
+
+def _charger_type_or_default(value: str | None, default: ChargerType) -> ChargerType:
+    """Return one wizard charger type while keeping topology literals typed."""
+    return cast(ChargerType, value or default)

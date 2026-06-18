@@ -195,9 +195,10 @@ def _phase_tokens(raw_value: str) -> list[str]:
 
 def _parse_phase_label(item: str, raw_part: str) -> PhaseLabel:
     """Parse and validate one normalized phase label."""
-    if item not in PHASE_ORDER:
-        raise ValueError(f"Unknown phase label: {raw_part}")
-    return cast(PhaseLabel, item)
+    for phase in PHASE_ORDER:
+        if item == phase:
+            return phase
+    raise ValueError(f"Unknown phase label: {raw_part}")
 
 
 def parse_inventory_kind(raw_value: str) -> CapabilityKind:

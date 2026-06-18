@@ -16,12 +16,13 @@ import sys
 import threading
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from gi.repository import GLib
 from venus_evcharger.core.shared import (
     AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION,
     compact_json,
+    config_get_float,
     parse_config_bool as _as_bool,
     write_text_atomically,
 )
@@ -31,6 +32,8 @@ from venus_evcharger.inputs.helper import (
     _AutoInputHelperSubscriptionMixin,
 )
 from venus_evcharger.inputs.helper.config_runtime import _AutoInputHelperConfigMixin
+
+__all__ = ["AutoInputHelper", "_as_bool", "main"]
 
 
 class AutoInputHelper(
@@ -99,13 +102,13 @@ class AutoInputHelper(
         self._system_bus = None
         self._dbus_generation = 0
         self._system_bus_generation = 0
-        self._name_owner_match = None
+        self._name_owner_match: Any = None
         self._dbus_subscription_backoff_until = 0.0
         self._dbus_list_backoff_until = 0.0
         self._dbus_list_failures = 0
         self._resolved_auto_pv_services = []
         self._auto_pv_last_scan = 0.0
-        self._resolved_auto_battery_service = None
+        self._resolved_auto_battery_service: str | None = None
         self._auto_battery_last_scan = 0.0
         self._resolved_auto_energy_services: dict[str, str] = {}
         self._auto_energy_last_scan: dict[str, float] = {}
@@ -147,8 +150,8 @@ class AutoInputHelper(
         """Return a slow service refresh interval for DBus subscription bookkeeping."""
         candidates = [60.0]
         for value in (
-            float(self.config.get("AutoPvScanIntervalSeconds", 60)),
-            float(self.config.get("AutoBatteryScanIntervalSeconds", 60)),
+            config_get_float(self.config, "AutoPvScanIntervalSeconds", 60.0),
+            config_get_float(self.config, "AutoBatteryScanIntervalSeconds", 60.0),
         ):
             if value > 0:
                 candidates.append(value)
@@ -304,7 +307,7 @@ class AutoInputHelper(
 
     def _ensure_liveness_thread_state(self) -> None:
         """Ensure liveness threads can start in partial construction paths."""
-        defaults = (
+        defaults: tuple[tuple[str, Callable[[], object]], ...] = (
             ("_stop_requested", lambda: False),
             ("_snapshot_lock", threading.RLock),
             ("_heartbeat_thread_stop", threading.Event),

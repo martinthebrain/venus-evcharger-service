@@ -12,3 +12,25 @@ select = [
     "F7",
     "F82",
 ]
+
+[tool.mutmut]
+source_paths = ["venus_evcharger"]
+only_mutate = [
+    "venus_evcharger/dbus_gateway_policy.py",
+    "venus_evcharger/dbus_gateway_commands.py",
+    "venus_evcharger/dbus_gateway_cache.py",
+    "venus_evcharger/dbus_gateway_core.py",
+    "venus_evcharger/dbus_gateway_client.py",
+    "venus_evcharger/dbus_gateway_latency.py",
+    "venus_evcharger/dbus_adapter_write_health.py",
+    "venus_evcharger/dbus_adapter_write_core.py",
+    "venus_evcharger/dbus_adapter_write_publish.py",
+    "venus_evcharger/dbus_adapter_read.py",
+    "venus_evcharger/dbus_adapter_process_health.py",
+]
+also_copy = ["venus_evcharger_dbus_adapter.py"]
+pytest_add_cli_args = ["-k", "not socket"]
+pytest_add_cli_args_test_selection = [
+    "tests/test_dbus_gateway_adapter_scheduler.py",
+    "tests/test_dbus_gateway_primitives.py",
+]

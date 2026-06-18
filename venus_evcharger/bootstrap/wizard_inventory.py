@@ -12,11 +12,15 @@ from venus_evcharger.inventory import (
     DeviceInstance,
     DeviceInventory,
     DeviceProfile,
+    PhaseLabel,
     RoleBinding,
     RoleBindingMember,
+    SwitchingMode,
     render_device_inventory_config,
 )
 from venus_evcharger.topology import EvChargerTopologyConfig
+
+_THREE_PHASE_SCOPE: tuple[PhaseLabel, ...] = ("L1", "L2", "L3")
 
 
 def build_wizard_inventory(
@@ -45,7 +49,7 @@ def _populate_actuator_inventory(
     answers: WizardAnswers,
     role_hosts: dict[str, str],
     topology_config: EvChargerTopologyConfig,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> None:
     if topology_config.actuator is None:
         return
@@ -101,7 +105,7 @@ def _populate_measurement_inventory(
     answers: WizardAnswers,
     role_hosts: dict[str, str],
     topology_config: EvChargerTopologyConfig,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> None:
     measurement_type = _measurement_type(topology_config)
     if measurement_type is None:
@@ -138,7 +142,7 @@ def _uses_standalone_meter(measurement_type: str) -> bool:
 
 
 def _charger_native_measurement_binding(
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> RoleBinding:
     """Return the inventory binding for charger-native measurement."""
     return RoleBinding(
@@ -155,7 +159,7 @@ def _actuator_native_measurement_binding(
     devices: list[DeviceInstance],
     answers: WizardAnswers,
     topology_config: EvChargerTopologyConfig,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> RoleBinding:
     assert topology_config.actuator is not None
     if topology_config.actuator.type == "switch_group":
@@ -170,7 +174,7 @@ def _actuator_native_measurement_binding(
                     id="meter",
                     kind="meter",
                     adapter_type=group_profile.capabilities[0].adapter_type,
-                    supported_phases=("L1", "L2", "L3"),
+                    supported_phases=_THREE_PHASE_SCOPE,
                     measures_power=True,
                     measures_energy=True,
                 ),
@@ -215,7 +219,7 @@ def _append_standalone_meter(
     answers: WizardAnswers,
     role_hosts: dict[str, str],
     measurement_type: str,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> None:
     meter_profile_id = _profile_id("meter", measurement_type)
     profile_map[meter_profile_id] = DeviceProfile(
@@ -258,7 +262,7 @@ def _populate_charger_inventory(
     answers: WizardAnswers,
     role_hosts: dict[str, str],
     topology_config: EvChargerTopologyConfig,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> None:
     if topology_config.charger is None:
         return
@@ -289,7 +293,7 @@ def _populate_charger_inventory(
 
 def _charger_capabilities(
     topology_config: EvChargerTopologyConfig,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> tuple[DeviceCapability, ...]:
     assert topology_config.charger is not None
     capabilities = [
@@ -333,7 +337,7 @@ def _switch_group_binding(
     profile_map: dict[str, DeviceProfile],
     devices: list[DeviceInstance],
     switch_host_input: str,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> RoleBinding:
     profile_id = _profile_id("switch", "switch_group_member")
     profile_map[profile_id] = DeviceProfile(
@@ -344,7 +348,7 @@ def _switch_group_binding(
                 id="switch",
                 kind="switch",
                 adapter_type="template_switch",
-                supported_phases=("L1", "L2", "L3"),
+                supported_phases=_THREE_PHASE_SCOPE,
                 switching_mode="contactor",
                 supports_feedback=True,
             ),
@@ -382,7 +386,7 @@ def _group_measurement_binding(
     devices: list[DeviceInstance],
     binding_id: str,
     label: str,
-    phase_scope: tuple[str, ...],
+    phase_scope: tuple[PhaseLabel, ...],
 ) -> RoleBinding:
     members = tuple(
         RoleBindingMember(
@@ -434,10 +438,10 @@ def _adapter_type_for_topology_preset(topology_preset: str) -> str:
     return "shelly_meter"
 
 
-def _phase_scope(phase: str) -> tuple[str, ...]:
+def _phase_scope(phase: str) -> tuple[PhaseLabel, ...]:
     normalized = phase.strip().upper()
     if normalized == "3P":
-        return ("L1", "L2", "L3")
+        return _THREE_PHASE_SCOPE
     if normalized == "L2":
         return ("L2",)
     if normalized == "L3":
@@ -445,16 +449,16 @@ def _phase_scope(phase: str) -> tuple[str, ...]:
     return ("L1",)
 
 
-def _switch_group_phase_scope(supported_phase_selections: str) -> tuple[str, ...]:
+def _switch_group_phase_scope(supported_phase_selections: str) -> tuple[PhaseLabel, ...]:
     normalized = supported_phase_selections.strip().upper()
     if "P1_P2_P3" in normalized:
-        return ("L1", "L2", "L3")
+        return _THREE_PHASE_SCOPE
     if "P1_P2" in normalized:
         return ("L1", "L2")
     return ("L1",)
 
 
-def _switching_mode(adapter_type: str) -> str:
+def _switching_mode(adapter_type: str) -> SwitchingMode:
     contactor_types = {
         "cerbo_gx_relay_switch",
         "shelly_contactor_switch",

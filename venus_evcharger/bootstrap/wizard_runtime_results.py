@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from venus_evcharger.bootstrap.wizard_models import WizardAnswers, WizardResult, WizardTransportKind
 from venus_evcharger.bootstrap.wizard_persistence import persist_wizard_state
@@ -16,7 +16,7 @@ from venus_evcharger.bootstrap.wizard_support import transport_summary
 def json_ready(value: object) -> object:
     """Convert wizard result fragments into JSON-serializable values."""
     if is_dataclass(value):
-        return json_ready(asdict(value))
+        return json_ready(asdict(cast(Any, value)))
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, dict):

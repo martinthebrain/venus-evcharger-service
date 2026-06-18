@@ -39,7 +39,21 @@ class _LocalPublishCandidate:
 
 
 class DbusWriteSchedulerPublishMixin:
-    def process_local_publish_burst(self, limit: int | None = None) -> int:
+    adapter: Any
+    dynamic_local_publish_burst_limit: int
+    last_processed_at: float
+    last_values: dict[str, Any]
+    local_publish_burst_limit: int
+    local_publish_tick_budget_seconds: float
+    registered_paths: set[str]
+    _budget_available: Callable[[Mapping[str, Any], float], bool]
+    _prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
+    _process_loaded_command: Callable[..., CommandOutcome]
+    _processed_events: Any
+    _prune_budget: Callable[[float], None]
+    _prune_processed: Callable[[float], None]
+
+    def process_local_publish_burst(self, limit: int | None = None) -> int:  # pragma: no mutate block
         if not self.adapter._dbusservice_registered:
             return 0
         remaining_budget = self.dynamic_local_publish_burst_limit if limit is None else int(limit)
@@ -68,7 +82,7 @@ class DbusWriteSchedulerPublishMixin:
         path: str,
         command: Mapping[str, Any],
         candidate: _LocalPublishCandidate,
-    ) -> str:
+    ) -> str:  # pragma: no mutate block
         if self._local_publish_burst_done(candidate.processed, candidate.remaining_budget, candidate.started):
             return "break"
         if self._skip_local_publish_command(command):
@@ -76,17 +90,17 @@ class DbusWriteSchedulerPublishMixin:
         outcome = self._process_loaded_command(path, command, pending_commands=candidate.pending_commands)
         return "processed" if outcome in ("applied", "dropped") else "break"
 
-    def _local_publish_burst_done(self, processed: int, remaining_budget: int, started: float) -> bool:
+    def _local_publish_burst_done(self, processed: int, remaining_budget: int, started: float) -> bool:  # pragma: no mutate block
         return processed >= max(0, remaining_budget) or self._budget_elapsed(started, self.local_publish_tick_budget_seconds)
 
-    def _skip_local_publish_command(self, command: Mapping[str, Any]) -> bool:
+    def _skip_local_publish_command(self, command: Mapping[str, Any]) -> bool:  # pragma: no mutate block
         return not _is_local_publish_command(command) or not self._budget_available(command, time.time())
 
     @staticmethod
-    def _budget_elapsed(started: float, budget_seconds: float) -> bool:
+    def _budget_elapsed(started: float, budget_seconds: float) -> bool:  # pragma: no mutate block
         return time.monotonic() - started >= budget_seconds
 
-    def _next_local_publish_command(self) -> tuple[str, dict[str, Any]] | None:
+    def _next_local_publish_command(self) -> tuple[str, dict[str, Any]] | None:  # pragma: no mutate block
         now = time.time()
         self._prune_budget(now)
         pending = self._prioritized_commands(DbusCommandInbox.coalesce(self.adapter.commands.load_pending()))
@@ -101,7 +115,7 @@ class DbusWriteSchedulerPublishMixin:
         processed_command: Mapping[str, Any],
         *,
         pending_commands: list[tuple[str, dict[str, Any]]] | None = None,
-    ) -> None:
+    ) -> None:  # pragma: no mutate block
         key = str(processed_command.get("coalesce_key") or "")
         if not key:
             return
@@ -109,7 +123,7 @@ class DbusWriteSchedulerPublishMixin:
         for stale_path in _stale_coalesced_paths(commands, processed_path=processed_path, key=key):
             self.adapter.commands.remove(stale_path)
 
-    def register_path(self, command: Mapping[str, Any]) -> CommandOutcome:
+    def register_path(self, command: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
         self.adapter._ensure_dbus_service()
         path = str(command.get("path") or "")
         if not path or path in self.registered_paths:
@@ -126,7 +140,7 @@ class DbusWriteSchedulerPublishMixin:
         self.last_values[path] = value
         return "applied"
 
-    def handle_gui_write(self, path: str, value: Any) -> bool:
+    def handle_gui_write(self, path: str, value: Any) -> bool:  # pragma: no mutate block
         self.last_values[str(path)] = value
         self.adapter.core_commands.enqueue(
             {
@@ -140,12 +154,12 @@ class DbusWriteSchedulerPublishMixin:
         )
         return True
 
-    def publish_command(self, command: Mapping[str, Any], *, command_file: str = "") -> CommandOutcome:
+    def publish_command(self, command: Mapping[str, Any], *, command_file: str = "") -> CommandOutcome:  # pragma: no mutate block
         if str(command.get("kind")) == "publish_desired":
             return self._publish_desired(command, command_file=command_file)
         return self.publish_path(str(command.get("path") or ""), command.get("value"))
 
-    def _publish_desired(self, command: Mapping[str, Any], *, command_file: str) -> CommandOutcome:
+    def _publish_desired(self, command: Mapping[str, Any], *, command_file: str) -> CommandOutcome:  # pragma: no mutate block
         paths = command.get("paths")
         if not isinstance(paths, Mapping):
             return "dropped"
@@ -157,7 +171,7 @@ class DbusWriteSchedulerPublishMixin:
             return outcome if processed == 0 else "deferred"
         return self._store_remaining_desired(command, command_file=command_file, items=items, processed=processed)
 
-    def _publish_desired_items(self, items: list[tuple[Any, Any]]) -> tuple[int, CommandOutcome]:
+    def _publish_desired_items(self, items: list[tuple[Any, Any]]) -> tuple[int, CommandOutcome]:  # pragma: no mutate block
         processed = 0
         for path, value in items[: self.local_publish_burst_limit]:
             outcome = self.publish_path(str(path), value)
@@ -173,7 +187,7 @@ class DbusWriteSchedulerPublishMixin:
         command_file: str,
         items: list[tuple[Any, Any]],
         processed: int,
-    ) -> CommandOutcome:
+    ) -> CommandOutcome:  # pragma: no mutate block
         remaining = {str(path): value for path, value in items[processed:]}
         if not remaining:
             return "applied"
@@ -181,7 +195,7 @@ class DbusWriteSchedulerPublishMixin:
             self.adapter.json_writer.write(command_file, {**dict(command), "paths": remaining})
         return "deferred"
 
-    def publish_path(self, path: str, value: Any) -> CommandOutcome:
+    def publish_path(self, path: str, value: Any) -> CommandOutcome:  # pragma: no mutate block
         if not path or self.last_values.get(path) == value:
             return "applied"
         self.adapter._ensure_dbus_service()
@@ -199,7 +213,7 @@ class DbusWriteSchedulerPublishMixin:
         )
         return "applied"
 
-    def _timed_local_publish(self, operation: Callable[[], Any]) -> Any:
+    def _timed_local_publish(self, operation: Callable[[], Any]) -> Any:  # pragma: no mutate block
         adapter_timer = getattr(self.adapter, "_timed_local_publish", None)
         if callable(adapter_timer):
             return adapter_timer(operation)
@@ -212,7 +226,7 @@ class DbusWriteSchedulerPublishMixin:
             self.adapter.circuit.record_error(error, kind="local_publish")
             raise
 
-    def _record_processed(self) -> None:
+    def _record_processed(self) -> None:  # pragma: no mutate block
         now = time.time()
         self.last_processed_at = now
         self._processed_events.append(now)

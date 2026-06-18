@@ -29,20 +29,20 @@ from venus_evcharger.bootstrap.wizard_inventory_support import (
     parse_inventory_switching_mode,
     save_inventory,
 )
-from venus_evcharger.inventory import DeviceInventory
+from venus_evcharger.inventory import BindingRole, CapabilityKind, DeviceInventory, PhaseLabel, RoleBinding, SwitchingMode
 
 
-def _guided_profile_kind(namespace: argparse.Namespace) -> str:
-    return inventory_choice_field(
+def _guided_profile_kind(namespace: argparse.Namespace) -> CapabilityKind:
+    return parse_inventory_kind(inventory_choice_field(
         namespace,
         "inventory_kind",
         "Choose the capability kind:",
         ("switch", "meter", "charger"),
         "switch",
-    )
+    ))
 
 
-def _guided_capability_defaults(kind: str) -> tuple[str, str]:
+def _guided_capability_defaults(kind: CapabilityKind) -> tuple[str, str]:
     capability_default = "meter" if kind == "meter" else "switch" if kind == "switch" else "charger"
     adapter_default = (
         "template_switch"
@@ -90,34 +90,34 @@ def _guided_capability_flags(
     return flags
 
 
-def _guided_role_for_kind(kind: str) -> str:
+def _guided_role_for_kind(kind: str) -> BindingRole:
     return "measurement" if kind == "meter" else "actuation" if kind == "switch" else "charger"
 
 
-def _default_binding_id(inventory: DeviceInventory, profile_id: str, role: str) -> str:
-    binding_id = role
+def _default_binding_id(inventory: DeviceInventory, profile_id: str, role: BindingRole) -> str:
+    binding_id: str = role
     if any(binding.id == binding_id for binding in inventory.bindings):
         binding_id = f"{profile_id}_{role}"
     return binding_id
 
 
-def _binding_label_default(existing_binding: object | None, role: str) -> str:
+def _binding_label_default(existing_binding: RoleBinding | None, role: BindingRole) -> str:
     if existing_binding is None:
         return role.replace("_", " ").title()
-    return cast(str, existing_binding.label)
+    return existing_binding.label
 
 
-def _binding_scope_default(existing_binding: object | None) -> str:
+def _binding_scope_default(existing_binding: RoleBinding | None) -> str:
     if existing_binding is None:
         return "L1"
-    return ",".join(cast(tuple[str, ...], existing_binding.phase_scope))
+    return ",".join(existing_binding.phase_scope)
 
 
 def _prompt_binding_choice(
     namespace: argparse.Namespace,
     inventory: DeviceInventory,
-    role: str,
-) -> tuple[str, object | None, str, tuple[str, ...]]:
+    role: BindingRole,
+) -> tuple[str, RoleBinding | None, str, tuple[PhaseLabel, ...]]:
     binding_default = _default_binding_id(inventory, role, role)
     existing_ids = {binding.id for binding in inventory.bindings}
     if binding_default in existing_ids:
@@ -141,9 +141,9 @@ def _prompt_binding_choice(
 def _maybe_replace_binding(
     namespace: argparse.Namespace,
     inventory: DeviceInventory,
-    existing_binding: object | None,
+    existing_binding: RoleBinding | None,
     binding_id: str,
-) -> tuple[DeviceInventory, object | None]:
+) -> tuple[DeviceInventory, RoleBinding | None]:
     if existing_binding is None:
         return inventory, None
     if not inventory_bool_field(namespace, "_inventory_replace_binding", "Replace existing binding members", False):
@@ -175,9 +175,9 @@ def _selected_binding_choice(choices: tuple[dict[str, object], ...]) -> dict[str
 def _binding_member_phases(
     namespace: argparse.Namespace,
     selected: dict[str, object],
-    binding_scope: tuple[str, ...],
-) -> tuple[str, ...]:
-    supported = cast(tuple[str, ...], selected["supported_phases"])
+    binding_scope: tuple[PhaseLabel, ...],
+) -> tuple[PhaseLabel, ...]:
+    supported = cast(tuple[PhaseLabel, ...], selected["supported_phases"])
     suggested_phases = tuple(phase for phase in binding_scope if phase in supported) or tuple(supported)
     return parse_inventory_phases(
         inventory_field_with_default(
@@ -194,11 +194,11 @@ def _set_guided_binding_member(
     *,
     binding_id: str,
     binding_label: str,
-    role: str,
-    existing_binding: object | None,
+    role: BindingRole,
+    existing_binding: RoleBinding | None,
     first_member: bool,
     selected: dict[str, object],
-    member_phases: tuple[str, ...],
+    member_phases: tuple[PhaseLabel, ...],
 ) -> DeviceInventory:
     return set_inventory_binding_member(
         inventory,
@@ -239,10 +239,10 @@ def save_and_payload(
 def _guided_profile_base_update(
     namespace: argparse.Namespace,
     inventory: DeviceInventory,
-) -> tuple[DeviceInventory, str, str, tuple[str, ...], str, str]:
+) -> tuple[DeviceInventory, str, str, tuple[PhaseLabel, ...], CapabilityKind, str]:
     profile_id = inventory_field(namespace, "inventory_profile_id", "Profile id")
     label = inventory_field(namespace, "inventory_label", "Profile label")
-    kind = parse_inventory_kind(_guided_profile_kind(namespace))
+    kind = _guided_profile_kind(namespace)
     capability_default, adapter_default = _guided_capability_defaults(kind)
     capability_id = inventory_field_with_default(
         namespace,
@@ -279,7 +279,7 @@ def _guided_profile_base_update(
         channel=inventory_optional_field(namespace, "inventory_channel", "Channel"),
         measures_power=cast(bool, capability_flags["measures_power"]),
         measures_energy=cast(bool, capability_flags["measures_energy"]),
-        switching_mode=capability_flags["switching_mode"],
+        switching_mode=cast(SwitchingMode | None, capability_flags["switching_mode"]),
         supports_feedback=cast(bool, capability_flags["supports_feedback"]),
         supports_phase_selection=cast(bool, capability_flags["supports_phase_selection"]),
     )
@@ -293,8 +293,8 @@ def _guided_binding_assignment(
     profile_id: str,
     device_id: str,
     capability_id: str,
-    supported_phases: tuple[str, ...],
-    inferred_role: str,
+    supported_phases: tuple[PhaseLabel, ...],
+    inferred_role: BindingRole,
 ) -> tuple[DeviceInventory, str | None]:
     binding_default = _default_binding_id(updated, profile_id, inferred_role)
     binding_id = inventory_field_with_default(
@@ -340,8 +340,8 @@ def _maybe_add_guided_device_and_binding(
     profile_id: str,
     label: str,
     capability_id: str,
-    supported_phases: tuple[str, ...],
-    inferred_role: str,
+    supported_phases: tuple[PhaseLabel, ...],
+    inferred_role: BindingRole,
 ) -> tuple[DeviceInventory, str | None, str | None]:
     if not inventory_bool_field(namespace, "_inventory_prompt_device", "Add one device instance for this profile now", True):
         return updated, None, None
@@ -409,7 +409,7 @@ def guided_inventory_add_profile(
 def _validated_guided_binding(
     updated: DeviceInventory,
     binding_id: str,
-    binding_scope: tuple[str, ...],
+    binding_scope: tuple[PhaseLabel, ...],
 ) -> None:
     final_binding = next((binding for binding in updated.bindings if binding.id == binding_id), None)
     if final_binding is None:
@@ -427,11 +427,11 @@ def _extend_guided_binding(
     namespace: argparse.Namespace,
     updated: DeviceInventory,
     *,
-    role: str,
+    role: BindingRole,
     binding_id: str,
     binding_label: str,
-    binding_scope: tuple[str, ...],
-    existing_binding: object | None,
+    binding_scope: tuple[PhaseLabel, ...],
+    existing_binding: RoleBinding | None,
     choices: tuple[dict[str, object], ...],
 ) -> DeviceInventory:
     first_member = True
@@ -461,17 +461,14 @@ def guided_inventory_edit_binding(
 ) -> dict[str, object]:
     if getattr(namespace, "non_interactive", False):
         raise ValueError("guided-edit-binding requires interactive input")
-    role = cast(
-        str,
-        parse_inventory_binding_role(
-            inventory_choice_field(
-                namespace,
-                "inventory_binding_role",
-                "Choose the binding role:",
-                ("actuation", "measurement", "charger"),
-                "measurement",
-            )
-        ),
+    role = parse_inventory_binding_role(
+        inventory_choice_field(
+            namespace,
+            "inventory_binding_role",
+            "Choose the binding role:",
+            ("actuation", "measurement", "charger"),
+            "measurement",
+        )
     )
     choices = inventory_role_capability_choices(inventory, role=role)
     if not choices:

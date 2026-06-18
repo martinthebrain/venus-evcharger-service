@@ -238,8 +238,9 @@ def _request_list(payload: dict[str, Any]) -> list[Any]:
     requests = payload.setdefault("requests", [])
     if isinstance(requests, list):
         return requests
-    payload["requests"] = []
-    return payload["requests"]
+    normalized_requests: list[Any] = []
+    payload["requests"] = normalized_requests
+    return normalized_requests
 
 
 def _write_request_payload(request_path: str, payload: dict[str, Any]) -> bool:

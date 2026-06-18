@@ -55,13 +55,16 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
         return max(0.0, float(getattr(self, "auto_battery_capacity_startup_recheck_seconds", 300.0) or 300.0))
 
     def _primary_energy_estimated_capacity_wh(self: Any) -> float | None:
-        return self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_wh", None))
+        return cast(float | None, self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_wh", None)))
 
     def _primary_energy_estimated_capacity_ah(self: Any) -> float | None:
-        return self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_ah", None))
+        return cast(float | None, self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_ah", None)))
 
     def _primary_energy_estimated_capacity_nominal_voltage(self: Any) -> float | None:
-        return self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_nominal_voltage", None))
+        return cast(
+            float | None,
+            self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_nominal_voltage", None)),
+        )
 
     def _primary_energy_estimated_capacity_cell_count(self: Any) -> int | None:
         try:
@@ -73,7 +76,7 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
     @staticmethod
     def _positive_float_or_none(value: object) -> float | None:
         try:
-            numeric = float(value)
+            numeric = float(str(value))
         except (TypeError, ValueError):
             return None
         return numeric if numeric > 0.0 else None

@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_write_support import (
@@ -32,6 +32,23 @@ _QUEUE_CLASS_RANKS = {
 }
 
 class DbusWriteSchedulerCoreMixin:
+    adapter: Any
+    local_publish_burst_limit: int
+    startup_registration_batch_limit: int
+    startup_registration_tick_budget_seconds: float
+    drop_stale_coalesced_commands: Callable[..., None]
+    process_local_publish_burst: Callable[..., int]
+    publish_command: Callable[..., CommandOutcome]
+    register_path: Callable[[Mapping[str, Any]], CommandOutcome]
+    set_remote_value: Callable[[Mapping[str, Any]], CommandOutcome]
+    _budget_available: Callable[[Mapping[str, Any], float], bool]
+    _budget_elapsed: Callable[[float, float], bool]
+    _prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
+    _prune_budget: Callable[[float], None]
+    _record_budget: Callable[[Mapping[str, Any]], None]
+    _record_lifecycle: Callable[[Mapping[str, Any], str], None]
+    _record_processed: Callable[[], None]
+
     def process_one(self, *, include_local_publish: bool = True) -> bool:
         pending = self.adapter.commands.load_pending()
         coalesced = self._prioritized_commands(DbusCommandInbox.coalesce(pending))
@@ -151,7 +168,7 @@ class DbusWriteSchedulerCoreMixin:
 
     def _dispatch_command(self, command: Mapping[str, Any], *, command_file: str) -> CommandOutcome:
         kind = _command_kind(command)
-        handlers = {
+        handlers: dict[str, Callable[[Mapping[str, Any]], CommandOutcome]] = {
             "register_service": self._register_service_command,
             "register_path": self.register_path,
             "publish_value": lambda item: self.publish_command(item, command_file=command_file),
@@ -160,7 +177,7 @@ class DbusWriteSchedulerCoreMixin:
         }
         handler = handlers.get(kind)
         if handler is None:
-            return self.adapter._process_non_write_command(command)
+            return cast(CommandOutcome, self.adapter._process_non_write_command(command))
         return handler(command)
 
     def _register_service_command(self, _command: Mapping[str, Any]) -> CommandOutcome:
@@ -175,25 +192,49 @@ class DbusWriteSchedulerCoreMixin:
         pending_commands: list[tuple[str, dict[str, Any]]] | None = None,
     ) -> CommandOutcome:
         if self._is_expired(command):
-            self.adapter.commands.remove(path)
-            self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
-            self._record_lifecycle(command, "expired")
-            self._record_processed()
-            return "dropped"
+            return self._drop_expired_command(path, command, pending_commands=pending_commands)
+        outcome = self._command_outcome(path, command)
+        self._apply_command_outcome(path, command, outcome, pending_commands=pending_commands)
+        self._record_lifecycle(command, outcome)
+        return outcome
+
+    def _drop_expired_command(
+        self,
+        path: str,
+        command: Mapping[str, Any],
+        *,
+        pending_commands: list[tuple[str, dict[str, Any]]] | None,
+    ) -> CommandOutcome:
+        self.adapter.commands.remove(path)
+        self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
+        self._record_lifecycle(command, "expired")
+        self._record_processed()
+        return "dropped"
+
+    def _command_outcome(self, path: str, command: Mapping[str, Any]) -> CommandOutcome:
         try:
-            outcome = self.process_command(command, command_file=path)
+            return self.process_command(command, command_file=path)
         except DbusOperationDeferred:
-            outcome = "deferred"
+            return "deferred"
         except Exception as error:  # pylint: disable=broad-except
             logging.exception("Gateway command failed; keeping for retry path=%s: %s", path, error)
-            outcome = "deferred"
+            return "deferred"
+
+    def _apply_command_outcome(
+        self,
+        path: str,
+        command: Mapping[str, Any],
+        outcome: CommandOutcome,
+        *,
+        pending_commands: list[tuple[str, dict[str, Any]]] | None,
+    ) -> None:
+        if outcome == "deferred":
+            self._record_budget(command)
         if outcome in ("applied", "dropped"):
             self.adapter.commands.remove(path)
             self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
             self._record_processed()
             self._record_budget(command)
-        self._record_lifecycle(command, outcome)
-        return outcome
 
     @staticmethod
     def _is_expired(command: Mapping[str, Any]) -> bool:

@@ -106,13 +106,13 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
     ) -> dict[str, object]:
         configured = self._configured_dbus_capacity_payload(source)
         if configured is not None:
-            return configured
+            return cast(dict[str, object], configured)
         cached = self._cached_dbus_capacity_payload(source, service_name)
         startup_recheck_due = self._dbus_capacity_startup_recheck_due(source, service_name, now)
         if self._dbus_cached_capacity_usable(cached, startup_recheck_due):
-            return cached
+            return cast(dict[str, object], cached)
         inferred = self._fresh_dbus_capacity_payload(source, service_name, soc_value, startup_recheck_due)
-        return self._resolved_dbus_capacity_payload(inferred, cached)
+        return cast(dict[str, object], self._resolved_dbus_capacity_payload(inferred, cached))
 
     @staticmethod
     def _dbus_cached_capacity_usable(cached: dict[str, object] | None, startup_recheck_due: bool) -> bool:
@@ -141,7 +141,7 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
             return None
         self._store_dbus_capacity_payload(source, service_name, inferred, startup_recheck_done=startup_recheck_due)
         self._persist_dbus_capacity_payload_if_needed(source, inferred, startup_recheck_due)
-        return inferred
+        return cast(dict[str, object], inferred)
 
     @staticmethod
     def _configured_dbus_capacity_payload(source: EnergySourceDefinition) -> dict[str, object] | None:
@@ -158,7 +158,7 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         estimates = getattr(self, "_auto_battery_capacity_estimates", {})
         cached = estimates.get(key) if isinstance(estimates, dict) else None
         if isinstance(cached, dict):
-            return dict(cached)
+            return cast(dict[str, object], dict(cached))
         return configured_estimated_capacity_payload(source)
 
     def _persist_dbus_capacity_payload_if_needed(
@@ -227,10 +227,10 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
             return None
         direct_capacity = self._read_positive_optional_energy_value(service_name, source.capacity_wh_path)
         if direct_capacity is not None:
-            return self._direct_dbus_capacity_payload(direct_capacity)
+            return cast(dict[str, object], self._direct_dbus_capacity_payload(direct_capacity))
         installed_capacity_ah = self._read_positive_optional_energy_value(service_name, source.capacity_ah_path)
         voltage = self._read_positive_optional_energy_value(service_name, source.voltage_path)
-        return self._lfp_inferred_dbus_capacity_payload(installed_capacity_ah, voltage)
+        return cast(dict[str, object] | None, self._lfp_inferred_dbus_capacity_payload(installed_capacity_ah, voltage))
 
     @staticmethod
     def _dbus_capacity_inference_allowed(source: EnergySourceDefinition, soc_value: float | None) -> bool:

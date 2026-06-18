@@ -12,18 +12,18 @@
 set -eu
 
 usage() {
-    echo "Usage: $0 [--dry-run|--preview] <target-dir>" >&2
-    exit 1
+	echo "Usage: $0 [--dry-run|--preview] <target-dir>" >&2
+	exit 1
 }
 
 DRY_RUN=0
 if [ "${1:-}" = "--dry-run" ] || [ "${1:-}" = "--preview" ]; then
-    DRY_RUN=1
-    shift
+	DRY_RUN=1
+	shift
 fi
 
 if [ "${1:-}" = "" ] || [ "${2:-}" != "" ]; then
-    usage
+	usage
 fi
 
 TARGET_DIR="$1"
@@ -34,11 +34,11 @@ CHANNEL="${VENUS_EVCHARGER_CHANNEL:-$DEFAULT_CHANNEL}"
 SOURCE_DIR_OVERRIDE="${VENUS_EVCHARGER_SOURCE_DIR:-}"
 MANIFEST_SOURCE="${VENUS_EVCHARGER_MANIFEST_SOURCE:-}"
 if [ -n "${VENUS_EVCHARGER_MANIFEST_SIG_SOURCE:-}" ]; then
-    MANIFEST_SIG_SOURCE="$VENUS_EVCHARGER_MANIFEST_SIG_SOURCE"
+	MANIFEST_SIG_SOURCE="$VENUS_EVCHARGER_MANIFEST_SIG_SOURCE"
 elif [ -n "$MANIFEST_SOURCE" ]; then
-    MANIFEST_SIG_SOURCE="${MANIFEST_SOURCE}.sig"
+	MANIFEST_SIG_SOURCE="${MANIFEST_SOURCE}.sig"
 else
-    MANIFEST_SIG_SOURCE=""
+	MANIFEST_SIG_SOURCE=""
 fi
 BOOTSTRAP_PUBKEY_OVERRIDE="${VENUS_EVCHARGER_BOOTSTRAP_PUBKEY:-}"
 REQUIRE_SIGNED_MANIFEST="${VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST:-0}"
@@ -87,11 +87,11 @@ export CONFIG_MERGE_CHANGED CONFIG_MERGE_COMMENT_PRESERVED CONFIG_MERGE_SKIPPED_
 export CONFIG_MERGE_BACKUP_PATH CONFIG_MERGE_BACKUP_REQUIRED CONFIG_SCHEMA_BEFORE CONFIG_SCHEMA_TARGET
 export CONFIG_MERGE_ADDED_KEYS CONFIG_MERGE_ADDED_SECTIONS CONFIG_MIGRATIONS_APPLIED
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 UPDATER_LIB_DIR="${SCRIPT_DIR}/bootstrap_updater.d"
 for lib_name in 00_core.sh 10_config_merge.sh 20_layout.sh 30_status_main.sh; do
-    # shellcheck source=/dev/null
-    . "${UPDATER_LIB_DIR}/${lib_name}"
+	# shellcheck source=/dev/null
+	. "${UPDATER_LIB_DIR}/${lib_name}"
 done
 
 main

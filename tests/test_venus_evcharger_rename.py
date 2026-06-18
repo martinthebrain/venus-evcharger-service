@@ -26,11 +26,14 @@ class TestVenusEvchargerRename(unittest.TestCase):
             ".pytest_cache",
             ".ruff_cache",
             ".venv",
+            ".venv-mutmut",
             ".venv-ruff",
             "__pycache__",
             ".coverage",
+            "build",
+            "mutants",
         }
-        return any(part in ignored_parts for part in path.parts)
+        return path.suffix in {".pyc", ".pyo"} or any(part in ignored_parts for part in path.parts)
 
     @staticmethod
     def _forbidden_tokens() -> tuple[str, ...]:

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 
 from .modbus_client import ModbusClient
 from .modbus_transport import ModbusTransport, create_modbus_transport
@@ -37,14 +37,14 @@ def native_modbus_client(backend: Any) -> ModbusClient:
             backend.settings.transport_settings.unit_id,
             backend.settings.transport_settings.timeout_seconds,
         )
-    return backend._client_cache
+    return cast(ModbusClient, backend._client_cache)
 
 
 def _native_modbus_transport_factory(backend: Any) -> Callable[[Any], ModbusTransport]:
     """Return the backend module's transport factory, preserving existing test patch points."""
     module = sys.modules.get(type(backend).__module__)
     factory = getattr(module, "create_modbus_transport", create_modbus_transport)
-    return factory if callable(factory) else create_modbus_transport
+    return cast(Callable[[Any], ModbusTransport], factory) if callable(factory) else create_modbus_transport
 
 
 __all__ = ["initialize_native_modbus_backend", "native_modbus_client"]

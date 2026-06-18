@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.probe import probe_meter_backend, probe_switch_backend, read_charger_backend
@@ -126,7 +126,7 @@ def _live_connectivity_payload_with_hooks(
     parser.read(main_path, encoding="utf-8")
     role_results: dict[str, dict[str, object]] = {}
     ok = True
-    resolved_backends = build_backends_fn(_probe_service_from_wallbox_config(parser, secret_defaults))
+    resolved_backends = cast(Any, build_backends_fn(_probe_service_from_wallbox_config(parser, secret_defaults)))
     runtime = resolved_backends.runtime
 
     def backend_for(role: str) -> object | None:

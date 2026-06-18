@@ -11,7 +11,7 @@
 #
 # It is safe to run this script repeatedly after updates.
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 SERVICE_NAME="dbus-venus-evcharger"
 DBUS_ADAPTER_SERVICE_NAME="dbus-venus-evcharger-dbus-adapter"
@@ -40,8 +40,8 @@ mkdir -p "$SERVICE_DIR/log" "$DBUS_ADAPTER_SERVICE_DIR/log"
 # The service is intentionally config-driven. Fail early if the config file is
 # missing so the user notices a broken deployment immediately.
 if [ ! -f "$CONFIG_PATH" ]; then
-    echo "config.venus_evcharger.ini file not found."
-    exit 1
+	echo "config.venus_evcharger.ini file not found."
+	exit 1
 fi
 
 # Restore execute bits for all directly launched entrypoints.
@@ -49,63 +49,63 @@ chmod a+x "$MAIN_ENTRYPOINT"
 chmod 755 "$MAIN_ENTRYPOINT"
 
 if [ -f "$DBUS_ADAPTER_ENTRYPOINT" ]; then
-    chmod a+x "$DBUS_ADAPTER_ENTRYPOINT"
-    chmod 755 "$DBUS_ADAPTER_ENTRYPOINT"
+	chmod a+x "$DBUS_ADAPTER_ENTRYPOINT"
+	chmod 755 "$DBUS_ADAPTER_ENTRYPOINT"
 fi
 
 if [ -f "$GENERIC_SHELLY_HELPER" ]; then
-    chmod a+x "$GENERIC_SHELLY_HELPER"
-    chmod 755 "$GENERIC_SHELLY_HELPER"
+	chmod a+x "$GENERIC_SHELLY_HELPER"
+	chmod 755 "$GENERIC_SHELLY_HELPER"
 fi
 
 if [ -f "$AUTO_INPUT_HELPER" ]; then
-    chmod a+x "$AUTO_INPUT_HELPER"
-    chmod 755 "$AUTO_INPUT_HELPER"
+	chmod a+x "$AUTO_INPUT_HELPER"
+	chmod 755 "$AUTO_INPUT_HELPER"
 fi
 
 if [ -f "$OBSERVER_ENTRYPOINT" ]; then
-    chmod a+x "$OBSERVER_ENTRYPOINT"
-    chmod 755 "$OBSERVER_ENTRYPOINT"
+	chmod a+x "$OBSERVER_ENTRYPOINT"
+	chmod 755 "$OBSERVER_ENTRYPOINT"
 fi
 
 if [ -f "$CONFIGURE_HELPER" ]; then
-    chmod a+x "$CONFIGURE_HELPER"
-    chmod 755 "$CONFIGURE_HELPER"
+	chmod a+x "$CONFIGURE_HELPER"
+	chmod 755 "$CONFIGURE_HELPER"
 fi
 
 if [ -f "$RESTART_HELPER" ]; then
-    chmod a+x "$RESTART_HELPER"
-    chmod 744 "$RESTART_HELPER"
+	chmod a+x "$RESTART_HELPER"
+	chmod 744 "$RESTART_HELPER"
 fi
 
 if [ -f "$RESET_CONFIG_HELPER" ]; then
-    chmod a+x "$RESET_CONFIG_HELPER"
-    chmod 744 "$RESET_CONFIG_HELPER"
+	chmod a+x "$RESET_CONFIG_HELPER"
+	chmod 744 "$RESET_CONFIG_HELPER"
 fi
 
 if [ -f "$BOOT_HELPER" ]; then
-    chmod a+x "$BOOT_HELPER"
-    chmod 755 "$BOOT_HELPER"
+	chmod a+x "$BOOT_HELPER"
+	chmod 755 "$BOOT_HELPER"
 fi
 
 if [ -f "$UNINSTALL_HELPER" ]; then
-    chmod a+x "$UNINSTALL_HELPER"
-    chmod 744 "$UNINSTALL_HELPER"
+	chmod a+x "$UNINSTALL_HELPER"
+	chmod 744 "$UNINSTALL_HELPER"
 fi
 
 if [ -f "$CONTROL_API_CLI_HELPER" ]; then
-    chmod a+x "$CONTROL_API_CLI_HELPER"
-    chmod 755 "$CONTROL_API_CLI_HELPER"
+	chmod a+x "$CONTROL_API_CLI_HELPER"
+	chmod 755 "$CONTROL_API_CLI_HELPER"
 fi
 
 if [ -f "$GX_SMOKE_HELPER" ]; then
-    chmod a+x "$GX_SMOKE_HELPER"
-    chmod 755 "$GX_SMOKE_HELPER"
+	chmod a+x "$GX_SMOKE_HELPER"
+	chmod 755 "$GX_SMOKE_HELPER"
 fi
 
 if [ -f "$SOAK_HELPER" ]; then
-    chmod a+x "$SOAK_HELPER"
-    chmod 744 "$SOAK_HELPER"
+	chmod a+x "$SOAK_HELPER"
+	chmod 744 "$SOAK_HELPER"
 fi
 
 chmod a+x "$SERVICE_DIR/run"
@@ -120,22 +120,22 @@ chmod a+x "$OBSERVER_SERVICE_DIR/run"
 chmod 755 "$OBSERVER_SERVICE_DIR/run"
 
 cleanup_duplicate_supervisors() {
-    service_name="$1"
-    pids=$(ps w 2>/dev/null | awk -v name="$service_name" '$5 == "supervise" && $6 == name {print $1}')
-    keep_pid=""
-    count=0
-    for pid in $pids; do
-        keep_pid="$pid"
-        count=$((count + 1))
-    done
-    if [ "$count" -le 1 ]; then
-        return
-    fi
-    for pid in $pids; do
-        if [ "$pid" != "$keep_pid" ]; then
-            kill "$pid" >/dev/null 2>&1 || true
-        fi
-    done
+	service_name="$1"
+	pids=$(ps w 2>/dev/null | awk -v name="$service_name" '$5 == "supervise" && $6 == name {print $1}')
+	keep_pid=""
+	count=0
+	for pid in $pids; do
+		keep_pid="$pid"
+		count=$((count + 1))
+	done
+	if [ "$count" -le 1 ]; then
+		return
+	fi
+	for pid in $pids; do
+		if [ "$pid" != "$keep_pid" ]; then
+			kill "$pid" >/dev/null 2>&1 || true
+		fi
+	done
 }
 
 # Register or update the runit service symlink.
@@ -147,33 +147,33 @@ cleanup_duplicate_supervisors "$DBUS_ADAPTER_SERVICE_NAME"
 cleanup_duplicate_supervisors "$OBSERVER_SERVICE_NAME"
 
 service_registered() {
-    service_name="$1"
-    service_path="/service/$service_name"
-    [ -e "$service_path" ] && command -v svc >/dev/null 2>&1
+	service_name="$1"
+	service_path="/service/$service_name"
+	[ -e "$service_path" ] && command -v svc >/dev/null 2>&1
 }
 
 service_down_if_registered() {
-    service_name="$1"
-    if ! service_registered "$service_name"; then
-        return
-    fi
-    svc -d "/service/$service_name" >/dev/null 2>&1 || true
+	service_name="$1"
+	if ! service_registered "$service_name"; then
+		return
+	fi
+	svc -d "/service/$service_name" >/dev/null 2>&1 || true
 }
 
 service_up_if_registered() {
-    service_name="$1"
-    if ! service_registered "$service_name"; then
-        return
-    fi
-    svc -u "/service/$service_name" >/dev/null 2>&1 || true
+	service_name="$1"
+	if ! service_registered "$service_name"; then
+		return
+	fi
+	svc -u "/service/$service_name" >/dev/null 2>&1 || true
 }
 
 service_restart_if_registered() {
-    service_name="$1"
-    if ! service_registered "$service_name"; then
-        return
-    fi
-    svc -t "/service/$service_name" >/dev/null 2>&1 || true
+	service_name="$1"
+	if ! service_registered "$service_name"; then
+		return
+	fi
+	svc -t "/service/$service_name" >/dev/null 2>&1 || true
 }
 
 # During upgrades from the pre-gateway layout the main service may still own
@@ -188,22 +188,22 @@ service_up_if_registered "$SERVICE_NAME"
 service_up_if_registered "$OBSERVER_SERVICE_NAME"
 
 remove_rc_local_line() {
-    line="$1"
-    if [ ! -f "$RC_LOCAL_FILE" ]; then
-        return
-    fi
-    tmp_file=$(mktemp)
-    grep -vxF "$line" "$RC_LOCAL_FILE" > "$tmp_file" || true
-    cat "$tmp_file" > "$RC_LOCAL_FILE"
-    rm -f "$tmp_file"
+	line="$1"
+	if [ ! -f "$RC_LOCAL_FILE" ]; then
+		return
+	fi
+	tmp_file=$(mktemp)
+	grep -vxF "$line" "$RC_LOCAL_FILE" >"$tmp_file" || true
+	cat "$tmp_file" >"$RC_LOCAL_FILE"
+	rm -f "$tmp_file"
 }
 
 # Create rc.local if the target system does not yet have one.
 if [ ! -f "$RC_LOCAL_FILE" ]; then
-    touch "$RC_LOCAL_FILE"
-    chmod 755 "$RC_LOCAL_FILE"
-    echo "#!/bin/bash" >> "$RC_LOCAL_FILE"
-    echo >> "$RC_LOCAL_FILE"
+	touch "$RC_LOCAL_FILE"
+	chmod 755 "$RC_LOCAL_FILE"
+	echo "#!/bin/bash" >>"$RC_LOCAL_FILE"
+	echo >>"$RC_LOCAL_FILE"
 fi
 
 remove_rc_local_line "$SCRIPT_DIR/install_venus_evcharger_service.sh"
@@ -213,7 +213,7 @@ remove_rc_local_line "$REPO_DIR/install.sh"
 
 # Keep rc.local lean: call the dedicated boot helper, not the full installer.
 STARTUP="$BOOT_HELPER"
-grep -qxF "$STARTUP" "$RC_LOCAL_FILE" || echo "$STARTUP" >> "$RC_LOCAL_FILE"
+grep -qxF "$STARTUP" "$RC_LOCAL_FILE" || echo "$STARTUP" >>"$RC_LOCAL_FILE"
 
 # Remove an obsolete direct generic helper line if one exists. The boot helper
 # handles that logic now.

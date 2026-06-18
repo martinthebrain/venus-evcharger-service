@@ -51,6 +51,7 @@ class DbusAdapterIoMixin:
         except DbusOperationDeferred:
             return False
         except Exception as error:  # pylint: disable=broad-except
+            self.commands.remove_coalesced("refresh:services")
             self.discovery.record_error(error, now=now)
             return True
 

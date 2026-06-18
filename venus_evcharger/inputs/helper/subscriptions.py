@@ -69,7 +69,10 @@ class _AutoInputHelperSubscriptionMixin:
     def _resolved_pv_subscription_services(self: Any) -> list[str]:
         """Return AC PV services that should currently be monitored."""
         try:
-            return [self.auto_pv_service] if self.auto_pv_service else self._resolve_auto_pv_services()
+            configured_service = str(getattr(self, "auto_pv_service", "") or "")
+            if configured_service:
+                return [configured_service]
+            return list(self._resolve_auto_pv_services())
         except Exception:  # pylint: disable=broad-except
             return []
 
@@ -166,7 +169,7 @@ class _AutoInputHelperSubscriptionMixin:
             GLib.idle_add(_run)
 
     def _subscription_refresh_backoff_active(self: Any) -> bool:
-        return self._subscription_refresh_delay_seconds() > 0.0
+        return bool(self._subscription_refresh_delay_seconds() > 0.0)
 
     def _subscription_refresh_delay_seconds(self: Any) -> float:
         backoff_until = float(getattr(self, "_dbus_subscription_backoff_until", 0.0) or 0.0)

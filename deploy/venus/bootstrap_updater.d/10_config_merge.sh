@@ -1,85 +1,85 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 preserve_local_config() {
-    preserve_dir="$1"
-    active_dir=$(current_codebase_dir)
-    local_deploy_dir=""
-    if [ -d "${active_dir}/deploy/venus" ]; then
-        local_deploy_dir="${active_dir}/deploy/venus"
-    elif [ -d "${TARGET_DIR}/deploy/venus" ]; then
-        local_deploy_dir="${TARGET_DIR}/deploy/venus"
-    fi
+	preserve_dir="$1"
+	active_dir=$(current_codebase_dir)
+	local_deploy_dir=""
+	if [ -d "${active_dir}/deploy/venus" ]; then
+		local_deploy_dir="${active_dir}/deploy/venus"
+	elif [ -d "${TARGET_DIR}/deploy/venus" ]; then
+		local_deploy_dir="${TARGET_DIR}/deploy/venus"
+	fi
 
-    if [ -f "${active_dir}/deploy/venus/config.venus_evcharger.ini" ]; then
-        mkdir -p "${preserve_dir}/deploy/venus"
-        cp "${active_dir}/deploy/venus/config.venus_evcharger.ini" "${preserve_dir}/deploy/venus/config.venus_evcharger.ini"
-    elif [ -f "${TARGET_DIR}/deploy/venus/config.venus_evcharger.ini" ]; then
-        mkdir -p "${preserve_dir}/deploy/venus"
-        cp "${TARGET_DIR}/deploy/venus/config.venus_evcharger.ini" "${preserve_dir}/deploy/venus/config.venus_evcharger.ini"
-    fi
+	if [ -f "${active_dir}/deploy/venus/config.venus_evcharger.ini" ]; then
+		mkdir -p "${preserve_dir}/deploy/venus"
+		cp "${active_dir}/deploy/venus/config.venus_evcharger.ini" "${preserve_dir}/deploy/venus/config.venus_evcharger.ini"
+	elif [ -f "${TARGET_DIR}/deploy/venus/config.venus_evcharger.ini" ]; then
+		mkdir -p "${preserve_dir}/deploy/venus"
+		cp "${TARGET_DIR}/deploy/venus/config.venus_evcharger.ini" "${preserve_dir}/deploy/venus/config.venus_evcharger.ini"
+	fi
 
-    if [ -n "$local_deploy_dir" ]; then
-        mkdir -p "${preserve_dir}/deploy/venus"
-        find "$local_deploy_dir" -maxdepth 1 -type f \
-            \( -name 'wizard-*.ini' -o -name 'config.venus_evcharger.ini.wizard-*' \) \
-            -exec cp {} "${preserve_dir}/deploy/venus/" \;
-    fi
+	if [ -n "$local_deploy_dir" ]; then
+		mkdir -p "${preserve_dir}/deploy/venus"
+		find "$local_deploy_dir" -maxdepth 1 -type f \
+			\( -name 'wizard-*.ini' -o -name 'config.venus_evcharger.ini.wizard-*' \) \
+			-exec cp {} "${preserve_dir}/deploy/venus/" \;
+	fi
 
-    if [ -f "${TARGET_DIR}/noUpdate" ]; then
-        cp "${TARGET_DIR}/noUpdate" "${preserve_dir}/noUpdate"
-    fi
-    if [ -f "${TARGET_DIR}/update-channel" ]; then
-        cp "${TARGET_DIR}/update-channel" "${preserve_dir}/update-channel"
-    fi
+	if [ -f "${TARGET_DIR}/noUpdate" ]; then
+		cp "${TARGET_DIR}/noUpdate" "${preserve_dir}/noUpdate"
+	fi
+	if [ -f "${TARGET_DIR}/update-channel" ]; then
+		cp "${TARGET_DIR}/update-channel" "${preserve_dir}/update-channel"
+	fi
 }
 
 restore_local_config() {
-    preserve_dir="$1"
-    destination_root="$2"
-    if [ -f "${preserve_dir}/deploy/venus/config.venus_evcharger.ini" ]; then
-        mkdir -p "${destination_root}/deploy/venus"
-        cp "${preserve_dir}/deploy/venus/config.venus_evcharger.ini" "${destination_root}/deploy/venus/config.venus_evcharger.ini"
-    fi
-    if [ -d "${preserve_dir}/deploy/venus" ]; then
-        mkdir -p "${destination_root}/deploy/venus"
-        find "${preserve_dir}/deploy/venus" -maxdepth 1 -type f \
-            \( -name 'wizard-*.ini' -o -name 'config.venus_evcharger.ini.wizard-*' \) \
-            -exec cp {} "${destination_root}/deploy/venus/" \;
-    fi
-    if [ "$DRY_RUN" != "1" ]; then
-        if [ -f "${preserve_dir}/noUpdate" ]; then
-            cp "${preserve_dir}/noUpdate" "${TARGET_DIR}/noUpdate"
-        fi
-        if [ -f "${preserve_dir}/update-channel" ]; then
-            cp "${preserve_dir}/update-channel" "${TARGET_DIR}/update-channel"
-        fi
-    fi
+	preserve_dir="$1"
+	destination_root="$2"
+	if [ -f "${preserve_dir}/deploy/venus/config.venus_evcharger.ini" ]; then
+		mkdir -p "${destination_root}/deploy/venus"
+		cp "${preserve_dir}/deploy/venus/config.venus_evcharger.ini" "${destination_root}/deploy/venus/config.venus_evcharger.ini"
+	fi
+	if [ -d "${preserve_dir}/deploy/venus" ]; then
+		mkdir -p "${destination_root}/deploy/venus"
+		find "${preserve_dir}/deploy/venus" -maxdepth 1 -type f \
+			\( -name 'wizard-*.ini' -o -name 'config.venus_evcharger.ini.wizard-*' \) \
+			-exec cp {} "${destination_root}/deploy/venus/" \;
+	fi
+	if [ "$DRY_RUN" != "1" ]; then
+		if [ -f "${preserve_dir}/noUpdate" ]; then
+			cp "${preserve_dir}/noUpdate" "${TARGET_DIR}/noUpdate"
+		fi
+		if [ -f "${preserve_dir}/update-channel" ]; then
+			cp "${preserve_dir}/update-channel" "${TARGET_DIR}/update-channel"
+		fi
+	fi
 }
 
 apply_merge_result() {
-    result_path="$1"
-    CONFIG_MERGE_CHANGED=$(json_field "$result_path" "changed" || printf '0')
-    CONFIG_MERGE_COMMENT_PRESERVED=$(json_field "$result_path" "comment_preserved" || printf '1')
-    CONFIG_MERGE_SKIPPED_REASON=$(json_field "$result_path" "skipped_reason" || true)
-    CONFIG_MERGE_BACKUP_PATH=$(json_field "$result_path" "backup_path" || true)
-    CONFIG_MERGE_BACKUP_REQUIRED=$(json_field "$result_path" "backup_required" || printf '0')
-    CONFIG_SCHEMA_BEFORE=$(json_field "$result_path" "schema_before" || true)
-    CONFIG_SCHEMA_TARGET=$(json_field "$result_path" "schema_target" || true)
-    CONFIG_MERGE_ADDED_KEYS=$(normalize_multiline_var "$(json_lines_field "$result_path" "added_keys" || true)")
-    CONFIG_MERGE_ADDED_SECTIONS=$(normalize_multiline_var "$(json_lines_field "$result_path" "added_sections" || true)")
-    CONFIG_MIGRATIONS_APPLIED=$(normalize_multiline_var "$(json_lines_field "$result_path" "migrations_applied" || true)")
+	result_path="$1"
+	CONFIG_MERGE_CHANGED=$(json_field "$result_path" "changed" || printf '0')
+	CONFIG_MERGE_COMMENT_PRESERVED=$(json_field "$result_path" "comment_preserved" || printf '1')
+	CONFIG_MERGE_SKIPPED_REASON=$(json_field "$result_path" "skipped_reason" || true)
+	CONFIG_MERGE_BACKUP_PATH=$(json_field "$result_path" "backup_path" || true)
+	CONFIG_MERGE_BACKUP_REQUIRED=$(json_field "$result_path" "backup_required" || printf '0')
+	CONFIG_SCHEMA_BEFORE=$(json_field "$result_path" "schema_before" || true)
+	CONFIG_SCHEMA_TARGET=$(json_field "$result_path" "schema_target" || true)
+	CONFIG_MERGE_ADDED_KEYS=$(normalize_multiline_var "$(json_lines_field "$result_path" "added_keys" || true)")
+	CONFIG_MERGE_ADDED_SECTIONS=$(normalize_multiline_var "$(json_lines_field "$result_path" "added_sections" || true)")
+	CONFIG_MIGRATIONS_APPLIED=$(normalize_multiline_var "$(json_lines_field "$result_path" "migrations_applied" || true)")
 }
 
 merge_local_config_template() {
-    source_root="$1"
-    destination_root="$2"
-    template_path="${source_root}/deploy/venus/config.venus_evcharger.ini"
-    local_path="${destination_root}/deploy/venus/config.venus_evcharger.ini"
-    [ -f "$template_path" ] || return 0
-    [ -f "$local_path" ] || return 0
+	source_root="$1"
+	destination_root="$2"
+	template_path="${source_root}/deploy/venus/config.venus_evcharger.ini"
+	local_path="${destination_root}/deploy/venus/config.venus_evcharger.ini"
+	[ -f "$template_path" ] || return 0
+	[ -f "$local_path" ] || return 0
 
-    merge_result_path="${TMP_DIR}/config-merge-result.json"
-    if python3 - "$local_path" "$template_path" "$merge_result_path" "$RUN_MODE" <<'PY'
+	merge_result_path="${TMP_DIR}/config-merge-result.json"
+	if python3 - "$local_path" "$template_path" "$merge_result_path" "$RUN_MODE" <<'PY'; then
 import configparser
 import json
 import os
@@ -326,54 +326,53 @@ with open(result_path, "w", encoding="utf-8") as handle:
     json.dump(result, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
-    then
-        merge_status=0
-    else
-        merge_status=$?
-    fi
-    apply_merge_result "$merge_result_path"
+		merge_status=0
+	else
+		merge_status=$?
+	fi
+	apply_merge_result "$merge_result_path"
 
-    if [ "$merge_status" -eq 2 ] && [ "$CONFIG_MERGE_SKIPPED_REASON" = "malformed-template-config" ]; then
-        log "Refreshed template config is malformed"
-        set_failure_reason_once "malformed-template-config"
-        return 1
-    fi
+	if [ "$merge_status" -eq 2 ] && [ "$CONFIG_MERGE_SKIPPED_REASON" = "malformed-template-config" ]; then
+		log "Refreshed template config is malformed"
+		set_failure_reason_once "malformed-template-config"
+		return 1
+	fi
 
-    if [ "$CONFIG_MERGE_CHANGED" = "1" ]; then
-        if [ "$DRY_RUN" = "1" ]; then
-            log "Previewed additive config merge with preserved comments/layout"
-        else
-            log "Merged missing config keys from the refreshed template"
-        fi
-    elif [ -n "$CONFIG_MERGE_SKIPPED_REASON" ]; then
-        log "Skipping additive config merge; reason: $CONFIG_MERGE_SKIPPED_REASON"
-    else
-        log "Preserved local config already contains the refreshed template keys"
-    fi
+	if [ "$CONFIG_MERGE_CHANGED" = "1" ]; then
+		if [ "$DRY_RUN" = "1" ]; then
+			log "Previewed additive config merge with preserved comments/layout"
+		else
+			log "Merged missing config keys from the refreshed template"
+		fi
+	elif [ -n "$CONFIG_MERGE_SKIPPED_REASON" ]; then
+		log "Skipping additive config merge; reason: $CONFIG_MERGE_SKIPPED_REASON"
+	else
+		log "Preserved local config already contains the refreshed template keys"
+	fi
 }
 
 validate_wallbox_config() {
-    destination_root="$1"
-    config_path="${destination_root}/deploy/venus/config.venus_evcharger.ini"
-    [ -f "$config_path" ] || return 0
-    if [ -f "${destination_root}/venus_evcharger/backend/probe.py" ]; then
-        if (
-            cd "$destination_root" &&
-            python3 -m venus_evcharger.backend.probe validate-wallbox "$config_path" >/dev/null
-        ); then
-            VALIDATION_PASSED=1
-            CONFIG_VALIDATION_MODE="probe"
-            log "Validated merged wallbox config"
-            return 0
-        fi
-        VALIDATION_PASSED=0
-        CONFIG_VALIDATION_MODE="probe"
-        PROMOTION_ABORTED_REASON="${PROMOTION_ABORTED_REASON:-config-validation-failed}"
-        set_failure_reason_once "config-validation-failed"
-        log "Wallbox config validation failed for $config_path"
-        return 1
-    fi
-    if python3 - "$config_path" <<'PY'
+	destination_root="$1"
+	config_path="${destination_root}/deploy/venus/config.venus_evcharger.ini"
+	[ -f "$config_path" ] || return 0
+	if [ -f "${destination_root}/venus_evcharger/backend/probe.py" ]; then
+		if (
+			cd "$destination_root" &&
+				python3 -m venus_evcharger.backend.probe validate-wallbox "$config_path" >/dev/null
+		); then
+			VALIDATION_PASSED=1
+			CONFIG_VALIDATION_MODE="probe"
+			log "Validated merged wallbox config"
+			return 0
+		fi
+		VALIDATION_PASSED=0
+		CONFIG_VALIDATION_MODE="probe"
+		PROMOTION_ABORTED_REASON="${PROMOTION_ABORTED_REASON:-config-validation-failed}"
+		set_failure_reason_once "config-validation-failed"
+		log "Wallbox config validation failed for $config_path"
+		return 1
+	fi
+	if python3 - "$config_path" <<'PY'; then
 import configparser
 import sys
 
@@ -387,16 +386,15 @@ except (OSError, configparser.Error):
 if "DEFAULT" not in parser or not parser["DEFAULT"].get("Host", "").strip():
     raise SystemExit(1)
 PY
-    then
-        VALIDATION_PASSED=1
-        CONFIG_VALIDATION_MODE="fallback"
-        log "Validated merged wallbox config with the bootstrap fallback validator"
-        return 0
-    fi
-    VALIDATION_PASSED=0
-    CONFIG_VALIDATION_MODE="fallback"
-    PROMOTION_ABORTED_REASON="${PROMOTION_ABORTED_REASON:-config-validation-failed}"
-    set_failure_reason_once "config-validation-failed"
-    log "Wallbox config validation failed for $config_path"
-    return 1
+		VALIDATION_PASSED=1
+		CONFIG_VALIDATION_MODE="fallback"
+		log "Validated merged wallbox config with the bootstrap fallback validator"
+		return 0
+	fi
+	VALIDATION_PASSED=0
+	CONFIG_VALIDATION_MODE="fallback"
+	PROMOTION_ABORTED_REASON="${PROMOTION_ABORTED_REASON:-config-validation-failed}"
+	set_failure_reason_once "config-validation-failed"
+	log "Wallbox config validation failed for $config_path"
+	return 1
 }

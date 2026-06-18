@@ -8,7 +8,7 @@
 # service symlink exists and optionally launches the one-shot helper that
 # disables a conflicting generic Shelly integration.
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 SERVICE_NAME="dbus-venus-evcharger"
 DBUS_ADAPTER_SERVICE_NAME="dbus-venus-evcharger-dbus-adapter"
@@ -24,42 +24,42 @@ mkdir -p "$SERVICE_DIR/log" "$DBUS_ADAPTER_SERVICE_DIR/log"
 
 # Keep the run scripts executable in case the deployment medium lost mode bits.
 if [ -f "$SERVICE_DIR/run" ]; then
-    chmod 755 "$SERVICE_DIR/run"
+	chmod 755 "$SERVICE_DIR/run"
 fi
 
 if [ -f "$SERVICE_DIR/log/run" ]; then
-    chmod 755 "$SERVICE_DIR/log/run"
+	chmod 755 "$SERVICE_DIR/log/run"
 fi
 
 if [ -f "$OBSERVER_SERVICE_DIR/run" ]; then
-    chmod 755 "$OBSERVER_SERVICE_DIR/run"
+	chmod 755 "$OBSERVER_SERVICE_DIR/run"
 fi
 
 if [ -f "$DBUS_ADAPTER_SERVICE_DIR/run" ]; then
-    chmod 755 "$DBUS_ADAPTER_SERVICE_DIR/run"
+	chmod 755 "$DBUS_ADAPTER_SERVICE_DIR/run"
 fi
 
 if [ -f "$DBUS_ADAPTER_SERVICE_DIR/log/run" ]; then
-    chmod 755 "$DBUS_ADAPTER_SERVICE_DIR/log/run"
+	chmod 755 "$DBUS_ADAPTER_SERVICE_DIR/log/run"
 fi
 
 cleanup_duplicate_supervisors() {
-    service_name="$1"
-    pids=$(ps w 2>/dev/null | awk -v name="$service_name" '$5 == "supervise" && $6 == name {print $1}')
-    keep_pid=""
-    count=0
-    for pid in $pids; do
-        keep_pid="$pid"
-        count=$((count + 1))
-    done
-    if [ "$count" -le 1 ]; then
-        return
-    fi
-    for pid in $pids; do
-        if [ "$pid" != "$keep_pid" ]; then
-            kill "$pid" >/dev/null 2>&1 || true
-        fi
-    done
+	service_name="$1"
+	pids=$(ps w 2>/dev/null | awk -v name="$service_name" '$5 == "supervise" && $6 == name {print $1}')
+	keep_pid=""
+	count=0
+	for pid in $pids; do
+		keep_pid="$pid"
+		count=$((count + 1))
+	done
+	if [ "$count" -le 1 ]; then
+		return
+	fi
+	for pid in $pids; do
+		if [ "$pid" != "$keep_pid" ]; then
+			kill "$pid" >/dev/null 2>&1 || true
+		fi
+	done
 }
 
 # Register the wallbox service with runit. Existing symlink targets are updated
@@ -74,5 +74,5 @@ cleanup_duplicate_supervisors "$OBSERVER_SERVICE_NAME"
 # Optionally kick off the generic Shelly disable helper in the background. This
 # avoids two Venus services trying to own the same physical Shelly device.
 if [ -f "$GENERIC_SHELLY_HELPER" ] && [ -f "$CONFIG_PATH" ]; then
-    "$GENERIC_SHELLY_HELPER" "$CONFIG_PATH" >/dev/null 2>&1 &
+	"$GENERIC_SHELLY_HELPER" "$CONFIG_PATH" >/dev/null 2>&1 &
 fi

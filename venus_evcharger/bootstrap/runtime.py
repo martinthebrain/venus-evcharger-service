@@ -115,10 +115,10 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
         if getattr(svc, "_switch_backend", None) is None and getattr(svc, "_charger_backend", None) is not None:
             supported_phase_selections = self._charger_backend_supported_phase_selections(svc)
         svc.manual_override_until = 0.0
-        svc.virtual_mode = self._normalize_mode(defaults.get("Mode", 0))
-        svc.virtual_autostart = int(defaults.get("AutoStart", 1))
-        svc.virtual_startstop = int(defaults.get("StartStop", 1))
-        svc.virtual_enable = int(defaults.get("Enable", defaults.get("StartStop", 1)))
+        svc.virtual_mode = self._normalize_mode(defaults.get("Mode", "0"))
+        svc.virtual_autostart = int(defaults.get("AutoStart", "1"))
+        svc.virtual_startstop = int(defaults.get("StartStop", "1"))
+        svc.virtual_enable = int(defaults.get("Enable", defaults.get("StartStop", "1")))
         svc.virtual_set_current = float(defaults.get("SetCurrent", svc.max_current))
         svc.charging_started_at = None
         svc.energy_at_start = 0.0

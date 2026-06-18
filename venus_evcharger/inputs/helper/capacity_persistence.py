@@ -159,7 +159,7 @@ def _read_text(path: str) -> str:
 
 def _positive_float(value: object) -> float | None:
     try:
-        numeric = float(value)
+        numeric = float(str(value))
     except (TypeError, ValueError):
         return None
     return numeric if numeric > 0.0 else None

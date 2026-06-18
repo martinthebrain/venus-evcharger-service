@@ -8,9 +8,10 @@ from typing import Any, cast
 
 from venus_evcharger.core.shared import discovery_cache_valid, first_matching_prefixed_service
 from venus_evcharger.energy import EnergySourceDefinition
+from venus_evcharger.inputs.helper.sources_dbus_common import _ResolvedAutoBatteryServiceState
 
 
-class _AutoInputHelperSourceDbusResolveMixin:
+class _AutoInputHelperSourceDbusResolveMixin(_ResolvedAutoBatteryServiceState):
     def _resolve_auto_battery_service(self: Any) -> str:
         now = time.time()
         resolved = (
@@ -120,4 +121,3 @@ class _AutoInputHelperSourceDbusResolveMixin:
             return ""
         value = self._get_dbus_value(service_name, path)
         return "" if value is None else str(value).strip()
-

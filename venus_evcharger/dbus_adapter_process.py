@@ -32,6 +32,7 @@ import dbus  # noqa: F401
 from dbus.mainloop.glib import DBusGMainLoop  # noqa: F401
 from gi.repository import GLib  # noqa: F401
 
+from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter_components import (
     AtomicJsonWriter,
     DbusCircuitBreaker,
@@ -82,14 +83,14 @@ class DbusAdapter(
         self.paths = paths or gateway_paths(defaults.get("DbusGatewayRunDir", ""))
         self.connection = DbusConnectionManager()
         self.rate_limiter = DbusRateLimiter(
-            read_interval_seconds=float(defaults.get("DbusGatewayReadIntervalSeconds", 0.25)),
-            write_interval_seconds=float(defaults.get("DbusGatewayWriteIntervalSeconds", 0.35)),
-            introspection_interval_seconds=float(defaults.get("DbusGatewayIntrospectionIntervalSeconds", 2.0)),
+            read_interval_seconds=config_get_float(defaults, "DbusGatewayReadIntervalSeconds", 0.25),
+            write_interval_seconds=config_get_float(defaults, "DbusGatewayWriteIntervalSeconds", 0.35),
+            introspection_interval_seconds=config_get_float(defaults, "DbusGatewayIntrospectionIntervalSeconds", 2.0),
         )
         self.circuit = DbusCircuitBreaker()
         self.cache = DbusCacheStore(
             self.paths,
-            stale_after_seconds=float(defaults.get("DbusGatewayStaleAfterSeconds", 10.0)),
+            stale_after_seconds=config_get_float(defaults, "DbusGatewayStaleAfterSeconds", 10.0),
         )
         self.commands = DbusCommandInbox(self.paths.command_dir)
         self.core_commands = DbusCommandInbox(self.paths.core_command_dir)
@@ -102,22 +103,22 @@ class DbusAdapter(
         self._main_loop: Any = None
         self.read_scheduler = DbusReadScheduler(self._configured_read_specs(defaults))
         self.read_executor = DbusReadExecutor(self)
-        configured_tick = float(defaults.get("DbusGatewayTickSeconds", 0.2))
-        self.min_tick_seconds = max(0.05, float(defaults.get("DbusGatewayMinTickSeconds", configured_tick)))
+        configured_tick = config_get_float(defaults, "DbusGatewayTickSeconds", 0.2)
+        self.min_tick_seconds = max(0.05, config_get_float(defaults, "DbusGatewayMinTickSeconds", configured_tick))
         self.max_tick_seconds = max(
             self.min_tick_seconds,
-            float(defaults.get("DbusGatewayMaxTickSeconds", 1.0)),
+            config_get_float(defaults, "DbusGatewayMaxTickSeconds", 1.0),
         )
         self.tick_seconds = self.min_tick_seconds
         self._next_work_tick_monotonic = 0.0
         self._last_resource_snapshot: dict[str, Any] = {}
         self.discovery = DbusDiscoveryManager(
-            interval_seconds=float(defaults.get("DbusGatewayServiceListIntervalSeconds", 900.0))
+            interval_seconds=config_get_float(defaults, "DbusGatewayServiceListIntervalSeconds", 900.0)
         )
         self.json_writer = AtomicJsonWriter()
         self.cache_publish_interval_seconds = max(
             0.0,
-            float(defaults.get("DbusGatewayCachePublishIntervalSeconds", 0.0)),
+            config_get_float(defaults, "DbusGatewayCachePublishIntervalSeconds", 0.0),
         )
         self.command_lifecycle_path = str(
             defaults.get(
@@ -125,17 +126,20 @@ class DbusAdapter(
                 os.path.join(self.paths.run_dir, "dbus-command-lifecycle.jsonl"),
             )
         ).strip()
-        self.slo_gui_max_age_seconds = max(0.1, float(defaults.get("DbusGatewaySloGuiMaxAgeSeconds", 2.0)))
+        self.slo_gui_max_age_seconds = max(0.1, config_get_float(defaults, "DbusGatewaySloGuiMaxAgeSeconds", 2.0))
         self.slo_core_read_max_age_seconds = max(
             0.1,
-            float(defaults.get("DbusGatewaySloCoreReadMaxAgeSeconds", 5.0)),
+            config_get_float(defaults, "DbusGatewaySloCoreReadMaxAgeSeconds", 5.0),
         )
-        self.slo_queue_max_age_seconds = max(0.1, float(defaults.get("DbusGatewaySloQueueMaxAgeSeconds", 10.0)))
-        self.slo_mainloop_gap_max_ms = max(10.0, float(defaults.get("DbusGatewaySloMainloopGapMaxMs", 500.0)))
+        self.slo_queue_max_age_seconds = max(0.1, config_get_float(defaults, "DbusGatewaySloQueueMaxAgeSeconds", 10.0))
+        self.slo_mainloop_gap_max_ms = max(10.0, config_get_float(defaults, "DbusGatewaySloMainloopGapMaxMs", 500.0))
         self.health_log_path = str(
             defaults.get("DbusGatewayHealthLogPath", os.path.join(self.paths.run_dir, "dbus-health-history.jsonl"))
         ).strip()
-        self.health_log_interval_seconds = max(0.0, float(defaults.get("DbusGatewayHealthLogIntervalSeconds", 10.0)))
+        self.health_log_interval_seconds = max(
+            0.0,
+            config_get_float(defaults, "DbusGatewayHealthLogIntervalSeconds", 10.0),
+        )
         deviceinstance = self._device_instance(defaults)
         self.dbus_introspection_snapshot_path = str(
             defaults.get(
@@ -206,9 +210,15 @@ class DbusAdapter(
                 "service": str(defaults.get("AutoPvService", "")).strip(),
                 "prefix": str(defaults.get("AutoPvServicePrefix", "com.victronenergy.pvinverter")).strip(),
                 "path": str(defaults.get("AutoPvPath", "/Ac/Power")).strip(),
+                "dc_service": str(defaults.get("AutoDcPvService", "com.victronenergy.system")).strip(),
+                "dc_path": str(defaults.get("AutoDcPvPath", "/Dc/Pv/Power")).strip(),
+                "use_dc_pv": str(defaults.get("AutoUseDcPv", "1")).strip().lower()
+                in ("1", "true", "yes", "on"),
                 "interval": 2.0,
-                "aggregate": "services-sum",
+                "aggregate": "pv-total",
                 "priority": "read",
+                "optional_zero_on_error": True,
+                "optional_confidence": 0.2,
             },
             "battery_soc": {
                 "service": battery_service,
@@ -222,3 +232,20 @@ class DbusAdapter(
 def _logging_level_from_config(config: configparser.ConfigParser) -> int:
     value = str(config["DEFAULT"].get("Logging", "INFO")).strip().upper()
     return getattr(logging, value, logging.INFO)
+
+
+__all__ = [
+    "AtomicJsonWriter",
+    "DBusGMainLoop",
+    "DbusAdapter",
+    "GLib",
+    "_logging_level_from_config",
+    "configparser",
+    "dbus",
+    "json",
+    "logging",
+    "os",
+    "select",
+    "signal",
+    "time",
+]

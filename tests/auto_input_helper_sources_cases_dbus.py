@@ -191,6 +191,26 @@ class _AutoInputHelperSourcesDbusCases:
         kinds = [command["kind"] for command in self._gateway_commands(paths)]
         self.assertCountEqual(kinds, ["refresh_value", "introspect"])
 
+    def test_get_dbus_value_suppresses_recent_gateway_error_until_retry_window(self):
+        helper = self._make_helper()
+        paths = self._prepare_gateway(helper)
+        store = DbusCacheStore(paths)
+        cache_key = dbus_path_key("svc", "/Missing")
+        store.mark_error(cache_key, source="svc/Missing", error="missing", now=100.0)
+        store.write_snapshot_files()
+        helper.dbus_gateway_error_retry_seconds = 30.0
+
+        with unittest.mock.patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=120.0):
+            self.assertIsNone(helper._get_dbus_value("svc", "/Missing"))
+        self.assertEqual(self._gateway_commands(paths), [])
+        self.assertFalse(helper._gateway_error_recent({"status": "fresh", "error_at": 100.0}))
+        self.assertFalse(helper._gateway_error_recent({"status": "error", "error_at": 0.0}))
+
+        with unittest.mock.patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=131.0):
+            self.assertIsNone(helper._get_dbus_value("svc", "/Missing"))
+        commands = self._gateway_commands(paths)
+        self.assertEqual(commands[0]["kind"], "refresh_value")
+
     def test_list_dbus_services_short_circuits_during_backoff_and_resets_on_success(self):
         helper = self._make_helper()
         with patch("venus_evcharger_auto_input_helper.time.time", return_value=50.0):
