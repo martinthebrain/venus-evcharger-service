@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: test lint pylint-audit security-audit spellcheck shell-audit quality-audit audit typecheck check stress soakcheck
+.PHONY: test lint pylint-audit security-audit spellcheck shell-audit quality-audit audit typecheck check stress soakcheck mutation-audit
 
 test:
 	$(PYTHON) -m unittest
@@ -37,3 +37,6 @@ stress:
 
 soakcheck:
 	bash ./scripts/ops/cerbo_soak_check.sh
+
+mutation-audit:
+	$(PYTHON) scripts/dev/run_mutation_audit.py

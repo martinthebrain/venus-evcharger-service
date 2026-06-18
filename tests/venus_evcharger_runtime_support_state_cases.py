@@ -236,6 +236,22 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         self.assertEqual(service._dbusservice["/UpdateIndex"], 1)
         self.assertEqual(service._dbus_publish_state["/A"], {"value": 2, "updated_at": 100.0})
 
+    def test_async_publish_flush_batches_gateway_proxy_writes(self) -> None:
+        service = make_runtime_support_service()
+        gateway_proxy = SimpleNamespace(publish_paths=MagicMock())
+        service._dbusservice = gateway_proxy
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.mark_mainloop_thread()
+        service._dbus_publish_state = {}
+
+        controller.enqueue_dbus_publish_values([("/A", 1), ("/B", 2)], 100.0)
+        self.assertTrue(controller.flush_dbus_publish_queue())
+
+        gateway_proxy.publish_paths.assert_called_once_with({"/A": 1, "/B": 2})
+        self.assertEqual(service._dbus_publish_state["/A"], {"value": 1, "updated_at": 100.0})
+        self.assertEqual(service._dbus_publish_state["/B"], {"value": 2, "updated_at": 100.0})
+
     def test_update_worker_scheduler_returns_while_cycle_is_blocked(self) -> None:
         started = threading.Event()
         release = threading.Event()

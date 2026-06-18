@@ -206,9 +206,15 @@ class DbusAdapter(
                 "service": str(defaults.get("AutoPvService", "")).strip(),
                 "prefix": str(defaults.get("AutoPvServicePrefix", "com.victronenergy.pvinverter")).strip(),
                 "path": str(defaults.get("AutoPvPath", "/Ac/Power")).strip(),
+                "dc_service": str(defaults.get("AutoDcPvService", "com.victronenergy.system")).strip(),
+                "dc_path": str(defaults.get("AutoDcPvPath", "/Dc/Pv/Power")).strip(),
+                "use_dc_pv": str(defaults.get("AutoUseDcPv", "1")).strip().lower()
+                in ("1", "true", "yes", "on"),
                 "interval": 2.0,
-                "aggregate": "services-sum",
+                "aggregate": "pv-total",
                 "priority": "read",
+                "optional_zero_on_error": True,
+                "optional_confidence": 0.2,
             },
             "battery_soc": {
                 "service": battery_service,

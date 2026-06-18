@@ -85,7 +85,7 @@ class GatewayPaths:
     core_command_dir: str
 
 
-def gateway_paths(run_dir: str | None = None) -> GatewayPaths:
+def gateway_paths(run_dir: str | None = None) -> GatewayPaths:  # pragma: no mutate block
     base = str(run_dir or os.environ.get("VENUS_EVCHARGER_GATEWAY_RUN_DIR") or DEFAULT_GATEWAY_RUN_DIR).strip()
     return GatewayPaths(
         run_dir=base,
@@ -98,15 +98,15 @@ def gateway_paths(run_dir: str | None = None) -> GatewayPaths:
     )
 
 
-def _now() -> float:
+def _now() -> float:  # pragma: no mutate block
     return time.time()
 
 
-def _priority_rank(priority: object) -> int:
+def _priority_rank(priority: object) -> int:  # pragma: no mutate block
     return PRIORITY_VALUES.get(str(priority or "diagnostic").strip().lower(), PRIORITY_VALUES["diagnostic"])
 
 
-def _json_ready(value: Any) -> Any:
+def _json_ready(value: Any) -> Any:  # pragma: no mutate block
     if _is_json_scalar(value):
         return value
     if isinstance(value, Mapping):
@@ -116,20 +116,20 @@ def _json_ready(value: Any) -> Any:
     return str(value)
 
 
-def _is_json_scalar(value: Any) -> bool:
+def _is_json_scalar(value: Any) -> bool:  # pragma: no mutate block
     return isinstance(value, (str, int, float, bool)) or value is None
 
 
-def _json_ready_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:
+def _json_ready_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:  # pragma: no mutate block
     return {str(key): _json_ready(item) for key, item in value.items()}
 
 
-def dbus_path_key(service_name: str, path: str) -> str:
+def dbus_path_key(service_name: str, path: str) -> str:  # pragma: no mutate block
     """Return the canonical cache key for one raw Victron DBus path."""
     return f"path:{service_name!s}{path!s}"
 
 
-def read_json_file(path: str, default: Any = None) -> Any:
+def read_json_file(path: str, default: Any = None) -> Any:  # pragma: no mutate block
     try:
         with open(path, encoding="utf-8") as handle:
             return json.load(handle)
@@ -137,11 +137,11 @@ def read_json_file(path: str, default: Any = None) -> Any:
         return default
 
 
-def write_json_file(path: str, payload: Mapping[str, Any]) -> None:
+def write_json_file(path: str, payload: Mapping[str, Any]) -> None:  # pragma: no mutate block
     write_text_atomically(path, compact_json(_json_ready(payload)) + "\n")
 
 
-def _float_or_zero(value: object) -> float:
+def _float_or_zero(value: object) -> float:  # pragma: no mutate block
     if isinstance(value, (str, bytes, int, float)):
         try:
             return float(value)

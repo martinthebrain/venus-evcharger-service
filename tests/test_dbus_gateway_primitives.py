@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from venus_evcharger import dbus_gateway
+from venus_evcharger import dbus_gateway_cache, dbus_gateway_commands
 from venus_evcharger.dbus_gateway import (
     CacheValueMetadata,
     DbusCacheStore,
@@ -80,6 +81,11 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             no_values = {"captured_at": 14.0, "values": []}
             self.assertIsNone(DbusCacheStore.value_entry(no_values, "nested"))
             self.assertIsNone(DbusCacheStore.value_entry({"values": {"nested": 1}}, "nested"))
+            copied_entry = DbusCacheStore.value_entry({"values": {"nested": {"value": 1}}}, "nested")
+            self.assertEqual(copied_entry, {"value": 1})
+            assert copied_entry is not None
+            copied_entry["value"] = 2
+            self.assertEqual(DbusCacheStore.value_entry({"values": {"nested": {"value": 1}}}, "nested"), {"value": 1})
 
             broken = Path(temp_dir) / "broken.json"
             broken.write_text("{", encoding="utf-8")
@@ -87,6 +93,35 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             out = Path(temp_dir) / "out.json"
             write_json_file(str(out), {"value": object()})
             self.assertIn("object object", read_json_file(str(out), {})["value"])
+
+    def test_cache_helpers_cover_freshness_metadata_and_error_edges(self) -> None:
+        self.assertEqual(dbus_gateway_cache._value_age(0.0, 100.0), 0.0)
+        self.assertEqual(dbus_gateway_cache._value_age(120.0, 100.0), 0.0)
+        self.assertFalse(dbus_gateway_cache._value_is_stale("error", 20.0, 1.0))
+        self.assertFalse(dbus_gateway_cache._value_is_stale("fresh", 20.0, 0.0))
+        self.assertTrue(dbus_gateway_cache._value_is_stale("fresh", 20.0, 1.0))
+        self.assertFalse(dbus_gateway_cache._valid_snapshot_payload({"captured_at": 0.0}))
+        self.assertFalse(dbus_gateway_cache._valid_snapshot_payload([]))
+        self.assertFalse(dbus_gateway_cache._snapshot_too_old(1.0, 100.0, -1.0))
+        self.assertTrue(dbus_gateway_cache._snapshot_too_old(1.0, 100.0, 1.0))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DbusCacheStore(gateway_paths(str(Path(temp_dir) / "run")), stale_after_seconds=-1)
+            self.assertEqual(store.stale_after_seconds, 0.0)
+            with patch.object(dbus_gateway_cache, "_now", return_value=42.0):
+                store.update_value("defaulted", 5)
+            entry = store.snapshot(now=50.0)["values"]["defaulted"]
+            self.assertEqual(entry["source"], "")
+            self.assertEqual(entry["status"], "fresh")
+            self.assertEqual(entry["confidence"], 1.0)
+            self.assertEqual(entry["updated_at"], 42.0)
+
+            store.mark_error("missing", source="svc/path", error=RuntimeError("boom"), now=60.0)
+            error_entry = store.snapshot(now=60.0)["values"]["missing"]
+            self.assertIsNone(error_entry["value"])
+            self.assertEqual(error_entry["age_s"], 0.0)
+            self.assertEqual(error_entry["last_error"], "boom")
+            self.assertEqual(error_entry["confidence"], 0.0)
 
     def test_command_inbox_coalesce_ordering_and_error_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -165,6 +200,64 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             )
             self.assertEqual(keep_old[0][0], "old")
 
+    def test_command_inbox_private_helpers_cover_priority_and_publish_ordering(self) -> None:
+        self.assertTrue(
+            DbusCommandInbox._should_replace_existing_payload(
+                {"priority": "diagnostic", "created_at": 10.0},
+                {"priority": "user", "created_at": 1.0},
+            )
+        )
+        self.assertFalse(
+            DbusCommandInbox._should_replace_existing_payload(
+                {"priority": "safety", "created_at": 10.0},
+                {"priority": "diagnostic", "created_at": 20.0},
+            )
+        )
+        self.assertFalse(
+            DbusCommandInbox._should_replace_existing_payload(
+                {"priority": "normal", "created_at": 10.0},
+                {"priority": "normal", "created_at": 9.0},
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = str(Path(temp_dir) / "coalesced.json")
+            Path(target).write_text("{}", encoding="utf-8")
+            self.assertFalse(dbus_gateway_commands._coalesced_target_exists({}, target))
+            self.assertTrue(dbus_gateway_commands._coalesced_target_exists({"coalesce_key": " k "}, target))
+
+        self.assertTrue(dbus_gateway_commands._replace_existing_coalesced([], {}))
+        self.assertTrue(
+            dbus_gateway_commands._same_priority(
+                {"priority": "publish"},
+                {"priority": "publish"},
+            )
+        )
+        payload = {"created_at": 20.0}
+        dbus_gateway_commands._mark_coalesced_payload([], payload)
+        self.assertEqual(payload, {"created_at": 20.0, "lifecycle_state": "coalesced"})
+
+        payload = {"priority": "publish", "created_at": 20.0}
+        with patch.object(dbus_gateway_commands, "_now", return_value=30.0):
+            dbus_gateway_commands._mark_coalesced_payload(
+                {"priority": "publish", "created_at": 10.0},
+                payload,
+            )
+        self.assertEqual(payload["created_at"], 10.0)
+        self.assertEqual(payload["updated_at"], 30.0)
+
+        ordered = sorted(
+            [
+                {"kind": "register_path", "id": "path", "created_at": 2.0},
+                {"kind": "register_service", "id": "service", "created_at": 3.0},
+                {"kind": "publish_value", "priority": "publish", "path": "/Session/Time", "id": "time"},
+                {"kind": "publish_value", "priority": "normal", "path": "/Session/Time", "id": "normal"},
+            ],
+            key=dbus_gateway_commands._command_order_key,
+        )
+        self.assertEqual([command["id"] for command in ordered], ["time", "normal", "service", "path"])
+        self.assertEqual(dbus_gateway_commands._command_kind({"type": "set_value"}), "set_value")
+
     def test_gateway_client_socket_and_command_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = gateway_paths(str(Path(temp_dir) / "run"))
@@ -204,11 +297,15 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                     self.assertEqual(client.send({"value": object()})["ok"], expected_ok)
 
             client.publish_path("/Mode", 1)
+            client.publish_paths({"/Ac/Power": 1200.0, "/Auto/Reason": "ok", "": "ignored"})
             client.register_path("/Mode", 1, writeable=True)
             client.request_read("grid_power_w")
             client.request_read("svc", "/Path", reason="freshen")
             client.enqueue_command({"kind": "custom"})
-            self.assertEqual(len(DbusCommandInbox(paths.command_dir).load_pending()), 5)
+            pending = DbusCommandInbox(paths.command_dir).load_pending()
+            self.assertEqual(len(pending), 6)
+            desired = [command for _path, command in pending if command.get("kind") == "publish_desired"][0]
+            self.assertEqual(desired["paths"], {"/Ac/Power": 1200.0, "/Auto/Reason": "ok"})
 
             store = DbusCacheStore(paths)
             store.update_value("grid_power_w", 12.0, source="svc/path")
@@ -218,10 +315,10 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(client.load_health()["backpressure"]["state"], "slow")
             self.assertEqual(client.backpressure_state(), "slow")
             client.publish_path("/Auto/Reason", "optional")
-            self.assertEqual(len(DbusCommandInbox(paths.command_dir).load_pending()), 5)
+            self.assertEqual(len(DbusCommandInbox(paths.command_dir).load_pending()), 6)
             client.publish_path("/Mode", 2, priority="user")
             pending = DbusCommandInbox(paths.command_dir).load_pending()
-            self.assertEqual(len(pending), 5)
+            self.assertEqual(len(pending), 6)
             mode = [
                 command
                 for _path, command in pending
@@ -234,41 +331,55 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             dbus_gateway.PRIORITY_VALUES["normal"],
             dbus_gateway.PRIORITY_VALUES["diagnostic"],
         )
-        self.assertEqual(command_queue_class({"kind": "register_path"}), "startup/register")
-        self.assertEqual(command_queue_class({"kind": "publish_value", "path": "/Mode"}), "gui-critical-publish")
-        self.assertEqual(command_queue_class({"kind": "publish_desired", "paths": {"/Session/Time": 1}}), "gui-critical-publish")
-        self.assertEqual(command_queue_class({"kind": "publish_value", "path": "/Auto/Reason"}), "local-publish")
-        self.assertEqual(command_queue_class({"kind": "set_value"}), "remote-write")
-        self.assertEqual(command_queue_class({"kind": "refresh_value", "key": "grid_power_w"}), "read-fast")
-        self.assertEqual(command_queue_class({"kind": "refresh_value", "key": "optional"}), "read-slow")
-        self.assertEqual(command_queue_class({"kind": "refresh_services"}), "discovery")
-        self.assertEqual(command_queue_class({"kind": "introspect"}), "introspection")
-        self.assertEqual(command_queue_class({"kind": "unknown"}), "diagnostic")
+        cases = [
+            ({"kind": "register_path"}, "startup/register"),
+            ({"kind": "register_service"}, "startup/register"),
+            ({"kind": "publish_value", "path": "/Mode"}, "gui-critical-publish"),
+            ({"kind": "publish_desired", "paths": {"/Session/Time": 1}}, "gui-critical-publish"),
+            ({"kind": "publish_desired", "paths": {"/Auto/Reason": 1}}, "local-publish"),
+            ({"kind": "publish_desired", "paths": ["/Mode"]}, "local-publish"),
+            ({"kind": "publish_value", "path": "/Auto/Reason"}, "local-publish"),
+            ({"kind": "set_value"}, "remote-write"),
+            ({"type": "set_value"}, "remote-write"),
+            ({"kind": "refresh_value", "key": "grid_power_w"}, "read-fast"),
+            ({"kind": "refresh_value", "key": "pv_power_w"}, "read-fast"),
+            ({"kind": "refresh_value", "key": "battery_soc"}, "read-fast"),
+            ({"kind": "refresh_value", "key": "optional"}, "read-slow"),
+            ({"kind": "refresh_value"}, "read-slow"),
+            ({"kind": "refresh_services"}, "discovery"),
+            ({"kind": "introspect"}, "introspection"),
+            ({"kind": "unknown"}, "diagnostic"),
+            ({}, "diagnostic"),
+        ]
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(command_queue_class(command), expected)
         self.assertTrue(command_allowed_by_backpressure({"kind": "register_path"}, "slow"))
         self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, "mystery"))
 
     def test_backpressure_command_filter_keeps_critical_work(self) -> None:
-        self.assertTrue(command_allowed_by_backpressure({"kind": "publish_value", "path": "/Auto/Reason"}, "ok"))
-        self.assertFalse(
-            command_allowed_by_backpressure(
-                {"kind": "publish_value", "path": "/Auto/Reason", "priority": "diagnostic"},
-                "congested",
-            )
-        )
-        self.assertTrue(command_allowed_by_backpressure({"kind": "publish_value", "path": "/Mode"}, "slow"))
-        self.assertFalse(command_allowed_by_backpressure({"kind": "publish_value", "path": "/Auto/Reason"}, "slow"))
-        self.assertTrue(
-            command_allowed_by_backpressure(
-                {"kind": "publish_value", "path": "/StartStop", "priority": "user"},
-                "protective",
-            )
-        )
-        self.assertFalse(
-            command_allowed_by_backpressure(
-                {"kind": "publish_value", "path": "/StartStop", "priority": "publish"},
-                "protective",
-            )
-        )
+        cases = [
+            ({"kind": "publish_value", "path": "/Auto/Reason"}, "ok", True),
+            ({"kind": "unknown", "priority": "diagnostic"}, "unknown", True),
+            ({"kind": "register_path", "priority": "diagnostic"}, "protective", True),
+            ({"kind": "publish_value", "path": "/Auto/Reason", "priority": "diagnostic"}, "congested", False),
+            ({"kind": "publish_value", "path": "/Auto/Reason", "priority": "optional"}, "congested", False),
+            ({"kind": "unknown", "priority": "normal"}, "congested", False),
+            ({"kind": "refresh_value", "key": "grid_power_w", "priority": "read"}, "congested", True),
+            ({"kind": "publish_value", "path": "/Mode"}, "slow", True),
+            ({"kind": "publish_value", "path": "/Auto/Reason"}, "slow", False),
+            ({"kind": "set_value", "priority": "user"}, "slow", True),
+            ({"kind": "refresh_services", "priority": "safety"}, "slow", True),
+            ({"kind": "refresh_services", "priority": "read"}, "slow", False),
+            ({"kind": "publish_value", "path": "/StartStop", "priority": " USER "}, "protective", True),
+            ({"kind": "set_value", "priority": "user"}, "protective", False),
+            ({"kind": "refresh_services", "priority": "safety"}, "protective", True),
+            ({"kind": "publish_value", "path": "/StartStop", "priority": "publish"}, "protective", False),
+            ({"kind": "publish_value", "path": "/Mode", "queue_class": "diagnostic"}, "congested", False),
+        ]
+        for command, state, expected in cases:
+            with self.subTest(command=command, state=state):
+                self.assertEqual(command_allowed_by_backpressure(command, state), expected)
 
     def test_gateway_proxy_gateway_value_and_latency_window(self) -> None:
         fake_client = MagicMock()
@@ -280,6 +391,9 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertEqual(proxy["/Mode"], 1)
         proxy["/Mode"] = 2
         self.assertEqual(proxy["/Mode"], 2)
+        proxy.publish_paths({"/Mode": 5, "/Ac/Power": 1200.0, "": "ignored"})
+        self.assertEqual(proxy["/Mode"], 5)
+        self.assertEqual(proxy["/Ac/Power"], 1200.0)
         self.assertTrue(proxy.apply_gateway_write("/Mode", 3))
         callback.assert_called_once_with("/Mode", 3)
         self.assertTrue(proxy.apply_gateway_write("/Other", 4))
@@ -287,6 +401,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         fake_client.register_path.assert_any_call("/Mode", 1, writeable=True)
         fake_client.register_path.assert_any_call("/Readonly", 0, writeable=False)
         fake_client.publish_path.assert_called_once_with("/Mode", 2)
+        fake_client.publish_paths.assert_called_once_with({"/Mode": 5, "/Ac/Power": 1200.0})
         fake_client.enqueue_command.assert_called_once()
 
         snapshot = {
