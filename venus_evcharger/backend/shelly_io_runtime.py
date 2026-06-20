@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime charger-state sync and retry helpers for Shelly I/O support."""
 
 from __future__ import annotations
 
 import math
-from typing import Any, cast
 
 from venus_evcharger.backend.models import ChargerState, PhaseSelection, phase_selection_count
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.backend.shelly_io_types import normalize_phase_value
+from venus_evcharger.backend.shelly_io_mixin_contracts import ShellyIoRuntimeMixinContract
+from venus_evcharger.backend.shelly_io_runtime_cache import ShellyIoRuntimeCacheMixin
+from venus_evcharger.backend.shelly_io_types import (
+    ShellyIoHost,
+    _ChargerStateBackendLike,
+)
 from venus_evcharger.core.common import (
     _charger_transport_retry_delay_seconds,
     _fresh_charger_retry_until,
@@ -18,7 +20,7 @@ from venus_evcharger.core.common import (
 from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
 
 
-class ShellyIoRuntimeMixin:
+class ShellyIoRuntimeMixin(ShellyIoRuntimeCacheMixin, ShellyIoRuntimeMixinContract):
     """Mirror charger readback into runtime state and synthesize retry behavior."""
 
     def _sync_charger_runtime_state(self, state: ChargerState, now: float | None = None) -> None:
@@ -197,7 +199,7 @@ class ShellyIoRuntimeMixin:
         svc._charger_retry_until = captured_at + delay_seconds
 
     @staticmethod
-    def _schedule_charger_retry_backoff(svc: Any, captured_at: float, delay_seconds: float) -> None:
+    def _schedule_charger_retry_backoff(svc: ShellyIoHost, captured_at: float, delay_seconds: float) -> None:
         delay_retry = getattr(svc, "_delay_source_retry", None)
         if callable(delay_retry):
             delay_retry("charger", captured_at, delay_seconds)
@@ -224,7 +226,7 @@ class ShellyIoRuntimeMixin:
             return None
         svc, backend, current = read_context
         try:
-            state = cast(ChargerState, backend.read_charger_state())
+            state = backend.read_charger_state()
         except Exception as error:
             self._handle_charger_state_read_error(svc, error, current)
             return None
@@ -234,7 +236,10 @@ class ShellyIoRuntimeMixin:
         svc._mark_recovery("charger", "Charger state reads recovered")
         return state
 
-    def _charger_read_context(self, now: float | None) -> tuple[Any, Any, float] | None:
+    def _charger_read_context(
+        self,
+        now: float | None,
+    ) -> tuple[ShellyIoHost, _ChargerStateBackendLike, float] | None:
         svc = self.service
         backend = self._charger_state_backend()
         if backend is None:
@@ -244,7 +249,7 @@ class ShellyIoRuntimeMixin:
             return None
         return svc, backend, current
 
-    def _handle_charger_state_read_error(self, svc: Any, error: BaseException, current: float) -> None:
+    def _handle_charger_state_read_error(self, svc: ShellyIoHost, error: BaseException, current: float) -> None:
         transport_reason = modbus_transport_issue_reason(error)
         if transport_reason is not None:
             self._remember_charger_transport_issue(transport_reason, "read", error, current)
@@ -256,71 +261,4 @@ class ShellyIoRuntimeMixin:
             "Charger state read failed: %s",
             error,
             exc_info=error,
-        )
-
-    @staticmethod
-    def _cached_optional_text(value: object) -> str | None:
-        return None if value is None else str(value)
-
-    def _runtime_cached_charger_state(
-        self,
-        *,
-        now: float | None = None,
-        max_age_seconds: float | None = None,
-    ) -> ChargerState | None:
-        captured_at = self._cached_charger_state_timestamp(now=now, max_age_seconds=max_age_seconds)
-        if captured_at is None:
-            return None
-        state = self._cached_charger_state_snapshot()
-        if not self._charger_state_has_cached_data(state):
-            return None
-        return state
-
-    def _cached_charger_state_timestamp(
-        self,
-        *,
-        now: float | None = None,
-        max_age_seconds: float | None = None,
-    ) -> float | None:
-        captured_at = finite_float_or_none(getattr(self.service, "_last_charger_state_at", None))
-        if captured_at is None:
-            return None
-        if max_age_seconds is None:
-            return captured_at
-        current = self.service._time_now() if now is None else float(now)
-        if (current - captured_at) > max(0.0, float(max_age_seconds)):
-            return None
-        return captured_at
-
-    def _cached_charger_state_snapshot(self) -> ChargerState:
-        svc = self.service
-        enabled = getattr(svc, "_last_charger_state_enabled", None)
-        phase_selection_raw = getattr(svc, "_last_charger_state_phase_selection", None)
-        return ChargerState(
-            enabled=None if enabled is None else bool(enabled),
-            current_amps=finite_float_or_none(getattr(svc, "_last_charger_state_current_amps", None)),
-            phase_selection=(
-                None if phase_selection_raw is None else normalize_phase_value(phase_selection_raw, "P1")
-            ),
-            actual_current_amps=finite_float_or_none(getattr(svc, "_last_charger_state_actual_current_amps", None)),
-            power_w=finite_float_or_none(getattr(svc, "_last_charger_state_power_w", None)),
-            energy_kwh=finite_float_or_none(getattr(svc, "_last_charger_state_energy_kwh", None)),
-            status_text=self._cached_optional_text(getattr(svc, "_last_charger_state_status", None)),
-            fault_text=self._cached_optional_text(getattr(svc, "_last_charger_state_fault", None)),
-        )
-
-    @staticmethod
-    def _charger_state_has_cached_data(state: ChargerState) -> bool:
-        return any(
-            value is not None
-            for value in (
-                state.enabled,
-                state.current_amps,
-                state.phase_selection,
-                state.actual_current_amps,
-                state.power_w,
-                state.energy_kwh,
-                state.status_text,
-                state.fault_text,
-            )
         )

@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Shelly worker transport error classification, retry, and session reset helpers."""
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 import requests
 from requests import exceptions as requests_exceptions
+
+from venus_evcharger.backend.shelly_io_types import ShellyIoHost, _TransportSessionResetBackendLike
 
 _SHELLY_TRANSPORT_ERROR_REASONS = frozenset(
     {
@@ -48,6 +48,12 @@ _SHELLY_RETRY_MINIMUMS = {
 class ShellyIoWorkerTransportMixin:
     """Classify Shelly transport failures and maintain RAM-only retry state."""
 
+    if TYPE_CHECKING:
+        service: ShellyIoHost
+
+        @staticmethod
+        def _close_object(candidate: object) -> None: ...
+
     def _shelly_retry_active(self, now: float) -> bool:
         svc = self.service
         source_retry_ready = getattr(svc, "_source_retry_ready", None)
@@ -57,7 +63,7 @@ class ShellyIoWorkerTransportMixin:
         return retry_after > float(now)
 
     @staticmethod
-    def _shelly_retry_after_value(svc: Any) -> float:
+    def _shelly_retry_after_value(svc: ShellyIoHost) -> float:
         retry_after = getattr(svc, "_shelly_retry_after", 0.0)
         if _shelly_numeric(retry_after):
             return float(retry_after)
@@ -111,7 +117,7 @@ class ShellyIoWorkerTransportMixin:
 
     def _record_shelly_failure_state(
         self,
-        svc: Any,
+        svc: ShellyIoHost,
         reason: str,
         source: str,
         error: BaseException,
@@ -131,7 +137,7 @@ class ShellyIoWorkerTransportMixin:
         self._record_shelly_offline_since(svc, now)
 
     @staticmethod
-    def _record_shelly_offline_since(svc: Any, now: float) -> None:
+    def _record_shelly_offline_since(svc: ShellyIoHost, now: float) -> None:
         """Remember when Shelly became offline for the current incident."""
         if svc._shelly_state != "offline":
             return
@@ -140,7 +146,12 @@ class ShellyIoWorkerTransportMixin:
         svc._shelly_offline_since = float(now)
 
     @staticmethod
-    def _record_shelly_retry_after(svc: Any, now: float, delay_seconds: float, retry_after: float) -> None:
+    def _record_shelly_retry_after(
+        svc: ShellyIoHost,
+        now: float,
+        delay_seconds: float,
+        retry_after: float,
+    ) -> None:
         """Update source-level Shelly retry state."""
         delay_source_retry = getattr(svc, "_delay_source_retry", None)
         if callable(delay_source_retry):
@@ -173,22 +184,22 @@ class ShellyIoWorkerTransportMixin:
         except (TypeError, ValueError):
             svc._shelly_session_reset_count = 1
 
-    def _reset_shelly_shared_session(self, svc: Any) -> None:
+    def _reset_shelly_shared_session(self, svc: ShellyIoHost) -> None:
         if not hasattr(svc, "session"):
             return
         self._close_object(getattr(svc, "session", None))
         svc.session = requests.Session()
 
-    def _reset_shelly_backend_sessions(self, svc: Any) -> None:
+    def _reset_shelly_backend_sessions(self, svc: ShellyIoHost) -> None:
         shared_session = getattr(svc, "session", None)
         for backend in self._shelly_transport_backends(svc):
             reset_transport_session = getattr(backend, "reset_transport_session", None)
             if callable(reset_transport_session):
-                reset_transport_session(shared_session)
+                cast(_TransportSessionResetBackendLike, backend).reset_transport_session(shared_session)
 
     @staticmethod
-    def _shelly_transport_backends(svc: Any) -> tuple[Any, ...]:
-        backends: list[Any] = []
+    def _shelly_transport_backends(svc: ShellyIoHost) -> tuple[object, ...]:
+        backends: list[object] = []
         seen: set[int] = set()
         for attr_name in ("_meter_backend", "_switch_backend", "_charger_backend"):
             backend = getattr(svc, attr_name, None)
@@ -202,12 +213,12 @@ class ShellyIoWorkerTransportMixin:
 __all__ = ["ShellyIoWorkerTransportMixin"]
 
 
-def _shelly_numeric(value: Any) -> bool:
+def _shelly_numeric(value: object) -> bool:
     """Return whether a value is numeric but not bool-like."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _shelly_source_retry_after_value(source_retry_after: Any) -> float:
+def _shelly_source_retry_after_value(source_retry_after: object) -> float:
     """Return retry-after value from the shared source-retry mapping."""
     if not isinstance(source_retry_after, dict):
         return 0.0

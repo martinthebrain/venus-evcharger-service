@@ -117,7 +117,7 @@ class _TestShellyIoControllerTertiaryPart2:
         )
         controller = ShellyIoController(service)
 
-        with patch("venus_evcharger.backend.shelly_io_worker.requests.Session", return_value=new_session):
+        with patch("venus_evcharger.backend.shelly_io_worker_lifecycle.requests.Session", return_value=new_session):
             controller.io_worker_once()
 
         service._delay_source_retry.assert_called_once_with("shelly", 100.0, 30.0)
@@ -163,7 +163,7 @@ class _TestShellyIoControllerTertiaryPart2:
         controller = ShellyIoController(service)
 
         with patch(
-            "venus_evcharger.backend.shelly_io_worker.requests.Session",
+            "venus_evcharger.backend.shelly_io_worker_lifecycle.requests.Session",
             side_effect=[new_worker_session, new_service_session],
         ):
             controller.io_worker_once()
