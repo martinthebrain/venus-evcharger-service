@@ -289,8 +289,10 @@ managed_layout_paths() {
 		SHELLY_PROFILES.md \
 		version.txt \
 		venus_evcharger_service.py \
+		venus_evcharger_dbus_adapter.py \
 		venus_evcharger_observer.py \
 		venus_evcharger_auto_input_helper.py \
+		venus_evchargerctl.py \
 		deploy/venus \
 		venus_evcharger \
 		scripts/ops
