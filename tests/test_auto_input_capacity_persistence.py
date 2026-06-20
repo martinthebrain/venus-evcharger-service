@@ -131,6 +131,7 @@ class TestAutoInputCapacityPersistence(unittest.TestCase):
         self.assertEqual(persistence._upsert_default_values("plain", {}), "plain")
         self.assertEqual(persistence._upsert_default_values("", {"A": "1"}), "A=1\n")
         self.assertEqual(persistence._upsert_default_values("[DEFAULT]\nB=2\n", {"A": "1"}), "[DEFAULT]\nB=2\nA=1\n")
+        self.assertEqual(persistence._default_section_bounds(["[DEFAULT]", "B=2"]), (1, 2))
         self.assertEqual(persistence._number_text(None), "")
         self.assertEqual(persistence._number_text("bad"), "")
         self.assertEqual(persistence._number_text(12.3456), "12.346")

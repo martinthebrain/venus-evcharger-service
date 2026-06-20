@@ -2067,6 +2067,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             adapter._dbusservice_registered = True
+            self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             adapter.commands.enqueue({"kind": "set_value", "service": "svc", "path": "/A", "priority": "user"})
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             adapter.commands.enqueue(

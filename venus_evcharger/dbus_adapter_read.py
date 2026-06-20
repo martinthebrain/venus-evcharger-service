@@ -43,10 +43,10 @@ def read_target(service: object, path: object) -> ReadTarget | None:  # pragma: 
 
 class _ReadCacheProtocol(Protocol):
     @property
-    def services(self) -> Mapping[str, Mapping[str, Any]]: ...
+    def services(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
 
     @property
-    def values(self) -> Mapping[str, Mapping[str, Any]]: ...
+    def values(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
 
     def update_value(
         self,
@@ -55,31 +55,33 @@ class _ReadCacheProtocol(Protocol):
         *,
         metadata: Any | None = None,
         **metadata_fields: Any,
-    ) -> None: ...
+    ) -> None: ...  # pragma: no cover
 
-    def mark_error(self, key: str, *, source: str, error: BaseException | str, now: float | None = None) -> None: ...
+    def mark_error(  # pragma: no cover
+        self, key: str, *, source: str, error: BaseException | str, now: float | None = None
+    ) -> None: ...
 
 
 class _ReadSchedulerProtocol(Protocol):
     @property
-    def specs(self) -> Mapping[str, Mapping[str, Any]]: ...
+    def specs(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
 
 
 class _ConnectionProtocol(Protocol):
-    def bus(self) -> Any: ...
+    def bus(self) -> Any: ...  # pragma: no cover
 
 
 class _ReadAdapterProtocol(Protocol):
     @property
-    def cache(self) -> _ReadCacheProtocol: ...
+    def cache(self) -> _ReadCacheProtocol: ...  # pragma: no cover
 
     @property
-    def connection(self) -> _ConnectionProtocol: ...
+    def connection(self) -> _ConnectionProtocol: ...  # pragma: no cover
 
     @property
-    def read_scheduler(self) -> _ReadSchedulerProtocol: ...
+    def read_scheduler(self) -> _ReadSchedulerProtocol: ...  # pragma: no cover
 
-    def _timed(self, kind: str, operation: Callable[[], Any]) -> Any: ...
+    def _timed(self, kind: str, operation: Callable[[], Any]) -> Any: ...  # pragma: no cover
 
 
 class DbusReadExecutor:
