@@ -12,7 +12,7 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
-from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths, read_json_file
+from venus_evcharger.dbus_gateway import DbusCommandInbox, dbus_path_key, gateway_paths, read_json_file
 
 fake_vedbus = ModuleType("vedbus")
 
@@ -478,6 +478,34 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(writes, [("/A", 1), ("/B", 2), ("/C", 3), ("/D", 4)])
             self.assertFalse(Path(command_path).exists())
             self.assertEqual(adapter.write_scheduler.health(now=time.time())["processed_commands_60s"], 1)
+
+    def test_repeated_local_publish_refreshes_cache_without_rewriting_dbus(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            writes: list[tuple[str, object]] = []
+
+            class _FakeDbusService(dict):
+                def __setitem__(self, key: str, value: object) -> None:
+                    writes.append((key, value))
+                    super().__setitem__(key, value)
+
+            adapter._dbusservice = _FakeDbusService()
+            adapter.write_scheduler.registered_paths.add("/Ac/Power")
+
+            self.assertEqual(adapter.write_scheduler.publish_path("/Ac/Power", 1200.0), "applied")
+            self.assertEqual(writes, [("/Ac/Power", 1200.0)])
+            key = dbus_path_key(adapter.service_name, "/Ac/Power")
+            adapter.cache.update_value(key, 1200.0, source="old", now=time.time() - 60.0)
+
+            self.assertEqual(adapter.write_scheduler.publish_path("/Ac/Power", 1200.0), "applied")
+
+            self.assertEqual(writes, [("/Ac/Power", 1200.0)])
+            refreshed = adapter.cache._value_snapshot(adapter.cache.values[key], time.time())  # pylint: disable=protected-access
+            self.assertEqual(refreshed["value"], 1200.0)
+            self.assertEqual(refreshed["status"], "fresh")
+            self.assertLess(refreshed["age_s"], 1.0)
 
     def test_write_scheduler_registers_paths_gui_writes_and_command_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

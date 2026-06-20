@@ -196,7 +196,11 @@ class DbusWriteSchedulerPublishMixin:
         return "deferred"
 
     def publish_path(self, path: str, value: Any) -> CommandOutcome:  # pragma: no mutate block
-        if not path or self.last_values.get(path) == value:
+        if not path:
+            return "applied"
+        if self.last_values.get(path) == value:
+            if path in self.registered_paths:
+                self._refresh_local_publish_cache(path, value)
             return "applied"
         self.adapter._ensure_dbus_service()
         if path not in self.registered_paths:
@@ -204,6 +208,10 @@ class DbusWriteSchedulerPublishMixin:
             return "dropped"
         self._timed_local_publish(lambda: self.adapter._dbusservice.__setitem__(path, value))
         self.last_values[path] = value
+        self._refresh_local_publish_cache(path, value)
+        return "applied"
+
+    def _refresh_local_publish_cache(self, path: str, value: Any) -> None:  # pragma: no mutate block
         source = f"{self.adapter.service_name}{path}"
         self.adapter.cache.update_value(
             dbus_path_key(self.adapter.service_name, path),
@@ -211,7 +219,6 @@ class DbusWriteSchedulerPublishMixin:
             source=source,
             confidence=1.0,
         )
-        return "applied"
 
     def _timed_local_publish(self, operation: Callable[[], Any]) -> Any:  # pragma: no mutate block
         adapter_timer = getattr(self.adapter, "_timed_local_publish", None)
