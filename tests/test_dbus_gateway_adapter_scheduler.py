@@ -507,6 +507,10 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(refreshed["status"], "fresh")
             self.assertLess(refreshed["age_s"], 1.0)
 
+            adapter.write_scheduler.last_values["/Unregistered"] = "same"
+            self.assertEqual(adapter.write_scheduler.publish_path("/Unregistered", "same"), "applied")
+            self.assertNotIn(dbus_path_key(adapter.service_name, "/Unregistered"), adapter.cache.values)
+
     def test_write_scheduler_registers_paths_gui_writes_and_command_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
