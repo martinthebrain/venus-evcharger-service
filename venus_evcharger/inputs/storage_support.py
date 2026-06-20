@@ -83,7 +83,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         try:
             if self._introspection_says_skip(service_name, self.service.auto_battery_soc_path, priority=80):
                 return False
-            soc_value = self.service._get_dbus_value(service_name, self.service.auto_battery_soc_path)
+            soc_value = self.service.get_dbus_value(service_name, self.service.auto_battery_soc_path)
         except Exception:
             self._request_introspection(service_name, self.service.auto_battery_soc_path, priority=95, reason="battery SOC probe failed")
             return False
@@ -95,7 +95,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         if self._introspection_says_skip(service_name, path, priority=85):
             return False
         try:
-            return self.service._get_dbus_value(service_name, path) is not None
+            return self.service.get_dbus_value(service_name, path) is not None
         except Exception:
             self._request_introspection(service_name, path, priority=95, reason="energy-source field probe failed")
             return False
@@ -161,7 +161,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         return service_name
 
     def _primary_energy_source_service(self) -> str:
-        return str(self.service._resolve_auto_battery_service())
+        return str(self.service.resolve_auto_battery_service())
 
     def _configured_energy_source_service(self, source: EnergySourceDefinition, now: float) -> str | None:
         if not source.service_name or not self._energy_source_has_readable_data(source, source.service_name):
@@ -172,7 +172,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         if not source.service_prefix:
             raise ValueError(f"No readable DBus service configured for energy source '{source.source_id}'")
         service_name = first_matching_prefixed_service(
-            self.service._list_dbus_services(),
+            self.service.list_dbus_services(),
             source.service_prefix,
             lambda candidate: self._energy_source_has_readable_data(source, candidate),
         )
@@ -197,7 +197,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         source = self._primary_energy_source()
         battery_service_prefix = str(getattr(svc, "auto_battery_service_prefix", "") or "")
         service_name = first_matching_prefixed_service(
-            svc._list_dbus_services(),
+            svc.list_dbus_services(),
             source.service_prefix or battery_service_prefix,
             lambda candidate: self._energy_source_has_readable_data(source, candidate),
         )
@@ -242,7 +242,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         if self._introspection_says_skip(svc.auto_grid_service, path, priority=85):
             return None
         try:
-            value = svc._get_dbus_value(svc.auto_grid_service, path)
+            value = svc.get_dbus_value(svc.auto_grid_service, path)
         except Exception as error:  # pylint: disable=broad-except
             logging.debug("Auto grid read failed for %s %s: %s", svc.auto_grid_service, path, error)
             self._request_introspection(svc.auto_grid_service, path, priority=95, reason="grid phase read failed")

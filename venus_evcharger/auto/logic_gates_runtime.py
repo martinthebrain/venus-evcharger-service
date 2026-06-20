@@ -69,7 +69,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         svc._auto_mode_cutover_pending = False
         svc._ignore_min_offtime_once = False
         self._set_auto_state("idle")
-        svc._save_runtime_state()
+        self.save_runtime_state()
         return relay_on
 
     def _handle_disabled_mode(self, cached_inputs: bool) -> bool:
@@ -79,7 +79,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         svc._auto_mode_cutover_pending = False
         svc._ignore_min_offtime_once = False
         self.set_health("disabled", cached_inputs, relay_intent=False)
-        svc._save_runtime_state()
+        self.save_runtime_state()
         return False
 
     def _normalized_battery_soc(self, battery_soc: float | int | None, now: float) -> float | None:
@@ -190,7 +190,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
     def _cutover_relay_off_confirmed(self, relay_on: bool, now: float) -> bool:
         """Return True when the relay-off cutover has been confirmed by Shelly."""
         svc = self.service
-        pending_state, _ = svc._peek_pending_relay_command()
+        pending_state, _ = self.peek_pending_relay_command()
         if pending_state is not None or relay_on:
             return False
         confirmed_pm_status, confirmed_pm_status_at = self._confirmed_cutover_pm_status()
@@ -212,7 +212,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         svc = self.service
         svc._auto_mode_cutover_pending = False
         svc._ignore_min_offtime_once = True
-        svc._save_runtime_state()
+        self.save_runtime_state()
 
     @staticmethod
     def _stop_tracking_needs_reset(
@@ -377,7 +377,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         if not relay_on:
             return cast(bool, self._idle_result_with_health("inputs-missing", cached_inputs))
 
-        daytime_window_open = svc._is_within_auto_daytime_window()
+        daytime_window_open = self.is_within_auto_daytime_window()
         stop_reason = self._known_missing_input_stop_reason(battery_soc, grid_power, daytime_window_open)
         if not self._minimum_runtime_elapsed(now) or stop_reason is None:
             return cast(bool, self._running_result_with_health("inputs-missing", cached_inputs))

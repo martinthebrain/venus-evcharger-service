@@ -17,10 +17,10 @@ class _AutoDecisionMetricsMixin(_ComposableControllerMixin):
     ) -> tuple[float | None, float | None]:
         """Update rolling Auto metrics and return averaged surplus/grid values."""
         svc = self.service
-        surplus_power = svc._get_available_surplus_watts(pv_power, grid_power)
-        svc._add_auto_sample(now, surplus_power, float(grid_power))
-        avg_surplus_power = svc._average_auto_metric(1)
-        avg_grid_power = svc._average_auto_metric(2)
+        surplus_power = self.available_surplus_watts(pv_power, grid_power)
+        self.add_auto_sample(now, surplus_power, float(grid_power))
+        avg_surplus_power = self.average_auto_metric(1)
+        avg_grid_power = self.average_auto_metric(2)
         if avg_surplus_power is None or avg_grid_power is None:
             return None, None
 

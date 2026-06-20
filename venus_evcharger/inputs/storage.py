@@ -30,7 +30,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             return None
         if self._introspection_says_skip(service_name, path, priority=85):
             return None
-        value = self.service._get_dbus_value(service_name, path)
+        value = self.service.get_dbus_value(service_name, path)
         return self._battery_soc_numeric(value)
 
     def _read_optional_energy_text(self, service_name: str, path: str) -> str:
@@ -38,7 +38,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             return ""
         if self._introspection_says_skip(service_name, path, priority=85):
             return ""
-        value = self.service._get_dbus_value(service_name, path)
+        value = self.service.get_dbus_value(service_name, path)
         return "" if value is None else str(value).strip()
 
     def _dbus_energy_source_snapshot(self, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
@@ -53,7 +53,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         except Exception:
             if source.source_id != self._primary_energy_source().source_id:
                 raise
-            self.service._invalidate_auto_battery_service()
+            self.service.invalidate_auto_battery_service()
             service_name = self._resolve_energy_source_service(source)
             soc_value = self._read_optional_energy_value(service_name, source.soc_path)
             net_battery_power = self._read_optional_energy_value(service_name, source.battery_power_path)
@@ -317,13 +317,13 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
     def _read_battery_soc_value(self) -> object:
         """Read one raw battery SOC value, retrying once after invalidating cached service discovery."""
         svc = self.service
-        service_name = svc._resolve_auto_battery_service()
+        service_name = svc.resolve_auto_battery_service()
         try:
-            return svc._get_dbus_value(service_name, svc.auto_battery_soc_path)
+            return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)
         except Exception:
-            svc._invalidate_auto_battery_service()
-            service_name = svc._resolve_auto_battery_service()
-            return svc._get_dbus_value(service_name, svc.auto_battery_soc_path)
+            svc.invalidate_auto_battery_service()
+            service_name = svc.resolve_auto_battery_service()
+            return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)
 
     def _battery_soc_numeric(self, value: object) -> float | None:
         """Return one numeric battery SOC value after DBus coercion."""

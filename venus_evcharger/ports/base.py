@@ -16,20 +16,7 @@ class _BaseServicePort:
     def __init__(self, service: Any) -> None:
         object.__setattr__(self, "_service", service)
 
-    def _resolve_compat_method_alias(self, name: str) -> Any:
-        """Map legacy ``_method`` lookups to public ``method`` names when available."""
-        if not name.startswith("_"):
-            return None
-        public_name = name[1:]
-        descriptor = getattr(type(self), public_name, None)
-        if descriptor is None:
-            return None
-        return getattr(self, public_name)
-
     def __getattr__(self, name: str) -> Any:
-        alias = self._resolve_compat_method_alias(name)
-        if alias is not None:
-            return alias
         if name in self._ALLOWED_ATTRS or name in self._ALLOWED_METHODS:
             return getattr(self._service, name)
         raise AttributeError(name)

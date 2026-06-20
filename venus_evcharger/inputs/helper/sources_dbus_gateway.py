@@ -108,7 +108,7 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
 
     @staticmethod
     def _cached_gateway_value(entry: Mapping[str, Any] | None) -> object:
-        if entry is None or str(entry.get("status", "")) not in ("fresh", "stale"):
+        if entry is None or str(entry.get("status", "")) != "fresh":
             return _CACHE_VALUE_MISSING
         return coerce_dbus_numeric(entry.get("value"))
 

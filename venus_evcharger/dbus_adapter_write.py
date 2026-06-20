@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import os  # noqa: F401 - compatibility patch surface for gateway scheduler tests
-import time  # noqa: F401 - compatibility patch surface for gateway scheduler tests
 from collections import deque
 from typing import Any
 
@@ -12,7 +10,6 @@ from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter_write_core import DbusWriteSchedulerCoreMixin
 from venus_evcharger.dbus_adapter_write_health import DbusWriteSchedulerHealthMixin
 from venus_evcharger.dbus_adapter_write_publish import DbusWriteSchedulerPublishMixin
-from venus_evcharger.dbus_adapter_write_support import _float_or_zero  # noqa: F401
 
 _QUEUE_CLASS_RANKS = {
     "startup/register": 0,

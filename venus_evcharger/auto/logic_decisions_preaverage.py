@@ -148,7 +148,7 @@ class _AutoDecisionPreAverageMixin:
         decision = self._handle_common_runtime_gates(relay_on, now, cached_inputs)
         if decision is not self._NO_DECISION:
             return self._decision_state(decision), None
-        return NO_RELAY_DECISION, self.service._is_within_auto_daytime_window()
+        return NO_RELAY_DECISION, self.is_within_auto_daytime_window()
 
     def _decision_state(self, decision: bool | object) -> RelayDecisionState:
         if decision is self._NO_DECISION:

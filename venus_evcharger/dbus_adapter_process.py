@@ -10,14 +10,10 @@ rate limiting, circuit breaking, and the RAM cache published to files.
 from __future__ import annotations
 
 import configparser
-import json  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
 import logging
 import os
-import select  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
-import signal  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
 import socket
 import sys
-import time  # noqa: F401 - re-exported by venus_evcharger_dbus_adapter for compatibility tests
 from typing import Any
 
 sys.path.insert(
@@ -27,10 +23,6 @@ sys.path.insert(
         "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python",
     ),
 )
-
-import dbus  # noqa: F401
-from dbus.mainloop.glib import DBusGMainLoop  # noqa: F401
-from gi.repository import GLib  # noqa: F401
 
 from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter_components import (
@@ -235,17 +227,9 @@ def _logging_level_from_config(config: configparser.ConfigParser) -> int:
 
 
 __all__ = [
-    "AtomicJsonWriter",
-    "DBusGMainLoop",
     "DbusAdapter",
-    "GLib",
     "_logging_level_from_config",
     "configparser",
-    "dbus",
-    "json",
     "logging",
     "os",
-    "select",
-    "signal",
-    "time",
 ]

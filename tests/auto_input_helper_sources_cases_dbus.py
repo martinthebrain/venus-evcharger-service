@@ -22,9 +22,9 @@ class _AutoInputHelperSourcesDbusCases:
         paths = self._prepare_gateway(helper)
         store = DbusCacheStore(paths)
         for (service_name, path), value in (values or {}).items():
-            store.update_value(dbus_path_key(service_name, path), value, source=f"{service_name}{path}", now=100.0)
+            store.update_value(dbus_path_key(service_name, path), value, source=f"{service_name}{path}")
         if services is not None:
-            store.update_services(list(services), now=100.0)
+            store.update_services(list(services))
         store.write_snapshot_files()
         return paths
 
@@ -102,6 +102,20 @@ class _AutoInputHelperSourcesDbusCases:
                 self.assertEqual(helper._get_dbus_child_nodes("svc", "/Ac/Grid"), ["L1", "L2"])
         finally:
             os.unlink(helper.dbus_introspection_snapshot_path)
+
+    def test_get_dbus_value_rejects_stale_gateway_cache_and_requests_refresh(self):
+        helper = self._make_helper()
+        paths = self._prepare_gateway(helper)
+        store = DbusCacheStore(paths, stale_after_seconds=1.0)
+        store.update_value(dbus_path_key("svc", "/Path"), 42.0, source="svc/Path", now=100.0)
+        with patch("venus_evcharger.dbus_gateway_cache._now", return_value=200.0):
+            store.write_snapshot_files()
+
+        self.assertIsNone(helper._get_dbus_value("svc", "/Path"))
+        commands = self._gateway_commands(paths)
+        self.assertEqual(commands[0]["kind"], "refresh_value")
+        self.assertEqual(commands[0]["service"], "svc")
+        self.assertEqual(commands[0]["path"], "/Path")
 
     def test_ac_pv_read_skips_fresh_unresponsive_introspection_finding(self):
         helper = self._make_helper()

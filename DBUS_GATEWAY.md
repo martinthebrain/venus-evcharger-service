@@ -121,4 +121,6 @@ When adding new code, search before merging:
 rg -n "^import dbus|from dbus|from vedbus|SystemBus\\(|SessionBus\\(|GetValue\\(|SetValue\\(|Introspect\\(|VeDbusService" venus_evcharger venus_evcharger_*.py scripts -g '*.py'
 ```
 
-Only `venus_evcharger_dbus_adapter.py` may contain real DBus access.
+Only the gateway entrypoint and its adapter component modules may contain real
+DBus access. The allow-list is enforced by
+`scripts/dev/check_dbus_isolation.py`.
