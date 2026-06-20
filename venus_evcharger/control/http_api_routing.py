@@ -45,8 +45,8 @@ class _LocalControlApiRoutingMixin:
 
         def _write_command_result(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None: ...
 
+        @staticmethod
         def _write_error(
-            self,
             handler: BaseHTTPRequestHandler,
             status: HTTPStatus,
             code: str,
@@ -55,8 +55,8 @@ class _LocalControlApiRoutingMixin:
 
         def _write_event_stream(self, handler: BaseHTTPRequestHandler, params: dict[str, list[str]]) -> None: ...
 
+        @staticmethod
         def _write_json(
-            self,
             handler: BaseHTTPRequestHandler,
             status: HTTPStatus,
             payload: Mapping[str, Any],
