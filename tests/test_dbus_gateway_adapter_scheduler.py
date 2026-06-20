@@ -80,6 +80,79 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         self.assertIsNone(read_module.read_target("svc", "Path"))
         self.assertIsNone(read_module.read_target("svc", ""))
 
+    def test_read_executor_drops_invalid_first_service_path_without_dbus_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.cache.update_services(["svc.first"])
+            adapter.read_executor.read_busitem = MagicMock(return_value=12.0)  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "first_value",
+                {"aggregate": "first-service", "prefix": "svc.", "path": "NotAbsolute"},
+            )
+
+            self.assertEqual(outcome, "dropped")
+            adapter.read_executor.read_busitem.assert_not_called()
+            self.assertNotIn("first_value", adapter.cache.values)
+
+    def test_read_executor_handles_invalid_aggregate_member_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.read_executor.read_busitem = MagicMock(return_value=5.0)  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "bad_sum",
+                {"aggregate": "sum", "service": "svc.aggregate", "paths": ["NotAbsolute"]},
+            )
+
+            self.assertEqual(outcome, "applied")
+            self.assertEqual(adapter.cache.values["bad_sum"]["value"], 5.0)
+            self.assertNotIn("path:svc.aggregateNotAbsolute", adapter.cache.values)
+
+    def test_read_executor_records_optional_invalid_aggregate_errors_only_on_semantic_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.read_executor.read_busitem = MagicMock(side_effect=RuntimeError("no reply"))  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "pv_power_w",
+                {
+                    "aggregate": "pv-total",
+                    "use_dc_pv": "yes",
+                    "dc_service": "com.victronenergy.system",
+                    "dc_path": "NotAbsolute",
+                    "optional_confidence": 0.25,
+                },
+            )
+
+            self.assertEqual(outcome, "applied")
+            self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 0.0)
+            self.assertEqual(adapter.cache.values["pv_power_w"]["confidence"], 0.25)
+            self.assertIn("no reply", adapter.cache.values["pv_power_w"]["last_error"])
+            self.assertNotIn("path:com.victronenergy.systemNotAbsolute", adapter.cache.values)
+
+    def test_read_executor_direct_path_key_updates_only_one_cache_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.read_executor.read_busitem = MagicMock(return_value=11.0)  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "path:svc.direct/Value",
+                {"service": "svc.direct", "path": "/Value"},
+            )
+
+            self.assertEqual(outcome, "applied")
+            self.assertEqual(adapter.cache.values["path:svc.direct/Value"]["value"], 11.0)
+            self.assertEqual(list(adapter.cache.values), ["path:svc.direct/Value"])
+
     def test_coalesced_commands_use_stable_filename_and_latest_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             inbox = DbusCommandInbox(str(Path(temp_dir) / "commands"))

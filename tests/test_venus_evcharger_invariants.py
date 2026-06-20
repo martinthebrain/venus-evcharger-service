@@ -50,6 +50,19 @@ class TestShellyWallboxInvariants(unittest.TestCase):
         service._is_within_auto_daytime_window = lambda: True
         return controller, service
 
+    def test_auto_controller_uses_public_service_methods_when_not_bound_back_to_self(self):
+        class PublicService:
+            def get_available_surplus_watts(self, _pv_power, _grid_power):
+                return 123.5
+
+            def write_auto_audit_event(self, reason, cached=False):
+                return f"{reason}:{int(cached)}"
+
+        controller = AutoDecisionController(PublicService(), _health_code, _mode_uses_auto_logic)
+
+        self.assertEqual(controller.available_surplus_watts(2000, -1000), 123.5)
+        self.assertEqual(controller.write_auto_audit_event("running", cached=True), "running:1")
+
     @staticmethod
     def _random_policy(rng: random.Random) -> AutoPolicy:
         normal_start = rng.uniform(700.0, 4200.0)
