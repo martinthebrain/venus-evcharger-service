@@ -12,13 +12,8 @@ from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.control.rate_limit import ControlApiRateLimiter
 from venus_evcharger.control.http_api_response import (
-    SAFE_EXTRA_RESPONSE_HEADERS,
-    command_payload,
     error_response_payload,
-    result_payload,
-    safe_extra_response_headers,
-    write_error,
-    write_json,
+    _LocalControlApiResponseMixin,
 )
 from venus_evcharger.core.contracts import (
     normalized_control_api_command_response_fields,
@@ -26,15 +21,7 @@ from venus_evcharger.core.contracts import (
 )
 
 
-class _LocalControlApiCommandMixin:
-    _SAFE_EXTRA_RESPONSE_HEADERS = SAFE_EXTRA_RESPONSE_HEADERS
-    _command_payload = staticmethod(command_payload)
-    _error_response_payload = staticmethod(error_response_payload)
-    _result_payload = staticmethod(result_payload)
-    _safe_extra_response_headers = staticmethod(safe_extra_response_headers)
-    _write_error = staticmethod(write_error)
-    _write_json = staticmethod(write_json)
-
+class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
     if TYPE_CHECKING:
         _fallback_idempotency_store: ControlApiIdempotencyStore
         _fallback_rate_limiter: ControlApiRateLimiter

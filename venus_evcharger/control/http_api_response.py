@@ -81,3 +81,13 @@ def write_json(
         handler.send_header("X-State-Token", safe_headers["X-State-Token"])
     handler.end_headers()
     handler.wfile.write(raw)
+
+
+class _LocalControlApiResponseMixin:
+    _SAFE_EXTRA_RESPONSE_HEADERS = SAFE_EXTRA_RESPONSE_HEADERS
+    _command_payload = staticmethod(command_payload)
+    _error_response_payload = staticmethod(error_response_payload)
+    _result_payload = staticmethod(result_payload)
+    _safe_extra_response_headers = staticmethod(safe_extra_response_headers)
+    _write_error = staticmethod(write_error)
+    _write_json = staticmethod(write_json)
