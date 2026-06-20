@@ -8,6 +8,7 @@ import os
 import socketserver
 import stat
 import threading
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -60,10 +61,14 @@ class LocalControlApiHttpServer(
             "/v1/state/victron-bias-recommendation",
         }
     )
-    _LOCALITY_FORBIDDEN = (403, "forbidden_remote_client", "Remote clients are not allowed for this API.")
-    _UNAUTHORIZED_ERROR = (401, "unauthorized", "Unauthorized.")
+    _LOCALITY_FORBIDDEN = (
+        HTTPStatus.FORBIDDEN,
+        "forbidden_remote_client",
+        "Remote clients are not allowed for this API.",
+    )
+    _UNAUTHORIZED_ERROR = (HTTPStatus.UNAUTHORIZED, "unauthorized", "Unauthorized.")
     _INSUFFICIENT_SCOPE_ERROR = (
-        403,
+        HTTPStatus.FORBIDDEN,
         "insufficient_scope",
         "The supplied token does not grant the required scope for this endpoint.",
     )

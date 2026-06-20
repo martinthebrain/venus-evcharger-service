@@ -37,6 +37,7 @@ class _DbusPublishConfigMixin:
         )
         startstop_value = int(bool(charger_enabled)) if charger_enabled is not None else int(startstop_display)
         return {
+            "/Connected": self._connected_display(now),
             "/Mode": int(getattr(self.service, "virtual_mode", 0)),
             "/AutoStart": int(getattr(self.service, "virtual_autostart", 1)),
             "/StartStop": startstop_value,
@@ -110,6 +111,96 @@ class _DbusPublishConfigMixin:
             "/Auto/PhaseMismatchLockoutCount": getattr(self.service, "auto_phase_mismatch_lockout_count", 0),
             "/Auto/PhaseMismatchLockoutSeconds": getattr(self.service, "auto_phase_mismatch_lockout_seconds", 0.0),
         }
+
+    def _connected_display(self, now: float | None) -> int:
+        """Return the live GUI connected flag from configuration and backend reachability."""
+        if not self._service_configured_for_connected(self.service):
+            return 0
+        return self._backend_reachable_display(self.service, now)
+
+    @staticmethod
+    def _service_configured_for_connected(service: Any) -> bool:
+        """Return whether the wallbox topology is configured enough to be shown connected."""
+        return bool(getattr(service, "topology_configured", getattr(service, "host_configured", True)))
+
+    @classmethod
+    def _backend_reachable_display(cls, service: Any, now: float | None) -> int:
+        """Return the live backend reachability display value."""
+        shelly_state = str(getattr(service, "_shelly_state", "") or "").strip().lower()
+        shelly_state_value = cls._explicit_connected_state_display(shelly_state)
+        if shelly_state_value is not None:
+            return shelly_state_value
+        return cls._implicit_connected_display(service, now)
+
+    @classmethod
+    def _implicit_connected_display(cls, service: Any, now: float | None) -> int:
+        """Return the connected flag from readback freshness and transport failures."""
+        if cls._fresh_backend_readback_present(service, now):
+            return 1
+        if cls._fresh_backend_transport_problem(service, now):
+            return 0
+        return cls._recent_pm_status_connected(service, now)
+
+    @staticmethod
+    def _connected_state_is_live(shelly_state: str) -> bool:
+        """Return whether the backend state explicitly reports live reachability."""
+        return shelly_state in {"online", "degraded"}
+
+    @classmethod
+    def _explicit_connected_state_display(cls, shelly_state: str) -> int | None:
+        """Return a hard connected flag for explicit backend states."""
+        if shelly_state == "offline":
+            return 0
+        if cls._connected_state_is_live(shelly_state):
+            return 1
+        return None
+
+    @classmethod
+    def _fresh_backend_readback_present(cls, service: Any, now: float | None) -> bool:
+        """Return whether PM or native charger readback has refreshed recently."""
+        return any(
+            cls._connected_timestamp_fresh(service, attribute_name, now)
+            for attribute_name in (
+                "_last_confirmed_pm_status_at",
+                "_last_pm_status_at",
+                "_last_charger_state_at",
+                "_shelly_last_ok_at",
+            )
+        )
+
+    @classmethod
+    def _fresh_backend_transport_problem(cls, service: Any, now: float | None) -> bool:
+        """Return whether a recent transport failure should make the GUI disconnected."""
+        return bool(getattr(service, "_last_charger_transport_reason", None)) and cls._connected_timestamp_fresh(
+            service,
+            "_last_charger_transport_at",
+            now,
+        )
+
+    @classmethod
+    def _connected_timestamp_fresh(cls, service: Any, attribute_name: str, now: float | None) -> bool:
+        """Return whether one backend timestamp is inside the connected freshness window."""
+        timestamp = finite_float_or_none(getattr(service, attribute_name, None))
+        if timestamp is None:
+            return False
+        current_time = time.time() if now is None else float(now)
+        return current_time - float(timestamp) <= cls._connected_stale_after_seconds(service)
+
+    @classmethod
+    def _recent_pm_status_connected(cls, service: Any, now: float | None) -> int:
+        """Return whether recent metering readback still counts the backend as connected."""
+        last_pm_status_at = finite_float_or_none(getattr(service, "_last_pm_status_at", None))
+        if last_pm_status_at is None:
+            return 1
+        current_time = time.time() if now is None else float(now)
+        stale_after_seconds = cls._connected_stale_after_seconds(service)
+        return int(current_time - float(last_pm_status_at) <= stale_after_seconds)
+
+    @staticmethod
+    def _connected_stale_after_seconds(service: Any) -> float:
+        """Return how long a non-native backend may be silent before the GUI shows disconnected."""
+        soft_fail_seconds = finite_float_or_none(getattr(service, "auto_shelly_soft_fail_seconds", None))
+        return max(1.0, float(soft_fail_seconds if soft_fail_seconds is not None else 10.0) * 2.0)
 
     @staticmethod
     def _backend_mode_value(service: Any) -> str:
@@ -318,6 +409,11 @@ class _DbusPublishConfigMixin:
         return -1.0 if value is None else float(value)
 
     def publish_config_paths(self, startstop_display: int, now: float | None) -> bool:
-        """Publish configuration-like EV charger paths only when they change."""
+        """Publish configuration-like EV charger paths and refresh GUI controls periodically."""
         self.ensure_state()
-        return self._publish_values_transactional("config", self._config_values(startstop_display, now), now)
+        return self._publish_values_transactional(
+            "config",
+            self._config_values(startstop_display, now),
+            now,
+            interval_seconds=self.service._dbus_slow_publish_interval_seconds,
+        )

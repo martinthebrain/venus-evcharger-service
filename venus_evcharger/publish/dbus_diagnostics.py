@@ -323,7 +323,7 @@ class _DbusPublishDiagnosticsMixin:
         }
 
     def _dbus_introspection_state(self, snapshot: object) -> str:
-        """Return the introspection worker state for diagnostics."""
+        """Return the gateway introspection state for diagnostics."""
         return str(snapshot.get("worker_state", "missing")) if isinstance(snapshot, dict) else "missing"
 
     def _dbus_introspection_queue_depth(self, snapshot: object) -> int:

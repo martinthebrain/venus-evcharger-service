@@ -1,13 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
 """Grid hold/smoothing helpers for the DBus companion bridge."""
 
 from __future__ import annotations
 
-from typing import Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, Mapping
 
 
 class _EnergyCompanionDbusBridgeGridMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        service: Any
+        _grid_hold_state: dict[str, dict[str, Any]]
+
+        def _normalized_source_snapshots(self, snapshot: Mapping[str, Any]) -> tuple[dict[str, Any], ...]: ...
+
     def _grid_connected(self, snapshot: Mapping[str, Any], now: float) -> int:
         held = self._grid_snapshot_values(snapshot, now)
         return 1 if held["connected"] else 0
@@ -46,7 +51,7 @@ class _EnergyCompanionDbusBridgeGridMixin:
     def _find_source_snapshot(self, snapshot: Mapping[str, Any], source_id: str) -> dict[str, Any] | None:
         for source in self._normalized_source_snapshots(snapshot):
             if str(source.get("source_id", "")).strip() == source_id:
-                return cast(dict[str, Any], source)
+                return source
         return None
 
     def _grid_source_hold_config(self) -> dict[str, float]:
@@ -146,8 +151,13 @@ class _EnergyCompanionDbusBridgeGridMixin:
             resolved = self._grid_resolved_payload(smoothed_value, bool(online), float(now))
             self._grid_hold_state[state_key] = resolved
             return resolved
-        if self._grid_within_hold_window(cached, now, hold_seconds) and isinstance(cached.get("value"), (int, float)):
-            held_last_good_at = cast(float, cached.get("last_good_at"))
-            return self._grid_resolved_payload(float(cached["value"]), True, held_last_good_at)
+        held_last_good_at = cached.get("last_good_at")
+        held_value = cached.get("value")
+        if (
+            isinstance(held_last_good_at, (int, float))
+            and isinstance(held_value, (int, float))
+            and self._grid_within_hold_window(cached, now, hold_seconds)
+        ):
+            return self._grid_resolved_payload(float(held_value), True, held_last_good_at)
         self._grid_hold_state.pop(state_key, None)
         return self._grid_resolved_payload(0.0, False, None)

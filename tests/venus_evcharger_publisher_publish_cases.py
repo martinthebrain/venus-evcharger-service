@@ -102,6 +102,28 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         self.assertNotIn("/Enable", service._dbus_publish_state)
         service._mark_failure.assert_called_once_with("dbus")
 
+    def test_publish_config_paths_refreshes_unchanged_gui_controls_on_slow_interval(self) -> None:
+        service = SimpleNamespace(
+            _dbusservice={},
+            _dbus_publish_state={},
+            _dbus_live_publish_interval_seconds=1.0,
+            _dbus_slow_publish_interval_seconds=5.0,
+            virtual_mode=1,
+            virtual_autostart=1,
+            virtual_enable=1,
+            virtual_set_current=16.0,
+            requested_phase_selection="P1",
+            active_phase_selection="P1",
+            supported_phase_selections=("P1",),
+            min_current=6.0,
+            max_current=16.0,
+        )
+        controller = DbusPublishController(service, self._age_seconds)
+
+        self.assertTrue(controller.publish_config_paths(1, 100.0))
+        self.assertFalse(controller.publish_config_paths(1, 101.0))
+        self.assertTrue(controller.publish_config_paths(1, 105.0))
+
     def test_learned_display_helpers_cover_empty_scalar_and_fault_paths(self) -> None:
         service = SimpleNamespace(
             _charger_backend=object(),

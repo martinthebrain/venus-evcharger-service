@@ -1,16 +1,30 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 from __future__ import annotations
 
 import ipaddress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 
 class _LocalControlApiAuthMixin:
+    if TYPE_CHECKING:
+        _auth_token: str
+        _admin_token: str
+        _control_token: str
+        _localhost_only: bool
+        _read_token: str
+        _service: Any
+        _unix_socket_path: str
+        _update_token: str
+        _COMMAND_SCOPE_REQUIREMENTS: dict[str, str]
+        _INSUFFICIENT_SCOPE_ERROR: tuple[HTTPStatus, str, str]
+        _LOCALITY_FORBIDDEN: tuple[HTTPStatus, str, str]
+        _SCOPE_ORDER: dict[str, int]
+        _STATE_TOKEN_HEADER: str
+        _UNAUTHORIZED_ERROR: tuple[HTTPStatus, str, str]
+
     def _command_post_auth_error(
         self,
         handler: BaseHTTPRequestHandler,
@@ -53,14 +67,13 @@ class _LocalControlApiAuthMixin:
         if self._scope_satisfies_requirement(scope, required_scope):
             return None
         if scope is not None and required_scope != "read":
-            return cast(tuple[HTTPStatus, str, str], self._INSUFFICIENT_SCOPE_ERROR)
-        return cast(tuple[HTTPStatus, str, str], self._UNAUTHORIZED_ERROR)
+            return self._INSUFFICIENT_SCOPE_ERROR
+        return self._UNAUTHORIZED_ERROR
 
     def _scope_satisfies_requirement(self, scope: str | None, required_scope: str) -> bool:
         if scope is None:
             return False
-        scope_order = cast(dict[str, int], getattr(self.__class__, "_SCOPE_ORDER"))
-        return scope_order.get(scope, -1) >= scope_order.get(required_scope, 999)
+        return self._SCOPE_ORDER.get(scope, -1) >= self._SCOPE_ORDER.get(required_scope, 999)
 
     def _authorization_scope(self, handler: BaseHTTPRequestHandler) -> str | None:
         scope_tokens = self._scope_tokens()
@@ -106,8 +119,7 @@ class _LocalControlApiAuthMixin:
                 ).name
             except ValueError:
                 return "control_admin"
-        requirements = cast(dict[str, str], self._COMMAND_SCOPE_REQUIREMENTS)
-        return requirements.get(command_name, "control_admin")
+        return self._COMMAND_SCOPE_REQUIREMENTS.get(command_name, "control_admin")
 
     def _request_state_tokens(self, handler: BaseHTTPRequestHandler) -> set[str]:
         tokens: set[str] = set()

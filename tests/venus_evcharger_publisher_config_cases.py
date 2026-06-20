@@ -65,6 +65,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
         values = controller._config_values(1, now=100.0)
 
+        self.assertEqual(values["/Connected"], 1)
         self.assertEqual(values["/SetCurrent"], 13.0)
         self.assertEqual(values["/PhaseSelection"], "P1_P2")
         self.assertEqual(values["/PhaseSelectionActive"], "P1")
@@ -210,6 +211,58 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         self.assertEqual(values["/Enable"], 0)
         self.assertEqual(values["/StartStop"], 0)
         self.assertEqual(values["/SetCurrent"], 12.5)
+
+    def test_config_values_publish_live_connected_display(self) -> None:
+        service = SimpleNamespace(
+            virtual_mode=1,
+            virtual_autostart=1,
+            virtual_enable=1,
+            virtual_set_current=16.0,
+            requested_phase_selection="P1",
+            active_phase_selection="P1",
+            supported_phase_selections=("P1",),
+            topology_configured=True,
+            _shelly_state="online",
+            _last_pm_status_at=90.0,
+            auto_shelly_soft_fail_seconds=10.0,
+        )
+        controller = DbusPublishController(service, self._age_seconds)
+
+        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 1)
+        service._shelly_state = "offline"
+        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 0)
+        service._shelly_state = ""
+        self.assertEqual(controller._config_values(1, now=109.0)["/Connected"], 1)
+        self.assertEqual(controller._config_values(1, now=120.1)["/Connected"], 0)
+        service.topology_configured = False
+        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 0)
+
+    def test_config_values_publish_connected_from_native_readback_and_transport_errors(self) -> None:
+        service = SimpleNamespace(
+            virtual_mode=1,
+            virtual_autostart=1,
+            virtual_enable=1,
+            virtual_set_current=16.0,
+            requested_phase_selection="P1",
+            active_phase_selection="P1",
+            supported_phase_selections=("P1",),
+            topology_configured=True,
+            _shelly_state="unknown",
+            _last_pm_status_at=None,
+            _last_charger_state_at=98.0,
+            _last_charger_transport_reason=None,
+            _last_charger_transport_at=None,
+            auto_shelly_soft_fail_seconds=10.0,
+        )
+        controller = DbusPublishController(service, self._age_seconds)
+
+        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 1)
+        service._last_charger_state_at = 70.0
+        service._last_charger_transport_reason = "offline"
+        service._last_charger_transport_at = 99.0
+        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 0)
+        service._last_charger_transport_at = 70.0
+        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 1)
 
     def test_config_helpers_cover_fault_and_contactor_count_fallbacks(self) -> None:
         service = SimpleNamespace(

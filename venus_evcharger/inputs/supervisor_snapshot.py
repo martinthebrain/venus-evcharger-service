@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Snapshot ingestion helpers for the Auto input supervisor."""
 
 from __future__ import annotations

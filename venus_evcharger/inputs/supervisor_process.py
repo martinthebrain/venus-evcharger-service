@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Helper-process lifecycle helpers for the Auto input supervisor."""
 
 from __future__ import annotations
@@ -10,10 +8,15 @@ import os
 import subprocess
 import sys
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 
 class _AutoInputSupervisorProcessMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        service: Any
+
+        def refresh_snapshot(self, now: float | None = None) -> None: ...
+
     def stop_helper(self, force: bool = False) -> None:
         svc = self.service
         svc._ensure_worker_state()

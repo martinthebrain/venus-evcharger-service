@@ -85,9 +85,9 @@ internal outcome for each command:
 
 ## Discovery And Introspection
 
-Discovery and introspection are gateway-owned. Legacy introspection worker code
-is kept only as a compatibility requester; it enqueues gateway commands and does
-not touch DBus.
+Discovery and introspection are gateway-owned. The legacy request/snapshot
+contract is kept only as a compatibility surface; requesters enqueue gateway
+commands and do not touch DBus.
 
 Forensic code reads the gateway cache and logs the cache state. It must never
 open DBus to investigate a DBus problem.

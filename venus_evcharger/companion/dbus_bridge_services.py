@@ -1,17 +1,30 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
 """Service registration and source-service helpers for the DBus companion bridge."""
 
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 
 class _EnergyCompanionDbusBridgeServicesMixin:
     _battery_service: Any
     _pvinverter_service: Any
     _grid_service: Any
+
+    if TYPE_CHECKING:  # pragma: no cover
+        service: Any
+        _source_battery_services: dict[str, Any]
+        _source_pvinverter_services: dict[str, Any]
+        _source_grid_services: dict[str, Any]
+
+        def _register_service(
+            self,
+            service_name: str,
+            device_instance: int,
+            product_label: str,
+            specific_paths: Mapping[str, Any],
+        ) -> Any: ...
 
     def _ensure_battery_service(self, base_device_instance: int) -> None:
         svc = self.service
