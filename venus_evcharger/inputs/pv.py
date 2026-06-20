@@ -39,15 +39,15 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
     def _mark_dbus_success(svc: Any) -> None:
         """Record a successful DBus read or listing operation."""
         svc._last_dbus_ok_at = time.time()
-        svc._mark_recovery("dbus", "DBus reads recovered")
+        svc.mark_recovery("dbus", "DBus reads recovered")
 
     def _source_retry_ready(self, source_key: str, now: float) -> bool:
         """Return whether a logical input source may currently be queried."""
-        return cast(bool, self.service._source_retry_ready(source_key, now))
+        return cast(bool, self.service.source_retry_ready(source_key, now))
 
     def _mark_source_recovery(self, source_key: str, message: str, *args: Any) -> None:
         """Record that one logical input source has recovered."""
-        self.service._mark_recovery(source_key, message, *args)
+        self.service.mark_recovery(source_key, message, *args)
 
     def _handle_source_failure(
         self,
@@ -60,9 +60,9 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
     ) -> float | None:
         """Apply the standard failure/backoff/warning flow for one input source."""
         svc = self.service
-        svc._mark_failure(source_key)
-        svc._delay_source_retry(source_key, now)
-        svc._warning_throttled(warning_key, warning_interval, warning_message, *args)
+        svc.mark_failure(source_key)
+        svc.delay_source_retry(source_key, now)
+        svc.warning_throttled(warning_key, warning_interval, warning_message, *args)
         return None
 
     def get_dbus_value(self, service_name: str, path: str) -> float | int | None:
@@ -72,7 +72,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         entry = DbusCacheStore.value_entry(snapshot, dbus_path_key(service_name, path))
         if entry is not None:
             status = str(entry.get("status") or "")
-            if status in ("fresh", "stale"):
+            if status == "fresh":
                 value = entry.get("value")
                 self._mark_dbus_success(svc)
                 return self._coerce_dbus_value(value)
@@ -83,7 +83,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
             reason="main input cache miss",
             source="evcharger-inputs",
         )
-        svc._mark_failure("dbus")
+        svc.mark_failure("dbus")
         return None
 
     def list_dbus_services(self) -> list[str]:
@@ -101,7 +101,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
             return names
         self._gateway_client().enqueue_command({"kind": "refresh_services", "source": "evcharger-inputs", "priority": "read"})
         svc._dbus_list_failures += 1
-        svc._mark_failure("dbus")
+        svc.mark_failure("dbus")
         svc._dbus_list_backoff_until = now + self._dbus_list_backoff_delay()
         return []
 
@@ -182,7 +182,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
             return cast(list[str], svc._resolved_auto_pv_services)
 
         service_names = prefixed_service_names(
-            svc._list_dbus_services(),
+            svc.list_dbus_services(),
             svc.auto_pv_service_prefix,
             max_services=svc.auto_pv_max_services,
             sort_names=True,
@@ -199,7 +199,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         """Resolve current AC PV service names and whether auto-discovery found none."""
         svc = self.service
         try:
-            return svc._resolve_auto_pv_services(), False
+            return svc.resolve_auto_pv_services(), False
         except ValueError as error:
             logging.debug("Auto AC PV service resolution found no services: %s", error)
             return [], not bool(svc.auto_pv_service)
@@ -234,7 +234,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         saw_failure = False
         for service_name in service_names:
             try:
-                value = svc._get_dbus_value(service_name, svc.auto_pv_path)
+                value = svc.get_dbus_value(service_name, svc.auto_pv_path)
             except Exception as error:  # pylint: disable=broad-except
                 logging.debug(
                     "Auto PV read failed%s for %s %s: %s",
@@ -255,9 +255,9 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
     def _read_rescanned_pv_services(self) -> tuple[float, bool]:
         """Refresh cached AC PV services once and retry reading them."""
         svc = self.service
-        svc._invalidate_auto_pv_services()
+        svc.invalidate_auto_pv_services()
         try:
-            rescanned_services = svc._resolve_auto_pv_services()
+            rescanned_services = svc.resolve_auto_pv_services()
         except Exception as error:  # pylint: disable=broad-except
             logging.debug("Auto AC PV rescan failed: %s", error)
             return 0.0, False
@@ -273,7 +273,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         if not svc.auto_use_dc_pv:
             return None, False
         try:
-            return svc._get_dbus_value(svc.auto_dc_pv_service, svc.auto_dc_pv_path), False
+            return svc.get_dbus_value(svc.auto_dc_pv_service, svc.auto_dc_pv_path), False
         except Exception as error:  # pylint: disable=broad-except
             logging.debug(
                 "Auto DC PV read failed for %s %s: %s",

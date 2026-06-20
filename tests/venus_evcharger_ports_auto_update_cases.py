@@ -16,7 +16,6 @@ class TestWallboxPortsAutoUpdate(unittest.TestCase):
                 raise AssertionError("service override should win")
         port.bind_controller(DummyController())
         self.assertEqual(port.get_dbus_value("svc", "/Path"), 42.0)
-        self.assertEqual(port._get_dbus_value("svc", "/Path"), 42.0)
 
     def test_auto_decision_port_falls_back_to_bound_controller(self) -> None:
         service = SimpleNamespace(auto_samples=[], auto_average_window_seconds=60.0, relay_last_changed_at=None, relay_last_off_at=None, auto_start_condition_since=None, auto_stop_condition_since=None, _last_health_reason="init", _last_health_code=0, auto_min_runtime_seconds=0.0, auto_min_offtime_seconds=0.0, _last_grid_at=None, auto_grid_missing_stop_seconds=60.0, virtual_mode=1, _auto_mode_cutover_pending=False, _ignore_min_offtime_once=False, _last_battery_allow_warning=None, auto_allow_without_battery_soc=False, auto_battery_scan_interval_seconds=60.0, auto_resume_soc=50.0, auto_min_soc=30.0, auto_stop_delay_seconds=30.0, auto_stop_grid_import_watts=200.0, auto_night_lock_stop=False, _last_auto_metrics={}, started_at=0.0, auto_startup_warmup_seconds=0.0, manual_override_until=0.0, virtual_autostart=1, auto_start_delay_seconds=30.0, auto_start_max_grid_import_watts=50.0, auto_start_surplus_watts=2000.0, auto_stop_surplus_watts=1500.0, _auto_cached_inputs_used=False, virtual_enable=1, auto_daytime_only=False, auto_month_windows={}, _save_runtime_state=MagicMock(), _peek_pending_relay_command=MagicMock(return_value=(None, None)))
@@ -26,9 +25,18 @@ class TestWallboxPortsAutoUpdate(unittest.TestCase):
                 return "cleared"
             def is_within_auto_daytime_window(self) -> bool:
                 return True
+            def get_available_surplus_watts(self, pv_power: float, grid_power: float) -> float:
+                return pv_power - grid_power
+            def add_auto_sample(self, now: float, surplus_power: float, grid_power: float) -> tuple[float, float, float]:
+                return now, surplus_power, grid_power
+            def average_auto_metric(self, index: int) -> float:
+                return float(index + 10)
         port.bind_controller(DummyController())
         self.assertEqual(port.clear_auto_samples(), "cleared")
         self.assertTrue(port.is_within_auto_daytime_window())
+        self.assertEqual(port.get_available_surplus_watts(20.0, -5.0), 25.0)
+        self.assertEqual(port.add_auto_sample(1.0, 2.0, 3.0), (1.0, 2.0, 3.0))
+        self.assertEqual(port.average_auto_metric(4), 14.0)
 
     def test_auto_decision_port_missing_controller_override_raises_for_bound_methods(self) -> None:
         service = SimpleNamespace(

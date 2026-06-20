@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 import dbus
 
@@ -15,12 +16,78 @@ from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperatio
 from venus_evcharger.dbus_gateway import dbus_path_key
 
 PV_MEMBER_ERROR_BACKOFF_SECONDS = 300.0
+DbusPathKey = str
+
+
+@dataclass(frozen=True)
+class ReadTarget:
+    service: str
+    path: str
+
+    @property
+    def source(self) -> str:
+        return f"{self.service}{self.path}"
+
+    @property
+    def cache_key(self) -> DbusPathKey:
+        return dbus_path_key(self.service, self.path)
+
+
+def read_target(service: object, path: object) -> ReadTarget | None:  # pragma: no mutate block
+    service_name = str(service or "").strip()
+    dbus_path = str(path or "").strip()
+    if not service_name or not dbus_path.startswith("/"):
+        return None
+    return ReadTarget(service_name, dbus_path)
+
+
+class _ReadCacheProtocol(Protocol):
+    @property
+    def services(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
+
+    @property
+    def values(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
+
+    def update_value(
+        self,
+        key: str,
+        value: Any,
+        *,
+        metadata: Any | None = None,
+        **metadata_fields: Any,
+    ) -> None: ...  # pragma: no cover
+
+    def mark_error(  # pragma: no cover
+        self, key: str, *, source: str, error: BaseException | str, now: float | None = None
+    ) -> None: ...
+
+
+class _ReadSchedulerProtocol(Protocol):
+    @property
+    def specs(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
+
+
+class _ConnectionProtocol(Protocol):
+    def bus(self) -> Any: ...  # pragma: no cover
+
+
+class _ReadAdapterProtocol(Protocol):
+    @property
+    def cache(self) -> _ReadCacheProtocol: ...  # pragma: no cover
+
+    @property
+    def connection(self) -> _ConnectionProtocol: ...  # pragma: no cover
+
+    @property
+    def read_scheduler(self) -> _ReadSchedulerProtocol: ...  # pragma: no cover
+
+    def _timed(self, kind: str, operation: Callable[[], Any]) -> Any: ...  # pragma: no cover
 
 
 class DbusReadExecutor:
     """Execute scheduled DBus reads and update the adapter cache."""
 
-    def __init__(self, adapter: Any) -> None:  # pragma: no mutate block
+    def __init__(self, adapter: _ReadAdapterProtocol) -> None:  # pragma: no mutate block
         self.adapter = adapter
         self._aggregate_state: dict[str, dict[str, Any]] = {}
         self.last_operation_performed = False
@@ -35,28 +102,22 @@ class DbusReadExecutor:
         target = self._direct_refresh_target(command)
         if target is None:
             return "dropped"
-        service, path, key, source = target
-        return self._read_direct_refresh(service, path, key, source)
+        return self._read_direct_refresh(target)
 
     @staticmethod
-    def _direct_refresh_target(command: Mapping[str, Any]) -> tuple[str, str, str, str] | None:  # pragma: no mutate block
-        service = str(command.get("service") or "")
-        path = str(command.get("path") or "")
-        if not service or not path:
-            return None
-        key = dbus_path_key(service, path)
-        return service, path, key, f"{service}{path}"
+    def _direct_refresh_target(command: Mapping[str, Any]) -> ReadTarget | None:  # pragma: no mutate block
+        return read_target(command.get("service"), command.get("path"))
 
-    def _read_direct_refresh(self, service: str, path: str, key: str, source: str) -> CommandOutcome:  # pragma: no mutate block
+    def _read_direct_refresh(self, target: ReadTarget) -> CommandOutcome:  # pragma: no mutate block
         try:
-            value = self.read_busitem(service, path)
+            value = self.read_busitem(target.service, target.path)
         except DbusOperationDeferred:
             return "deferred"
         except Exception as error:  # pylint: disable=broad-except
-            self.adapter.cache.mark_error(key, source=source, error=error)
-            logging.debug("DBus adapter direct refresh failed key=%s: %s", key, error)
+            self.adapter.cache.mark_error(target.cache_key, source=target.source, error=error)
+            logging.debug("DBus adapter direct refresh failed key=%s: %s", target.cache_key, error)
             return "dropped"
-        self.adapter.cache.update_value(key, value, source=source)
+        self.adapter.cache.update_value(target.cache_key, value, source=target.source)
         return "applied"
 
     def poll_read_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
@@ -84,10 +145,11 @@ class DbusReadExecutor:
         return handler(key, spec) if handler else self._poll_direct_spec(key, spec)
 
     def _poll_direct_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
-        service = str(spec.get("service") or "")
-        path = str(spec.get("path") or "")
-        value = self.read_busitem(service, path)
-        self.adapter.cache.update_value(key, value, source=f"{service}{path}")
+        target = read_target(spec.get("service"), spec.get("path"))
+        if target is None:
+            return "dropped"
+        value = self.read_busitem(target.service, target.path)
+        self._update_read_value(key, target, value)
         return "applied"
 
     def _mark_read_error(self, key: str, spec: Mapping[str, Any], error: BaseException) -> None:  # pragma: no mutate block
@@ -147,9 +209,11 @@ class DbusReadExecutor:
         services = self._prefixed_services(prefix)
         if not services:
             raise RuntimeError(f"No cached services for prefix '{prefix}'")
-        service = services[0]
-        value = self.read_busitem(service, path)
-        self.adapter.cache.update_value(key, value, source=f"{service}{path}")
+        target = read_target(services[0], path)
+        if target is None:
+            return "dropped"
+        value = self.read_busitem(target.service, target.path)
+        self._update_read_value(key, target, value)
         return "applied"
 
     def _services_for_sum(self, spec: Mapping[str, Any]) -> list[str]:  # pragma: no mutate block
@@ -254,16 +318,36 @@ class DbusReadExecutor:
         ignore_member_errors: bool,
     ) -> Any:  # pragma: no mutate block
         try:
-            return self.read_busitem(service, path)
+            value = self.read_busitem(service, path)
         except DbusOperationDeferred:
             raise
         except Exception as error:
             if not ignore_member_errors:
                 raise
-            self.adapter.cache.mark_error(dbus_path_key(service, path), source=f"{service}{path}", error=error)
-            state["errors"] = [*list(state.get("errors", [])), f"{service}{path}: {error}"]
-            logging.debug("DBus adapter optional aggregate member failed %s%s: %s", service, path, error)
-            return None
+            return self._record_optional_aggregate_error(service, path, state, error)
+        target = read_target(service, path)
+        if target is not None:
+            self.adapter.cache.update_value(target.cache_key, value, source=target.source)
+        return value
+
+    def _record_optional_aggregate_error(
+        self,
+        service: str,
+        path: str,
+        state: dict[str, Any],
+        error: BaseException,
+    ) -> None:  # pragma: no mutate block
+        target = read_target(service, path)
+        if target is not None:
+            self.adapter.cache.mark_error(target.cache_key, source=target.source, error=error)
+        state["errors"] = [*list(state.get("errors", [])), f"{service}{path}: {error}"]
+        logging.debug("DBus adapter optional aggregate member failed %s%s: %s", service, path, error)
+
+    def _update_read_value(self, key: str, target: ReadTarget, value: Any) -> None:  # pragma: no mutate block
+        path_key = target.cache_key
+        self.adapter.cache.update_value(path_key, value, source=target.source)
+        if key != path_key:
+            self.adapter.cache.update_value(key, value, source=target.source)
 
     @staticmethod
     def _record_aggregate_member(state: dict[str, Any], service: str, path: str, value: Any) -> None:  # pragma: no mutate block

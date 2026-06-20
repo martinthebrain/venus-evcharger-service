@@ -125,7 +125,7 @@ class _AutoDecisionDecisionMixin(_AutoDecisionPreAverageMixin, _ComposableContro
             return False
         if (now - svc.auto_start_condition_since) >= svc.auto_start_delay_seconds:
             svc._ignore_min_offtime_once = False
-            svc._save_runtime_state()
+            self.save_runtime_state()
             self.set_health("auto-start", cached_inputs, relay_intent=True)
             return True
         return False

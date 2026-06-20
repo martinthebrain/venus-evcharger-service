@@ -14,11 +14,7 @@ from typing import Any
 from gi.repository import GLib
 
 
-class _GatewaySignalMatch:
-    """Compatibility match object for gateway-managed cache refresh interests."""
-
-    def remove(self) -> None:
-        return
+_GATEWAY_MATCH_SENTINEL = object()
 
 
 class _AutoInputHelperSubscriptionMixin:
@@ -37,7 +33,7 @@ class _AutoInputHelperSubscriptionMixin:
         key = self._signal_spec_key(source_name, service_name, path)
         if key in self._signal_matches:
             return
-        self._signal_matches[key] = _GatewaySignalMatch()
+        self._signal_matches[key] = _GATEWAY_MATCH_SENTINEL
         self._monitored_specs[key] = {
             "source": source_name,
             "service_name": service_name,
@@ -314,7 +310,7 @@ class _AutoInputHelperSubscriptionMixin:
         except Exception as error:  # pylint: disable=broad-except
             logging.debug("Gateway service refresh request failed: %s", error)
             return
-        self._name_owner_match = _GatewaySignalMatch()
+        self._name_owner_match = _GATEWAY_MATCH_SENTINEL
 
     def _clear_all_signal_matches(self: Any) -> None:
         for key in list(getattr(self, "_signal_matches", {})):
@@ -328,8 +324,11 @@ class _AutoInputHelperSubscriptionMixin:
     def _remove_signal_match(match: Any) -> None:
         if match is None:
             return
+        remove = getattr(match, "remove", None)
+        if not callable(remove):
+            return
         try:
-            match.remove()
+            remove()
         except Exception:  # pylint: disable=broad-except
             pass
 

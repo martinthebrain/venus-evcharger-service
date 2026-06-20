@@ -332,7 +332,7 @@ class _AutoDecisionSamplesMixin(_ComposableControllerMixin):
         effective_relay_intent = self._observed_relay_state() if relay_intent is None else bool(relay_intent)
         self._apply_decision_trace_postconditions(base_reason, cached, effective_relay_intent)
         if getattr(self.service, "auto_audit_log", False):
-            self.service._write_auto_audit_event(base_reason, cached)
+            self.write_auto_audit_event(base_reason, cached)
 
     def _observed_relay_state(self) -> bool:
         """Return the best current relay state hint for broad Auto-state classification."""
@@ -359,13 +359,13 @@ class _AutoDecisionSamplesMixin(_ComposableControllerMixin):
         svc = self.service
         svc.auto_start_condition_since = None
         svc.auto_stop_condition_since = None
-        svc._clear_auto_samples()
+        self.clear_auto_samples()
 
     def _clear_auto_start_tracking(self, clear_samples: bool = False) -> None:
         """Clear pending Auto-start tracking, optionally including average samples."""
         self.service.auto_start_condition_since = None
         if clear_samples:
-            self.service._clear_auto_samples()
+            self.clear_auto_samples()
 
     def _clear_auto_stop_tracking(self) -> None:
         """Clear pending Auto-stop tracking."""

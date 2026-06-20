@@ -20,6 +20,7 @@ fi
 "${RUFF[@]}" check \
 	--select ARG,B,C4,DTZ,E9,F,I,PIE,PLC,PLE,PLR0913,PLR2004,PLW,PERF,RET,RUF,SIM,UP \
 	--ignore B007,B904,RUF100 \
+	scripts/dev/check_architecture_contracts.py \
 	scripts/dev/check_dbus_isolation.py \
 	scripts/dev/dbus_gateway_chaos.py \
 	scripts/dev/pi_gateway_release_gate.py \

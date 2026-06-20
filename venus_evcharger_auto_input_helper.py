@@ -44,10 +44,6 @@ class AutoInputHelper(
 ):
     SNAPSHOT_SCHEMA_VERSION = AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION
 
-    @staticmethod
-    def _dbus_module() -> Any:
-        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
-
     def __init__(
         self,
         config_path: str,
@@ -241,11 +237,6 @@ class AutoInputHelper(
             self._write_snapshot(snapshot)
 
     @staticmethod
-    def _require_dbus_glib_mainloop() -> None:
-        """Compatibility hook; DBus mainloop setup now belongs to the gateway."""
-        return None
-
-    @staticmethod
     def _signal_values() -> tuple[int, ...]:
         """Return supported process signals for clean helper shutdown."""
         return tuple(
@@ -360,7 +351,6 @@ class AutoInputHelper(
 
     def run(self) -> None:
         """Main helper loop using gateway cache refreshes plus a small RAM heartbeat."""
-        self._require_dbus_glib_mainloop()
         self._install_signal_handlers()
         self._log_helper_start()
         self._build_main_loop()

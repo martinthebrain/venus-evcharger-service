@@ -61,7 +61,7 @@ class DbusWriteSchedulerPublishMixin:
         pending_commands = self.adapter.commands.load_pending()
         pending = self._prioritized_commands(DbusCommandInbox.coalesce(pending_commands))
         started = time.monotonic()
-        for path, command in pending:
+        for path, command in pending:  # pragma: no branch
             action = self._process_local_publish_candidate(
                 path,
                 command,

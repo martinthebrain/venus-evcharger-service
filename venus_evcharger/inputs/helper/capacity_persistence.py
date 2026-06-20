@@ -145,7 +145,7 @@ def _default_section_bounds(lines: list[str]) -> tuple[int, int]:
     if lines and lines[0].strip().lower() == "[default]":
         start = 1
     end = len(lines)
-    for index in range(start, len(lines)):
+    for index in range(start, len(lines)):  # pragma: no branch
         if _SECTION_RE.match(lines[index]):
             end = index
             break

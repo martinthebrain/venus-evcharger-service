@@ -260,7 +260,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         controller._handle_mode_transition_to_auto(1, 100.0)
         self.assertFalse(hasattr(service, "manual_override_until"))
 
-        controller._publish_startstop_enable(service, 100.0)
+        controller._publish_startstop_enable(controller.port, 100.0)
         service._publish_dbus_path.assert_any_call("/StartStop", 1, 100.0, force=True)
         service._publish_dbus_path.assert_any_call("/Enable", 1, 100.0, force=True)
 

@@ -50,7 +50,26 @@ class TestDbusInputController(unittest.TestCase):
             _warning_throttled=MagicMock(),
             _reset_system_bus=MagicMock(),
             _get_system_bus=MagicMock(),
+            _get_dbus_value=MagicMock(return_value=None),
+            _list_dbus_services=MagicMock(return_value=[]),
+            _resolve_auto_pv_services=MagicMock(return_value=[]),
+            _invalidate_auto_pv_services=MagicMock(),
+            _resolve_auto_battery_service=MagicMock(return_value=""),
+            _invalidate_auto_battery_service=MagicMock(),
         )
+        service.mark_failure = lambda source: service._mark_failure(source)
+        service.mark_recovery = lambda source, detail: service._mark_recovery(source, detail)
+        service.delay_source_retry = lambda source, now: service._delay_source_retry(source, now)
+        service.warning_throttled = lambda key, message: service._warning_throttled(key, message)
+        service.reset_system_bus = lambda: service._reset_system_bus()
+        service.get_system_bus = lambda: service._get_system_bus()
+        service.get_dbus_value = lambda service_name, path: service._get_dbus_value(service_name, path)
+        service.list_dbus_services = lambda: service._list_dbus_services()
+        service.source_retry_ready = lambda source, now: service._source_retry_ready(source, now)
+        service.resolve_auto_pv_services = lambda: service._resolve_auto_pv_services()
+        service.invalidate_auto_pv_services = lambda: service._invalidate_auto_pv_services()
+        service.resolve_auto_battery_service = lambda: service._resolve_auto_battery_service()
+        service.invalidate_auto_battery_service = lambda: service._invalidate_auto_battery_service()
         return service
 
     def _prepare_gateway(self, service: SimpleNamespace) -> GatewayPaths:
@@ -111,6 +130,21 @@ class TestDbusInputController(unittest.TestCase):
         self._write_gateway_cache(service, services=["com.victronenergy.system"])
         self.assertEqual(controller.list_dbus_services(), ["com.victronenergy.system"])
         self.assertEqual(service._dbus_list_failures, 0)
+
+    def test_get_dbus_value_rejects_stale_gateway_cache_and_requests_refresh(self) -> None:
+        service = self._make_service()
+        controller = DbusInputController(service)
+        paths = self._prepare_gateway(service)
+        store = DbusCacheStore(paths, stale_after_seconds=1.0)
+        store.update_value(dbus_path_key("svc", "/Path"), 42.0, source="svc/Path", now=100.0)
+        with patch("venus_evcharger.dbus_gateway_cache._now", return_value=200.0):
+            store.write_snapshot_files()
+
+        self.assertIsNone(controller.get_dbus_value("svc", "/Path"))
+        commands = [command for _, command in DbusCommandInbox(paths.command_dir).load_pending()]
+        self.assertEqual(commands[0]["kind"], "refresh_value")
+        self.assertEqual(commands[0]["service"], "svc")
+        self.assertEqual(commands[0]["path"], "/Path")
 
     def test_pv_resolution_and_missing_pv_paths_cover_explicit_cached_and_rescan_failures(self) -> None:
         service = self._make_service()

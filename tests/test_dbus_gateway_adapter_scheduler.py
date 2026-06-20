@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import tempfile
 import time
-import sys
 import unittest
 import json
 import builtins
+import configparser
+import logging
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -37,8 +38,24 @@ fake_dbus_mainloop = ModuleType("dbus.mainloop.glib")
 fake_dbus_mainloop.DBusGMainLoop = MagicMock()  # type: ignore[attr-defined]
 
 with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fake_dbus_mainloop}):
+    import venus_evcharger_dbus_adapter as adapter_module
+    import venus_evcharger.dbus_adapter_components_rate as rate_module
+    import venus_evcharger.dbus_adapter_components_resource as resource_module
+    import venus_evcharger.dbus_adapter_process_health as process_health_module
+    import venus_evcharger.dbus_adapter_process_introspection as introspection_module
+    import venus_evcharger.dbus_adapter_process_io as process_io_module
+    import venus_evcharger.dbus_adapter_process_runtime as runtime_module
+    import venus_evcharger.dbus_adapter_read as read_module
+    import venus_evcharger.dbus_adapter_write_core as write_core_module
+    import venus_evcharger.dbus_adapter_write_health as write_health_module
+    import venus_evcharger.dbus_adapter_write_publish as write_publish_module
+    import venus_evcharger.dbus_adapter_write_support as write_support_module
     from venus_evcharger_dbus_adapter import (
         DbusAdapter,
+        main as adapter_main,
+    )
+    from venus_evcharger.dbus_adapter_components import (
+        AtomicJsonWriter,
         DbusCircuitBreaker,
         DbusConnectionManager,
         DbusDiscoveryManager,
@@ -48,14 +65,94 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
         ResourceMonitor,
         TickHealth,
     )
-    adapter_module = sys.modules["venus_evcharger_dbus_adapter"]
-    adapter_process_module = sys.modules["venus_evcharger.dbus_adapter_process"]
-    read_module = sys.modules["venus_evcharger.dbus_adapter_read"]
-    write_module = sys.modules["venus_evcharger.dbus_adapter_write"]
-    write_health_module = sys.modules["venus_evcharger.dbus_adapter_write_health"]
 
 
 class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
+    def test_read_target_contract_requires_service_and_absolute_path(self) -> None:
+        target = read_module.read_target(" svc ", " /Path ")
+        self.assertIsNotNone(target)
+        assert target is not None
+        self.assertEqual(target.service, "svc")
+        self.assertEqual(target.path, "/Path")
+        self.assertEqual(target.source, "svc/Path")
+        self.assertEqual(target.cache_key, "path:svc/Path")
+        self.assertIsNone(read_module.read_target("", "/Path"))
+        self.assertIsNone(read_module.read_target("svc", "Path"))
+        self.assertIsNone(read_module.read_target("svc", ""))
+
+    def test_read_executor_drops_invalid_first_service_path_without_dbus_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.cache.update_services(["svc.first"])
+            adapter.read_executor.read_busitem = MagicMock(return_value=12.0)  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "first_value",
+                {"aggregate": "first-service", "prefix": "svc.", "path": "NotAbsolute"},
+            )
+
+            self.assertEqual(outcome, "dropped")
+            adapter.read_executor.read_busitem.assert_not_called()
+            self.assertNotIn("first_value", adapter.cache.values)
+
+    def test_read_executor_handles_invalid_aggregate_member_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.read_executor.read_busitem = MagicMock(return_value=5.0)  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "bad_sum",
+                {"aggregate": "sum", "service": "svc.aggregate", "paths": ["NotAbsolute"]},
+            )
+
+            self.assertEqual(outcome, "applied")
+            self.assertEqual(adapter.cache.values["bad_sum"]["value"], 5.0)
+            self.assertNotIn("path:svc.aggregateNotAbsolute", adapter.cache.values)
+
+    def test_read_executor_records_optional_invalid_aggregate_errors_only_on_semantic_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.read_executor.read_busitem = MagicMock(side_effect=RuntimeError("no reply"))  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "pv_power_w",
+                {
+                    "aggregate": "pv-total",
+                    "use_dc_pv": "yes",
+                    "dc_service": "com.victronenergy.system",
+                    "dc_path": "NotAbsolute",
+                    "optional_confidence": 0.25,
+                },
+            )
+
+            self.assertEqual(outcome, "applied")
+            self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 0.0)
+            self.assertEqual(adapter.cache.values["pv_power_w"]["confidence"], 0.25)
+            self.assertIn("no reply", adapter.cache.values["pv_power_w"]["last_error"])
+            self.assertNotIn("path:com.victronenergy.systemNotAbsolute", adapter.cache.values)
+
+    def test_read_executor_direct_path_key_updates_only_one_cache_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.read_executor.read_busitem = MagicMock(return_value=11.0)  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "path:svc.direct/Value",
+                {"service": "svc.direct", "path": "/Value"},
+            )
+
+            self.assertEqual(outcome, "applied")
+            self.assertEqual(adapter.cache.values["path:svc.direct/Value"]["value"], 11.0)
+            self.assertEqual(list(adapter.cache.values), ["path:svc.direct/Value"])
+
     def test_coalesced_commands_use_stable_filename_and_latest_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             inbox = DbusCommandInbox(str(Path(temp_dir) / "commands"))
@@ -124,7 +221,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             def get_dbus_name(self) -> str:
                 raise RuntimeError("name unavailable")
 
-        with patch.object(adapter_module.time, "time", return_value=1000.0):
+        with patch.object(rate_module.time, "time", return_value=1000.0):
             for _index in range(3):
                 breaker.record_error(_NamedTimeout("slow"))
             self.assertEqual(breaker.state(now=1001.0), "degraded")
@@ -143,7 +240,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         self.assertIn("operations", health)
         self.assertEqual(health["consecutive_failures"], 1)
         self.assertEqual(breaker.state(now=2000.0), "ok")
-        with patch.object(adapter_module.time, "time", return_value=3000.0):
+        with patch.object(rate_module.time, "time", return_value=3000.0):
             breaker.record_success(1.0)
             breaker._successes.append((2000.0, 1.0))
             self.assertGreaterEqual(breaker.health()["successes_60s"], 1)
@@ -165,7 +262,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         monitor._open_fd_count = MagicMock(return_value=7)  # type: ignore[method-assign]
         monitor._loadavg = MagicMock(return_value=(0.2, 0.3, 0.4))  # type: ignore[method-assign]
 
-        with patch.object(adapter_module.time, "monotonic", side_effect=[10.0, 11.0]):
+        with patch.object(resource_module.time, "monotonic", side_effect=[10.0, 11.0]):
             first = monitor.snapshot()
             second = monitor.snapshot()
 
@@ -179,7 +276,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
     def test_resource_monitor_procfs_failure_edges(self) -> None:
         monitor = ResourceMonitor(pid=123)
-        with patch.object(adapter_module.os, "getloadavg", side_effect=OSError("missing")):
+        with patch.object(resource_module.os, "getloadavg", side_effect=OSError("missing")):
             self.assertEqual(monitor._loadavg(), (0.0, 0.0, 0.0))
         with patch.object(builtins, "open", side_effect=OSError("missing")):
             self.assertEqual(monitor._read_system_cpu(), (0, 0))
@@ -189,7 +286,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         read_data = "Name:\tpython\nThreads:\t3\nVmRSS:\tbad kB\n"
         with patch.object(builtins, "open", unittest.mock.mock_open(read_data=read_data)):
             self.assertEqual(monitor._read_process_status(), {"Threads": 3.0})
-        with patch.object(adapter_module.os, "listdir", side_effect=OSError("missing")):
+        with patch.object(resource_module.os, "listdir", side_effect=OSError("missing")):
             self.assertEqual(monitor._open_fd_count(), 0)
 
     def test_tick_health_rolls_recent_tick_durations(self) -> None:
@@ -209,7 +306,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
     def test_connection_manager_creates_private_bus_and_resets_best_effort(self) -> None:
         manager = DbusConnectionManager()
         fake_bus = MagicMock()
-        with patch.object(adapter_module.dbus, "SystemBus", return_value=fake_bus) as system_bus:
+        with patch.object(rate_module.dbus, "SystemBus", return_value=fake_bus) as system_bus:
             self.assertIs(manager.bus(), fake_bus)
             self.assertIs(manager.bus(), fake_bus)
             system_bus.assert_called_once_with(private=True)
@@ -288,7 +385,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         self.assertNotIn("missing", scheduler.next_read_at)
 
     def test_adapter_static_config_helpers_cover_defaults_and_invalid_instance(self) -> None:
-        parser = adapter_module.configparser.ConfigParser()
+        parser = configparser.ConfigParser()
         parser["DEFAULT"] = {
             "ServiceName": "com.example.ev",
             "DeviceInstance": "bad",
@@ -507,7 +604,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.write_scheduler._lifecycle_events.append((0.0, "applied", "local-publish"))
             adapter.write_scheduler._prune_lifecycle(time.time())
             self.assertEqual(adapter.write_scheduler._lifecycle_counts_60s(), {})
-            self.assertEqual(write_module._float_or_zero(object()), 0.0)
+            self.assertEqual(write_support_module._float_or_zero(object()), 0.0)
 
     def test_write_scheduler_health_budgets_lifecycle_and_remote_write_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -713,7 +810,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 empty_adapter.write_scheduler._record_lifecycle({"kind": "noop"}, "dropped")
             empty_adapter.command_lifecycle_path = "lifecycle-without-dir.jsonl"
             lifecycle_handle = unittest.mock.mock_open()
-            with patch.object(write_module.os.path, "dirname", return_value=""), patch.object(
+            with patch.object(write_health_module.os.path, "dirname", return_value=""), patch.object(
                 builtins, "open", lifecycle_handle
             ):
                 empty_adapter.write_scheduler._record_lifecycle({"kind": "noop"}, "queued")
@@ -927,7 +1024,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            with patch.object(write_module.time, "time", return_value=10.0):
+            with patch.object(write_core_module.time, "time", return_value=10.0):
                 self.assertFalse(adapter.write_scheduler._is_expired({"created_at": 0.0, "deadline_s": 1.0}))
                 self.assertTrue(adapter.write_scheduler._is_expired({"created_at": 1.0, "deadline_s": 1.0}))
                 self.assertFalse(adapter.write_scheduler._is_expired({"created_at": 9.0, "deadline_s": 1.0}))
@@ -1011,7 +1108,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             fake_bus.get_object.return_value = object()
             adapter.connection.bus = MagicMock(return_value=fake_bus)  # type: ignore[method-assign]
 
-            with patch.object(adapter_module.dbus, "Interface", return_value=fake_iface):
+            with patch.object(write_health_module.dbus, "Interface", return_value=fake_iface):
                 outcome = adapter.write_scheduler.set_remote_value(
                     {"service": "svc", "path": "/Set", "value": 9, "timeout": 2.0}
                 )
@@ -1116,10 +1213,10 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         falsey = ("", "0", "false", "no", "off", None)
 
         for value in truthy:
-            self.assertTrue(adapter_process_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": value}))
+            self.assertTrue(read_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": value}))
 
         for value in falsey:
-            self.assertFalse(adapter_process_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": value}))
+            self.assertFalse(read_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": value}))
 
     def test_pv_total_automatically_combines_ac_services_and_dc_pv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1460,6 +1557,9 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             )
             adapter.read_executor.read_busitem.assert_called_once_with("com.victronenergy.battery.socketcan_can1", "/Soc")
             self.assertEqual(adapter.cache.values["battery_soc"]["value"], 74.0)
+            member_key = "path:com.victronenergy.battery.socketcan_can1/Soc"
+            self.assertEqual(adapter.cache.values[member_key]["value"], 74.0)
+            self.assertEqual(adapter.cache.values[member_key]["status"], "fresh")
 
     def test_read_executor_covers_refresh_sum_error_and_direct_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1485,12 +1585,18 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 "applied",
             )
             self.assertEqual(adapter.cache.values["sum"]["value"], 1.5)
+            self.assertEqual(adapter.cache.values["path:svc/L1"]["value"], 1.5)
+            self.assertEqual(adapter.cache.values["path:svc/L2"]["value"], None)
             adapter.cache.update_services(["pv.1"])
             self.assertEqual(
                 adapter.read_executor.poll_read_spec("pv", {"aggregate": "services-sum", "prefix": "pv.", "path": "/P"}),
                 "applied",
             )
             self.assertEqual(adapter.read_executor.poll_read_spec("direct", {"service": "svc", "path": "/Path"}), "applied")
+            self.assertEqual(adapter.cache.values["direct"]["value"], 7)
+            self.assertEqual(adapter.cache.values["path:svc/Path"]["value"], 7)
+            self.assertEqual(adapter.read_executor.poll_read_spec("invalid", {"service": "svc", "path": "Path"}), "dropped")
+            self.assertNotIn("path:svcPath", adapter.cache.values)
             self.assertEqual(adapter.read_executor.refresh_requested_value({"service": "svc", "path": "/Path"}), "applied")
             self.assertEqual(adapter.read_executor.refresh_requested_value({"key": "grid_power_w"}), "deferred")
             self.assertEqual(adapter.read_executor.refresh_requested_value({}), "dropped")
@@ -1545,7 +1651,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             fake_bus = MagicMock()
             fake_bus.get_object.return_value = object()
             adapter.connection.bus = MagicMock(return_value=fake_bus)  # type: ignore[method-assign]
-            with patch.object(adapter_module.dbus, "Interface", return_value=fake_iface):
+            with patch.object(read_module.dbus, "Interface", return_value=fake_iface):
                 self.assertEqual(adapter.read_executor.read_busitem("svc", "/P"), 4.0)
             fake_bus.get_object.assert_called_once_with("svc", "/P", introspect=False)
             self.assertIsNone(adapter.read_executor.read_busitem("", "/P"))
@@ -1578,7 +1684,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             server.accept.return_value = (conn, object())
             adapter._server = server
 
-            with patch.object(adapter_module.select, "select", return_value=([server], [], [])):
+            with patch.object(runtime_module.select, "select", return_value=([server], [], [])):
                 adapter._process_socket_once()
 
             conn.settimeout.assert_called_once_with(0.1)
@@ -1595,16 +1701,16 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertTrue(adapter._handle_socket_payload('{"type":"snapshot"}')["ok"])
             self.assertTrue(adapter._handle_socket_payload('{"type":"health"}')["ok"])
             for request_type in ("refresh_value", "refresh_services", "publish_desired", "publish_value", "set_value"):
-                self.assertTrue(adapter._handle_socket_payload(adapter_module.json.dumps({"type": request_type}))["ok"])
+                self.assertTrue(adapter._handle_socket_payload(json.dumps({"type": request_type}))["ok"])
             self.assertFalse(adapter._handle_socket_payload('{"type":"wat"}')["ok"])
 
             adapter._server = None
             adapter._process_socket_once()
             server = MagicMock()
             adapter._server = server
-            with patch.object(adapter_module.select, "select", return_value=([], [], [])):
+            with patch.object(runtime_module.select, "select", return_value=([], [], [])):
                 adapter._process_socket_once()
-            with patch.object(adapter_module.select, "select", return_value=([server], [], [])):
+            with patch.object(runtime_module.select, "select", return_value=([server], [], [])):
                 server.accept.side_effect = BlockingIOError()
                 adapter._process_socket_once()
 
@@ -1619,7 +1725,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             server = MagicMock()
             server.accept.return_value = (conn, object())
             adapter._server = server
-            with patch.object(adapter_module.select, "select", return_value=([server], [], [])):
+            with patch.object(runtime_module.select, "select", return_value=([server], [], [])):
                 adapter._process_socket_once()
             conn.sendall.assert_called_once()
 
@@ -1947,7 +2053,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     }
                 )
 
-            with patch.object(write_module.time, "monotonic", side_effect=[0.0, 0.0, 0.002]):
+            with patch.object(write_publish_module.time, "monotonic", side_effect=[0.0, 0.0, 0.002]):
                 processed = adapter.write_scheduler.process_local_publish_burst()
 
             self.assertEqual(processed, 1)
@@ -1961,6 +2067,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             adapter._dbusservice_registered = True
+            self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             adapter.commands.enqueue({"kind": "set_value", "service": "svc", "path": "/A", "priority": "user"})
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             adapter.commands.enqueue(
@@ -2024,7 +2131,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 )
             commands = adapter.write_scheduler._prioritized_commands(DbusCommandInbox.coalesce(adapter.commands.load_pending()))
 
-            with patch.object(write_module.time, "monotonic", side_effect=[0.0, 0.0, 0.002, 0.002]):
+            with patch.object(write_publish_module.time, "monotonic", side_effect=[0.0, 0.0, 0.002, 0.002]):
                 self.assertTrue(adapter.write_scheduler.process_startup_registration_batch(commands))
 
             self.assertEqual(len(adapter.write_scheduler.registered_paths), 1)
@@ -2201,7 +2308,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.health_log_path = "health-history-without-dir.jsonl"
             adapter._last_health_log_monotonic = 0.0
             log_handle = unittest.mock.mock_open()
-            with patch.object(adapter_module.os.path, "dirname", return_value=""), patch.object(
+            with patch.object(process_health_module.os.path, "dirname", return_value=""), patch.object(
                 builtins, "open", log_handle
             ):
                 adapter._append_health_log({"state": "ok"})
@@ -2681,17 +2788,17 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             def fake_signal(signum: int, callback: object) -> None:
                 callbacks[signum] = callback
 
-            with patch.object(adapter_module.signal, "signal", side_effect=fake_signal), patch.object(adapter_module.GLib, "idle_add") as idle_add:
+            with patch.object(runtime_module.signal, "signal", side_effect=fake_signal), patch.object(runtime_module.GLib, "idle_add") as idle_add:
                 adapter._install_signal_handlers()
-                callbacks[adapter_module.signal.SIGTERM](adapter_module.signal.SIGTERM, None)  # type: ignore[index,operator]
+                callbacks[runtime_module.signal.SIGTERM](runtime_module.signal.SIGTERM, None)  # type: ignore[index,operator]
             self.assertTrue(adapter._stop)
             idle_add.assert_called_once_with(fake_loop.quit)
 
             adapter._main_loop = None
             adapter._stop = False
-            with patch.object(adapter_module.signal, "signal", side_effect=fake_signal), patch.object(adapter_module.GLib, "idle_add") as idle_add:
+            with patch.object(runtime_module.signal, "signal", side_effect=fake_signal), patch.object(runtime_module.GLib, "idle_add") as idle_add:
                 adapter._install_signal_handlers()
-                callbacks[adapter_module.signal.SIGINT](adapter_module.signal.SIGINT, None)  # type: ignore[index,operator]
+                callbacks[runtime_module.signal.SIGINT](runtime_module.signal.SIGINT, None)  # type: ignore[index,operator]
             self.assertTrue(adapter._stop)
             idle_add.assert_not_called()
 
@@ -2700,7 +2807,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             fake_bus = MagicMock()
             fake_bus.get_object.return_value = object()
             adapter.connection.bus = MagicMock(return_value=fake_bus)  # type: ignore[method-assign]
-            with patch.object(adapter_module.dbus, "Interface", return_value=fake_iface):
+            with patch.object(process_io_module.dbus, "Interface", return_value=fake_iface):
                 self.assertEqual(adapter._list_services(), ["svc.a", "b'svc.b'"])
 
     def test_socket_start_without_stale_path_and_default_cache_publish(self) -> None:
@@ -2718,7 +2825,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
     def test_atomic_json_writer_writes_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "payload.json"
-            writer = adapter_module.AtomicJsonWriter()
+            writer = AtomicJsonWriter()
             writer.write(str(path), {"ok": True})
             self.assertEqual(read_json_file(str(path), {}), {"ok": True})
 
@@ -2763,7 +2870,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             fake_bus = MagicMock()
             fake_bus.get_object.return_value = object()
             adapter.connection.bus = MagicMock(return_value=fake_bus)  # type: ignore[method-assign]
-            with patch.object(adapter_module.dbus, "Interface", return_value=fake_iface):
+            with patch.object(introspection_module.dbus, "Interface", return_value=fake_iface):
                 self.assertEqual(adapter._introspect_command({"service": "svc", "path": "/Real", "timeout": 2.0}), "applied")
             fake_iface.Introspect.assert_called_once_with(timeout=2.0)
 
@@ -2774,9 +2881,9 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(adapter._json_ready({"ok": True}), {"ok": True})
             self.assertEqual(adapter._json_ready(object()).startswith("<object object"), True)
 
-            self.assertEqual(adapter_module._logging_level_from_config(adapter.config), adapter_module.logging.DEBUG)
+            self.assertEqual(adapter_module._logging_level_from_config(adapter.config), logging.DEBUG)
             with patch.object(adapter_module.DbusAdapter, "run") as run:
-                self.assertEqual(adapter_module.main([str(config_path), "--run-dir", str(Path(temp_dir) / "run2")]), 0)
+                self.assertEqual(adapter_main([str(config_path), "--run-dir", str(Path(temp_dir) / "run2")]), 0)
             run.assert_called_once()
 
 
