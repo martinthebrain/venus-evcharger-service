@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Observability and worker-state helpers for runtime audit support."""
 
 from __future__ import annotations
@@ -30,6 +28,12 @@ def _normalized_optional_audit_text(value: object) -> str | None:
 
 
 class _RuntimeSupportAuditFieldsMixin:
+    service: Any
+    clone_worker_snapshot: Any
+    ensure_missing_attributes: Any
+    observability_state_defaults: Any
+    worker_state_defaults: Any
+
     @staticmethod
     def _backend_value(svc: Any, attribute_name: str, default: str = "") -> str:
         resolved = _resolved_backend_value(svc, attribute_name, default)

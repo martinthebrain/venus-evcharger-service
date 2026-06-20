@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Core DBus publish and transactional write helpers."""
 
 from __future__ import annotations
@@ -11,7 +9,11 @@ from typing import Any, Mapping, Sequence, cast
 
 from venus_evcharger.publish.dbus_shared import PublishServiceValueSnapshot, PublishStateEntry, PhaseData
 
+
 class _DbusPublishCoreMixin:
+    PHASE_NAMES: tuple[str, str, str]
+    service: Any
+
     def ensure_state(self) -> None:
         """Initialize DBus publish throttling helpers for tests or partial instances."""
         if not hasattr(self.service, "_dbus_publish_state"):

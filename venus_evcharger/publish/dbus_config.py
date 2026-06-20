@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Config-value publishing helpers for DBus publishing."""
 
 from __future__ import annotations
 
 import time
 from datetime import datetime
-from typing import Any, Mapping, cast
+from typing import Any, Mapping, TYPE_CHECKING, cast
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.backend.models import effective_supported_phase_selections, switch_feedback_mismatch
@@ -19,7 +17,30 @@ from venus_evcharger.core.common import (
 )
 from venus_evcharger.core.contracts import finite_float_or_none, normalized_auto_state_pair
 
+
 class _DbusPublishConfigMixin:
+    service: Any
+
+    if TYPE_CHECKING:
+        # Sibling mixins provide these methods on the composed
+        # DbusPublishController. Keeping the declarations type-check-only
+        # preserves the runtime MRO while avoiding broad attr suppressions.
+
+        def _charger_enabled_readback(self, now: float | None) -> bool | None: ...
+
+        def _display_set_current(self, now: float | None) -> float: ...
+
+        def ensure_state(self) -> None: ...
+
+        def _publish_values_transactional(
+            self,
+            group_name: str,
+            values: Mapping[str, Any],
+            now: float | None,
+            interval_seconds: float | None = None,
+            force: bool = False,
+        ) -> bool: ...
+
     def _config_values(self, startstop_display: int, now: float | None) -> dict[str, Any]:
         """Return mode and control values keyed by DBus path."""
         charger_enabled = self._charger_enabled_readback(now)

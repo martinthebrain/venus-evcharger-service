@@ -21,7 +21,10 @@ from venus_evcharger.core.contracts import (
 )
 from venus_evcharger.dbus_introspection import load_owner_introspection_snapshot
 
+
 class _DbusPublishDiagnosticsMixin:
+    service: Any
+
     @classmethod
     def _scheduled_counter_values_from_snapshot(cls, scheduled_snapshot: Any) -> dict[str, str | int]:
         """Return normalized outward scheduled-state diagnostics."""

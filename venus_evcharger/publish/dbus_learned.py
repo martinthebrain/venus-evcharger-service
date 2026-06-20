@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Learned-current and charger-readback display helpers for DBus publishing."""
 
 from __future__ import annotations
 
 import math
 import time
+from typing import Any, TYPE_CHECKING
 
 from venus_evcharger.core.common import (
     _fresh_charger_retry_reason,
@@ -25,7 +24,14 @@ from venus_evcharger.core.contracts import (
 )
 from venus_evcharger.publish.dbus_shared import _LearnedDisplayCurrentInputs
 
+
 class _DbusPublishLearnedMixin:
+    service: Any
+
+    if TYPE_CHECKING:
+
+        def _diagnostic_text_value(self, raw_value: Any) -> str: ...
+
     def _display_uses_learned_set_current(self) -> bool:
         """Return whether the GUI SetCurrent field should mirror the learned EVSE current."""
         charger_backend = getattr(self.service, "_charger_backend", None)
