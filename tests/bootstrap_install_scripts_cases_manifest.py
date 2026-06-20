@@ -32,13 +32,17 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
                 ("SHELLY_PROFILES.md", "profiles\n"),
                 ("version.txt", "9.9.9\n"),
                 ("venus_evcharger_service.py", "#!/usr/bin/env python3\n"),
+                ("venus_evcharger_dbus_adapter.py", "#!/usr/bin/env python3\n"),
                 ("venus_evcharger_auto_input_helper.py", "#!/usr/bin/env python3\n"),
+                ("venus_evchargerctl.py", "#!/usr/bin/env python3\n"),
                 ("deploy/venus/install_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/boot_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/restart_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/uninstall_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/service_venus_evcharger/run", "#!/bin/sh\n"),
                 ("deploy/venus/service_venus_evcharger/log/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_dbus_adapter/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_dbus_adapter/log/run", "#!/bin/sh\n"),
                 ("deploy/venus/config.venus_evcharger.ini", "[DEFAULT]\nHost=template-host\nNewToggle=1\n"),
                 ("venus_evcharger/__init__.py", "# pkg\n"),
                 ("scripts/ops/example.sh", "#!/bin/bash\n"),
@@ -57,7 +61,9 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
                     "SHELLY_PROFILES.md",
                     "version.txt",
                     "venus_evcharger_service.py",
+                    "venus_evcharger_dbus_adapter.py",
                     "venus_evcharger_auto_input_helper.py",
+                    "venus_evchargerctl.py",
                     "deploy/venus",
                     "venus_evcharger",
                     "scripts/ops",
@@ -123,13 +129,17 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
                 ("SHELLY_PROFILES.md", "profiles\n"),
                 ("version.txt", "9.9.9\n"),
                 ("venus_evcharger_service.py", "#!/usr/bin/env python3\n"),
+                ("venus_evcharger_dbus_adapter.py", "#!/usr/bin/env python3\nfresh adapter\n"),
                 ("venus_evcharger_auto_input_helper.py", "#!/usr/bin/env python3\n"),
+                ("venus_evchargerctl.py", "#!/usr/bin/env python3\n"),
                 ("deploy/venus/install_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/boot_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/restart_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/uninstall_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/service_venus_evcharger/run", "#!/bin/sh\n"),
                 ("deploy/venus/service_venus_evcharger/log/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_dbus_adapter/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_dbus_adapter/log/run", "#!/bin/sh\n"),
                 ("deploy/venus/config.venus_evcharger.ini", "[DEFAULT]\nHost=template-host\n"),
                 ("venus_evcharger/__init__.py", "# pkg\n"),
                 ("scripts/ops/example.sh", "#!/bin/bash\n"),
@@ -148,7 +158,9 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
                     "SHELLY_PROFILES.md",
                     "version.txt",
                     "venus_evcharger_service.py",
+                    "venus_evcharger_dbus_adapter.py",
                     "venus_evcharger_auto_input_helper.py",
+                    "venus_evchargerctl.py",
                     "deploy/venus",
                     "venus_evcharger",
                     "scripts/ops",
@@ -184,8 +196,12 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
 
             self.assertTrue((target_dir / "current").is_symlink())
             self.assertTrue((target_dir / "current/venus_evcharger_service.py").is_file())
+            self.assertEqual((target_dir / "current/venus_evcharger_dbus_adapter.py").read_text(encoding="utf-8"), "#!/usr/bin/env python3\nfresh adapter\n")
+            self.assertTrue((target_dir / "current/venus_evchargerctl.py").is_file())
             self.assertTrue((target_dir / "releases/9.9.9/deploy/venus/install_venus_evcharger_service.sh").is_file())
+            self.assertTrue((target_dir / "releases/9.9.9/deploy/venus/service_venus_evcharger_dbus_adapter/run").is_file())
             self.assertTrue((target_dir / "current/deploy/venus/install_venus_evcharger_service.sh").is_file())
+            self.assertTrue((target_dir / "current/deploy/venus/service_venus_evcharger_dbus_adapter/run").is_file())
             self.assertEqual((target_dir / ".bootstrap-state/installed_bundle_sha256").read_text(encoding="utf-8"), f"{bundle_hash}\n")
             self.assertEqual((target_dir / ".bootstrap-state/installed_version").read_text(encoding="utf-8"), "9.9.9\n")
             self.assertTrue((target_dir / "noUpdate").is_file())
