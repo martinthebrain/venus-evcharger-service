@@ -134,10 +134,41 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(pending_set_value["queue_class"], "remote-write")
             self.assertEqual(pending_set_value["lifecycle_state"], "coalesced")
             self.assertGreaterEqual(pending_set_value["updated_at"], 2.0)
+            desired_path = inbox.enqueue(
+                {
+                    "kind": "publish_desired",
+                    "created_at": 2.0,
+                    "priority": "publish",
+                    "coalesce_key": "publish:desired",
+                    "paths": {"/Connected": 1, "/Status": 1, "/Mode": 0},
+                }
+            )
+            self.assertEqual(
+                inbox.enqueue(
+                    {
+                        "kind": "publish_desired",
+                        "created_at": 3.0,
+                        "priority": "publish",
+                        "coalesce_key": "publish:desired",
+                        "paths": {"/Ac/Power": 1200.0, "/Mode": 1},
+                    }
+                ),
+                desired_path,
+            )
+            pending_desired = read_json_file(desired_path, {})
+            self.assertEqual(
+                pending_desired["paths"],
+                {"/Connected": 1, "/Status": 1, "/Mode": 1, "/Ac/Power": 1200.0},
+            )
             services_first = inbox.enqueue({"kind": "refresh_services", "created_at": 3.0})
             services_second = inbox.enqueue({"kind": "refresh_services", "created_at": 4.0})
             self.assertEqual(services_first, services_second)
-            self.assertEqual(inbox.load_pending()[1][1]["coalesce_key"], "refresh:services")
+            pending_refresh = [
+                command
+                for _path, command in inbox.load_pending()
+                if command.get("kind") == "refresh_services"
+            ][0]
+            self.assertEqual(pending_refresh["coalesce_key"], "refresh:services")
             legacy_refresh = Path(temp_dir) / "commands" / "legacy-refresh.json"
             legacy_refresh.write_text(
                 '{"kind":"refresh_services","created_at":2.0,"coalesce_key":"refresh-services"}',

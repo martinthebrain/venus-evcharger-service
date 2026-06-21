@@ -51,6 +51,7 @@ python3 -m py_compile \
 	scripts/dev/pi_gateway_release_gate_remote.py \
 	scripts/dev/pi_gateway_release_gate_shelly.py \
 	scripts/dev/pi_gateway_release_gate_support.py \
+	scripts/dev/pi_safety_invariants_gate.py \
 	venus_evcharger/core/common.py \
 	venus_evcharger/ports/__init__.py \
 	venus_evcharger/controllers/auto.py \

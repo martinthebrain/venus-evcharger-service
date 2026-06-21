@@ -30,6 +30,7 @@ fi
 	scripts/dev/pi_gateway_release_gate_remote.py \
 	scripts/dev/pi_gateway_release_gate_shelly.py \
 	scripts/dev/pi_gateway_release_gate_support.py \
+	scripts/dev/pi_safety_invariants_gate.py \
 	scripts/dev/run_mutation_audit.py \
 	venus_evcharger_dbus_adapter.py \
 	venus_evcharger/dbus_adapter_components.py \
