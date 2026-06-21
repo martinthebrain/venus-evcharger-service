@@ -16,7 +16,7 @@ class _DbusDiagnosticsContractsMixin:
     service: Any
     _age_seconds: Callable[[Any, float], float]
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:  # pragma: no cover
 
         def _backend_mode_value(self, service: Any) -> str: ...
 
