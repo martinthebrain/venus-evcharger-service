@@ -21,7 +21,7 @@ from venus_evcharger.core.contracts import finite_float_or_none, normalized_auto
 class _DbusPublishConfigMixin:
     service: Any
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:  # pragma: no cover
         # Sibling mixins provide these methods on the composed
         # DbusPublishController. Keeping the declarations type-check-only
         # preserves the runtime MRO while avoiding broad attr suppressions.

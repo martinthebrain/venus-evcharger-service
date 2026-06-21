@@ -12,7 +12,7 @@ class _UpdateCycleOfflineMixin:
     FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
     service: Any
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:  # pragma: no cover
 
         def _phase_data_for_pm_status(
             self,

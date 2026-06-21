@@ -10,7 +10,7 @@ from venus_evcharger.update.software_update_state import _SoftwareUpdateStateMix
 
 
 class _SoftwareUpdateRunMixin(_SoftwareUpdateStateMixin):
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:  # pragma: no cover
 
         @classmethod
         def _spawn_software_update_process(

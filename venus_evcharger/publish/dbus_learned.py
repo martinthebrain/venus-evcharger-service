@@ -28,7 +28,7 @@ from venus_evcharger.publish.dbus_shared import _LearnedDisplayCurrentInputs
 class _DbusPublishLearnedMixin:
     service: Any
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:  # pragma: no cover
 
         def _diagnostic_text_value(self, raw_value: Any) -> str: ...
 

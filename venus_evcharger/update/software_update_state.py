@@ -10,7 +10,7 @@ from typing import Any, ClassVar, TYPE_CHECKING
 class _SoftwareUpdateStateMixin:
     SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS: ClassVar[float]
 
-    if TYPE_CHECKING:
+    if TYPE_CHECKING:  # pragma: no cover
 
         @classmethod
         def _software_update_manifest_result(
