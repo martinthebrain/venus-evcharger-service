@@ -39,6 +39,8 @@ fake_dbus_mainloop.DBusGMainLoop = MagicMock()  # type: ignore[attr-defined]
 
 with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fake_dbus_mainloop}):
     import venus_evcharger_dbus_adapter as adapter_module
+    import venus_evcharger.dbus_adapter_health_history as health_history_module
+    import venus_evcharger.dbus_adapter_health_queue as health_queue_module
     import venus_evcharger.dbus_adapter_components_rate as rate_module
     import venus_evcharger.dbus_adapter_components_resource as resource_module
     import venus_evcharger.dbus_adapter_process_health as process_health_module
@@ -50,6 +52,7 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
     import venus_evcharger.dbus_adapter_write_health as write_health_module
     import venus_evcharger.dbus_adapter_write_publish as write_publish_module
     import venus_evcharger.dbus_adapter_write_support as write_support_module
+    import venus_evcharger.dbus_gateway_core as gateway_core_module
     from venus_evcharger_dbus_adapter import (
         DbusAdapter,
         main as adapter_main,
@@ -2496,7 +2499,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.health_log_path = "health-history-without-dir.jsonl"
             adapter._last_health_log_monotonic = 0.0
             log_handle = unittest.mock.mock_open()
-            with patch.object(process_health_module.os.path, "dirname", return_value=""), patch.object(
+            with patch.object(health_history_module.os.path, "dirname", return_value=""), patch.object(
                 builtins, "open", log_handle
             ):
                 adapter._append_health_log({"state": "ok"})
@@ -2513,7 +2516,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             ("bad", {"created_at": "bad"}),
         ]
 
-        self.assertEqual(DbusAdapter._oldest_command_age(commands, 100.0), 10.0)
+        self.assertEqual(health_queue_module.oldest_command_age(commands, 100.0), 10.0)
 
     def test_adaptive_tick_uses_fast_default_and_slows_under_pressure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3066,8 +3069,8 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.rate_limiter.next_at["read"] = 0.0
             with self.assertRaises(RuntimeError):
                 adapter._timed("read", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-            self.assertEqual(adapter._json_ready({"ok": True}), {"ok": True})
-            self.assertEqual(adapter._json_ready(object()).startswith("<object object"), True)
+            self.assertEqual(gateway_core_module._json_ready({"ok": True}), {"ok": True})
+            self.assertEqual(gateway_core_module._json_ready(object()).startswith("<object object"), True)
 
             self.assertEqual(adapter_module._logging_level_from_config(adapter.config), logging.DEBUG)
             with patch.object(adapter_module.DbusAdapter, "run") as run:

@@ -8,26 +8,27 @@ is intentionally isolated to the gateway adapter modules only.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import time
 from collections.abc import Mapping
 from typing import Any
 
-from venus_evcharger.core.shared import compact_json
+from venus_evcharger.dbus_adapter_health_freshness import (
+    cache_freshness,
+    cached_entry_age,
+    cached_entry_float,
+    max_cached_path_age,
+    missing_cached_path_count,
+)
 from venus_evcharger.dbus_adapter_health_gui import (
     ACTIVE_SESSION_GUI_FRESHNESS_PATHS,
     GUI_CONTROL_FRESHNESS_PATHS,
     GUI_MEASUREMENT_FRESHNESS_PATHS,
 )
+from venus_evcharger.dbus_adapter_health_history import append_health_log
+from venus_evcharger.dbus_adapter_health_queue import oldest_command_age, queue_class_health, queue_health
 from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterHealthContext
-from venus_evcharger.dbus_gateway import (
-    FAST_READ_KEYS,
-    DbusCommandInbox,
-    command_queue_class,
-    dbus_path_key,
-)
+from venus_evcharger.dbus_gateway import FAST_READ_KEYS, DbusCommandInbox, dbus_path_key
 
 BACKPRESSURE_SLO_REASONS = {"core_reads_fresh", "queue_age_ok"}
 SESSION_ACTIVE_POWER_WATTS = 50.0
@@ -40,10 +41,7 @@ class DbusAdapterHealthMixin:
             return
         self._last_health_log_monotonic = time.monotonic()
         try:
-            _ensure_parent_dir(self.health_log_path)
-            payload = _health_log_payload(health)
-            with open(self.health_log_path, "a", encoding="utf-8") as handle:
-                handle.write(compact_json(payload) + "\n")
+            append_health_log(self.health_log_path, health)
         except Exception:  # pylint: disable=broad-except
             logging.debug("Unable to append DBus gateway health history", exc_info=True)
 
@@ -59,17 +57,17 @@ class DbusAdapterHealthMixin:
         effective_pending = DbusCommandInbox.coalesce(pending)
         core_pending = self.core_commands.load_pending()
         write_scheduler_health = self.write_scheduler.health(now=current_time)
-        queue_health = self._queue_health(
+        queue_metrics = queue_health(
             effective_pending,
             core_pending,
             current_time,
             physical_count=len(pending),
             write_scheduler_health=write_scheduler_health,
         )
-        cache_freshness = self._cache_freshness(current_time)
+        freshness = self._cache_freshness(current_time)
         slo = self._slo_snapshot(
-            queue_health=queue_health,
-            cache_freshness=cache_freshness,
+            queue_health=queue_metrics,
+            cache_freshness=freshness,
             now=current_time,
             current_monotonic=current_monotonic,
         )
@@ -90,12 +88,12 @@ class DbusAdapterHealthMixin:
             "discovery_last_error": self.discovery.last_error,
             "discovery_next_scan_at": self.discovery.next_scan_at,
             "mainloop_heartbeat_age_s": heartbeat_age,
-            "queues": queue_health,
-            "queue_classes": self._queue_class_health(effective_pending, current_time),
+            "queues": queue_metrics,
+            "queue_classes": queue_class_health(effective_pending, current_time),
             "write_scheduler": write_scheduler_health,
-            "cache_freshness": cache_freshness,
+            "cache_freshness": freshness,
             "slo": slo,
-            "backpressure": self._backpressure_snapshot(slo=slo, queue_health=queue_health),
+            "backpressure": self._backpressure_snapshot(slo=slo, queue_health=queue_metrics),
             "resources": self._last_resource_snapshot or self.resource_monitor.snapshot(),
             "adaptive_tick_seconds": self.tick_seconds,
             "min_tick_seconds": self.min_tick_seconds,
@@ -108,63 +106,8 @@ class DbusAdapterHealthMixin:
             },
         }
 
-    @staticmethod
-    def _queue_class_health(pending: list[tuple[str, dict[str, Any]]], now: float) -> dict[str, Any]:  # pragma: no mutate block
-        classes: dict[str, dict[str, Any]] = {}
-        for _path, command in pending:
-            queue_class = str(command.get("queue_class") or command_queue_class(command))
-            entry = classes.setdefault(queue_class, {"pending": 0, "oldest_age_s": 0.0})
-            entry["pending"] = int(entry["pending"]) + 1
-            entry["oldest_age_s"] = max(
-                float(entry["oldest_age_s"]),
-                0.0,
-                now - DbusAdapterHealthMixin._command_activity_at(command, now),
-            )
-        return dict(sorted(classes.items()))
-
-    @staticmethod
-    def _queue_health(
-        pending: list[tuple[str, dict[str, Any]]],
-        core_pending: list[tuple[str, dict[str, Any]]],
-        now: float,
-        *,
-        physical_count: int | None = None,
-        write_scheduler_health: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:  # pragma: no mutate block
-        scheduler = write_scheduler_health or {}
-        return {
-            "pending_command_count": len(pending),
-            "physical_command_count": _physical_command_count(pending, physical_count),
-            "oldest_command_age_s": DbusAdapterHealthMixin._oldest_command_age(pending, now),
-            "core_command_count": len(core_pending),
-            "oldest_core_command_age_s": DbusAdapterHealthMixin._oldest_command_age(core_pending, now),
-            "processed_commands_60s": int(scheduler.get("processed_commands_60s", 0) or 0),
-            "queue_drain_rate_per_s": float(scheduler.get("processed_commands_60s", 0) or 0) / 60.0,
-            "last_processed_at": float(scheduler.get("last_processed_at", 0.0) or 0.0),
-        }
-
-    @staticmethod
-    def _oldest_command_age(commands: list[tuple[str, dict[str, Any]]], now: float) -> float:  # pragma: no mutate block
-        ages = [
-            max(0.0, now - DbusAdapterHealthMixin._command_activity_at(command, now))
-            for _path, command in commands
-        ]
-        return max(ages) if ages else 0.0
-
-    @staticmethod
-    def _command_activity_at(command: Mapping[str, Any], now: float) -> float:  # pragma: no mutate block
-        timestamp = command.get("updated_at") if command.get("updated_at") is not None else command.get("created_at")
-        try:
-            return float(timestamp if timestamp is not None else now)
-        except (TypeError, ValueError):
-            return now
-
     def _cache_freshness(self: DbusAdapterHealthContext, now: float) -> dict[str, Any]:  # pragma: no mutate block
-        values = {
-            key: self.cache._value_snapshot(value, now)  # pylint: disable=protected-access
-            for key, value in self.cache.values.items()
-        }
-        return {"value_count": len(values), "status_counts": _status_counts(values), **_important_freshness(values)}
+        return cache_freshness(self.cache, now)
 
     def _slo_snapshot(
         self: DbusAdapterHealthContext,
@@ -257,9 +200,9 @@ class DbusAdapterHealthMixin:
 
     def _fresh_cached_path_float(self: DbusAdapterHealthContext, path: str, now: float) -> float:
         entry = self.cache.values.get(dbus_path_key(self.service_name, path))
-        if _cached_entry_age(entry, now) > self._effective_gui_max_age_seconds():
+        if cached_entry_age(entry, now) > self._effective_gui_max_age_seconds():
             return 0.0
-        return _cached_entry_float(entry)
+        return cached_entry_float(entry)
 
     def _backpressure_snapshot(
         self: DbusAdapterHealthContext,
@@ -310,7 +253,7 @@ class DbusAdapterHealthMixin:
     def _apply_slo_regulation(self: DbusAdapterHealthContext) -> None:  # pragma: no mutate block
         now = time.time()
         pending = DbusCommandInbox.coalesce(self.commands.load_pending())
-        queue_age = self._oldest_command_age(pending, now)
+        queue_age = oldest_command_age(pending, now)
         cache_freshness = self._cache_freshness(now)
         core_read_age = self._max_core_read_age(cache_freshness)
         eventloop_gap_ms = float(self.tick_health.snapshot().get("max_tick_gap_ms_60s", 0.0) or 0.0)
@@ -338,14 +281,10 @@ class DbusAdapterHealthMixin:
         self._last_introspection_full_scan_at = max(self._last_introspection_full_scan_at, now)
 
     def _max_cached_path_age(self: DbusAdapterHealthContext, paths: set[str], now: float) -> float:  # pragma: no mutate block
-        ages = [_cached_entry_age(self.cache.values.get(dbus_path_key(self.service_name, path)), now) for path in paths]
-        ages = [age for age in ages if age > 0.0]
-        return max(ages) if ages else 0.0
+        return max_cached_path_age(self.cache.values, self.service_name, paths, now)
 
     def _missing_cached_path_count(self: DbusAdapterHealthContext, paths: set[str]) -> float:  # pragma: no mutate block
-        return float(
-            sum(1 for path in paths if dbus_path_key(self.service_name, path) not in self.cache.values)
-        )
+        return missing_cached_path_count(self.cache.values, self.service_name, paths)
 
     @staticmethod
     def _max_core_read_age(cache_freshness: Mapping[str, Any]) -> float:  # pragma: no mutate block
@@ -371,93 +310,6 @@ class DbusAdapterHealthMixin:
         if str(cache_freshness[status_key]) != "fresh":
             return True
         return float(cache_freshness[age_key] or 0.0) > self.slo_core_read_max_age_seconds
-
-    @staticmethod
-    def _json_ready(value: Any) -> Any:  # pragma: no mutate block
-        try:
-            json.dumps(value)
-            return value
-        except TypeError:
-            return str(value)
-
-
-
-def _ensure_parent_dir(path: str) -> None:  # pragma: no mutate block
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-
-
-def _mapping_child(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:  # pragma: no mutate block
-    value = parent.get(key)
-    return value if isinstance(value, Mapping) else {}
-
-
-def _health_log_payload(health: Mapping[str, Any]) -> dict[str, Any]:  # pragma: no mutate block
-    queues = _mapping_child(health, "queues")
-    eventloop = _mapping_child(health, "eventloop")
-    cache_freshness = _mapping_child(health, "cache_freshness")
-    backpressure = _mapping_child(health, "backpressure")
-    return {
-        "at": time.time(),
-        "state": health.get("state", "unknown"),
-        "backpressure": backpressure.get("state", "unknown"),
-        "queue_oldest_age_s": queues.get("oldest_command_age_s", 0.0),
-        "core_queue_oldest_age_s": queues.get("oldest_core_command_age_s", 0.0),
-        "max_tick_gap_ms_60s": eventloop.get("max_tick_gap_ms_60s", 0.0),
-        "timeouts_60s": health.get("timeouts_60s", 0),
-        "cache_freshness": _health_log_cache_freshness(cache_freshness),
-    }
-
-
-def _health_log_cache_freshness(cache_freshness: Mapping[str, Any]) -> dict[str, Any]:  # pragma: no mutate block
-    return {
-        key: cache_freshness.get(key)
-        for key in (
-            "grid_power_w_age_s",
-            "grid_power_w_status",
-            "pv_power_w_age_s",
-            "pv_power_w_status",
-            "battery_soc_age_s",
-            "battery_soc_status",
-        )
-    }
-
-
-def _physical_command_count(pending: list[tuple[str, dict[str, Any]]], physical_count: int | None) -> int:  # pragma: no mutate block
-    return len(pending) if physical_count is None else int(physical_count)
-
-
-def _status_counts(values: Mapping[str, Mapping[str, Any]]) -> dict[str, int]:  # pragma: no mutate block
-    counts: dict[str, int] = {}
-    for value in values.values():
-        status = str(value.get("status", "unknown"))
-        counts[status] = counts.get(status, 0) + 1
-    return counts
-
-
-def _important_freshness(values: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:  # pragma: no mutate block
-    important: dict[str, Any] = {
-        f"{key}_age_s": float(values.get(key, {}).get("age_s", 0.0) or 0.0) for key in FAST_READ_KEYS
-    }
-    important.update({f"{key}_status": str(values.get(key, {}).get("status", "missing")) for key in FAST_READ_KEYS})
-    return important
-
-
-def _cached_entry_age(entry: object, now: float) -> float:  # pragma: no mutate block
-    if not isinstance(entry, Mapping):
-        return 0.0
-    updated_at = float(entry.get("updated_at", 0.0) or 0.0)
-    return max(0.0, now - updated_at) if updated_at > 0.0 else 0.0
-
-
-def _cached_entry_float(entry: object) -> float:  # pragma: no mutate block
-    if not isinstance(entry, Mapping):
-        return 0.0
-    try:
-        return float(entry.get("value", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _slo_payload(

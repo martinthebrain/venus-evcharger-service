@@ -20,6 +20,7 @@ from venus_evcharger.dbus_gateway import (
     DbusCommandInbox,
     dbus_path_key,
 )
+from venus_evcharger.dbus_gateway_core import _json_ready
 
 _QUEUE_CLASS_RANKS = {
     "startup/register": 0,
@@ -151,7 +152,7 @@ class DbusWriteSchedulerPublishMixin:
                 "kind": "user_command",
                 "source": "dbus-gui",
                 "path": str(path),
-                "value": self.adapter._json_ready(value),
+                "value": _json_ready(value),
                 "priority": "user",
                 "coalesce_key": f"core:{path}",
             }
