@@ -1626,6 +1626,25 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertIsNone(value)
             self.assertEqual(state["errors"], ["svc.optional/Power: sleeping"])
 
+    def test_optional_aggregate_member_skips_cache_for_invalid_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.read_executor.read_optional_busitem = MagicMock(side_effect=RuntimeError("bad path"))  # type: ignore[method-assign]
+            state: dict[str, object] = {}
+
+            value = adapter.read_executor._read_aggregate_member(
+                "svc.optional",
+                "NotAbsolute",
+                state,
+                ignore_member_errors=True,
+            )
+
+            self.assertIsNone(value)
+            self.assertEqual(state["errors"], ["svc.optionalNotAbsolute: bad path"])
+            self.assertNotIn("path:svc.optionalNotAbsolute", adapter.cache.values)
+
     def test_optional_aggregate_member_reraises_required_source_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -1640,6 +1659,15 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.read_executor.read_optional_busitem = MagicMock(side_effect=DbusOperationDeferred("read"))  # type: ignore[method-assign]
             with self.assertRaises(DbusOperationDeferred):
                 adapter.read_executor._read_aggregate_member("svc", "/Path", {}, ignore_member_errors=True)
+
+    def test_optional_busitem_returns_none_for_incomplete_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+
+            self.assertIsNone(adapter.read_executor.read_optional_busitem("", "/Path"))
+            self.assertIsNone(adapter.read_executor.read_optional_busitem("svc", ""))
 
     def test_first_service_read_uses_discovered_battery_service(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
