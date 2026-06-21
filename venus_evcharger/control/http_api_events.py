@@ -1,17 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 from __future__ import annotations
 
 import json
 import time
-from typing import Any, Mapping
 from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING, Any, Mapping
 
 from venus_evcharger.core.contracts import CONTROL_API_EVENT_KINDS, normalized_control_api_event_fields
 
 
 class _LocalControlApiEventsMixin:
+    if TYPE_CHECKING:
+        _service: Any
+        _RETRY_HEADER: str
+
+        def _state_token(self) -> str: ...
+
     def _write_event_stream(self, handler: BaseHTTPRequestHandler, params: dict[str, list[str]]) -> None:
         event_bus = self._service._control_api_event_bus()
         limit = self._query_int(params, "limit", 20)

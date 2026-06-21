@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """PM snapshot normalization and cache fallback helpers."""
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from venus_evcharger.core.contracts import (
     normalized_worker_snapshot,
@@ -15,6 +13,8 @@ from venus_evcharger.core.contracts import (
 
 
 class _UpdateCyclePmSnapshotMixin:
+    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
+
     @staticmethod
     def _worker_pm_snapshot_data(
         worker_snapshot: dict[str, Any],

@@ -23,7 +23,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             },
         }
 
-        with patch("venus_evcharger.publish.dbus_diagnostics.load_owner_introspection_snapshot", return_value=snapshot):
+        with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", return_value=snapshot):
             values = controller._dbus_introspection_counter_values(100.0)
 
         self.assertEqual(values["/Auto/DbusIntrospectionState"], "running")
@@ -31,7 +31,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         self.assertEqual(values["/Auto/DbusIntrospectionServiceCount"], 4)
         self.assertEqual(values["/Auto/DbusIntrospectionUnusablePathCount"], 2)
 
-        with patch("venus_evcharger.publish.dbus_diagnostics.load_owner_introspection_snapshot", return_value={"services": []}):
+        with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", return_value={"services": []}):
             odd_values = controller._dbus_introspection_counter_values(101.0)
 
         self.assertEqual(odd_values["/Auto/DbusIntrospectionServiceCount"], 0)

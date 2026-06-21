@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Runtime-facing property surface for the DBus write controller port.
 
 The write controller should not know the concrete service object's internal
@@ -42,7 +40,26 @@ from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normaliz
 from venus_evcharger.core.contracts import finite_float_or_none, non_negative_int, normalize_binary_flag
 
 
+def _finite_service_float(service: Any, attr_name: str, default: float = 0.0) -> float:
+    return float(finite_float_or_none(getattr(service, attr_name, default)) or default)
+
+
+def _set_finite_service_float(service: Any, attr_name: str, value: Any, default: float = 0.0) -> None:
+    setattr(service, attr_name, float(finite_float_or_none(value) or default))
+
+
+def _service_binary_flag(service: Any, attr_name: str, default: int = 1) -> int:
+    return normalize_binary_flag(getattr(service, attr_name, default), default=default)
+
+
+def _set_service_binary_flag(service: Any, attr_name: str, value: Any, *, as_bool: bool = False) -> None:
+    normalized = normalize_binary_flag(value)
+    setattr(service, attr_name, bool(normalized) if as_bool else normalized)
+
+
 class _WriteControllerRuntimePortMixin:
+    _service: Any
+
     @property
     def virtual_mode(self) -> int:
         return non_negative_int(getattr(self._service, "virtual_mode", 0))
@@ -54,27 +71,27 @@ class _WriteControllerRuntimePortMixin:
 
     @property
     def virtual_autostart(self) -> int:
-        return normalize_binary_flag(getattr(self._service, "virtual_autostart", 1), default=1)
+        return _service_binary_flag(self._service, "virtual_autostart")
 
     @virtual_autostart.setter
     def virtual_autostart(self, value: Any) -> None:
-        self._service.virtual_autostart = normalize_binary_flag(value)
+        _set_service_binary_flag(self._service, "virtual_autostart", value)
 
     @property
     def virtual_startstop(self) -> int:
-        return normalize_binary_flag(getattr(self._service, "virtual_startstop", 1), default=1)
+        return _service_binary_flag(self._service, "virtual_startstop")
 
     @virtual_startstop.setter
     def virtual_startstop(self, value: Any) -> None:
-        self._service.virtual_startstop = normalize_binary_flag(value)
+        _set_service_binary_flag(self._service, "virtual_startstop", value)
 
     @property
     def virtual_enable(self) -> int:
-        return normalize_binary_flag(getattr(self._service, "virtual_enable", 1), default=1)
+        return _service_binary_flag(self._service, "virtual_enable")
 
     @virtual_enable.setter
     def virtual_enable(self, value: Any) -> None:
-        self._service.virtual_enable = normalize_binary_flag(value)
+        _set_service_binary_flag(self._service, "virtual_enable", value)
 
     @property
     def auto_manual_override_seconds(self) -> Any:
@@ -82,75 +99,75 @@ class _WriteControllerRuntimePortMixin:
 
     @property
     def virtual_set_current(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "virtual_set_current", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "virtual_set_current")
 
     @virtual_set_current.setter
     def virtual_set_current(self, value: Any) -> None:
-        self._service.virtual_set_current = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "virtual_set_current", value)
 
     @property
     def min_current(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "min_current", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "min_current")
 
     @min_current.setter
     def min_current(self, value: Any) -> None:
-        self._service.min_current = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "min_current", value)
 
     @property
     def max_current(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "max_current", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "max_current")
 
     @max_current.setter
     def max_current(self, value: Any) -> None:
-        self._service.max_current = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "max_current", value)
 
     @property
     def auto_start_surplus_watts(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_start_surplus_watts", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_start_surplus_watts")
 
     @auto_start_surplus_watts.setter
     def auto_start_surplus_watts(self, value: Any) -> None:
-        self._service.auto_start_surplus_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_start_surplus_watts", value)
 
     @property
     def auto_stop_surplus_watts(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_stop_surplus_watts", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_stop_surplus_watts")
 
     @auto_stop_surplus_watts.setter
     def auto_stop_surplus_watts(self, value: Any) -> None:
-        self._service.auto_stop_surplus_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_stop_surplus_watts", value)
 
     @property
     def auto_min_soc(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_min_soc", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_min_soc")
 
     @auto_min_soc.setter
     def auto_min_soc(self, value: Any) -> None:
-        self._service.auto_min_soc = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_min_soc", value)
 
     @property
     def auto_resume_soc(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_resume_soc", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_resume_soc")
 
     @auto_resume_soc.setter
     def auto_resume_soc(self, value: Any) -> None:
-        self._service.auto_resume_soc = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_resume_soc", value)
 
     @property
     def auto_start_delay_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_start_delay_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_start_delay_seconds")
 
     @auto_start_delay_seconds.setter
     def auto_start_delay_seconds(self, value: Any) -> None:
-        self._service.auto_start_delay_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_start_delay_seconds", value)
 
     @property
     def auto_stop_delay_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_stop_delay_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_stop_delay_seconds")
 
     @auto_stop_delay_seconds.setter
     def auto_stop_delay_seconds(self, value: Any) -> None:
-        self._service.auto_stop_delay_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_stop_delay_seconds", value)
 
     @property
     def auto_scheduled_enabled_days(self) -> str:
@@ -165,12 +182,11 @@ class _WriteControllerRuntimePortMixin:
 
     @property
     def auto_scheduled_night_start_delay_seconds(self) -> float:
-        value = getattr(self._service, "auto_scheduled_night_start_delay_seconds", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_scheduled_night_start_delay_seconds")
 
     @auto_scheduled_night_start_delay_seconds.setter
     def auto_scheduled_night_start_delay_seconds(self, value: Any) -> None:
-        self._service.auto_scheduled_night_start_delay_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_scheduled_night_start_delay_seconds", value)
 
     @property
     def auto_scheduled_latest_end_time(self) -> str:
@@ -182,12 +198,11 @@ class _WriteControllerRuntimePortMixin:
 
     @property
     def auto_scheduled_night_current_amps(self) -> float:
-        value = getattr(self._service, "auto_scheduled_night_current_amps", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_scheduled_night_current_amps")
 
     @auto_scheduled_night_current_amps.setter
     def auto_scheduled_night_current_amps(self, value: Any) -> None:
-        self._service.auto_scheduled_night_current_amps = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_scheduled_night_current_amps", value)
 
     @property
     def _software_update_run_requested_at(self) -> float | None:
@@ -199,169 +214,163 @@ class _WriteControllerRuntimePortMixin:
 
     @property
     def auto_dbus_backoff_base_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_dbus_backoff_base_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_dbus_backoff_base_seconds")
 
     @auto_dbus_backoff_base_seconds.setter
     def auto_dbus_backoff_base_seconds(self, value: Any) -> None:
-        self._service.auto_dbus_backoff_base_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_dbus_backoff_base_seconds", value)
 
     @property
     def auto_dbus_backoff_max_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_dbus_backoff_max_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_dbus_backoff_max_seconds")
 
     @auto_dbus_backoff_max_seconds.setter
     def auto_dbus_backoff_max_seconds(self, value: Any) -> None:
-        self._service.auto_dbus_backoff_max_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_dbus_backoff_max_seconds", value)
 
     @property
     def auto_grid_recovery_start_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_grid_recovery_start_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_grid_recovery_start_seconds")
 
     @auto_grid_recovery_start_seconds.setter
     def auto_grid_recovery_start_seconds(self, value: Any) -> None:
-        self._service.auto_grid_recovery_start_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_grid_recovery_start_seconds", value)
 
     @property
     def auto_stop_surplus_delay_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_stop_surplus_delay_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_stop_surplus_delay_seconds")
 
     @auto_stop_surplus_delay_seconds.setter
     def auto_stop_surplus_delay_seconds(self, value: Any) -> None:
-        self._service.auto_stop_surplus_delay_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_stop_surplus_delay_seconds", value)
 
     @property
     def auto_stop_surplus_volatility_low_watts(self) -> float:
-        value = getattr(self._service, "auto_stop_surplus_volatility_low_watts", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_stop_surplus_volatility_low_watts")
 
     @auto_stop_surplus_volatility_low_watts.setter
     def auto_stop_surplus_volatility_low_watts(self, value: Any) -> None:
-        self._service.auto_stop_surplus_volatility_low_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_stop_surplus_volatility_low_watts", value)
 
     @property
     def auto_stop_surplus_volatility_high_watts(self) -> float:
-        value = getattr(self._service, "auto_stop_surplus_volatility_high_watts", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_stop_surplus_volatility_high_watts")
 
     @auto_stop_surplus_volatility_high_watts.setter
     def auto_stop_surplus_volatility_high_watts(self, value: Any) -> None:
-        self._service.auto_stop_surplus_volatility_high_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_stop_surplus_volatility_high_watts", value)
 
     @property
     def auto_reference_charge_power_watts(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_reference_charge_power_watts", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_reference_charge_power_watts")
 
     @auto_reference_charge_power_watts.setter
     def auto_reference_charge_power_watts(self, value: Any) -> None:
-        self._service.auto_reference_charge_power_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_reference_charge_power_watts", value)
 
     @property
     def auto_learn_charge_power_enabled(self) -> int:
-        return normalize_binary_flag(getattr(self._service, "auto_learn_charge_power_enabled", 1), default=1)
+        return _service_binary_flag(self._service, "auto_learn_charge_power_enabled")
 
     @auto_learn_charge_power_enabled.setter
     def auto_learn_charge_power_enabled(self, value: Any) -> None:
-        self._service.auto_learn_charge_power_enabled = bool(normalize_binary_flag(value))
+        _set_service_binary_flag(self._service, "auto_learn_charge_power_enabled", value, as_bool=True)
 
     @property
     def auto_learn_charge_power_min_watts(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_learn_charge_power_min_watts", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_learn_charge_power_min_watts")
 
     @auto_learn_charge_power_min_watts.setter
     def auto_learn_charge_power_min_watts(self, value: Any) -> None:
-        self._service.auto_learn_charge_power_min_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_learn_charge_power_min_watts", value)
 
     @property
     def auto_learn_charge_power_alpha(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_learn_charge_power_alpha", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_learn_charge_power_alpha")
 
     @auto_learn_charge_power_alpha.setter
     def auto_learn_charge_power_alpha(self, value: Any) -> None:
-        self._service.auto_learn_charge_power_alpha = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_learn_charge_power_alpha", value)
 
     @property
     def auto_learn_charge_power_start_delay_seconds(self) -> float:
-        value = getattr(self._service, "auto_learn_charge_power_start_delay_seconds", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_learn_charge_power_start_delay_seconds")
 
     @auto_learn_charge_power_start_delay_seconds.setter
     def auto_learn_charge_power_start_delay_seconds(self, value: Any) -> None:
-        self._service.auto_learn_charge_power_start_delay_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_learn_charge_power_start_delay_seconds", value)
 
     @property
     def auto_learn_charge_power_window_seconds(self) -> float:
-        value = getattr(self._service, "auto_learn_charge_power_window_seconds", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_learn_charge_power_window_seconds")
 
     @auto_learn_charge_power_window_seconds.setter
     def auto_learn_charge_power_window_seconds(self, value: Any) -> None:
-        self._service.auto_learn_charge_power_window_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_learn_charge_power_window_seconds", value)
 
     @property
     def auto_learn_charge_power_max_age_seconds(self) -> float:
-        value = getattr(self._service, "auto_learn_charge_power_max_age_seconds", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_learn_charge_power_max_age_seconds")
 
     @auto_learn_charge_power_max_age_seconds.setter
     def auto_learn_charge_power_max_age_seconds(self, value: Any) -> None:
-        self._service.auto_learn_charge_power_max_age_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_learn_charge_power_max_age_seconds", value)
 
     @property
     def auto_phase_switching_enabled(self) -> int:
-        return normalize_binary_flag(getattr(self._service, "auto_phase_switching_enabled", 1), default=1)
+        return _service_binary_flag(self._service, "auto_phase_switching_enabled")
 
     @auto_phase_switching_enabled.setter
     def auto_phase_switching_enabled(self, value: Any) -> None:
-        self._service.auto_phase_switching_enabled = bool(normalize_binary_flag(value))
+        _set_service_binary_flag(self._service, "auto_phase_switching_enabled", value, as_bool=True)
 
     @property
     def auto_phase_prefer_lowest_when_idle(self) -> int:
-        return normalize_binary_flag(getattr(self._service, "auto_phase_prefer_lowest_when_idle", 1), default=1)
+        return _service_binary_flag(self._service, "auto_phase_prefer_lowest_when_idle")
 
     @auto_phase_prefer_lowest_when_idle.setter
     def auto_phase_prefer_lowest_when_idle(self, value: Any) -> None:
-        self._service.auto_phase_prefer_lowest_when_idle = bool(normalize_binary_flag(value))
+        _set_service_binary_flag(self._service, "auto_phase_prefer_lowest_when_idle", value, as_bool=True)
 
     @property
     def auto_phase_upshift_delay_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_phase_upshift_delay_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_phase_upshift_delay_seconds")
 
     @auto_phase_upshift_delay_seconds.setter
     def auto_phase_upshift_delay_seconds(self, value: Any) -> None:
-        self._service.auto_phase_upshift_delay_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_phase_upshift_delay_seconds", value)
 
     @property
     def auto_phase_downshift_delay_seconds(self) -> float:
-        value = getattr(self._service, "auto_phase_downshift_delay_seconds", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_phase_downshift_delay_seconds")
 
     @auto_phase_downshift_delay_seconds.setter
     def auto_phase_downshift_delay_seconds(self, value: Any) -> None:
-        self._service.auto_phase_downshift_delay_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_phase_downshift_delay_seconds", value)
 
     @property
     def auto_phase_upshift_headroom_watts(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_phase_upshift_headroom_watts", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_phase_upshift_headroom_watts")
 
     @auto_phase_upshift_headroom_watts.setter
     def auto_phase_upshift_headroom_watts(self, value: Any) -> None:
-        self._service.auto_phase_upshift_headroom_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_phase_upshift_headroom_watts", value)
 
     @property
     def auto_phase_downshift_margin_watts(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_phase_downshift_margin_watts", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_phase_downshift_margin_watts")
 
     @auto_phase_downshift_margin_watts.setter
     def auto_phase_downshift_margin_watts(self, value: Any) -> None:
-        self._service.auto_phase_downshift_margin_watts = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_phase_downshift_margin_watts", value)
 
     @property
     def auto_phase_mismatch_retry_seconds(self) -> float:
-        return float(finite_float_or_none(getattr(self._service, "auto_phase_mismatch_retry_seconds", 0.0)) or 0.0)
+        return _finite_service_float(self._service, "auto_phase_mismatch_retry_seconds")
 
     @auto_phase_mismatch_retry_seconds.setter
     def auto_phase_mismatch_retry_seconds(self, value: Any) -> None:
-        self._service.auto_phase_mismatch_retry_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_phase_mismatch_retry_seconds", value)
 
     @property
     def auto_phase_mismatch_lockout_count(self) -> int:
@@ -373,12 +382,11 @@ class _WriteControllerRuntimePortMixin:
 
     @property
     def auto_phase_mismatch_lockout_seconds(self) -> float:
-        value = getattr(self._service, "auto_phase_mismatch_lockout_seconds", 0.0)
-        return float(finite_float_or_none(value) or 0.0)
+        return _finite_service_float(self._service, "auto_phase_mismatch_lockout_seconds")
 
     @auto_phase_mismatch_lockout_seconds.setter
     def auto_phase_mismatch_lockout_seconds(self, value: Any) -> None:
-        self._service.auto_phase_mismatch_lockout_seconds = float(finite_float_or_none(value) or 0.0)
+        _set_finite_service_float(self._service, "auto_phase_mismatch_lockout_seconds", value)
 
     @property
     def supported_phase_selections(self) -> tuple[str, ...]:
@@ -386,7 +394,8 @@ class _WriteControllerRuntimePortMixin:
             getattr(self._service, "supported_phase_selections", ("P1",)),
             ("P1",),
         )
-        current_time = self.time_now() if callable(getattr(self._service, "_time_now", None)) else time.time()
+        time_now = getattr(self._service, "_time_now", None)
+        current_time = float(time_now()) if callable(time_now) else time.time()
         return effective_supported_phase_selections(
             normalized,
             lockout_selection=getattr(self._service, "_phase_switch_lockout_selection", None),

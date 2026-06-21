@@ -1,15 +1,25 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 from __future__ import annotations
 
 import os
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.core.contracts import timestamp_not_future
 
 
 class _AutoInputSupervisorSnapshotRuntimeMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        service: Any
+        SNAPSHOT_SOURCE_KEYS: tuple[str, ...]
+        FUTURE_TIMESTAMP_TOLERANCE_SECONDS: float
+
+        @classmethod
+        def _coerce_snapshot_timestamp(cls, value: Any) -> float | None: ...
+
+        def _coerce_snapshot_int(self, value: Any) -> int | None: ...
+
+        def _validate_snapshot_dict(self, path: str, snapshot: Any) -> dict[str, Any] | None: ...
+
     def _snapshot_mtime_ns(self, path: str) -> int | None:
         svc = self.service
         try:
@@ -33,7 +43,7 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
                 exc_info=error,
             )
             return None
-        return cast(dict[str, Any] | None, self._validate_snapshot_dict(path, snapshot))
+        return self._validate_snapshot_dict(path, snapshot)
 
     def _snapshot_freshness(self, snapshot: dict[str, Any], current: float) -> tuple[float | None, float | None, bool]:
         svc = self.service

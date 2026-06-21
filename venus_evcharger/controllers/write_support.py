@@ -1,18 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Support helpers shared by the DBus write controller."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
 from venus_evcharger.backend.models import effective_supported_phase_selections
 from venus_evcharger.controllers.write_snapshot import capture_write_state, restore_write_state
 
 
 class _DbusWriteSupportMixin:
+    SNAPSHOT_ATTRS: ClassVar[tuple[str, ...]]
+    SNAPSHOT_DBUS_PATHS: ClassVar[tuple[str, ...]]
+    SNAPSHOT_DEQUE_ATTRS: ClassVar[tuple[str, ...]]
+    SNAPSHOT_MAPPING_ATTRS: ClassVar[tuple[str, ...]]
+    SNAPSHOT_VALUE_ATTRS: ClassVar[tuple[str, ...]]
+    port: Any
+
     @classmethod
     def _snapshot_write_state(cls, svc: Any) -> dict[str, Any]:
         return capture_write_state(

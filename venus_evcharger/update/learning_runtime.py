@@ -1,17 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Learning-state normalization helpers used during update cycles."""
 
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import normalize_learning_phase, normalize_learning_state
 
 
 class _UpdateCycleLearningRuntimeMixin:
+    LEARNED_POWER_STABLE_TOLERANCE_RATIO: ClassVar[float]
+    LEARNED_POWER_STABLE_TOLERANCE_WATTS: ClassVar[float]
+    LEARNED_POWER_VOLTAGE_TOLERANCE_VOLTS: ClassVar[float]
+    service: Any
+
     @staticmethod
     def _normalize_learned_charge_power_state(value: Any) -> str:
         """Return one supported learned-power state string."""

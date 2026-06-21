@@ -12,7 +12,7 @@ class _TestShellyIoControllerQuaternaryPart1:
         )
 
         controller = ShellyIoController(service)
-        with patch("venus_evcharger.backend.shelly_io_worker.threading.Thread") as thread_factory:
+        with patch("venus_evcharger.backend.shelly_io_worker_lifecycle.threading.Thread") as thread_factory:
             controller.start_io_worker()
             thread_factory.assert_not_called()
         service._ensure_auto_input_helper_process.assert_called_once_with()
@@ -24,7 +24,7 @@ class _TestShellyIoControllerQuaternaryPart1:
         )
         controller = ShellyIoController(service)
         thread = MagicMock()
-        with patch("venus_evcharger.backend.shelly_io_worker.threading.Thread", return_value=thread) as thread_factory:
+        with patch("venus_evcharger.backend.shelly_io_worker_lifecycle.threading.Thread", return_value=thread) as thread_factory:
             controller.start_io_worker()
 
         thread_factory.assert_called_once()
@@ -55,9 +55,9 @@ class _TestShellyIoControllerQuaternaryPart1:
         new_thread = MagicMock()
 
         with (
-            patch("venus_evcharger.backend.shelly_io_worker.threading.Event", return_value=new_stop_event),
-            patch("venus_evcharger.backend.shelly_io_worker.requests.Session", return_value=new_session),
-            patch("venus_evcharger.backend.shelly_io_worker.threading.Thread", return_value=new_thread),
+            patch("venus_evcharger.backend.shelly_io_worker_lifecycle.threading.Event", return_value=new_stop_event),
+            patch("venus_evcharger.backend.shelly_io_worker_lifecycle.requests.Session", return_value=new_session),
+            patch("venus_evcharger.backend.shelly_io_worker_lifecycle.threading.Thread", return_value=new_thread),
         ):
             controller.start_io_worker()
 
@@ -83,7 +83,7 @@ class _TestShellyIoControllerQuaternaryPart1:
         )
         controller = ShellyIoController(service)
 
-        with patch("venus_evcharger.backend.shelly_io_worker.threading.Thread") as thread_factory:
+        with patch("venus_evcharger.backend.shelly_io_worker_lifecycle.threading.Thread") as thread_factory:
             controller.start_io_worker()
 
         thread_factory.assert_not_called()
@@ -114,8 +114,8 @@ class _TestShellyIoControllerQuaternaryPart1:
         new_session = MagicMock()
 
         with (
-            patch("venus_evcharger.backend.shelly_io_worker.threading.Event", return_value=new_stop_event),
-            patch("venus_evcharger.backend.shelly_io_worker.requests.Session", return_value=new_session),
+            patch("venus_evcharger.backend.shelly_io_worker_lifecycle.threading.Event", return_value=new_stop_event),
+            patch("venus_evcharger.backend.shelly_io_worker_lifecycle.requests.Session", return_value=new_session),
         ):
             controller._restart_stale_io_worker(100.0)
 
@@ -310,5 +310,4 @@ ReferenceWatts=2300
         service._last_charger_state_current_amps = None
         service._last_charger_state_phase_selection = None
         self.assertIsNone(controller._runtime_cached_charger_state())
-
 

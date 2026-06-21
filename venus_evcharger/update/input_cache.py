@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Cached helper-input resolution for the update cycle."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import timestamp_not_future
 
 
 class _UpdateCycleInputCacheMixin:
+    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
+    service: Any
+
     @staticmethod
     def extract_pm_measurements(
         svc: Any,

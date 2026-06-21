@@ -1888,9 +1888,64 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 )
 
             self.assertFalse(adapter._charging_session_active_for_gui(now))
-            self.assertEqual(adapter._gui_freshness_paths(now), {"/Ac/Power", "/Ac/Current"})
+            freshness_paths = adapter._gui_freshness_paths(now)
+            self.assertIn("/Ac/Power", freshness_paths)
+            self.assertIn("/Ac/Current", freshness_paths)
+            self.assertIn("/Connected", freshness_paths)
+            self.assertIn("/Mode", freshness_paths)
+            self.assertNotIn("/Session/Energy", freshness_paths)
             observed = adapter._slo_observed({}, {}, now, time.monotonic())
+            self.assertEqual(observed["gui_session_max_age_s"], 0.0)
+            self.assertEqual(observed["gui_session_missing_path_count"], 0.0)
+            self.assertGreater(observed["gui_control_missing_path_count"], 0.0)
             self.assertTrue(adapter._slo_checks_from_observed(observed)["gui_fresh"])
+            self.assertTrue(adapter._slo_checks_from_observed(observed)["gui_controls_fresh"])
+
+    def test_gui_freshness_tracks_control_paths_against_effective_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                "DbusGatewaySloGuiMaxAgeSeconds=2\n"
+                "DbusGatewaySloCoreReadMaxAgeSeconds=5\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            now = time.time()
+            for path, value, age in (
+                ("/Ac/Power", 1.0, 0.5),
+                ("/Ac/Current", 0.01, 0.5),
+                ("/Mode", 1, 9.0),
+            ):
+                adapter.cache.update_value(
+                    f"path:{adapter.service_name}{path}",
+                    value,
+                    source=f"{adapter.service_name}{path}",
+                    now=now - age,
+                )
+
+            observed = adapter._slo_observed({}, {}, now, time.monotonic())
+            checks = adapter._slo_checks_from_observed(observed)
+
+            self.assertEqual(adapter._slo_targets()["configured_gui_max_age_s"], 2.0)
+            self.assertEqual(adapter._slo_targets()["gui_control_max_age_s"], 10.0)
+            self.assertEqual(observed["gui_control_max_age_s"], 9.0)
+            self.assertEqual(observed["gui_control_missing_path_count"], 6.0)
+            self.assertGreater(observed["gui_missing_path_count"], observed["gui_control_missing_path_count"])
+            self.assertTrue(checks["gui_controls_fresh"])
+            self.assertTrue(checks["gui_fresh"])
+
+            adapter.cache.update_value(
+                f"path:{adapter.service_name}/Mode",
+                1,
+                source=f"{adapter.service_name}/Mode",
+                now=now - 10.1,
+            )
+            stale_observed = adapter._slo_observed({}, {}, now, time.monotonic())
+            stale_checks = adapter._slo_checks_from_observed(stale_observed)
+
+            self.assertFalse(stale_checks["gui_controls_fresh"])
+            self.assertFalse(stale_checks["gui_fresh"])
 
     def test_gui_freshness_includes_session_counters_while_charging(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

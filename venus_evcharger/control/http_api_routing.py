@@ -1,14 +1,54 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 from __future__ import annotations
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, Mapping, cast
+
+from venus_evcharger.control.http_api_response import _LocalControlApiResponseMixin
 
 
-class _LocalControlApiRoutingMixin:
+class _LocalControlApiRoutingMixin(_LocalControlApiResponseMixin):
+    if TYPE_CHECKING:
+        _service: Any
+        _STATE_GET_ENDPOINTS: frozenset[str]
+
+        def capabilities_payload(self) -> dict[str, Any]: ...
+
+        def health_payload(self) -> dict[str, Any]: ...
+
+        def openapi_payload(self) -> dict[str, Any]: ...
+
+        def _auth_error(
+            self,
+            handler: BaseHTTPRequestHandler,
+            *,
+            required_scope: str,
+        ) -> tuple[HTTPStatus, str, str] | None: ...
+
+        def _command_post_auth_error(
+            self,
+            handler: BaseHTTPRequestHandler,
+            payload: dict[str, Any],
+        ) -> tuple[HTTPStatus, str, str] | None: ...
+
+        def _locality_error(self, handler: BaseHTTPRequestHandler) -> tuple[HTTPStatus, str, str] | None: ...
+
+        def _optimistic_concurrency_error(
+            self,
+            handler: BaseHTTPRequestHandler,
+        ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]] | None: ...
+
+        def _parsed_request_target(self, target: str) -> tuple[str, dict[str, list[str]]]: ...
+
+        def _read_json_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any] | None: ...
+
+        def _state_token_headers(self) -> dict[str, str]: ...
+
+        def _write_command_result(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None: ...
+
+        def _write_event_stream(self, handler: BaseHTTPRequestHandler, params: dict[str, list[str]]) -> None: ...
+
     def _state_payload(self, path: str) -> dict[str, Any]:
         payload_getter_names: dict[str, str] = {
             "/v1/state/automation": "_state_api_automation_payload",
@@ -31,16 +71,16 @@ class _LocalControlApiRoutingMixin:
 
     def _public_get_payload(self, path: str) -> dict[str, Any] | None:
         if path == "/v1/control/health":
-            return cast(dict[str, Any], self.health_payload())
+            return self.health_payload()
         if path == "/v1/state/healthz":
             return self._state_payload(path)
         if path == "/v1/openapi.json":
-            return cast(dict[str, Any], self.openapi_payload())
+            return self.openapi_payload()
         return None
 
     def _authorized_get_payload(self, path: str) -> dict[str, Any] | None:
         if path == "/v1/capabilities":
-            return cast(dict[str, Any], self.capabilities_payload())
+            return self.capabilities_payload()
         if path in self._STATE_GET_ENDPOINTS:
             return self._state_payload(path)
         return None

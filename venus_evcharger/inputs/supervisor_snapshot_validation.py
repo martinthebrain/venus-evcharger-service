@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 from __future__ import annotations
 
 import math
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from venus_evcharger.core.contracts import paired_optional_values, valid_battery_soc
 
 
 class _AutoInputSupervisorSnapshotValidationMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        service: Any
+        SNAPSHOT_SOURCE_KEYS: tuple[str, ...]
+        SNAPSHOT_REQUIRED_KEYS: frozenset[str]
+        SNAPSHOT_SCHEMA_VERSION: int
+
     OPTIONAL_NUMERIC_FIELDS = (
         "battery_combined_soc",
         "battery_combined_usable_capacity_wh",

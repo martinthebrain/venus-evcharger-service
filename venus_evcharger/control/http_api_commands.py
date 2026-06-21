@@ -1,28 +1,39 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict, replace
+from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.control.rate_limit import ControlApiRateLimiter
+from venus_evcharger.control.http_api_response import (
+    error_response_payload,
+    _LocalControlApiResponseMixin,
+)
 from venus_evcharger.core.contracts import (
     normalized_control_api_command_response_fields,
     normalized_control_api_error_fields,
-    normalized_control_command_fields,
-    normalized_control_result_fields,
 )
 
 
-class _LocalControlApiCommandMixin:
-    _SAFE_EXTRA_RESPONSE_HEADERS: frozenset[str] = frozenset(("ETag", "Retry-After", "X-State-Token"))
+class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
+    if TYPE_CHECKING:
+        _fallback_idempotency_store: ControlApiIdempotencyStore
+        _fallback_rate_limiter: ControlApiRateLimiter
+        _service: Any
+
+        def _client_host(self, handler: BaseHTTPRequestHandler) -> str: ...
+
+        def _request_state_tokens(self, handler: BaseHTTPRequestHandler) -> set[str]: ...
+
+        def _state_token(self) -> str: ...
+
+        def _state_token_headers(self) -> dict[str, str]: ...
 
     def _read_json_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
         try:
@@ -148,7 +159,7 @@ class _LocalControlApiCommandMixin:
         rate_limiter_factory = getattr(self._service, "_control_api_rate_limiter", None)
         if callable(rate_limiter_factory):
             return cast(ControlApiRateLimiter, rate_limiter_factory())
-        return cast(ControlApiRateLimiter, self._fallback_rate_limiter)
+        return self._fallback_rate_limiter
 
     @staticmethod
     def _throttled_response(
@@ -263,7 +274,7 @@ class _LocalControlApiCommandMixin:
         store_factory = getattr(self._service, "_control_api_idempotency_store", None)
         if callable(store_factory):
             return cast(ControlApiIdempotencyStore, store_factory())
-        return cast(ControlApiIdempotencyStore, self._fallback_idempotency_store)
+        return self._fallback_idempotency_store
 
     @staticmethod
     def _idempotency_fingerprint(payload: dict[str, Any]) -> str:
@@ -369,21 +380,6 @@ class _LocalControlApiCommandMixin:
                 return True
         return False
 
-    @staticmethod
-    def _error_response_payload(code: str, message: str) -> dict[str, Any]:
-        return normalized_control_api_command_response_fields(
-            {
-                "ok": False,
-                "detail": message,
-                "error": {
-                    "code": code,
-                    "message": message,
-                    "retryable": False,
-                    "details": {},
-                },
-            }
-        )
-
     def _record_command_audit(
         self,
         *,
@@ -416,54 +412,3 @@ class _LocalControlApiCommandMixin:
         if result.status == "accepted_in_flight":
             return HTTPStatus.ACCEPTED
         return HTTPStatus.CONFLICT
-
-    @staticmethod
-    def _command_payload(command: ControlCommand) -> dict[str, Any]:
-        return normalized_control_command_fields(asdict(command), default_source="http")
-
-    @staticmethod
-    def _result_payload(result: ControlResult) -> dict[str, Any]:
-        return normalized_control_result_fields(asdict(result))
-
-    @staticmethod
-    def _safe_extra_response_headers(extra_headers: Mapping[str, str] | None) -> dict[str, str]:
-        if not extra_headers:
-            return {}
-        safe_headers: dict[str, str] = {}
-        for key, value in extra_headers.items():
-            if key not in _LocalControlApiCommandMixin._SAFE_EXTRA_RESPONSE_HEADERS:
-                continue
-            safe_headers[key] = str(value).replace("\r", "").replace("\n", "")
-        return safe_headers
-
-    @staticmethod
-    def _write_error(
-        handler: BaseHTTPRequestHandler,
-        status: HTTPStatus,
-        code: str,
-        message: str,
-    ) -> None:
-        payload = _LocalControlApiCommandMixin._error_response_payload(code, message)
-        _LocalControlApiCommandMixin._write_json(handler, status, payload)
-
-    @staticmethod
-    def _write_json(
-        handler: BaseHTTPRequestHandler,
-        status: HTTPStatus,
-        payload: Mapping[str, Any],
-        *,
-        extra_headers: Mapping[str, str] | None = None,
-    ) -> None:
-        raw = json.dumps(dict(payload), sort_keys=True).encode("utf-8")
-        handler.send_response(int(status))
-        handler.send_header("Content-Type", "application/json")
-        handler.send_header("Content-Length", str(len(raw)))
-        safe_headers = _LocalControlApiCommandMixin._safe_extra_response_headers(extra_headers)
-        if "ETag" in safe_headers:
-            handler.send_header("ETag", safe_headers["ETag"])
-        if "Retry-After" in safe_headers:
-            handler.send_header("Retry-After", safe_headers["Retry-After"])
-        if "X-State-Token" in safe_headers:
-            handler.send_header("X-State-Token", safe_headers["X-State-Token"])
-        handler.end_headers()
-        handler.wfile.write(raw)

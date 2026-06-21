@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
 from __future__ import annotations
 
 from venus_evcharger.backend.config import load_runtime_backend_summary

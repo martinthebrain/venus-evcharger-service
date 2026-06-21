@@ -19,6 +19,10 @@ omit =
     venus_evcharger_auto_input_helper.py
 
 [report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if typing.TYPE_CHECKING:
 omit =
     tests/*
     .github/*

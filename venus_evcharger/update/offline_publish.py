@@ -1,16 +1,31 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code=attr-defined
-# pyright: reportAttributeAccessIssue=false
 """Offline publishing helpers for the update cycle."""
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, ClassVar, TYPE_CHECKING, cast
 
 from venus_evcharger.core.contracts import timestamp_age_within
 
 
 class _UpdateCycleOfflineMixin:
+    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
+    service: Any
+
+    if TYPE_CHECKING:  # pragma: no cover
+
+        def _phase_data_for_pm_status(
+            self,
+            pm_status: dict[str, Any] | None,
+            total_power: float,
+            voltage: float,
+            total_current: float,
+        ) -> dict[str, dict[str, float]]: ...
+
+        def _total_phase_current(self, phase_data: dict[str, dict[str, float]]) -> float: ...
+
+        def update_virtual_state(self, status: int, energy_forward: float, relay_on: bool) -> bool: ...
+
     @staticmethod
     def _offline_health_reason(svc: Any) -> str:
         """Return the health reason used for one offline publish."""

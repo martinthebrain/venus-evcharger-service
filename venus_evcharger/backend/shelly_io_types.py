@@ -3,12 +3,17 @@
 
 from __future__ import annotations
 
+from types import TracebackType
 from typing import Protocol, TypedDict
 
 from requests.auth import HTTPDigestAuth
 
 from venus_evcharger.backend.models import (
+    ChargerState,
+    MeterReading,
     PhaseSelection,
+    SwitchCapabilities,
+    SwitchState,
     normalize_phase_selection,
     normalize_phase_selection_tuple,
 )
@@ -76,6 +81,73 @@ class _WorkerThreadLike(Protocol):
     def start(self) -> None: ...  # pragma: no cover
 
 
+class _LockLike(Protocol):
+    """Context-manager lock subset used for relay command state."""
+
+    def __enter__(self) -> object: ...  # pragma: no cover
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None: ...  # pragma: no cover
+
+
+class _CloseableLike(Protocol):
+    """Object subset for sessions/transports that can be closed."""
+
+    def close(self) -> None: ...  # pragma: no cover
+
+
+class _SettableEventLike(Protocol):
+    """Object subset for event-like objects that can be set."""
+
+    def set(self) -> None: ...  # pragma: no cover
+
+
+class _MeterBackendLike(Protocol):
+    """Meter backend subset consumed by Shelly I/O split mode."""
+
+    def read_meter(self) -> MeterReading: ...  # pragma: no cover
+
+
+class _EnableBackendLike(Protocol):
+    """Backend subset that can switch charging output on or off."""
+
+    def set_enabled(self, enabled: bool) -> None: ...  # pragma: no cover
+
+
+class _PhaseSelectionBackendLike(Protocol):
+    """Backend subset that can apply one phase-selection target."""
+
+    def set_phase_selection(self, selection: PhaseSelection) -> None: ...  # pragma: no cover
+
+
+class _SwitchStateBackendLike(Protocol):
+    """Switch backend subset that can read normalized switch state."""
+
+    def read_switch_state(self) -> SwitchState: ...  # pragma: no cover
+
+
+class _SwitchCapabilitiesBackendLike(Protocol):
+    """Switch backend subset that exposes normalized capabilities."""
+
+    def capabilities(self) -> SwitchCapabilities: ...  # pragma: no cover
+
+
+class _ChargerStateBackendLike(Protocol):
+    """Charger backend subset that can read normalized charger state."""
+
+    def read_charger_state(self) -> ChargerState: ...  # pragma: no cover
+
+
+class _TransportSessionResetBackendLike(Protocol):
+    """Backend subset that accepts a new shared transport session."""
+
+    def reset_transport_session(self, session: object) -> None: ...  # pragma: no cover
+
+
 class _RequestAuthKwargs(TypedDict, total=False):
     """Optional auth kwargs accepted by ``requests.Session.get``."""
 
@@ -110,7 +182,7 @@ class ShellyIoHost(Protocol):
     _last_pm_status_at: float | None
     _last_pm_status_confirmed: bool
     _last_voltage: float | None
-    _relay_command_lock: object
+    _relay_command_lock: _LockLike
     _pending_relay_state: bool | None
     _pending_relay_requested_at: float | None
     relay_sync_timeout_seconds: float
@@ -151,6 +223,15 @@ class ShellyIoHost(Protocol):
     _last_switch_feedback_at: float | None
     _charger_target_current_amps: float | None
     _charger_target_current_applied_at: float | None
+    _shelly_state: str
+    _shelly_last_error_reason: str | None
+    _shelly_last_error_detail: str | None
+    _shelly_last_error_at: float | None
+    _shelly_consecutive_errors: int
+    _shelly_retry_after: float
+    _shelly_offline_since: float | None
+    _shelly_last_ok_at: float | None
+    _shelly_session_reset_count: int
 
     def _time_now(self) -> float: ...  # pragma: no cover
 
@@ -235,8 +316,18 @@ __all__ = [
     "ShellyRpcScalar",
     "_RequestAuthKwargs",
     "_RequestKwargs",
+    "_ChargerStateBackendLike",
+    "_CloseableLike",
+    "_EnableBackendLike",
+    "_LockLike",
+    "_MeterBackendLike",
+    "_PhaseSelectionBackendLike",
     "_ResponseLike",
+    "_SettableEventLike",
     "_SessionLike",
+    "_SwitchCapabilitiesBackendLike",
+    "_SwitchStateBackendLike",
+    "_TransportSessionResetBackendLike",
     "_WorkerStopEventLike",
     "_WorkerThreadLike",
     "_distributed_phase_vector",
