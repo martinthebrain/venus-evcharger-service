@@ -50,6 +50,7 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
     import venus_evcharger.dbus_adapter_process_io as process_io_module
     import venus_evcharger.dbus_adapter_process_runtime as runtime_module
     import venus_evcharger.dbus_adapter_read as read_module
+    import venus_evcharger.dbus_adapter_read_pv as read_pv_module
     import venus_evcharger.dbus_adapter_write_core as write_core_module
     import venus_evcharger.dbus_adapter_write_health as write_health_module
     import venus_evcharger.dbus_adapter_write_publish as write_publish_module
@@ -84,6 +85,15 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         self.assertIsNone(read_module.read_target("", "/Path"))
         self.assertIsNone(read_module.read_target("svc", "Path"))
         self.assertIsNone(read_module.read_target("svc", ""))
+
+    def test_aggregate_signature_members_accepts_only_matching_complete_signatures(self) -> None:
+        self.assertIsNone(read_module.aggregate_signature_members(None, "pv-total"))
+        self.assertIsNone(read_module.aggregate_signature_members(("pv-total", (), "extra"), "pv-total"))
+        self.assertIsNone(read_module.aggregate_signature_members(("sum", (("svc", "/Path"),)), "pv-total"))
+        self.assertEqual(
+            read_module.aggregate_signature_members(("pv-total", (("svc", "/Path"),)), "pv-total"),
+            [("svc", "/Path")],
+        )
 
     def test_read_executor_drops_invalid_first_service_path_without_dbus_read(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -140,7 +150,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(outcome, "applied")
             self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 0.0)
             self.assertEqual(adapter.cache.values["pv_power_w"]["confidence"], 0.25)
-            self.assertIn("No cached AC PV services or configured DC PV path", adapter.cache.values["pv_power_w"]["last_error"])
+            self.assertIn("No available AC or DC PV source candidates", adapter.cache.values["pv_power_w"]["last_error"])
             self.assertNotIn("path:com.victronenergy.systemNotAbsolute", adapter.cache.values)
 
     def test_read_executor_direct_path_key_updates_only_one_cache_entry(self) -> None:
@@ -1419,7 +1429,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 "use_dc_pv": "false",
             }
 
-            with self.assertRaisesRegex(RuntimeError, "No cached AC PV services or configured DC PV path"):
+            with self.assertRaisesRegex(RuntimeError, "No available AC or DC PV source candidates"):
                 adapter.read_executor._poll_pv_total_step("pv_power_w", spec)
 
     def test_pv_total_member_discovery_keeps_ac_and_dc_sources_explicit(self) -> None:
@@ -1435,8 +1445,16 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 ]
             )
 
+            def members(spec: dict[str, object], *, now: float | None = None) -> list[tuple[str, str]]:
+                return read_pv_module.pv_total_members(
+                    spec,
+                    adapter.read_executor._services_for_sum(spec),
+                    adapter.cache.values,
+                    now=now,
+                )
+
             self.assertEqual(
-                adapter.read_executor._pv_total_members(
+                members(
                     {
                         "prefix": "com.victronenergy.pvinverter",
                         "path": "/Ac/Power",
@@ -1452,7 +1470,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                adapter.read_executor._pv_total_members(
+                members(
                     {
                         "prefix": "com.victronenergy.pvinverter",
                         "path": "/Ac/Power",
@@ -1478,47 +1496,48 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 error="old",
                 now=-1000.0,
             )
-            with patch.object(read_module.time, "time", return_value=120.0):
-                self.assertEqual(
-                    adapter.read_executor._pv_total_members(
-                        {
-                            "prefix": "com.victronenergy.pvinverter",
-                            "path": "/Ac/Power",
-                            "dc_service": "",
-                            "dc_path": "",
-                            "use_dc_pv": "off",
-                        }
-                    ),
-                    [("com.victronenergy.pvinverter.http_9", "/Ac/Power")],
-                )
+            self.assertEqual(
+                members(
+                    {
+                        "prefix": "com.victronenergy.pvinverter",
+                        "path": "/Ac/Power",
+                        "dc_service": "",
+                        "dc_path": "",
+                        "use_dc_pv": "off",
+                    },
+                    now=120.0,
+                ),
+                [("com.victronenergy.pvinverter.http_9", "/Ac/Power")],
+            )
             adapter.cache.mark_error(
                 "path:com.victronenergy.system/Dc/Pv/Power",
                 source="com.victronenergy.system/Dc/Pv/Power",
                 error="dc asleep",
                 now=100.0,
             )
-            with patch.object(read_module.time, "time", return_value=120.0):
-                self.assertEqual(
-                    adapter.read_executor._pv_total_members(
-                        {
-                            "prefix": "com.victronenergy.pvinverter",
-                            "path": "",
-                            "dc_service": "com.victronenergy.system",
-                            "dc_path": "/Dc/Pv/Power",
-                            "use_dc_pv": "on",
-                        }
-                    ),
-                    [],
-                )
             self.assertEqual(
-                adapter.read_executor._pv_total_members(
+                members(
+                    {
+                        "prefix": "com.victronenergy.pvinverter",
+                        "path": "",
+                        "dc_service": "com.victronenergy.system",
+                        "dc_path": "/Dc/Pv/Power",
+                        "use_dc_pv": "on",
+                    },
+                    now=120.0,
+                ),
+                [],
+            )
+            self.assertEqual(
+                members(
                     {
                         "prefix": "com.victronenergy.pvinverter",
                         "path": "/Ac/Power",
                         "dc_service": "",
                         "dc_path": "/Dc/Pv/Power",
                         "use_dc_pv": "on",
-                    }
+                    },
+                    now=1000.0,
                 ),
                 [
                     ("com.victronenergy.pvinverter.http_1", "/Ac/Power"),
@@ -1526,26 +1545,28 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                adapter.read_executor._pv_total_members(
+                members(
                     {
                         "prefix": "com.victronenergy.pvinverter",
                         "path": "",
                         "dc_service": "com.victronenergy.system",
                         "dc_path": "/Dc/Pv/Power",
                         "use_dc_pv": "on",
-                    }
+                    },
+                    now=1000.0,
                 ),
                 [("com.victronenergy.system", "/Dc/Pv/Power")],
             )
             self.assertEqual(
-                adapter.read_executor._pv_total_members(
+                members(
                     {
                         "prefix": "com.victronenergy.pvinverter",
                         "path": "/Ac/Power",
                         "dc_service": "com.victronenergy.system",
                         "dc_path": "",
                         "use_dc_pv": "on",
-                    }
+                    },
+                    now=1000.0,
                 ),
                 [
                     ("com.victronenergy.pvinverter.http_1", "/Ac/Power"),
@@ -1560,7 +1581,6 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
-            adapter.read_executor._pv_member_recently_failed = MagicMock(return_value=False)  # type: ignore[method-assign]
 
             def fake_read(service: str, path: str) -> float:
                 if service == "com.victronenergy.pvinverter.http_1":

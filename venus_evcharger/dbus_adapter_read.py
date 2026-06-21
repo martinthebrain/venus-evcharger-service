@@ -13,10 +13,11 @@ import dbus
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
+from venus_evcharger.dbus_adapter_read_pv import pv_total_members
 from venus_evcharger.dbus_gateway import dbus_path_key
 
-PV_MEMBER_ERROR_BACKOFF_SECONDS = 300.0
 DbusPathKey = str
+PV_TOTAL_AGGREGATE = "pv-total"
 _OPTIONAL_MEMBER_FAILED = object()
 
 
@@ -40,6 +41,18 @@ def read_target(service: object, path: object) -> ReadTarget | None:  # pragma: 
     if not service_name or not dbus_path.startswith("/"):
         return None
     return ReadTarget(service_name, dbus_path)
+
+
+def aggregate_signature_members(signature: Any, aggregate: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
+    if not isinstance(signature, tuple):
+        return None
+    try:
+        name, members = signature
+    except ValueError:
+        return None
+    if name != aggregate:
+        return None
+    return [(str(service), str(path)) for service, path in members]
 
 
 class _ReadCacheProtocol(Protocol):
@@ -154,7 +167,7 @@ class DbusReadExecutor:
             "sum": self._poll_sum_step,
             "services-sum": self._poll_services_sum_step,
             "first-service": self._poll_first_service,
-            "pv-total": self._poll_pv_total_step,
+            PV_TOTAL_AGGREGATE: self._poll_pv_total_step,
         }
         handler = handlers.get(aggregate)
         return handler(key, spec) if handler else self._poll_direct_spec(key, spec)
@@ -207,16 +220,25 @@ class DbusReadExecutor:
         return self._poll_aggregate_step(key, ("services-sum", path, tuple(services)), [(service, path) for service in services])
 
     def _poll_pv_total_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
-        members = self._pv_total_members(spec)
+        members = self._in_progress_pv_total_members(key) or pv_total_members(
+            spec,
+            self._services_for_sum(spec),
+            self.adapter.cache.values,
+        )
         if not members:
-            raise RuntimeError("No cached AC PV services or configured DC PV path")
+            raise RuntimeError("No available AC or DC PV source candidates")
         return self._poll_aggregate_step(
             key,
-            ("pv-total", tuple(members)),
+            (PV_TOTAL_AGGREGATE, tuple(members)),
             members,
             ignore_member_errors=True,
             empty_confidence=float(spec.get("optional_confidence", 0.2) or 0.2),
         )
+
+    def _in_progress_pv_total_members(self, key: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
+        state = self._aggregate_state.get(key)
+        signature = state.get("signature") if state is not None else None
+        return aggregate_signature_members(signature, PV_TOTAL_AGGREGATE)
 
     def _poll_first_service(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
         path = str(spec.get("path") or "")
@@ -237,43 +259,6 @@ class DbusReadExecutor:
 
     def _prefixed_services(self, prefix: str) -> list[str]:  # pragma: no mutate block
         return sorted(name for name in self.adapter.cache.services if name.startswith(prefix))
-
-    def _pv_total_members(self, spec: Mapping[str, Any]) -> list[tuple[str, str]]:
-        return [*self._ac_pv_members(spec), *self._dc_pv_members(spec)]
-
-    def _ac_pv_members(self, spec: Mapping[str, Any]) -> list[tuple[str, str]]:
-        path = str(spec.get("path") or "")
-        return [
-            (service, path)
-            for service in self._services_for_sum(spec)
-            if path and not self._pv_member_recently_failed(service, path)
-        ]
-
-    def _dc_pv_members(self, spec: Mapping[str, Any]) -> list[tuple[str, str]]:
-        if not self._use_dc_pv(spec):
-            return []
-        target = self._dc_pv_target(spec)
-        if target is None or self._pv_member_recently_failed(*target):
-            return []
-        return [target]
-
-    @staticmethod
-    def _dc_pv_target(spec: Mapping[str, Any]) -> tuple[str, str] | None:
-        target = read_target(spec.get("dc_service"), spec.get("dc_path"))
-        if target is None:
-            return None
-        return target.service, target.path
-
-    @staticmethod
-    def _use_dc_pv(spec: Mapping[str, Any]) -> bool:  # pragma: no mutate block
-        return str(spec.get("use_dc_pv", "")).strip().lower() in {"1", "true", "yes", "on"}
-
-    def _pv_member_recently_failed(self, service: str, path: str) -> bool:  # pragma: no mutate block
-        entry = self.adapter.cache.values.get(dbus_path_key(service, path), {})
-        if entry.get("status") != "error":
-            return False
-        error_at = float(entry.get("error_at", 0.0) or 0.0)
-        return error_at > 0.0 and time.time() - error_at < PV_MEMBER_ERROR_BACKOFF_SECONDS
 
     def _poll_aggregate_step(
         self,
