@@ -13,6 +13,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from venus_evcharger.dbus_adapter_health_backpressure import backpressure_snapshot
 from venus_evcharger.dbus_adapter_health_freshness import (
     cache_freshness,
     cached_entry_age,
@@ -27,10 +28,19 @@ from venus_evcharger.dbus_adapter_health_gui import (
 )
 from venus_evcharger.dbus_adapter_health_history import append_health_log
 from venus_evcharger.dbus_adapter_health_queue import oldest_command_age, queue_class_health, queue_health
+from venus_evcharger.dbus_adapter_health_slo import (
+    SloThresholds,
+    effective_gui_max_age_seconds,
+    max_core_read_age,
+    regulated_publish_burst,
+    slo_checks_from_observed,
+    slo_payload,
+    slo_targets,
+    stale_core_read_keys,
+)
 from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterHealthContext
 from venus_evcharger.dbus_gateway import FAST_READ_KEYS, DbusCommandInbox, dbus_path_key
 
-BACKPRESSURE_SLO_REASONS = {"core_reads_fresh", "queue_age_ok"}
 SESSION_ACTIVE_POWER_WATTS = 50.0
 SESSION_ACTIVE_CURRENT_AMPS = 0.2
 
@@ -93,7 +103,12 @@ class DbusAdapterHealthMixin:
             "write_scheduler": write_scheduler_health,
             "cache_freshness": freshness,
             "slo": slo,
-            "backpressure": self._backpressure_snapshot(slo=slo, queue_health=queue_metrics),
+            "backpressure": backpressure_snapshot(
+                circuit_state=self.circuit.state(),
+                queue_health=queue_metrics,
+                slo=slo,
+                queue_max_age_seconds=self.slo_queue_max_age_seconds,
+            ),
             "resources": self._last_resource_snapshot or self.resource_monitor.snapshot(),
             "adaptive_tick_seconds": self.tick_seconds,
             "min_tick_seconds": self.min_tick_seconds,
@@ -118,8 +133,19 @@ class DbusAdapterHealthMixin:
         current_monotonic: float,
     ) -> dict[str, Any]:  # pragma: no mutate block
         observed = self._slo_observed(queue_health, cache_freshness, now, current_monotonic)
-        checks = self._slo_checks_from_observed(observed)
-        return _slo_payload(checks, self._slo_targets(), observed)
+        thresholds = self._slo_thresholds()
+        checks = slo_checks_from_observed(observed, thresholds)
+        return slo_payload(checks, slo_targets(thresholds), observed)
+
+    def _slo_thresholds(self: DbusAdapterHealthContext) -> SloThresholds:  # pragma: no mutate block
+        return SloThresholds(
+            gui_max_age_seconds=self.slo_gui_max_age_seconds,
+            core_read_max_age_seconds=self.slo_core_read_max_age_seconds,
+            queue_max_age_seconds=self.slo_queue_max_age_seconds,
+            mainloop_gap_max_ms=self.slo_mainloop_gap_max_ms,
+            tick_seconds=self.tick_seconds,
+            max_tick_seconds=self.max_tick_seconds,
+        )
 
     def _slo_observed(
         self: DbusAdapterHealthContext,
@@ -142,47 +168,10 @@ class DbusAdapterHealthMixin:
             "gui_measurement_missing_path_count": self._missing_cached_path_count(GUI_MEASUREMENT_FRESHNESS_PATHS),
             "gui_control_missing_path_count": self._missing_cached_path_count(GUI_CONTROL_FRESHNESS_PATHS),
             "gui_session_missing_path_count": self._missing_cached_path_count(session_paths),
-            "core_read_max_age_s": self._max_core_read_age(cache_freshness),
+            "core_read_max_age_s": max_core_read_age(cache_freshness),
             "queue_oldest_age_s": float(queue_health.get("oldest_command_age_s", 0.0) or 0.0),
             "mainloop_max_gap_ms_60s": float(eventloop.get("max_tick_gap_ms_60s", 0.0) or 0.0),
         }
-
-    def _slo_checks_from_observed(
-        self: DbusAdapterHealthContext,
-        observed: Mapping[str, float],
-    ) -> dict[str, bool]:  # pragma: no mutate block
-        gui_target = self._effective_gui_max_age_seconds()
-        return {
-            "gui_fresh": float(observed.get("gui_max_age_s", 0.0)) <= gui_target,
-            "gui_measurements_fresh": float(observed.get("gui_measurement_max_age_s", 0.0)) <= gui_target,
-            "gui_controls_fresh": float(observed.get("gui_control_max_age_s", 0.0)) <= gui_target,
-            "gui_session_fresh": float(observed.get("gui_session_max_age_s", 0.0)) <= gui_target,
-            "core_reads_fresh": float(observed.get("core_read_max_age_s", 0.0))
-            <= self.slo_core_read_max_age_seconds,
-            "queue_age_ok": float(observed.get("queue_oldest_age_s", 0.0)) <= self.slo_queue_max_age_seconds,
-            "mainloop_gap_ok": float(observed.get("mainloop_max_gap_ms_60s", 0.0))
-            <= self._effective_mainloop_gap_max_ms(),
-        }
-
-    def _slo_targets(self: DbusAdapterHealthContext) -> dict[str, float]:  # pragma: no mutate block
-        effective_gui_age = self._effective_gui_max_age_seconds()
-        return {
-            "gui_max_age_s": effective_gui_age,
-            "gui_measurement_max_age_s": effective_gui_age,
-            "gui_control_max_age_s": effective_gui_age,
-            "gui_session_max_age_s": effective_gui_age,
-            "configured_gui_max_age_s": self.slo_gui_max_age_seconds,
-            "core_read_max_age_s": self.slo_core_read_max_age_seconds,
-            "queue_max_age_s": self.slo_queue_max_age_seconds,
-            "mainloop_gap_max_ms": self._effective_mainloop_gap_max_ms(),
-        }
-
-    def _effective_gui_max_age_seconds(self: DbusAdapterHealthContext) -> float:  # pragma: no mutate block
-        return max(self.slo_gui_max_age_seconds, self.slo_core_read_max_age_seconds * 2.0)
-
-    def _effective_mainloop_gap_max_ms(self: DbusAdapterHealthContext) -> float:  # pragma: no mutate block
-        adaptive_tick_ms = max(self.tick_seconds, self.max_tick_seconds) * 1000.0
-        return max(self.slo_mainloop_gap_max_ms, adaptive_tick_ms * 2.5)
 
     def _gui_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
         paths = set(GUI_MEASUREMENT_FRESHNESS_PATHS | GUI_CONTROL_FRESHNESS_PATHS)
@@ -200,80 +189,36 @@ class DbusAdapterHealthMixin:
 
     def _fresh_cached_path_float(self: DbusAdapterHealthContext, path: str, now: float) -> float:
         entry = self.cache.values.get(dbus_path_key(self.service_name, path))
-        if cached_entry_age(entry, now) > self._effective_gui_max_age_seconds():
+        if cached_entry_age(entry, now) > effective_gui_max_age_seconds(self._slo_thresholds()):
             return 0.0
         return cached_entry_float(entry)
-
-    def _backpressure_snapshot(
-        self: DbusAdapterHealthContext,
-        *,
-        slo: Mapping[str, Any],
-        queue_health: Mapping[str, Any],
-    ) -> dict[str, Any]:  # pragma: no mutate block
-        circuit_state = self.circuit.state()
-        queue_age = float(queue_health.get("oldest_command_age_s", 0.0) or 0.0)
-        reasons = self._backpressure_reasons(circuit_state, queue_age, slo)
-        state = self._backpressure_state(circuit_state, queue_age, reasons)
-        return {
-            "state": state,
-            "core_should_throttle": state != "ok",
-            "suppress_optional_commands": state in {"slow", "protective"},
-            "prefer_coalescing": state != "ok",
-            "reason": ",".join(dict.fromkeys(reasons)) if reasons else "ok",
-        }
-
-    def _backpressure_reasons(
-        self: DbusAdapterHealthContext,
-        circuit_state: str,
-        queue_age: float,
-        slo: Mapping[str, Any],
-    ) -> list[str]:  # pragma: no mutate block
-        reasons = [f"dbus-{circuit_state}"] if circuit_state != "ok" else []
-        if queue_age > self.slo_queue_max_age_seconds:
-            reasons.append("queue-age")
-        reasons.extend(self._backpressure_slo_reasons(slo))
-        return reasons
-
-    @staticmethod
-    def _backpressure_slo_reasons(slo: Mapping[str, Any]) -> list[str]:  # pragma: no mutate block
-        return [str(item) for item in list(slo.get("violated", []) or []) if item in BACKPRESSURE_SLO_REASONS]
-
-    def _backpressure_state(
-        self: DbusAdapterHealthContext,
-        circuit_state: str,
-        queue_age: float,
-        reasons: list[str],
-    ) -> str:  # pragma: no mutate block
-        if circuit_state == "protective":
-            return "protective"
-        if circuit_state == "degraded" or queue_age > self.slo_queue_max_age_seconds * 2.0:
-            return "slow"
-        return "congested" if reasons else "ok"
 
     def _apply_slo_regulation(self: DbusAdapterHealthContext) -> None:  # pragma: no mutate block
         now = time.time()
         pending = DbusCommandInbox.coalesce(self.commands.load_pending())
         queue_age = oldest_command_age(pending, now)
         cache_freshness = self._cache_freshness(now)
-        core_read_age = self._max_core_read_age(cache_freshness)
+        core_read_age = max_core_read_age(cache_freshness)
         eventloop_gap_ms = float(self.tick_health.snapshot().get("max_tick_gap_ms_60s", 0.0) or 0.0)
-        self.write_scheduler.set_dynamic_local_publish_burst(self._regulated_publish_burst(queue_age, eventloop_gap_ms))
+        thresholds = self._slo_thresholds()
+        self.write_scheduler.set_dynamic_local_publish_burst(
+            regulated_publish_burst(
+                queue_age=queue_age,
+                eventloop_gap_ms=eventloop_gap_ms,
+                base_burst=self.write_scheduler.local_publish_burst_limit,
+                thresholds=thresholds,
+            )
+        )
         if core_read_age > self.slo_core_read_max_age_seconds:
-            self.read_scheduler.force_due(self._stale_core_read_keys(cache_freshness))
+            self.read_scheduler.force_due(
+                stale_core_read_keys(
+                    cache_freshness,
+                    FAST_READ_KEYS,
+                    max_age_seconds=self.slo_core_read_max_age_seconds,
+                )
+            )
         if self.circuit.state() != "ok":
             self._quiet_discovery_and_introspection(now)
-
-    def _regulated_publish_burst(
-        self: DbusAdapterHealthContext,
-        queue_age: float,
-        eventloop_gap_ms: float,
-    ) -> int:  # pragma: no mutate block
-        burst = self.write_scheduler.local_publish_burst_limit
-        if queue_age > self.slo_queue_max_age_seconds:
-            burst = min(max(burst * 3, burst + 4), 50)
-        if eventloop_gap_ms > self._effective_mainloop_gap_max_ms():
-            burst = max(1, min(burst, max(1, self.write_scheduler.local_publish_burst_limit // 2)))
-        return int(burst)
 
     def _quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:  # pragma: no mutate block
         quiet_until = now + 60.0
@@ -285,43 +230,3 @@ class DbusAdapterHealthMixin:
 
     def _missing_cached_path_count(self: DbusAdapterHealthContext, paths: set[str]) -> float:  # pragma: no mutate block
         return missing_cached_path_count(self.cache.values, self.service_name, paths)
-
-    @staticmethod
-    def _max_core_read_age(cache_freshness: Mapping[str, Any]) -> float:  # pragma: no mutate block
-        ages = [
-            float(cache_freshness.get(f"{key}_age_s", 0.0) or 0.0)
-            for key in ("grid_power_w", "pv_power_w", "battery_soc")
-            if f"{key}_age_s" in cache_freshness
-        ]
-        return max(ages) if ages else 0.0
-
-    def _stale_core_read_keys(self: DbusAdapterHealthContext, cache_freshness: Mapping[str, Any]) -> set[str]:
-        return {
-            key
-            for key in FAST_READ_KEYS
-            if self._core_read_stale(key, cache_freshness)
-        }
-
-    def _core_read_stale(self: DbusAdapterHealthContext, key: str, cache_freshness: Mapping[str, Any]) -> bool:
-        status_key = f"{key}_status"
-        age_key = f"{key}_age_s"
-        if status_key not in cache_freshness or age_key not in cache_freshness:
-            return True
-        if str(cache_freshness[status_key]) != "fresh":
-            return True
-        return float(cache_freshness[age_key] or 0.0) > self.slo_core_read_max_age_seconds
-
-
-def _slo_payload(
-    checks: Mapping[str, bool],
-    targets: Mapping[str, float],
-    observed: Mapping[str, float],
-) -> dict[str, Any]:  # pragma: no mutate block
-    violated = [name for name, ok in checks.items() if not ok]
-    return {
-        "state": "violated" if violated else "ok",
-        "violated": violated,
-        "checks": dict(checks),
-        "targets": dict(targets),
-        "observed": dict(observed),
-    }

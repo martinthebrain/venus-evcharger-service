@@ -39,8 +39,10 @@ fake_dbus_mainloop.DBusGMainLoop = MagicMock()  # type: ignore[attr-defined]
 
 with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fake_dbus_mainloop}):
     import venus_evcharger_dbus_adapter as adapter_module
+    import venus_evcharger.dbus_adapter_health_backpressure as health_backpressure_module
     import venus_evcharger.dbus_adapter_health_history as health_history_module
     import venus_evcharger.dbus_adapter_health_queue as health_queue_module
+    import venus_evcharger.dbus_adapter_health_slo as health_slo_module
     import venus_evcharger.dbus_adapter_components_rate as rate_module
     import venus_evcharger.dbus_adapter_components_resource as resource_module
     import venus_evcharger.dbus_adapter_process_health as process_health_module
@@ -2002,8 +2004,9 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(observed["gui_session_max_age_s"], 0.0)
             self.assertEqual(observed["gui_session_missing_path_count"], 0.0)
             self.assertGreater(observed["gui_control_missing_path_count"], 0.0)
-            self.assertTrue(adapter._slo_checks_from_observed(observed)["gui_fresh"])
-            self.assertTrue(adapter._slo_checks_from_observed(observed)["gui_controls_fresh"])
+            checks = health_slo_module.slo_checks_from_observed(observed, adapter._slo_thresholds())
+            self.assertTrue(checks["gui_fresh"])
+            self.assertTrue(checks["gui_controls_fresh"])
 
     def test_gui_freshness_tracks_control_paths_against_effective_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2026,13 +2029,14 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     value,
                     source=f"{adapter.service_name}{path}",
                     now=now - age,
-                )
+            )
 
             observed = adapter._slo_observed({}, {}, now, time.monotonic())
-            checks = adapter._slo_checks_from_observed(observed)
+            checks = health_slo_module.slo_checks_from_observed(observed, adapter._slo_thresholds())
+            targets = health_slo_module.slo_targets(adapter._slo_thresholds())
 
-            self.assertEqual(adapter._slo_targets()["configured_gui_max_age_s"], 2.0)
-            self.assertEqual(adapter._slo_targets()["gui_control_max_age_s"], 10.0)
+            self.assertEqual(targets["configured_gui_max_age_s"], 2.0)
+            self.assertEqual(targets["gui_control_max_age_s"], 10.0)
             self.assertEqual(observed["gui_control_max_age_s"], 9.0)
             self.assertEqual(observed["gui_control_missing_path_count"], 7.0)
             self.assertGreater(observed["gui_missing_path_count"], observed["gui_control_missing_path_count"])
@@ -2046,7 +2050,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 now=now - 10.1,
             )
             stale_observed = adapter._slo_observed({}, {}, now, time.monotonic())
-            stale_checks = adapter._slo_checks_from_observed(stale_observed)
+            stale_checks = health_slo_module.slo_checks_from_observed(stale_observed, adapter._slo_thresholds())
 
             self.assertFalse(stale_checks["gui_controls_fresh"])
             self.assertFalse(stale_checks["gui_fresh"])
@@ -2077,7 +2081,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertTrue(adapter._charging_session_active_for_gui(now))
             self.assertIn("/Session/Energy", adapter._gui_freshness_paths(now))
             observed = adapter._slo_observed({}, {}, now, time.monotonic())
-            self.assertFalse(adapter._slo_checks_from_observed(observed)["gui_fresh"])
+            self.assertFalse(health_slo_module.slo_checks_from_observed(observed, adapter._slo_thresholds())["gui_fresh"])
 
     def test_gui_activity_detection_uses_fresh_power_or_current_thresholds(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2118,30 +2122,46 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.slo_core_read_max_age_seconds = 0.5
 
-            self.assertTrue(adapter._core_read_stale("grid_power_w", {}))
-            self.assertTrue(adapter._core_read_stale("grid_power_w", {"grid_power_w_status": "fresh"}))
             self.assertTrue(
-                adapter._core_read_stale(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+            self.assertTrue(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {"grid_power_w_status": "fresh"},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+            self.assertTrue(
+                health_slo_module.core_read_stale(
                     "grid_power_w",
                     {"grid_power_w_status": "error", "grid_power_w_age_s": 0.0},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
                 )
             )
             self.assertFalse(
-                adapter._core_read_stale(
+                health_slo_module.core_read_stale(
                     "grid_power_w",
                     {"grid_power_w_status": "fresh", "grid_power_w_age_s": 0.0},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
                 )
             )
             self.assertFalse(
-                adapter._core_read_stale(
+                health_slo_module.core_read_stale(
                     "grid_power_w",
                     {"grid_power_w_status": "fresh", "grid_power_w_age_s": 0.5},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
                 )
             )
             self.assertTrue(
-                adapter._core_read_stale(
+                health_slo_module.core_read_stale(
                     "grid_power_w",
                     {"grid_power_w_status": "fresh", "grid_power_w_age_s": 0.6},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
                 )
             )
 
@@ -2828,7 +2848,16 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-health-edges")))
 
             adapter.write_scheduler.local_publish_burst_limit = 20
-            self.assertEqual(adapter._regulated_publish_burst(0.0, adapter._effective_mainloop_gap_max_ms() + 1.0), 10)
+            thresholds = adapter._slo_thresholds()
+            self.assertEqual(
+                health_slo_module.regulated_publish_burst(
+                    queue_age=0.0,
+                    eventloop_gap_ms=health_slo_module.effective_mainloop_gap_max_ms(thresholds) + 1.0,
+                    base_burst=adapter.write_scheduler.local_publish_burst_limit,
+                    thresholds=thresholds,
+                ),
+                10,
+            )
 
             now = time.time()
             adapter.cache.update_value(
@@ -2877,20 +2906,34 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 adapter._timed_local_publish(lambda: (_ for _ in ()).throw(RuntimeError("publish failed")))
 
-            slow = adapter._backpressure_snapshot(
+            slow = health_backpressure_module.backpressure_snapshot(
+                circuit_state=adapter.circuit.state(),
                 slo={"violated": []},
                 queue_health={"oldest_command_age_s": adapter.slo_queue_max_age_seconds * 3.0},
+                queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
             )
             self.assertEqual(slow["state"], "slow")
             adapter.circuit.protective_until = time.time() + 10.0
-            protective = adapter._backpressure_snapshot(slo={"violated": []}, queue_health={"oldest_command_age_s": 0.0})
+            protective = health_backpressure_module.backpressure_snapshot(
+                circuit_state=adapter.circuit.state(),
+                slo={"violated": []},
+                queue_health={"oldest_command_age_s": 0.0},
+                queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
+            )
             self.assertEqual(protective["state"], "protective")
             adapter.circuit.protective_until = 0.0
-            congested = adapter._backpressure_snapshot(slo={"violated": ["gui_fresh"]}, queue_health={"oldest_command_age_s": 0.0})
+            congested = health_backpressure_module.backpressure_snapshot(
+                circuit_state=adapter.circuit.state(),
+                slo={"violated": ["gui_fresh"]},
+                queue_health={"oldest_command_age_s": 0.0},
+                queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
+            )
             self.assertEqual(congested["state"], "ok")
-            congested = adapter._backpressure_snapshot(
+            congested = health_backpressure_module.backpressure_snapshot(
+                circuit_state=adapter.circuit.state(),
                 slo={"violated": ["core_reads_fresh"]},
                 queue_health={"oldest_command_age_s": 0.0},
+                queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
             )
             self.assertEqual(congested["state"], "congested")
 
