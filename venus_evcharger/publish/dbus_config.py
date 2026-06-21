@@ -59,6 +59,7 @@ class _DbusPublishConfigMixin:
         startstop_value = int(bool(charger_enabled)) if charger_enabled is not None else int(startstop_display)
         return {
             "/Connected": self._connected_display(now),
+            "/Status": int(getattr(self.service, "last_status", 0)),
             "/Mode": int(getattr(self.service, "virtual_mode", 0)),
             "/AutoStart": int(getattr(self.service, "virtual_autostart", 1)),
             "/StartStop": startstop_value,

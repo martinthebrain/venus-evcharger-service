@@ -367,6 +367,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             ({"kind": "register_path"}, "startup/register"),
             ({"kind": "register_service"}, "startup/register"),
             ({"kind": "publish_value", "path": "/Mode"}, "gui-critical-publish"),
+            ({"kind": "publish_value", "path": "/UpdateIndex"}, "gui-critical-publish"),
             ({"kind": "publish_desired", "paths": {"/Session/Time": 1}}, "gui-critical-publish"),
             ({"kind": "publish_desired", "paths": {"/Auto/Reason": 1}}, "local-publish"),
             ({"kind": "publish_desired", "paths": ["/Mode"]}, "local-publish"),

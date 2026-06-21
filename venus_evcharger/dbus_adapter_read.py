@@ -17,6 +17,7 @@ from venus_evcharger.dbus_gateway import dbus_path_key
 
 PV_MEMBER_ERROR_BACKOFF_SECONDS = 300.0
 DbusPathKey = str
+_OPTIONAL_MEMBER_FAILED = object()
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,14 @@ class _ConnectionProtocol(Protocol):
     def bus(self) -> Any: ...  # pragma: no cover
 
 
+class _RateLimiterProtocol(Protocol):
+    def require_due(self, kind: str) -> None: ...  # pragma: no cover
+
+
+class _CircuitProtocol(Protocol):
+    def record_success(self, latency_ms: float, *, kind: str = "dbus") -> None: ...  # pragma: no cover
+
+
 class _ReadAdapterProtocol(Protocol):
     @property
     def cache(self) -> _ReadCacheProtocol: ...  # pragma: no cover
@@ -80,6 +89,12 @@ class _ReadAdapterProtocol(Protocol):
 
     @property
     def read_scheduler(self) -> _ReadSchedulerProtocol: ...  # pragma: no cover
+
+    @property
+    def rate_limiter(self) -> _RateLimiterProtocol: ...  # pragma: no cover
+
+    @property
+    def circuit(self) -> _CircuitProtocol: ...  # pragma: no cover
 
     def _timed(self, kind: str, operation: Callable[[], Any]) -> Any: ...  # pragma: no cover
 
@@ -244,11 +259,10 @@ class DbusReadExecutor:
 
     @staticmethod
     def _dc_pv_target(spec: Mapping[str, Any]) -> tuple[str, str] | None:
-        dc_service = str(spec.get("dc_service") or "")
-        dc_path = str(spec.get("dc_path") or "")
-        if not dc_service or not dc_path:
+        target = read_target(spec.get("dc_service"), spec.get("dc_path"))
+        if target is None:
             return None
-        return dc_service, dc_path
+        return target.service, target.path
 
     @staticmethod
     def _use_dc_pv(spec: Mapping[str, Any]) -> bool:  # pragma: no mutate block
@@ -317,18 +331,32 @@ class DbusReadExecutor:
         *,
         ignore_member_errors: bool,
     ) -> Any:  # pragma: no mutate block
+        value = self._read_aggregate_member_value(service, path, state, ignore_member_errors=ignore_member_errors)
+        if value is _OPTIONAL_MEMBER_FAILED:
+            return None
+        target = read_target(service, path)
+        if target is not None:
+            self.adapter.cache.update_value(target.cache_key, value, source=target.source)
+        return value
+
+    def _read_aggregate_member_value(
+        self,
+        service: str,
+        path: str,
+        state: dict[str, Any],
+        *,
+        ignore_member_errors: bool,
+    ) -> Any:
         try:
-            value = self.read_busitem(service, path)
+            read = self.read_optional_busitem if ignore_member_errors else self.read_busitem
+            return read(service, path)
         except DbusOperationDeferred:
             raise
         except Exception as error:
             if not ignore_member_errors:
                 raise
-            return self._record_optional_aggregate_error(service, path, state, error)
-        target = read_target(service, path)
-        if target is not None:
-            self.adapter.cache.update_value(target.cache_key, value, source=target.source)
-        return value
+            self._record_optional_aggregate_error(service, path, state, error)
+            return _OPTIONAL_MEMBER_FAILED
 
     def _record_optional_aggregate_error(
         self,
@@ -373,6 +401,16 @@ class DbusReadExecutor:
             return None
 
         return self.adapter._timed("read", lambda: self._read_busitem_now(service, path))
+
+    def read_optional_busitem(self, service: str, path: str) -> Any:  # pragma: no mutate block
+        if not service or not path:
+            return None
+
+        self.adapter.rate_limiter.require_due("read")
+        started = time.monotonic()
+        value = self._read_busitem_now(service, path)
+        self.adapter.circuit.record_success((time.monotonic() - started) * 1000.0, kind="optional_read")
+        return value
 
     def _read_busitem_now(self, service: str, path: str) -> Any:  # pragma: no mutate block
         obj = self.adapter.connection.bus().get_object(service, path, introspect=False)

@@ -15,7 +15,11 @@ from venus_evcharger.dbus_adapter_write_support import (
     _local_publish_action_result,
     _stale_coalesced_paths,
 )
-from venus_evcharger.dbus_gateway import DbusCommandInbox, dbus_path_key
+from venus_evcharger.dbus_gateway import (
+    PUBLISH_PATH_RANKS,
+    DbusCommandInbox,
+    dbus_path_key,
+)
 
 _QUEUE_CLASS_RANKS = {
     "startup/register": 0,
@@ -163,7 +167,7 @@ class DbusWriteSchedulerPublishMixin:
         paths = command.get("paths")
         if not isinstance(paths, Mapping):
             return "dropped"
-        items = list(paths.items())
+        items = _prioritized_publish_items(paths)
         if not items:
             return "applied"
         processed, outcome = self._publish_desired_items(items)
@@ -238,3 +242,7 @@ class DbusWriteSchedulerPublishMixin:
         self.last_processed_at = now
         self._processed_events.append(now)
         self._prune_processed(now)
+
+
+def _prioritized_publish_items(paths: Mapping[Any, Any]) -> list[tuple[Any, Any]]:
+    return sorted(paths.items(), key=lambda item: (PUBLISH_PATH_RANKS.get(str(item[0]), 9), str(item[0])))

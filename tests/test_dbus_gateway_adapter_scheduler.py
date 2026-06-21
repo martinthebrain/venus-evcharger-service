@@ -127,6 +127,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     "use_dc_pv": "yes",
                     "dc_service": "com.victronenergy.system",
                     "dc_path": "NotAbsolute",
+                    "optional_zero_on_error": "yes",
                     "optional_confidence": 0.25,
                 },
             )
@@ -134,7 +135,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(outcome, "applied")
             self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 0.0)
             self.assertEqual(adapter.cache.values["pv_power_w"]["confidence"], 0.25)
-            self.assertIn("no reply", adapter.cache.values["pv_power_w"]["last_error"])
+            self.assertIn("No cached AC PV services or configured DC PV path", adapter.cache.values["pv_power_w"]["last_error"])
             self.assertNotIn("path:com.victronenergy.systemNotAbsolute", adapter.cache.values)
 
     def test_read_executor_direct_path_key_updates_only_one_cache_entry(self) -> None:
@@ -478,6 +479,45 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(writes, [("/A", 1), ("/B", 2), ("/C", 3), ("/D", 4)])
             self.assertFalse(Path(command_path).exists())
             self.assertEqual(adapter.write_scheduler.health(now=time.time())["processed_commands_60s"], 1)
+
+    def test_publish_desired_prioritizes_gui_paths_inside_large_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\nDbusGatewayLocalPublishBurstLimit=3\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            writes: list[tuple[str, object]] = []
+
+            class _FakeDbusService(dict):
+                def __setitem__(self, key: str, value: object) -> None:
+                    writes.append((key, value))
+                    super().__setitem__(key, value)
+
+            adapter._dbusservice = _FakeDbusService()
+            adapter.write_scheduler.registered_paths.update(
+                {"/Auto/Reason", "/Mode", "/Status", "/StartStop", "/Ac/L2/Power"}
+            )
+            command_path = adapter.commands.enqueue(
+                {
+                    "kind": "publish_desired",
+                    "paths": {
+                        "/Auto/Reason": "idle",
+                        "/Ac/L2/Power": 0.0,
+                        "/Mode": 1,
+                        "/Status": 6,
+                        "/StartStop": 1,
+                    },
+                    "coalesce_key": "publish-batch",
+                    "priority": "publish",
+                }
+            )
+
+            self.assertTrue(adapter.write_scheduler.process_one())
+
+            self.assertEqual(writes, [("/Mode", 1), ("/StartStop", 1), ("/Status", 6)])
+            self.assertEqual(
+                read_json_file(command_path, {})["paths"],
+                {"/Ac/L2/Power": 0.0, "/Auto/Reason": "idle"},
+            )
 
     def test_repeated_local_publish_refreshes_cache_without_rewriting_dbus(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1178,8 +1218,9 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\nAutoPvServicePrefix=com.victronenergy.pvinverter\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
-            adapter.read_executor.read_busitem = MagicMock(side_effect=RuntimeError("offline"))  # type: ignore[method-assign]
+            adapter.read_executor._read_busitem_now = MagicMock(side_effect=RuntimeError("offline"))  # type: ignore[method-assign]
 
             first = adapter.read_executor.poll_read_spec("pv_power_w", adapter.read_scheduler.specs["pv_power_w"])
             outcome = adapter.read_executor.poll_read_spec("pv_power_w", adapter.read_scheduler.specs["pv_power_w"])
@@ -1191,7 +1232,36 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(entry["status"], "fresh")
             self.assertEqual(entry["confidence"], 0.2)
             self.assertIn("offline", entry["last_error"])
-            self.assertEqual(adapter.read_executor.read_busitem.call_count, 2)
+            self.assertEqual(adapter.read_executor._read_busitem_now.call_count, 2)
+
+    def test_optional_pv_member_failure_does_not_trip_circuit_breaker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.rate_limiter.intervals["read"] = 0.0
+            adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
+            adapter.read_executor._read_busitem_now = MagicMock(side_effect=RuntimeError("night pv asleep"))  # type: ignore[method-assign]
+            adapter.circuit.record_error = MagicMock()  # type: ignore[method-assign]
+
+            outcome = adapter.read_executor.poll_read_spec(
+                "pv_power_w",
+                {
+                    "aggregate": "pv-total",
+                    "prefix": "com.victronenergy.pvinverter",
+                    "path": "/Ac/Power",
+                    "dc_service": "",
+                    "dc_path": "",
+                    "use_dc_pv": "false",
+                },
+            )
+
+            self.assertEqual(outcome, "applied")
+            adapter.circuit.record_error.assert_not_called()
+            member = adapter.cache.values["path:com.victronenergy.pvinverter.http_1/Ac/Power"]
+            self.assertEqual(member["status"], "error")
+            self.assertEqual(member["last_error"], "night pv asleep")
+            self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 0.0)
 
     def test_optional_direct_read_falls_back_to_fresh_zero(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1255,12 +1325,13 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
             values = {
                 ("com.victronenergy.pvinverter.http_1", "/Ac/Power"): 120.0,
                 ("com.victronenergy.system", "/Dc/Pv/Power"): 30.0,
             }
-            adapter.read_executor.read_busitem = MagicMock(side_effect=lambda service, path: values[(service, path)])  # type: ignore[method-assign]
+            adapter.read_executor._read_busitem_now = MagicMock(side_effect=lambda service, path: values[(service, path)])  # type: ignore[method-assign]
 
             first = adapter.read_executor.poll_read_spec("pv_power_w", adapter.read_scheduler.specs["pv_power_w"])
             second = adapter.read_executor.poll_read_spec("pv_power_w", adapter.read_scheduler.specs["pv_power_w"])
@@ -1268,8 +1339,8 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(first, "deferred")
             self.assertEqual(second, "applied")
             self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 150.0)
-            adapter.read_executor.read_busitem.assert_any_call("com.victronenergy.pvinverter.http_1", "/Ac/Power")
-            adapter.read_executor.read_busitem.assert_any_call("com.victronenergy.system", "/Dc/Pv/Power")
+            adapter.read_executor._read_busitem_now.assert_any_call("com.victronenergy.pvinverter.http_1", "/Ac/Power")
+            adapter.read_executor._read_busitem_now.assert_any_call("com.victronenergy.system", "/Dc/Pv/Power")
 
     def test_pv_total_step_passes_members_signature_and_confidence_to_aggregate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1482,6 +1553,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
             adapter.read_executor._pv_member_recently_failed = MagicMock(return_value=False)  # type: ignore[method-assign]
 
@@ -1490,7 +1562,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     raise RuntimeError("ac asleep")
                 return 70.0
 
-            adapter.read_executor.read_busitem = MagicMock(side_effect=fake_read)  # type: ignore[method-assign]
+            adapter.read_executor._read_busitem_now = MagicMock(side_effect=fake_read)  # type: ignore[method-assign]
 
             first = adapter.read_executor.poll_read_spec("pv_power_w", adapter.read_scheduler.specs["pv_power_w"])
             second = adapter.read_executor.poll_read_spec("pv_power_w", adapter.read_scheduler.specs["pv_power_w"])
@@ -1508,7 +1580,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            adapter.read_executor.read_busitem = MagicMock(side_effect=RuntimeError("sleeping"))  # type: ignore[method-assign]
+            adapter.read_executor.read_optional_busitem = MagicMock(side_effect=RuntimeError("sleeping"))  # type: ignore[method-assign]
             state: dict[str, object] = {"errors": ["old"]}
 
             with self.assertLogs(level="DEBUG") as logs:
@@ -1541,7 +1613,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            adapter.read_executor.read_busitem = MagicMock(side_effect=RuntimeError("sleeping"))  # type: ignore[method-assign]
+            adapter.read_executor.read_optional_busitem = MagicMock(side_effect=RuntimeError("sleeping"))  # type: ignore[method-assign]
             state: dict[str, object] = {}
 
             value = adapter.read_executor._read_aggregate_member(
@@ -1565,6 +1637,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 adapter.read_executor._read_aggregate_member("svc", "/Path", {}, ignore_member_errors=False)
 
             adapter.read_executor.read_busitem = MagicMock(side_effect=DbusOperationDeferred("read"))  # type: ignore[method-assign]
+            adapter.read_executor.read_optional_busitem = MagicMock(side_effect=DbusOperationDeferred("read"))  # type: ignore[method-assign]
             with self.assertRaises(DbusOperationDeferred):
                 adapter.read_executor._read_aggregate_member("svc", "/Path", {}, ignore_member_errors=True)
 
@@ -1930,7 +2003,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(adapter._slo_targets()["configured_gui_max_age_s"], 2.0)
             self.assertEqual(adapter._slo_targets()["gui_control_max_age_s"], 10.0)
             self.assertEqual(observed["gui_control_max_age_s"], 9.0)
-            self.assertEqual(observed["gui_control_missing_path_count"], 6.0)
+            self.assertEqual(observed["gui_control_missing_path_count"], 7.0)
             self.assertGreater(observed["gui_missing_path_count"], observed["gui_control_missing_path_count"])
             self.assertTrue(checks["gui_controls_fresh"])
             self.assertTrue(checks["gui_fresh"])

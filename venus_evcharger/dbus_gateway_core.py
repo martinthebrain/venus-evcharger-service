@@ -33,6 +33,7 @@ PRIORITY_VALUES = {
 }
 
 PUBLISH_PATH_RANKS = {
+    "/UpdateIndex": 0,
     "/Connected": 0,
     "/Mode": 0,
     "/StartStop": 0,
@@ -59,6 +60,7 @@ PUBLISH_PATH_RANKS = {
 }
 
 GUI_CRITICAL_PUBLISH_PATHS = {
+    "/UpdateIndex",
     "/Connected",
     "/Mode",
     "/StartStop",
