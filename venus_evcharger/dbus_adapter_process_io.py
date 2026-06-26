@@ -19,7 +19,7 @@ from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContex
 
 
 class DbusAdapterIoMixin:
-    def _poll_one_due_read_once(self: DbusAdapterIoContext) -> bool:
+    def poll_one_due_read_once(self: DbusAdapterIoContext) -> bool:
         now = time.time()
         due = self.read_scheduler.next_due(
             now=now,
@@ -36,15 +36,15 @@ class DbusAdapterIoMixin:
             self.read_scheduler.record_error(key, now=now, interval=interval)
         return outcome != "deferred" or bool(self.read_executor.last_operation_performed)
 
-    def _maybe_refresh_services(self: DbusAdapterIoContext) -> None:
-        self._refresh_services_if_due_once()
+    def maybe_refresh_services(self: DbusAdapterIoContext) -> None:
+        self.refresh_services_if_due_once()
 
-    def _refresh_services_if_due_once(self: DbusAdapterIoContext) -> bool:
+    def refresh_services_if_due_once(self: DbusAdapterIoContext) -> bool:
         now = time.time()
         if not self.discovery.due(now=now, priority_allowed=self.circuit.allows_priority):
             return False
         try:
-            self.cache.update_services(self._list_services())
+            self.cache.update_services(self.list_services())
             self.commands.remove_coalesced("refresh:services")
             self.discovery.record_success(now=now)
             return True
@@ -55,7 +55,7 @@ class DbusAdapterIoMixin:
             self.discovery.record_error(error, now=now)
             return True
 
-    def _list_services(self: DbusAdapterIoContext) -> list[str]:
+    def list_services(self: DbusAdapterIoContext) -> list[str]:
         def _read() -> list[str]:
             obj = self.connection.bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
             iface = dbus.Interface(obj, "org.freedesktop.DBus")
@@ -84,8 +84,8 @@ class DbusAdapterIoMixin:
             self.circuit.record_error(error, kind="local_publish")
             raise
 
-    def _publish_cache(self: DbusAdapterIoContext) -> None:
-        health = self._health_snapshot()
+    def publish_cache(self: DbusAdapterIoContext) -> None:
+        health = self.health_snapshot()
         self.cache.health.update(health)
         if self.cache_publish_interval_seconds > 0.0:
             now = time.monotonic()
@@ -97,5 +97,5 @@ class DbusAdapterIoMixin:
             self._last_cache_publish_monotonic = now
             self._last_cache_publish_sequence = self.cache.sequence
         self.cache.write_snapshot_files()
-        self._append_health_log(health)
+        self.append_health_log(health)
         self._write_introspection_snapshot()

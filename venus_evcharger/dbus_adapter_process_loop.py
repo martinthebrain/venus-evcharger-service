@@ -46,9 +46,9 @@ class DbusAdapterLoopMixin:
         self._last_tick_monotonic = tick_started
         try:
             self.process_socket_once()
-            self._process_introspection_requests_once()
-            self._process_one_dbus_operation_once()
-            self._publish_cache()
+            self.process_introspection_requests_once()
+            self.process_one_dbus_operation_once()
+            self.publish_cache()
         except Exception as error:  # pylint: disable=broad-except
             self.circuit.record_error(error)
             logging.exception("DBus adapter tick failed: %s", error)
@@ -59,23 +59,23 @@ class DbusAdapterLoopMixin:
                 expected_interval_s=self.tick_seconds,
                 now=tick_started,
             )
-            self._update_adaptive_tick()
+            self.update_adaptive_tick()
             self._next_work_tick_monotonic = time.monotonic() + self.tick_seconds
         return not self._stop
 
-    def _update_adaptive_tick(self: DbusAdapterLoopContext) -> None:
+    def update_adaptive_tick(self: DbusAdapterLoopContext) -> None:
         resources = self.resource_monitor.snapshot()
         self._last_resource_snapshot = resources
-        self._apply_slo_regulation()
+        self.apply_slo_regulation()
         resource_state = str(resources.get("state", "ok"))
         if float(self.tick_health.snapshot().get("max_tick_duration_ms_60s", 0.0) or 0.0) > self.slo_mainloop_gap_max_ms:
             resource_state = "busy"
-        self.tick_seconds = self._adaptive_tick_seconds(
+        self.tick_seconds = self.adaptive_tick_seconds(
             circuit_state=self.circuit.state(),
             resource_state=resource_state,
         )
 
-    def _adaptive_tick_seconds(
+    def adaptive_tick_seconds(
         self: DbusAdapterLoopContext,
         *,
         circuit_state: str,
@@ -89,25 +89,25 @@ class DbusAdapterLoopMixin:
             return min(self.max_tick_seconds, max(self.min_tick_seconds * 1.5, 0.3))
         return self.min_tick_seconds
 
-    def _process_one_dbus_operation_once(self: DbusAdapterLoopContext) -> bool:
+    def process_one_dbus_operation_once(self: DbusAdapterLoopContext) -> bool:
         if self._refresh_initial_services_once():
             return True
-        self._enqueue_background_introspection_if_due()
+        self.enqueue_background_introspection_if_due()
         if self._priority_read_performed():
             return True
         return self._process_standard_operation_once()
 
     def _refresh_initial_services_once(self: DbusAdapterLoopContext) -> bool:
-        return not self.cache.services and self._refresh_services_if_due_once()
+        return not self.cache.services and self.refresh_services_if_due_once()
 
     def _priority_read_performed(self: DbusAdapterLoopContext) -> bool:
-        return self._reads_need_priority() and self._poll_one_due_read_once()
+        return self._reads_need_priority() and self.poll_one_due_read_once()
 
     def _process_standard_operation_once(self: DbusAdapterLoopContext) -> bool:
         local_publish_count = self.write_scheduler.process_local_publish_burst()
         if self._process_preferred_read_or_write():
             return True
-        return self._refresh_services_if_due_once() or local_publish_count > 0
+        return self.refresh_services_if_due_once() or local_publish_count > 0
 
     def _reads_need_priority(self: DbusAdapterLoopContext) -> bool:
         return self.read_executor.has_pending_aggregate() or self._core_reads_stale()
@@ -132,7 +132,7 @@ class DbusAdapterLoopMixin:
         return self._try_write_then_read()
 
     def _try_read_then_write(self: DbusAdapterLoopContext) -> bool:
-        if self._poll_one_due_read_once():
+        if self.poll_one_due_read_once():
             self._prefer_read_next = self._reads_need_priority()
             return True
         return self._try_scheduled_write(prefer_read_next=True)
@@ -140,7 +140,7 @@ class DbusAdapterLoopMixin:
     def _try_write_then_read(self: DbusAdapterLoopContext) -> bool:
         if self._try_scheduled_write(prefer_read_next=True):
             return True
-        if self._poll_one_due_read_once():
+        if self.poll_one_due_read_once():
             self._prefer_read_next = False
             return True
         return False

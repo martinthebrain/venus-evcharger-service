@@ -90,7 +90,7 @@ class DbusAdapterSocketMixin:
         _payload: dict[str, Any],
         _request_type: str,
     ) -> dict[str, Any]:
-        return {"ok": True, "dbus_health": self._health_snapshot()}
+        return {"ok": True, "dbus_health": self.health_snapshot()}
 
     def _socket_enqueue(
         self: DbusAdapterSocketContext,

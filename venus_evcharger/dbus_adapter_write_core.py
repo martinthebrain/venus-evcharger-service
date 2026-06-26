@@ -177,7 +177,7 @@ class DbusWriteSchedulerCoreMixin:
         }
         handler = handlers.get(kind)
         if handler is None:
-            return cast(CommandOutcome, self.adapter._process_non_write_command(command))
+            return cast(CommandOutcome, self.adapter.process_non_write_command(command))
         return handler(command)
 
     def _register_service_command(self, _command: Mapping[str, Any]) -> CommandOutcome:

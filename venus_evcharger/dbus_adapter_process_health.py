@@ -46,7 +46,7 @@ SESSION_ACTIVE_CURRENT_AMPS = 0.2
 
 
 class DbusAdapterHealthMixin:
-    def _append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, Any]) -> None:  # pragma: no mutate block
+    def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, Any]) -> None:  # pragma: no mutate block
         if not self._health_log_due():
             return
         self._last_health_log_monotonic = time.monotonic()
@@ -60,7 +60,7 @@ class DbusAdapterHealthMixin:
             return False
         return bool(time.monotonic() - self._last_health_log_monotonic >= self.health_log_interval_seconds)
 
-    def _health_snapshot(self: DbusAdapterHealthContext) -> dict[str, Any]:  # pragma: no mutate block
+    def health_snapshot(self: DbusAdapterHealthContext) -> dict[str, Any]:  # pragma: no mutate block
         current_monotonic = time.monotonic()
         current_time = time.time()
         pending = self.commands.load_pending()
@@ -74,8 +74,8 @@ class DbusAdapterHealthMixin:
             physical_count=len(pending),
             write_scheduler_health=write_scheduler_health,
         )
-        freshness = self._cache_freshness(current_time)
-        slo = self._slo_snapshot(
+        freshness = self.cache_freshness_snapshot(current_time)
+        slo = self.slo_snapshot(
             queue_health=queue_metrics,
             cache_freshness=freshness,
             now=current_time,
@@ -121,10 +121,10 @@ class DbusAdapterHealthMixin:
             },
         }
 
-    def _cache_freshness(self: DbusAdapterHealthContext, now: float) -> dict[str, Any]:  # pragma: no mutate block
+    def cache_freshness_snapshot(self: DbusAdapterHealthContext, now: float) -> dict[str, Any]:  # pragma: no mutate block
         return cache_freshness(self.cache, now)
 
-    def _slo_snapshot(
+    def slo_snapshot(
         self: DbusAdapterHealthContext,
         *,
         queue_health: Mapping[str, Any],
@@ -132,12 +132,12 @@ class DbusAdapterHealthMixin:
         now: float,
         current_monotonic: float,
     ) -> dict[str, Any]:  # pragma: no mutate block
-        observed = self._slo_observed(queue_health, cache_freshness, now, current_monotonic)
-        thresholds = self._slo_thresholds()
+        observed = self.slo_observed(queue_health, cache_freshness, now, current_monotonic)
+        thresholds = self.slo_thresholds()
         checks = slo_checks_from_observed(observed, thresholds)
         return slo_payload(checks, slo_targets(thresholds), observed)
 
-    def _slo_thresholds(self: DbusAdapterHealthContext) -> SloThresholds:  # pragma: no mutate block
+    def slo_thresholds(self: DbusAdapterHealthContext) -> SloThresholds:  # pragma: no mutate block
         return SloThresholds(
             gui_max_age_seconds=self.slo_gui_max_age_seconds,
             core_read_max_age_seconds=self.slo_core_read_max_age_seconds,
@@ -147,7 +147,7 @@ class DbusAdapterHealthMixin:
             max_tick_seconds=self.max_tick_seconds,
         )
 
-    def _slo_observed(
+    def slo_observed(
         self: DbusAdapterHealthContext,
         queue_health: Mapping[str, Any],
         cache_freshness: Mapping[str, Any],
@@ -155,52 +155,52 @@ class DbusAdapterHealthMixin:
         current_monotonic: float,
     ) -> dict[str, float]:  # pragma: no mutate block
         eventloop = self.tick_health.snapshot(now=current_monotonic)
-        measurement_age = self._max_cached_path_age(GUI_MEASUREMENT_FRESHNESS_PATHS, now)
-        control_age = self._max_cached_path_age(GUI_CONTROL_FRESHNESS_PATHS, now)
-        session_paths = self._gui_session_freshness_paths(now)
-        session_age = self._max_cached_path_age(session_paths, now)
+        measurement_age = self.max_cached_path_age_for_paths(GUI_MEASUREMENT_FRESHNESS_PATHS, now)
+        control_age = self.max_cached_path_age_for_paths(GUI_CONTROL_FRESHNESS_PATHS, now)
+        session_paths = self.gui_session_freshness_paths(now)
+        session_age = self.max_cached_path_age_for_paths(session_paths, now)
         return {
             "gui_max_age_s": max(measurement_age, control_age, session_age),
             "gui_measurement_max_age_s": measurement_age,
             "gui_control_max_age_s": control_age,
             "gui_session_max_age_s": session_age,
-            "gui_missing_path_count": self._missing_cached_path_count(self._gui_freshness_paths(now)),
-            "gui_measurement_missing_path_count": self._missing_cached_path_count(GUI_MEASUREMENT_FRESHNESS_PATHS),
-            "gui_control_missing_path_count": self._missing_cached_path_count(GUI_CONTROL_FRESHNESS_PATHS),
-            "gui_session_missing_path_count": self._missing_cached_path_count(session_paths),
+            "gui_missing_path_count": self.missing_cached_path_count_for_paths(self.gui_freshness_paths(now)),
+            "gui_measurement_missing_path_count": self.missing_cached_path_count_for_paths(GUI_MEASUREMENT_FRESHNESS_PATHS),
+            "gui_control_missing_path_count": self.missing_cached_path_count_for_paths(GUI_CONTROL_FRESHNESS_PATHS),
+            "gui_session_missing_path_count": self.missing_cached_path_count_for_paths(session_paths),
             "core_read_max_age_s": max_core_read_age(cache_freshness),
             "queue_oldest_age_s": float(queue_health.get("oldest_command_age_s", 0.0) or 0.0),
             "mainloop_max_gap_ms_60s": float(eventloop.get("max_tick_gap_ms_60s", 0.0) or 0.0),
         }
 
-    def _gui_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
+    def gui_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
         paths = set(GUI_MEASUREMENT_FRESHNESS_PATHS | GUI_CONTROL_FRESHNESS_PATHS)
-        paths.update(self._gui_session_freshness_paths(now))
+        paths.update(self.gui_session_freshness_paths(now))
         return paths
 
-    def _gui_session_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
-        return set(ACTIVE_SESSION_GUI_FRESHNESS_PATHS) if self._charging_session_active_for_gui(now) else set()
+    def gui_session_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
+        return set(ACTIVE_SESSION_GUI_FRESHNESS_PATHS) if self.charging_session_active_for_gui(now) else set()
 
-    def _charging_session_active_for_gui(self: DbusAdapterHealthContext, now: float) -> bool:
+    def charging_session_active_for_gui(self: DbusAdapterHealthContext, now: float) -> bool:
         return (
-            self._fresh_cached_path_float("/Ac/Power", now) >= SESSION_ACTIVE_POWER_WATTS
-            or self._fresh_cached_path_float("/Ac/Current", now) >= SESSION_ACTIVE_CURRENT_AMPS
+            self.fresh_cached_path_float("/Ac/Power", now) >= SESSION_ACTIVE_POWER_WATTS
+            or self.fresh_cached_path_float("/Ac/Current", now) >= SESSION_ACTIVE_CURRENT_AMPS
         )
 
-    def _fresh_cached_path_float(self: DbusAdapterHealthContext, path: str, now: float) -> float:
+    def fresh_cached_path_float(self: DbusAdapterHealthContext, path: str, now: float) -> float:
         entry = self.cache.values.get(dbus_path_key(self.service_name, path))
-        if cached_entry_age(entry, now) > effective_gui_max_age_seconds(self._slo_thresholds()):
+        if cached_entry_age(entry, now) > effective_gui_max_age_seconds(self.slo_thresholds()):
             return 0.0
         return cached_entry_float(entry)
 
-    def _apply_slo_regulation(self: DbusAdapterHealthContext) -> None:  # pragma: no mutate block
+    def apply_slo_regulation(self: DbusAdapterHealthContext) -> None:  # pragma: no mutate block
         now = time.time()
         pending = DbusCommandInbox.coalesce(self.commands.load_pending())
         queue_age = oldest_command_age(pending, now)
-        cache_freshness = self._cache_freshness(now)
+        cache_freshness = self.cache_freshness_snapshot(now)
         core_read_age = max_core_read_age(cache_freshness)
         eventloop_gap_ms = float(self.tick_health.snapshot().get("max_tick_gap_ms_60s", 0.0) or 0.0)
-        thresholds = self._slo_thresholds()
+        thresholds = self.slo_thresholds()
         self.write_scheduler.set_dynamic_local_publish_burst(
             regulated_publish_burst(
                 queue_age=queue_age,
@@ -218,15 +218,15 @@ class DbusAdapterHealthMixin:
                 )
             )
         if self.circuit.state() != "ok":
-            self._quiet_discovery_and_introspection(now)
+            self.quiet_discovery_and_introspection(now)
 
-    def _quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:  # pragma: no mutate block
+    def quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:  # pragma: no mutate block
         quiet_until = now + 60.0
         self.discovery.next_scan_at = max(self.discovery.next_scan_at, quiet_until)
         self._last_introspection_full_scan_at = max(self._last_introspection_full_scan_at, now)
 
-    def _max_cached_path_age(self: DbusAdapterHealthContext, paths: set[str], now: float) -> float:  # pragma: no mutate block
+    def max_cached_path_age_for_paths(self: DbusAdapterHealthContext, paths: set[str], now: float) -> float:  # pragma: no mutate block
         return max_cached_path_age(self.cache.values, self.service_name, paths, now)
 
-    def _missing_cached_path_count(self: DbusAdapterHealthContext, paths: set[str]) -> float:  # pragma: no mutate block
+    def missing_cached_path_count_for_paths(self: DbusAdapterHealthContext, paths: set[str]) -> float:  # pragma: no mutate block
         return missing_cached_path_count(self.cache.values, self.service_name, paths)

@@ -24,7 +24,7 @@ OPTIONAL_INTROSPECTION_PRIORITY_MIN = 90
 
 
 class DbusAdapterIntrospectionMixin:
-    def _process_introspection_requests_once(self: DbusAdapterIntrospectionContext) -> None:
+    def process_introspection_requests_once(self: DbusAdapterIntrospectionContext) -> None:
         if not self.dbus_introspection_enabled:
             return
         payload = self._read_introspection_request_payload()
@@ -88,7 +88,7 @@ class DbusAdapterIntrospectionMixin:
             }
         )
 
-    def _enqueue_background_introspection_if_due(self: DbusAdapterIntrospectionContext) -> None:
+    def enqueue_background_introspection_if_due(self: DbusAdapterIntrospectionContext) -> None:
         now = time.time()
         if not self._background_introspection_due(now):
             return
@@ -144,7 +144,7 @@ class DbusAdapterIntrospectionMixin:
         prefix = str(defaults.get(prefix_key, default_prefix)).strip()
         return sorted(name for name in self.cache.services if name.startswith(prefix))[:10]
 
-    def _process_non_write_command(self: DbusAdapterIntrospectionContext, command: Mapping[str, Any]) -> CommandOutcome:
+    def process_non_write_command(self: DbusAdapterIntrospectionContext, command: Mapping[str, Any]) -> CommandOutcome:
         kind = str(command.get("kind") or command.get("type") or "")
         handlers = {
             "refresh_value": self.read_executor.refresh_requested_value,
@@ -157,7 +157,7 @@ class DbusAdapterIntrospectionMixin:
         if self.circuit.state() != "ok":
             return "deferred"
         try:
-            self.cache.update_services(self._list_services())
+            self.cache.update_services(self.list_services())
         except DbusOperationDeferred:
             return "deferred"
         except Exception as error:  # pylint: disable=broad-except
