@@ -194,7 +194,9 @@ class DbusAdapterIntrospectionMixin:
         timeout: float,
     ) -> tuple[CommandOutcome, Any]:
         try:
-            return "applied", self._timed("introspection", lambda: self._read_introspection_xml(service, path, timeout))
+            return "applied", self.timed_dbus_operation(
+                "introspection", lambda: self._read_introspection_xml(service, path, timeout)
+            )
         except DbusOperationDeferred:
             return "deferred", None
         except Exception as error:  # pylint: disable=broad-except

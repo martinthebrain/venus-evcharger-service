@@ -20,7 +20,7 @@ from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterSoc
 class DbusAdapterSocketMixin:
     _server: socket.socket | None
 
-    def _start_socket(self: DbusAdapterSocketContext) -> None:
+    def start_socket(self: DbusAdapterSocketContext) -> None:
         with suppress(FileNotFoundError):
             os.unlink(self.paths.socket_path)
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -29,14 +29,14 @@ class DbusAdapterSocketMixin:
         server.setblocking(False)
         self._server = server
 
-    def _close_socket(self: DbusAdapterSocketContext) -> None:
+    def close_socket(self: DbusAdapterSocketContext) -> None:
         if self._server is not None:
             self._server.close()
             self._server = None
         with suppress(FileNotFoundError):
             os.unlink(self.paths.socket_path)
 
-    def _process_socket_once(self: DbusAdapterSocketContext) -> None:
+    def process_socket_once(self: DbusAdapterSocketContext) -> None:
         if self._server is None:
             return
         readable, _writable, _errors = select.select([self._server], [], [], 0.0)
@@ -53,10 +53,10 @@ class DbusAdapterSocketMixin:
             except TimeoutError:
                 logging.debug("Gateway socket client connected without sending a request")
                 return
-            response = self._handle_socket_payload(data)
+            response = self.handle_socket_payload(data)
             conn.sendall((compact_json(response) + "\n").encode("utf-8"))
 
-    def _handle_socket_payload(self: DbusAdapterSocketContext, data: str) -> dict[str, Any]:
+    def handle_socket_payload(self: DbusAdapterSocketContext, data: str) -> dict[str, Any]:
         try:
             payload = json.loads(data)
         except json.JSONDecodeError as error:

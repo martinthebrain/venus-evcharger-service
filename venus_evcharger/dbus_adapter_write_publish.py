@@ -11,9 +11,9 @@ from typing import Any
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome
 from venus_evcharger.dbus_adapter_write_support import (
-    _is_local_publish_command,
-    _local_publish_action_result,
-    _stale_coalesced_paths,
+    is_local_publish_command,
+    local_publish_action_result,
+    stale_coalesced_paths,
 )
 from venus_evcharger.dbus_gateway import (
     PUBLISH_PATH_RANKS,
@@ -51,12 +51,12 @@ class DbusWriteSchedulerPublishMixin:
     local_publish_burst_limit: int
     local_publish_tick_budget_seconds: float
     registered_paths: set[str]
-    _budget_available: Callable[[Mapping[str, Any], float], bool]
-    _prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
-    _process_loaded_command: Callable[..., CommandOutcome]
+    budget_available: Callable[[Mapping[str, Any], float], bool]
+    prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
+    process_loaded_command: Callable[..., CommandOutcome]
     _processed_events: Any
-    _prune_budget: Callable[[float], None]
-    _prune_processed: Callable[[float], None]
+    prune_budget: Callable[[float], None]
+    prune_processed: Callable[[float], None]
 
     def process_local_publish_burst(self, limit: int | None = None) -> int:  # pragma: no mutate block
         if not self.adapter._dbusservice_registered:
@@ -64,7 +64,7 @@ class DbusWriteSchedulerPublishMixin:
         remaining_budget = self.dynamic_local_publish_burst_limit if limit is None else int(limit)
         processed = 0
         pending_commands = self.adapter.commands.load_pending()
-        pending = self._prioritized_commands(DbusCommandInbox.coalesce(pending_commands))
+        pending = self.prioritized_commands(DbusCommandInbox.coalesce(pending_commands))
         started = time.monotonic()
         for path, command in pending:  # pragma: no branch
             action = self._process_local_publish_candidate(
@@ -77,7 +77,7 @@ class DbusWriteSchedulerPublishMixin:
                     started=started,
                 ),
             )
-            processed, stop = _local_publish_action_result(processed, action)
+            processed, stop = local_publish_action_result(processed, action)
             if stop:
                 break
         return processed
@@ -92,25 +92,25 @@ class DbusWriteSchedulerPublishMixin:
             return "break"
         if self._skip_local_publish_command(command):
             return "skip"
-        outcome = self._process_loaded_command(path, command, pending_commands=candidate.pending_commands)
+        outcome = self.process_loaded_command(path, command, pending_commands=candidate.pending_commands)
         return "processed" if outcome in ("applied", "dropped") else "break"
 
     def _local_publish_burst_done(self, processed: int, remaining_budget: int, started: float) -> bool:  # pragma: no mutate block
         return processed >= max(0, remaining_budget) or self._budget_elapsed(started, self.local_publish_tick_budget_seconds)
 
     def _skip_local_publish_command(self, command: Mapping[str, Any]) -> bool:  # pragma: no mutate block
-        return not _is_local_publish_command(command) or not self._budget_available(command, time.time())
+        return not is_local_publish_command(command) or not self.budget_available(command, time.time())
 
     @staticmethod
     def _budget_elapsed(started: float, budget_seconds: float) -> bool:  # pragma: no mutate block
         return time.monotonic() - started >= budget_seconds
 
-    def _next_local_publish_command(self) -> tuple[str, dict[str, Any]] | None:  # pragma: no mutate block
+    def next_local_publish_command(self) -> tuple[str, dict[str, Any]] | None:  # pragma: no mutate block
         now = time.time()
-        self._prune_budget(now)
-        pending = self._prioritized_commands(DbusCommandInbox.coalesce(self.adapter.commands.load_pending()))
+        self.prune_budget(now)
+        pending = self.prioritized_commands(DbusCommandInbox.coalesce(self.adapter.commands.load_pending()))
         for path, command in pending:
-            if _is_local_publish_command(command) and self._budget_available(command, now):
+            if is_local_publish_command(command) and self.budget_available(command, now):
                 return path, command
         return None
 
@@ -125,7 +125,7 @@ class DbusWriteSchedulerPublishMixin:
         if not key:
             return
         commands = self.adapter.commands.load_pending() if pending_commands is None else pending_commands
-        for stale_path in _stale_coalesced_paths(commands, processed_path=processed_path, key=key):
+        for stale_path in stale_coalesced_paths(commands, processed_path=processed_path, key=key):
             self.adapter.commands.remove(stale_path)
 
     def register_path(self, command: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
@@ -211,7 +211,7 @@ class DbusWriteSchedulerPublishMixin:
         if path not in self.registered_paths:
             logging.debug("Dropping publish for unregistered DBus path %s", path)
             return "dropped"
-        self._timed_local_publish(lambda: self.adapter._dbusservice.__setitem__(path, value))
+        self.timed_local_publish(lambda: self.adapter._dbusservice.__setitem__(path, value))
         self.last_values[path] = value
         self._refresh_local_publish_cache(path, value)
         return "applied"
@@ -225,24 +225,14 @@ class DbusWriteSchedulerPublishMixin:
             confidence=1.0,
         )
 
-    def _timed_local_publish(self, operation: Callable[[], Any]) -> Any:  # pragma: no mutate block
-        adapter_timer = getattr(self.adapter, "_timed_local_publish", None)
-        if callable(adapter_timer):
-            return adapter_timer(operation)
-        started = time.monotonic()
-        try:
-            result = operation()
-            self.adapter.circuit.record_success((time.monotonic() - started) * 1000.0, kind="local_publish")
-            return result
-        except Exception as error:
-            self.adapter.circuit.record_error(error, kind="local_publish")
-            raise
+    def timed_local_publish(self, operation: Callable[[], Any]) -> Any:  # pragma: no mutate block
+        return self.adapter.timed_local_publish(operation)
 
-    def _record_processed(self) -> None:  # pragma: no mutate block
+    def record_processed(self) -> None:  # pragma: no mutate block
         now = time.time()
         self.last_processed_at = now
         self._processed_events.append(now)
-        self._prune_processed(now)
+        self.prune_processed(now)
 
 
 def _prioritized_publish_items(paths: Mapping[Any, Any]) -> list[tuple[Any, Any]]:

@@ -15,9 +15,9 @@ import dbus
 from venus_evcharger.core.shared import compact_json, config_get_float
 from venus_evcharger.dbus_adapter_components import CommandOutcome
 from venus_evcharger.dbus_adapter_write_support import (
-    _float_or_zero,
-    _lifecycle_payload,
-    _priority_rank,
+    float_or_zero,
+    lifecycle_payload,
+    priority_rank,
 )
 from venus_evcharger.dbus_gateway import command_queue_class, dbus_path_key
 
@@ -55,8 +55,8 @@ class DbusWriteSchedulerHealthMixin:
 
     def health(self, *, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
         current = time.time() if now is None else float(now)  # pragma: no mutate
-        self._prune_processed(current)
-        self._prune_lifecycle(current)
+        self.prune_processed(current)
+        self.prune_lifecycle(current)
         return {
             "processed_commands_60s": len(self._processed_events),  # pragma: no mutate
             "last_processed_at": self.last_processed_at,  # pragma: no mutate
@@ -66,9 +66,9 @@ class DbusWriteSchedulerHealthMixin:
             "startup_registration_batch_limit": self.startup_registration_batch_limit,  # pragma: no mutate
             "startup_registration_tick_budget_ms": self.startup_registration_tick_budget_seconds * 1000.0,  # pragma: no mutate
             "queue_class_budgets": dict(sorted(self.queue_class_budgets.items())),  # pragma: no mutate
-            "queue_class_usage_1s": self._queue_class_usage_1s(),  # pragma: no mutate
+            "queue_class_usage_1s": self.queue_class_usage_1s(),  # pragma: no mutate
             "lifecycle_counts": dict(sorted(self._lifecycle_counts.items())),  # pragma: no mutate
-            "lifecycle_counts_60s": self._lifecycle_counts_60s(),  # pragma: no mutate
+            "lifecycle_counts_60s": self.lifecycle_counts_60s(),  # pragma: no mutate
         }
 
     def set_dynamic_local_publish_burst(self, burst: int) -> None:  # pragma: no mutate block
@@ -87,7 +87,7 @@ class DbusWriteSchedulerHealthMixin:
             normalized,  # pragma: no mutate
         )
 
-    def _prune_processed(self, now: float) -> None:  # pragma: no mutate block
+    def prune_processed(self, now: float) -> None:  # pragma: no mutate block
         cutoff = now - 60.0  # pragma: no mutate
         while self._processed_events and self._processed_events[0] < cutoff:
             self._processed_events.popleft()
@@ -106,51 +106,51 @@ class DbusWriteSchedulerHealthMixin:
             "diagnostic": max(0, int(config_get_float(defaults, "DbusGatewayQueueBudgetDiagnostic", 1.0))),  # pragma: no mutate
         }
 
-    def _budget_available(self, command: Mapping[str, Any], now: float) -> bool:  # pragma: no mutate block
+    def budget_available(self, command: Mapping[str, Any], now: float) -> bool:  # pragma: no mutate block
         queue_class = str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
         limit = int(self.queue_class_budgets.get(queue_class, 1))  # pragma: no mutate
         if limit <= 0:
             return False
-        return self._budget_usage(queue_class, now) < limit  # pragma: no mutate
+        return self.budget_usage(queue_class, now) < limit  # pragma: no mutate
 
-    def _budget_usage(self, queue_class: str, now: float) -> int:
+    def budget_usage(self, queue_class: str, now: float) -> int:
         return sum(1 for timestamp, item_class in self._budget_events if item_class == queue_class and now - timestamp <= 1.0)  # pragma: no mutate
 
-    def _record_budget(self, command: Mapping[str, Any]) -> None:
+    def record_budget(self, command: Mapping[str, Any]) -> None:
         now = time.time()  # pragma: no mutate
         self._budget_events.append((now, str(command.get("queue_class") or command_queue_class(command))))  # pragma: no mutate
-        self._prune_budget(now)
+        self.prune_budget(now)
 
-    def _prune_budget(self, now: float) -> None:  # pragma: no mutate block
+    def prune_budget(self, now: float) -> None:  # pragma: no mutate block
         cutoff = now - 1.0  # pragma: no mutate
         while self._budget_events and self._budget_events[0][0] < cutoff:
             self._budget_events.popleft()
 
-    def _queue_class_usage_1s(self) -> dict[str, int]:
+    def queue_class_usage_1s(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for _timestamp, queue_class in self._budget_events:
             counts[queue_class] = counts.get(queue_class, 0) + 1  # pragma: no mutate
         return dict(sorted(counts.items()))  # pragma: no mutate
 
     @staticmethod
-    def _prioritized_commands(commands: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:  # pragma: no mutate block
+    def prioritized_commands(commands: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:  # pragma: no mutate block
         now = time.time()  # pragma: no mutate
         return sorted(
             commands,
             key=lambda item: (
-                _effective_command_priority_rank(item[1], now),  # pragma: no mutate
+                effective_command_priority_rank(item[1], now),  # pragma: no mutate
                 _QUEUE_CLASS_RANKS.get(str(item[1].get("queue_class") or command_queue_class(item[1])), 99),  # pragma: no mutate
-                _float_or_zero(item[1].get("created_at")),  # pragma: no mutate
+                float_or_zero(item[1].get("created_at")),  # pragma: no mutate
             ),
         )
 
-    def _record_lifecycle(self, command: Mapping[str, Any], state: str) -> None:  # pragma: no mutate block
+    def record_lifecycle(self, command: Mapping[str, Any], state: str) -> None:  # pragma: no mutate block
         now = time.time()  # pragma: no mutate
         queue_class = str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
         normalized_state = str(state or "unknown")  # pragma: no mutate
         self._lifecycle_counts[normalized_state] = self._lifecycle_counts.get(normalized_state, 0) + 1  # pragma: no mutate
         self._lifecycle_events.append((now, normalized_state, queue_class))  # pragma: no mutate
-        self._prune_lifecycle(now)
+        self.prune_lifecycle(now)
         self._append_lifecycle_event(command, normalized_state, queue_class, now)
 
     def _append_lifecycle_event(
@@ -166,7 +166,7 @@ class DbusWriteSchedulerHealthMixin:
         try:
             self._ensure_lifecycle_directory(path)
             with open(path, "a", encoding="utf-8") as handle:
-                handle.write(compact_json(_lifecycle_payload(command, state, queue_class, now)) + "\n")  # pragma: no mutate
+                handle.write(compact_json(lifecycle_payload(command, state, queue_class, now)) + "\n")  # pragma: no mutate
         except Exception:  # pylint: disable=broad-except
             logging.debug("Unable to append DBus gateway command lifecycle event", exc_info=True)
 
@@ -176,12 +176,12 @@ class DbusWriteSchedulerHealthMixin:
         if directory:
             os.makedirs(directory, exist_ok=True)
 
-    def _prune_lifecycle(self, now: float) -> None:  # pragma: no mutate block
+    def prune_lifecycle(self, now: float) -> None:  # pragma: no mutate block
         cutoff = now - 60.0  # pragma: no mutate
         while self._lifecycle_events and self._lifecycle_events[0][0] < cutoff:
             self._lifecycle_events.popleft()
 
-    def _lifecycle_counts_60s(self) -> dict[str, int]:
+    def lifecycle_counts_60s(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for _at, state, _queue_class in self._lifecycle_events:
             counts[state] = counts.get(state, 0) + 1  # pragma: no mutate
@@ -198,7 +198,7 @@ class DbusWriteSchedulerHealthMixin:
             iface = dbus.Interface(obj, "com.victronenergy.BusItem")  # pragma: no mutate
             iface.SetValue(command.get("value"), timeout=float(command.get("timeout", 1.0)))  # pragma: no mutate
 
-        self.adapter._timed("write", _write)
+        self.adapter.timed_dbus_operation("write", _write)
         self.adapter.cache.update_value(
             dbus_path_key(service, path),  # pragma: no mutate
             command.get("value"),  # pragma: no mutate
@@ -208,14 +208,14 @@ class DbusWriteSchedulerHealthMixin:
         return "applied"  # pragma: no mutate
 
 
-def _effective_command_priority_rank(command: Mapping[str, Any], now: float) -> float:
-    rank = float(_priority_rank(command.get("priority")))  # pragma: no mutate
-    if _aged_refresh_command(command, now):
+def effective_command_priority_rank(command: Mapping[str, Any], now: float) -> float:
+    rank = float(priority_rank(command.get("priority")))  # pragma: no mutate
+    if aged_refresh_command(command, now):
         return min(rank, _AGED_REFRESH_PRIORITY_RANK)  # pragma: no mutate
     return rank  # pragma: no mutate
 
 
-def _aged_refresh_command(command: Mapping[str, Any], now: float) -> bool:
+def aged_refresh_command(command: Mapping[str, Any], now: float) -> bool:
     queue_class = str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
-    created_at = _float_or_zero(command.get("created_at"))  # pragma: no mutate
+    created_at = float_or_zero(command.get("created_at"))  # pragma: no mutate
     return queue_class in _AGING_QUEUE_CLASSES and created_at > 0.0 and now - created_at >= _AGED_REFRESH_SECONDS  # pragma: no mutate

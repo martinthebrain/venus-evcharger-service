@@ -61,9 +61,9 @@ class DbusAdapterIoMixin:
             iface = dbus.Interface(obj, "org.freedesktop.DBus")
             return [str(name) for name in iface.ListNames()]
 
-        return cast(list[str], self._timed("read", _read))
+        return cast(list[str], self.timed_dbus_operation("read", _read))
 
-    def _timed(self: DbusAdapterIoContext, kind: str, operation: Callable[[], Any]) -> Any:
+    def timed_dbus_operation(self: DbusAdapterIoContext, kind: str, operation: Callable[[], Any]) -> Any:
         self.rate_limiter.require_due(kind)
         started = time.monotonic()
         try:
@@ -74,7 +74,7 @@ class DbusAdapterIoMixin:
             self.circuit.record_error(error, kind=kind)
             raise
 
-    def _timed_local_publish(self: DbusAdapterIoContext, operation: Callable[[], Any]) -> Any:
+    def timed_local_publish(self: DbusAdapterIoContext, operation: Callable[[], Any]) -> Any:
         started = time.monotonic()
         try:
             result = operation()

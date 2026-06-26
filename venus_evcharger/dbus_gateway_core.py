@@ -107,7 +107,7 @@ def _now() -> float:  # pragma: no mutate block
     return time.time()
 
 
-def _priority_rank(priority: object) -> int:  # pragma: no mutate block
+def priority_rank(priority: object) -> int:  # pragma: no mutate block
     return PRIORITY_VALUES.get(str(priority or "diagnostic").strip().lower(), PRIORITY_VALUES["diagnostic"])
 
 
@@ -146,7 +146,7 @@ def write_json_file(path: str, payload: Mapping[str, Any]) -> None:  # pragma: n
     write_text_atomically(path, compact_json(_json_ready(payload)) + "\n")
 
 
-def _float_or_zero(value: object) -> float:  # pragma: no mutate block
+def float_or_zero(value: object) -> float:  # pragma: no mutate block
     if isinstance(value, (str, bytes, int, float)):
         try:
             return float(value)

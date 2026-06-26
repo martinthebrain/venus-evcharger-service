@@ -125,7 +125,7 @@ class DbusCacheStore:
 
     def snapshot(self, *, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
         current = _now() if now is None else float(now)  # pragma: no mutate
-        values = {key: self._value_snapshot(item, current) for key, item in self.values.items()}  # pragma: no mutate
+        values = {key: self.value_snapshot(item, current) for key, item in self.values.items()}  # pragma: no mutate
         return {
             "schema_version": DBUS_GATEWAY_SCHEMA_VERSION,  # pragma: no mutate
             "sequence": self.sequence,  # pragma: no mutate
@@ -135,7 +135,7 @@ class DbusCacheStore:
             "services": dict(self.services),  # pragma: no mutate
         }
 
-    def _value_snapshot(self, item: Mapping[str, Any], now: float) -> dict[str, Any]:
+    def value_snapshot(self, item: Mapping[str, Any], now: float) -> dict[str, Any]:
         updated_at = float(item.get("updated_at", 0.0) or 0.0)  # pragma: no mutate
         age = _value_age(updated_at, now)  # pragma: no mutate
         status = self._value_status(item, age)  # pragma: no mutate

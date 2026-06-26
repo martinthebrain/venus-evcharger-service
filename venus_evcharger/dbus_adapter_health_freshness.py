@@ -12,7 +12,7 @@ from venus_evcharger.dbus_gateway import FAST_READ_KEYS, DbusCacheStore, dbus_pa
 
 def cache_freshness(cache: DbusCacheStore, now: float) -> dict[str, Any]:
     values = {
-        key: cache._value_snapshot(value, now)  # pylint: disable=protected-access
+        key: cache.value_snapshot(value, now)
         for key, value in cache.values.items()
     }
     return {"value_count": len(values), "status_counts": status_counts(values), **important_freshness(values)}

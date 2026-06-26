@@ -25,7 +25,7 @@ class DbusAdapterLoopMixin:
         os.makedirs(self.paths.run_dir, exist_ok=True)
         os.makedirs(self.paths.command_dir, exist_ok=True)
         os.makedirs(self.paths.core_command_dir, exist_ok=True)
-        self._start_socket()
+        self.start_socket()
         self._ensure_dbus_service()
         self._main_loop = GLib.MainLoop()
         GLib.timeout_add(max(50, int(self.min_tick_seconds * 1000)), self._tick)
@@ -33,19 +33,19 @@ class DbusAdapterLoopMixin:
             self._main_loop.run()
         finally:
             self._stop = True
-            self._close_socket()
+            self.close_socket()
 
     def _tick(self: DbusAdapterLoopContext) -> bool:
         tick_started = time.monotonic()
         if self._stop:
-            self._close_socket()
+            self.close_socket()
             return False
         if tick_started < self._next_work_tick_monotonic:
             return True
         self._last_tick_at = time.time()
         self._last_tick_monotonic = tick_started
         try:
-            self._process_socket_once()
+            self.process_socket_once()
             self._process_introspection_requests_once()
             self._process_one_dbus_operation_once()
             self._publish_cache()

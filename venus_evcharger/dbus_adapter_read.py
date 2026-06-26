@@ -76,7 +76,7 @@ class _ReadAdapterProtocol(Protocol):
     @property
     def circuit(self) -> _CircuitProtocol: ...  # pragma: no cover
 
-    def _timed(self, kind: str, operation: Callable[[], Any]) -> Any: ...  # pragma: no cover
+    def timed_dbus_operation(self, kind: str, operation: Callable[[], Any]) -> Any: ...  # pragma: no cover
 
 
 class DbusReadExecutor:
@@ -320,7 +320,7 @@ class DbusReadExecutor:
         if not service or not path:
             return None
 
-        return self.adapter._timed("read", lambda: self._read_busitem_now(service, path))
+        return self.adapter.timed_dbus_operation("read", lambda: self.read_busitem_now(service, path))
 
     def read_optional_busitem(self, service: str, path: str) -> Any:  # pragma: no mutate block
         if not service or not path:
@@ -328,11 +328,11 @@ class DbusReadExecutor:
 
         self.adapter.rate_limiter.require_due("read")
         started = time.monotonic()
-        value = self._read_busitem_now(service, path)
+        value = self.read_busitem_now(service, path)
         self.adapter.circuit.record_success((time.monotonic() - started) * 1000.0, kind="optional_read")
         return value
 
-    def _read_busitem_now(self, service: str, path: str) -> Any:  # pragma: no mutate block
+    def read_busitem_now(self, service: str, path: str) -> Any:  # pragma: no mutate block
         obj = self.adapter.connection.bus().get_object(service, path, introspect=False)
         iface = dbus.Interface(obj, "com.victronenergy.BusItem")
         return coerce_dbus_numeric(iface.GetValue(timeout=1.0))

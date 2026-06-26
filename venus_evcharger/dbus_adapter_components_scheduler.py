@@ -33,7 +33,7 @@ class DbusReadScheduler:
         due_keys.sort(key=lambda key: (self.next_read_at.get(key, 0.0), self._order.get(key, 0)))
         for key in due_keys:
             spec = self.specs[key]
-            interval = self._effective_interval(spec, circuit_state)
+            interval = self.effective_interval(spec, circuit_state)
             if priority_allowed(str(spec.get("priority", "read"))):
                 return key, spec, interval
             return None
@@ -59,7 +59,7 @@ class DbusReadScheduler:
                 self.next_read_at[normalized] = 0.0
 
     @staticmethod
-    def _effective_interval(spec: Mapping[str, Any], circuit_state: str) -> float:
+    def effective_interval(spec: Mapping[str, Any], circuit_state: str) -> float:
         interval = float(spec.get("interval", 2.0))
         if circuit_state == "protective":
             return interval * 5.0
