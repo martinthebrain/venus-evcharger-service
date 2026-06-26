@@ -98,4 +98,4 @@ class DbusAdapterIoMixin:
             self._last_cache_publish_sequence = self.cache.sequence
         self.cache.write_snapshot_files()
         self.append_health_log(health)
-        self._write_introspection_snapshot()
+        self.write_introspection_snapshot()

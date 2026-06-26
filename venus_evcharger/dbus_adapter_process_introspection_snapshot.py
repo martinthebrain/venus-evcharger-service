@@ -21,7 +21,7 @@ from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
 
 
 class DbusAdapterIntrospectionSnapshotMixin:
-    def _write_introspection_snapshot(self: DbusAdapterIntrospectionSnapshotContext) -> None:
+    def write_introspection_snapshot(self: DbusAdapterIntrospectionSnapshotContext) -> None:
         if not self.dbus_introspection_enabled or not self.dbus_introspection_snapshot_path:
             return
         now = time.time()
@@ -33,14 +33,14 @@ class DbusAdapterIntrospectionSnapshotMixin:
             "writer_pid": os.getpid(),
             "queue_depth": self._introspection_queue_depth,
             "last_full_scan_at": self._last_introspection_full_scan_at,
-            "services": self._introspection_services_snapshot(now),
+            "services": self.introspection_services_snapshot(now),
         }
         try:
             write_text_atomically(self.dbus_introspection_snapshot_path, compact_json(payload))
         except Exception as error:  # pylint: disable=broad-except
             logging.debug("Unable to write DBus introspection snapshot %s: %s", self.dbus_introspection_snapshot_path, error)
 
-    def _introspection_services_snapshot(self: DbusAdapterIntrospectionSnapshotContext, now: float) -> dict[str, Any]:
+    def introspection_services_snapshot(self: DbusAdapterIntrospectionSnapshotContext, now: float) -> dict[str, Any]:
         services: dict[str, Any] = {}
         for key, entry in self._introspection_cache_entries():
             service, path = self._split_introspection_cache_key(key)
@@ -85,7 +85,7 @@ class DbusAdapterIntrospectionSnapshotMixin:
         return _backoff_introspection_finding(entry, status, now)
 
     @staticmethod
-    def _parse_introspection_xml(xml_data: object) -> tuple[list[str], list[str]]:
+    def parse_introspection_xml(xml_data: object) -> tuple[list[str], list[str]]:
         try:
             root = xml_et.fromstring(str(xml_data))
         except Exception:
@@ -94,7 +94,7 @@ class DbusAdapterIntrospectionSnapshotMixin:
 
 
 def _fresh_introspection_finding(entry: Mapping[str, Any], now: float) -> dict[str, Any]:
-    interfaces, children = DbusAdapterIntrospectionSnapshotMixin._parse_introspection_xml(entry.get("value", ""))
+    interfaces, children = DbusAdapterIntrospectionSnapshotMixin.parse_introspection_xml(entry.get("value", ""))
     return {
         "status": "fresh",
         "confidence": entry.get("confidence", 0.8),

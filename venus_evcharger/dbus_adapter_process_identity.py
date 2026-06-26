@@ -17,26 +17,39 @@ from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterIde
 
 
 class DbusAdapterIdentityMixin:
-    def _ensure_dbus_service(self: DbusAdapterIdentityContext) -> None:
+    @property
+    def dbus_service(self: DbusAdapterIdentityContext) -> Any:
+        self.ensure_dbus_service()
+        return self._dbusservice
+
+    @property
+    def dbus_service_registered(self: DbusAdapterIdentityContext) -> bool:
+        return bool(self._dbusservice_registered)
+
+    def set_dbus_service(self: DbusAdapterIdentityContext, service: Any, *, registered: bool = False) -> None:
+        self._dbusservice = service
+        self._dbusservice_registered = bool(registered)
+
+    def ensure_dbus_service(self: DbusAdapterIdentityContext) -> None:
         if self._dbusservice is not None:
             return
-        self._dbusservice = VeDbusService(self.service_name, register=False)
-        self._register_identity_paths()
+        self.set_dbus_service(VeDbusService(self.service_name, register=False))
+        self.register_identity_paths()
 
-    def _register_dbus_service_name(self: DbusAdapterIdentityContext) -> None:
-        self._ensure_dbus_service()
-        if self._dbusservice_registered:
+    def register_dbus_service_name(self: DbusAdapterIdentityContext) -> None:
+        service = self.dbus_service
+        if self.dbus_service_registered:
             return
-        self._dbusservice.register()
+        service.register()
         self._dbusservice_registered = True
         logging.info("DBus adapter owns service %s", self.service_name)
 
-    def _register_identity_paths(self: DbusAdapterIdentityContext) -> None:
+    def register_identity_paths(self: DbusAdapterIdentityContext) -> None:
         defaults = self.config["DEFAULT"]
-        for path, value in self._identity_path_values(defaults).items():
-            self._add_owned_path(path, value)
+        for path, value in self.identity_path_values(defaults).items():
+            self.add_owned_path(path, value)
 
-    def _identity_path_values(
+    def identity_path_values(
         self: DbusAdapterIdentityContext,
         defaults: configparser.SectionProxy,
     ) -> dict[str, Any]:
@@ -52,13 +65,13 @@ class DbusAdapterIdentityMixin:
             "/FirmwareVersion": str(defaults.get("FirmwareVersion", "")).strip(),
             "/HardwareVersion": str(defaults.get("HardwareVersion", "")).strip(),
             "/Serial": str(defaults.get("Serial", f"gateway-{device_instance}")).strip(),
-            "/Connected": 1 if self._configured_for_identity(defaults) else 0,
+            "/Connected": 1 if self.configured_for_identity(defaults) else 0,
             "/Position": int(float(str(defaults.get("Position", "1")).strip() or "1")),
             "/UpdateIndex": 0,
         }
 
     @staticmethod
-    def _configured_for_identity(defaults: configparser.SectionProxy) -> bool:
+    def configured_for_identity(defaults: configparser.SectionProxy) -> bool:
         if str(defaults.get("Host", "")).strip():
             return True
         return any(
@@ -66,7 +79,7 @@ class DbusAdapterIdentityMixin:
             for key in ("MeterConfigPath", "SwitchConfigPath", "ChargerConfigPath")
         )
 
-    def _add_owned_path(self: DbusAdapterIdentityContext, path: str, value: Any) -> None:
-        self._dbusservice.add_path(path, value)
+    def add_owned_path(self: DbusAdapterIdentityContext, path: str, value: Any) -> None:
+        self.dbus_service.add_path(path, value)
         self.write_scheduler.registered_paths.add(path)
         self.write_scheduler.last_values[path] = value

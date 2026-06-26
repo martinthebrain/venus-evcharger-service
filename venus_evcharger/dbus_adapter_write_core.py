@@ -59,7 +59,7 @@ class DbusWriteSchedulerCoreMixin:
         return self.process_next_scheduled_command(coalesced, include_local_publish=include_local_publish)
 
     def _startup_registration_pending(self, commands: list[tuple[str, dict[str, Any]]]) -> bool:
-        return not self.adapter._dbusservice_registered and has_startup_registration(commands=commands)
+        return not self.adapter.dbus_service_registered and has_startup_registration(commands=commands)
 
     def process_next_scheduled_command(
         self,
@@ -181,7 +181,7 @@ class DbusWriteSchedulerCoreMixin:
         return handler(command)
 
     def _register_service_command(self, _command: Mapping[str, Any]) -> CommandOutcome:
-        self.adapter._register_dbus_service_name()
+        self.adapter.register_dbus_service_name()
         return "applied"
 
     def process_loaded_command(

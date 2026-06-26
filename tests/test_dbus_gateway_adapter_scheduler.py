@@ -444,7 +444,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     writes.append((key, value))
                     super().__setitem__(key, value)
 
-            adapter._dbusservice = _FakeDbusService()
+            adapter.set_dbus_service(_FakeDbusService())
             adapter.write_scheduler.registered_paths.update({"/A", "/B"})
             command_path = adapter.commands.enqueue(
                 {
@@ -478,7 +478,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     writes.append((key, value))
                     super().__setitem__(key, value)
 
-            adapter._dbusservice = _FakeDbusService()
+            adapter.set_dbus_service(_FakeDbusService())
             adapter.write_scheduler.registered_paths.update({"/A", "/B", "/C", "/D"})
             command_path = adapter.commands.enqueue(
                 {
@@ -511,7 +511,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     writes.append((key, value))
                     super().__setitem__(key, value)
 
-            adapter._dbusservice = _FakeDbusService()
+            adapter.set_dbus_service(_FakeDbusService())
             adapter.write_scheduler.registered_paths.update(
                 {"/Auto/Reason", "/Mode", "/Status", "/StartStop", "/Ac/L2/Power"}
             )
@@ -550,7 +550,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     writes.append((key, value))
                     super().__setitem__(key, value)
 
-            adapter._dbusservice = _FakeDbusService()
+            adapter.set_dbus_service(_FakeDbusService())
             adapter.write_scheduler.registered_paths.add("/Ac/Power")
 
             self.assertEqual(adapter.write_scheduler.publish_path("/Ac/Power", 1200.0), "applied")
@@ -577,7 +577,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
 
             self.assertEqual(adapter.write_scheduler.process_command({"kind": "register_service"}), "applied")
-            self.assertTrue(adapter._dbusservice.registered)
+            self.assertTrue(adapter.dbus_service.registered)
             outcome = adapter.write_scheduler.process_command(
                 {"kind": "register_path", "path": "/Mode", "value": 1, "writeable": True}
             )
@@ -596,7 +596,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 adapter.write_scheduler.publish_command({"kind": "publish_desired", "paths": {"/A": 1, "/B": 2}}),
                 "deferred",
             )
-            self.assertEqual(adapter._dbusservice["/A"], 1)
+            self.assertEqual(adapter.dbus_service["/A"], 1)
             self.assertEqual(adapter.write_scheduler.publish_path("", 1), "applied")
             self.assertEqual(adapter.write_scheduler.publish_path("/Missing", 1), "dropped")
             self.assertEqual(adapter.write_scheduler.publish_command({"kind": "publish_value", "path": "/Missing", "value": 1}), "dropped")
@@ -787,20 +787,20 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
 
-            adapter._ensure_dbus_service()
+            adapter.ensure_dbus_service()
 
-            self.assertFalse(adapter._dbusservice.registered)
-            self.assertEqual(adapter._dbusservice["/DeviceInstance"], 77)
-            self.assertEqual(adapter._dbusservice["/ProductName"], "Test EVCS")
-            self.assertEqual(adapter._dbusservice["/CustomName"], "Garage")
-            self.assertEqual(adapter._dbusservice["/Connected"], 1)
-            self.assertEqual(adapter._dbusservice["/Mgmt/Connection"], "Shelly RPC")
+            self.assertFalse(adapter.dbus_service.registered)
+            self.assertEqual(adapter.dbus_service["/DeviceInstance"], 77)
+            self.assertEqual(adapter.dbus_service["/ProductName"], "Test EVCS")
+            self.assertEqual(adapter.dbus_service["/CustomName"], "Garage")
+            self.assertEqual(adapter.dbus_service["/Connected"], 1)
+            self.assertEqual(adapter.dbus_service["/Mgmt/Connection"], "Shelly RPC")
             self.assertIn("/DeviceInstance", adapter.write_scheduler.registered_paths)
 
-            adapter._register_dbus_service_name()
-            adapter._register_dbus_service_name()
+            adapter.register_dbus_service_name()
+            adapter.register_dbus_service_name()
 
-            self.assertTrue(adapter._dbusservice.registered)
+            self.assertTrue(adapter.dbus_service.registered)
 
     def test_startup_registration_batch_registers_paths_before_service_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -837,9 +837,9 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
             self.assertTrue(adapter.write_scheduler.process_one())
 
-            self.assertTrue(adapter._dbusservice.registered)
-            self.assertEqual(adapter._dbusservice["/Mode"], 0)
-            self.assertEqual(adapter._dbusservice["/StartStop"], 1)
+            self.assertTrue(adapter.dbus_service.registered)
+            self.assertEqual(adapter.dbus_service["/Mode"], 0)
+            self.assertEqual(adapter.dbus_service["/StartStop"], 1)
             self.assertEqual(adapter.commands.load_pending(), [])
 
     def test_startup_registration_batch_honors_limit_before_registering_service(self) -> None:
@@ -860,13 +860,13 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.commands.enqueue({"kind": "register_service", "coalesce_key": "register-service", "priority": "publish"})
 
             self.assertTrue(adapter.write_scheduler.process_one())
-            self.assertFalse(adapter._dbusservice.registered)
+            self.assertFalse(adapter.dbus_service.registered)
             self.assertIn("/Mode", adapter.write_scheduler.registered_paths)
             self.assertIn("/StartStop", adapter.write_scheduler.registered_paths)
             self.assertNotIn("/Status", adapter.write_scheduler.registered_paths)
 
             self.assertTrue(adapter.write_scheduler.process_one())
-            self.assertTrue(adapter._dbusservice.registered)
+            self.assertTrue(adapter.dbus_service.registered)
             self.assertIn("/Status", adapter.write_scheduler.registered_paths)
             self.assertEqual(adapter.commands.load_pending(), [])
 
@@ -1152,7 +1152,6 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.cache.update_services(["svc"])
-            adapter._dbusservice_registered = True
             adapter.write_scheduler.registered_paths.update({"/Session/Time", "/Ac/Power"})
             writes: list[tuple[str, object]] = []
 
@@ -1161,7 +1160,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     writes.append((key, value))
                     super().__setitem__(key, value)
 
-            adapter._dbusservice = _FakeDbusService()
+            adapter.set_dbus_service(_FakeDbusService(), registered=True)
             adapter.commands.enqueue(
                 {
                     "kind": "publish_value",
@@ -2288,7 +2287,6 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            adapter._dbusservice_registered = True
             writes: list[tuple[str, object]] = []
 
             class _FakeDbusService(dict):
@@ -2296,7 +2294,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     writes.append((key, value))
                     super().__setitem__(key, value)
 
-            adapter._dbusservice = _FakeDbusService()
+            adapter.set_dbus_service(_FakeDbusService(), registered=True)
             for index in range(200):
                 path = f"/LoadTest/{index}"
                 adapter.write_scheduler.registered_paths.add(path)
@@ -2327,7 +2325,6 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            adapter._dbusservice_registered = True
             adapter.timed_local_publish = MagicMock(side_effect=lambda operation: operation())  # type: ignore[method-assign]
             writes: list[tuple[str, object]] = []
 
@@ -2336,7 +2333,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     writes.append((key, value))
                     super().__setitem__(key, value)
 
-            adapter._dbusservice = _FakeDbusService()
+            adapter.set_dbus_service(_FakeDbusService(), registered=True)
             for index in range(5):
                 path = f"/BudgetTest/{index}"
                 adapter.write_scheduler.registered_paths.add(path)
@@ -2363,7 +2360,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             config_path.write_text("[DEFAULT]\nDbusGatewayLocalPublishBurstLimit=3\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
-            adapter._dbusservice_registered = True
+            adapter.set_dbus_service(_FakeVeDbusService(), registered=True)
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             adapter.commands.enqueue({"kind": "set_value", "service": "svc", "path": "/A", "priority": "user"})
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
@@ -2416,7 +2413,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            adapter._dbusservice = _FakeVeDbusService()
+            adapter.set_dbus_service(_FakeVeDbusService())
             for index in range(5):
                 adapter.commands.enqueue(
                     {
@@ -2473,7 +2470,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             commands = [("svc", {"kind": "register_service", "priority": "publish"})]
             self.assertTrue(adapter.write_scheduler.process_startup_registration_batch(commands))
-            self.assertTrue(adapter._dbusservice.registered)
+            self.assertTrue(adapter.dbus_service.registered)
 
             limited = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-limited")))
             limited.write_scheduler.startup_registration_batch_limit = 0
@@ -2501,7 +2498,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     [("svc", {"kind": "register_service", "priority": "publish"})]
                 )
             )
-            self.assertFalse(waiting._dbusservice_registered)
+            self.assertFalse(waiting.dbus_service_registered)
 
             no_paths = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-no-paths")))
             self.assertEqual(no_paths.write_scheduler.process_startup_register_paths([], time.monotonic()), (False, 0))
@@ -2715,12 +2712,12 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
             adapter.dbus_introspection_enabled = True
             adapter.dbus_introspection_request_path = ""
-            self.assertEqual(adapter._read_introspection_request_payload(), {})
+            self.assertEqual(adapter.introspection_request_payload(), {})
             adapter.dbus_introspection_request_path = str(request_path)
             request_path.write_text("[]", encoding="utf-8")
-            self.assertEqual(adapter._read_introspection_request_payload(), {})
+            self.assertEqual(adapter.introspection_request_payload(), {})
             request_path.write_text("{", encoding="utf-8")
-            self.assertEqual(adapter._read_introspection_request_payload(), {})
+            self.assertEqual(adapter.introspection_request_payload(), {})
             request_path.write_text(json.dumps({"requests": "bad"}), encoding="utf-8")
             adapter.process_introspection_requests_once()
             self.assertEqual(adapter.commands.load_pending(), [])
@@ -2730,12 +2727,12 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             request_path.write_text(json.dumps({"requests": [{"service": "svc", "path": "/P"}]}), encoding="utf-8")
             adapter.process_introspection_requests_once()
             self.assertEqual(adapter._introspection_queue_depth, 1)
-            clear_globals = adapter._clear_introspection_request_payload.__globals__
+            clear_globals = adapter.clear_introspection_request_payload.__globals__
             with patch.dict(
                 clear_globals,
                 {"write_text_atomically": MagicMock(side_effect=RuntimeError("readonly"))},
             ), patch.object(clear_globals["logging"], "debug") as debug:
-                adapter._clear_introspection_request_payload()
+                adapter.clear_introspection_request_payload()
             debug.assert_called_once()
 
             background = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-bg")))
@@ -2751,7 +2748,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             background.enqueue_background_introspection_if_due()
             self.assertGreater(background._enqueue_introspection_command.call_count, 0)
             self.assertEqual(
-                background._configured_or_prefixed_services(
+                background.configured_or_prefixed_services(
                     "UnusedExplicit",
                     "UnusedPrefix",
                     "com.victronenergy.pvinverter",
@@ -2760,7 +2757,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             )
             background.config["DEFAULT"]["UnusedExplicit"] = "com.victronenergy.pvinverter.missing"
             self.assertEqual(
-                background._configured_or_prefixed_services(
+                background.configured_or_prefixed_services(
                     "UnusedExplicit",
                     "UnusedPrefix",
                     "com.victronenergy.pvinverter",
@@ -2781,7 +2778,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             )
             quiet_background = DbusAdapter(str(quiet_config), paths=gateway_paths(str(Path(temp_dir) / "run-quiet-bg")))
             quiet_background.cache.update_services(["com.victronenergy.battery.tty1", "com.victronenergy.pvinverter.http_1"])
-            self.assertEqual(quiet_background._background_introspection_specs(), [])
+            self.assertEqual(quiet_background.background_introspection_specs(), [])
 
     def test_gateway_writes_legacy_introspection_snapshot_from_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2802,7 +2799,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 now=123.0,
             )
 
-            adapter._write_introspection_snapshot()
+            adapter.write_introspection_snapshot()
 
             payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
             finding = payload["services"]["com.victronenergy.system"]["paths"]["/Ac/Grid"]
@@ -2813,13 +2810,13 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.cache.mark_error("introspection:bad-key", source="bad", error="bad", now=124.0)
             adapter.cache.mark_error("introspection::/NoService", source="bad", error="bad", now=124.5)
             adapter.cache.mark_error("introspection:svc:/Broken", source="svc/Broken", error="offline", now=125.0)
-            snapshot = adapter._introspection_services_snapshot(200.0)
+            snapshot = adapter.introspection_services_snapshot(200.0)
             self.assertNotIn("", snapshot)
             self.assertEqual(snapshot["svc"]["paths"]["/Broken"]["status"], "unresponsive-backoff")
-            self.assertEqual(adapter._parse_introspection_xml("<bad"), ([], []))
+            self.assertEqual(adapter.parse_introspection_xml("<bad"), ([], []))
 
             adapter.dbus_introspection_enabled = False
-            adapter._write_introspection_snapshot()
+            adapter.write_introspection_snapshot()
 
     def test_gateway_introspection_snapshot_logs_write_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2832,13 +2829,13 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.dbus_introspection_enabled = True
-            method_globals = adapter._write_introspection_snapshot.__globals__
+            method_globals = adapter.write_introspection_snapshot.__globals__
 
             with (
                 patch.dict(method_globals, {"write_text_atomically": MagicMock(side_effect=OSError("readonly"))}),
                 patch.object(method_globals["logging"], "debug") as debug_log,
             ):
-                adapter._write_introspection_snapshot()
+                adapter.write_introspection_snapshot()
 
         debug_log.assert_called_once()
 
@@ -3170,7 +3167,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(adapter.process_non_write_command({"kind": "refresh_services"}), "deferred")
             self.assertEqual(adapter.process_non_write_command({"kind": "introspect"}), "deferred")
             adapter.circuit.degraded_until = 0.0
-            self.assertEqual(adapter._introspect_command({}), "dropped")
+            self.assertEqual(adapter.introspect_command({}), "dropped")
             adapter.timed_dbus_operation = MagicMock(return_value="<node/>")  # type: ignore[method-assign]
             self.assertEqual(adapter.process_non_write_command({"kind": "introspect", "service": "svc", "path": "/"}), "applied")
             self.assertEqual(adapter.cache.values["introspection:svc:/"]["value"], "<node/>")
@@ -3197,7 +3194,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             fake_bus.get_object.return_value = object()
             adapter.connection.bus = MagicMock(return_value=fake_bus)  # type: ignore[method-assign]
             with patch.object(introspection_module.dbus, "Interface", return_value=fake_iface):
-                self.assertEqual(adapter._introspect_command({"service": "svc", "path": "/Real", "timeout": 2.0}), "applied")
+                self.assertEqual(adapter.introspect_command({"service": "svc", "path": "/Real", "timeout": 2.0}), "applied")
             fake_iface.Introspect.assert_called_once_with(timeout=2.0)
 
             self.assertEqual(adapter.timed_dbus_operation("read", lambda: 42), 42)

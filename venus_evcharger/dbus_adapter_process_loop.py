@@ -26,7 +26,7 @@ class DbusAdapterLoopMixin:
         os.makedirs(self.paths.command_dir, exist_ok=True)
         os.makedirs(self.paths.core_command_dir, exist_ok=True)
         self.start_socket()
-        self._ensure_dbus_service()
+        self.ensure_dbus_service()
         self._main_loop = GLib.MainLoop()
         GLib.timeout_add(max(50, int(self.min_tick_seconds * 1000)), self._tick)
         try:

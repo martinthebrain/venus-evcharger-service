@@ -59,7 +59,7 @@ class DbusWriteSchedulerPublishMixin:
     prune_processed: Callable[[float], None]
 
     def process_local_publish_burst(self, limit: int | None = None) -> int:  # pragma: no mutate block
-        if not self.adapter._dbusservice_registered:
+        if not self.adapter.dbus_service_registered:
             return 0
         remaining_budget = self.dynamic_local_publish_burst_limit if limit is None else int(limit)
         processed = 0
@@ -129,13 +129,12 @@ class DbusWriteSchedulerPublishMixin:
             self.adapter.commands.remove(stale_path)
 
     def register_path(self, command: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
-        self.adapter._ensure_dbus_service()
         path = str(command.get("path") or "")
         if not path or path in self.registered_paths:
             return "applied"
         value = command.get("value")
         writeable = bool(command.get("writeable"))
-        self.adapter._dbusservice.add_path(
+        self.adapter.dbus_service.add_path(
             path,
             value,
             writeable=writeable,
@@ -205,18 +204,17 @@ class DbusWriteSchedulerPublishMixin:
             return "applied"
         if self.last_values.get(path) == value:
             if path in self.registered_paths:
-                self._refresh_localpublish_cache(path, value)
+                self._refresh_local_publish_cache(path, value)
             return "applied"
-        self.adapter._ensure_dbus_service()
         if path not in self.registered_paths:
             logging.debug("Dropping publish for unregistered DBus path %s", path)
             return "dropped"
-        self.timed_local_publish(lambda: self.adapter._dbusservice.__setitem__(path, value))
+        self.timed_local_publish(lambda: self.adapter.dbus_service.__setitem__(path, value))
         self.last_values[path] = value
-        self._refresh_localpublish_cache(path, value)
+        self._refresh_local_publish_cache(path, value)
         return "applied"
 
-    def _refresh_localpublish_cache(self, path: str, value: Any) -> None:  # pragma: no mutate block
+    def _refresh_local_publish_cache(self, path: str, value: Any) -> None:  # pragma: no mutate block
         source = f"{self.adapter.service_name}{path}"
         self.adapter.cache.update_value(
             dbus_path_key(self.adapter.service_name, path),
