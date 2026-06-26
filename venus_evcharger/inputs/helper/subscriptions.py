@@ -73,7 +73,7 @@ class _AutoInputHelperSubscriptionMixin:
             return []
 
     def _dc_pv_subscription_spec(self: Any) -> tuple[str, str, str] | None:
-        """Return the optional DC PV subscription tuple when configured."""
+        """Return the DC PV subscription tuple when enabled and configured."""
         if self.auto_use_dc_pv and self.auto_dc_pv_service and self.auto_dc_pv_path:
             return ("pv", self.auto_dc_pv_service, self.auto_dc_pv_path)
         return None

@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from venus_evcharger.dbus_gateway_core import FAST_READ_KEYS, GUI_CRITICAL_PUBLISH_PATHS, _priority_rank
+from venus_evcharger.dbus_gateway_core import FAST_READ_KEYS, GUI_CRITICAL_PUBLISH_PATHS, priority_rank
 
 _STATIC_QUEUE_CLASSES = {
     "register_path": "startup/register",
@@ -50,7 +50,7 @@ def _backpressure_rule(state: str, priority: str, queue_class: str) -> bool:
         "slow": _allowed_when_slow,
         "protective": _allowed_when_protective,
     }
-    return rules.get(state, _allow_any)(_priority_rank(priority), priority, queue_class)  # pragma: no mutate
+    return rules.get(state, _allow_any)(priority_rank(priority), priority, queue_class)  # pragma: no mutate
 
 
 def _allow_any(_rank: int, _priority: str, _queue_class: str) -> bool:

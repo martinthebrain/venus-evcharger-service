@@ -60,12 +60,14 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             learned_charge_power_voltage=230.0,
             phase="L1",
             voltage_mode="phase",
+            last_status=6,
         )
         controller = DbusPublishController(service, self._age_seconds)
 
         values = controller._config_values(1, now=100.0)
 
         self.assertEqual(values["/Connected"], 1)
+        self.assertEqual(values["/Status"], 6)
         self.assertEqual(values["/SetCurrent"], 13.0)
         self.assertEqual(values["/PhaseSelection"], "P1_P2")
         self.assertEqual(values["/PhaseSelectionActive"], "P1")

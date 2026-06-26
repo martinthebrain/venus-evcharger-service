@@ -268,7 +268,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         return total, seen_value
 
     def _read_dc_pv_value(self) -> tuple[Any, bool]:
-        """Read optional DC PV power."""
+        """Read DC PV power when enabled for the current installation."""
         svc = self.service
         if not svc.auto_use_dc_pv:
             return None, False
@@ -327,7 +327,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         )
 
     def get_pv_power(self) -> float | None:
-        """Return summed PV power from all AC PV services and optional DC PV."""
+        """Return summed PV power from all discovered AC/DC PV sources."""
         svc = self.service
         now = time.time()
         if not self._source_retry_ready("pv", now):

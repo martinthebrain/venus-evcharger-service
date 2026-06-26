@@ -10,12 +10,12 @@ from typing import Any, cast
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_write_support import (
-    _command_kind,
-    _deadline_pair,
-    _has_startup_registration,
-    _is_local_publish_command,
-    _register_service_command,
-    _should_follow_with_local_burst,
+    command_kind,
+    deadline_pair,
+    has_startup_registration,
+    is_local_publish_command,
+    register_service_command,
+    should_follow_with_local_burst,
 )
 from venus_evcharger.dbus_gateway import DbusCommandInbox
 
@@ -41,45 +41,45 @@ class DbusWriteSchedulerCoreMixin:
     publish_command: Callable[..., CommandOutcome]
     register_path: Callable[[Mapping[str, Any]], CommandOutcome]
     set_remote_value: Callable[[Mapping[str, Any]], CommandOutcome]
-    _budget_available: Callable[[Mapping[str, Any], float], bool]
+    budget_available: Callable[[Mapping[str, Any], float], bool]
     _budget_elapsed: Callable[[float, float], bool]
-    _prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
-    _prune_budget: Callable[[float], None]
-    _record_budget: Callable[[Mapping[str, Any]], None]
-    _record_lifecycle: Callable[[Mapping[str, Any], str], None]
-    _record_processed: Callable[[], None]
+    prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
+    prune_budget: Callable[[float], None]
+    record_budget: Callable[[Mapping[str, Any]], None]
+    record_lifecycle: Callable[[Mapping[str, Any], str], None]
+    record_processed: Callable[[], None]
 
     def process_one(self, *, include_local_publish: bool = True) -> bool:
         pending = self.adapter.commands.load_pending()
-        coalesced = self._prioritized_commands(DbusCommandInbox.coalesce(pending))
+        coalesced = self.prioritized_commands(DbusCommandInbox.coalesce(pending))
         if not coalesced:
             return False
         if self._startup_registration_pending(coalesced):
             return self.process_startup_registration_batch(coalesced)
-        return self._process_next_scheduled_command(coalesced, include_local_publish=include_local_publish)
+        return self.process_next_scheduled_command(coalesced, include_local_publish=include_local_publish)
 
     def _startup_registration_pending(self, commands: list[tuple[str, dict[str, Any]]]) -> bool:
-        return not self.adapter._dbusservice_registered and _has_startup_registration(commands=commands)
+        return not self.adapter._dbusservice_registered and has_startup_registration(commands=commands)
 
-    def _process_next_scheduled_command(
+    def process_next_scheduled_command(
         self,
         commands: list[tuple[str, dict[str, Any]]],
         *,
         include_local_publish: bool,
     ) -> bool:
-        selected = self._select_next_command(commands, include_local_publish=include_local_publish)
+        selected = self.select_next_command(commands, include_local_publish=include_local_publish)
         if selected is None:
             return False
         path, command = selected
-        outcome = self._process_loaded_command(path, command)
-        if _should_follow_with_local_burst(command, outcome):
+        outcome = self.process_loaded_command(path, command)
+        if should_follow_with_local_burst(command, outcome):
             self.process_local_publish_burst(max(0, self.local_publish_burst_limit - 1))
         return True
 
     def process_startup_registration_batch(self, commands: list[tuple[str, dict[str, Any]]]) -> bool:
         started = time.monotonic()
-        register_service = _register_service_command(commands)
-        did_paths, processed = self._process_startup_register_paths(commands, started)
+        register_service = register_service_command(commands)
+        did_paths, processed = self.process_startup_register_paths(commands, started)
         did_service = self._process_startup_register_service(
             register_service,
             processed=processed,
@@ -87,7 +87,7 @@ class DbusWriteSchedulerCoreMixin:
         )
         return did_paths or did_service
 
-    def _process_startup_register_paths(
+    def process_startup_register_paths(
         self,
         commands: list[tuple[str, dict[str, Any]]],
         started: float,
@@ -97,12 +97,12 @@ class DbusWriteSchedulerCoreMixin:
         for path, command in commands:
             if self._startup_path_budget_exhausted(started, processed):
                 break
-            if _command_kind(command) != "register_path":
+            if command_kind(command) != "register_path":
                 continue
             if self.register_path(command) != "applied":
                 continue
             self.adapter.commands.remove(path)
-            self._record_processed()
+            self.record_processed()
             did_work = True
             processed += 1
         return did_work, processed
@@ -114,17 +114,17 @@ class DbusWriteSchedulerCoreMixin:
         processed: int,
         started: float,
     ) -> bool:
-        if not self._should_process_startup_service(register_service, processed=processed, started=started):
+        if not self.should_process_startup_service(register_service, processed=processed, started=started):
             return False
         assert register_service is not None
         path, command = register_service
         if self.process_command(command, command_file=path) != "applied":
             return False
         self.adapter.commands.remove(path)
-        self._record_processed()
+        self.record_processed()
         return True
 
-    def _should_process_startup_service(
+    def should_process_startup_service(
         self,
         register_service: tuple[str, dict[str, Any]] | None,
         *,
@@ -133,7 +133,7 @@ class DbusWriteSchedulerCoreMixin:
     ) -> bool:
         return (
             register_service is not None
-            and not self._remaining_register_paths()
+            and not self.remaining_register_paths()
             and processed < self.startup_registration_batch_limit
             and not self._budget_elapsed(started, self.startup_registration_tick_budget_seconds)
         )
@@ -144,19 +144,19 @@ class DbusWriteSchedulerCoreMixin:
             or self._budget_elapsed(started, self.startup_registration_tick_budget_seconds)
         )
 
-    def _remaining_register_paths(self) -> bool:
-        return any(_command_kind(command) == "register_path" for _path, command in self.adapter.commands.load_pending())
+    def remaining_register_paths(self) -> bool:
+        return any(command_kind(command) == "register_path" for _path, command in self.adapter.commands.load_pending())
 
-    def _select_next_command(
+    def select_next_command(
         self,
         commands: list[tuple[str, dict[str, Any]]],
         *,
         include_local_publish: bool = True,
     ) -> tuple[str, dict[str, Any]] | None:
         now = time.time()
-        self._prune_budget(now)
+        self.prune_budget(now)
         for path, command in commands:
-            if (include_local_publish or not _is_local_publish_command(command)) and self._budget_available(command, now):
+            if (include_local_publish or not is_local_publish_command(command)) and self.budget_available(command, now):
                 return path, command
         return None
 
@@ -164,10 +164,10 @@ class DbusWriteSchedulerCoreMixin:
         priority = str(command.get("priority") or "diagnostic")
         if not self.adapter.circuit.allows_priority(priority):
             return "deferred"
-        return self._dispatch_command(command, command_file=command_file)
+        return self.dispatch_command(command, command_file=command_file)
 
-    def _dispatch_command(self, command: Mapping[str, Any], *, command_file: str) -> CommandOutcome:
-        kind = _command_kind(command)
+    def dispatch_command(self, command: Mapping[str, Any], *, command_file: str) -> CommandOutcome:
+        kind = command_kind(command)
         handlers: dict[str, Callable[[Mapping[str, Any]], CommandOutcome]] = {
             "register_service": self._register_service_command,
             "register_path": self.register_path,
@@ -177,25 +177,25 @@ class DbusWriteSchedulerCoreMixin:
         }
         handler = handlers.get(kind)
         if handler is None:
-            return cast(CommandOutcome, self.adapter._process_non_write_command(command))
+            return cast(CommandOutcome, self.adapter.process_non_write_command(command))
         return handler(command)
 
     def _register_service_command(self, _command: Mapping[str, Any]) -> CommandOutcome:
         self.adapter._register_dbus_service_name()
         return "applied"
 
-    def _process_loaded_command(
+    def process_loaded_command(
         self,
         path: str,
         command: Mapping[str, Any],
         *,
         pending_commands: list[tuple[str, dict[str, Any]]] | None = None,
     ) -> CommandOutcome:
-        if self._is_expired(command):
+        if self.command_expired(command):
             return self._drop_expired_command(path, command, pending_commands=pending_commands)
-        outcome = self._command_outcome(path, command)
-        self._apply_command_outcome(path, command, outcome, pending_commands=pending_commands)
-        self._record_lifecycle(command, outcome)
+        outcome = self.command_outcome(path, command)
+        self._apply_command_result(path, command, outcome, pending_commands=pending_commands)
+        self.record_lifecycle(command, outcome)
         return outcome
 
     def _drop_expired_command(
@@ -207,11 +207,11 @@ class DbusWriteSchedulerCoreMixin:
     ) -> CommandOutcome:
         self.adapter.commands.remove(path)
         self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
-        self._record_lifecycle(command, "expired")
-        self._record_processed()
+        self.record_lifecycle(command, "expired")
+        self.record_processed()
         return "dropped"
 
-    def _command_outcome(self, path: str, command: Mapping[str, Any]) -> CommandOutcome:
+    def command_outcome(self, path: str, command: Mapping[str, Any]) -> CommandOutcome:
         try:
             return self.process_command(command, command_file=path)
         except DbusOperationDeferred:
@@ -220,7 +220,7 @@ class DbusWriteSchedulerCoreMixin:
             logging.exception("Gateway command failed; keeping for retry path=%s: %s", path, error)
             return "deferred"
 
-    def _apply_command_outcome(
+    def _apply_command_result(
         self,
         path: str,
         command: Mapping[str, Any],
@@ -229,14 +229,14 @@ class DbusWriteSchedulerCoreMixin:
         pending_commands: list[tuple[str, dict[str, Any]]] | None,
     ) -> None:
         if outcome == "deferred":
-            self._record_budget(command)
+            self.record_budget(command)
         if outcome in ("applied", "dropped"):
             self.adapter.commands.remove(path)
             self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
-            self._record_processed()
-            self._record_budget(command)
+            self.record_processed()
+            self.record_budget(command)
 
     @staticmethod
-    def _is_expired(command: Mapping[str, Any]) -> bool:
-        deadline, created_at = _deadline_pair(command)
+    def command_expired(command: Mapping[str, Any]) -> bool:
+        deadline, created_at = deadline_pair(command)
         return deadline > 0.0 and created_at > 0.0 and time.time() > created_at + deadline

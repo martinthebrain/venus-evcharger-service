@@ -106,7 +106,7 @@ class ResourceMonitor:
         mem_total = float(meminfo.get("MemTotal", 0.0) or 0.0)
         mem_available = float(meminfo.get("MemAvailable", 0.0) or 0.0)
         return {
-            "state": _resource_state(load1 / cpu_count, system_cpu_pct, mem_available),
+            "state": resource_state(load1 / cpu_count, system_cpu_pct, mem_available),
             "loadavg_1m": load1,
             "loadavg_5m": load5,
             "loadavg_15m": load15,
@@ -203,10 +203,6 @@ class ResourceMonitor:
         except OSError:
             return 0
 
-    @staticmethod
-    def _resource_state(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> str:
-        return _resource_state(load_per_cpu, cpu_pct, mem_available_kb)
-
 
 def _average(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
@@ -216,7 +212,7 @@ def _percentage(value: float, total: float) -> float:
     return (value / total * 100.0) if total > 0.0 else 0.0
 
 
-def _resource_state(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> str:
+def resource_state(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> str:
     if _resource_constrained(load_per_cpu, cpu_pct, mem_available_kb):
         return "constrained"
     if _resource_busy(load_per_cpu, cpu_pct, mem_available_kb):

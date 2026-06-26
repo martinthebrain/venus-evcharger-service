@@ -15,9 +15,9 @@ from typing import Any
 from venus_evcharger.dbus_gateway_core import (
     DBUS_GATEWAY_SCHEMA_VERSION,
     PUBLISH_PATH_RANKS,
-    _float_or_zero,
     _now,
-    _priority_rank,
+    float_or_zero,
+    priority_rank,
     read_json_file,
     write_json_file,
 )
@@ -76,13 +76,13 @@ class DbusCommandInbox:
 
     @staticmethod
     def _should_replace_existing_payload(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
-        existing_rank = _priority_rank(existing.get("priority"))
-        new_rank = _priority_rank(payload.get("priority"))
+        existing_rank = priority_rank(existing.get("priority"))
+        new_rank = priority_rank(payload.get("priority"))
         if new_rank < existing_rank:
             return True  # pragma: no mutate
         if new_rank > existing_rank:
             return False  # pragma: no mutate
-        return _float_or_zero(payload.get("created_at")) >= _float_or_zero(existing.get("created_at"))  # pragma: no mutate
+        return float_or_zero(payload.get("created_at")) >= float_or_zero(existing.get("created_at"))  # pragma: no mutate
 
     @staticmethod
     def _normalized_command(command: Mapping[str, Any]) -> dict[str, Any]:
@@ -157,10 +157,10 @@ def _selected_coalesced_command(
 ) -> tuple[str, dict[str, Any]]:  # pragma: no mutate block
     old_path, old_command = existing  # pragma: no mutate
     path, command = candidate  # pragma: no mutate
-    old_rank = _priority_rank(old_command.get("priority"))  # pragma: no mutate
-    new_rank = _priority_rank(command.get("priority"))  # pragma: no mutate
-    old_created = _float_or_zero(old_command.get("created_at"))  # pragma: no mutate
-    new_created = _float_or_zero(command.get("created_at"))  # pragma: no mutate
+    old_rank = priority_rank(old_command.get("priority"))  # pragma: no mutate
+    new_rank = priority_rank(command.get("priority"))  # pragma: no mutate
+    old_created = float_or_zero(old_command.get("created_at"))  # pragma: no mutate
+    new_created = float_or_zero(command.get("created_at"))  # pragma: no mutate
     if new_rank < old_rank or (new_rank == old_rank and new_created >= old_created):
         return path, command  # pragma: no mutate
     return old_path, old_command  # pragma: no mutate
@@ -177,7 +177,7 @@ def _replace_existing_coalesced(existing: object, payload: Mapping[str, Any]) ->
 
 
 def _same_priority(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
-    return _priority_rank(existing.get("priority")) == _priority_rank(payload.get("priority"))  # pragma: no mutate
+    return priority_rank(existing.get("priority")) == priority_rank(payload.get("priority"))  # pragma: no mutate
 
 
 def _same_kind(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
@@ -217,15 +217,15 @@ def _path_mapping(command: Mapping[str, Any]) -> Mapping[str, Any] | None:
 def _mark_coalesced_payload(existing: object, payload: dict[str, Any]) -> None:
     payload["lifecycle_state"] = "coalesced"  # pragma: no mutate
     if isinstance(existing, Mapping) and _same_priority(existing, payload):
-        payload["created_at"] = _float_or_zero(existing.get("created_at")) or payload["created_at"]  # pragma: no mutate
+        payload["created_at"] = float_or_zero(existing.get("created_at")) or payload["created_at"]  # pragma: no mutate
         payload["updated_at"] = _now()  # pragma: no mutate
 
 
 def _command_order_key(command: Mapping[str, Any]) -> tuple[int, int, float, int, str]:  # pragma: no mutate block
     return (
-        _priority_rank(command.get("priority")),  # pragma: no mutate
+        priority_rank(command.get("priority")),  # pragma: no mutate
         _command_kind_rank(command),  # pragma: no mutate
-        _float_or_zero(command.get("created_at")),  # pragma: no mutate
+        float_or_zero(command.get("created_at")),  # pragma: no mutate
         _publish_path_rank(command),  # pragma: no mutate
         str(command.get("id") or ""),  # pragma: no mutate
     )

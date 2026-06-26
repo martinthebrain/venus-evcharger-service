@@ -375,5 +375,12 @@ export VENUS_EVCHARGER_MANIFEST_SIG_SOURCE="$MANIFEST_SIG_SOURCE"
 VENUS_EVCHARGER_BOOTSTRAP_PUBKEY="$(resolve_pubkey_path)"
 export VENUS_EVCHARGER_BOOTSTRAP_PUBKEY
 export VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST="$REQUIRE_SIGNED_MANIFEST"
+set +e
 "$UPDATER_PATH" "$TARGET_DIR"
+updater_status=$?
+set -e
+if [ "$updater_status" -ne 0 ]; then
+	log "Updater failed with exit code $updater_status; target left unchanged"
+	exit "$updater_status"
+fi
 run_existing_installer
