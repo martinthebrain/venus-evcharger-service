@@ -38,7 +38,7 @@ from venus_evcharger.dbus_adapter_health_slo import (
     slo_targets,
     stale_core_read_keys,
 )
-from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterHealthContext
+from venus_evcharger.dbus_adapter_process_protocol_health import DbusAdapterHealthContext
 from venus_evcharger.dbus_gateway import FAST_READ_KEYS, DbusCommandInbox, dbus_path_key
 
 SESSION_ACTIVE_POWER_WATTS = 50.0

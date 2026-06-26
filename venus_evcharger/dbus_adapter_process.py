@@ -24,7 +24,6 @@ sys.path.insert(
     ),
 )
 
-from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter_components import (
     AtomicJsonWriter,
     DbusCircuitBreaker,
@@ -35,33 +34,30 @@ from venus_evcharger.dbus_adapter_components import (
     ResourceMonitor,
     TickHealth,
 )
+from venus_evcharger.dbus_adapter_process_config import adapter_settings, load_adapter_config
 from venus_evcharger.dbus_adapter_process_health import DbusAdapterHealthMixin
+from venus_evcharger.dbus_adapter_process_identity import DbusAdapterIdentityMixin
 from venus_evcharger.dbus_adapter_process_introspection import DbusAdapterIntrospectionMixin
 from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdapterIntrospectionSnapshotMixin
 from venus_evcharger.dbus_adapter_process_io import DbusAdapterIoMixin
 from venus_evcharger.dbus_adapter_process_loop import DbusAdapterLoopMixin
 from venus_evcharger.dbus_adapter_process_runtime import DbusAdapterRuntimeMixin
+from venus_evcharger.dbus_adapter_process_socket import DbusAdapterSocketMixin
 from venus_evcharger.dbus_adapter_read import DbusReadExecutor
 from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
 from venus_evcharger.dbus_gateway import (
     DbusCacheStore,
     DbusCommandInbox,
     GatewayPaths,
-    gateway_paths,
 )
-
-
-class _CasePreservingConfigParser(configparser.ConfigParser):
-    """Config parser that keeps DBus path and option casing intact."""
-
-    def optionxform(self, optionstr: str) -> str:
-        return optionstr
 
 
 class DbusAdapter(
     DbusAdapterLoopMixin,
     DbusAdapterIntrospectionMixin,
     DbusAdapterRuntimeMixin,
+    DbusAdapterSocketMixin,
+    DbusAdapterIdentityMixin,
     DbusAdapterIoMixin,
     DbusAdapterIntrospectionSnapshotMixin,
     DbusAdapterHealthMixin,
@@ -70,87 +66,50 @@ class DbusAdapter(
 
     def __init__(self, config_path: str, *, paths: GatewayPaths | None = None) -> None:
         self.config_path = config_path
-        self.config = self._load_config(config_path)
+        self.config = load_adapter_config(config_path)
         defaults = self.config["DEFAULT"]
-        self.paths = paths or gateway_paths(defaults.get("DbusGatewayRunDir", ""))
+        settings = adapter_settings(defaults, explicit_paths=paths)
+        self.paths = settings.paths
         self.connection = DbusConnectionManager()
         self.rate_limiter = DbusRateLimiter(
-            read_interval_seconds=config_get_float(defaults, "DbusGatewayReadIntervalSeconds", 0.25),
-            write_interval_seconds=config_get_float(defaults, "DbusGatewayWriteIntervalSeconds", 0.35),
-            introspection_interval_seconds=config_get_float(defaults, "DbusGatewayIntrospectionIntervalSeconds", 2.0),
+            read_interval_seconds=settings.rates.read_interval_seconds,
+            write_interval_seconds=settings.rates.write_interval_seconds,
+            introspection_interval_seconds=settings.rates.introspection_interval_seconds,
         )
         self.circuit = DbusCircuitBreaker()
         self.cache = DbusCacheStore(
             self.paths,
-            stale_after_seconds=config_get_float(defaults, "DbusGatewayStaleAfterSeconds", 10.0),
+            stale_after_seconds=settings.stale_after_seconds,
         )
         self.commands = DbusCommandInbox(self.paths.command_dir)
         self.core_commands = DbusCommandInbox(self.paths.core_command_dir)
-        self.service_name = self._evcharger_service_name(defaults)
+        self.service_name = settings.service_name
         self._dbusservice: Any = None
         self._dbusservice_registered = False
         self.write_scheduler = DbusWriteScheduler(self)
         self._stop = False
         self._server: socket.socket | None = None
         self._main_loop: Any = None
-        self.read_scheduler = DbusReadScheduler(self._configured_read_specs(defaults))
+        self.read_scheduler = DbusReadScheduler(settings.read_specs)
         self.read_executor = DbusReadExecutor(self)
-        configured_tick = config_get_float(defaults, "DbusGatewayTickSeconds", 0.2)
-        self.min_tick_seconds = max(0.05, config_get_float(defaults, "DbusGatewayMinTickSeconds", configured_tick))
-        self.max_tick_seconds = max(
-            self.min_tick_seconds,
-            config_get_float(defaults, "DbusGatewayMaxTickSeconds", 1.0),
-        )
+        self.min_tick_seconds = settings.timing.min_tick_seconds
+        self.max_tick_seconds = settings.timing.max_tick_seconds
         self.tick_seconds = self.min_tick_seconds
         self._next_work_tick_monotonic = 0.0
         self._last_resource_snapshot: dict[str, Any] = {}
-        self.discovery = DbusDiscoveryManager(
-            interval_seconds=config_get_float(defaults, "DbusGatewayServiceListIntervalSeconds", 900.0)
-        )
+        self.discovery = DbusDiscoveryManager(interval_seconds=settings.timing.service_list_interval_seconds)
         self.json_writer = AtomicJsonWriter()
-        self.cache_publish_interval_seconds = max(
-            0.0,
-            config_get_float(defaults, "DbusGatewayCachePublishIntervalSeconds", 0.0),
-        )
-        self.command_lifecycle_path = str(
-            defaults.get(
-                "DbusGatewayCommandLifecyclePath",
-                os.path.join(self.paths.run_dir, "dbus-command-lifecycle.jsonl"),
-            )
-        ).strip()
-        self.slo_gui_max_age_seconds = max(0.1, config_get_float(defaults, "DbusGatewaySloGuiMaxAgeSeconds", 2.0))
-        self.slo_core_read_max_age_seconds = max(
-            0.1,
-            config_get_float(defaults, "DbusGatewaySloCoreReadMaxAgeSeconds", 5.0),
-        )
-        self.slo_queue_max_age_seconds = max(0.1, config_get_float(defaults, "DbusGatewaySloQueueMaxAgeSeconds", 10.0))
-        self.slo_mainloop_gap_max_ms = max(10.0, config_get_float(defaults, "DbusGatewaySloMainloopGapMaxMs", 500.0))
-        self.health_log_path = str(
-            defaults.get("DbusGatewayHealthLogPath", os.path.join(self.paths.run_dir, "dbus-health-history.jsonl"))
-        ).strip()
-        self.health_log_interval_seconds = max(
-            0.0,
-            config_get_float(defaults, "DbusGatewayHealthLogIntervalSeconds", 10.0),
-        )
-        deviceinstance = self._device_instance(defaults)
-        self.dbus_introspection_snapshot_path = str(
-            defaults.get(
-                "DbusIntrospectionSnapshotPath",
-                f"/run/dbus-venus-evcharger-dbus-map-{deviceinstance}.json",
-            )
-        ).strip()
-        self.dbus_introspection_request_path = str(
-            defaults.get(
-                "DbusIntrospectionRequestPath",
-                f"/run/dbus-venus-evcharger-dbus-map-requests-{deviceinstance}.json",
-            )
-        ).strip()
-        self.dbus_introspection_enabled = str(defaults.get("DbusIntrospectionEnabled", "1")).strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
+        self.cache_publish_interval_seconds = settings.timing.cache_publish_interval_seconds
+        self.command_lifecycle_path = settings.files.command_lifecycle_path
+        self.slo_gui_max_age_seconds = settings.slo.gui_max_age_seconds
+        self.slo_core_read_max_age_seconds = settings.slo.core_read_max_age_seconds
+        self.slo_queue_max_age_seconds = settings.slo.queue_max_age_seconds
+        self.slo_mainloop_gap_max_ms = settings.slo.mainloop_gap_max_ms
+        self.health_log_path = settings.files.health_log_path
+        self.health_log_interval_seconds = settings.files.health_log_interval_seconds
+        self.dbus_introspection_snapshot_path = settings.introspection.snapshot_path
+        self.dbus_introspection_request_path = settings.introspection.request_path
+        self.dbus_introspection_enabled = settings.introspection.enabled
         self._last_introspection_full_scan_at = 0.0
         self._introspection_queue_depth = 0
         self._last_cache_publish_monotonic = 0.0
@@ -163,64 +122,6 @@ class DbusAdapter(
         self.tick_health = TickHealth()
         self._prefer_read_next = True
 
-    @staticmethod
-    def _load_config(path: str) -> configparser.ConfigParser:
-        parser = _CasePreservingConfigParser()
-        loaded = parser.read(path)
-        if not loaded:
-            raise ValueError(f"Unable to read config file: {path}")
-        return parser
-
-    @staticmethod
-    def _evcharger_service_name(defaults: configparser.SectionProxy) -> str:
-        base = str(defaults.get("ServiceName", "com.victronenergy.evcharger")).strip() or "com.victronenergy.evcharger"
-        try:
-            device_instance = int(str(defaults.get("DeviceInstance", "60")).strip() or "60")
-        except ValueError:
-            device_instance = 60
-        return f"{base}.http_{device_instance}"
-
-    @staticmethod
-    def _configured_read_specs(defaults: configparser.SectionProxy) -> dict[str, dict[str, Any]]:
-        grid_paths = [
-            str(defaults.get("AutoGridL1Path", "/Ac/Grid/L1/Power")).strip(),
-            str(defaults.get("AutoGridL2Path", "/Ac/Grid/L2/Power")).strip(),
-            str(defaults.get("AutoGridL3Path", "/Ac/Grid/L3/Power")).strip(),
-        ]
-        battery_service = str(defaults.get("AutoBatteryService", "")).strip()
-        if battery_service.endswith(".example"):
-            battery_service = ""
-        return {
-            "grid_power_w": {
-                "service": str(defaults.get("AutoGridService", "com.victronenergy.system")).strip(),
-                "paths": [path for path in grid_paths if path],
-                "interval": 2.0,
-                "aggregate": "sum",
-                "priority": "read",
-            },
-            "pv_power_w": {
-                "service": str(defaults.get("AutoPvService", "")).strip(),
-                "prefix": str(defaults.get("AutoPvServicePrefix", "com.victronenergy.pvinverter")).strip(),
-                "path": str(defaults.get("AutoPvPath", "/Ac/Power")).strip(),
-                "dc_service": str(defaults.get("AutoDcPvService", "com.victronenergy.system")).strip(),
-                "dc_path": str(defaults.get("AutoDcPvPath", "/Dc/Pv/Power")).strip(),
-                "use_dc_pv": str(defaults.get("AutoUseDcPv", "1")).strip().lower()
-                in ("1", "true", "yes", "on"),
-                "interval": 2.0,
-                "aggregate": "pv-total",
-                "priority": "read",
-                "optional_zero_on_error": True,
-                "optional_confidence": 0.2,
-            },
-            "battery_soc": {
-                "service": battery_service,
-                "prefix": str(defaults.get("AutoBatteryServicePrefix", "com.victronenergy.battery")).strip(),
-                "path": str(defaults.get("AutoBatterySocPath", "/Dc/Battery/Soc")).strip(),
-                "aggregate": "first-service" if not battery_service else "",
-                "interval": 2.0,
-                "priority": "read",
-            },
-        }
 def _logging_level_from_config(config: configparser.ConfigParser) -> int:
     value = str(config["DEFAULT"].get("Logging", "INFO")).strip().upper()
     return getattr(logging, value, logging.INFO)

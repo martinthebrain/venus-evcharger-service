@@ -15,7 +15,7 @@ from typing import Any, cast
 import dbus
 
 from venus_evcharger.dbus_adapter_components import DbusOperationDeferred
-from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterIoContext
+from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContext
 
 
 class DbusAdapterIoMixin:

@@ -15,7 +15,7 @@ import time
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
-from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterLoopContext
+from venus_evcharger.dbus_adapter_process_protocol_loop import DbusAdapterLoopContext
 
 
 class DbusAdapterLoopMixin:

@@ -18,7 +18,7 @@ import dbus
 
 from venus_evcharger.core.shared import compact_json, config_get_float, write_text_atomically
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
-from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterIntrospectionContext
+from venus_evcharger.dbus_adapter_process_protocol_introspection import DbusAdapterIntrospectionContext
 
 OPTIONAL_INTROSPECTION_PRIORITY_MIN = 90
 

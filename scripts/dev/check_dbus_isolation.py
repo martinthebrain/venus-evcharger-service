@@ -14,11 +14,13 @@ ADAPTER_FILES = {
     ADAPTER,
     REPO / "venus_evcharger" / "dbus_adapter_process.py",
     REPO / "venus_evcharger" / "dbus_adapter_process_health.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_identity.py",
     REPO / "venus_evcharger" / "dbus_adapter_process_introspection.py",
     REPO / "venus_evcharger" / "dbus_adapter_process_introspection_snapshot.py",
     REPO / "venus_evcharger" / "dbus_adapter_process_io.py",
     REPO / "venus_evcharger" / "dbus_adapter_process_loop.py",
     REPO / "venus_evcharger" / "dbus_adapter_process_runtime.py",
+    REPO / "venus_evcharger" / "dbus_adapter_process_socket.py",
     REPO / "venus_evcharger" / "dbus_adapter_components.py",
     REPO / "venus_evcharger" / "dbus_adapter_components_rate.py",
     REPO / "venus_evcharger" / "dbus_adapter_components_resource.py",
@@ -127,7 +129,7 @@ def main() -> int:
     for path in _production_files():
         violations.extend(_violations_for(path))
     if violations:
-        print("Direct DBus access is only allowed in venus_evcharger_dbus_adapter.py.", file=sys.stderr)
+        print("Direct DBus access is only allowed in dedicated DBus gateway adapter modules.", file=sys.stderr)
         for violation in violations:
             print(violation, file=sys.stderr)
         return 1

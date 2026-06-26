@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""EV-charger DBus service identity for the dedicated adapter process."""
+
+from __future__ import annotations
+
+import configparser
+import logging
+import os
+import platform
+from typing import Any
+
+from vedbus import VeDbusService
+
+from venus_evcharger.dbus_adapter_process_config import configured_device_instance
+from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterIdentityContext
+
+
+class DbusAdapterIdentityMixin:
+    def _ensure_dbus_service(self: DbusAdapterIdentityContext) -> None:
+        if self._dbusservice is not None:
+            return
+        self._dbusservice = VeDbusService(self.service_name, register=False)
+        self._register_identity_paths()
+
+    def _register_dbus_service_name(self: DbusAdapterIdentityContext) -> None:
+        self._ensure_dbus_service()
+        if self._dbusservice_registered:
+            return
+        self._dbusservice.register()
+        self._dbusservice_registered = True
+        logging.info("DBus adapter owns service %s", self.service_name)
+
+    def _register_identity_paths(self: DbusAdapterIdentityContext) -> None:
+        defaults = self.config["DEFAULT"]
+        for path, value in self._identity_path_values(defaults).items():
+            self._add_owned_path(path, value)
+
+    def _identity_path_values(
+        self: DbusAdapterIdentityContext,
+        defaults: configparser.SectionProxy,
+    ) -> dict[str, Any]:
+        device_instance = configured_device_instance(defaults)
+        return {
+            "/Mgmt/ProcessName": os.path.join(os.path.dirname(__file__), "venus_evcharger_service.py"),
+            "/Mgmt/ProcessVersion": "Unknown version, and running on Python " + platform.python_version(),
+            "/Mgmt/Connection": str(defaults.get("Connection", "Venus EV Charger Gateway")).strip(),
+            "/DeviceInstance": device_instance,
+            "/ProductId": 0xFFFF,
+            "/ProductName": str(defaults.get("ProductName", "Venus EV Charger Service")).strip(),
+            "/CustomName": str(defaults.get("CustomName", "Wallbox")).strip() or "Wallbox",
+            "/FirmwareVersion": str(defaults.get("FirmwareVersion", "")).strip(),
+            "/HardwareVersion": str(defaults.get("HardwareVersion", "")).strip(),
+            "/Serial": str(defaults.get("Serial", f"gateway-{device_instance}")).strip(),
+            "/Connected": 1 if self._configured_for_identity(defaults) else 0,
+            "/Position": int(float(str(defaults.get("Position", "1")).strip() or "1")),
+            "/UpdateIndex": 0,
+        }
+
+    @staticmethod
+    def _configured_for_identity(defaults: configparser.SectionProxy) -> bool:
+        if str(defaults.get("Host", "")).strip():
+            return True
+        return any(
+            str(defaults.get(key, "")).strip()
+            for key in ("MeterConfigPath", "SwitchConfigPath", "ChargerConfigPath")
+        )
+
+    def _add_owned_path(self: DbusAdapterIdentityContext, path: str, value: Any) -> None:
+        self._dbusservice.add_path(path, value)
+        self.write_scheduler.registered_paths.add(path)
+        self.write_scheduler.last_values[path] = value

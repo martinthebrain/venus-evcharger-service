@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.dbus_adapter_process_protocols import DbusAdapterIntrospectionSnapshotContext
+from venus_evcharger.dbus_adapter_process_protocol_introspection import DbusAdapterIntrospectionSnapshotContext
 from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
 
 

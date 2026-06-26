@@ -1,267 +1,29 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Structural contracts shared by DBus adapter process mixins."""
+"""Composed structural contract for the full DBus adapter process."""
 
 from __future__ import annotations
 
-import configparser
-import socket
-from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Protocol
 
-from venus_evcharger.dbus_adapter_components import (
-    CommandOutcome,
-    DbusCircuitBreaker,
-    DbusConnectionManager,
-    DbusDiscoveryManager,
-    DbusRateLimiter,
-    DbusReadScheduler,
-    ResourceMonitor,
-    TickHealth,
+from venus_evcharger.dbus_adapter_process_protocol_health import DbusAdapterHealthContext
+from venus_evcharger.dbus_adapter_process_protocol_introspection import (
+    DbusAdapterIntrospectionContext,
+    DbusAdapterIntrospectionSnapshotContext,
 )
-from venus_evcharger.dbus_adapter_health_slo import SloThresholds
-from venus_evcharger.dbus_adapter_read import DbusReadExecutor
-from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, GatewayPaths
-
-
-class DbusAdapterRuntimeContext(Protocol):
-    """Runtime and socket surface required by ``DbusAdapterRuntimeMixin``."""
-
-    config: configparser.ConfigParser
-    paths: GatewayPaths
-    cache: DbusCacheStore
-    commands: DbusCommandInbox
-    write_scheduler: DbusWriteScheduler
-    service_name: str
-    _dbusservice: Any
-    _dbusservice_registered: bool
-    _server: socket.socket | None
-    _main_loop: Any
-    _stop: bool
-
-    def _handle_socket_payload(self, data: str) -> dict[str, Any]: ...
-    def _socket_handlers(self) -> dict[str, Callable[[dict[str, Any], str], dict[str, Any]]]: ...
-    def _socket_snapshot(self, payload: dict[str, Any], request_type: str) -> dict[str, Any]: ...
-    def _socket_health(self, payload: dict[str, Any], request_type: str) -> dict[str, Any]: ...
-    def _socket_enqueue(self, payload: dict[str, Any], request_type: str) -> dict[str, Any]: ...
-    def _unsupported_socket_request(self, payload: dict[str, Any], request_type: str) -> dict[str, Any]: ...
-    def _health_snapshot(self) -> dict[str, Any]: ...
-    def _ensure_dbus_service(self) -> None: ...
-    def _register_identity_paths(self) -> None: ...
-    def _identity_path_values(self, defaults: configparser.SectionProxy) -> dict[str, Any]: ...
-    def _add_owned_path(self, path: str, value: Any) -> None: ...
-    def _device_instance(self, defaults: configparser.SectionProxy) -> int: ...
-    def _configured_for_identity(self, defaults: configparser.SectionProxy) -> bool: ...
-
-
-class DbusAdapterLoopContext(Protocol):
-    """Main-loop scheduling surface required by ``DbusAdapterLoopMixin``."""
-
-    paths: GatewayPaths
-    cache: DbusCacheStore
-    circuit: DbusCircuitBreaker
-    resource_monitor: ResourceMonitor
-    tick_health: TickHealth
-    read_executor: DbusReadExecutor
-    write_scheduler: DbusWriteScheduler
-    tick_seconds: float
-    min_tick_seconds: float
-    max_tick_seconds: float
-    slo_mainloop_gap_max_ms: float
-    slo_core_read_max_age_seconds: float
-    _main_loop: Any
-    _stop: bool
-    _next_work_tick_monotonic: float
-    _last_resource_snapshot: dict[str, Any]
-    _last_tick_at: float
-    _last_tick_monotonic: float
-    _last_tick_duration_ms: float
-    _prefer_read_next: bool
-
-    def _install_signal_handlers(self) -> None: ...
-    def _tick(self) -> bool: ...
-    def _start_socket(self) -> None: ...
-    def _close_socket(self) -> None: ...
-    def _process_socket_once(self) -> None: ...
-    def _ensure_dbus_service(self) -> None: ...
-    def _process_introspection_requests_once(self) -> None: ...
-    def _publish_cache(self) -> None: ...
-    def _update_adaptive_tick(self) -> None: ...
-    def _apply_slo_regulation(self) -> None: ...
-    def _adaptive_tick_seconds(self, *, circuit_state: str, resource_state: str) -> float: ...
-    def _process_one_dbus_operation_once(self) -> bool: ...
-    def _refresh_initial_services_once(self) -> bool: ...
-    def _priority_read_performed(self) -> bool: ...
-    def _process_standard_operation_once(self) -> bool: ...
-    def _reads_need_priority(self) -> bool: ...
-    def _core_reads_stale(self) -> bool: ...
-    def _core_read_age(self, key: str, now: float) -> float: ...
-    def _refresh_services_if_due_once(self) -> bool: ...
-    def _enqueue_background_introspection_if_due(self) -> None: ...
-    def _process_preferred_read_or_write(self) -> bool: ...
-    def _try_read_then_write(self) -> bool: ...
-    def _try_write_then_read(self) -> bool: ...
-    def _try_scheduled_write(self, *, prefer_read_next: bool) -> bool: ...
-    def _poll_one_due_read_once(self) -> bool: ...
-
-
-class DbusAdapterIoContext(Protocol):
-    """DBus read, discovery, timing, and cache-publish surface."""
-
-    connection: DbusConnectionManager
-    rate_limiter: DbusRateLimiter
-    circuit: DbusCircuitBreaker
-    cache: DbusCacheStore
-    commands: DbusCommandInbox
-    discovery: DbusDiscoveryManager
-    read_scheduler: DbusReadScheduler
-    read_executor: DbusReadExecutor
-    cache_publish_interval_seconds: float
-    _last_cache_publish_monotonic: float
-    _last_cache_publish_sequence: int
-
-    def _poll_one_due_read_once(self) -> bool: ...
-    def _refresh_services_if_due_once(self) -> bool: ...
-    def _list_services(self) -> list[str]: ...
-    def _timed(self, kind: str, operation: Callable[[], Any]) -> Any: ...
-    def _health_snapshot(self) -> dict[str, Any]: ...
-    def _append_health_log(self, health: Mapping[str, Any]) -> None: ...
-    def _write_introspection_snapshot(self) -> None: ...
-
-
-class DbusAdapterHealthContext(Protocol):
-    """Health, SLO, and backpressure surface."""
-
-    cache: DbusCacheStore
-    commands: DbusCommandInbox
-    core_commands: DbusCommandInbox
-    circuit: DbusCircuitBreaker
-    discovery: DbusDiscoveryManager
-    read_scheduler: DbusReadScheduler
-    write_scheduler: DbusWriteScheduler
-    resource_monitor: ResourceMonitor
-    tick_health: TickHealth
-    service_name: str
-    tick_seconds: float
-    min_tick_seconds: float
-    max_tick_seconds: float
-    health_log_path: str
-    health_log_interval_seconds: float
-    slo_gui_max_age_seconds: float
-    slo_core_read_max_age_seconds: float
-    slo_queue_max_age_seconds: float
-    slo_mainloop_gap_max_ms: float
-    _last_resource_snapshot: dict[str, Any]
-    _last_health_log_monotonic: float
-    _last_tick_at: float
-    _last_tick_monotonic: float
-    _last_tick_duration_ms: float
-    _last_introspection_full_scan_at: float
-
-    def _health_log_due(self) -> bool: ...
-    def _health_snapshot(self) -> dict[str, Any]: ...
-    def _cache_freshness(self, now: float) -> dict[str, Any]: ...
-    def _slo_snapshot(
-        self,
-        *,
-        queue_health: Mapping[str, Any],
-        cache_freshness: Mapping[str, Any],
-        now: float,
-        current_monotonic: float,
-    ) -> dict[str, Any]: ...
-    def _slo_observed(
-        self,
-        queue_health: Mapping[str, Any],
-        cache_freshness: Mapping[str, Any],
-        now: float,
-        current_monotonic: float,
-    ) -> dict[str, float]: ...
-    def _slo_thresholds(self) -> SloThresholds: ...
-    def _gui_freshness_paths(self, now: float) -> set[str]: ...
-    def _gui_session_freshness_paths(self, now: float) -> set[str]: ...
-    def _charging_session_active_for_gui(self, now: float) -> bool: ...
-    def _fresh_cached_path_float(self, path: str, now: float) -> float: ...
-    def _apply_slo_regulation(self) -> None: ...
-    def _quiet_discovery_and_introspection(self, now: float) -> None: ...
-    def _max_cached_path_age(self, paths: set[str], now: float) -> float: ...
-    def _missing_cached_path_count(self, paths: set[str]) -> float: ...
-
-
-class DbusAdapterIntrospectionContext(Protocol):
-    """Introspection request and background-discovery surface."""
-
-    config: configparser.ConfigParser
-    connection: DbusConnectionManager
-    circuit: DbusCircuitBreaker
-    cache: DbusCacheStore
-    commands: DbusCommandInbox
-    discovery: DbusDiscoveryManager
-    read_executor: DbusReadExecutor
-    dbus_introspection_enabled: bool
-    dbus_introspection_request_path: str
-    _introspection_queue_depth: int
-    _last_introspection_full_scan_at: float
-
-    def _read_introspection_request_payload(self) -> dict[str, Any]: ...
-    def _enqueue_introspection_requests(self, payload: Mapping[str, Any]) -> int: ...
-    def _clear_introspection_request_payload(self) -> None: ...
-    def _enqueue_introspection_command(
-        self,
-        service: str,
-        path: str,
-        *,
-        priority: int,
-        source: str,
-        reason: str,
-    ) -> None: ...
-    def _background_introspection_due(self, now: float) -> bool: ...
-    def _background_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def _grid_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def _battery_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def _pv_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def _configured_or_prefixed_services(
-        self,
-        explicit_key: str,
-        prefix_key: str,
-        default_prefix: str,
-    ) -> list[str]: ...
-    def _refresh_services_command(self, command: Mapping[str, Any]) -> CommandOutcome: ...
-    def _introspect_command_if_healthy(self, command: Mapping[str, Any]) -> CommandOutcome: ...
-    def _introspect_command(self, command: Mapping[str, Any]) -> CommandOutcome: ...
-    def _timed_introspection_result(self, service: str, path: str, timeout: float) -> tuple[CommandOutcome, Any]: ...
-    def _read_introspection_xml(self, service: str, path: str, timeout: float) -> Any: ...
-    def _drop_failed_introspection(self, service: str, path: str, error: BaseException) -> CommandOutcome: ...
-    def _record_introspection_xml(self, service: str, path: str, xml_data: Any) -> None: ...
-    def _list_services(self) -> list[str]: ...
-    def _timed(self, kind: str, operation: Callable[[], Any]) -> Any: ...
-
-
-class DbusAdapterIntrospectionSnapshotContext(Protocol):
-    """Snapshot surface for advisory introspection findings."""
-
-    cache: DbusCacheStore
-    dbus_introspection_enabled: bool
-    dbus_introspection_snapshot_path: str
-    _introspection_queue_depth: int
-    _last_introspection_full_scan_at: float
-
-    def _introspection_services_snapshot(self, now: float) -> dict[str, Any]: ...
-    def _introspection_cache_entries(self) -> list[tuple[str, dict[str, Any]]]: ...
-    def _split_introspection_cache_key(self, key: str) -> tuple[str, str]: ...
-    def _add_introspection_service_entry(
-        self,
-        services: dict[str, Any],
-        service: str,
-        path: str,
-        entry: Mapping[str, Any],
-        now: float,
-    ) -> None: ...
-    def _introspection_finding(self, entry: Mapping[str, Any], now: float) -> dict[str, Any]: ...
-
-
-class DbusAdapterProcessContext(
+from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContext
+from venus_evcharger.dbus_adapter_process_protocol_loop import DbusAdapterLoopContext
+from venus_evcharger.dbus_adapter_process_protocol_runtime import (
+    DbusAdapterIdentityContext,
     DbusAdapterRuntimeContext,
+    DbusAdapterSocketContext,
+)
+
+
+class DbusAdapterProcessContext(  # pragma: no cover
+    DbusAdapterRuntimeContext,
+    DbusAdapterSocketContext,
+    DbusAdapterIdentityContext,
     DbusAdapterLoopContext,
     DbusAdapterIoContext,
     DbusAdapterHealthContext,
