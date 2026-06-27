@@ -10,6 +10,7 @@ from typing import Any, cast
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_write_support import (
+    budget_elapsed,
     command_kind,
     deadline_pair,
     has_startup_registration,
@@ -19,17 +20,6 @@ from venus_evcharger.dbus_adapter_write_support import (
 )
 from venus_evcharger.dbus_gateway import DbusCommandInbox
 
-_QUEUE_CLASS_RANKS = {
-    "startup/register": 0,
-    "gui-critical-publish": 1,
-    "remote-write": 2,
-    "local-publish": 3,
-    "read-fast": 4,
-    "read-slow": 5,
-    "discovery": 6,
-    "introspection": 7,
-    "diagnostic": 8,
-}
 
 class DbusWriteSchedulerCoreMixin:
     adapter: Any
@@ -42,7 +32,6 @@ class DbusWriteSchedulerCoreMixin:
     register_path: Callable[[Mapping[str, Any]], CommandOutcome]
     set_remote_value: Callable[[Mapping[str, Any]], CommandOutcome]
     budget_available: Callable[[Mapping[str, Any], float], bool]
-    _budget_elapsed: Callable[[float, float], bool]
     prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
     prune_budget: Callable[[float], None]
     record_budget: Callable[[Mapping[str, Any]], None]
@@ -135,13 +124,13 @@ class DbusWriteSchedulerCoreMixin:
             register_service is not None
             and not self.remaining_register_paths()
             and processed < self.startup_registration_batch_limit
-            and not self._budget_elapsed(started, self.startup_registration_tick_budget_seconds)
+            and not budget_elapsed(started, self.startup_registration_tick_budget_seconds)
         )
 
     def _startup_path_budget_exhausted(self, started: float, processed: int) -> bool:
         return (
             processed >= self.startup_registration_batch_limit
-            or self._budget_elapsed(started, self.startup_registration_tick_budget_seconds)
+            or budget_elapsed(started, self.startup_registration_tick_budget_seconds)
         )
 
     def remaining_register_paths(self) -> bool:

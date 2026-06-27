@@ -2650,7 +2650,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.process_one_dbus_operation_once = MagicMock()  # type: ignore[method-assign]
             adapter.publish_cache = MagicMock()  # type: ignore[method-assign]
 
-            self.assertTrue(adapter._tick())
+            self.assertTrue(adapter.tick())
 
             adapter.process_socket_once.assert_not_called()
             adapter.process_one_dbus_operation_once.assert_not_called()
@@ -2736,17 +2736,17 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             debug.assert_called_once()
 
             background = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-bg")))
-            background._enqueue_introspection_command = MagicMock()  # type: ignore[method-assign]
+            background.enqueue_introspection_command = MagicMock()  # type: ignore[method-assign]
             background.enqueue_background_introspection_if_due()
-            background._enqueue_introspection_command.assert_not_called()
+            background.enqueue_introspection_command.assert_not_called()
             background.cache.update_services(["com.victronenergy.battery.tty1", "com.victronenergy.pvinverter.http_1"])
             background.circuit.protective_until = time.time() + 10.0
             background.enqueue_background_introspection_if_due()
-            background._enqueue_introspection_command.assert_not_called()
+            background.enqueue_introspection_command.assert_not_called()
             background.circuit.protective_until = 0.0
             background._last_introspection_full_scan_at = 0.0
             background.enqueue_background_introspection_if_due()
-            self.assertGreater(background._enqueue_introspection_command.call_count, 0)
+            self.assertGreater(background.enqueue_introspection_command.call_count, 0)
             self.assertEqual(
                 background.configured_or_prefixed_services(
                     "UnusedExplicit",
@@ -2847,12 +2847,12 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
             adapter._stop = True
             adapter.close_socket = MagicMock()  # type: ignore[method-assign]
-            self.assertFalse(adapter._tick())
+            self.assertFalse(adapter.tick())
             adapter.close_socket.assert_called_once()
 
             adapter._stop = False
             adapter.process_socket_once = MagicMock(side_effect=RuntimeError("tick failed"))  # type: ignore[method-assign]
-            self.assertTrue(adapter._tick())
+            self.assertTrue(adapter.tick())
             self.assertEqual(adapter.circuit.last_error, "tick failed")
 
             adapter.poll_one_due_read_once = MagicMock(return_value=True)  # type: ignore[method-assign]
@@ -2874,8 +2874,8 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertTrue(adapter.process_one_dbus_operation_once())
             adapter._prefer_read_next = True
             adapter.poll_one_due_read_once = MagicMock(return_value=True)  # type: ignore[method-assign]
-            adapter._reads_need_priority = MagicMock(return_value=False)  # type: ignore[method-assign]
-            self.assertTrue(adapter._try_read_then_write())
+            adapter.reads_need_priority = MagicMock(return_value=False)  # type: ignore[method-assign]
+            self.assertTrue(adapter.try_read_then_write())
             self.assertFalse(adapter._prefer_read_next)
             adapter._prefer_read_next = True
             adapter.poll_one_due_read_once = MagicMock(return_value=False)  # type: ignore[method-assign]
@@ -2885,12 +2885,12 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter._prefer_read_next = False
             adapter.write_scheduler.process_one = MagicMock(return_value=True)  # type: ignore[method-assign]
             adapter.poll_one_due_read_once = MagicMock(return_value=True)  # type: ignore[method-assign]
-            self.assertTrue(adapter._try_write_then_read())
+            self.assertTrue(adapter.try_write_then_read())
             adapter.poll_one_due_read_once.assert_not_called()
             adapter._prefer_read_next = True
             adapter.write_scheduler.process_one = MagicMock(return_value=False)  # type: ignore[method-assign]
             adapter.poll_one_due_read_once = MagicMock(return_value=True)  # type: ignore[method-assign]
-            self.assertTrue(adapter._try_write_then_read())
+            self.assertTrue(adapter.try_write_then_read())
             self.assertFalse(adapter._prefer_read_next)
             adapter.write_scheduler.process_one = MagicMock(return_value=False)  # type: ignore[method-assign]
             adapter.poll_one_due_read_once = MagicMock(return_value=True)  # type: ignore[method-assign]
@@ -2974,7 +2974,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.process_introspection_requests_once = MagicMock()  # type: ignore[method-assign]
             adapter.publish_cache = MagicMock()  # type: ignore[method-assign]
             adapter._next_work_tick_monotonic = 0.0
-            self.assertTrue(adapter._tick())
+            self.assertTrue(adapter.tick())
             adapter.process_socket_once.assert_called_once()
             adapter.process_introspection_requests_once.assert_called_once()
             adapter.process_one_dbus_operation_once.assert_called_once()
@@ -3112,7 +3112,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 callbacks[signum] = callback
 
             with patch.object(runtime_module.signal, "signal", side_effect=fake_signal), patch.object(runtime_module.GLib, "idle_add") as idle_add:
-                adapter._install_signal_handlers()
+                adapter.install_signal_handlers()
                 callbacks[runtime_module.signal.SIGTERM](runtime_module.signal.SIGTERM, None)  # type: ignore[index,operator]
             self.assertTrue(adapter._stop)
             idle_add.assert_called_once_with(fake_loop.quit)
@@ -3120,7 +3120,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter._main_loop = None
             adapter._stop = False
             with patch.object(runtime_module.signal, "signal", side_effect=fake_signal), patch.object(runtime_module.GLib, "idle_add") as idle_add:
-                adapter._install_signal_handlers()
+                adapter.install_signal_handlers()
                 callbacks[runtime_module.signal.SIGINT](runtime_module.signal.SIGINT, None)  # type: ignore[index,operator]
             self.assertTrue(adapter._stop)
             idle_add.assert_not_called()

@@ -47,7 +47,7 @@ SESSION_ACTIVE_CURRENT_AMPS = 0.2
 
 class DbusAdapterHealthMixin:
     def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, Any]) -> None:  # pragma: no mutate block
-        if not self._health_log_due():
+        if not self.health_log_due():
             return
         self._last_health_log_monotonic = time.monotonic()
         try:
@@ -55,7 +55,7 @@ class DbusAdapterHealthMixin:
         except Exception:  # pylint: disable=broad-except
             logging.debug("Unable to append DBus gateway health history", exc_info=True)
 
-    def _health_log_due(self: DbusAdapterHealthContext) -> bool:  # pragma: no mutate block
+    def health_log_due(self: DbusAdapterHealthContext) -> bool:  # pragma: no mutate block
         if not self.health_log_path or self.health_log_interval_seconds <= 0.0:
             return False
         return bool(time.monotonic() - self._last_health_log_monotonic >= self.health_log_interval_seconds)

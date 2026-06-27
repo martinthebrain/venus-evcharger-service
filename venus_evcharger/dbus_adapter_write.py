@@ -11,18 +11,6 @@ from venus_evcharger.dbus_adapter_write_core import DbusWriteSchedulerCoreMixin
 from venus_evcharger.dbus_adapter_write_health import DbusWriteSchedulerHealthMixin
 from venus_evcharger.dbus_adapter_write_publish import DbusWriteSchedulerPublishMixin
 
-_QUEUE_CLASS_RANKS = {
-    "startup/register": 0,
-    "gui-critical-publish": 1,
-    "remote-write": 2,
-    "local-publish": 3,
-    "read-fast": 4,
-    "read-slow": 5,
-    "discovery": 6,
-    "introspection": 7,
-    "diagnostic": 8,
-}
-
 
 class DbusWriteScheduler(
     DbusWriteSchedulerCoreMixin,

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -56,6 +57,10 @@ def local_publish_action_result(processed: int, action: str) -> tuple[int, bool]
     if action == "break":
         return processed, True
     return processed + 1 if action == "processed" else processed, False
+
+
+def budget_elapsed(started: float, budget_seconds: float) -> bool:
+    return time.monotonic() - started >= budget_seconds
 
 
 def command_kind(command: Mapping[str, Any]) -> str:

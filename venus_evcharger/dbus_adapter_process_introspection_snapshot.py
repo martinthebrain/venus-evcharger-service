@@ -42,19 +42,19 @@ class DbusAdapterIntrospectionSnapshotMixin:
 
     def introspection_services_snapshot(self: DbusAdapterIntrospectionSnapshotContext, now: float) -> dict[str, Any]:
         services: dict[str, Any] = {}
-        for key, entry in self._introspection_cache_entries():
-            service, path = self._split_introspection_cache_key(key)
-            self._add_introspection_service_entry(services, service, path, entry, now)
+        for key, entry in self.introspection_cache_entries():
+            service, path = self.split_introspection_cache_key(key)
+            self.add_introspection_service_entry(services, service, path, entry, now)
         return services
 
-    def _introspection_cache_entries(self: DbusAdapterIntrospectionSnapshotContext) -> list[tuple[str, dict[str, Any]]]:
+    def introspection_cache_entries(self: DbusAdapterIntrospectionSnapshotContext) -> list[tuple[str, dict[str, Any]]]:
         return [
             (key, entry)
             for key, entry in self.cache.values.items()
             if key.startswith("introspection:") and isinstance(entry, dict)
         ]
 
-    def _add_introspection_service_entry(
+    def add_introspection_service_entry(
         self: DbusAdapterIntrospectionSnapshotContext,
         services: dict[str, Any],
         service: str,
@@ -65,20 +65,20 @@ class DbusAdapterIntrospectionSnapshotMixin:
         if not service:
             return
         service_payload = services.setdefault(service, {"paths": {}, "last_updated_at": now})
-        service_payload.setdefault("paths", {})[path] = self._introspection_finding(entry, now)
+        service_payload.setdefault("paths", {})[path] = self.introspection_finding(entry, now)
         service_payload["last_updated_at"] = max(
             float(service_payload.get("last_updated_at", 0.0) or 0.0),
             float(entry.get("updated_at", now) or now),
         )
 
     @staticmethod
-    def _split_introspection_cache_key(key: str) -> tuple[str, str]:
+    def split_introspection_cache_key(key: str) -> tuple[str, str]:
         remainder = key[len("introspection:") :]
         service, separator, path = remainder.partition(":")
         return service, path if separator else "/"
 
     @staticmethod
-    def _introspection_finding(entry: Mapping[str, Any], now: float) -> dict[str, Any]:
+    def introspection_finding(entry: Mapping[str, Any], now: float) -> dict[str, Any]:
         status = str(entry.get("status", "") or "")
         if status == "fresh":
             return _fresh_introspection_finding(entry, now)

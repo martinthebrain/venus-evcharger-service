@@ -12,7 +12,7 @@ from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterRun
 
 
 class DbusAdapterRuntimeMixin:
-    def _install_signal_handlers(self: DbusAdapterRuntimeContext) -> None:
+    def install_signal_handlers(self: DbusAdapterRuntimeContext) -> None:
         def _stop(_signum: int, _frame: object) -> None:
             self._stop = True
             if self._main_loop is not None:

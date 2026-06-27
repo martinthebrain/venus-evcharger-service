@@ -64,35 +64,35 @@ class DbusAdapterSocketMixin:
         if not isinstance(payload, dict):
             return {"ok": False, "error": "request must be an object"}
         request_type = str(payload.get("type") or payload.get("kind") or "")
-        handler = self._socket_handlers().get(request_type, self._unsupported_socket_request)
+        handler = self.socket_handlers().get(request_type, self.unsupported_socket_request)
         return handler(payload, request_type)
 
-    def _socket_handlers(self: DbusAdapterSocketContext) -> dict[str, Callable[[dict[str, Any], str], dict[str, Any]]]:
+    def socket_handlers(self: DbusAdapterSocketContext) -> dict[str, Callable[[dict[str, Any], str], dict[str, Any]]]:
         return {
-            "snapshot": self._socket_snapshot,
-            "health": self._socket_health,
-            "refresh_value": self._socket_enqueue,
-            "refresh_services": self._socket_enqueue,
-            "publish_desired": self._socket_enqueue,
-            "publish_value": self._socket_enqueue,
-            "set_value": self._socket_enqueue,
+            "snapshot": self.socket_snapshot,
+            "health": self.socket_health,
+            "refresh_value": self.socket_enqueue,
+            "refresh_services": self.socket_enqueue,
+            "publish_desired": self.socket_enqueue,
+            "publish_value": self.socket_enqueue,
+            "set_value": self.socket_enqueue,
         }
 
-    def _socket_snapshot(
+    def socket_snapshot(
         self: DbusAdapterSocketContext,
         _payload: dict[str, Any],
         _request_type: str,
     ) -> dict[str, Any]:
         return {"ok": True, "snapshot": self.cache.snapshot()}
 
-    def _socket_health(
+    def socket_health(
         self: DbusAdapterSocketContext,
         _payload: dict[str, Any],
         _request_type: str,
     ) -> dict[str, Any]:
         return {"ok": True, "dbus_health": self.health_snapshot()}
 
-    def _socket_enqueue(
+    def socket_enqueue(
         self: DbusAdapterSocketContext,
         payload: dict[str, Any],
         request_type: str,
@@ -101,5 +101,5 @@ class DbusAdapterSocketMixin:
         return {"ok": True}
 
     @staticmethod
-    def _unsupported_socket_request(_payload: dict[str, Any], request_type: str) -> dict[str, Any]:
+    def unsupported_socket_request(_payload: dict[str, Any], request_type: str) -> dict[str, Any]:
         return {"ok": False, "error": f"unsupported request type: {request_type}"}

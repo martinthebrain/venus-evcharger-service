@@ -28,15 +28,15 @@ class DbusAdapterIntrospectionMixin:
         if not self.dbus_introspection_enabled:
             return
         payload = self.introspection_request_payload()
-        accepted = self._enqueue_introspection_requests(payload)
+        accepted = self.enqueue_introspection_requests(payload)
         if accepted:
             self._introspection_queue_depth += accepted
             self.clear_introspection_request_payload()
 
-    def _enqueue_introspection_requests(self: DbusAdapterIntrospectionContext, payload: Mapping[str, Any]) -> int:
+    def enqueue_introspection_requests(self: DbusAdapterIntrospectionContext, payload: Mapping[str, Any]) -> int:
         accepted = 0
         for request in _valid_introspection_requests(payload):
-            self._enqueue_introspection_command(
+            self.enqueue_introspection_command(
                 request["service"],
                 request["path"],
                 priority=request["priority"],
@@ -66,7 +66,7 @@ class DbusAdapterIntrospectionMixin:
                 error,
             )
 
-    def _enqueue_introspection_command(
+    def enqueue_introspection_command(
         self: DbusAdapterIntrospectionContext,
         service: str,
         path: str,
@@ -90,13 +90,13 @@ class DbusAdapterIntrospectionMixin:
 
     def enqueue_background_introspection_if_due(self: DbusAdapterIntrospectionContext) -> None:
         now = time.time()
-        if not self._background_introspection_due(now):
+        if not self.background_introspection_due(now):
             return
         self._last_introspection_full_scan_at = now
         for service, path, priority, source, reason in self.background_introspection_specs():
-            self._enqueue_introspection_command(service, path, priority=priority, source=source, reason=reason)
+            self.enqueue_introspection_command(service, path, priority=priority, source=source, reason=reason)
 
-    def _background_introspection_due(self: DbusAdapterIntrospectionContext, now: float) -> bool:
+    def background_introspection_due(self: DbusAdapterIntrospectionContext, now: float) -> bool:
         interval = max(
             60.0,
             config_get_float(self.config["DEFAULT"], "DbusIntrospectionFullScanIntervalSeconds", 21600.0),
@@ -109,9 +109,9 @@ class DbusAdapterIntrospectionMixin:
         )
 
     def background_introspection_specs(self: DbusAdapterIntrospectionContext) -> list[tuple[str, str, int, str, str]]:
-        return self._grid_introspection_specs() + self._battery_introspection_specs() + self._pv_introspection_specs()
+        return self.grid_introspection_specs() + self.battery_introspection_specs() + self.pv_introspection_specs()
 
-    def _grid_introspection_specs(self: DbusAdapterIntrospectionContext) -> list[tuple[str, str, int, str, str]]:
+    def grid_introspection_specs(self: DbusAdapterIntrospectionContext) -> list[tuple[str, str, int, str, str]]:
         defaults = self.config["DEFAULT"]
         service = str(defaults.get("AutoGridService", "com.victronenergy.system")).strip()
         paths = (
@@ -121,12 +121,12 @@ class DbusAdapterIntrospectionMixin:
         )
         return [(service, path, 80, "grid", "configured-grid-path") for path in paths if service and path]
 
-    def _battery_introspection_specs(self: DbusAdapterIntrospectionContext) -> list[tuple[str, str, int, str, str]]:
+    def battery_introspection_specs(self: DbusAdapterIntrospectionContext) -> list[tuple[str, str, int, str, str]]:
         path = str(self.config["DEFAULT"].get("AutoBatterySocPath", "/Soc")).strip()
         services = self.configured_or_prefixed_services("AutoBatteryService", "AutoBatteryServicePrefix", "com.victronenergy.battery")
         return [(service, path, 70, "battery", "battery-service-discovery") for service in services if path]
 
-    def _pv_introspection_specs(self: DbusAdapterIntrospectionContext) -> list[tuple[str, str, int, str, str]]:
+    def pv_introspection_specs(self: DbusAdapterIntrospectionContext) -> list[tuple[str, str, int, str, str]]:
         path = str(self.config["DEFAULT"].get("AutoPvPath", "/Ac/Power")).strip()
         services = self.configured_or_prefixed_services("AutoPvService", "AutoPvServicePrefix", "com.victronenergy.pvinverter")
         return [(service, path, 30, "pv", "pv-service-discovery") for service in services if path]
@@ -148,12 +148,12 @@ class DbusAdapterIntrospectionMixin:
         kind = str(command.get("kind") or command.get("type") or "")
         handlers = {
             "refresh_value": self.read_executor.refresh_requested_value,
-            "refresh_services": self._refresh_services_command,
-            "introspect": self._introspect_command_if_healthy,
+            "refresh_services": self.refresh_services_command,
+            "introspect": self.introspect_command_if_healthy,
         }
         return handlers.get(kind, _drop_command)(command)
 
-    def _refresh_services_command(self: DbusAdapterIntrospectionContext, _command: Mapping[str, Any]) -> CommandOutcome:
+    def refresh_services_command(self: DbusAdapterIntrospectionContext, _command: Mapping[str, Any]) -> CommandOutcome:
         if self.circuit.state() != "ok":
             return "deferred"
         try:
@@ -167,7 +167,7 @@ class DbusAdapterIntrospectionMixin:
         self.commands.remove_coalesced("refresh:services")
         return "applied"
 
-    def _introspect_command_if_healthy(
+    def introspect_command_if_healthy(
         self: DbusAdapterIntrospectionContext,
         command: Mapping[str, Any],
     ) -> CommandOutcome:
@@ -181,13 +181,13 @@ class DbusAdapterIntrospectionMixin:
         if not service:
             return "dropped"
         timeout = float(command.get("timeout", 1.0))
-        outcome, xml_data = self._timed_introspection_result(service, path, timeout)
+        outcome, xml_data = self.timed_introspection_result(service, path, timeout)
         if outcome != "applied":
             return outcome
-        self._record_introspection_xml(service, path, xml_data)
+        self.record_introspection_xml(service, path, xml_data)
         return "applied"
 
-    def _timed_introspection_result(
+    def timed_introspection_result(
         self: DbusAdapterIntrospectionContext,
         service: str,
         path: str,
@@ -195,14 +195,14 @@ class DbusAdapterIntrospectionMixin:
     ) -> tuple[CommandOutcome, Any]:
         try:
             return "applied", self.timed_dbus_operation(
-                "introspection", lambda: self._read_introspection_xml(service, path, timeout)
+                "introspection", lambda: self.read_introspection_xml(service, path, timeout)
             )
         except DbusOperationDeferred:
             return "deferred", None
         except Exception as error:  # pylint: disable=broad-except
-            return self._drop_failed_introspection(service, path, error), None
+            return self.drop_failed_introspection(service, path, error), None
 
-    def _read_introspection_xml(
+    def read_introspection_xml(
         self: DbusAdapterIntrospectionContext,
         service: str,
         path: str,
@@ -212,7 +212,7 @@ class DbusAdapterIntrospectionMixin:
         iface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
         return iface.Introspect(timeout=timeout)
 
-    def _drop_failed_introspection(
+    def drop_failed_introspection(
         self: DbusAdapterIntrospectionContext,
         service: str,
         path: str,
@@ -223,7 +223,7 @@ class DbusAdapterIntrospectionMixin:
         logging.debug("Dropping failed DBus introspection command service=%s path=%s: %s", service, path, error)
         return "dropped"
 
-    def _record_introspection_xml(
+    def record_introspection_xml(
         self: DbusAdapterIntrospectionContext,
         service: str,
         path: str,

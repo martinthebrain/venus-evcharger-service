@@ -11,6 +11,7 @@ from typing import Any
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome
 from venus_evcharger.dbus_adapter_write_support import (
+    budget_elapsed,
     is_local_publish_command,
     local_publish_action_result,
     stale_coalesced_paths,
@@ -21,18 +22,6 @@ from venus_evcharger.dbus_gateway import (
     dbus_path_key,
 )
 from venus_evcharger.dbus_gateway_core import _json_ready
-
-_QUEUE_CLASS_RANKS = {
-    "startup/register": 0,
-    "gui-critical-publish": 1,
-    "remote-write": 2,
-    "local-publish": 3,
-    "read-fast": 4,
-    "read-slow": 5,
-    "discovery": 6,
-    "introspection": 7,
-    "diagnostic": 8,
-}
 
 
 @dataclass(frozen=True)
@@ -96,14 +85,10 @@ class DbusWriteSchedulerPublishMixin:
         return "processed" if outcome in ("applied", "dropped") else "break"
 
     def _local_publish_burst_done(self, processed: int, remaining_budget: int, started: float) -> bool:  # pragma: no mutate block
-        return processed >= max(0, remaining_budget) or self._budget_elapsed(started, self.local_publish_tick_budget_seconds)
+        return processed >= max(0, remaining_budget) or budget_elapsed(started, self.local_publish_tick_budget_seconds)
 
     def _skip_local_publish_command(self, command: Mapping[str, Any]) -> bool:  # pragma: no mutate block
         return not is_local_publish_command(command) or not self.budget_available(command, time.time())
-
-    @staticmethod
-    def _budget_elapsed(started: float, budget_seconds: float) -> bool:  # pragma: no mutate block
-        return time.monotonic() - started >= budget_seconds
 
     def next_local_publish_command(self) -> tuple[str, dict[str, Any]] | None:  # pragma: no mutate block
         now = time.time()

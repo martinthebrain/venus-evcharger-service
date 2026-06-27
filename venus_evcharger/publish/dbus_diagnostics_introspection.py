@@ -52,15 +52,15 @@ class _DbusDiagnosticsIntrospectionMixin(_DbusDiagnosticsContractsMixin):
         paths = service_payload.get("paths", {}) if isinstance(service_payload, dict) else {}
         if not isinstance(paths, dict):
             return 0
-        return sum(1 for finding in paths.values() if self._dbus_introspection_finding_unusable(finding))
-
-    @staticmethod
-    def _dbus_introspection_finding_unusable(finding: object) -> bool:
-        """Return whether one introspection path finding is currently unusable."""
-        if not isinstance(finding, dict):
-            return False
-        return str(finding.get("status", "") or "") in ("known-missing", "unresponsive-backoff")
+        return sum(1 for finding in paths.values() if _introspection_finding_unusable(finding))
 
     def _dbus_introspection_snapshot_age(self, now: float) -> float:
         """Return age of the latest introspection snapshot heartbeat."""
         return self._age_seconds(self._dbus_introspection_snapshot(now).get("heartbeat_at"), now)
+
+
+def _introspection_finding_unusable(finding: object) -> bool:
+    """Return whether one introspection path finding is currently unusable."""
+    if not isinstance(finding, dict):
+        return False
+    return str(finding.get("status", "") or "") in ("known-missing", "unresponsive-backoff")
