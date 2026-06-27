@@ -6,23 +6,37 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from venus_evcharger.core.contracts import finite_float_or_none
+
+
+@runtime_checkable
+class ChargerEnableBackend(Protocol):
+    """Charger backend surface required for enable/disable writes."""
+
+    def set_enabled(self, enabled: bool) -> None: ...  # pragma: no cover
+
+
+@runtime_checkable
+class ChargerCurrentBackend(Protocol):
+    """Charger backend surface required for current writes."""
+
+    def set_current(self, amps: float) -> None: ...  # pragma: no cover
 
 
 class _RelayChargerReadbackMixin:
     """Normalize fresh charger and switch readback surfaces for later policy code."""
 
     @staticmethod
-    def _charger_enable_backend(svc: Any) -> object | None:
+    def _charger_enable_backend(svc: Any) -> ChargerEnableBackend | None:
         backend = getattr(svc, "_charger_backend", None)
-        return backend if hasattr(backend, "set_enabled") else None
+        return backend if isinstance(backend, ChargerEnableBackend) else None
 
     @staticmethod
-    def _charger_current_backend(svc: Any) -> object | None:
+    def _charger_current_backend(svc: Any) -> ChargerCurrentBackend | None:
         backend = getattr(svc, "_charger_backend", None)
-        return backend if hasattr(backend, "set_current") else None
+        return backend if isinstance(backend, ChargerCurrentBackend) else None
 
     @staticmethod
     def _charger_state_max_age_seconds(svc: Any) -> float:

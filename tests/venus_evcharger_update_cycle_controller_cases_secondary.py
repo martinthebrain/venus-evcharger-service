@@ -54,6 +54,41 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
         service._mark_failure.assert_called_once_with("shelly")
         service._warning_throttled.assert_called_once()
 
+    def test_runtime_count_helpers_normalize_invalid_state(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        service = SimpleNamespace(
+            _contactor_fault_counts={
+                "contactor-suspected-open": 2,
+                "contactor-suspected-welded": -1,
+                "bogus": 7,
+                "bad-bool": True,
+            },
+            _phase_switch_mismatch_counts={
+                "P1": -1,
+                "P1_P2": 3,
+                "P1_P2_P3": True,
+                "bogus": 5,
+            },
+        )
+
+        self.assertEqual(
+            controller._contactor_fault_counts(service),
+            {"contactor-suspected-open": 2, "contactor-suspected-welded": 0},
+        )
+        self.assertEqual(
+            service._contactor_fault_counts,
+            {"contactor-suspected-open": 2, "contactor-suspected-welded": 0},
+        )
+        self.assertEqual(controller._phase_switch_mismatch_counts(service), {"P1": 0, "P1_P2": 3})
+        self.assertEqual(service._phase_switch_mismatch_counts, {"P1": 0, "P1_P2": 3})
+
+        service._contactor_fault_counts = []
+        service._phase_switch_mismatch_counts = []
+        self.assertEqual(controller._contactor_fault_counts(service), {})
+        self.assertEqual(service._contactor_fault_counts, {})
+        self.assertEqual(controller._phase_switch_mismatch_counts(service), {})
+        self.assertEqual(service._phase_switch_mismatch_counts, {})
+
     def test_relay_helper_edges_cover_health_status_and_learned_current_helpers(self):
         service = _auto_phase_service(
             _auto_phase_target_candidate="P1_P2",

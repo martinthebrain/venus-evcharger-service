@@ -533,6 +533,27 @@ class _ServiceMixinsRuntimeUpdateCases:
         with self.assertRaisesRegex(TypeError, "list_dbus_services must return list\\[str\\]"):
             service._list_dbus_services()
 
+    def test_auto_logic_mixin_rejects_non_list_service_list_result(self):
+        service = _AutoService()
+        service._dbus_input_controller = MagicMock()
+        service._dbus_input_controller.list_dbus_services.return_value = "svc"
+
+        with self.assertRaisesRegex(TypeError, "list_dbus_services must return list, got str"):
+            service._list_dbus_services()
+
+    def test_auto_logic_mixin_accepts_absent_optional_input_results(self):
+        service = _AutoService()
+        service._dbus_input_controller = MagicMock()
+        service._dbus_input_controller.get_pv_power.return_value = None
+        service._dbus_input_controller.resolve_auto_battery_service.return_value = None
+        service._dbus_input_controller.get_battery_soc.return_value = None
+        service._dbus_input_controller.get_grid_power.return_value = None
+
+        self.assertIsNone(service._get_pv_power())
+        self.assertIsNone(service._resolve_auto_battery_service())
+        self.assertIsNone(service._get_battery_soc())
+        self.assertIsNone(service._get_grid_power())
+
     def test_auto_logic_mixin_rejects_non_optional_float_result(self):
         service = _AutoService()
         service._dbus_input_controller = MagicMock()

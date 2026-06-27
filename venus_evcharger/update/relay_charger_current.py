@@ -6,11 +6,12 @@
 from __future__ import annotations
 
 import math
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.common import local_datetime_from_timestamp, mode_uses_scheduled_logic, scheduled_mode_snapshot
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_learning_phase, normalize_learning_state
+from venus_evcharger.update.relay_charger_readback import ChargerCurrentBackend
 
 
 class _RelayChargerCurrentMixin:
@@ -215,14 +216,14 @@ class _RelayChargerCurrentMixin:
 
         last_target = finite_float_or_none(getattr(svc, "_charger_target_current_amps", None))
         if cls._charger_target_unchanged(last_target, target_amps):
-            return cast(float, last_target)
+            return cls._known_charger_current_target(last_target)
         return cls._apply_new_charger_current_target(svc, backend, target_amps, now, last_target)
 
     @classmethod
     def _apply_new_charger_current_target(
         cls,
         svc: Any,
-        backend: Any,
+        backend: ChargerCurrentBackend,
         target_amps: float,
         now: float,
         last_target: float | None,
@@ -279,10 +280,16 @@ class _RelayChargerCurrentMixin:
         if backend is not None:
             if cls._charger_retry_active(svc, now):
                 return False
-            cast(Any, backend).set_enabled(bool(enabled))
+            backend.set_enabled(bool(enabled))
             cls._clear_charger_transport_issue(svc)
             cls._clear_charger_retry(svc)
             svc._mark_recovery("charger", "Charger enable writes recovered")
             return True
         svc._queue_relay_command(bool(enabled), now)
         return True
+
+    @staticmethod
+    def _known_charger_current_target(last_target: float | None) -> float:
+        if last_target is None:
+            raise TypeError("last charger current target must be available when unchanged")
+        return float(last_target)

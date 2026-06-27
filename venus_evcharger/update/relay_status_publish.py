@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.common import evse_fault_reason
@@ -68,10 +68,16 @@ class _RelayStatusPublishMixin:
 
     def _apply_relay_target_best_effort(self, svc: Any, desired_relay: bool, now: float) -> bool | None:
         try:
-            return cast(bool | None, self._apply_enabled_target(svc, desired_relay, now))
+            return self._relay_apply_result(self._apply_enabled_target(svc, desired_relay, now))
         except Exception as error:
             self._handle_relay_decision_failure(svc, error)
             return None
+
+    @staticmethod
+    def _relay_apply_result(value: Any) -> bool:
+        if not isinstance(value, bool):
+            raise TypeError(f"_apply_enabled_target must return bool, got {type(value).__name__}")
+        return value
 
     @classmethod
     def _relay_decision_noop(cls, svc: Any, desired_relay: bool, relay_on: bool) -> bool:

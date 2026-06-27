@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, TYPE_CHECKING
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.contracts import finite_float_or_none, mutable_dict_attr
@@ -13,6 +13,20 @@ from venus_evcharger.core.contracts import finite_float_or_none, mutable_dict_at
 
 class _RelayPhaseDecisionMixin:
     """Derive Auto phase targets from policy, surplus, and supported layouts."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+
+        @classmethod
+        def _downshift_auto_phase_target(
+            cls,
+            svc: Any,
+            phase_policy: Any,
+            supported: tuple[PhaseSelection, ...],
+            current_selection: PhaseSelection,
+            current_index: int,
+            surplus_watts: float,
+            voltage: float,
+        ) -> tuple[PhaseSelection | None, str, float | None] | None: ...
 
     @staticmethod
     def _phase_selection_count(selection: object) -> int:
@@ -34,14 +48,14 @@ class _RelayPhaseDecisionMixin:
     @classmethod
     def _ordered_auto_phase_selections(cls, svc: Any) -> tuple[PhaseSelection, ...]:
         raw_supported = tuple(getattr(svc, "supported_phase_selections", ("P1",)))
-        ordered = cast(
-            tuple[PhaseSelection, ...],
-            tuple(
-                sorted(
-                    {normalize_phase_selection(selection, "P1") for selection in raw_supported},
-                    key=cls._phase_selection_count,
-                )
-            ),
+        normalized_supported: set[PhaseSelection] = {
+            normalize_phase_selection(selection, "P1") for selection in raw_supported
+        }
+        ordered = tuple(
+            sorted(
+                normalized_supported,
+                key=cls._phase_selection_count,
+            )
         )
         return ordered or ("P1",)
 
@@ -194,7 +208,7 @@ class _RelayPhaseDecisionMixin:
             voltage,
         )
         if downshift_target is not None:
-            return cast(tuple[PhaseSelection | None, str, float | None], downshift_target)
+            return downshift_target
         return None, "phase-hold", None
 
     @classmethod

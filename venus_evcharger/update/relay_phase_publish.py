@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, cast
+from typing import Any
+
 
 class _RelayPhasePublishMixin:
     """Translate PM metadata into phase displays and track relay confirmations."""
@@ -33,10 +34,10 @@ class _RelayPhasePublishMixin:
     def _resolved_phase_tuple(
         values: tuple[float | None, float | None, float | None],
     ) -> tuple[float, float, float] | None:
-        if None in values:
-            return None
         first, second, third = values
-        return cast(float, first), cast(float, second), cast(float, third)
+        if first is None or second is None or third is None:
+            return None
+        return first, second, third
 
     @staticmethod
     def _phase_voltage(voltage: float, selection: Any, voltage_mode: Any) -> float:
@@ -69,7 +70,27 @@ class _RelayPhasePublishMixin:
         phase_data = self._phase_data_from_backend_metadata(pm_status, voltage, getattr(svc, "voltage_mode", "phase"))
         if phase_data is not None:
             return phase_data
-        return cast(dict[str, dict[str, float]], self._phase_values(power, voltage, svc.phase, svc.voltage_mode))
+        return self._checked_phase_data(self._phase_values(power, voltage, svc.phase, svc.voltage_mode))
+
+    @staticmethod
+    def _checked_phase_data(value: Any) -> dict[str, dict[str, float]]:
+        if not isinstance(value, dict):
+            raise TypeError(f"_phase_values must return dict, got {type(value).__name__}")
+        checked: dict[str, dict[str, float]] = {}
+        for phase_name, phase_values in value.items():
+            if not isinstance(phase_name, str) or not isinstance(phase_values, dict):
+                raise TypeError("_phase_values must return dict[str, dict[str, float]]")
+            checked[phase_name] = _RelayPhasePublishMixin._checked_phase_values(phase_values)
+        return checked
+
+    @staticmethod
+    def _checked_phase_values(values: dict[Any, Any]) -> dict[str, float]:
+        checked: dict[str, float] = {}
+        for key, value in values.items():
+            if not isinstance(key, str) or not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise TypeError("_phase_values must return dict[str, dict[str, float]]")
+            checked[key] = float(value)
+        return checked
 
     def _phase_data_from_backend_metadata(
         self,

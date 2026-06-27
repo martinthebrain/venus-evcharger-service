@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import (
     normalized_worker_snapshot,
@@ -93,28 +93,18 @@ class _UpdateCyclePmSnapshotMixin:
         soft_fail_seconds: float,
     ) -> dict[str, Any] | None:
         """Return one confirmed PM cache entry when it is fresh enough."""
-        if not cls._cached_pm_status_usable(pm_status, captured_at, now, soft_fail_seconds):
+        if not isinstance(pm_status, dict) or captured_at is None:
             return None
-        confirmed = dict(cast(dict[str, Any], pm_status))
+        if not timestamp_age_within(
+            captured_at,
+            now,
+            soft_fail_seconds,
+            future_tolerance_seconds=cls.FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS,
+        ):
+            return None
+        confirmed = dict(pm_status)
         confirmed["_pm_confirmed"] = True
         return confirmed
-
-    @classmethod
-    def _cached_pm_status_usable(
-        cls,
-        pm_status: Any,
-        captured_at: Any,
-        now: float,
-        soft_fail_seconds: float,
-    ) -> bool:
-        return isinstance(pm_status, dict) and captured_at is not None and bool(
-            timestamp_age_within(
-                captured_at,
-                now,
-                soft_fail_seconds,
-                future_tolerance_seconds=cls.FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS,
-            )
-        )
 
     @staticmethod
     def _direct_pm_snapshot_max_age_seconds(svc: Any) -> float:
@@ -140,9 +130,8 @@ class _UpdateCyclePmSnapshotMixin:
         """Return the freshest Shelly status, including short soft-fail reuse."""
         soft_fail_seconds = float(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
         pm_status, pm_confirmed, snapshot_at = cls._worker_pm_snapshot_data(worker_snapshot, now)
-        if not cls._worker_pm_snapshot_usable(pm_status, pm_confirmed, snapshot_at, now):
+        if pm_status is None or not cls._worker_pm_snapshot_usable(pm_status, pm_confirmed, snapshot_at, now):
             return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
-        pm_status = cast(dict[str, Any], pm_status)
         pm_status["_pm_confirmed"] = True
         should_remember, within_soft_fail = cls._pm_snapshot_storage_decision(
             svc,
@@ -159,13 +148,13 @@ class _UpdateCyclePmSnapshotMixin:
     @classmethod
     def _worker_pm_snapshot_usable(
         cls,
-        pm_status: dict[str, Any] | None,
+        pm_status: dict[str, Any],
         pm_confirmed: bool,
         snapshot_at: float,
         now: float,
     ) -> bool:
         """Return whether worker PM data may be used directly."""
-        if pm_status is None or not pm_confirmed:
+        if not pm_confirmed:
             return False
         return not cls._pm_snapshot_falls_back_to_cache(snapshot_at, now)
 

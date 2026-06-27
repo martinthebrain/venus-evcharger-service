@@ -9,7 +9,7 @@ health, retry visibility, contactor suspicion, and feedback mismatch state.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.backend.models import switch_feedback_mismatch
 from venus_evcharger.core.common import (
@@ -173,10 +173,23 @@ class _RelayChargerHealthMixin:
     def _contactor_fault_counts(svc: Any) -> dict[str, int]:
         counts = getattr(svc, "_contactor_fault_counts", None)
         if isinstance(counts, dict):
-            return cast(dict[str, int], counts)
-        counts = {}
-        _RelayChargerHealthMixin._set_runtime_attr(svc, "_contactor_fault_counts", counts)
-        return counts
+            normalized = _RelayChargerHealthMixin._normalized_contactor_fault_counts(counts)
+            _RelayChargerHealthMixin._set_runtime_attr(svc, "_contactor_fault_counts", normalized)
+            return normalized
+        empty_counts: dict[str, int] = {}
+        _RelayChargerHealthMixin._set_runtime_attr(svc, "_contactor_fault_counts", empty_counts)
+        return empty_counts
+
+    @staticmethod
+    def _normalized_contactor_fault_counts(counts: dict[Any, Any]) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for reason, count in counts.items():
+            if reason not in {"contactor-suspected-open", "contactor-suspected-welded"}:
+                continue
+            if not isinstance(count, int) or isinstance(count, bool):
+                continue
+            normalized[str(reason)] = max(0, count)
+        return normalized
 
     @classmethod
     def _contactor_fault_count(cls, svc: Any, reason: object) -> int:
@@ -250,7 +263,7 @@ class _RelayChargerHealthMixin:
         if active_reason == normalized and active_since is not None:
             return active_since
         counts = cls._contactor_fault_counts(svc)
-        counts[normalized] = cls._contactor_fault_count(svc, normalized) + 1
+        counts[normalized] = max(0, int(counts.get(normalized, 0))) + 1
         cls._set_runtime_attr(svc, "_contactor_fault_active_reason", normalized)
         cls._set_runtime_attr(svc, "_contactor_fault_active_since", current)
         return current

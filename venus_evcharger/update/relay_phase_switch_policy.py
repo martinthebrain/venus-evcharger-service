@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.common import fresh_confirmed_relay_output
@@ -68,10 +68,23 @@ class _RelayPhaseSwitchPolicyMixin:
     def _phase_switch_mismatch_counts(svc: Any) -> dict[str, int]:
         counts = getattr(svc, "_phase_switch_mismatch_counts", None)
         if isinstance(counts, dict):
-            return cast(dict[str, int], counts)
-        counts = {}
-        svc._phase_switch_mismatch_counts = counts
-        return counts
+            normalized = _RelayPhaseSwitchPolicyMixin._normalized_phase_switch_mismatch_counts(counts)
+            svc._phase_switch_mismatch_counts = normalized
+            return normalized
+        empty_counts: dict[str, int] = {}
+        svc._phase_switch_mismatch_counts = empty_counts
+        return empty_counts
+
+    @staticmethod
+    def _normalized_phase_switch_mismatch_counts(counts: dict[Any, Any]) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for selection, count in counts.items():
+            if selection not in {"P1", "P1_P2", "P1_P2_P3"}:
+                continue
+            if not isinstance(count, int) or isinstance(count, bool):
+                continue
+            normalized[normalize_phase_selection(selection, "P1")] = max(0, count)
+        return normalized
 
     @classmethod
     def _phase_switch_mismatch_count(cls, svc: Any, selection: PhaseSelection) -> int:
@@ -80,7 +93,7 @@ class _RelayPhaseSwitchPolicyMixin:
     @classmethod
     def _remember_phase_switch_mismatch(cls, svc: Any, selection: PhaseSelection, now: float) -> int:
         counts = cls._phase_switch_mismatch_counts(svc)
-        next_count = cls._phase_switch_mismatch_count(svc, selection) + 1
+        next_count = max(0, int(counts.get(selection, 0))) + 1
         counts[selection] = next_count
         svc._phase_switch_mismatch_active = True
         svc._phase_switch_last_mismatch_selection = selection

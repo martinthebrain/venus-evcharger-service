@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, TYPE_CHECKING, cast
+from typing import Any, ClassVar, TYPE_CHECKING
 
 from venus_evcharger.core.contracts import timestamp_age_within
 
@@ -136,14 +136,11 @@ class _UpdateCycleOfflineMixin:
         )
         if offline_pm_status_at is None:
             return None
-        if not cls._offline_confirmed_relay_sample_present(
-            offline_pm_status,
-            offline_pm_status_at,
-        ):
+        if not isinstance(offline_pm_status, dict) or "output" not in offline_pm_status:
             return None
         if not cls._offline_confirmed_relay_sample_fresh(svc, now, offline_pm_status_at):
             return None
-        return cast(dict[str, Any], offline_pm_status)
+        return offline_pm_status
 
     @staticmethod
     def _offline_power_state() -> tuple[float, float, int]:
