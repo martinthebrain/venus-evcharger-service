@@ -54,6 +54,36 @@ Label=P1
 [Capability:p1:meter]
 Kind=meter
 AdapterType=template_meter
+SupportedPhases=L1
+MeasuresPower=1
+
+[Device:d1]
+Profile=p1
+Label=D1
+Endpoint=http://d1.local
+
+[Binding:b1]
+Role=invalid
+PhaseScope=L1
+
+[BindingMember:b1:1]
+Device=d1
+Capability=meter
+Phases=L1
+"""
+        )
+        with self.assertRaisesRegex(DeviceInventoryConfigError, "Binding.Role must be one of"):
+            parse_device_inventory_config(parser)
+
+        parser = configparser.ConfigParser()
+        parser.read_string(
+            """
+[Profile:p1]
+Label=P1
+
+[Capability:p1:meter]
+Kind=meter
+AdapterType=template_meter
 SupportedPhases=L4
 MeasuresPower=1
 """
@@ -160,28 +190,28 @@ Phases=L1
             {"Capability:p1:meter": capability_section},
         )
         with self.assertRaisesRegex(DeviceInventoryConfigError, "duplicate capability id 'meter'"):
-            _capabilities(duplicate_capability)  # type: ignore[arg-type]
+            _capabilities(duplicate_capability)
 
         duplicate_device = self._FakeConfig(
             ["Device:d1", "Device:d1"],
             {"Device:d1": device_section},
         )
         with self.assertRaisesRegex(DeviceInventoryConfigError, "duplicate device id 'd1'"):
-            _devices(duplicate_device)  # type: ignore[arg-type]
+            _devices(duplicate_device)
 
         duplicate_binding = self._FakeConfig(
             ["Binding:b1", "Binding:b1"],
             {"Binding:b1": binding_section},
         )
         with self.assertRaisesRegex(DeviceInventoryConfigError, "duplicate binding id 'b1'"):
-            _bindings(duplicate_binding)  # type: ignore[arg-type]
+            _bindings(duplicate_binding)
 
         duplicate_member = self._FakeConfig(
             ["BindingMember:b1:m1", "BindingMember:b1:m1"],
             {"BindingMember:b1:m1": member_section},
         )
         with self.assertRaisesRegex(DeviceInventoryConfigError, "duplicate binding member id 'm1'"):
-            _binding_members(duplicate_member)  # type: ignore[arg-type]
+            _binding_members(duplicate_member)
 
         duplicate_capability_inventory = DeviceInventory(
             profiles=(
@@ -279,4 +309,3 @@ Phases=L1
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import configparser
 from pathlib import Path
-from typing import cast
 
 from venus_evcharger.inventory import (
     BindingRole,
@@ -24,6 +23,9 @@ from venus_evcharger.inventory import (
 )
 
 PHASE_ORDER: tuple[PhaseLabel, ...] = ("L1", "L2", "L3")
+_INVENTORY_KINDS: tuple[CapabilityKind, ...] = ("switch", "meter", "charger")
+_BINDING_ROLES: tuple[BindingRole, ...] = ("actuation", "measurement", "charger")
+_SWITCHING_MODES: tuple[SwitchingMode, ...] = ("direct", "contactor")
 
 
 def inventory_default_path(config_path: str) -> Path:
@@ -204,17 +206,19 @@ def _parse_phase_label(item: str, raw_part: str) -> PhaseLabel:
 def parse_inventory_kind(raw_value: str) -> CapabilityKind:
     """Parse one capability kind from CLI input."""
     normalized = raw_value.strip().lower()
-    if normalized not in {"switch", "meter", "charger"}:
-        raise ValueError("Capability kind must be one of: charger, meter, switch")
-    return cast(CapabilityKind, normalized)
+    for kind in _INVENTORY_KINDS:
+        if normalized == kind:
+            return kind
+    raise ValueError("Capability kind must be one of: charger, meter, switch")
 
 
 def parse_inventory_binding_role(raw_value: str) -> BindingRole:
     """Parse one binding role from CLI input."""
     normalized = raw_value.strip().lower()
-    if normalized not in {"actuation", "measurement", "charger"}:
-        raise ValueError("Binding role must be one of: actuation, charger, measurement")
-    return cast(BindingRole, normalized)
+    for role in _BINDING_ROLES:
+        if normalized == role:
+            return role
+    raise ValueError("Binding role must be one of: actuation, charger, measurement")
 
 
 def parse_inventory_switching_mode(raw_value: str | None) -> SwitchingMode | None:
@@ -224,9 +228,10 @@ def parse_inventory_switching_mode(raw_value: str | None) -> SwitchingMode | Non
     normalized = raw_value.strip().lower()
     if not normalized:
         return None
-    if normalized not in {"direct", "contactor"}:
-        raise ValueError("Switching mode must be one of: contactor, direct")
-    return cast(SwitchingMode, normalized)
+    for mode in _SWITCHING_MODES:
+        if normalized == mode:
+            return mode
+    raise ValueError("Switching mode must be one of: contactor, direct")
 
 
 def inventory_action_path(namespace: argparse.Namespace) -> Path:

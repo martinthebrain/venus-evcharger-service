@@ -14,11 +14,12 @@ import os
 import sys
 import time
 import xml.etree.ElementTree as xml_et
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 
 
+_CONFIG_SCALAR_TYPES = (str, bytes, bytearray, int, float)
 DEFAULT_CONFIG_PATH = os.path.join(
     os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")),
     "deploy",
@@ -38,7 +39,9 @@ def _as_bool(value: object, default: bool = False) -> bool:
 def _as_int(value: object, default: int) -> int:
     """Convert a config value to int, falling back for invalid input."""
     try:
-        return int(cast(Any, value))
+        if isinstance(value, _CONFIG_SCALAR_TYPES):
+            return int(value)
+        return int(str(value))
     except (TypeError, ValueError):
         return int(default)
 
@@ -46,7 +49,9 @@ def _as_int(value: object, default: int) -> int:
 def _as_float(value: object, default: float) -> float:
     """Convert a config value to float, falling back for invalid input."""
     try:
-        return float(cast(Any, value))
+        if isinstance(value, _CONFIG_SCALAR_TYPES):
+            return float(value)
+        return float(str(value))
     except (TypeError, ValueError):
         return float(default)
 

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Literal
 
 from venus_evcharger.bootstrap.wizard_models import WizardChargerBackend, WizardTransportKind
 
@@ -38,9 +38,10 @@ _PRESET_UNIT_IDS: dict[WizardChargerPreset, int] = {
 
 
 def charger_preset_backend(charger_preset: str | None) -> WizardChargerBackend | None:
-    if charger_preset is None:
+    preset = _charger_preset(charger_preset)
+    if preset is None:
         return None
-    return _PRESET_BACKENDS.get(cast(WizardChargerPreset, charger_preset))
+    return _PRESET_BACKENDS.get(preset)
 
 
 def apply_charger_preset_backend(
@@ -61,15 +62,27 @@ def preset_transport_port(
     charger_preset: str | None,
     transport_kind: WizardTransportKind,
 ) -> int | None:
-    if charger_preset is None or transport_kind != "tcp":
+    preset = _charger_preset(charger_preset)
+    if preset is None or transport_kind != "tcp":
         return None
-    return _PRESET_TCP_PORTS.get(cast(WizardChargerPreset, charger_preset))
+    return _PRESET_TCP_PORTS.get(preset)
 
 
 def preset_transport_unit_id(charger_preset: str | None) -> int | None:
+    preset = _charger_preset(charger_preset)
+    if preset is None:
+        return None
+    return _PRESET_UNIT_IDS.get(preset)
+
+
+def _charger_preset(charger_preset: str | None) -> WizardChargerPreset | None:
+    """Return one known charger preset identifier, if the raw value is supported."""
     if charger_preset is None:
         return None
-    return _PRESET_UNIT_IDS.get(cast(WizardChargerPreset, charger_preset))
+    for preset in CHARGER_PRESET_VALUES:
+        if charger_preset == preset:
+            return preset
+    return None
 
 
 def render_charger_preset_config(
