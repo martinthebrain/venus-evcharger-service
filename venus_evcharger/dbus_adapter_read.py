@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from collections.abc import Mapping
+from typing import Any
 
 import dbus
 
@@ -18,71 +18,15 @@ from venus_evcharger.dbus_adapter_read_aggregate import (
     AggregateState,
     AggregateStore,
 )
+from venus_evcharger.dbus_adapter_read_protocols import DbusReadAdapter
 from venus_evcharger.dbus_adapter_read_pv import pv_total_members
 from venus_evcharger.dbus_adapter_read_targets import ReadTarget, read_target
-
-
-class _ReadCacheProtocol(Protocol):
-    @property
-    def services(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
-
-    @property
-    def values(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
-
-    def update_value(
-        self,
-        key: str,
-        value: Any,
-        *,
-        metadata: Any | None = None,
-        **metadata_fields: Any,
-    ) -> None: ...  # pragma: no cover
-
-    def mark_error(  # pragma: no cover
-        self, key: str, *, source: str, error: BaseException | str, now: float | None = None
-    ) -> None: ...
-
-
-class _ReadSchedulerProtocol(Protocol):
-    @property
-    def specs(self) -> Mapping[str, Mapping[str, Any]]: ...  # pragma: no cover
-
-
-class _ConnectionProtocol(Protocol):
-    def bus(self) -> Any: ...  # pragma: no cover
-
-
-class _RateLimiterProtocol(Protocol):
-    def require_due(self, kind: str) -> None: ...  # pragma: no cover
-
-
-class _CircuitProtocol(Protocol):
-    def record_success(self, latency_ms: float, *, kind: str = "dbus") -> None: ...  # pragma: no cover
-
-
-class _ReadAdapterProtocol(Protocol):
-    @property
-    def cache(self) -> _ReadCacheProtocol: ...  # pragma: no cover
-
-    @property
-    def connection(self) -> _ConnectionProtocol: ...  # pragma: no cover
-
-    @property
-    def read_scheduler(self) -> _ReadSchedulerProtocol: ...  # pragma: no cover
-
-    @property
-    def rate_limiter(self) -> _RateLimiterProtocol: ...  # pragma: no cover
-
-    @property
-    def circuit(self) -> _CircuitProtocol: ...  # pragma: no cover
-
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], Any]) -> Any: ...  # pragma: no cover
 
 
 class DbusReadExecutor:
     """Execute scheduled DBus reads and update the adapter cache."""
 
-    def __init__(self, adapter: _ReadAdapterProtocol) -> None:  # pragma: no mutate block
+    def __init__(self, adapter: DbusReadAdapter) -> None:  # pragma: no mutate block
         self.adapter = adapter
         self._aggregates = AggregateStore()
         self.last_operation_performed = False

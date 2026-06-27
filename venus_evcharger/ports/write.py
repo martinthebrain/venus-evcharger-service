@@ -109,7 +109,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
             return None
         if not WriteControllerPort._relay_output_timestamp_fresh(current_time, captured_at_value, max_age_seconds):
             return None
-        return bool(cast(dict[str, Any], pm_status).get("output"))
+        return WriteControllerPort._relay_output_value(pm_status)
 
     def _fresh_last_output(self, current_time: float, max_age_seconds: float) -> bool | None:
         """Return a fresh confirmed relay output from the last remembered Shelly read."""
@@ -121,7 +121,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
             return None
         if not self._relay_output_timestamp_fresh(current_time, last_pm_status_at_value, max_age_seconds):
             return None
-        return bool(cast(dict[str, Any], last_pm_status).get("output"))
+        return self._relay_output_value(last_pm_status)
 
     def _last_relay_output_sample(self) -> tuple[Any, Any]:
         """Return the best remembered relay-output sample for cutover freshness checks."""
@@ -160,6 +160,20 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         age_seconds = current_time - float(captured_at)
         return -1.0 <= age_seconds <= max_age_seconds
 
+    @staticmethod
+    def _relay_output_value(pm_status: Any) -> bool | None:
+        """Return a normalized relay output from a status payload with an output field."""
+        if not isinstance(pm_status, dict) or "output" not in pm_status:
+            return None
+        return bool(pm_status.get("output"))
+
+    @staticmethod
+    def _pending_relay_state_on(sample: Any) -> bool:
+        """Return whether a pending relay sample requests relay-on."""
+        if not isinstance(sample, tuple) or not sample:
+            return False
+        return bool(sample[0])
+
     def _fresh_confirmed_relay_output(self, snapshot: Any) -> bool | None:
         """Return the latest confirmed relay output only when it is still fresh."""
         current_time = self.time_now()
@@ -173,8 +187,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         snapshot = self.get_worker_snapshot()
         peek_pending = getattr(self._service, "_peek_pending_relay_command", None)
         if callable(peek_pending):
-            pending_state, _ = cast(tuple[Any, Any], peek_pending())
-            if bool(pending_state):
+            if self._pending_relay_state_on(peek_pending()):
                 return True
 
         confirmed_output = self._fresh_confirmed_relay_output(snapshot)

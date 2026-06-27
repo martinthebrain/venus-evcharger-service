@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome
+from venus_evcharger.dbus_adapter_write_protocols import DbusWriteSchedulerAdapter, ProcessLoadedCommand
 from venus_evcharger.dbus_adapter_write_support import (
     budget_elapsed,
     is_local_publish_command,
@@ -33,7 +35,7 @@ class _LocalPublishCandidate:
 
 
 class DbusWriteSchedulerPublishMixin:
-    adapter: Any
+    adapter: DbusWriteSchedulerAdapter
     dynamic_local_publish_burst_limit: int
     last_processed_at: float
     last_values: dict[str, Any]
@@ -42,8 +44,8 @@ class DbusWriteSchedulerPublishMixin:
     registered_paths: set[str]
     budget_available: Callable[[Mapping[str, Any], float], bool]
     prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
-    process_loaded_command: Callable[..., CommandOutcome]
-    _processed_events: Any
+    process_loaded_command: ProcessLoadedCommand
+    _processed_events: deque[float]
     prune_budget: Callable[[float], None]
     prune_processed: Callable[[float], None]
 

@@ -3,6 +3,16 @@ from tests.venus_evcharger_write_controller_support import *
 
 
 class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
+    def test_write_port_relay_payload_helpers_validate_untrusted_shapes(self) -> None:
+        self.assertIsNone(WriteControllerPort._relay_output_value(None))
+        self.assertIsNone(WriteControllerPort._relay_output_value({}))
+        self.assertFalse(WriteControllerPort._relay_output_value({"output": 0}))
+        self.assertTrue(WriteControllerPort._relay_output_value({"output": 1}))
+        self.assertFalse(WriteControllerPort._pending_relay_state_on([True, 100.0]))
+        self.assertFalse(WriteControllerPort._pending_relay_state_on(()))
+        self.assertFalse(WriteControllerPort._pending_relay_state_on((None, 100.0)))
+        self.assertTrue(WriteControllerPort._pending_relay_state_on((True, 100.0)))
+
     def test_auto_runtime_setting_write_publishes_and_persists_overrides(self) -> None:
         service = SimpleNamespace(
             virtual_mode=1,

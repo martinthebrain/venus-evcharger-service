@@ -73,6 +73,8 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             invalid_time = Path(temp_dir) / "invalid-time.json"
             invalid_time.write_text(json.dumps({"captured_at": 0.0}), encoding="utf-8")
             self.assertEqual(DbusCacheStore.load_snapshot(str(invalid_time), now=14.0), {})
+            invalid_time.write_text(json.dumps({"captured_at": "bad"}), encoding="utf-8")
+            self.assertEqual(DbusCacheStore.load_snapshot(str(invalid_time), now=14.0), {})
             self.assertEqual(DbusCacheStore.load_snapshot(str(Path(temp_dir) / "missing.json")), {})
 
             invalid = Path(temp_dir) / "invalid.json"
@@ -101,6 +103,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertFalse(dbus_gateway_cache._value_is_stale("fresh", 20.0, 0.0))
         self.assertTrue(dbus_gateway_cache._value_is_stale("fresh", 20.0, 1.0))
         self.assertFalse(dbus_gateway_cache._valid_snapshot_payload({"captured_at": 0.0}))
+        self.assertFalse(dbus_gateway_cache._valid_snapshot_payload({"captured_at": object()}))
         self.assertFalse(dbus_gateway_cache._valid_snapshot_payload([]))
         self.assertFalse(dbus_gateway_cache._snapshot_too_old(1.0, 100.0, -1.0))
         self.assertTrue(dbus_gateway_cache._snapshot_too_old(1.0, 100.0, 1.0))

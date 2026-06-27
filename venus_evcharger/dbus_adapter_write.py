@@ -9,6 +9,7 @@ from typing import Any
 from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter_write_core import DbusWriteSchedulerCoreMixin
 from venus_evcharger.dbus_adapter_write_health import DbusWriteSchedulerHealthMixin
+from venus_evcharger.dbus_adapter_write_protocols import DbusWriteSchedulerAdapter
 from venus_evcharger.dbus_adapter_write_publish import DbusWriteSchedulerPublishMixin
 
 
@@ -17,7 +18,7 @@ class DbusWriteScheduler(
     DbusWriteSchedulerPublishMixin,
     DbusWriteSchedulerHealthMixin,
 ):
-    def __init__(self, adapter: Any) -> None:
+    def __init__(self, adapter: DbusWriteSchedulerAdapter) -> None:
         self.adapter = adapter
         self.registered_paths: set[str] = set()
         self.last_values: dict[str, Any] = {}

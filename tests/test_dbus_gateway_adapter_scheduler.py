@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+import builtins
+import configparser
+import json
+import logging
 import tempfile
 import time
 import unittest
-import json
-import builtins
-import configparser
-import logging
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -38,13 +38,12 @@ fake_dbus_mainloop = ModuleType("dbus.mainloop.glib")
 fake_dbus_mainloop.DBusGMainLoop = MagicMock()  # type: ignore[attr-defined]
 
 with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fake_dbus_mainloop}):
-    import venus_evcharger_dbus_adapter as adapter_module
+    import venus_evcharger.dbus_adapter_components_rate as rate_module
+    import venus_evcharger.dbus_adapter_components_resource as resource_module
     import venus_evcharger.dbus_adapter_health_backpressure as health_backpressure_module
     import venus_evcharger.dbus_adapter_health_history as health_history_module
     import venus_evcharger.dbus_adapter_health_queue as health_queue_module
     import venus_evcharger.dbus_adapter_health_slo as health_slo_module
-    import venus_evcharger.dbus_adapter_components_rate as rate_module
-    import venus_evcharger.dbus_adapter_components_resource as resource_module
     import venus_evcharger.dbus_adapter_process_config as process_config_module
     import venus_evcharger.dbus_adapter_process_health as process_health_module
     import venus_evcharger.dbus_adapter_process_introspection as introspection_module
@@ -60,10 +59,7 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
     import venus_evcharger.dbus_adapter_write_publish as write_publish_module
     import venus_evcharger.dbus_adapter_write_support as write_support_module
     import venus_evcharger.dbus_gateway_core as gateway_core_module
-    from venus_evcharger_dbus_adapter import (
-        DbusAdapter,
-        main as adapter_main,
-    )
+    import venus_evcharger_dbus_adapter as adapter_module
     from venus_evcharger.dbus_adapter_components import (
         AtomicJsonWriter,
         DbusCircuitBreaker,
@@ -75,6 +71,8 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
         ResourceMonitor,
         TickHealth,
     )
+    from venus_evcharger_dbus_adapter import DbusAdapter
+    from venus_evcharger_dbus_adapter import main as adapter_main
 
 
 class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
@@ -3132,6 +3130,14 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.connection.bus = MagicMock(return_value=fake_bus)  # type: ignore[method-assign]
             with patch.object(process_io_module.dbus, "Interface", return_value=fake_iface):
                 self.assertEqual(adapter.list_services(), ["svc.a", "b'svc.b'"])
+                adapter.rate_limiter.next_at["read"] = 0.0
+                fake_iface.ListNames.return_value = "svc.a"
+                with self.assertRaises(TypeError):
+                    adapter.list_services()
+                adapter.rate_limiter.next_at["read"] = 0.0
+                fake_iface.ListNames.return_value = object()
+                with self.assertRaises(TypeError):
+                    adapter.list_services()
 
     def test_socket_start_without_stale_path_and_default_cache_publish(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

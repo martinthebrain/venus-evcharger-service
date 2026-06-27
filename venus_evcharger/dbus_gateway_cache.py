@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.dbus_gateway_core import (
@@ -29,7 +29,20 @@ def _value_is_stale(status: str, age: float, stale_after_seconds: float) -> bool
 
 
 def _valid_snapshot_payload(payload: object) -> bool:
-    return isinstance(payload, dict) and float(payload.get("captured_at", 0.0) or 0.0) > 0.0  # pragma: no mutate
+    return _snapshot_payload(payload) is not None  # pragma: no mutate
+
+
+def _snapshot_payload(payload: object) -> Mapping[Any, Any] | None:
+    if not isinstance(payload, Mapping):
+        return None
+    return payload if _snapshot_captured_at(payload) > 0.0 else None  # pragma: no mutate
+
+
+def _snapshot_captured_at(payload: Mapping[Any, Any]) -> float:
+    try:
+        return float(payload.get("captured_at", 0.0) or 0.0)  # pragma: no mutate
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _snapshot_too_old(captured_at: float, current: float, max_age_seconds: float) -> bool:
@@ -168,14 +181,14 @@ class DbusCacheStore:
 
     @staticmethod
     def load_snapshot(path: str, *, max_age_seconds: float = 30.0, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
-        payload = read_json_file(path, {})  # pragma: no mutate
-        if not _valid_snapshot_payload(payload):
+        payload = _snapshot_payload(read_json_file(path, {}))  # pragma: no mutate
+        if payload is None:
             return {}
-        captured_at = float(payload.get("captured_at", 0.0) or 0.0)  # pragma: no mutate
+        captured_at = _snapshot_captured_at(payload)  # pragma: no mutate
         current = _now() if now is None else float(now)  # pragma: no mutate
         if _snapshot_too_old(captured_at, current, max_age_seconds):
             return {}
-        return cast(dict[str, Any], payload)  # pragma: no mutate
+        return {str(key): value for key, value in payload.items()}  # pragma: no mutate
 
     @staticmethod
     def value_entry(snapshot: Mapping[str, Any], key: str) -> dict[str, Any] | None:

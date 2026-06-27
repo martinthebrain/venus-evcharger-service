@@ -9,8 +9,8 @@ is intentionally isolated to the gateway adapter modules only.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from typing import Any, cast
+from collections.abc import Callable, Iterable
+from typing import Any
 
 import dbus
 
@@ -56,12 +56,12 @@ class DbusAdapterIoMixin:
             return True
 
     def list_services(self: DbusAdapterIoContext) -> list[str]:
-        def _read() -> list[str]:
+        def _read() -> object:
             obj = self.connection.bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
             iface = dbus.Interface(obj, "org.freedesktop.DBus")
-            return [str(name) for name in iface.ListNames()]
+            return iface.ListNames()
 
-        return cast(list[str], self.timed_dbus_operation("read", _read))
+        return _service_names(self.timed_dbus_operation("read", _read))
 
     def timed_dbus_operation(self: DbusAdapterIoContext, kind: str, operation: Callable[[], Any]) -> Any:
         self.rate_limiter.require_due(kind)
@@ -99,3 +99,9 @@ class DbusAdapterIoMixin:
         self.cache.write_snapshot_files()
         self.append_health_log(health)
         self.write_introspection_snapshot()
+
+
+def _service_names(value: object) -> list[str]:
+    if isinstance(value, str) or not isinstance(value, Iterable):
+        raise TypeError("DBus ListNames returned a non-iterable service list")
+    return [str(name) for name in value]

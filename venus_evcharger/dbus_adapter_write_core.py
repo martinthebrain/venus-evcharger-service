@@ -6,9 +6,15 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Mapping
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
+from venus_evcharger.dbus_adapter_write_protocols import (
+    DbusWriteSchedulerAdapter,
+    DropStaleCoalescedCommands,
+    ProcessLocalPublishBurst,
+    PublishCommand,
+)
 from venus_evcharger.dbus_adapter_write_support import (
     budget_elapsed,
     command_kind,
@@ -22,13 +28,13 @@ from venus_evcharger.dbus_gateway import DbusCommandInbox
 
 
 class DbusWriteSchedulerCoreMixin:
-    adapter: Any
+    adapter: DbusWriteSchedulerAdapter
     local_publish_burst_limit: int
     startup_registration_batch_limit: int
     startup_registration_tick_budget_seconds: float
-    drop_stale_coalesced_commands: Callable[..., None]
-    process_local_publish_burst: Callable[..., int]
-    publish_command: Callable[..., CommandOutcome]
+    drop_stale_coalesced_commands: DropStaleCoalescedCommands
+    process_local_publish_burst: ProcessLocalPublishBurst
+    publish_command: PublishCommand
     register_path: Callable[[Mapping[str, Any]], CommandOutcome]
     set_remote_value: Callable[[Mapping[str, Any]], CommandOutcome]
     budget_available: Callable[[Mapping[str, Any], float], bool]
@@ -166,7 +172,7 @@ class DbusWriteSchedulerCoreMixin:
         }
         handler = handlers.get(kind)
         if handler is None:
-            return cast(CommandOutcome, self.adapter.process_non_write_command(command))
+            return self.adapter.process_non_write_command(command)
         return handler(command)
 
     def _register_service_command(self, _command: Mapping[str, Any]) -> CommandOutcome:
