@@ -28,7 +28,7 @@ attribute vocabulary.
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.backend.models import (
     PhaseSelection,
@@ -409,28 +409,30 @@ class _WriteControllerRuntimePortMixin:
 
     @property
     def requested_phase_selection(self) -> str:
+        fallback = normalize_phase_selection(self.supported_phase_selections[0], "P1")
         normalized: PhaseSelection = normalize_phase_selection(
-            getattr(self._service, "requested_phase_selection", self.supported_phase_selections[0]),
-            cast(PhaseSelection, self.supported_phase_selections[0]),
+            getattr(self._service, "requested_phase_selection", fallback),
+            fallback,
         )
         return str(normalized)
 
     @requested_phase_selection.setter
     def requested_phase_selection(self, value: Any) -> None:
-        fallback = cast(PhaseSelection, self.supported_phase_selections[0])
+        fallback = normalize_phase_selection(self.supported_phase_selections[0], "P1")
         self._service.requested_phase_selection = normalize_phase_selection(value, fallback)
 
     @property
     def active_phase_selection(self) -> str:
+        fallback = normalize_phase_selection(self.requested_phase_selection, "P1")
         normalized: PhaseSelection = normalize_phase_selection(
-            getattr(self._service, "active_phase_selection", self.requested_phase_selection),
-            cast(PhaseSelection, self.requested_phase_selection),
+            getattr(self._service, "active_phase_selection", fallback),
+            fallback,
         )
         return str(normalized)
 
     @active_phase_selection.setter
     def active_phase_selection(self, value: Any) -> None:
-        fallback = cast(PhaseSelection, self.requested_phase_selection)
+        fallback = normalize_phase_selection(self.requested_phase_selection, "P1")
         self._service.active_phase_selection = normalize_phase_selection(value, fallback)
 
     @property

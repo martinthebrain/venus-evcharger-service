@@ -3,18 +3,24 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-
+from typing import Any
 
 from venus_evcharger.backend.models import (
-    PhaseSelection,
     normalize_phase_selection,
 )
 from venus_evcharger.core.contracts import (
     normalized_worker_snapshot,
 )
 from venus_evcharger.ports.write_runtime import _WriteControllerRuntimePortMixin
+
 from .base import _BaseServicePort
+
+
+def _require_str(value: Any, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must return str, got {type(value).__name__}")
+    return value
+
 
 class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
     """Expose only the write-path surface needed by ``DbusWriteController``."""
@@ -231,16 +237,14 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         return bool(self._service._phase_selection_requires_pause())
 
     def apply_phase_selection(self, selection: Any) -> str:
-        return cast(str, self._service._apply_phase_selection(selection))
+        return _require_str(self._service._apply_phase_selection(selection), "_apply_phase_selection")
 
     def normalize_phase_selection(self, value: Any, default: str | None = None) -> str:
-        fallback: PhaseSelection = (
-            cast(PhaseSelection, self.supported_phase_selections[0])
-            if default is None
-            else cast(PhaseSelection, str(default))
+        fallback = normalize_phase_selection(
+            self.supported_phase_selections[0] if default is None else default,
+            "P1",
         )
-        normalized: PhaseSelection = normalize_phase_selection(value, fallback)
-        return str(normalized)
+        return str(normalize_phase_selection(value, fallback))
 
     def normalize_mode(self, value: Any) -> int:
         return int(self._service._normalize_mode(value))
@@ -249,7 +253,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         return bool(self._service._mode_uses_auto_logic(mode))
 
     def state_summary(self) -> str:
-        return cast(str, self._service._state_summary())
+        return _require_str(self._service._state_summary(), "_state_summary")
 
     def save_runtime_state(self) -> Any:
         return self._service._save_runtime_state()

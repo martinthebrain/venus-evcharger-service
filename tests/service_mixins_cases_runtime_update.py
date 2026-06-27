@@ -199,6 +199,7 @@ class _ServiceMixinsRuntimeUpdateCases:
     def test_state_publish_mixin_delegates_state_and_publish_calls(self):
         service = _StateService()
         service._state_controller = MagicMock()
+        service._state_controller.state_summary.return_value = "state"
         service._dbus_publisher = MagicMock()
         service._companion_dbus_bridge = MagicMock()
 
@@ -249,6 +250,14 @@ class _ServiceMixinsRuntimeUpdateCases:
         self.assertEqual(cloned["pm_status"], {"output": True})
         defaults = service._observability_state_defaults()
         self.assertIn("_error_state", defaults)
+
+    def test_state_publish_mixin_rejects_non_string_state_summary(self):
+        service = _StateService()
+        service._state_controller = MagicMock()
+        service._state_controller.state_summary.return_value = {"state": "bad"}
+
+        with self.assertRaisesRegex(TypeError, "state_summary must return str"):
+            service._state_summary()
 
     def test_service_controller_factory_skips_recreating_existing_controllers(self):
         service = _FactoryService()

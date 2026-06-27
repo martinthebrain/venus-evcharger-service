@@ -13,6 +13,18 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         self.assertFalse(WriteControllerPort._pending_relay_state_on((None, 100.0)))
         self.assertTrue(WriteControllerPort._pending_relay_state_on((True, 100.0)))
 
+    def test_write_port_rejects_non_string_contract_results(self) -> None:
+        service = SimpleNamespace(
+            _apply_phase_selection=MagicMock(return_value={"phase": "bad"}),
+            _state_summary=MagicMock(return_value={"state": "bad"}),
+        )
+        port = WriteControllerPort(service)
+
+        with self.assertRaisesRegex(TypeError, "_apply_phase_selection must return str"):
+            port.apply_phase_selection("P1")
+        with self.assertRaisesRegex(TypeError, "_state_summary must return str"):
+            port.state_summary()
+
     def test_auto_runtime_setting_write_publishes_and_persists_overrides(self) -> None:
         service = SimpleNamespace(
             virtual_mode=1,

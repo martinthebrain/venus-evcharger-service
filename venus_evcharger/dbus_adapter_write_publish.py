@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome
-from venus_evcharger.dbus_adapter_write_protocols import DbusWriteSchedulerAdapter, ProcessLoadedCommand
+from venus_evcharger.dbus_adapter_write_protocols import CommandFileList, DbusWriteSchedulerAdapter
 from venus_evcharger.dbus_adapter_write_support import (
     budget_elapsed,
     is_local_publish_command,
@@ -44,10 +44,18 @@ class DbusWriteSchedulerPublishMixin:
     registered_paths: set[str]
     budget_available: Callable[[Mapping[str, Any], float], bool]
     prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
-    process_loaded_command: ProcessLoadedCommand
     _processed_events: deque[float]
     prune_budget: Callable[[float], None]
     prune_processed: Callable[[float], None]
+
+    def process_loaded_command(  # pragma: no cover
+        self,
+        path: str,
+        command: Mapping[str, Any],
+        *,
+        pending_commands: CommandFileList | None = None,
+    ) -> CommandOutcome:
+        raise NotImplementedError
 
     def process_local_publish_burst(self, limit: int | None = None) -> int:  # pragma: no mutate block
         if not self.adapter.dbus_service_registered:

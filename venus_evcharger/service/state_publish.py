@@ -12,6 +12,12 @@ from venus_evcharger.runtime import RuntimeSupportController
 from .factory import ServiceControllerFactoryMixin
 
 
+def _require_str(value: Any, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must return str, got {type(value).__name__}")
+    return value
+
+
 class StatePublishMixin(ServiceControllerFactoryMixin):
     """Static state and DBus publish delegations."""
 
@@ -42,9 +48,9 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
     def _observability_state_defaults() -> dict[str, Any]:
         return RuntimeSupportController.observability_state_defaults()
 
-    def _state_summary(self) -> dict[str, Any]:
+    def _state_summary(self) -> str:
         self._ensure_state_controller()
-        return cast(dict[str, Any], self._state_controller.state_summary())
+        return _require_str(self._state_controller.state_summary(), "state_summary")
 
     def _current_runtime_state(self) -> dict[str, Any]:
         self._ensure_state_controller()
