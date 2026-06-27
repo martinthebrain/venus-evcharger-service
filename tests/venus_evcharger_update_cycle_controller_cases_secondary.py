@@ -327,6 +327,21 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
         self.assertIsNone(_UpdateCycleRelayMixin._phase_tuple_item(True))
         self.assertIsNone(_UpdateCycleRelayMixin._resolved_phase_tuple((1.0, None, 3.0)))
         self.assertAlmostEqual(_UpdateCycleRelayMixin._phase_voltage(400.0, "P1_P2_P3", "line"), 400.0 / math.sqrt(3.0))
+        with self.assertRaisesRegex(TypeError, "last charger current target must be available"):
+            _UpdateCycleRelayMixin._known_charger_current_target(None)
+        self.assertEqual(
+            _UpdateCycleRelayMixin._normalized_contactor_fault_counts({"contactor-suspected-open": True}),
+            {},
+        )
+        self.assertEqual(_UpdateCycleRelayMixin._phase_switch_mismatch_count(svc, "P1_P2_P3"), 0)
+        with self.assertRaisesRegex(TypeError, "_apply_enabled_target must return bool"):
+            _UpdateCycleRelayMixin._relay_apply_result("bad")
+        with self.assertRaisesRegex(TypeError, "_phase_values must return dict, got list"):
+            _UpdateCycleRelayMixin._checked_phase_data([])
+        with self.assertRaisesRegex(TypeError, r"_phase_values must return dict\[str, dict\[str, float\]\]"):
+            _UpdateCycleRelayMixin._checked_phase_data({1: {}})
+        with self.assertRaisesRegex(TypeError, r"_phase_values must return dict\[str, dict\[str, float\]\]"):
+            _UpdateCycleRelayMixin._checked_phase_data({"L1": {"power": True}})
 
     def test_relay_mixin_direct_helper_edges_cover_remaining_small_branches(self):
         svc = SimpleNamespace(
