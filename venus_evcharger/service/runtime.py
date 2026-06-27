@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.control import ControlCommand
 
 from .factory import ServiceControllerFactoryMixin
+from .return_contracts import require_bool, require_dict, require_int, require_str, require_tuple2
 
 
 class RuntimeHelperMixin(ServiceControllerFactoryMixin):
@@ -34,7 +35,7 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _worker_state_defaults(self) -> dict[str, Any]:
         self._ensure_runtime_support_controller()
-        return cast(dict[str, Any], self._runtime_support_controller.worker_state_defaults())
+        return require_dict(self._runtime_support_controller.worker_state_defaults(), "worker_state_defaults")
 
     def _ensure_missing_attributes(self, defaults: dict[str, Any]) -> None:
         self._ensure_runtime_support_controller()
@@ -50,7 +51,7 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _dbus_publish_direct_allowed(self) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.dbus_publish_direct_allowed())
+        return require_bool(self._runtime_support_controller.dbus_publish_direct_allowed(), "dbus_publish_direct_allowed")
 
     def _assert_dbus_mainloop_thread(self, operation: str = "dbus access") -> None:
         self._ensure_runtime_support_controller()
@@ -58,7 +59,10 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _enqueue_dbus_publish_values(self, values: list[tuple[str, Any]], current: float) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.enqueue_dbus_publish_values(values, current))
+        return require_bool(
+            self._runtime_support_controller.enqueue_dbus_publish_values(values, current),
+            "enqueue_dbus_publish_values",
+        )
 
     def _enqueue_dbus_update_index_bump(self, current: float) -> None:
         self._ensure_runtime_support_controller()
@@ -66,11 +70,14 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _enqueue_companion_dbus_publish(self, now: float | None = None) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.enqueue_companion_dbus_publish(now))
+        return require_bool(
+            self._runtime_support_controller.enqueue_companion_dbus_publish(now),
+            "enqueue_companion_dbus_publish",
+        )
 
     def _flush_dbus_publish_queue(self) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.flush_dbus_publish_queue())
+        return require_bool(self._runtime_support_controller.flush_dbus_publish_queue(), "flush_dbus_publish_queue")
 
     def _start_update_worker(self) -> None:
         self._ensure_runtime_support_controller()
@@ -78,7 +85,7 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _schedule_update_cycle(self) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.schedule_update_cycle())
+        return require_bool(self._runtime_support_controller.schedule_update_cycle(), "schedule_update_cycle")
 
     def _start_control_command_worker(self) -> None:
         self._ensure_runtime_support_controller()
@@ -86,11 +93,11 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _enqueue_control_command(self, command: ControlCommand) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.enqueue_control_command(command))
+        return require_bool(self._runtime_support_controller.enqueue_control_command(command), "enqueue_control_command")
 
     def _mainloop_heartbeat_tick(self) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.mainloop_heartbeat_tick())
+        return require_bool(self._runtime_support_controller.mainloop_heartbeat_tick(), "mainloop_heartbeat_tick")
 
     def _start_mainloop_watchdog(self) -> None:
         self._ensure_runtime_support_controller()
@@ -106,7 +113,7 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _get_worker_snapshot(self) -> dict[str, Any]:
         self._ensure_runtime_support_controller()
-        return cast(dict[str, Any], self._runtime_support_controller.get_worker_snapshot())
+        return require_dict(self._runtime_support_controller.get_worker_snapshot(), "get_worker_snapshot")
 
     def _ensure_observability_state(self) -> None:
         self._ensure_runtime_support_controller()
@@ -114,7 +121,7 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _is_update_stale(self, now: float | None = None) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.is_update_stale(now))
+        return require_bool(self._runtime_support_controller.is_update_stale(now), "is_update_stale")
 
     def _watchdog_recover(self, now: float) -> None:
         self._ensure_runtime_support_controller()
@@ -145,11 +152,11 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _source_retry_ready(self, source_key: str, now: float) -> bool:
         self._ensure_runtime_support_controller()
-        return cast(bool, self._runtime_support_controller.source_retry_ready(source_key, now))
+        return require_bool(self._runtime_support_controller.source_retry_ready(source_key, now), "source_retry_ready")
 
     def _source_retry_remaining(self, source_key: str, now: float | None = None) -> int:
         self._ensure_runtime_support_controller()
-        return cast(int, self._runtime_support_controller.source_retry_remaining(source_key, now))
+        return require_int(self._runtime_support_controller.source_retry_remaining(source_key, now), "source_retry_remaining")
 
     def _delay_source_retry(self, source_key: str, now: float, delay_seconds: float | None = None) -> None:
         self._ensure_runtime_support_controller()
@@ -200,7 +207,7 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _peek_pending_relay_command(self) -> tuple[bool | None, float | None]:
         self._ensure_shelly_io_controller()
-        return cast(tuple[bool | None, float | None], self._shelly_io_controller.peek_pending_relay_command())
+        return require_tuple2(self._shelly_io_controller.peek_pending_relay_command(), "peek_pending_relay_command")
 
     def _clear_pending_relay_command(self, relay_on: bool) -> None:
         self._ensure_shelly_io_controller()
@@ -243,8 +250,8 @@ class RuntimeHelperMixin(ServiceControllerFactoryMixin):
 
     def _phase_selection_requires_pause(self) -> bool:
         self._ensure_shelly_io_controller()
-        return cast(bool, self._shelly_io_controller.phase_selection_requires_pause())
+        return require_bool(self._shelly_io_controller.phase_selection_requires_pause(), "phase_selection_requires_pause")
 
     def _apply_phase_selection(self, selection: Any) -> str:
         self._ensure_shelly_io_controller()
-        return cast(str, self._shelly_io_controller.set_phase_selection(selection))
+        return require_str(self._shelly_io_controller.set_phase_selection(selection), "set_phase_selection")

@@ -4,18 +4,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.runtime import RuntimeSupportController
 
 from .factory import ServiceControllerFactoryMixin
-
-
-def _require_str(value: Any, name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{name} must return str, got {type(value).__name__}")
-    return value
+from .return_contracts import require_bool, require_dict, require_str
 
 
 class StatePublishMixin(ServiceControllerFactoryMixin):
@@ -50,27 +45,27 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
 
     def _state_summary(self) -> str:
         self._ensure_state_controller()
-        return _require_str(self._state_controller.state_summary(), "state_summary")
+        return require_str(self._state_controller.state_summary(), "state_summary")
 
     def _current_runtime_state(self) -> dict[str, Any]:
         self._ensure_state_controller()
-        return cast(dict[str, Any], self._state_controller.current_runtime_state())
+        return require_dict(self._state_controller.current_runtime_state(), "current_runtime_state")
 
-    def _load_runtime_state(self) -> dict[str, Any]:
+    def _load_runtime_state(self) -> None:
         self._ensure_state_controller()
-        return cast(dict[str, Any], self._state_controller.load_runtime_state())
+        self._state_controller.load_runtime_state()
 
-    def _save_runtime_state(self) -> dict[str, Any]:
+    def _save_runtime_state(self) -> None:
         self._ensure_state_controller()
-        return cast(dict[str, Any], self._state_controller.save_runtime_state())
+        self._state_controller.save_runtime_state()
 
-    def _save_runtime_overrides(self) -> dict[str, Any]:
+    def _save_runtime_overrides(self) -> None:
         self._ensure_state_controller()
-        return cast(dict[str, Any], self._state_controller.save_runtime_overrides())
+        self._state_controller.save_runtime_overrides()
 
-    def _flush_runtime_overrides(self, now: float | None = None) -> dict[str, Any]:
+    def _flush_runtime_overrides(self, now: float | None = None) -> None:
         self._ensure_state_controller()
-        return cast(dict[str, Any], self._state_controller.flush_runtime_overrides(now))
+        self._state_controller.flush_runtime_overrides(now)
 
     def _validate_runtime_config(self) -> None:
         self._ensure_state_controller()
@@ -86,7 +81,7 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
 
     def _publish_dbus_path(self, path: str, value: Any, current_time: float | None, force: bool = False) -> bool:
         self._ensure_dbus_publisher()
-        return cast(bool, self._dbus_publisher.publish_path(path, value, current_time, force=force))
+        return require_bool(self._dbus_publisher.publish_path(path, value, current_time, force=force), "publish_path")
 
     def _bump_update_index(self, current_time: float | None) -> None:
         self._ensure_dbus_publisher()
@@ -101,7 +96,10 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
         now: float | None,
     ) -> bool:
         self._ensure_dbus_publisher()
-        return cast(bool, self._dbus_publisher.publish_live_measurements(power, voltage, total_current, phase_data, now))
+        return require_bool(
+            self._dbus_publisher.publish_live_measurements(power, voltage, total_current, phase_data, now),
+            "publish_live_measurements",
+        )
 
     def _publish_energy_time_measurements(
         self,
@@ -112,8 +110,7 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
         now: float | None,
     ) -> bool:
         self._ensure_dbus_publisher()
-        return cast(
-            bool,
+        return require_bool(
             self._dbus_publisher.publish_energy_time_measurements(
                 current_total_energy,
                 phase_energies,
@@ -121,15 +118,16 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
                 session_energy,
                 now,
             ),
+            "publish_energy_time_measurements",
         )
 
     def _publish_config_paths(self, startstop_display: int, now: float | None) -> bool:
         self._ensure_dbus_publisher()
-        return cast(bool, self._dbus_publisher.publish_config_paths(startstop_display, now))
+        return require_bool(self._dbus_publisher.publish_config_paths(startstop_display, now), "publish_config_paths")
 
     def _publish_diagnostic_paths(self, now: float) -> bool:
         self._ensure_dbus_publisher()
-        return cast(bool, self._dbus_publisher.publish_diagnostic_paths(now))
+        return require_bool(self._dbus_publisher.publish_diagnostic_paths(now), "publish_diagnostic_paths")
 
     def _start_companion_dbus_bridge(self) -> None:
         self._ensure_companion_dbus_bridge()
@@ -144,5 +142,5 @@ class StatePublishMixin(ServiceControllerFactoryMixin):
         direct_allowed = getattr(self, "_dbus_publish_direct_allowed", None)
         enqueue_publish = getattr(self, "_enqueue_companion_dbus_publish", None)
         if callable(direct_allowed) and callable(enqueue_publish) and not bool(direct_allowed()):
-            return cast(bool, enqueue_publish(now))
-        return cast(bool, self._companion_dbus_bridge.publish(now))
+            return require_bool(enqueue_publish(now), "_enqueue_companion_dbus_publish")
+        return require_bool(self._companion_dbus_bridge.publish(now), "companion_dbus_bridge.publish")
