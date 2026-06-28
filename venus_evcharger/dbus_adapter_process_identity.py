@@ -8,25 +8,35 @@ import configparser
 import logging
 import os
 import platform
-from typing import Any
 
 from vedbus import VeDbusService
 
 from venus_evcharger.dbus_adapter_process_config import configured_device_instance
 from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterIdentityContext
+from venus_evcharger.dbus_adapter_service_protocol import DbusServiceLike
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
 class DbusAdapterIdentityMixin:
+    _dbusservice: DbusServiceLike | None
+
     @property
-    def dbus_service(self: DbusAdapterIdentityContext) -> Any:
+    def dbus_service(self: DbusAdapterIdentityContext) -> DbusServiceLike:
         self.ensure_dbus_service()
-        return self._dbusservice
+        service = self._dbusservice
+        assert service is not None
+        return service
 
     @property
     def dbus_service_registered(self: DbusAdapterIdentityContext) -> bool:
         return bool(self._dbusservice_registered)
 
-    def set_dbus_service(self: DbusAdapterIdentityContext, service: Any, *, registered: bool = False) -> None:
+    def set_dbus_service(
+        self: DbusAdapterIdentityContext,
+        service: DbusServiceLike,
+        *,
+        registered: bool = False,
+    ) -> None:
         self._dbusservice = service
         self._dbusservice_registered = bool(registered)
 
@@ -52,7 +62,7 @@ class DbusAdapterIdentityMixin:
     def identity_path_values(
         self: DbusAdapterIdentityContext,
         defaults: configparser.SectionProxy,
-    ) -> dict[str, Any]:
+    ) -> CommandPayload:
         device_instance = configured_device_instance(defaults)
         return {
             "/Mgmt/ProcessName": os.path.join(os.path.dirname(__file__), "venus_evcharger_service.py"),
@@ -79,7 +89,7 @@ class DbusAdapterIdentityMixin:
             for key in ("MeterConfigPath", "SwitchConfigPath", "ChargerConfigPath")
         )
 
-    def add_owned_path(self: DbusAdapterIdentityContext, path: str, value: Any) -> None:
+    def add_owned_path(self: DbusAdapterIdentityContext, path: str, value: object) -> None:
         self.dbus_service.add_path(path, value)
         self.write_scheduler.registered_paths.add(path)
         self.write_scheduler.last_values[path] = value

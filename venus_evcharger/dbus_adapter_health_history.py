@@ -7,12 +7,12 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Mapping
-from typing import Any
 
 from venus_evcharger.core.shared import compact_json
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
-def append_health_log(path: str, health: Mapping[str, Any]) -> None:
+def append_health_log(path: str, health: Mapping[str, object]) -> None:
     ensure_parent_dir(path)
     with open(path, "a", encoding="utf-8") as handle:
         handle.write(compact_json(health_log_payload(health)) + "\n")
@@ -24,7 +24,7 @@ def ensure_parent_dir(path: str) -> None:
         os.makedirs(directory, exist_ok=True)
 
 
-def health_log_payload(health: Mapping[str, Any]) -> dict[str, Any]:
+def health_log_payload(health: Mapping[str, object]) -> CommandPayload:
     queues = mapping_child(health, "queues")
     eventloop = mapping_child(health, "eventloop")
     cache = mapping_child(health, "cache_freshness")
@@ -41,12 +41,12 @@ def health_log_payload(health: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def mapping_child(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+def mapping_child(parent: Mapping[str, object], key: str) -> Mapping[str, object]:
     value = parent.get(key)
     return value if isinstance(value, Mapping) else {}
 
 
-def health_log_cache_freshness(cache_freshness: Mapping[str, Any]) -> dict[str, Any]:
+def health_log_cache_freshness(cache_freshness: Mapping[str, object]) -> CommandPayload:
     return {
         key: cache_freshness.get(key)
         for key in (

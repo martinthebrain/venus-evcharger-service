@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
-from typing import Any
 
 from venus_evcharger.dbus_adapter_health_backpressure import backpressure_snapshot
 from venus_evcharger.dbus_adapter_health_freshness import (
@@ -40,13 +39,15 @@ from venus_evcharger.dbus_adapter_health_slo import (
 )
 from venus_evcharger.dbus_adapter_process_protocol_health import DbusAdapterHealthContext
 from venus_evcharger.dbus_gateway import FAST_READ_KEYS, DbusCommandInbox, dbus_path_key
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.dbus_gateway_core import float_or_zero
 
 SESSION_ACTIVE_POWER_WATTS = 50.0
 SESSION_ACTIVE_CURRENT_AMPS = 0.2
 
 
 class DbusAdapterHealthMixin:
-    def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, Any]) -> None:  # pragma: no mutate block
+    def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, object]) -> None:  # pragma: no mutate block
         if not self.health_log_due():
             return
         self._last_health_log_monotonic = time.monotonic()
@@ -60,7 +61,7 @@ class DbusAdapterHealthMixin:
             return False
         return bool(time.monotonic() - self._last_health_log_monotonic >= self.health_log_interval_seconds)
 
-    def health_snapshot(self: DbusAdapterHealthContext) -> dict[str, Any]:  # pragma: no mutate block
+    def health_snapshot(self: DbusAdapterHealthContext) -> CommandPayload:  # pragma: no mutate block
         current_monotonic = time.monotonic()
         current_time = time.time()
         pending = self.commands.load_pending()
@@ -121,17 +122,17 @@ class DbusAdapterHealthMixin:
             },
         }
 
-    def cache_freshness_snapshot(self: DbusAdapterHealthContext, now: float) -> dict[str, Any]:  # pragma: no mutate block
+    def cache_freshness_snapshot(self: DbusAdapterHealthContext, now: float) -> CommandPayload:  # pragma: no mutate block
         return cache_freshness(self.cache, now)
 
     def slo_snapshot(
         self: DbusAdapterHealthContext,
         *,
-        queue_health: Mapping[str, Any],
-        cache_freshness: Mapping[str, Any],
+        queue_health: Mapping[str, object],
+        cache_freshness: Mapping[str, object],
         now: float,
         current_monotonic: float,
-    ) -> dict[str, Any]:  # pragma: no mutate block
+    ) -> CommandPayload:  # pragma: no mutate block
         observed = self.slo_observed(queue_health, cache_freshness, now, current_monotonic)
         thresholds = self.slo_thresholds()
         checks = slo_checks_from_observed(observed, thresholds)
@@ -149,8 +150,8 @@ class DbusAdapterHealthMixin:
 
     def slo_observed(
         self: DbusAdapterHealthContext,
-        queue_health: Mapping[str, Any],
-        cache_freshness: Mapping[str, Any],
+        queue_health: Mapping[str, object],
+        cache_freshness: Mapping[str, object],
         now: float,
         current_monotonic: float,
     ) -> dict[str, float]:  # pragma: no mutate block
@@ -169,8 +170,8 @@ class DbusAdapterHealthMixin:
             "gui_control_missing_path_count": self.missing_cached_path_count_for_paths(GUI_CONTROL_FRESHNESS_PATHS),
             "gui_session_missing_path_count": self.missing_cached_path_count_for_paths(session_paths),
             "core_read_max_age_s": max_core_read_age(cache_freshness),
-            "queue_oldest_age_s": float(queue_health.get("oldest_command_age_s", 0.0) or 0.0),
-            "mainloop_max_gap_ms_60s": float(eventloop.get("max_tick_gap_ms_60s", 0.0) or 0.0),
+            "queue_oldest_age_s": float_or_zero(queue_health.get("oldest_command_age_s")),
+            "mainloop_max_gap_ms_60s": float_or_zero(eventloop.get("max_tick_gap_ms_60s")),
         }
 
     def gui_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
@@ -199,7 +200,7 @@ class DbusAdapterHealthMixin:
         queue_age = oldest_command_age(pending, now)
         cache_freshness = self.cache_freshness_snapshot(now)
         core_read_age = max_core_read_age(cache_freshness)
-        eventloop_gap_ms = float(self.tick_health.snapshot().get("max_tick_gap_ms_60s", 0.0) or 0.0)
+        eventloop_gap_ms = float_or_zero(self.tick_health.snapshot().get("max_tick_gap_ms_60s"))
         thresholds = self.slo_thresholds()
         self.write_scheduler.set_dynamic_local_publish_burst(
             regulated_publish_burst(

@@ -6,18 +6,21 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from venus_evcharger.core.shared import write_text_atomically
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import (
     DBUS_GATEWAY_SCHEMA_VERSION,
     GatewayPaths,
     _json_ready,
     _now,
+    float_or_zero,
     gateway_paths,
     read_json_file,
     write_json_file,
 )
+
+NumericMetadataValue = str | bytes | bytearray | int | float
 
 
 def _value_age(updated_at: float, now: float) -> float:
@@ -32,17 +35,14 @@ def _valid_snapshot_payload(payload: object) -> bool:
     return _snapshot_payload(payload) is not None  # pragma: no mutate
 
 
-def _snapshot_payload(payload: object) -> Mapping[Any, Any] | None:
+def _snapshot_payload(payload: object) -> Mapping[object, object] | None:
     if not isinstance(payload, Mapping):
         return None
     return payload if _snapshot_captured_at(payload) > 0.0 else None  # pragma: no mutate
 
 
-def _snapshot_captured_at(payload: Mapping[Any, Any]) -> float:
-    try:
-        return float(payload.get("captured_at", 0.0) or 0.0)  # pragma: no mutate
-    except (TypeError, ValueError):
-        return 0.0
+def _snapshot_captured_at(payload: Mapping[object, object]) -> float:
+    return float_or_zero(payload.get("captured_at"))
 
 
 def _snapshot_too_old(captured_at: float, current: float, max_age_seconds: float) -> bool:
@@ -58,24 +58,40 @@ class CacheValueMetadata:
     now: float | None = None
 
 
-def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[str, Any]) -> CacheValueMetadata:  # pragma: no mutate block
+def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[str, object]) -> CacheValueMetadata:  # pragma: no mutate block
     if metadata is not None:
         if fields:
             return CacheValueMetadata(  # pragma: no mutate
                 source=str(fields.get("source", metadata.source)),  # pragma: no mutate
                 status=str(fields.get("status", metadata.status)),  # pragma: no mutate
-                confidence=float(fields.get("confidence", metadata.confidence)),  # pragma: no mutate
+                confidence=_metadata_float(fields.get("confidence"), metadata.confidence),  # pragma: no mutate
                 last_error=str(fields.get("last_error", metadata.last_error)),  # pragma: no mutate
-                now=fields.get("now", metadata.now),  # pragma: no mutate
+                now=_metadata_now(fields.get("now"), metadata.now),  # pragma: no mutate
             )
         return metadata  # pragma: no mutate
     return CacheValueMetadata(  # pragma: no mutate
         source=str(fields.get("source", "")),  # pragma: no mutate
         status=str(fields.get("status", "fresh")),  # pragma: no mutate
-        confidence=float(fields.get("confidence", 1.0)),  # pragma: no mutate
+        confidence=_metadata_float(fields.get("confidence"), 1.0),  # pragma: no mutate
         last_error=str(fields.get("last_error", "")),  # pragma: no mutate
-        now=fields.get("now"),  # pragma: no mutate
+        now=_metadata_now(fields.get("now")),  # pragma: no mutate
     )
+
+
+def _metadata_now(value: object, fallback: float | None = None) -> float | None:
+    if value is None:
+        return fallback
+    if isinstance(value, NumericMetadataValue):
+        return float(value)  # pragma: no mutate
+    return fallback
+
+
+def _metadata_float(value: object, fallback: float) -> float:
+    if value is None:
+        return fallback
+    if isinstance(value, NumericMetadataValue):
+        return float(value)  # pragma: no mutate
+    return fallback
 
 
 class DbusCacheStore:
@@ -85,9 +101,9 @@ class DbusCacheStore:
         self.paths = paths or gateway_paths()  # pragma: no mutate
         self.stale_after_seconds = max(0.0, float(stale_after_seconds))  # pragma: no mutate
         self.sequence = 0
-        self.values: dict[str, dict[str, Any]] = {}
-        self.services: dict[str, dict[str, Any]] = {}
-        self.health: dict[str, Any] = {
+        self.values: dict[str, CommandPayload] = {}
+        self.services: dict[str, CommandPayload] = {}
+        self.health: CommandPayload = {
             "state": "init",  # pragma: no mutate
             "degraded_until": 0.0,  # pragma: no mutate
             "timeouts_60s": 0,  # pragma: no mutate
@@ -98,10 +114,10 @@ class DbusCacheStore:
     def update_value(
         self,
         key: str,
-        value: Any,
+        value: object,
         *,
         metadata: CacheValueMetadata | None = None,
-        **metadata_fields: Any,
+        **metadata_fields: object,
     ) -> None:  # pragma: no mutate block
         details = _cache_value_metadata(metadata, metadata_fields)  # pragma: no mutate
         current = _now() if details.now is None else float(details.now)  # pragma: no mutate
@@ -122,9 +138,9 @@ class DbusCacheStore:
         self.values[str(key)] = {
             "value": current_value.get("value"),  # pragma: no mutate
             "source": str(source),  # pragma: no mutate
-            "updated_at": float(current_value.get("updated_at", 0.0) or 0.0),  # pragma: no mutate
+            "updated_at": float_or_zero(current_value.get("updated_at")),  # pragma: no mutate
             "error_at": current,  # pragma: no mutate
-            "age_s": max(0.0, current - float(current_value.get("updated_at", 0.0) or 0.0)),  # pragma: no mutate
+            "age_s": max(0.0, current - float_or_zero(current_value.get("updated_at"))),  # pragma: no mutate
             "status": "error",  # pragma: no mutate
             "last_error": str(error),  # pragma: no mutate
             "confidence": 0.0,  # pragma: no mutate
@@ -136,7 +152,7 @@ class DbusCacheStore:
         self.services = {str(name): {"seen_at": current, "status": "present"} for name in names}  # pragma: no mutate
         self.sequence += 1
 
-    def snapshot(self, *, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
+    def snapshot(self, *, now: float | None = None) -> CommandPayload:  # pragma: no mutate block
         current = _now() if now is None else float(now)  # pragma: no mutate
         values = {key: self.value_snapshot(item, current) for key, item in self.values.items()}  # pragma: no mutate
         return {
@@ -148,8 +164,8 @@ class DbusCacheStore:
             "services": dict(self.services),  # pragma: no mutate
         }
 
-    def value_snapshot(self, item: Mapping[str, Any], now: float) -> dict[str, Any]:
-        updated_at = float(item.get("updated_at", 0.0) or 0.0)  # pragma: no mutate
+    def value_snapshot(self, item: Mapping[str, object], now: float) -> CommandPayload:
+        updated_at = float_or_zero(item.get("updated_at"))  # pragma: no mutate
         age = _value_age(updated_at, now)  # pragma: no mutate
         status = self._value_status(item, age)  # pragma: no mutate
         return {
@@ -158,7 +174,7 @@ class DbusCacheStore:
             "status": status,  # pragma: no mutate
         }
 
-    def _value_status(self, item: Mapping[str, Any], age: float) -> str:
+    def _value_status(self, item: Mapping[str, object], age: float) -> str:
         status = str(item.get("status", "unknown"))  # pragma: no mutate
         if _value_is_stale(status, age, self.stale_after_seconds):
             return "stale"  # pragma: no mutate
@@ -180,7 +196,7 @@ class DbusCacheStore:
         )
 
     @staticmethod
-    def load_snapshot(path: str, *, max_age_seconds: float = 30.0, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
+    def load_snapshot(path: str, *, max_age_seconds: float = 30.0, now: float | None = None) -> CommandPayload:  # pragma: no mutate block
         payload = _snapshot_payload(read_json_file(path, {}))  # pragma: no mutate
         if payload is None:
             return {}
@@ -191,7 +207,7 @@ class DbusCacheStore:
         return {str(key): value for key, value in payload.items()}  # pragma: no mutate
 
     @staticmethod
-    def value_entry(snapshot: Mapping[str, Any], key: str) -> dict[str, Any] | None:
+    def value_entry(snapshot: Mapping[str, object], key: str) -> CommandPayload | None:
         values = snapshot.get("values")  # pragma: no mutate
         if not isinstance(values, Mapping):
             return None

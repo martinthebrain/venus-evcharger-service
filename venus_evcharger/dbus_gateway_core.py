@@ -146,10 +146,14 @@ def write_json_file(path: str, payload: Mapping[str, Any]) -> None:  # pragma: n
     write_text_atomically(path, compact_json(_json_ready(payload)) + "\n")
 
 
-def float_or_zero(value: object) -> float:  # pragma: no mutate block
+def float_or_default(value: object, default: float) -> float:  # pragma: no mutate block
     if not isinstance(value, (str, bytes, SupportsFloat, SupportsIndex)):
-        return 0.0
+        return default
     try:
         return float(value)
     except (TypeError, ValueError):
-        return 0.0
+        return default
+
+
+def float_or_zero(value: object) -> float:  # pragma: no mutate block
+    return float_or_default(value, 0.0)

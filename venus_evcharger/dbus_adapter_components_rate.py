@@ -11,6 +11,7 @@ from typing import Any
 import dbus
 
 from venus_evcharger.dbus_gateway import LatencyWindow
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 DBUS_DEGRADED_TIMEOUTS_PER_MINUTE = 3
 DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE = 5
@@ -128,7 +129,7 @@ class DbusCircuitBreaker:
             return rank <= DEGRADED_MAX_ALLOWED_PRIORITY_RANK
         return True
 
-    def health(self) -> dict[str, Any]:
+    def health(self) -> CommandPayload:
         now = time.time()
         self._prune_events(now)
         summary = self.latencies.summary(now=now)

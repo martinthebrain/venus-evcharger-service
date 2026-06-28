@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable
 
 import dbus
 
@@ -25,6 +24,8 @@ from venus_evcharger.dbus_adapter_read_aggregate import (
 from venus_evcharger.dbus_adapter_read_protocols import DbusReadAdapter
 from venus_evcharger.dbus_adapter_read_pv import pv_total_members
 from venus_evcharger.dbus_adapter_read_targets import ReadTarget, read_target
+from venus_evcharger.dbus_adapter_read_types import ReadSpec
+from venus_evcharger.dbus_gateway_command_types import CommandMapping
 
 DBUS_READ_ERRORS = DBUS_GATEWAY_OPERATION_ERRORS
 
@@ -37,20 +38,20 @@ class DbusReadExecutor:
         self._aggregates = AggregateStore()
         self.last_operation_performed = False
 
-    def refresh_requested_value(self, command: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def refresh_requested_value(self, command: CommandMapping) -> CommandOutcome:  # pragma: no mutate block
         key = str(command.get("key") or "")
         if key in self.adapter.read_scheduler.specs:
             return self.poll_read_spec(key, self.adapter.read_scheduler.specs[key])
         return self._refresh_direct_value(command)
 
-    def _refresh_direct_value(self, command: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def _refresh_direct_value(self, command: CommandMapping) -> CommandOutcome:  # pragma: no mutate block
         target = self._direct_refresh_target(command)
         if target is None:
             return "dropped"
         return self._read_direct_refresh(target)
 
     @staticmethod
-    def _direct_refresh_target(command: Mapping[str, Any]) -> ReadTarget | None:  # pragma: no mutate block
+    def _direct_refresh_target(command: CommandMapping) -> ReadTarget | None:  # pragma: no mutate block
         return read_target(command.get("service"), command.get("path"))
 
     def _read_direct_refresh(self, target: ReadTarget) -> CommandOutcome:  # pragma: no mutate block
@@ -65,7 +66,7 @@ class DbusReadExecutor:
         self.adapter.cache.update_value(target.cache_key, value, source=target.source)
         return "applied"
 
-    def poll_read_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def poll_read_spec(self, key: str, spec: ReadSpec) -> CommandOutcome:  # pragma: no mutate block
         self.last_operation_performed = False
         try:
             return self._poll_read_spec_unchecked(key, spec)
@@ -78,18 +79,18 @@ class DbusReadExecutor:
             self._mark_read_error(key, spec, error)
             return "dropped"
 
-    def _poll_read_spec_unchecked(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def _poll_read_spec_unchecked(self, key: str, spec: ReadSpec) -> CommandOutcome:  # pragma: no mutate block
         aggregate = str(spec.get("aggregate") or "")
-        handlers = {
+        handlers: dict[str, Callable[[str, ReadSpec], CommandOutcome]] = {
             "sum": self._poll_sum_step,
             "services-sum": self._poll_services_sum_step,
             "first-service": self._poll_first_service,
             PV_TOTAL_AGGREGATE: self._poll_pv_total_step,
         }
-        handler = handlers.get(aggregate)
-        return handler(key, spec) if handler else self._poll_direct_spec(key, spec)
+        handler = handlers.get(aggregate, self._poll_direct_spec)
+        return handler(key, spec)
 
-    def _poll_direct_spec(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def _poll_direct_spec(self, key: str, spec: ReadSpec) -> CommandOutcome:  # pragma: no mutate block
         target = read_target(spec.get("service"), spec.get("path"))
         if target is None:
             return "dropped"
@@ -97,12 +98,12 @@ class DbusReadExecutor:
         self._update_read_value(key, target, value)
         return "applied"
 
-    def _mark_read_error(self, key: str, spec: Mapping[str, Any], error: BaseException) -> None:  # pragma: no mutate block
+    def _mark_read_error(self, key: str, spec: ReadSpec, error: BaseException) -> None:  # pragma: no mutate block
         self._aggregates.discard(key)
         self.adapter.cache.mark_error(key, source=self._spec_source(spec), error=error)
         logging.debug("DBus adapter read failed key=%s: %s", key, error)
 
-    def _mark_optional_zero(self, key: str, spec: Mapping[str, Any], error: BaseException) -> None:  # pragma: no mutate block
+    def _mark_optional_zero(self, key: str, spec: ReadSpec, error: BaseException) -> None:  # pragma: no mutate block
         self._aggregates.discard(key)
         self.adapter.cache.update_value(
             key,
@@ -114,21 +115,21 @@ class DbusReadExecutor:
         logging.debug("DBus adapter optional read fell back to zero key=%s: %s", key, error)
 
     @staticmethod
-    def _optional_zero_on_error(spec: Mapping[str, Any]) -> bool:  # pragma: no mutate block
+    def _optional_zero_on_error(spec: ReadSpec) -> bool:  # pragma: no mutate block
         return str(spec.get("optional_zero_on_error", "")).strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
-    def _optional_confidence(spec: Mapping[str, Any]) -> float:  # pragma: no mutate block
+    def _optional_confidence(spec: ReadSpec) -> float:  # pragma: no mutate block
         return float(spec.get("optional_confidence", 0.2) or 0.2)
 
     @staticmethod
-    def _spec_source(spec: Mapping[str, Any], *, fallback: str = "") -> str:  # pragma: no mutate block
+    def _spec_source(spec: ReadSpec, *, fallback: str = "") -> str:  # pragma: no mutate block
         return str(spec.get("service") or spec.get("prefix") or fallback)
 
     def has_pending_aggregate(self) -> bool:
         return self._aggregates.has_pending()
 
-    def _poll_sum_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def _poll_sum_step(self, key: str, spec: ReadSpec) -> CommandOutcome:  # pragma: no mutate block
         service = str(spec.get("service"))
         members = [(service, str(path)) for path in spec.get("paths", ()) if str(path)]
         if not members:
@@ -136,14 +137,14 @@ class DbusReadExecutor:
             return "applied"
         return self._poll_aggregate_step(key, ("sum", tuple(members)), members)
 
-    def _poll_services_sum_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def _poll_services_sum_step(self, key: str, spec: ReadSpec) -> CommandOutcome:  # pragma: no mutate block
         path = str(spec.get("path") or "")
         services = self._services_for_sum(spec)
         if not services:
             raise RuntimeError(f"No cached services for prefix '{spec.get('prefix', '')}'")
         return self._poll_aggregate_step(key, ("services-sum", path, tuple(services)), [(service, path) for service in services])
 
-    def _poll_pv_total_step(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def _poll_pv_total_step(self, key: str, spec: ReadSpec) -> CommandOutcome:  # pragma: no mutate block
         members = self._in_progress_pv_total_members(key) or pv_total_members(
             spec,
             self._services_for_sum(spec),
@@ -162,7 +163,7 @@ class DbusReadExecutor:
     def _in_progress_pv_total_members(self, key: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
         return self._aggregates.signature_members(key, PV_TOTAL_AGGREGATE)
 
-    def _poll_first_service(self, key: str, spec: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
+    def _poll_first_service(self, key: str, spec: ReadSpec) -> CommandOutcome:  # pragma: no mutate block
         path = str(spec.get("path") or "")
         prefix = str(spec.get("prefix") or "")
         services = self._prefixed_services(prefix)
@@ -175,7 +176,7 @@ class DbusReadExecutor:
         self._update_read_value(key, target, value)
         return "applied"
 
-    def _services_for_sum(self, spec: Mapping[str, Any]) -> list[str]:  # pragma: no mutate block
+    def _services_for_sum(self, spec: ReadSpec) -> list[str]:  # pragma: no mutate block
         explicit = str(spec.get("service") or "")
         return [explicit] if explicit else self._prefixed_services(str(spec.get("prefix") or ""))
 
@@ -185,7 +186,7 @@ class DbusReadExecutor:
     def _poll_aggregate_step(
         self,
         key: str,
-        signature: tuple[Any, ...],
+        signature: tuple[object, ...],
         members: list[tuple[str, str]],
         *,
         ignore_member_errors: bool = False,
@@ -218,7 +219,7 @@ class DbusReadExecutor:
         state: AggregateState,
         *,
         ignore_member_errors: bool,
-    ) -> Any:  # pragma: no mutate block
+    ) -> object:  # pragma: no mutate block
         value = self._read_aggregate_member_value(service, path, state, ignore_member_errors=ignore_member_errors)
         if value is OPTIONAL_MEMBER_FAILED:
             return None
@@ -234,10 +235,11 @@ class DbusReadExecutor:
         state: AggregateState,
         *,
         ignore_member_errors: bool,
-    ) -> Any:
+    ) -> object:
         try:
             read = self.read_optional_busitem if ignore_member_errors else self.read_busitem
-            return read(service, path)
+            value: object = read(service, path)
+            return value
         except DbusOperationDeferred:
             raise
         except DBUS_READ_ERRORS as error:
@@ -259,37 +261,39 @@ class DbusReadExecutor:
         state.record_error(service, path, error)
         logging.debug("DBus adapter optional aggregate member failed %s%s: %s", service, path, error)
 
-    def _update_read_value(self, key: str, target: ReadTarget, value: Any) -> None:  # pragma: no mutate block
+    def _update_read_value(self, key: str, target: ReadTarget, value: object) -> None:  # pragma: no mutate block
         path_key = target.cache_key
         self.adapter.cache.update_value(path_key, value, source=target.source)
         if key != path_key:
             self.adapter.cache.update_value(key, value, source=target.source)
 
     @staticmethod
-    def _record_aggregate_member(state: AggregateState, service: str, path: str, value: Any) -> None:  # pragma: no mutate block
+    def _record_aggregate_member(state: AggregateState, service: str, path: str, value: object) -> None:  # pragma: no mutate block
         state.record_member(service, path, value)
 
     def _complete_aggregate(self, key: str, state: AggregateState) -> None:  # pragma: no mutate block
         self.adapter.cache.update_value(key, **state.payload(key))
         self._aggregates.discard(key)
 
-    def read_busitem(self, service: str, path: str) -> Any:  # pragma: no mutate block
+    def read_busitem(self, service: str, path: str) -> object:  # pragma: no mutate block
         if not service or not path:
             return None
 
-        return self.adapter.timed_dbus_operation("read", lambda: self.read_busitem_now(service, path))
+        value: object = self.adapter.timed_dbus_operation("read", lambda: self.read_busitem_now(service, path))
+        return value
 
-    def read_optional_busitem(self, service: str, path: str) -> Any:  # pragma: no mutate block
+    def read_optional_busitem(self, service: str, path: str) -> object:  # pragma: no mutate block
         if not service or not path:
             return None
 
         self.adapter.rate_limiter.require_due("read")
         started = time.monotonic()
-        value = self.read_busitem_now(service, path)
+        value: object = self.read_busitem_now(service, path)
         self.adapter.circuit.record_success((time.monotonic() - started) * 1000.0, kind="optional_read")
         return value
 
-    def read_busitem_now(self, service: str, path: str) -> Any:  # pragma: no mutate block
+    def read_busitem_now(self, service: str, path: str) -> object:  # pragma: no mutate block
         obj = self.adapter.connection.bus().get_object(service, path, introspect=False)
         iface = dbus.Interface(obj, "com.victronenergy.BusItem")
-        return coerce_dbus_numeric(iface.GetValue(timeout=1.0))
+        value: object = coerce_dbus_numeric(iface.GetValue(timeout=1.0))
+        return value

@@ -13,6 +13,7 @@ from venus_evcharger.dbus_adapter_components import (
     DbusCircuitBreaker,
     DbusConnectionManager,
 )
+from venus_evcharger.dbus_adapter_service_protocol import DbusServiceLike
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox
 from venus_evcharger.dbus_gateway_command_types import CommandFileList, CommandMapping
 
@@ -31,7 +32,7 @@ class DbusWriteSchedulerAdapter(Protocol):  # pragma: no cover
     service_name: str
 
     @property
-    def dbus_service(self) -> Any: ...
+    def dbus_service(self) -> DbusServiceLike: ...
     @property
     def dbus_service_registered(self) -> bool: ...
     def process_non_write_command(self, command: CommandMapping) -> CommandOutcome: ...

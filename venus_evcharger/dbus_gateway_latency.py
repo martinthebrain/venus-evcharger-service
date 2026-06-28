@@ -4,9 +4,15 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
+from typing import TypedDict
 
 from venus_evcharger.dbus_gateway_core import _now
+
+
+class LatencySummary(TypedDict):
+    timeouts_60s: int
+    avg_latency_ms: float
+    max_latency_ms: float
 
 
 class LatencyWindow:
@@ -34,7 +40,7 @@ class LatencyWindow:
         while self._timeouts and self._timeouts[0] < cutoff:
             self._timeouts.popleft()
 
-    def summary(self, *, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
+    def summary(self, *, now: float | None = None) -> LatencySummary:  # pragma: no mutate block
         current = _now() if now is None else float(now)
         self._prune(current)
         latencies = [latency for _timestamp, latency in self._latencies]
@@ -43,4 +49,3 @@ class LatencyWindow:
             "avg_latency_ms": sum(latencies) / len(latencies) if latencies else 0.0,
             "max_latency_ms": max(latencies) if latencies else 0.0,
         }
-

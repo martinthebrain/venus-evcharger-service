@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
+from venus_evcharger.dbus_gateway_command_types import CommandMapping
 from venus_evcharger.dbus_gateway_core import FAST_READ_KEYS, GUI_CRITICAL_PUBLISH_PATHS, priority_rank
 
 _STATIC_QUEUE_CLASSES = {
@@ -18,7 +18,7 @@ _STATIC_QUEUE_CLASSES = {
 }
 
 
-def command_queue_class(command: Mapping[str, Any]) -> str:
+def command_queue_class(command: CommandMapping) -> str:
     kind = _command_kind(command)
     if _is_publish_command(kind):
         return _publish_queue_class(command)
@@ -27,15 +27,15 @@ def command_queue_class(command: Mapping[str, Any]) -> str:
     return _STATIC_QUEUE_CLASSES.get(kind, "diagnostic")
 
 
-def _publish_queue_class(command: Mapping[str, Any]) -> str:
+def _publish_queue_class(command: CommandMapping) -> str:
     return "gui-critical-publish" if _is_gui_critical_publish(command) else "local-publish"
 
 
-def _refresh_queue_class(command: Mapping[str, Any]) -> str:
+def _refresh_queue_class(command: CommandMapping) -> str:
     return "read-fast" if _refresh_key(command) in FAST_READ_KEYS else "read-slow"
 
 
-def command_allowed_by_backpressure(command: Mapping[str, Any], state: str) -> bool:
+def command_allowed_by_backpressure(command: CommandMapping, state: str) -> bool:
     normalized_state = _normalized_state(state)
     priority = _normalized_priority(command)
     queue_class = _effective_queue_class(command)
@@ -69,7 +69,7 @@ def _allowed_when_protective(_rank: int, priority: str, queue_class: str) -> boo
     return priority == "safety" or (priority == "user" and queue_class == "gui-critical-publish")
 
 
-def _is_gui_critical_publish(command: Mapping[str, Any]) -> bool:
+def _is_gui_critical_publish(command: CommandMapping) -> bool:
     if _publish_path(command) in GUI_CRITICAL_PUBLISH_PATHS:
         return True
     paths = command.get("paths")
@@ -78,7 +78,7 @@ def _is_gui_critical_publish(command: Mapping[str, Any]) -> bool:
     return False
 
 
-def _command_kind(command: Mapping[str, Any]) -> str:
+def _command_kind(command: CommandMapping) -> str:
     return str(command.get("kind") or command.get("type") or "")  # pragma: no mutate
 
 
@@ -86,7 +86,7 @@ def _is_publish_command(kind: str) -> bool:
     return kind in {"publish_value", "publish_desired"}
 
 
-def _refresh_key(command: Mapping[str, Any]) -> str:
+def _refresh_key(command: CommandMapping) -> str:
     return str(command.get("key") or "")  # pragma: no mutate
 
 
@@ -94,11 +94,11 @@ def _normalized_state(state: str) -> str:
     return str(state or "unknown")  # pragma: no mutate
 
 
-def _normalized_priority(command: Mapping[str, Any]) -> str:
+def _normalized_priority(command: CommandMapping) -> str:
     return str(command.get("priority") or "diagnostic").strip().lower()  # pragma: no mutate
 
 
-def _effective_queue_class(command: Mapping[str, Any]) -> str:
+def _effective_queue_class(command: CommandMapping) -> str:
     return str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
 
 
@@ -110,5 +110,5 @@ def _is_startup_registration(queue_class: str) -> bool:
     return queue_class == "startup/register"
 
 
-def _publish_path(command: Mapping[str, Any]) -> str:
+def _publish_path(command: CommandMapping) -> str:
     return str(command.get("path") or "")  # pragma: no mutate

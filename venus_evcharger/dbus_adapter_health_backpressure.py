@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.dbus_gateway_core import float_or_zero
 
 BACKPRESSURE_SLO_REASONS = {"core_reads_fresh", "queue_age_ok"}
 
@@ -13,11 +15,11 @@ BACKPRESSURE_SLO_REASONS = {"core_reads_fresh", "queue_age_ok"}
 def backpressure_snapshot(
     *,
     circuit_state: str,
-    queue_health: Mapping[str, Any],
-    slo: Mapping[str, Any],
+    queue_health: Mapping[str, object],
+    slo: Mapping[str, object],
     queue_max_age_seconds: float,
-) -> dict[str, Any]:
-    queue_age = float(queue_health.get("oldest_command_age_s", 0.0) or 0.0)
+) -> CommandPayload:
+    queue_age = float_or_zero(queue_health.get("oldest_command_age_s"))
     reasons = backpressure_reasons(circuit_state, queue_age, slo, queue_max_age_seconds=queue_max_age_seconds)
     state = backpressure_state(circuit_state, queue_age, reasons, queue_max_age_seconds=queue_max_age_seconds)
     return {
@@ -32,7 +34,7 @@ def backpressure_snapshot(
 def backpressure_reasons(
     circuit_state: str,
     queue_age: float,
-    slo: Mapping[str, Any],
+    slo: Mapping[str, object],
     *,
     queue_max_age_seconds: float,
 ) -> list[str]:
@@ -43,8 +45,13 @@ def backpressure_reasons(
     return reasons
 
 
-def backpressure_slo_reasons(slo: Mapping[str, Any]) -> list[str]:
-    return [str(item) for item in list(slo.get("violated", []) or []) if item in BACKPRESSURE_SLO_REASONS]
+def backpressure_slo_reasons(slo: Mapping[str, object]) -> list[str]:
+    return [str(item) for item in slo_violations(slo) if item in BACKPRESSURE_SLO_REASONS]
+
+
+def slo_violations(slo: Mapping[str, object]) -> list[object]:
+    raw_violations = slo.get("violated", [])
+    return list(raw_violations) if isinstance(raw_violations, list | tuple | set) else []
 
 
 def backpressure_state(

@@ -99,10 +99,20 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         self.assertIsNone(read_aggregate_module.aggregate_signature_members(None, "pv-total"))
         self.assertIsNone(read_aggregate_module.aggregate_signature_members(("pv-total", (), "extra"), "pv-total"))
         self.assertIsNone(read_aggregate_module.aggregate_signature_members(("sum", (("svc", "/Path"),)), "pv-total"))
+        self.assertIsNone(read_aggregate_module.aggregate_signature_members(("pv-total", ["svc"]), "pv-total"))
+        self.assertIsNone(read_aggregate_module.aggregate_signature_members(("pv-total", ("svc",)), "pv-total"))
+        self.assertIsNone(read_aggregate_module.aggregate_signature_members(("pv-total", (("svc", "/Path", "x"),)), "pv-total"))
         self.assertEqual(
             read_aggregate_module.aggregate_signature_members(("pv-total", (("svc", "/Path"),)), "pv-total"),
             [("svc", "/Path")],
         )
+
+    def test_aggregate_member_float_rejects_non_numeric_values(self) -> None:
+        self.assertEqual(read_aggregate_module.aggregate_member_float(True), 1.0)
+        self.assertEqual(read_aggregate_module.aggregate_member_float("2.5"), 2.5)
+        self.assertEqual(read_aggregate_module.aggregate_member_float(b"3.5"), 3.5)
+        with self.assertRaises(TypeError):
+            read_aggregate_module.aggregate_member_float(object())
 
     def test_read_executor_drops_invalid_first_service_path_without_dbus_read(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2915,6 +2925,18 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertNotIn("", snapshot)
             self.assertEqual(snapshot["svc"]["paths"]["/Broken"]["status"], "unresponsive-backoff")
             self.assertEqual(adapter.parse_introspection_xml("<bad"), ([], []))
+
+            services = {"svc": {"paths": "broken", "last_updated_at": "bad"}}
+            adapter.add_introspection_service_entry(
+                services,
+                "svc",
+                "/Recovered",
+                {"status": "error", "source": "svc/Recovered", "updated_at": "bad"},
+                210.0,
+            )
+            self.assertIsInstance(services["svc"]["paths"], dict)
+            self.assertEqual(services["svc"]["paths"]["/Recovered"]["status"], "unresponsive-backoff")
+            self.assertEqual(services["svc"]["last_updated_at"], 210.0)
 
             adapter.dbus_introspection_enabled = False
             adapter.write_introspection_snapshot()

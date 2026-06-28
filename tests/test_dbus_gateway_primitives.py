@@ -119,6 +119,17 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(entry["confidence"], 1.0)
             self.assertEqual(entry["updated_at"], 42.0)
 
+            store.update_value(
+                "metadata-fallback",
+                6,
+                metadata=CacheValueMetadata(source="svc/fallback", confidence=0.55, now=88.0),
+                confidence=object(),
+                now=object(),
+            )
+            fallback_entry = store.snapshot(now=90.0)["values"]["metadata-fallback"]
+            self.assertEqual(fallback_entry["confidence"], 0.55)
+            self.assertEqual(fallback_entry["updated_at"], 88.0)
+
             store.mark_error("missing", source="svc/path", error=RuntimeError("boom"), now=60.0)
             error_entry = store.snapshot(now=60.0)["values"]["missing"]
             self.assertIsNone(error_entry["value"])

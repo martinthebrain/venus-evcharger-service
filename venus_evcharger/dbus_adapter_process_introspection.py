@@ -12,7 +12,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import TypedDict
 
 import dbus
 
@@ -23,8 +23,18 @@ from venus_evcharger.dbus_adapter_components import (
     DbusOperationDeferred,
 )
 from venus_evcharger.dbus_adapter_process_protocol_introspection import DbusAdapterIntrospectionContext
+from venus_evcharger.dbus_gateway_command_types import CommandMapping, CommandPayload
+from venus_evcharger.dbus_gateway_core import float_or_default
 
 OPTIONAL_INTROSPECTION_PRIORITY_MIN = 90
+
+
+class IntrospectionRequest(TypedDict):
+    service: str
+    path: str
+    priority: int
+    source: str
+    reason: str
 
 
 class DbusAdapterIntrospectionMixin:
@@ -37,7 +47,7 @@ class DbusAdapterIntrospectionMixin:
             self._introspection_queue_depth += accepted
             self.clear_introspection_request_payload()
 
-    def enqueue_introspection_requests(self: DbusAdapterIntrospectionContext, payload: Mapping[str, Any]) -> int:
+    def enqueue_introspection_requests(self: DbusAdapterIntrospectionContext, payload: CommandMapping) -> int:
         accepted = 0
         for request in _valid_introspection_requests(payload):
             self.enqueue_introspection_command(
@@ -50,7 +60,7 @@ class DbusAdapterIntrospectionMixin:
             accepted += 1
         return accepted
 
-    def introspection_request_payload(self: DbusAdapterIntrospectionContext) -> dict[str, Any]:
+    def introspection_request_payload(self: DbusAdapterIntrospectionContext) -> CommandPayload:
         if not self.dbus_introspection_request_path:
             return {}
         try:
@@ -148,7 +158,7 @@ class DbusAdapterIntrospectionMixin:
         prefix = str(defaults.get(prefix_key, default_prefix)).strip()
         return sorted(name for name in self.cache.services if name.startswith(prefix))[:10]
 
-    def process_non_write_command(self: DbusAdapterIntrospectionContext, command: Mapping[str, Any]) -> CommandOutcome:
+    def process_non_write_command(self: DbusAdapterIntrospectionContext, command: CommandMapping) -> CommandOutcome:
         kind = str(command.get("kind") or command.get("type") or "")
         handlers = {
             "refresh_value": self.read_executor.refresh_requested_value,
@@ -157,7 +167,7 @@ class DbusAdapterIntrospectionMixin:
         }
         return handlers.get(kind, _drop_command)(command)
 
-    def refresh_services_command(self: DbusAdapterIntrospectionContext, _command: Mapping[str, Any]) -> CommandOutcome:
+    def refresh_services_command(self: DbusAdapterIntrospectionContext, _command: CommandMapping) -> CommandOutcome:
         if self.circuit.state() != "ok":
             return "deferred"
         try:
@@ -173,18 +183,18 @@ class DbusAdapterIntrospectionMixin:
 
     def introspect_command_if_healthy(
         self: DbusAdapterIntrospectionContext,
-        command: Mapping[str, Any],
+        command: CommandMapping,
     ) -> CommandOutcome:
         if self.circuit.state() != "ok":
             return "deferred"
         return self.introspect_command(command)
 
-    def introspect_command(self: DbusAdapterIntrospectionContext, command: Mapping[str, Any]) -> CommandOutcome:
+    def introspect_command(self: DbusAdapterIntrospectionContext, command: CommandMapping) -> CommandOutcome:
         service = str(command.get("service") or "")
         path = str(command.get("path") or "/")
         if not service:
             return "dropped"
-        timeout = float(command.get("timeout", 1.0))
+        timeout = float_or_default(command.get("timeout"), 1.0)
         outcome, xml_data = self.timed_introspection_result(service, path, timeout)
         if outcome != "applied":
             return outcome
@@ -196,7 +206,7 @@ class DbusAdapterIntrospectionMixin:
         service: str,
         path: str,
         timeout: float,
-    ) -> tuple[CommandOutcome, Any]:
+    ) -> tuple[CommandOutcome, object]:
         try:
             return "applied", self.timed_dbus_operation(
                 "introspection", lambda: self.read_introspection_xml(service, path, timeout)
@@ -211,7 +221,7 @@ class DbusAdapterIntrospectionMixin:
         service: str,
         path: str,
         timeout: float,
-    ) -> Any:
+    ) -> object:
         obj = self.connection.bus().get_object(service, path, introspect=False)
         iface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
         return iface.Introspect(timeout=timeout)
@@ -231,38 +241,38 @@ class DbusAdapterIntrospectionMixin:
         self: DbusAdapterIntrospectionContext,
         service: str,
         path: str,
-        xml_data: Any,
+        xml_data: object,
     ) -> None:
         self.cache.update_value(f"introspection:{service}:{path}", xml_data, source=f"{service}{path}", confidence=0.5)
         self._introspection_queue_depth = max(0, self._introspection_queue_depth - 1)
 
 
-def _valid_introspection_requests(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _valid_introspection_requests(payload: CommandMapping) -> list[IntrospectionRequest]:
     requests = payload.get("requests", [])
     if not isinstance(requests, list):
         return []
-    normalized: list[dict[str, Any]] = []
+    normalized: list[IntrospectionRequest] = []
     for request in requests:
         item = _normalized_introspection_request(request)
-        if item:
+        if item is not None:
             normalized.append(item)
     return normalized
 
 
-def _normalized_introspection_request(request: object) -> dict[str, Any]:
+def _normalized_introspection_request(request: object) -> IntrospectionRequest | None:
     if not isinstance(request, dict):
-        return {}
+        return None
     service, path = _introspection_request_target(request)
     if not service or not path:
-        return {}
+        return None
     return _introspection_request_payload(request, service, path)
 
 
-def _introspection_request_target(request: Mapping[str, Any]) -> tuple[str, str]:
+def _introspection_request_target(request: Mapping[str, object]) -> tuple[str, str]:
     return str(request.get("service", "") or "").strip(), str(request.get("path", "") or "").strip()
 
 
-def _introspection_request_payload(request: Mapping[str, Any], service: str, path: str) -> dict[str, Any]:
+def _introspection_request_payload(request: Mapping[str, object], service: str, path: str) -> IntrospectionRequest:
     return {
         "service": service,
         "path": path,
@@ -272,9 +282,13 @@ def _introspection_request_payload(request: Mapping[str, Any], service: str, pat
     }
 
 
-def _introspection_request_priority(request: Mapping[str, Any]) -> int:
-    return int(request.get("priority", 100) or 100)
+def _introspection_request_priority(request: Mapping[str, object]) -> int:
+    return _int_or_default(request.get("priority"), 100)
 
 
-def _drop_command(_command: Mapping[str, Any]) -> CommandOutcome:
+def _int_or_default(value: object, default: int) -> int:
+    return int(float_or_default(value, float(default)))
+
+
+def _drop_command(_command: CommandMapping) -> CommandOutcome:
     return "dropped"

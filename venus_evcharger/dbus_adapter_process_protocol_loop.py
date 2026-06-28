@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Protocol
 
 from venus_evcharger.dbus_adapter_components import DbusCircuitBreaker, ResourceMonitor, TickHealth
+from venus_evcharger.dbus_adapter_process_protocol_runtime import MainLoopLike
 from venus_evcharger.dbus_adapter_read import DbusReadExecutor
 from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayPaths
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
 class DbusAdapterLoopContext(Protocol):  # pragma: no cover
@@ -27,10 +29,10 @@ class DbusAdapterLoopContext(Protocol):  # pragma: no cover
     max_tick_seconds: float
     slo_mainloop_gap_max_ms: float
     slo_core_read_max_age_seconds: float
-    _main_loop: Any
+    _main_loop: MainLoopLike | None
     _stop: bool
     _next_work_tick_monotonic: float
-    _last_resource_snapshot: dict[str, Any]
+    _last_resource_snapshot: CommandPayload
     _last_tick_at: float
     _last_tick_monotonic: float
     _last_tick_duration_ms: float

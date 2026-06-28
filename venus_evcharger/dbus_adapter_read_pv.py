@@ -7,13 +7,14 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 
+from venus_evcharger.dbus_adapter_read_types import ReadSpec
 from venus_evcharger.dbus_gateway import dbus_path_key
 
 PV_MEMBER_ERROR_BACKOFF_SECONDS = 300.0
 
 
 def pv_total_members(
-    spec: Mapping[str, object],
+    spec: ReadSpec,
     ac_services: Sequence[str],
     cached_values: Mapping[str, Mapping[str, object]],
     *,
@@ -27,7 +28,7 @@ def pv_total_members(
 
 
 def ac_pv_members(
-    spec: Mapping[str, object],
+    spec: ReadSpec,
     services: Sequence[str],
     cached_values: Mapping[str, Mapping[str, object]],
     *,
@@ -42,7 +43,7 @@ def ac_pv_members(
 
 
 def dc_pv_members(
-    spec: Mapping[str, object],
+    spec: ReadSpec,
     cached_values: Mapping[str, Mapping[str, object]],
     *,
     now: float,
@@ -53,7 +54,7 @@ def dc_pv_members(
     return [target]
 
 
-def dc_pv_target(spec: Mapping[str, object]) -> tuple[str, str] | None:
+def dc_pv_target(spec: ReadSpec) -> tuple[str, str] | None:
     service = str(spec.get("dc_service") or "").strip()
     path = str(spec.get("dc_path") or "").strip()
     if not service or not path.startswith("/"):
@@ -61,7 +62,7 @@ def dc_pv_target(spec: Mapping[str, object]) -> tuple[str, str] | None:
     return service, path
 
 
-def use_dc_pv(spec: Mapping[str, object]) -> bool:
+def use_dc_pv(spec: ReadSpec) -> bool:
     return str(spec.get("use_dc_pv", "")).strip().lower() in {"1", "true", "yes", "on"}
 
 

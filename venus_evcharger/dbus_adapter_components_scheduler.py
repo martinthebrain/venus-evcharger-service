@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
 
 from venus_evcharger.dbus_adapter_read_types import ReadSpec, read_spec_from_mapping
 from venus_evcharger.dbus_gateway import write_json_file
+from venus_evcharger.dbus_gateway_command_types import CommandMapping
 
 
 class DbusReadScheduler:
@@ -94,7 +94,7 @@ class DbusDiscoveryManager:
 class AtomicJsonWriter:
     """Small explicit adapter-side wrapper for atomic JSON writes."""
 
-    def write(self, path: str, payload: Mapping[str, Any]) -> None:
+    def write(self, path: str, payload: CommandMapping) -> None:
         write_json_file(path, payload)
 
 

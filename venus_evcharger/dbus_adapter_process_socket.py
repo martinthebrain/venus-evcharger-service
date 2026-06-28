@@ -11,10 +11,12 @@ import select
 import socket
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Any
 
 from venus_evcharger.core.shared import compact_json
 from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterSocketContext
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
+
+SocketHandler = Callable[[CommandPayload, str], CommandPayload]
 
 
 class DbusAdapterSocketMixin:
@@ -56,18 +58,22 @@ class DbusAdapterSocketMixin:
             response = self.handle_socket_payload(data)
             conn.sendall((compact_json(response) + "\n").encode("utf-8"))
 
-    def handle_socket_payload(self: DbusAdapterSocketContext, data: str) -> dict[str, Any]:
-        try:
-            payload = json.loads(data)
-        except json.JSONDecodeError as error:
-            return {"ok": False, "error": str(error)}
-        if not isinstance(payload, dict):
-            return {"ok": False, "error": "request must be an object"}
+    def handle_socket_payload(self: DbusAdapterSocketContext, data: str) -> CommandPayload:
+        payload, error = parsed_socket_payload(data)
+        if error:
+            return {"ok": False, "error": error}
+        return self.dispatch_socket_payload(payload)
+
+    def dispatch_socket_payload(self: DbusAdapterSocketContext, payload: CommandPayload) -> CommandPayload:
         request_type = str(payload.get("type") or payload.get("kind") or "")
         handler = self.socket_handlers().get(request_type, self.unsupported_socket_request)
         return handler(payload, request_type)
 
-    def socket_handlers(self: DbusAdapterSocketContext) -> dict[str, Callable[[dict[str, Any], str], dict[str, Any]]]:
+    @staticmethod
+    def unsupported_socket_request(_payload: CommandPayload, request_type: str) -> CommandPayload:
+        return {"ok": False, "error": f"unsupported request type: {request_type}"}
+
+    def socket_handlers(self: DbusAdapterSocketContext) -> dict[str, SocketHandler]:
         return {
             "snapshot": self.socket_snapshot,
             "health": self.socket_health,
@@ -80,26 +86,32 @@ class DbusAdapterSocketMixin:
 
     def socket_snapshot(
         self: DbusAdapterSocketContext,
-        _payload: dict[str, Any],
+        _payload: CommandPayload,
         _request_type: str,
-    ) -> dict[str, Any]:
+    ) -> CommandPayload:
         return {"ok": True, "snapshot": self.cache.snapshot()}
 
     def socket_health(
         self: DbusAdapterSocketContext,
-        _payload: dict[str, Any],
+        _payload: CommandPayload,
         _request_type: str,
-    ) -> dict[str, Any]:
+    ) -> CommandPayload:
         return {"ok": True, "dbus_health": self.health_snapshot()}
 
     def socket_enqueue(
         self: DbusAdapterSocketContext,
-        payload: dict[str, Any],
+        payload: CommandPayload,
         request_type: str,
-    ) -> dict[str, Any]:
+    ) -> CommandPayload:
         self.commands.enqueue({**payload, "kind": request_type, "source": payload.get("source", "socket")})
         return {"ok": True}
 
-    @staticmethod
-    def unsupported_socket_request(_payload: dict[str, Any], request_type: str) -> dict[str, Any]:
-        return {"ok": False, "error": f"unsupported request type: {request_type}"}
+
+def parsed_socket_payload(data: str) -> tuple[CommandPayload, str]:
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError as error:
+        return {}, str(error)
+    if not isinstance(payload, dict):
+        return {}, "request must be an object"
+    return {str(key): value for key, value in payload.items()}, ""

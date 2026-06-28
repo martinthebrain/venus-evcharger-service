@@ -16,6 +16,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
 from venus_evcharger.dbus_adapter_process_protocol_loop import DbusAdapterLoopContext
+from venus_evcharger.dbus_gateway_core import float_or_zero
 
 GATEWAY_TICK_RECOVERY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
@@ -29,10 +30,11 @@ class DbusAdapterLoopMixin:
         os.makedirs(self.paths.core_command_dir, exist_ok=True)
         self.start_socket()
         self.ensure_dbus_service()
-        self._main_loop = GLib.MainLoop()
+        main_loop = GLib.MainLoop()
+        self._main_loop = main_loop
         GLib.timeout_add(max(50, int(self.min_tick_seconds * 1000)), self.tick)
         try:
-            self._main_loop.run()
+            main_loop.run()
         finally:
             self._stop = True
             self.close_socket()
@@ -70,7 +72,7 @@ class DbusAdapterLoopMixin:
         self._last_resource_snapshot = resources
         self.apply_slo_regulation()
         resource_state = str(resources.get("state", "ok"))
-        if float(self.tick_health.snapshot().get("max_tick_duration_ms_60s", 0.0) or 0.0) > self.slo_mainloop_gap_max_ms:
+        if float_or_zero(self.tick_health.snapshot().get("max_tick_duration_ms_60s")) > self.slo_mainloop_gap_max_ms:
             resource_state = "busy"
         self.tick_seconds = self.adaptive_tick_seconds(
             circuit_state=self.circuit.state(),
@@ -125,7 +127,7 @@ class DbusAdapterLoopMixin:
         entry = self.cache.values.get(key)
         if not entry:
             return self.slo_core_read_max_age_seconds + 1.0
-        updated_at = float(entry.get("updated_at", 0.0) or 0.0)
+        updated_at = float_or_zero(entry.get("updated_at"))
         return now - updated_at if updated_at > 0.0 else self.slo_core_read_max_age_seconds + 1.0
 
     def process_preferred_read_or_write(self: DbusAdapterLoopContext) -> bool:
