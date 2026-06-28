@@ -120,6 +120,9 @@ class _EnergyConnectorsHttpOpenDtuCases:
 
         self.assertEqual(forwarded, [("victron", 50.0)])
         self.assertEqual(snapshot.usable_capacity_wh, 5120.0)
+        bad_owner = SimpleNamespace(_dbus_energy_source_snapshot=MagicMock(return_value={"source_id": "bad"}))
+        with self.assertRaisesRegex(TypeError, "_dbus_energy_source_snapshot must return EnergySourceSnapshot"):
+            read_energy_source_snapshot(bad_owner, source, 51.0)
 
     def test_template_http_connector_uses_source_capacity_when_response_omits_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -3,22 +3,33 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, cast
+from typing import Any, Iterable, TypeVar
 
 from venus_evcharger.backend.template_support import json_path_value
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_binary_flag
+
+T = TypeVar("T")
 
 
 def _runtime_owner(owner: Any) -> Any:
     return getattr(owner, "service", owner)
 
 
-def _cache_map(runtime: Any, attr_name: str) -> dict[str, Any]:
+def _cache_map(runtime: Any, attr_name: str) -> dict[str, object]:
     cache = getattr(runtime, attr_name, None)
     if isinstance(cache, dict):
-        return cast(dict[str, Any], cache)
-    setattr(runtime, attr_name, {})
-    return cast(dict[str, Any], getattr(runtime, attr_name))
+        normalized = {str(key): value for key, value in cache.items()}
+    else:
+        normalized = {}
+    setattr(runtime, attr_name, normalized)
+    return normalized
+
+
+def _typed_cache_map(runtime: Any, attr_name: str, expected_type: type[T]) -> dict[str, T]:
+    cache = _cache_map(runtime, attr_name)
+    typed = {key: value for key, value in cache.items() if isinstance(value, expected_type)}
+    setattr(runtime, attr_name, typed)
+    return typed
 
 
 def _normalized_connector_type(raw_value: object) -> str:

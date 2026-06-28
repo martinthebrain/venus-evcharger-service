@@ -6,9 +6,9 @@ from __future__ import annotations
 from typing import Any
 
 from venus_evcharger.control import ControlCommand
+from venus_evcharger.core.return_contracts import require_bool, require_dict, require_int, require_str, require_tuple2
 
 from .factory import ServiceControllerFactoryMixin
-from .return_contracts import require_bool, require_dict, require_int, require_str, require_tuple2
 
 
 class RuntimeHelperMixin(ServiceControllerFactoryMixin):

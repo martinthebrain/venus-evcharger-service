@@ -3,14 +3,13 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 import logging
 import threading
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.control import ControlCommand
-from venus_evcharger.runtime.async_mainloop_types import QueuedControlCommand
+from venus_evcharger.runtime.async_mainloop_types import require_control_command_queue
 
 ASYNC_CONTROL_COMMAND_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
@@ -24,7 +23,7 @@ class _RuntimeSupportAsyncMainloopControlMixin:
             return bool(result.accepted)
         queued_at = time.time()
         with svc._control_command_lock:
-            pending = cast("OrderedDict[str, QueuedControlCommand]", svc._control_command_pending)
+            pending = require_control_command_queue(svc._control_command_pending, "_control_command_pending")
             svc._control_command_sequence += 1
             if command.path in pending:
                 del pending[command.path]
@@ -50,7 +49,7 @@ class _RuntimeSupportAsyncMainloopControlMixin:
     def _drain_control_commands_once(self: Any) -> bool:
         svc = self.service
         with svc._control_command_lock:
-            pending = cast("OrderedDict[str, QueuedControlCommand]", svc._control_command_pending)
+            pending = require_control_command_queue(svc._control_command_pending, "_control_command_pending")
             commands = sorted(pending.values(), key=lambda item: item[0])
             pending.clear()
         if not commands:

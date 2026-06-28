@@ -3,12 +3,39 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 
 from venus_evcharger.core.contracts import non_negative_int, normalize_binary_flag, normalized_auto_state_pair
 
 from .base import _ControllerBoundPort
+
+
+PendingRelayCommand = tuple[bool | None, float | None]
+
+
+def _require_pending_relay_command(value: object) -> PendingRelayCommand:
+    if not isinstance(value, tuple):
+        raise TypeError(f"peek_pending_relay_command must return tuple, got {type(value).__name__}")
+    if len(value) != 2:
+        raise TypeError(f"peek_pending_relay_command must return tuple length 2, got {len(value)}")
+    relay_on, requested_at = value
+    return _pending_relay_state(relay_on), _pending_relay_requested_at(requested_at)
+
+
+def _pending_relay_state(value: object) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise TypeError(f"peek_pending_relay_command state must be bool|None, got {type(value).__name__}")
+
+
+def _pending_relay_requested_at(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"peek_pending_relay_command timestamp must be int|float|None, got {type(value).__name__}")
+    return float(value)
+
 
 class AutoDecisionPort(_ControllerBoundPort):
     """Expose the Auto-decision surface needed by ``AutoDecisionController``."""
@@ -180,7 +207,7 @@ class AutoDecisionPort(_ControllerBoundPort):
         return self._service._write_auto_audit_event(reason, cached)
 
     def peek_pending_relay_command(self) -> tuple[bool | None, float | None]:
-        return cast(tuple[bool | None, float | None], self._service._peek_pending_relay_command())
+        return _require_pending_relay_command(self._service._peek_pending_relay_command())
 
     def is_within_auto_daytime_window(self, current_dt: object | None = None) -> bool:
         check = self._controller_or_override(

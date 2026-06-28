@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import configparser
 from dataclasses import replace
-from typing import Mapping, MutableMapping, cast
+from typing import Mapping, MutableMapping
 
 from venus_evcharger.backend.modbus_client import ModbusClient
 from venus_evcharger.backend.modbus_transport import create_modbus_transport
@@ -227,11 +227,11 @@ def _attempt_probe(
     transport_settings: ModbusTransportSettings,
     field: dict[str, object],
 ) -> dict[str, object]:
-    address = cast(int, field["address"])
-    scale = cast(float, field["scale"])
-    register_type = cast(str, field["register_type"])
-    data_type = cast(str, field["data_type"])
-    word_order = cast(str, field["word_order"])
+    address = _probe_int_field(field, "address")
+    scale = _probe_float_field(field, "scale")
+    register_type = _probe_text_field(field, "register_type")
+    data_type = _probe_text_field(field, "data_type")
+    word_order = _probe_text_field(field, "word_order")
     try:
         transport = create_modbus_transport(transport_settings)
         client = ModbusClient(transport, transport_settings.unit_id, transport_settings.timeout_seconds)
@@ -254,6 +254,27 @@ def _attempt_probe(
             "reason": modbus_transport_issue_reason(error) or error.__class__.__name__.lower(),
             "detail": str(error),
         }
+
+
+def _probe_int_field(field: Mapping[str, object], name: str) -> int:
+    value = field.get(name)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"probe field {name} must be int")
+    return value
+
+
+def _probe_float_field(field: Mapping[str, object], name: str) -> float:
+    value = field.get(name)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"probe field {name} must be float")
+    return float(value)
+
+
+def _probe_text_field(field: Mapping[str, object], name: str) -> str:
+    value = field.get(name)
+    if not isinstance(value, str):
+        raise TypeError(f"probe field {name} must be str")
+    return value
 
 
 def _probe_plan(

@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 import logging
 import time
-from typing import Any, cast
+from typing import Any
 
-from venus_evcharger.runtime.async_mainloop_types import QueuedPublishValue
+from venus_evcharger.runtime.async_mainloop_types import PublishQueue, QueuedPublishValue, require_publish_queue
 
 DBUS_PUBLISH_QUEUE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
@@ -21,7 +20,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             return False
         queued_at = time.time()
         with svc._dbus_publish_queue_lock:
-            pending = cast("OrderedDict[str, QueuedPublishValue]", svc._dbus_publish_pending)
+            pending = require_publish_queue(svc._dbus_publish_pending, "_dbus_publish_pending")
             self._coalesce_dbus_publish_values(pending, values, float(current), queued_at)
             self._trim_dbus_publish_queue(svc, pending)
             self._remember_oldest_dbus_publish(svc, pending)
@@ -29,7 +28,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
 
     @staticmethod
     def _coalesce_dbus_publish_values(
-        pending: "OrderedDict[str, QueuedPublishValue]",
+        pending: PublishQueue,
         values: list[tuple[str, Any]],
         current: float,
         queued_at: float,
@@ -41,14 +40,14 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             pending[path] = (value, current, queued_at)
 
     @staticmethod
-    def _trim_dbus_publish_queue(svc: Any, pending: "OrderedDict[str, QueuedPublishValue]") -> None:
+    def _trim_dbus_publish_queue(svc: Any, pending: PublishQueue) -> None:
         """Trim oldest queued DBus writes when the queue is full."""
         while len(pending) > int(getattr(svc, "_dbus_publish_max_paths", 256)):
             pending.popitem(last=False)
             svc._dbus_publish_dropped_count += 1
 
     @staticmethod
-    def _remember_oldest_dbus_publish(svc: Any, pending: "OrderedDict[str, QueuedPublishValue]") -> None:
+    def _remember_oldest_dbus_publish(svc: Any, pending: PublishQueue) -> None:
         """Remember the oldest queued publish time for queue-lag diagnostics."""
         if pending:
             svc._dbus_publish_oldest_queued_at = min(item[2] for item in pending.values())
@@ -98,7 +97,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
     def _drain_dbus_publish_queue(svc: Any) -> tuple[list[tuple[str, QueuedPublishValue]], int, float | None]:
         """Drain queued DBus writes and return their diagnostics."""
         with svc._dbus_publish_queue_lock:
-            pending = cast("OrderedDict[str, QueuedPublishValue]", svc._dbus_publish_pending)
+            pending = require_publish_queue(svc._dbus_publish_pending, "_dbus_publish_pending")
             values = list(pending.items())
             pending.clear()
             bump_count = int(getattr(svc, "_dbus_publish_bump_pending", 0))

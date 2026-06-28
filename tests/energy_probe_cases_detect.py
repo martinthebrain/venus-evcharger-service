@@ -10,9 +10,42 @@ from tests.energy_probe_cases_common import (
     redirect_stdout,
     tempfile,
 )
+from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
+from venus_evcharger.energy.probe import _attempt_probe
 
 
 class _EnergyProbeDetectCases(_EnergyProbeBase):
+    @staticmethod
+    def _transport_settings() -> ModbusTransportSettings:
+        return ModbusTransportSettings(
+            transport_kind="tcp",
+            unit_id=1,
+            timeout_seconds=2.0,
+            host="192.0.2.1",
+            port=502,
+            device=None,
+            baudrate=9600,
+            bytesize=8,
+            parity="N",
+            stopbits=1,
+            serial_port_owner="none",
+            serial_port_owner_stop_command=None,
+            serial_port_owner_start_command=None,
+            serial_retry_count=0,
+            serial_retry_delay_seconds=0.0,
+        )
+
+    def test_attempt_probe_rejects_malformed_field_contract(self) -> None:
+        field = {
+            "address": True,
+            "scale": 1.0,
+            "register_type": "holding",
+            "data_type": "uint16",
+            "word_order": "big",
+        }
+        with self.assertRaisesRegex(TypeError, "probe field address must be int"):
+            _attempt_probe(self._transport_settings(), field)
+
     def test_detect_modbus_energy_source_uses_huawei_candidates_until_success(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = self._write_config(

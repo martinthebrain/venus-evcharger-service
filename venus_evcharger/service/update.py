@@ -5,8 +5,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from venus_evcharger.core.return_contracts import (
+    require_bool,
+    require_dict,
+    require_int,
+    require_tuple2,
+    require_tuple3,
+    require_tuple4,
+    require_tuple5,
+)
+
 from .factory import ServiceControllerFactoryMixin
-from .return_contracts import require_bool, require_dict, require_int, require_tuple2, require_tuple3, require_tuple4, require_tuple5
 
 
 class UpdateCycleMixin(ServiceControllerFactoryMixin):

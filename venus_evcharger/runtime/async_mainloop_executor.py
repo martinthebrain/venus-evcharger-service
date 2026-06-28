@@ -6,7 +6,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
+
+from venus_evcharger.core.return_contracts import require_bool
 
 ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
@@ -119,7 +121,9 @@ class _RuntimeSupportAsyncMainloopExecutorMixin:
         svc = self.service
         path = str(payload.get("path") or "")
         apply_gateway_write = getattr(getattr(svc, "_dbusservice", None), "apply_gateway_write", None)
-        return bool(callable(apply_gateway_write) and cast(bool, apply_gateway_write(path, payload.get("value"))))
+        if not callable(apply_gateway_write):
+            return False
+        return require_bool(apply_gateway_write(path, payload.get("value")), "apply_gateway_write")
 
     def _dispatch_gateway_control_command(self: Any, payload: Mapping[str, Any]) -> None:
         """Dispatch a gateway command through the existing control command path."""

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.common import evse_fault_reason
+from venus_evcharger.core.return_contracts import require_bool
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 RELAY_TARGET_APPLY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
@@ -149,10 +150,8 @@ class _RelayStatusPublishMixin(_ComposableControllerMixin):
             return None
 
     @staticmethod
-    def _relay_apply_result(value: Any) -> bool:
-        if not isinstance(value, bool):
-            raise TypeError(f"_apply_enabled_target must return bool, got {type(value).__name__}")
-        return value
+    def _relay_apply_result(value: object) -> bool:
+        return require_bool(value, "_apply_enabled_target")
 
     @classmethod
     def _relay_decision_noop(cls, svc: Any, desired_relay: bool, relay_on: bool) -> bool:

@@ -6,9 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from venus_evcharger.control import ControlCommand, ControlResult
-from venus_evcharger.controllers.auto import AutoDecisionController
-from .factory import ServiceControllerFactoryMixin
-from .return_contracts import (
+from venus_evcharger.core.return_contracts import (
     require_bool,
     require_dict,
     require_float,
@@ -18,6 +16,9 @@ from .return_contracts import (
     require_str_list,
     require_str_or_none,
 )
+from venus_evcharger.controllers.auto import AutoDecisionController
+
+from .factory import ServiceControllerFactoryMixin
 
 
 class DbusAutoLogicMixin(ServiceControllerFactoryMixin):

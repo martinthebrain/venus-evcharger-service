@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
+from venus_evcharger.core.return_contracts import require_str_list, require_str_or_none
 
 from .base import _ControllerBoundPort
+
 
 class DbusInputPort(_ControllerBoundPort):
     """Expose the DBus-input surface needed by ``DbusInputController``."""
@@ -96,20 +98,19 @@ class DbusInputPort(_ControllerBoundPort):
     def reset_system_bus(self) -> None:
         self._service._reset_system_bus()
 
-    def get_dbus_value(self, service_name: str, path: str) -> float | int | None:
-        value = self._controller_or_override("_get_dbus_value", "get_dbus_value")(service_name, path)
-        return cast(float | int | None, value)
+    def get_dbus_value(self, service_name: str, path: str) -> object:
+        return self._controller_or_override("_get_dbus_value", "get_dbus_value")(service_name, path)
 
     def list_dbus_services(self) -> list[str]:
         services = self._controller_or_override("_list_dbus_services", "list_dbus_services")()
-        return cast(list[str], services)
+        return require_str_list(services, "list_dbus_services")
 
     def invalidate_auto_pv_services(self) -> None:
         self._controller_or_override("_invalidate_auto_pv_services", "invalidate_auto_pv_services")()
 
     def resolve_auto_pv_services(self) -> list[str]:
         services = self._controller_or_override("_resolve_auto_pv_services", "resolve_auto_pv_services")()
-        return cast(list[str], services)
+        return require_str_list(services, "resolve_auto_pv_services")
 
     def invalidate_auto_battery_service(self) -> None:
         self._controller_or_override(
@@ -117,9 +118,9 @@ class DbusInputPort(_ControllerBoundPort):
             "invalidate_auto_battery_service",
         )()
 
-    def resolve_auto_battery_service(self) -> str:
+    def resolve_auto_battery_service(self) -> str | None:
         service = self._controller_or_override(
             "_resolve_auto_battery_service",
             "resolve_auto_battery_service",
         )()
-        return str(service)
+        return require_str_or_none(service, "resolve_auto_battery_service")

@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.backend.models import effective_supported_phase_selections, switch_feedback_mismatch
@@ -29,7 +30,7 @@ def _normalized_optional_audit_text(value: object) -> str | None:
 
 class _RuntimeSupportAuditFieldsMixin:
     service: Any
-    clone_worker_snapshot: Any
+    clone_worker_snapshot: Callable[[WorkerSnapshot], WorkerSnapshot]
     ensure_missing_attributes: Any
     observability_state_defaults: Any
     worker_state_defaults: Any
@@ -202,7 +203,7 @@ class _RuntimeSupportAuditFieldsMixin:
         svc = self.service
         svc._ensure_worker_state()
         with svc._worker_snapshot_lock:
-            return cast(WorkerSnapshot, self.clone_worker_snapshot(svc._worker_snapshot))
+            return self.clone_worker_snapshot(svc._worker_snapshot)
 
     def ensure_observability_state(self) -> None:
         self.ensure_missing_attributes(self.service, self.observability_state_defaults())

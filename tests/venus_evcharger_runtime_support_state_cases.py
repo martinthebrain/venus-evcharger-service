@@ -463,6 +463,19 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         fresh_controller._remember_dbus_publish_queue_lag(fresh_service, 100.0, None)
         fresh_controller._report_dbus_publish_failures(SimpleNamespace(), ["/Path"])
 
+    def test_async_publish_queue_contract_rejects_malformed_pending_queue(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+
+        service._dbus_publish_pending["/bad"] = ("payload", object(), 1.0)
+        with self.assertRaisesRegex(TypeError, "_dbus_publish_pending current must be float"):
+            controller.enqueue_dbus_publish_values([("/A", 1)], 100.0)
+
+        service._dbus_publish_pending = {}
+        with self.assertRaisesRegex(TypeError, "_dbus_publish_pending must be OrderedDict"):
+            controller.enqueue_dbus_publish_values([("/A", 1)], 100.0)
+
     def test_runtime_executor_covers_sync_fallbacks_errors_trimming_and_budget_warnings(self) -> None:
         service = make_runtime_support_service()
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
@@ -508,6 +521,21 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         log_exception.assert_called_once()
         log_warning.assert_called_once()
 
+    def test_async_control_queue_contract_rejects_malformed_pending_queue(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        service._control_command_async_enabled = True
+        command = ControlCommand(name="set_mode", path="/Mode", value=1)
+
+        service._control_command_pending["/bad"] = (True, time.time(), command)
+        with self.assertRaisesRegex(TypeError, "_control_command_pending sequence must be int"):
+            controller.enqueue_control_command(command)
+
+        service._control_command_pending = {}
+        with self.assertRaisesRegex(TypeError, "_control_command_pending must be OrderedDict"):
+            controller.enqueue_control_command(command)
+
     def test_runtime_executor_gateway_core_command_paths(self) -> None:
         service = make_runtime_support_service()
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
@@ -527,6 +555,10 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         self.assertTrue(controller._drain_gateway_core_commands_once())
         service._dbusservice.apply_gateway_write.assert_called_once_with("/Mode", 2)
         inbox.remove.assert_called_once_with("first")
+
+        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value="yes"))
+        with self.assertRaisesRegex(TypeError, "apply_gateway_write must return bool"):
+            controller._apply_gateway_write_if_supported({"path": "/Mode", "value": 1})
 
         service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=False))
         service._control_command_from_write = MagicMock(return_value=ControlCommand(name="set_mode", path="/Mode", value=1))

@@ -11,15 +11,10 @@ from venus_evcharger.backend.models import (
 from venus_evcharger.core.contracts import (
     normalized_worker_snapshot,
 )
+from venus_evcharger.core.return_contracts import require_str
 from venus_evcharger.ports.write_runtime import _WriteControllerRuntimePortMixin
 
 from .base import _BaseServicePort
-
-
-def _require_str(value: object, name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{name} must return str, got {type(value).__name__}")
-    return value
 
 
 class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
@@ -76,7 +71,6 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
 
     def __init__(self, service: Any) -> None:
         super().__init__(service)
-
 
     def clear_auto_samples(self) -> object:
         return self._service._clear_auto_samples()
@@ -237,7 +231,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         return bool(self._service._phase_selection_requires_pause())
 
     def apply_phase_selection(self, selection: object) -> str:
-        return _require_str(self._service._apply_phase_selection(selection), "_apply_phase_selection")
+        return require_str(self._service._apply_phase_selection(selection), "_apply_phase_selection")
 
     def normalize_phase_selection(self, value: object, default: str | None = None) -> str:
         fallback = normalize_phase_selection(
@@ -253,7 +247,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         return bool(self._service._mode_uses_auto_logic(mode))
 
     def state_summary(self) -> str:
-        return _require_str(self._service._state_summary(), "_state_summary")
+        return require_str(self._service._state_summary(), "_state_summary")
 
     def save_runtime_state(self) -> object:
         return self._service._save_runtime_state()

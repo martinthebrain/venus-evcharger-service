@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.energy_connectors_cases_common import *
 
+from venus_evcharger.energy.connectors_common import _cache_map, _typed_cache_map
+
 
 class _EnergyConnectorsHelperCases:
     def test_template_http_settings_and_validation_helpers_cover_cache_and_errors(self) -> None:
@@ -34,6 +36,16 @@ class _EnergyConnectorsHelperCases:
             config_path="cached.ini",
         )
         self.assertIs(energy_connectors._template_http_energy_source_settings(runtime, cached_source), settings)
+        runtime._energy_template_settings_cache = {"cached.ini": settings, 1: "stale", "bad.ini": object()}
+        typed_cache = _typed_cache_map(
+            runtime,
+            "_energy_template_settings_cache",
+            energy_connectors.TemplateHttpEnergySourceSettings,
+        )
+        self.assertEqual(typed_cache, {"cached.ini": settings})
+        self.assertEqual(runtime._energy_template_settings_cache, {"cached.ini": settings})
+        runtime._energy_misc_cache = {1: "one"}
+        self.assertEqual(_cache_map(runtime, "_energy_misc_cache"), {"1": "one"})
 
         with self.assertRaisesRegex(ValueError, "requires \\[EnergyRequest\\] Url"):
             energy_connectors._validate_template_http_energy_source_settings(

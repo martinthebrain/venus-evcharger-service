@@ -78,6 +78,7 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
         ResourceMonitor,
         TickHealth,
     )
+    from venus_evcharger.dbus_adapter_read_types import read_spec_from_mapping
     from venus_evcharger_dbus_adapter import DbusAdapter
     from venus_evcharger_dbus_adapter import main as adapter_main
 
@@ -401,6 +402,33 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         self.assertIsNotNone(due)
         assert due is not None
         self.assertEqual(due[0], "battery")
+
+    def test_read_spec_from_mapping_validates_known_fields(self) -> None:
+        spec = read_spec_from_mapping(
+            {
+                "service": "svc",
+                "paths": ["/A", "/B"],
+                "interval": 2,
+                "use_dc_pv": True,
+                "optional_zero_on_error": False,
+                "optional_confidence": 0.2,
+            }
+        )
+        self.assertEqual(spec["service"], "svc")
+        self.assertEqual(spec["paths"], ["/A", "/B"])
+        self.assertEqual(spec["interval"], 2.0)
+        self.assertTrue(spec["use_dc_pv"])
+
+        with self.assertRaisesRegex(KeyError, "unknown read spec field"):
+            read_spec_from_mapping({"unexpected": "value"})
+        with self.assertRaisesRegex(TypeError, "service must be str"):
+            read_spec_from_mapping({"service": object()})
+        with self.assertRaisesRegex(TypeError, "interval must be float"):
+            read_spec_from_mapping({"interval": True})
+        with self.assertRaisesRegex(TypeError, "paths must be list\\[str\\]"):
+            read_spec_from_mapping({"paths": ["/ok", 1]})
+        with self.assertRaisesRegex(TypeError, "use_dc_pv must be bool"):
+            read_spec_from_mapping({"use_dc_pv": 1})
 
     def test_discovery_manager_tracks_success_and_error_backoff(self) -> None:
         discovery = DbusDiscoveryManager(interval_seconds=900.0)

@@ -6,11 +6,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from venus_evcharger.core.return_contracts import require_bool, require_dict, require_str
 from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.runtime import RuntimeSupportController
 
 from .factory import ServiceControllerFactoryMixin
-from .return_contracts import require_bool, require_dict, require_str
 
 
 class StatePublishMixin(ServiceControllerFactoryMixin):
