@@ -7,9 +7,13 @@ import configparser
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
+from venus_evcharger.bootstrap.wizard_choices import optional_choice, recognized_choice
 from venus_evcharger.bootstrap.wizard_models import (
+    WIZARD_CHARGER_BACKENDS,
+    WIZARD_POLICY_MODES,
+    WIZARD_PROFILES,
+    WIZARD_TRANSPORT_KINDS,
     WizardChargerBackend,
     WizardPolicyMode,
     WizardProfile,
@@ -172,7 +176,7 @@ def _profile_defaults_from_types(
     switch_type: str,
     charger_type: str,
 ) -> tuple[WizardProfile | None, str | None, WizardChargerBackend | None]:
-    backend = cast(WizardChargerBackend | None, charger_type or None)
+    backend = recognized_choice(charger_type or None, WIZARD_CHARGER_BACKENDS)
     native_defaults = _native_profile_defaults(meter_type, switch_type, charger_type, backend)
     if native_defaults is not None:
         return native_defaults
@@ -216,7 +220,7 @@ def _transport_defaults(config_path: Path, backends: configparser.SectionProxy |
     adapter = _config_parser(adapter_path)
     adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
     adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    transport_kind = cast(WizardTransportKind | None, adapter_section.get("Transport"))
+    transport_kind = recognized_choice(adapter_section.get("Transport"), WIZARD_TRANSPORT_KINDS)
     transport_section = adapter["Transport"] if adapter.has_section("Transport") else adapter_defaults
     return (
         transport_kind,
@@ -270,6 +274,34 @@ def _switch_group_phase_layout(config_path: Path, backends: configparser.Section
     return adapter["Capabilities"].get("SupportedPhaseSelections")
 
 
+def _json_str(value: object) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    raise ValueError(f"Wizard result field must be a string or null: {value!r}")
+
+
+def _json_bool(value: object) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise ValueError(f"Wizard result field must be a boolean or null: {value!r}")
+
+
+def _json_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if type(value) is int:
+        return value
+    raise ValueError(f"Wizard result field must be an integer or null: {value!r}")
+
+
+def _json_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    raise ValueError(f"Wizard result field must be numeric or null: {value!r}")
+
+
 def _load_from_result_json(config_path: Path) -> ImportedWizardDefaults:
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -279,35 +311,35 @@ def _load_from_result_json(config_path: Path) -> ImportedWizardDefaults:
         raise ValueError(f"Wizard result is missing answer_defaults: {config_path}")
     return ImportedWizardDefaults(
         imported_from=str(config_path),
-        profile=cast(WizardProfile | None, defaults.get("profile")),
-        host_input=cast(str | None, defaults.get("host_input")),
-        meter_host_input=cast(str | None, defaults.get("meter_host_input")),
-        switch_host_input=cast(str | None, defaults.get("switch_host_input")),
-        charger_host_input=cast(str | None, defaults.get("charger_host_input")),
-        device_instance=cast(int | None, defaults.get("device_instance")),
-        phase=cast(str | None, defaults.get("phase")),
-        policy_mode=cast(WizardPolicyMode | None, defaults.get("policy_mode")),
-        digest_auth=cast(bool | None, defaults.get("digest_auth")),
-        username=cast(str | None, defaults.get("username")),
+        profile=optional_choice(defaults.get("profile"), WIZARD_PROFILES, "profile"),
+        host_input=_json_str(defaults.get("host_input")),
+        meter_host_input=_json_str(defaults.get("meter_host_input")),
+        switch_host_input=_json_str(defaults.get("switch_host_input")),
+        charger_host_input=_json_str(defaults.get("charger_host_input")),
+        device_instance=_json_int(defaults.get("device_instance")),
+        phase=_json_str(defaults.get("phase")),
+        policy_mode=optional_choice(defaults.get("policy_mode"), WIZARD_POLICY_MODES, "policy mode"),
+        digest_auth=_json_bool(defaults.get("digest_auth")),
+        username=_json_str(defaults.get("username")),
         password=None,
-        topology_preset=cast(str | None, defaults.get("topology_preset")),
-        charger_backend=cast(WizardChargerBackend | None, defaults.get("charger_backend")),
-        charger_preset=cast(str | None, defaults.get("charger_preset")),
-        request_timeout_seconds=cast(float | None, defaults.get("request_timeout_seconds")),
-        switch_group_phase_layout=cast(str | None, defaults.get("switch_group_supported_phase_selections")),
-        auto_start_surplus_watts=cast(float | None, defaults.get("auto_start_surplus_watts")),
-        auto_stop_surplus_watts=cast(float | None, defaults.get("auto_stop_surplus_watts")),
-        auto_min_soc=cast(float | None, defaults.get("auto_min_soc")),
-        auto_resume_soc=cast(float | None, defaults.get("auto_resume_soc")),
-        scheduled_enabled_days=cast(str | None, defaults.get("scheduled_enabled_days")),
-        scheduled_latest_end_time=cast(str | None, defaults.get("scheduled_latest_end_time")),
-        scheduled_night_current_amps=cast(float | None, defaults.get("scheduled_night_current_amps")),
-        transport_kind=cast(WizardTransportKind | None, defaults.get("transport_kind")),
-        transport_host=cast(str | None, defaults.get("transport_host")),
-        transport_port=cast(int | None, defaults.get("transport_port")),
-        transport_device=cast(str | None, defaults.get("transport_device")),
-        transport_unit_id=cast(int | None, defaults.get("transport_unit_id")),
-        inventory_path=cast(str | None, payload.get("inventory_path")) or _sibling_inventory_path(config_path),
+        topology_preset=_json_str(defaults.get("topology_preset")),
+        charger_backend=optional_choice(defaults.get("charger_backend"), WIZARD_CHARGER_BACKENDS, "charger backend"),
+        charger_preset=_json_str(defaults.get("charger_preset")),
+        request_timeout_seconds=_json_float(defaults.get("request_timeout_seconds")),
+        switch_group_phase_layout=_json_str(defaults.get("switch_group_supported_phase_selections")),
+        auto_start_surplus_watts=_json_float(defaults.get("auto_start_surplus_watts")),
+        auto_stop_surplus_watts=_json_float(defaults.get("auto_stop_surplus_watts")),
+        auto_min_soc=_json_float(defaults.get("auto_min_soc")),
+        auto_resume_soc=_json_float(defaults.get("auto_resume_soc")),
+        scheduled_enabled_days=_json_str(defaults.get("scheduled_enabled_days")),
+        scheduled_latest_end_time=_json_str(defaults.get("scheduled_latest_end_time")),
+        scheduled_night_current_amps=_json_float(defaults.get("scheduled_night_current_amps")),
+        transport_kind=optional_choice(defaults.get("transport_kind"), WIZARD_TRANSPORT_KINDS, "transport"),
+        transport_host=_json_str(defaults.get("transport_host")),
+        transport_port=_json_int(defaults.get("transport_port")),
+        transport_device=_json_str(defaults.get("transport_device")),
+        transport_unit_id=_json_int(defaults.get("transport_unit_id")),
+        inventory_path=_json_str(payload.get("inventory_path")) or _sibling_inventory_path(config_path),
     )
 
 

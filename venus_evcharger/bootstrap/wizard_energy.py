@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
 
 from venus_evcharger.energy.recommendation_schema import (
     recommendation_bundle_manifest_path,
@@ -445,7 +444,7 @@ def huawei_bundle_files(
     manifest_path = recommendation_bundle_manifest_path(str(base))
     if manifest_path.exists():
         manifest = validate_recommendation_bundle_manifest(json.loads(manifest_path.read_text(encoding="utf-8")))
-        manifest_files = cast(dict[str, str], manifest["files"])
+        manifest_files = manifest["files"]
         source_paths = {
             "wizard-huawei-energy.ini": Path(manifest_files["config_snippet"]),
             "wizard-huawei-energy.wizard.txt": Path(manifest_files["wizard_hint"]),

@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any
 
 from venus_evcharger.core.contracts import finite_float_or_none, sanitized_auto_metrics
 from venus_evcharger.energy import summarize_energy_learning_profiles
@@ -12,7 +13,9 @@ from venus_evcharger.energy import summarize_energy_learning_profiles
 def _worker_snapshot(owner: Any) -> dict[str, Any]:
     get_worker_snapshot = getattr(owner, "_get_worker_snapshot", None)
     raw_worker_snapshot = get_worker_snapshot() if callable(get_worker_snapshot) else {}
-    return cast(dict[str, Any], raw_worker_snapshot if isinstance(raw_worker_snapshot, dict) else {})
+    if not isinstance(raw_worker_snapshot, Mapping):
+        return {}
+    return {str(key): value for key, value in raw_worker_snapshot.items()}
 
 
 def _worker_learning_summary(worker_snapshot: dict[str, Any]) -> dict[str, Any]:

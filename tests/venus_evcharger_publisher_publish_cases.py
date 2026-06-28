@@ -24,6 +24,10 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         service._dbus_publish_state["/IntervalMissing"] = {"value": 5}
         self.assertTrue(controller.publish_path("/IntervalMissing", 5, now=100.0, interval_seconds=5.0))
 
+        service._dbus_publish_state["/Corrupt"] = "bad"
+        self.assertTrue(controller.publish_path("/Corrupt", 9, now=100.0, interval_seconds=5.0))
+        self.assertEqual(service._dbus_publish_state["/Corrupt"], {"value": 9, "updated_at": 100.0})
+
         self.assertFalse(controller.publish_path("/IntervalMissing", 7, now=103.0, interval_seconds=5.0))
         self.assertTrue(controller.publish_path("/IntervalMissing", 7, now=106.0, interval_seconds=5.0))
 

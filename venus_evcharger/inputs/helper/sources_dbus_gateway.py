@@ -7,7 +7,7 @@ import logging
 import time
 import xml.etree.ElementTree as xml_et
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
@@ -32,9 +32,12 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         cache_key = dbus_path_key(service_name, path)
         snapshot = self._gateway_cache_snapshot()
         entry = DbusCacheStore.value_entry(snapshot, cache_key)
-        cached_value = self._cached_gateway_value(entry)
-        if cached_value is not _CACHE_VALUE_MISSING:
-            return cast(float | int | None, cached_value)
+        has_cached_value, cached_value = _AutoInputHelperSourceDbusGatewayMixin._cached_gateway_numeric_value(
+            self,
+            entry,
+        )
+        if has_cached_value:
+            return cached_value
         if self._cached_gateway_error_recent(entry):
             logging.debug("Auto helper suppressing fresh DBus cache error for %s %s", service_name, path)
             return None
@@ -95,10 +98,10 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
 
     def _gateway_client(self: Any) -> GatewayClient:
         client = getattr(self, "_gateway_client_instance", None)
-        if client is None:
+        if not isinstance(client, GatewayClient):
             client = GatewayClient(gateway_paths(getattr(self, "dbus_gateway_run_dir", "")))
             self._gateway_client_instance = client
-        return cast(GatewayClient, client)
+        return client
 
     def _gateway_cache_snapshot(self: Any) -> dict[str, Any]:
         return DbusCacheStore.load_snapshot(
@@ -111,6 +114,18 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         if entry is None or str(entry.get("status", "")) != "fresh":
             return _CACHE_VALUE_MISSING
         return coerce_dbus_numeric(entry.get("value"))
+
+    def _cached_gateway_numeric_value(self: Any, entry: Mapping[str, Any] | None) -> tuple[bool, float | int | None]:
+        cached_value = _AutoInputHelperSourceDbusGatewayMixin._cached_gateway_value(entry)
+        if cached_value is _CACHE_VALUE_MISSING:
+            return False, None
+        return True, _AutoInputHelperSourceDbusGatewayMixin._gateway_numeric_or_none(cached_value)
+
+    @staticmethod
+    def _gateway_numeric_or_none(value: object) -> float | int | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return value
 
     def _cached_gateway_error_recent(self: Any, entry: Mapping[str, Any] | None) -> bool:
         return bool(entry is not None and self._gateway_error_recent(entry))

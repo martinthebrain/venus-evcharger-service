@@ -264,6 +264,13 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertIsNone(helper._read_optional_energy_value("svc", ""))
         self.assertEqual(helper._read_optional_energy_text("svc", ""), "")
 
+        helper._get_dbus_value = MagicMock(side_effect=[True, "bad", 12.5])
+        self.assertIsNone(helper._read_optional_energy_value("svc", "/Soc"))
+        self.assertIsNone(helper._read_optional_energy_value("svc", "/Soc"))
+        self.assertEqual(helper._read_optional_energy_value("svc", "/Soc"), 12.5)
+        self.assertIsNone(helper._battery_soc_numeric("bad"))
+        self.assertEqual(helper._battery_soc_numeric("12.5"), 12.5)
+
         helper._get_dbus_value = MagicMock(side_effect=[None, "support"])
         self.assertEqual(helper._read_optional_energy_text("svc", "/Mode"), "")
         self.assertEqual(helper._read_optional_energy_text("svc", "/Mode"), "support")
@@ -292,6 +299,15 @@ class _AutoInputHelperSourcesEnergyCases:
 
         with patch("venus_evcharger_auto_input_helper.time.time", return_value=42.0):
             self.assertIsNone(helper._cached_energy_service("missing", 42.0))
+        helper._resolved_auto_energy_services = {"numeric": 123}
+        helper._auto_energy_last_scan = {"numeric": 40.0}
+        self.assertEqual(helper._cached_energy_service("numeric", 42.0), "123")
+
+        helper = self._make_helper()
+        helper._resolve_auto_battery_service = MagicMock(return_value="")
+        primary_source = EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus")
+        with self.assertRaisesRegex(ValueError, "primary energy source"):
+            helper._resolve_energy_source_service(primary_source)
 
         helper = self._make_helper()
         helper.auto_battery_service = "configured-battery"
@@ -589,6 +605,36 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertEqual(helper._cached_dbus_capacity_payload(active_source, "svc"), {"usable_capacity_wh": 1.0})
         self.assertEqual(helper._resolved_dbus_capacity_payload(None, {"usable_capacity_wh": 2.0}), {"usable_capacity_wh": 2.0})
 
+        cache_key = helper._dbus_capacity_cache_key(active_source, "svc")
+        helper._auto_battery_capacity_estimates = {
+            cache_key: {
+                "usable_capacity_wh": "bad",
+                "installed_capacity_ah": True,
+                "capacity_voltage_v": 54.0,
+                "capacity_cell_count": "16",
+                7: "numeric-key",
+            }
+        }
+        cached_payload = helper._cached_dbus_capacity_payload(active_source, "svc")
+        self.assertEqual(cached_payload["7"], "numeric-key")
+
+        helper._dbus_energy_source_capacity_payload = MagicMock(return_value=cached_payload)
+        snapshot = helper._dbus_energy_source_snapshot_payload(
+            active_source,
+            "svc",
+            95.0,
+            None,
+            None,
+            None,
+            None,
+            "",
+            123.0,
+        )
+        self.assertIsNone(snapshot.usable_capacity_wh)
+        self.assertIsNone(snapshot.installed_capacity_ah)
+        self.assertEqual(snapshot.capacity_voltage_v, 54.0)
+        self.assertEqual(snapshot.capacity_cell_count, 16)
+
     def test_dbus_capacity_persistence_handles_disabled_and_failed_writes(self):
         helper = self._make_helper()
         source = EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus")
@@ -629,3 +675,11 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertIsNone(helper._primary_energy_estimated_capacity_ah())
         self.assertIsNone(helper._primary_energy_estimated_capacity_nominal_voltage())
         self.assertIsNone(helper._primary_energy_estimated_capacity_cell_count())
+
+        source = EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus")
+        helper.auto_energy_sources = [source, "not-a-source"]
+        self.assertEqual(helper._configured_primary_energy_sources(), (source,))
+        helper.auto_energy_sources = {"source": source}
+        self.assertEqual(helper._configured_primary_energy_sources(), ())
+        helper.auto_energy_sources = "not-a-sequence"
+        self.assertEqual(helper._configured_primary_energy_sources(), ())

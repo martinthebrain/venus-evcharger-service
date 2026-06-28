@@ -6,22 +6,41 @@
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from venus_evcharger.control import ControlApiAuditTrail, ControlApiIdempotencyStore, ControlApiRateLimiter
 from venus_evcharger.control.events import ControlApiEventBus
 
 
+_RuntimeComponent = TypeVar("_RuntimeComponent")
+
+
+def _runtime_component(
+    owner: object,
+    attribute_name: str,
+    component_type: type[_RuntimeComponent],
+    factory: Callable[[], _RuntimeComponent],
+) -> _RuntimeComponent:
+    component = getattr(owner, attribute_name, None)
+    if isinstance(component, component_type):
+        return component
+    component = factory()
+    setattr(owner, attribute_name, component)
+    return component
+
+
 class _ControlApiRuntimeMixin:
     def _control_api_audit_trail(self) -> ControlApiAuditTrail:
-        audit_trail = getattr(self, "_control_api_audit_trail_instance", None)
-        if audit_trail is None:
-            audit_trail = ControlApiAuditTrail(
+        return _runtime_component(
+            self,
+            "_control_api_audit_trail_instance",
+            ControlApiAuditTrail,
+            lambda: ControlApiAuditTrail(
                 history_limit=int(getattr(self, "control_api_audit_max_entries", 200)),
                 path=str(getattr(self, "control_api_audit_path", "")).strip(),
-            )
-            self._control_api_audit_trail_instance = audit_trail
-        return cast(ControlApiAuditTrail, audit_trail)
+            ),
+        )
 
     def _record_control_api_command_audit(
         self,
@@ -82,32 +101,35 @@ class _ControlApiRuntimeMixin:
         }
 
     def _control_api_idempotency_store(self) -> ControlApiIdempotencyStore:
-        idempotency_store = getattr(self, "_control_api_idempotency_store_instance", None)
-        if idempotency_store is None:
-            idempotency_store = ControlApiIdempotencyStore(
+        return _runtime_component(
+            self,
+            "_control_api_idempotency_store_instance",
+            ControlApiIdempotencyStore,
+            lambda: ControlApiIdempotencyStore(
                 history_limit=int(getattr(self, "control_api_idempotency_max_entries", 200)),
                 path=str(getattr(self, "control_api_idempotency_path", "")).strip(),
-            )
-            self._control_api_idempotency_store_instance = idempotency_store
-        return cast(ControlApiIdempotencyStore, idempotency_store)
+            ),
+        )
 
     def _control_api_rate_limiter(self) -> ControlApiRateLimiter:
-        rate_limiter = getattr(self, "_control_api_rate_limiter_instance", None)
-        if rate_limiter is None:
-            rate_limiter = ControlApiRateLimiter(
+        return _runtime_component(
+            self,
+            "_control_api_rate_limiter_instance",
+            ControlApiRateLimiter,
+            lambda: ControlApiRateLimiter(
                 max_requests=int(getattr(self, "control_api_rate_limit_max_requests", 30)),
                 window_seconds=float(getattr(self, "control_api_rate_limit_window_seconds", 5.0)),
                 critical_cooldown_seconds=float(getattr(self, "control_api_critical_cooldown_seconds", 2.0)),
-            )
-            self._control_api_rate_limiter_instance = rate_limiter
-        return cast(ControlApiRateLimiter, rate_limiter)
+            ),
+        )
 
     def _control_api_event_bus(self) -> ControlApiEventBus:
-        event_bus = getattr(self, "_control_api_event_bus_instance", None)
-        if event_bus is None:
-            event_bus = ControlApiEventBus()
-            self._control_api_event_bus_instance = event_bus
-        return cast(ControlApiEventBus, event_bus)
+        return _runtime_component(
+            self,
+            "_control_api_event_bus_instance",
+            ControlApiEventBus,
+            ControlApiEventBus,
+        )
 
     def _publish_control_api_command_event(self, command: Any, result: Any, *, replayed: bool = False) -> None:
         self._control_api_event_bus().publish(

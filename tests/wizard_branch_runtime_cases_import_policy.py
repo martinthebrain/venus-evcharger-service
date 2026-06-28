@@ -196,6 +196,66 @@ class _WizardBranchRuntimeImportPolicyCases:
             with self.assertRaisesRegex(ValueError, "missing answer_defaults"):
                 _load_from_result_json(bad_defaults_path)
 
+            minimal_result_path = temp_path / "minimal.wizard-result.json"
+            minimal_result_path.write_text(json.dumps({"answer_defaults": {}}), encoding="utf-8")
+            self.assertIsNone(_load_from_result_json(minimal_result_path).profile)
+
+            valid_result_path = temp_path / "valid.wizard-result.json"
+            valid_result_path.write_text(
+                json.dumps(
+                    {
+                        "inventory_path": "inventory.ini",
+                        "answer_defaults": {
+                            "profile": "native_device",
+                            "host_input": "charger.local",
+                            "meter_host_input": "meter.local",
+                            "switch_host_input": "switch.local",
+                            "charger_host_input": "charger.local",
+                            "device_instance": 42,
+                            "phase": "L1",
+                            "policy_mode": "auto",
+                            "digest_auth": True,
+                            "username": "user",
+                            "topology_preset": "shelly-meter-goe",
+                            "charger_backend": "goe_charger",
+                            "charger_preset": "go-e",
+                            "request_timeout_seconds": 2,
+                            "switch_group_supported_phase_selections": "P1,P1_P2",
+                            "auto_start_surplus_watts": 1800,
+                            "auto_stop_surplus_watts": 1500.5,
+                            "auto_min_soc": 30,
+                            "auto_resume_soc": 35.5,
+                            "scheduled_enabled_days": "Mon",
+                            "scheduled_latest_end_time": "06:30",
+                            "scheduled_night_current_amps": 6,
+                            "transport_kind": "tcp",
+                            "transport_host": "192.168.1.90",
+                            "transport_port": 502,
+                            "transport_device": "/dev/ttyUSB0",
+                            "transport_unit_id": 1,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            valid_defaults = _load_from_result_json(valid_result_path)
+            self.assertEqual(valid_defaults.profile, "native_device")
+            self.assertEqual(valid_defaults.request_timeout_seconds, 2.0)
+            self.assertEqual(valid_defaults.inventory_path, "inventory.ini")
+
+            invalid_result_fields = (
+                ("bad-string", {"host_input": 1}, "string or null"),
+                ("bad-bool", {"digest_auth": "yes"}, "boolean or null"),
+                ("bad-int", {"device_instance": True}, "integer or null"),
+                ("bad-float", {"auto_start_surplus_watts": "1800"}, "numeric or null"),
+                ("bad-transport", {"transport_kind": "udp"}, "Unsupported transport"),
+            )
+            for name, defaults_payload, error_pattern in invalid_result_fields:
+                invalid_path = temp_path / f"{name}.wizard-result.json"
+                invalid_path.write_text(json.dumps({"answer_defaults": defaults_payload}), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, error_pattern):
+                    _load_from_result_json(invalid_path)
+
             with self.assertRaisesRegex(ValueError, "Import config does not exist"):
                 load_imported_defaults(temp_path / "missing.ini")
 

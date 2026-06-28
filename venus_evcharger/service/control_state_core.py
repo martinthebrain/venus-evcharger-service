@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.control import ControlCommand
@@ -19,13 +20,19 @@ from venus_evcharger.core.contracts import (
 )
 
 
+def _plain_state_mapping(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
 class _ControlApiStateCoreMixin:
     def _control_command_from_payload(self, payload: dict[str, Any], source: str = "http") -> ControlCommand:
         self._ensure_write_controller()
-        return cast(
-            ControlCommand,
-            self._write_controller.build_control_command_from_payload(payload, source=source),
-        )
+        command = self._write_controller.build_control_command_from_payload(payload, source=source)
+        if not isinstance(command, ControlCommand):
+            raise TypeError("write controller returned non-ControlCommand payload")
+        return command
 
     def _state_api_summary_payload(self) -> dict[str, Any]:
         summary = getattr(self, "_state_summary")()
@@ -54,8 +61,8 @@ class _ControlApiStateCoreMixin:
         now_func = getattr(self, "_time_now", None)
         raw_now = now_func() if callable(now_func) else time.time()
         now = float(raw_now) if isinstance(raw_now, (int, float)) else time.time()
-        counters = cast(dict[str, Any], self._dbus_publisher._diagnostic_counter_values(now))
-        ages = cast(dict[str, Any], self._dbus_publisher._diagnostic_age_values(now))
+        counters = _plain_state_mapping(self._dbus_publisher._diagnostic_counter_values(now))
+        ages = _plain_state_mapping(self._dbus_publisher._diagnostic_age_values(now))
         return normalized_state_api_dbus_diagnostics_fields(
             {
                 "ok": True,

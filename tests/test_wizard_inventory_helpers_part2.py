@@ -330,5 +330,21 @@ MeasuresEnergy=1
             ready,
             {"path": "/tmp/device.ini", "items": ["/tmp/child.ini", {"nested": ["/tmp/x.ini"]}]},
         )
-
-
+        answer_ready = json_ready(
+            WizardAnswers(
+                profile="simple_relay",
+                host_input="switch.local",
+                meter_host_input=None,
+                switch_host_input="switch.local",
+                charger_host_input=None,
+                device_instance=1,
+                phase="L1",
+                policy_mode="manual",
+                digest_auth=False,
+                username="",
+                password="",
+            )
+        )
+        self.assertIsInstance(answer_ready, dict)
+        self.assertEqual(answer_ready["profile"], "simple_relay")
+        self.assertIs(json_ready(WizardAnswers), WizardAnswers)

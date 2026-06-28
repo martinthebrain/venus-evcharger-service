@@ -59,3 +59,13 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         self.assertEqual(result, {"mac": "ABC"})
         sleep_mock.assert_called_once_with(2.5)
         self.assertGreaterEqual(warning_mock.call_count, 1)
+
+    def test_fetch_device_info_with_fallback_ignores_non_mapping_payload(self):
+        service = SimpleNamespace(
+            startup_device_info_retries=0,
+            startup_device_info_retry_seconds=0,
+            fetch_rpc=MagicMock(return_value=["not", "a", "mapping"]),
+        )
+        controller = self._controller(service)
+
+        self.assertEqual(controller.fetch_device_info_with_fallback(), {})

@@ -5,9 +5,16 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Mapping, Sequence, cast
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from venus_evcharger.publish.dbus_shared import PublishServiceValueSnapshot, PublishStateEntry, PhaseData
+
+
+def _publish_state_entry(value: object) -> PublishStateEntry | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {str(key): item for key, item in value.items()}
 
 
 class _DbusPublishCoreMixin:
@@ -72,7 +79,7 @@ class _DbusPublishCoreMixin:
         force: bool,
     ) -> tuple[bool, PublishStateEntry | None]:
         """Return whether one path should be written plus its current publish-state entry."""
-        entry = cast(PublishStateEntry | None, self.service._dbus_publish_state.get(path))
+        entry = _publish_state_entry(self.service._dbus_publish_state.get(path))
         if force or entry is None:
             return True, entry
         last_value, last_updated_at = self._publish_state_fields(entry)

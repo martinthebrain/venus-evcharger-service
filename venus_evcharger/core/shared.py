@@ -6,7 +6,7 @@ import json
 import os
 from os import PathLike
 import threading
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias
 
 
 AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION = 1
@@ -16,12 +16,12 @@ ServicePredicate: TypeAlias = Callable[[str], bool]
 _UNCOERCED = object()
 
 
-def _iter_numeric_container_items(value: Any) -> list[object] | None:
+def _iter_numeric_container_items(value: object) -> list[object] | None:
     """Return list-like DBus container items, or None for scalars and mappings."""
     if isinstance(value, (str, bytes, bytearray, dict)):
         return None
     try:
-        return list(cast(Iterable[object], value)) if isinstance(value, Iterable) else None
+        return list(value) if isinstance(value, Iterable) else None
     except TypeError:
         return None
 

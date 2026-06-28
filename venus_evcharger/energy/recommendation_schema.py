@@ -4,10 +4,29 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, TypedDict
 
 RECOMMENDATION_BUNDLE_SCHEMA_TYPE = "energy-recommendation-bundle"
 RECOMMENDATION_BUNDLE_SCHEMA_VERSION = 1
+
+
+class RecommendationBundleManifestFiles(TypedDict):
+    """Validated file paths referenced by one recommendation bundle."""
+
+    config_snippet: str
+    wizard_hint: str
+    summary: str
+
+
+class RecommendationBundleManifest(TypedDict):
+    """Validated recommendation bundle manifest payload."""
+
+    schema_type: str
+    schema_version: int
+    source_id: str
+    profile: str
+    config_path: str
+    files: RecommendationBundleManifestFiles
 
 
 def recommendation_bundle_manifest_path(prefix: str) -> Path:
@@ -21,7 +40,7 @@ def recommendation_bundle_manifest(
     profile: str,
     config_path: str,
     written_files: Mapping[str, str],
-) -> dict[str, object]:
+) -> RecommendationBundleManifest:
     """Build a versioned manifest for one recommendation bundle."""
     return {
         "schema_type": RECOMMENDATION_BUNDLE_SCHEMA_TYPE,
@@ -55,8 +74,8 @@ def _manifest_files(payload: Mapping[str, object]) -> Mapping[str, object]:
     raise ValueError("Recommendation bundle manifest is missing files")
 
 
-def _normalized_manifest_files(files: Mapping[str, object]) -> dict[str, str]:
-    normalized_files = {
+def _normalized_manifest_files(files: Mapping[str, object]) -> RecommendationBundleManifestFiles:
+    normalized_files: RecommendationBundleManifestFiles = {
         "config_snippet": str(files.get("config_snippet", "")).strip(),
         "wizard_hint": str(files.get("wizard_hint", "")).strip(),
         "summary": str(files.get("summary", "")).strip(),
@@ -67,7 +86,7 @@ def _normalized_manifest_files(files: Mapping[str, object]) -> dict[str, str]:
     return normalized_files
 
 
-def validate_recommendation_bundle_manifest(payload: Mapping[str, object]) -> dict[str, object]:
+def validate_recommendation_bundle_manifest(payload: Mapping[str, object]) -> RecommendationBundleManifest:
     """Validate and normalize one recommendation bundle manifest."""
     schema_type = _manifest_string(payload, "schema_type")
     if schema_type != RECOMMENDATION_BUNDLE_SCHEMA_TYPE:

@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
-from typing import cast
 
 from venus_evcharger.bootstrap.wizard_charger_presets import apply_charger_preset_backend, relevant_charger_presets
+from venus_evcharger.bootstrap.wizard_choices import optional_choice
 from venus_evcharger.bootstrap.wizard_guidance import default_backend, resolved_primary_host, role_host_defaults
 from venus_evcharger.bootstrap.wizard_import import ImportedWizardDefaults
 from venus_evcharger.bootstrap.wizard_models import (
+    WIZARD_CHARGER_BACKENDS,
+    WIZARD_POLICY_MODES,
+    WIZARD_PROFILES,
     WizardAnswers,
     WizardChargerBackend,
     WizardPolicyMode,
@@ -26,16 +29,15 @@ from venus_evcharger.bootstrap.wizard_transport_guidance import (
     preset_specific_defaults,
 )
 
-
 def non_interactive_profile(namespace: argparse.Namespace, imported_defaults: ImportedWizardDefaults) -> WizardProfile:
-    profile = cast(WizardProfile | None, namespace.profile or imported_defaults.profile)
+    profile = optional_choice(namespace.profile or imported_defaults.profile, WIZARD_PROFILES, "profile")
     if profile is None:
         raise ValueError("--profile is required in --non-interactive mode unless --import-config/--clone-current provides one")
     return profile
 
 
 def non_interactive_policy_mode(namespace: argparse.Namespace, imported_defaults: ImportedWizardDefaults) -> WizardPolicyMode:
-    return cast(WizardPolicyMode, namespace.policy_mode or imported_defaults.policy_mode or "manual")
+    return optional_choice(namespace.policy_mode or imported_defaults.policy_mode, WIZARD_POLICY_MODES, "policy mode") or "manual"
 
 
 def non_interactive_digest_auth(namespace: argparse.Namespace, imported_defaults: ImportedWizardDefaults) -> bool:
@@ -64,7 +66,7 @@ def non_interactive_backend(
     topology_preset: str | None,
 ) -> WizardChargerBackend | None:
     _ = topology_preset
-    return cast(WizardChargerBackend | None, namespace.charger_backend or default_backend(profile, imported))
+    return optional_choice(namespace.charger_backend or default_backend(profile, imported), WIZARD_CHARGER_BACKENDS, "charger backend")
 
 
 def resolved_backend(

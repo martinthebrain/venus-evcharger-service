@@ -275,6 +275,11 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         self.assertEqual(counter_values["/Auto/SwitchBackend"], "switch_group")
         self.assertEqual(counter_values["/Auto/ChargerBackend"], "smartevse_charger")
 
+        service._error_state = "bad"
+        counter_values = DbusPublishController(service, self._real_age_seconds)._diagnostic_counter_values(current_time)
+        self.assertEqual(counter_values["/Auto/ErrorCount"], 0)
+        self.assertEqual(counter_values["/Auto/DbusReadErrors"], 0)
+
     def test_software_update_age_values_are_negative_one_before_any_check_or_run(self) -> None:
         service = SimpleNamespace(
             _dbusservice={},
@@ -312,4 +317,3 @@ class _TestDbusPublishControllerDiagnosticsPart1:
 
         self.assertEqual(age_values["/Auto/SoftwareUpdateLastCheckAge"], -1.0)
         self.assertEqual(age_values["/Auto/SoftwareUpdateLastRunAge"], -1.0)
-

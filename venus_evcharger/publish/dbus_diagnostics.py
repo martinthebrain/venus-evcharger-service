@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any
 
 from venus_evcharger.core.common import _charger_retry_remaining_seconds, _fresh_charger_transport_timestamp
 from venus_evcharger.core.contracts import (
@@ -27,9 +28,14 @@ class _DbusPublishDiagnosticsMixin(
     _DbusDiagnosticsScheduleMixin,
     _DbusDiagnosticsSourcesMixin,
 ):
+    @staticmethod
+    def _runtime_error_state(service: Any) -> Mapping[str, Any]:
+        error_state = getattr(service, "_error_state", {})
+        return error_state if isinstance(error_state, Mapping) else {}
+
     def _diagnostic_counter_values(self, now: float) -> dict[str, DiagnosticValue]:
         """Return change-driven diagnostic counters keyed by DBus path."""
-        error_state = cast(dict[str, Any], self.service._error_state)
+        error_state = self._runtime_error_state(self.service)
         scheduled_snapshot = self._scheduled_snapshot(self.service, now)
         auto_state, auto_state_code = normalized_auto_state_pair(
             getattr(self.service, "_last_auto_state", "idle"),

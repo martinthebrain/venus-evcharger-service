@@ -207,6 +207,17 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
             now=None,
         )
         self.assertEqual(worker_snapshot["captured_at"], 0.0)
+        worker_snapshot = normalized_worker_snapshot(
+            configparser.ConfigParser({"captured_at": "5.0"})["DEFAULT"],
+            now=6.0,
+        )
+        self.assertEqual(worker_snapshot["captured_at"], 5.0)
+        worker_snapshot = normalized_worker_snapshot(
+            {"captured_at": 5.0, "pm_status": "bad", "pm_confirmed": True},
+            now=6.0,
+        )
+        self.assertIsNone(worker_snapshot["pm_status"])
+        self.assertFalse(worker_snapshot["pm_confirmed"])
         self.assertFalse(cutover_confirmed_off(
             relay_on=False,
             pending_state=None,

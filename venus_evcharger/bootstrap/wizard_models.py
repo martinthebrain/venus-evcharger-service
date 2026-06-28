@@ -23,6 +23,23 @@ WizardChargerBackend = Literal[
 ]
 WizardTransportKind = Literal["serial_rtu", "tcp"]
 
+WIZARD_PROFILES: tuple[WizardProfile, ...] = (
+    "simple_relay",
+    "native_device",
+    "hybrid_topology",
+    "multi_adapter_topology",
+    "advanced_manual",
+)
+WIZARD_POLICY_MODES: tuple[WizardPolicyMode, ...] = ("manual", "auto", "scheduled")
+WIZARD_CHARGER_BACKENDS: tuple[WizardChargerBackend, ...] = (
+    "goe_charger",
+    "simpleevse_charger",
+    "smartevse_charger",
+    "template_charger",
+    "modbus_charger",
+)
+WIZARD_TRANSPORT_KINDS: tuple[WizardTransportKind, ...] = ("serial_rtu", "tcp")
+
 
 @dataclass(frozen=True)
 class WizardAnswers:

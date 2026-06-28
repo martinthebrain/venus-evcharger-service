@@ -5,13 +5,32 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any, TypeGuard
 
 from venus_evcharger.energy import EnergySourceDefinition, EnergySourceSnapshot
+from venus_evcharger.energy.numeric import optional_float, optional_int
 from venus_evcharger.inputs.helper.capacity_persistence import (
     configured_estimated_capacity_payload,
     persist_estimated_capacity_if_ah_changed,
 )
+
+
+def _capacity_payload_mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
+def _capacity_payload_float(payload: Mapping[str, object], key: str) -> float | None:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return None
+    return optional_float(value)
+
+
+def _capacity_payload_int(payload: Mapping[str, object], key: str) -> int | None:
+    return optional_int(payload.get(key))
 
 
 class _AutoInputHelperSourceDbusSnapshotMixin:
@@ -80,12 +99,12 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
             role=source.role,
             service_name=service_name,
             soc=soc_value,
-            usable_capacity_wh=cast(float | None, capacity_payload.get("usable_capacity_wh")),
+            usable_capacity_wh=_capacity_payload_float(capacity_payload, "usable_capacity_wh"),
             usable_capacity_source=str(capacity_payload.get("usable_capacity_source", "")),
-            installed_capacity_ah=cast(float | None, capacity_payload.get("installed_capacity_ah")),
-            capacity_voltage_v=cast(float | None, capacity_payload.get("capacity_voltage_v")),
-            capacity_nominal_voltage_v=cast(float | None, capacity_payload.get("capacity_nominal_voltage_v")),
-            capacity_cell_count=cast(int | None, capacity_payload.get("capacity_cell_count")),
+            installed_capacity_ah=_capacity_payload_float(capacity_payload, "installed_capacity_ah"),
+            capacity_voltage_v=_capacity_payload_float(capacity_payload, "capacity_voltage_v"),
+            capacity_nominal_voltage_v=_capacity_payload_float(capacity_payload, "capacity_nominal_voltage_v"),
+            capacity_cell_count=_capacity_payload_int(capacity_payload, "capacity_cell_count"),
             battery_chemistry=source.battery_chemistry,
             net_battery_power_w=net_battery_power,
             ac_power_w=ac_power,
@@ -104,18 +123,32 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         soc_value: float | None,
         now: float,
     ) -> dict[str, object]:
-        configured = self._configured_dbus_capacity_payload(source)
+        configured = _AutoInputHelperSourceDbusSnapshotMixin._configured_dbus_capacity_payload(source)
         if configured is not None:
-            return cast(dict[str, object], configured)
-        cached = self._cached_dbus_capacity_payload(source, service_name)
-        startup_recheck_due = self._dbus_capacity_startup_recheck_due(source, service_name, now)
-        if self._dbus_cached_capacity_usable(cached, startup_recheck_due):
-            return cast(dict[str, object], cached)
-        inferred = self._fresh_dbus_capacity_payload(source, service_name, soc_value, startup_recheck_due)
-        return cast(dict[str, object], self._resolved_dbus_capacity_payload(inferred, cached))
+            return configured
+        cached = _AutoInputHelperSourceDbusSnapshotMixin._cached_dbus_capacity_payload(self, source, service_name)
+        startup_recheck_due = _AutoInputHelperSourceDbusSnapshotMixin._dbus_capacity_startup_recheck_due(
+            self,
+            source,
+            service_name,
+            now,
+        )
+        if _AutoInputHelperSourceDbusSnapshotMixin._dbus_cached_capacity_usable(cached, startup_recheck_due):
+            return cached
+        inferred = _AutoInputHelperSourceDbusSnapshotMixin._fresh_dbus_capacity_payload(
+            self,
+            source,
+            service_name,
+            soc_value,
+            startup_recheck_due,
+        )
+        return _AutoInputHelperSourceDbusSnapshotMixin._resolved_dbus_capacity_payload(inferred, cached)
 
     @staticmethod
-    def _dbus_cached_capacity_usable(cached: dict[str, object] | None, startup_recheck_due: bool) -> bool:
+    def _dbus_cached_capacity_usable(
+        cached: dict[str, object] | None,
+        startup_recheck_due: bool,
+    ) -> TypeGuard[dict[str, object]]:
         return cached is not None and not startup_recheck_due
 
     @staticmethod
@@ -136,12 +169,17 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         soc_value: float | None,
         startup_recheck_due: bool,
     ) -> dict[str, object] | None:
-        inferred = self._infer_dbus_capacity_payload(source, service_name, soc_value)
+        inferred = _AutoInputHelperSourceDbusSnapshotMixin._infer_dbus_capacity_payload(
+            self,
+            source,
+            service_name,
+            soc_value,
+        )
         if inferred is None:
             return None
         self._store_dbus_capacity_payload(source, service_name, inferred, startup_recheck_done=startup_recheck_due)
         self._persist_dbus_capacity_payload_if_needed(source, inferred, startup_recheck_due)
-        return cast(dict[str, object], inferred)
+        return inferred
 
     @staticmethod
     def _configured_dbus_capacity_payload(source: EnergySourceDefinition) -> dict[str, object] | None:
@@ -157,9 +195,7 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         key = self._dbus_capacity_cache_key(source, service_name)
         estimates = getattr(self, "_auto_battery_capacity_estimates", {})
         cached = estimates.get(key) if isinstance(estimates, dict) else None
-        if isinstance(cached, dict):
-            return cast(dict[str, object], dict(cached))
-        return configured_estimated_capacity_payload(source)
+        return _capacity_payload_mapping(cached) or configured_estimated_capacity_payload(source)
 
     def _persist_dbus_capacity_payload_if_needed(
         self: Any,
@@ -223,14 +259,18 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         service_name: str,
         soc_value: float | None,
     ) -> dict[str, object] | None:
-        if not self._dbus_capacity_inference_allowed(source, soc_value):
+        if not _AutoInputHelperSourceDbusSnapshotMixin._dbus_capacity_inference_allowed(source, soc_value):
             return None
         direct_capacity = self._read_positive_optional_energy_value(service_name, source.capacity_wh_path)
         if direct_capacity is not None:
-            return cast(dict[str, object], self._direct_dbus_capacity_payload(direct_capacity))
+            return _AutoInputHelperSourceDbusSnapshotMixin._direct_dbus_capacity_payload(direct_capacity)
         installed_capacity_ah = self._read_positive_optional_energy_value(service_name, source.capacity_ah_path)
         voltage = self._read_positive_optional_energy_value(service_name, source.voltage_path)
-        return cast(dict[str, object] | None, self._lfp_inferred_dbus_capacity_payload(installed_capacity_ah, voltage))
+        return _AutoInputHelperSourceDbusSnapshotMixin._lfp_inferred_dbus_capacity_payload(
+            self,
+            installed_capacity_ah,
+            voltage,
+        )
 
     @staticmethod
     def _dbus_capacity_inference_allowed(source: EnergySourceDefinition, soc_value: float | None) -> bool:
@@ -284,17 +324,15 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
             operating_mode,
         ) = fields
         validated_soc = self._validated_energy_source_soc(source, service_name, soc_value)
-        return cast(
-            EnergySourceSnapshot,
-            self._dbus_energy_source_snapshot_payload(
-                source,
-                service_name,
-                validated_soc,
-                net_battery_power,
-                ac_power,
-                pv_input_power,
-                grid_interaction,
-                operating_mode,
-                now,
-            ),
+        return _AutoInputHelperSourceDbusSnapshotMixin._dbus_energy_source_snapshot_payload(
+            self,
+            source,
+            service_name,
+            validated_soc,
+            net_battery_power,
+            ac_power,
+            pv_input_power,
+            grid_interaction,
+            operating_mode,
+            now,
         )

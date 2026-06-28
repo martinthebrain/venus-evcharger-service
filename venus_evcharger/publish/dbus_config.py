@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Mapping, TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.backend.models import effective_supported_phase_selections, switch_feedback_mismatch
@@ -254,7 +255,9 @@ class _DbusPublishConfigMixin:
     def _auto_metrics(service: Any) -> dict[str, Any]:
         """Return the latest Auto metrics mapping used for outward diagnostics."""
         metrics = getattr(service, "_last_auto_metrics", None)
-        return dict(cast(dict[str, Any], metrics)) if isinstance(metrics, dict) else {}
+        if not isinstance(metrics, Mapping):
+            return {}
+        return {str(key): value for key, value in metrics.items()}
 
     @classmethod
     def _auto_phase_metric_text(cls, service: Any, field_name: str) -> str:

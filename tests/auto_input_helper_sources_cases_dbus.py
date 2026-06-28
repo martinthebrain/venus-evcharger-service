@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from venus_evcharger.core.shared import compact_json
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, GatewayClient, dbus_path_key, gateway_paths
 
 
 class _AutoInputHelperSourcesDbusCases:
@@ -74,6 +74,9 @@ class _AutoInputHelperSourcesDbusCases:
     def test_get_dbus_value_reads_gateway_cache_and_child_nodes_use_introspection_snapshot(self):
         helper = self._make_helper()
         self._write_gateway_cache(helper, values={("svc", "/Path"): 42.0})
+        helper._gateway_client_instance = object()
+        self.assertIsInstance(helper._gateway_client(), GatewayClient)
+        self.assertIs(helper._gateway_client(), helper._gateway_client_instance)
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
             handle.write(
                 compact_json(
@@ -102,6 +105,13 @@ class _AutoInputHelperSourcesDbusCases:
                 self.assertEqual(helper._get_dbus_child_nodes("svc", "/Ac/Grid"), ["L1", "L2"])
         finally:
             os.unlink(helper.dbus_introspection_snapshot_path)
+
+    def test_get_dbus_value_ignores_fresh_non_numeric_gateway_values(self):
+        helper = self._make_helper()
+        paths = self._write_gateway_cache(helper, values={("svc", "/Path"): "not-numeric"})
+
+        self.assertIsNone(helper._get_dbus_value("svc", "/Path"))
+        self.assertEqual(self._gateway_commands(paths), [])
 
     def test_get_dbus_value_rejects_stale_gateway_cache_and_requests_refresh(self):
         helper = self._make_helper()
