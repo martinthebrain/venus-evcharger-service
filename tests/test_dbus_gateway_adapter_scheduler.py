@@ -1238,6 +1238,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             _install_mock(adapter, "poll_one_due_read_once", MagicMock(return_value=False))
             _install_mock(adapter, "refresh_services_if_due_once", MagicMock(return_value=False))
             _install_mock(adapter, "enqueue_background_introspection_if_due", MagicMock())
+            _install_mock(adapter, "list_services", MagicMock(return_value=["svc"]))
             _install_mock(adapter.discovery, "refresh_services", MagicMock(return_value=["svc"]))
 
             self.assertTrue(adapter.process_one_dbus_operation_once())

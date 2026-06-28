@@ -21,6 +21,7 @@ from venus_evcharger.dbus_gateway_core import (
 )
 
 NumericMetadataValue = str | bytes | bytearray | int | float
+NUMERIC_METADATA_TYPES = (str, bytes, bytearray, int, float)
 
 
 def _value_age(updated_at: float, now: float) -> float:
@@ -81,7 +82,7 @@ def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[s
 def _metadata_now(value: object, fallback: float | None = None) -> float | None:
     if value is None:
         return fallback
-    if isinstance(value, NumericMetadataValue):
+    if isinstance(value, NUMERIC_METADATA_TYPES):
         return float(value)  # pragma: no mutate
     return fallback
 
@@ -89,7 +90,7 @@ def _metadata_now(value: object, fallback: float | None = None) -> float | None:
 def _metadata_float(value: object, fallback: float) -> float:
     if value is None:
         return fallback
-    if isinstance(value, NumericMetadataValue):
+    if isinstance(value, NUMERIC_METADATA_TYPES):
         return float(value)  # pragma: no mutate
     return fallback
 

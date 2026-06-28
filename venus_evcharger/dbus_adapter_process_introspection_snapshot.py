@@ -132,5 +132,5 @@ def _backoff_introspection_finding(entry: CommandMapping, status: str, now: floa
     }
 
 
-def _xml_names(root: xml_et.Element[str], tag: str) -> list[str]:
+def _xml_names(root: xml_et.Element, tag: str) -> list[str]:
     return [str(node.attrib.get("name", "")) for node in root.findall(tag) if node.attrib.get("name")]
