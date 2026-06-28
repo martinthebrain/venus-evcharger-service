@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.energy import (
     EnergyClusterSnapshot,
-    EnergyLearningProfile,
     EnergySourceDefinition,
     EnergySourceSnapshot,
     aggregate_energy_sources,
@@ -19,6 +18,13 @@ from venus_evcharger.energy import (
     read_energy_source_snapshot,
     summarize_energy_learning_profiles,
     update_energy_learning_profiles,
+)
+from .energy_snapshot_contracts import (
+    energy_source_definitions,
+    learning_profile_payloads,
+    learning_profiles,
+    nested_object_mappings,
+    object_mapping,
 )
 from .storage_support import _DbusInputStorageSupportMixin
 
@@ -80,7 +86,10 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         )
 
     def _battery_snapshot_sources(self) -> tuple[EnergySourceDefinition, ...]:
-        return tuple(getattr(self.service, "auto_energy_sources", ()) or (self._primary_energy_source(),))
+        configured = energy_source_definitions(getattr(self.service, "auto_energy_sources", ()))
+        if configured:
+            return configured
+        return energy_source_definitions(self._primary_energy_source())
 
     def _battery_snapshot_cluster(
         self,
@@ -109,18 +118,19 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         cluster: EnergyClusterSnapshot,
         now: float,
     ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-        learning_profiles = update_energy_learning_profiles(
-            getattr(cache_owner, "_last_energy_learning_profiles", {}),
+        existing_profiles = learning_profiles(getattr(cache_owner, "_last_energy_learning_profiles", {}))
+        updated_profiles = update_energy_learning_profiles(
+            existing_profiles,
             cluster.sources,
             now,
         )
-        cache_owner._last_energy_learning_profiles = learning_profiles
+        cache_owner._last_energy_learning_profiles = updated_profiles
         learning_summary = summarize_energy_learning_profiles(
-            learning_profiles
+            updated_profiles
         )
         discharge_balance = derive_discharge_balance_metrics(
             cluster.sources,
-            learning_profiles,
+            updated_profiles,
         )
         forecast = derive_energy_forecast(
             {
@@ -132,20 +142,15 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             },
             learning_summary,
         )
-        return (
-            cast(dict[str, object], learning_summary),
-            cast(dict[str, object], discharge_balance),
-            cast(dict[str, object], forecast),
-        )
+        return object_mapping(learning_summary), object_mapping(discharge_balance), object_mapping(forecast)
 
     @staticmethod
     def _battery_snapshot_discharge_control(
         cluster: EnergyClusterSnapshot,
         sources: tuple[EnergySourceDefinition, ...],
     ) -> dict[str, object]:
-        return cast(
-            dict[str, object],
-            derive_discharge_control_metrics(cluster.sources, {source.source_id: source for source in sources}),
+        return object_mapping(
+            derive_discharge_control_metrics(cluster.sources, {source.source_id: source for source in sources})
         )
 
     @staticmethod
@@ -154,9 +159,9 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         discharge_balance: dict[str, object],
         discharge_control: dict[str, object],
     ) -> list[dict[str, object]]:
-        source_payloads = [source.as_dict() for source in cluster.sources]
-        source_balance = cast(dict[str, dict[str, object]], discharge_balance.get("sources", {}))
-        source_control = cast(dict[str, dict[str, object]], discharge_control.get("sources", {}))
+        source_payloads = [object_mapping(source.as_dict()) for source in cluster.sources]
+        source_balance = nested_object_mappings(discharge_balance.get("sources", {}))
+        source_control = nested_object_mappings(discharge_control.get("sources", {}))
         for source_payload in source_payloads:
             source_id = str(source_payload.get("source_id", ""))
             source_payload.update(source_balance.get(source_id, {}))
@@ -212,13 +217,9 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             "battery_hybrid_inverter_source_count": cluster.hybrid_inverter_source_count,
             "battery_inverter_source_count": cluster.inverter_source_count,
             "battery_sources": source_payloads,
-            "battery_learning_profiles": {
-                source_id: profile.as_dict()
-                for source_id, profile in cast(
-                    dict[str, EnergyLearningProfile],
-                    getattr(cache_owner, "_last_energy_learning_profiles", {}),
-                ).items()
-            },
+            "battery_learning_profiles": learning_profile_payloads(
+                getattr(cache_owner, "_last_energy_learning_profiles", {})
+            ),
         }
 
     @staticmethod
@@ -259,6 +260,12 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             "battery_learning_profiles": {},
         }
 
+    @staticmethod
+    def _failure_soc_value(value: object) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
     def _successful_battery_snapshot_payload(self, now: float) -> dict[str, object]:
         cluster, sources, _ = self._battery_snapshot_cluster(now)
         effective_soc = self._battery_snapshot_effective_soc(cluster)
@@ -294,7 +301,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             svc.auto_battery_soc_path,
             error,
         )
-        return self._empty_battery_snapshot_payload(cast(float | None, failure))
+        return self._empty_battery_snapshot_payload(self._failure_soc_value(failure))
 
     def get_battery_snapshot(self) -> dict[str, object]:
         """Return aggregated battery and inverter source data for Auto mode."""

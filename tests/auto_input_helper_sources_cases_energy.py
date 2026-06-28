@@ -6,11 +6,42 @@ from venus_evcharger.inputs.helper.sources_dbus_common import (
     _dbus_error_name,
     _is_expected_missing_dbus_error,
 )
+from venus_evcharger.inputs.energy_snapshot_contracts import (
+    energy_source_definitions,
+    is_source_definition_iterable,
+    learning_profile_payloads,
+    learning_profiles,
+    nested_object_mappings,
+    object_mapping,
+)
 from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbusMixin
 from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscriptionMixin
 
 
 class _AutoInputHelperSourcesEnergyCases:
+    def test_battery_snapshot_normalizers_reject_dirty_payloads(self):
+        source = EnergySourceDefinition(source_id="battery", role="battery", connector_type="dbus")
+        profile = EnergyLearningProfile(source_id="battery", sample_count=3)
+
+        self.assertEqual(energy_source_definitions(source), (source,))
+        self.assertEqual(energy_source_definitions([source, "bad", object()]), (source,))
+        self.assertEqual(energy_source_definitions("bad"), ())
+        self.assertEqual(energy_source_definitions(object()), ())
+        self.assertFalse(is_source_definition_iterable({"source": source}))
+
+        self.assertEqual(object_mapping("bad"), {})
+        self.assertEqual(object_mapping({1: "one"}), {"1": "one"})
+        self.assertEqual(nested_object_mappings("bad"), {})
+        self.assertEqual(nested_object_mappings({"battery": {"ready": True}, "skip": "bad"}), {"battery": {"ready": True}})
+
+        self.assertEqual(learning_profiles("bad"), {})
+        self.assertEqual(
+            set(learning_profiles({"battery": profile, "legacy": {"sample_count": 1}, "skip": object()})),
+            {"battery", "legacy"},
+        )
+        self.assertEqual(learning_profile_payloads("bad"), {})
+        self.assertEqual(learning_profile_payloads({"battery": profile, "skip": object()})["battery"]["source_id"], "battery")
+
     def test_mixin_default_dbus_module_fallbacks_are_disabled(self):
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
             _AutoInputHelperSourceDbusMixin._dbus_module()

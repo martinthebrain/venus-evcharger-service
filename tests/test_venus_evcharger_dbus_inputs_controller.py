@@ -473,6 +473,9 @@ class TestDbusInputController(unittest.TestCase):
 
         self.assertIsNone(controller._read_optional_energy_value("svc", ""))
         self.assertEqual(controller._read_optional_energy_text("svc", ""), "")
+        self.assertEqual(controller._failure_soc_value(42), 42.0)
+        self.assertIsNone(controller._failure_soc_value(True))
+        self.assertIsNone(controller._failure_soc_value("bad"))
 
         service._resolve_auto_battery_service = MagicMock(side_effect=["svc-a", "svc-b"])
         service._get_dbus_value = MagicMock(side_effect=[RuntimeError("boom"), 44.0])
