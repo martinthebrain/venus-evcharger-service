@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Automatic phase-selection decision helpers for the update cycle."""
 
 from __future__ import annotations
@@ -16,6 +14,9 @@ class _RelayPhaseDecisionMixin:
 
     if TYPE_CHECKING:  # pragma: no cover
 
+        @staticmethod
+        def _phase_voltage(voltage: float, selection: Any, voltage_mode: Any) -> float: ...
+
         @classmethod
         def _downshift_auto_phase_target(
             cls,
@@ -27,6 +28,23 @@ class _RelayPhaseDecisionMixin:
             surplus_watts: float,
             voltage: float,
         ) -> tuple[PhaseSelection | None, str, float | None] | None: ...
+
+        @classmethod
+        def _phase_switch_lockout_active(
+            cls,
+            svc: Any,
+            now: float,
+            selection: PhaseSelection | None = None,
+        ) -> bool: ...
+
+        @classmethod
+        def _phase_switch_mismatch_retry_active(
+            cls,
+            svc: Any,
+            current_selection: PhaseSelection,
+            target_selection: PhaseSelection,
+            now: float,
+        ) -> bool: ...
 
     @staticmethod
     def _phase_selection_count(selection: object) -> int:

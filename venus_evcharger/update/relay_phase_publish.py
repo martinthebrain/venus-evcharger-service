@@ -1,17 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Phase-metadata, relay-sync, and PM publish helpers for the update cycle."""
 
 from __future__ import annotations
 
 import logging
 import math
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
-class _RelayPhasePublishMixin:
+class _RelayPhasePublishMixin(_ComposableControllerMixin):
     """Translate PM metadata into phase displays and track relay confirmations."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+        _phase_values: Callable[[float, float, Any, Any], dict[str, Any]]
 
     @staticmethod
     def _phase_tuple(raw_value: Any) -> tuple[float, float, float] | None:

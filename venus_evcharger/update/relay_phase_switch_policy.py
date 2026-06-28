@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Phase-switch retry, lockout, and staging helpers for the update cycle."""
 
 from __future__ import annotations
@@ -10,9 +8,10 @@ from typing import Any
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.common import fresh_confirmed_relay_output
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.update.relay_phase_contracts import _RelayPhaseSwitchPolicyContractsMixin
 
 
-class _RelayPhaseSwitchPolicyMixin:
+class _RelayPhaseSwitchPolicyMixin(_RelayPhaseSwitchPolicyContractsMixin):
     """Handle phase-switch cooldowns, lockouts, and pending Auto candidates."""
 
     @classmethod

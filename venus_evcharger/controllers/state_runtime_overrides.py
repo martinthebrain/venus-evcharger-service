@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime-override persistence helpers for the state controller."""
 
 from __future__ import annotations
@@ -13,6 +11,7 @@ from typing import Any, Callable
 
 from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normalize_hhmm_text, scheduled_enabled_days_text
 from venus_evcharger.core.shared import compact_json
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.controllers.state_runtime_normalize import _StateRuntimeNormalizeMixin
 from venus_evcharger.controllers.state_specs import (
     RUNTIME_OVERRIDE_BY_CONFIG_KEY,
@@ -23,7 +22,13 @@ from venus_evcharger.controllers.state_specs import (
 )
 
 
-class _StateRuntimeOverridesMixin:
+class _StateRuntimeOverridesMixin(_ComposableControllerMixin):
+    @staticmethod
+    def runtime_overrides_path(defaults: configparser.SectionProxy) -> str:
+        device_instance = defaults.get("DeviceInstance", "60").strip() or "60"
+        fallback = f"/run/dbus-venus-evcharger-overrides-{device_instance}.ini"
+        return defaults.get("RuntimeOverridesPath", fallback).strip()
+
     @classmethod
     def _read_runtime_override_values(cls, path: str) -> dict[str, str]:
         if not str(path).strip():
@@ -242,4 +247,3 @@ class _StateRuntimeOverridesMixin:
 
     def _serialized_runtime_state(self) -> str:
         return compact_json(self.current_runtime_state())
-

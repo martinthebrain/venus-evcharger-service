@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import cast
 
 from venus_evcharger.core.shared import (
     configured_grid_paths,
@@ -16,6 +15,14 @@ from venus_evcharger.core.shared import (
 from venus_evcharger.dbus_introspection import owner_path_unusable, request_owner_introspection
 from venus_evcharger.energy import EnergySourceDefinition
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+
+
+def _service_name_or_none(value: object) -> str | None:
+    """Return a valid cached DBus service name, or None for malformed values."""
+    if not isinstance(value, str):
+        return None
+    service_name = value.strip()
+    return service_name or None
 
 
 class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
@@ -126,13 +133,14 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
 
     def _cached_auto_battery_service(self, now: float) -> str | None:
         svc = self.service
-        if discovery_cache_valid(
-            svc._resolved_auto_battery_service,
+        cached_service = _service_name_or_none(svc._resolved_auto_battery_service)
+        if cached_service is not None and discovery_cache_valid(
+            cached_service,
             svc._auto_battery_last_scan,
             svc.auto_battery_scan_interval_seconds,
             now,
         ):
-            return cast(str | None, svc._resolved_auto_battery_service)
+            return cached_service
         return None
 
     def _energy_cache_valid(self, source_id: str, now: float) -> str | None:
@@ -141,13 +149,14 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
         last_scan = getattr(svc, "_auto_energy_last_scan", {})
         cached_service = resolved.get(source_id) if isinstance(resolved, dict) else None
         cached_scan_at = last_scan.get(source_id, 0.0) if isinstance(last_scan, dict) else 0.0
-        if discovery_cache_valid(
-            cached_service,
+        service_name = _service_name_or_none(cached_service)
+        if service_name is not None and discovery_cache_valid(
+            service_name,
             cached_scan_at,
             svc.auto_battery_scan_interval_seconds,
             now,
         ):
-            return cast(str | None, cached_service)
+            return service_name
         return None
 
     def _remember_energy_service(self, source_id: str, service_name: str, now: float) -> str:
@@ -281,17 +290,15 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
                 svc.auto_grid_service,
                 ", ".join(missing_paths),
             )
-        return cast(
-            float | None,
-            self._handle_source_failure(
-                "grid",
-                now,
-                "grid-missing",
-                svc.auto_pv_scan_interval_seconds,
-                "Auto mode could not read grid power from %s.",
-                svc.auto_grid_service,
-            ),
+        self._handle_source_failure(
+            "grid",
+            now,
+            "grid-missing",
+            svc.auto_pv_scan_interval_seconds,
+            "Auto mode could not read grid power from %s.",
+            svc.auto_grid_service,
         )
+        return None
 
     def _finalize_grid_power(
         self,

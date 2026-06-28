@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Fresh charger readback helpers for the update-cycle relay logic."""
 
 from __future__ import annotations
 
 import time
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from venus_evcharger.core.contracts import finite_float_or_none
 
@@ -27,6 +25,9 @@ class ChargerCurrentBackend(Protocol):
 
 class _RelayChargerReadbackMixin:
     """Normalize fresh charger and switch readback surfaces for later policy code."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+        CHARGER_FAULT_HINT_TOKENS: frozenset[str]
 
     @staticmethod
     def _charger_enable_backend(svc: Any) -> ChargerEnableBackend | None:

@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="no-any-return"
-# pyright: reportReturnType=false
 """Shared helpers for Victron ESS balance-bias learning profiles."""
 
 from __future__ import annotations
@@ -38,6 +36,28 @@ def _victron_ess_balance_near_charge_limit(site_regime: str, combined_charge_hea
 
 def _victron_ess_balance_pv_phase(expected_export_w: float, pv_input_power_w: float) -> str:
     return "pv_strong" if max(expected_export_w, pv_input_power_w) >= 1500.0 else "pv_weak"
+
+
+def _victron_ess_balance_adaptive_scalar_int(value: Any) -> int:
+    return max(0, int(value or 0))
+
+
+def _victron_ess_balance_adaptive_scalar_str(value: Any) -> str:
+    return str(value or "")
+
+
+def _victron_ess_balance_adaptive_scalar_value(
+    raw_value: Any,
+    caster: Any,
+    optional_float: Callable[[Any], float | None],
+) -> Any:
+    scalar_casts: dict[str, Callable[[Any], Any]] = {
+        "int": _victron_ess_balance_adaptive_scalar_int,
+        "str": _victron_ess_balance_adaptive_scalar_str,
+        "bool": bool,
+        "optional_float": optional_float,
+    }
+    return scalar_casts[str(caster)](raw_value)
 
 
 def _victron_ess_balance_learning_profile_key(

@@ -1,18 +1,91 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Relay decision, status derivation, and live publish helpers for the update cycle."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.common import evse_fault_reason
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
-class _RelayStatusPublishMixin:
+class _RelayStatusPublishMixin(_ComposableControllerMixin):
     """Apply relay intent, derive outward status, and publish live state."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+
+        @staticmethod
+        def _pm_status_confirmed(pm_status: dict[str, Any]) -> bool: ...
+
+        @staticmethod
+        def log_auto_relay_change(svc: Any, desired_relay: bool) -> None: ...
+
+        def _publish_local_pm_status_best_effort(self, relay_on: bool, now: float) -> None: ...
+
+        @classmethod
+        def _apply_enabled_target(cls, svc: Any, enabled: bool, now: float) -> bool: ...
+
+        @classmethod
+        def _enable_control_source_key(cls, svc: Any) -> str: ...
+
+        @classmethod
+        def _enable_control_label(cls, svc: Any) -> str: ...
+
+        @classmethod
+        def _remember_charger_transport_issue(
+            cls,
+            svc: Any,
+            reason: str,
+            source: str,
+            error: BaseException,
+            now: float | None = None,
+        ) -> None: ...
+
+        @classmethod
+        def _remember_charger_retry(
+            cls,
+            svc: Any,
+            reason: str,
+            source: str,
+            now: float | None = None,
+        ) -> None: ...
+
+        @classmethod
+        def charger_health_override(cls, svc: Any, now: float | None = None) -> str | None: ...
+
+        @classmethod
+        def _charger_status_override(
+            cls,
+            svc: Any,
+            auto_mode_active: bool,
+            now: float | None = None,
+        ) -> tuple[int, str] | None: ...
+
+        @classmethod
+        def _effective_enabled_state(cls, svc: Any, relay_on: bool, now: float | None = None) -> bool: ...
+
+        @classmethod
+        def _fresh_charger_power_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        @classmethod
+        def _fresh_charger_actual_current_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        @classmethod
+        def _fresh_charger_energy_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        def _phase_data_for_pm_status(
+            self,
+            pm_status: dict[str, Any] | None,
+            power: float,
+            voltage: float,
+            current: float,
+        ) -> dict[str, dict[str, float]]: ...
+
+        @staticmethod
+        def _total_phase_current(phase_data: dict[str, dict[str, float]]) -> float: ...
+
+        def update_virtual_state(self, status: int, current_total_energy: float, relay_on: bool) -> bool: ...
 
     def apply_relay_decision(
         self,

@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime-config validation helpers for the state controller."""
 
 from __future__ import annotations
@@ -10,9 +8,10 @@ from typing import Any
 
 from venus_evcharger.auto.policy import validate_auto_policy
 from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normalize_hhmm_text, scheduled_enabled_days_text
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
-class _StateValidationMixin:
+class _StateValidationMixin(_ComposableControllerMixin):
     NON_NEGATIVE_INTERVAL_ATTRS = (
         "auto_pv_scan_interval_seconds",
         "auto_battery_scan_interval_seconds",

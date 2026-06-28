@@ -109,6 +109,9 @@ class TestDbusInputController(unittest.TestCase):
         self._write_gateway_cache(service, values={("svc", "/Path"): 42.0})
         self.assertEqual(controller.get_dbus_value("svc", "/Path"), 42.0)
 
+        self._write_gateway_cache(service, values={("svc", "/Text"): "not-a-number"})
+        self.assertIsNone(controller.get_dbus_value("svc", "/Text"))
+
         with patch("venus_evcharger.inputs.dbus.time.time", return_value=10.0):
             service._dbus_list_backoff_until = 20.0
             with self.assertRaises(RuntimeError):
@@ -159,6 +162,11 @@ class TestDbusInputController(unittest.TestCase):
         with patch("venus_evcharger.inputs.dbus.time.time", return_value=120.0):
             self.assertEqual(controller.resolve_auto_pv_services(), ["cached-pv"])
 
+        service._resolved_auto_pv_services = "malformed-cache"
+        service._list_dbus_services = MagicMock(return_value=["com.victronenergy.pvinverter.http_40"])
+        with patch("venus_evcharger.inputs.dbus.time.time", return_value=121.0):
+            self.assertEqual(controller.resolve_auto_pv_services(), ["com.victronenergy.pvinverter.http_40"])
+
         service._resolved_auto_pv_services = []
         service._list_dbus_services = MagicMock(return_value=["com.victronenergy.system"])
         with patch("venus_evcharger.inputs.dbus.time.time", return_value=200.0):
@@ -195,6 +203,10 @@ class TestDbusInputController(unittest.TestCase):
         service._auto_battery_last_scan = 100.0
         with patch("venus_evcharger.inputs.dbus.time.time", return_value=120.0):
             self.assertEqual(controller._cached_auto_battery_service(120.0), "cached-battery")
+
+        service._resolved_auto_battery_service = 123
+        service._auto_battery_last_scan = 100.0
+        self.assertIsNone(controller._cached_auto_battery_service(120.0))
 
         service._list_dbus_services = MagicMock(return_value=["com.victronenergy.system"])
         with patch.object(controller, "_battery_service_has_soc", return_value=False):
@@ -332,6 +344,10 @@ class TestDbusInputController(unittest.TestCase):
         )
         with patch("venus_evcharger.inputs.storage.time.time", return_value=120.0):
             self.assertEqual(controller._resolve_energy_source_service(cached_source), "cached-hybrid")
+
+        service._resolved_auto_energy_services = {"hybrid": 123}
+        service._auto_energy_last_scan = {"hybrid": 100.0}
+        self.assertIsNone(controller._energy_cache_valid("hybrid", 120.0))
 
         missing_source = EnergySourceDefinition(source_id="missing", role="battery", connector_type="dbus")
         with self.assertRaisesRegex(ValueError, "No readable DBus service configured"):

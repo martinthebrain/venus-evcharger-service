@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 sys.modules["vedbus"] = MagicMock()
 
 from venus_evcharger.companion import dbus_bridge_grid as bridge_grid_mod
+from venus_evcharger.controllers import state_json as state_json_mod
 from venus_evcharger.controllers import state_runtime_snapshot as runtime_snapshot_mod
 from venus_evcharger.energy import probe_core as probe_core_mod
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
@@ -218,11 +219,15 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             good_path = Path(tmpdir) / "runtime.json"
             bad_path = Path(tmpdir) / "bad.json"
+            list_path = Path(tmpdir) / "list.json"
             good_path.write_text(json.dumps({"ok": True}), encoding="utf-8")
             bad_path.write_text("{broken", encoding="utf-8")
+            list_path.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
             self.assertEqual(snapshot._read_runtime_state_payload(str(good_path)), {"ok": True})
             self.assertIsNone(snapshot._read_runtime_state_payload(str(Path(tmpdir) / "missing.json")))
             self.assertIsNone(snapshot._read_runtime_state_payload(str(bad_path)))
+            self.assertIsNone(snapshot._read_runtime_state_payload(str(list_path)))
+            self.assertIsNone(state_json_mod.json_object_payload({1: "bad-key"}))
 
         self.assertEqual(runtime_snapshot_mod._victron_ess_balance_energy_ids(service), ["hybrid", "victron"])
         self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_string(service, "auto_battery_discharge_balance_victron_bias_service"), "com.victronenergy.settings")

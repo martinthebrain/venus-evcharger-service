@@ -1,14 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Support helpers for Victron ESS balance-bias safety handling."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 
 class _UpdateCycleVictronEssBalanceSafetySupportMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        def _optional_float(self, value: Any) -> float | None: ...
+
+        def _victron_ess_balance_current_tuning_snapshot(self, svc: Any) -> dict[str, Any]: ...
+
+        def _victron_ess_balance_activation_mode(self, svc: Any) -> str: ...
+
+        def _reset_victron_ess_balance_pid_integral(self, svc: Any, aggressive: bool = False) -> None: ...
+
     def _victron_ess_balance_refresh_stable_tuning(self, svc: Any, metrics: dict[str, Any], now: float) -> None:
         confidence = self._optional_float(metrics.get("battery_discharge_balance_victron_bias_recommendation_confidence"))
         stability = self._optional_float(metrics.get("battery_discharge_balance_victron_bias_learning_profile_stability_score"))

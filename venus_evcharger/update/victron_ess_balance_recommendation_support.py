@@ -1,14 +1,37 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Support helpers for Victron ESS balance-bias recommendations."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 
 class _UpdateCycleVictronEssBalanceRecommendationSupportMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        def _optional_float(self, value: Any) -> float | None: ...
+
+        def _victron_ess_balance_learning_profile_state(self, svc: Any, profile_key: str) -> dict[str, Any]: ...
+
+        def _victron_ess_balance_profile_sample_count(self, profile: dict[str, Any]) -> int: ...
+
+        def _merge_victron_ess_balance_learning_profile_metrics(
+            self,
+            svc: Any,
+            metrics: dict[str, Any],
+            profile_key: str,
+        ) -> None: ...
+
+        def _victron_ess_balance_overshoot_cooldown_active(self, svc: Any, now: float) -> bool: ...
+
+        def _populate_victron_ess_balance_runtime_safety_metrics(
+            self,
+            svc: Any,
+            now: float,
+            metrics: dict[str, Any],
+        ) -> None: ...
+
+        def _victron_ess_balance_activation_mode(self, svc: Any) -> str: ...
+
     @staticmethod
     def _victron_ess_balance_has_insufficient_telemetry(
         observations: dict[str, Any],

@@ -1,19 +1,30 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Audit, event, and server helpers for the Control API mixin."""
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from venus_evcharger.control import ControlApiAuditTrail, ControlApiIdempotencyStore, ControlApiRateLimiter
 from venus_evcharger.control.events import ControlApiEventBus
 
 
 _RuntimeComponent = TypeVar("_RuntimeComponent")
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from typing import Protocol
+
+    class _ControlApiServerLike(Protocol):
+        bound_host: str
+        bound_port: int
+        bound_unix_socket_path: str
+
+        def start(self) -> None: ...
+
+        def stop(self) -> None: ...
 
 
 def _runtime_component(
@@ -31,6 +42,26 @@ def _runtime_component(
 
 
 class _ControlApiRuntimeMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        control_api_enabled: bool
+        control_api_host: str
+        control_api_port: int
+        control_api_auth_token: str
+        control_api_read_token: str
+        control_api_control_token: str
+        control_api_admin_token: str
+        control_api_update_token: str
+        control_api_localhost_only: bool
+        control_api_unix_socket_path: str
+        control_api_listen_host: str
+        control_api_listen_port: int
+        control_api_bound_unix_socket_path: str
+        _control_api_server: _ControlApiServerLike | None
+
+        def _state_api_event_snapshot_payload(self) -> dict[str, Any]: ...
+
+        def _control_api_server_factory(self) -> Callable[..., _ControlApiServerLike]: ...
+
     def _control_api_audit_trail(self) -> ControlApiAuditTrail:
         return _runtime_component(
             self,

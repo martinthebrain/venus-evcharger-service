@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime-state restore helpers for the state controller."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import Any
 
+from venus_evcharger.backend.models import PhaseSelection
 from venus_evcharger.core.contracts import non_negative_float_or_none, non_negative_int
 from venus_evcharger.core.shared import write_text_atomically
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from .state_restore_support import (
     _StateRuntimeRestoreVictronEssMixin,
     _victron_ess_balance_energy_ids,
@@ -17,7 +17,7 @@ from .state_restore_support import (
 )
 
 
-class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin):
+class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin, _ComposableControllerMixin):
 
     @staticmethod
     def _victron_ess_balance_activation_mode(payload: dict[str, object], svc: Any) -> str | None:
@@ -150,12 +150,16 @@ class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin):
             svc._phase_switch_stable_until = None
             svc._phase_switch_resume_relay = False
 
-    def _normalized_phase_switch_mismatch_counts(self, raw_counts: object, default_selection: str) -> dict[str, int]:
+    def _normalized_phase_switch_mismatch_counts(
+        self,
+        raw_counts: object,
+        default_selection: PhaseSelection,
+    ) -> dict[str, int]:
         normalized_counts: dict[str, int] = {}
         if not isinstance(raw_counts, dict):
             return normalized_counts
         for raw_selection, raw_count in raw_counts.items():
-            normalized_selection = self._normalize_runtime_phase_selection(raw_selection, cast(Any, default_selection))
+            normalized_selection = self._normalize_runtime_phase_selection(raw_selection, default_selection)
             normalized_counts[normalized_selection] = non_negative_int(raw_count, 0)
         return normalized_counts
 

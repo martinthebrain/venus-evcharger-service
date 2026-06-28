@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """State-summary helpers for the Venus EV charger service."""
 
 from __future__ import annotations
@@ -23,9 +21,10 @@ from venus_evcharger.core.common import (
     scheduled_mode_snapshot,
 )
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
-class _StateSummaryMixin:
+class _StateSummaryMixin(_ComposableControllerMixin):
     @staticmethod
     def _summary_flag(value: object) -> str:
         return str(int(bool(value)))

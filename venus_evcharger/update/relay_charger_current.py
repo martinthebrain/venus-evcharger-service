@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Native charger-current and enable-target helpers for the update cycle."""
 
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.common import local_datetime_from_timestamp, mode_uses_scheduled_logic, scheduled_mode_snapshot
@@ -16,6 +14,42 @@ from venus_evcharger.update.relay_charger_readback import ChargerCurrentBackend
 
 class _RelayChargerCurrentMixin:
     """Derive and apply charger current targets from learned and scheduled policy."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+
+        @staticmethod
+        def _charger_current_backend(svc: Any) -> ChargerCurrentBackend | None: ...
+
+        @staticmethod
+        def _charger_enable_backend(svc: Any) -> Any | None: ...
+
+        @classmethod
+        def _charger_retry_active(cls, svc: Any, now: float | None = None) -> bool: ...
+
+        @classmethod
+        def _clear_charger_transport_issue(cls, svc: Any) -> None: ...
+
+        @classmethod
+        def _clear_charger_retry(cls, svc: Any) -> None: ...
+
+        @classmethod
+        def _remember_charger_transport_issue(
+            cls,
+            svc: Any,
+            reason: str,
+            source: str,
+            error: BaseException,
+            now: float | None = None,
+        ) -> None: ...
+
+        @classmethod
+        def _remember_charger_retry(
+            cls,
+            svc: Any,
+            reason: str,
+            source: str,
+            now: float | None = None,
+        ) -> None: ...
 
     @classmethod
     def _contactor_heuristic_delay_seconds(cls, svc: Any) -> float:

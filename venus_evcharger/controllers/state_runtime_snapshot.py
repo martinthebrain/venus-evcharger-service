@@ -1,18 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime-state snapshot helpers for the state controller."""
 
 from __future__ import annotations
 
-import json
-import logging
-from typing import Any, cast
+from typing import Any
 
+from venus_evcharger.controllers.state_json import read_json_object_file
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
-class _StateRuntimeSnapshotMixin:
+class _StateRuntimeSnapshotMixin(_ComposableControllerMixin):
     @staticmethod
     def _victron_ess_balance_runtime_profile_sample_count(profile: dict[str, object]) -> int:
         explicit_sample_count = profile.get("sample_count")
@@ -352,15 +350,7 @@ class _StateRuntimeSnapshotMixin:
 
     @staticmethod
     def _read_runtime_state_payload(path: str) -> dict[str, object] | None:
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                loaded_state = cast(dict[str, object], json.load(handle))
-        except FileNotFoundError:
-            return None
-        except Exception as error:  # pylint: disable=broad-except
-            logging.warning("Unable to read runtime state from %s: %s", path, error)
-            return None
-        return loaded_state
+        return read_json_object_file(path)
 
 
 def _victron_ess_balance_energy_ids(svc: Any) -> list[str]:

@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Core state payload helpers for the Control API mixin."""
 
 from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.control import ControlCommand
@@ -26,7 +24,32 @@ def _plain_state_mapping(value: object) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
+if TYPE_CHECKING:  # pragma: no cover
+    from typing import Protocol
+
+    class _WriteControllerLike(Protocol):
+        def build_control_command_from_payload(self, payload: dict[str, Any], source: str = "http") -> ControlCommand: ...
+
+    class _DbusDiagnosticsPublisherLike(Protocol):
+        def _diagnostic_counter_values(self, now: float) -> Mapping[str, Any]: ...
+
+        def _diagnostic_age_values(self, now: float) -> Mapping[str, Any]: ...
+
+
 class _ControlApiStateCoreMixin:
+    if TYPE_CHECKING:  # pragma: no cover
+        _write_controller: _WriteControllerLike
+        _dbus_publisher: _DbusDiagnosticsPublisherLike
+        active_phase_selection: str
+        requested_phase_selection: str
+        supported_phase_selections: tuple[str, ...]
+        service_name: str
+        connection_name: str
+
+        def _ensure_write_controller(self) -> None: ...
+
+        def _ensure_dbus_publisher(self) -> None: ...
+
     def _control_command_from_payload(self, payload: dict[str, Any], source: str = "http") -> ControlCommand:
         self._ensure_write_controller()
         command = self._write_controller.build_control_command_from_payload(payload, source=source)

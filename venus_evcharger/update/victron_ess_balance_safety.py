@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Victron ESS balance-bias safety helpers."""
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
-from .victron_ess_balance_apply import _UpdateCycleVictronEssBalanceApplyMixin
 from .victron_ess_balance_safety_support import _UpdateCycleVictronEssBalanceSafetySupportMixin
+
+
+def _optional_numeric_float(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
 
 
 class _UpdateCycleVictronEssBalanceSafetyMixin(_UpdateCycleVictronEssBalanceSafetySupportMixin):
@@ -241,7 +242,7 @@ class _UpdateCycleVictronEssBalanceSafetyMixin(_UpdateCycleVictronEssBalanceSafe
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
-            entry_at = _UpdateCycleVictronEssBalanceApplyMixin._optional_float(entry.get("at"))
+            entry_at = _optional_numeric_float(entry.get("at"))
             if entry_at is None or float(entry_at) < cutoff:
                 continue
             kept.append(dict(entry))

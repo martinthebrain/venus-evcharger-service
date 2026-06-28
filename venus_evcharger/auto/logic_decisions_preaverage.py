@@ -1,17 +1,87 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Pre-average and average-resolution helpers for Auto relay decisions."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .logic_types import NO_RELAY_DECISION, RelayDecisionState
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+
+from .logic_types import NO_RELAY_DECISION, RelayDecision, RelayDecisionState
 
 
-class _AutoDecisionPreAverageMixin:
+class _AutoDecisionPreAverageMixin(_ComposableControllerMixin):
+    if TYPE_CHECKING:  # pragma: no cover
+        _NO_DECISION: RelayDecisionState
+        _mode_uses_auto_logic: Callable[[Any], bool]
+
+        def _scheduled_night_charge_active(self, now: float | None = None) -> bool: ...
+
+        def _handle_non_auto_mode(self, relay_on: bool) -> bool: ...
+
+        def _handle_disabled_mode(self, cached_inputs: bool) -> bool: ...
+
+        def _handle_cutover_pending(self, relay_on: bool, cached_inputs: bool) -> RelayDecision: ...
+
+        def _grid_recently_read(self, grid_power: float | None, now: float) -> bool: ...
+
+        def _handle_grid_missing(self, relay_on: bool, now: float, cached_inputs: bool) -> bool: ...
+
+        def _handle_grid_recovery_start_gate(
+            self,
+            relay_on: bool,
+            now: float,
+            cached_inputs: bool,
+        ) -> RelayDecision: ...
+
+        def _resolve_battery_soc(
+            self,
+            battery_soc: float | int | None,
+            relay_on: bool,
+            now: float,
+            cached_inputs: bool,
+        ) -> tuple[float | None, RelayDecision]: ...
+
+        def _handle_common_runtime_gates(self, relay_on: bool, now: float, cached_inputs: bool) -> RelayDecision: ...
+
+        def is_within_auto_daytime_window(self) -> bool: ...
+
+        def _update_average_metrics(
+            self,
+            now: float,
+            pv_power: float,
+            grid_power: float,
+            battery_soc: float,
+            relay_on: bool,
+        ) -> tuple[float | None, float | None]: ...
+
+        def set_health(self, reason: str, cached: bool = False, relay_intent: bool | None = None) -> None: ...
+
+        def _handle_relay_on(
+            self,
+            avg_surplus_power: float,
+            avg_grid_power: float,
+            battery_soc: float,
+            daytime_window_open: bool,
+            now: float,
+            cached_inputs: bool,
+        ) -> bool: ...
+
+        def _handle_relay_off(
+            self,
+            avg_surplus_power: float,
+            avg_grid_power: float,
+            battery_soc: float,
+            daytime_window_open: bool,
+            now: float,
+            cached_inputs: bool,
+        ) -> bool: ...
+
+        def _learning_policy_now(self) -> float: ...
+
+        def _scheduled_night_decision(self, relay_on: bool, now: float, cached_inputs: bool) -> bool: ...
+
     def _pre_average_decision(
         self,
         relay_on: bool,

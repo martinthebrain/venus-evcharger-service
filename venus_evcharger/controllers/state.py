@@ -44,12 +44,6 @@ class ServiceStateController(
             "config.venus_evcharger.ini",
         )
 
-    @classmethod
-    def runtime_overrides_path(cls, defaults: configparser.SectionProxy) -> str:
-        device_instance = defaults.get("DeviceInstance", "60").strip() or "60"
-        fallback = f"/run/dbus-venus-evcharger-overrides-{device_instance}.ini"
-        return defaults.get("RuntimeOverridesPath", fallback).strip()
-
     def load_config(self) -> configparser.ConfigParser:
         config = configparser.ConfigParser()
         config.read(self.config_path())
@@ -59,4 +53,3 @@ class ServiceStateController(
                 "Copy it from the documented deploy/venus/config.venus_evcharger.ini template so the required keys exist."
             )
         return self._apply_runtime_overrides_to_config(self.service, config)
-

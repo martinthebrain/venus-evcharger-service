@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.core.shared import (
     coerce_dbus_numeric,
@@ -18,6 +18,36 @@ from venus_evcharger.core.split_mixins import ComposableControllerMixin as _Comp
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 
 
+def _numeric_dbus_value(value: Any) -> float | int | None:
+    """Return a scalar numeric DBus value or None for unusable payloads."""
+    coerced_value: object = coerce_dbus_numeric(value)
+    if isinstance(coerced_value, bool):
+        return None
+    if isinstance(coerced_value, (float, int)):
+        return coerced_value
+    return None
+
+
+def _service_name_or_none(value: object) -> str | None:
+    """Return one valid DBus service name from cached discovery data."""
+    if not isinstance(value, str):
+        return None
+    service_name = value.strip()
+    return service_name or None
+
+
+def _service_name_list(value: object) -> list[str] | None:
+    """Return a non-empty list of service names from cached discovery data."""
+    if not isinstance(value, list):
+        return None
+    service_names: list[str] = []
+    for item in value:
+        service_name = _service_name_or_none(item)
+        if service_name is not None:
+            service_names.append(service_name)
+    return service_names or None
+
+
 class _DbusInputPvMixin(_ComposableControllerMixin):
     def _dbus_module(self) -> Any:
         """Direct DBus access is forbidden outside the gateway adapter."""
@@ -26,8 +56,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
     @staticmethod
     def _coerce_dbus_value(value: Any) -> float | int | None:
         """Convert raw DBus values to numbers where possible."""
-        coerced_value = coerce_dbus_numeric(value)
-        return cast(float | int | None, coerced_value)
+        return _numeric_dbus_value(value)
 
     @staticmethod
     def _numeric_sum(value: Any) -> float | None:
@@ -43,7 +72,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
 
     def _source_retry_ready(self, source_key: str, now: float) -> bool:
         """Return whether a logical input source may currently be queried."""
-        return cast(bool, self.service.source_retry_ready(source_key, now))
+        return bool(self.service.source_retry_ready(source_key, now))
 
     def _mark_source_recovery(self, source_key: str, message: str, *args: Any) -> None:
         """Record that one logical input source has recovered."""
@@ -173,13 +202,14 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
             return [svc.auto_pv_service]
 
         now = time.time()
-        if discovery_cache_valid(
-            svc._resolved_auto_pv_services,
+        cached_services = _service_name_list(svc._resolved_auto_pv_services)
+        if cached_services is not None and discovery_cache_valid(
+            cached_services,
             svc._auto_pv_last_scan,
             svc.auto_pv_scan_interval_seconds,
             now,
         ):
-            return cast(list[str], svc._resolved_auto_pv_services)
+            return cached_services
 
         service_names = prefixed_service_names(
             svc.list_dbus_services(),
@@ -192,8 +222,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         logging.debug("Auto PV services resolved: %s", svc._resolved_auto_pv_services)
         if not svc._resolved_auto_pv_services:
             raise ValueError(f"No DBus service found with prefix '{svc.auto_pv_service_prefix}'")
-        resolved_services: list[str] = svc._resolved_auto_pv_services
-        return resolved_services
+        return service_names
 
     def _resolve_pv_service_names(self) -> tuple[list[str], bool]:
         """Resolve current AC PV service names and whether auto-discovery found none."""

@@ -1,18 +1,73 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Staged phase-switch runtime orchestration for the update cycle."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
-class _RelayPhaseSwitchRuntimeMixin:
+class _RelayPhaseSwitchRuntimeMixin(_ComposableControllerMixin):
     """Advance waiting and stabilizing phase-switch state machines."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+        PHASE_SWITCH_WAITING_STATE: str
+        PHASE_SWITCH_STABILIZING_STATE: str
+
+        @classmethod
+        def _fresh_charger_state_timestamp(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        @classmethod
+        def _remember_phase_switch_mismatch(cls, svc: Any, selection: PhaseSelection, now: float) -> int: ...
+
+        @classmethod
+        def _phase_switch_lockout_threshold(cls, svc: Any) -> int: ...
+
+        @classmethod
+        def _engage_phase_switch_lockout(cls, svc: Any, selection: PhaseSelection, now: float) -> None: ...
+
+        @classmethod
+        def _phase_switch_lockout_active(
+            cls,
+            svc: Any,
+            now: float,
+            selection: PhaseSelection | None = None,
+        ) -> bool: ...
+
+        @classmethod
+        def _phase_switch_fallback_selection(
+            cls,
+            svc: Any,
+            observed_selection: PhaseSelection | None,
+            pending_selection: PhaseSelection,
+        ) -> PhaseSelection: ...
+
+        @staticmethod
+        def _clear_auto_phase_candidate(svc: Any) -> None: ...
+
+        @classmethod
+        def _apply_enabled_target(cls, svc: Any, enabled: bool, now: float) -> bool: ...
+
+        @classmethod
+        def _enable_control_source_key(cls, svc: Any) -> str: ...
+
+        @classmethod
+        def _enable_control_label(cls, svc: Any) -> str: ...
+
+        def _publish_local_pm_status_best_effort(self, relay_on: bool, now: float) -> None: ...
+
+        @classmethod
+        def _clear_phase_switch_mismatch_tracking(
+            cls,
+            svc: Any,
+            selection: PhaseSelection | None = None,
+        ) -> None: ...
+
+        @staticmethod
+        def _clear_phase_switch_lockout(svc: Any) -> None: ...
 
     @staticmethod
     def _phase_switch_pause_seconds(svc: Any) -> float:

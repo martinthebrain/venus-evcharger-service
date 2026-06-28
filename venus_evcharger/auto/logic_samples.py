@@ -16,7 +16,7 @@ import logging
 import math
 import time
 from datetime import datetime
-from typing import Any, Deque, cast
+from typing import Any, Deque
 
 from .policy import AutoPolicy, validate_auto_policy
 from venus_evcharger.core.common import (
@@ -60,7 +60,7 @@ class _AutoDecisionSamplesMixin(_ComposableControllerMixin):
 
     def average_auto_metric(self, index: int) -> float | None:
         """Compute the mean of one field from the sample buffer."""
-        samples = cast(Deque[AutoSample], self.service.auto_samples)
+        samples: Deque[AutoSample] = self.service.auto_samples
         if not samples:
             return None
         return sum(sample[index] for sample in samples) / len(samples)
