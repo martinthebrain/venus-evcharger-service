@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.probe import probe_meter_backend, probe_switch_backend, read_charger_backend
+from venus_evcharger.bootstrap.errors import WIZARD_ROLE_PROBE_ERRORS
 from venus_evcharger.bootstrap.wizard_cli import prompt_yes_no
 from venus_evcharger.bootstrap.wizard_energy import (
     build_suggested_energy_merge,
@@ -162,7 +163,7 @@ def _live_connectivity_payload_with_hooks(
                     "status": "ok",
                     "payload": _combined_role_payload(role, backend, main_path, backend_type),
                 }
-            except Exception as exc:
+            except WIZARD_ROLE_PROBE_ERRORS as exc:
                 ok = False
                 role_results[role] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
             return
@@ -182,7 +183,7 @@ def _live_connectivity_payload_with_hooks(
                 }
                 return
             role_results[role] = {"status": "ok", "payload": probe(str(resolved_path))}
-        except Exception as exc:
+        except WIZARD_ROLE_PROBE_ERRORS as exc:
             ok = False
             role_results[role] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 

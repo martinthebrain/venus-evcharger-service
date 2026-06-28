@@ -14,9 +14,7 @@ from venus_evcharger.dbus_adapter_components import (
     DbusConnectionManager,
 )
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox
-
-CommandFile = tuple[str, dict[str, Any]]
-CommandFileList = list[CommandFile]
+from venus_evcharger.dbus_gateway_command_types import CommandFileList, CommandMapping
 
 
 class DbusWriteSchedulerAdapter(Protocol):  # pragma: no cover
@@ -36,7 +34,7 @@ class DbusWriteSchedulerAdapter(Protocol):  # pragma: no cover
     def dbus_service(self) -> Any: ...
     @property
     def dbus_service_registered(self) -> bool: ...
-    def process_non_write_command(self, command: Mapping[str, Any]) -> CommandOutcome: ...
+    def process_non_write_command(self, command: CommandMapping) -> CommandOutcome: ...
     def register_dbus_service_name(self) -> None: ...
     def timed_dbus_operation(self, kind: str, operation: Callable[[], Any]) -> Any: ...
     def timed_local_publish(self, operation: Callable[[], Any]) -> Any: ...
@@ -48,7 +46,7 @@ class DropStaleCoalescedCommands(Protocol):  # pragma: no cover
     def __call__(
         self,
         processed_path: str,
-        processed_command: Mapping[str, Any],
+        processed_command: CommandMapping,
         *,
         pending_commands: CommandFileList | None = None,
     ) -> None: ...
@@ -63,7 +61,7 @@ class ProcessLocalPublishBurst(Protocol):  # pragma: no cover
 class PublishCommand(Protocol):  # pragma: no cover
     """Callable surface for publishing one gateway command."""
 
-    def __call__(self, command: Mapping[str, Any], *, command_file: str = "") -> CommandOutcome: ...
+    def __call__(self, command: CommandMapping, *, command_file: str = "") -> CommandOutcome: ...
 
 
 class ProcessLoadedCommand(Protocol):  # pragma: no cover
@@ -72,7 +70,7 @@ class ProcessLoadedCommand(Protocol):  # pragma: no cover
     def __call__(
         self,
         path: str,
-        command: Mapping[str, Any],
+        command: CommandMapping,
         *,
         pending_commands: CommandFileList | None = None,
     ) -> CommandOutcome: ...

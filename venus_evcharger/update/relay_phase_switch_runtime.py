@@ -10,6 +10,16 @@ from venus_evcharger.core.contracts import finite_float_or_none
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
+PHASE_SWITCH_RUNTIME_APPLY_ERRORS = (
+    AttributeError,
+    KeyError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
+
 class _RelayPhaseSwitchRuntimeMixin(_ComposableControllerMixin):
     """Advance waiting and stabilizing phase-switch state machines."""
 
@@ -213,7 +223,7 @@ class _RelayPhaseSwitchRuntimeMixin(_ComposableControllerMixin):
             return relay_on, power, current, pm_confirmed
         try:
             applied = self._apply_enabled_target(svc, True, now)
-        except Exception as error:
+        except PHASE_SWITCH_RUNTIME_APPLY_ERRORS as error:
             source_key = self._enable_control_source_key(svc)
             source_label = self._enable_control_label(svc)
             svc._mark_failure(source_key)
@@ -352,7 +362,7 @@ class _RelayPhaseSwitchRuntimeMixin(_ComposableControllerMixin):
             return relay_on, power, current, pm_confirmed, False
         try:
             return self._apply_pending_phase_selection(svc, pending_selection, now)
-        except Exception as error:
+        except PHASE_SWITCH_RUNTIME_APPLY_ERRORS as error:
             relay_on, power, current, pm_confirmed = self._abort_pending_phase_switch(
                 svc,
                 relay_on,

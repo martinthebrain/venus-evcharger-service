@@ -19,6 +19,7 @@ from venus_evcharger.energy import (
     summarize_energy_learning_profiles,
     update_energy_learning_profiles,
 )
+from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS, DBUS_INPUT_SNAPSHOT_ERRORS
 from .energy_snapshot_contracts import (
     energy_source_definitions,
     learning_profile_payloads,
@@ -56,7 +57,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             pv_input_power = self._read_optional_energy_value(service_name, source.pv_power_path)
             grid_interaction = self._read_optional_energy_value(service_name, source.grid_interaction_path)
             operating_mode = self._read_optional_energy_text(service_name, source.operating_mode_path)
-        except Exception:
+        except DBUS_INPUT_READ_ERRORS:
             if source.source_id != self._primary_energy_source().source_id:
                 raise
             self.service.invalidate_auto_battery_service()
@@ -310,7 +311,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             return {"battery_soc": None}
         try:
             return self._successful_battery_snapshot_payload(now)
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_INPUT_SNAPSHOT_ERRORS as error:
             return self._failed_battery_snapshot_payload(now, error)
 
     def get_battery_soc(self) -> float | None:
@@ -327,7 +328,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         service_name = svc.resolve_auto_battery_service()
         try:
             return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)
-        except Exception:
+        except DBUS_INPUT_READ_ERRORS:
             svc.invalidate_auto_battery_service()
             service_name = svc.resolve_auto_battery_service()
             return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)

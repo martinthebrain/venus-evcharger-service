@@ -26,6 +26,8 @@ ErrorState = dict[str, int]
 FailureState = dict[str, bool]
 DefaultFactory = Callable[[], Any]
 
+AUDIT_LOG_READ_ERRORS = (OSError, RuntimeError, UnicodeDecodeError)
+AUDIT_LOG_WRITE_ERRORS = (OSError, RuntimeError, TypeError, UnicodeEncodeError)
 
 
 class _RuntimeSupportAuditMixin(_RuntimeSupportAuditFieldsMixin, _ComposableControllerMixin):
@@ -333,7 +335,7 @@ class _RuntimeSupportAuditMixin(_RuntimeSupportAuditFieldsMixin, _ComposableCont
                 return handle.readlines()
         except FileNotFoundError:
             return None
-        except Exception as error:  # pylint: disable=broad-except
+        except AUDIT_LOG_READ_ERRORS as error:
             logging.debug("Auto audit cleanup skipped for %s: %s", path, error)
             return None
 
@@ -342,7 +344,7 @@ class _RuntimeSupportAuditMixin(_RuntimeSupportAuditFieldsMixin, _ComposableCont
         """Persist one pruned audit payload with debug-only error handling."""
         try:
             write_text_atomically(path, "".join(kept_lines))
-        except Exception as error:  # pylint: disable=broad-except
+        except AUDIT_LOG_WRITE_ERRORS as error:
             logging.debug("Unable to prune auto audit log %s: %s", path, error)
 
     @staticmethod
@@ -397,6 +399,6 @@ class _RuntimeSupportAuditMixin(_RuntimeSupportAuditFieldsMixin, _ComposableCont
             self._write_auto_audit_line(path, self._format_auto_audit_line(svc, reason, cached, now))
             svc._last_auto_audit_key = audit_key
             svc._last_auto_audit_event_at = now
-        except Exception as error:  # pylint: disable=broad-except
+        except AUDIT_LOG_WRITE_ERRORS as error:
             logging.debug("Unable to write auto audit log %s: %s", path, error)
 __all__ = ["_RuntimeSupportAuditMixin"]

@@ -17,6 +17,8 @@ from gi.repository import GLib
 
 from venus_evcharger.dbus_adapter_process_protocol_loop import DbusAdapterLoopContext
 
+GATEWAY_TICK_RECOVERY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
 
 class DbusAdapterLoopMixin:
     def run(self: DbusAdapterLoopContext) -> None:  # pragma: no cover - Venus DBus/GLib process loop
@@ -49,7 +51,7 @@ class DbusAdapterLoopMixin:
             self.process_introspection_requests_once()
             self.process_one_dbus_operation_once()
             self.publish_cache()
-        except Exception as error:  # pylint: disable=broad-except
+        except GATEWAY_TICK_RECOVERY_ERRORS as error:
             self.circuit.record_error(error)
             logging.exception("DBus adapter tick failed: %s", error)
         finally:

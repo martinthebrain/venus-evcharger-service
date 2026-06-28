@@ -9,6 +9,8 @@ from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reas
 from venus_evcharger.core.common import evse_fault_reason
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
+RELAY_TARGET_APPLY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
 
 class _RelayStatusPublishMixin(_ComposableControllerMixin):
     """Apply relay intent, derive outward status, and publish live state."""
@@ -142,7 +144,7 @@ class _RelayStatusPublishMixin(_ComposableControllerMixin):
     def _apply_relay_target_best_effort(self, svc: Any, desired_relay: bool, now: float) -> bool | None:
         try:
             return self._relay_apply_result(self._apply_enabled_target(svc, desired_relay, now))
-        except Exception as error:
+        except RELAY_TARGET_APPLY_ERRORS as error:
             self._handle_relay_decision_failure(svc, error)
             return None
 

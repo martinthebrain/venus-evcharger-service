@@ -28,6 +28,16 @@ DEFAULT_CONFIG_PATH = os.path.join(
 )
 DEFAULT_GENERIC_SHELLY_SERVICE = "com.victronenergy.shelly"
 
+GENERIC_SHELLY_HELPER_ERRORS = (
+    KeyError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    configparser.Error,
+    xml_et.ParseError,
+)
+
 
 def _as_bool(value: object, default: bool = False) -> bool:
     """Convert a config value to bool."""
@@ -317,7 +327,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
         result = run_once(config_path)
-    except Exception as error:  # pylint: disable=broad-except
+    except GENERIC_SHELLY_HELPER_ERRORS as error:
         logging.exception("Generic Shelly one-shot helper failed: %s", error)
         return 1
     logging.info("Generic Shelly one-shot helper finished: %s", result)

@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 from typing import Any, TYPE_CHECKING
 
+from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_PROCESS_ERRORS
 from venus_evcharger.update.software_update_state import _SoftwareUpdateStateMixin
 
 
@@ -50,7 +51,7 @@ class _SoftwareUpdateRunMixin(_SoftwareUpdateStateMixin):
                 repo_root,
                 restart_script,
             )
-        except Exception as error:  # pylint: disable=broad-except
+        except SOFTWARE_UPDATE_PROCESS_ERRORS as error:
             cls._software_update_mark_install_failed(svc, error)
             return False
         svc._software_update_process = process

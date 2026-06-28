@@ -7,6 +7,7 @@ import logging
 from typing import Any, ClassVar
 
 from venus_evcharger.backend.models import effective_supported_phase_selections
+from venus_evcharger.controllers.errors import WRITE_SNAPSHOT_DBUS_ERRORS
 from venus_evcharger.controllers.write_snapshot import capture_write_state, restore_write_state
 
 
@@ -44,7 +45,7 @@ class _DbusWriteSupportMixin:
     def _publish_local_pm_status_best_effort(svc: Any, relay_on: bool, current_time: float) -> None:
         try:
             svc.publish_local_pm_status(relay_on, current_time)
-        except Exception as error:  # pylint: disable=broad-except
+        except WRITE_SNAPSHOT_DBUS_ERRORS as error:
             logging.warning(
                 "Local relay placeholder publish failed after queuing relay=%s: %s",
                 int(bool(relay_on)),

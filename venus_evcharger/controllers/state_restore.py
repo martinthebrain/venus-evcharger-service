@@ -10,6 +10,7 @@ from venus_evcharger.backend.models import PhaseSelection
 from venus_evcharger.core.contracts import non_negative_float_or_none, non_negative_int
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.controllers.errors import RUNTIME_PERSISTENCE_WRITE_ERRORS
 from .state_restore_support import (
     _StateRuntimeRestoreVictronEssMixin,
     _victron_ess_balance_energy_ids,
@@ -247,5 +248,5 @@ class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin, _Composable
             write_text_atomically(path, payload)
             svc._runtime_state_serialized = payload
             logging.debug("Saved runtime state to %s: %s", path, self.state_summary())
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_PERSISTENCE_WRITE_ERRORS as error:
             logging.warning("Unable to write runtime state to %s: %s", path, error)

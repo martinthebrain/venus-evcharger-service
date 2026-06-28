@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
+RELAY_PLACEHOLDER_PUBLISH_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
 
 class _RelayPhasePublishMixin(_ComposableControllerMixin):
     """Translate PM metadata into phase displays and track relay confirmations."""
@@ -166,7 +168,7 @@ class _RelayPhasePublishMixin(_ComposableControllerMixin):
         svc = self.service
         try:
             svc._publish_local_pm_status(relay_on, now)
-        except Exception as error:
+        except RELAY_PLACEHOLDER_PUBLISH_ERRORS as error:
             svc._warning_throttled(
                 "relay-placeholder-publish-failed",
                 max(1.0, float(getattr(svc, "relay_sync_timeout_seconds", 2.0) or 2.0)),

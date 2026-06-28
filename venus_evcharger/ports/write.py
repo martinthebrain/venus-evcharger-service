@@ -16,7 +16,7 @@ from venus_evcharger.ports.write_runtime import _WriteControllerRuntimePortMixin
 from .base import _BaseServicePort
 
 
-def _require_str(value: Any, name: str) -> str:
+def _require_str(value: object, name: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{name} must return str, got {type(value).__name__}")
     return value
@@ -78,16 +78,16 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         super().__init__(service)
 
 
-    def clear_auto_samples(self) -> Any:
+    def clear_auto_samples(self) -> object:
         return self._service._clear_auto_samples()
 
-    def queue_relay_command(self, relay_on: bool, current_time: float) -> Any:
+    def queue_relay_command(self, relay_on: bool, current_time: float) -> object:
         return self._service._queue_relay_command(relay_on, current_time)
 
-    def publish_local_pm_status(self, relay_on: bool, current_time: float) -> Any:
+    def publish_local_pm_status(self, relay_on: bool, current_time: float) -> object:
         return self._service._publish_local_pm_status(relay_on, current_time)
 
-    def get_worker_snapshot(self) -> Any:
+    def get_worker_snapshot(self) -> object:
         return self._service._get_worker_snapshot()
 
     def _relay_status_freshness_seconds(self) -> float:
@@ -102,7 +102,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         return max(1.0, min(candidates))
 
     @staticmethod
-    def _fresh_snapshot_output(snapshot: Any, current_time: float, max_age_seconds: float) -> bool | None:
+    def _fresh_snapshot_output(snapshot: object, current_time: float, max_age_seconds: float) -> bool | None:
         """Return a fresh confirmed relay output directly from the worker snapshot."""
         normalized_snapshot = normalized_worker_snapshot(snapshot, now=current_time, clamp_future_timestamps=False)
         pm_status = normalized_snapshot.get("pm_status")
@@ -129,7 +129,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
             return None
         return self._relay_output_value(last_pm_status)
 
-    def _last_relay_output_sample(self) -> tuple[Any, Any]:
+    def _last_relay_output_sample(self) -> tuple[object, object]:
         """Return the best remembered relay-output sample for cutover freshness checks."""
         last_pm_status = getattr(self._service, "_last_confirmed_pm_status", None)
         last_pm_status_at = getattr(self._service, "_last_confirmed_pm_status_at", None)
@@ -142,8 +142,8 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
     @staticmethod
     def _relay_output_payload_present(
         confirmed: bool,
-        pm_status: Any,
-        captured_at: Any,
+        pm_status: object,
+        captured_at: object,
     ) -> bool:
         """Return whether a relay-output payload has the required shape for freshness checks."""
         return bool(
@@ -154,7 +154,7 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         )
 
     @staticmethod
-    def _relay_output_timestamp(captured_at: Any) -> float | None:
+    def _relay_output_timestamp(captured_at: object) -> float | None:
         """Return a numeric relay-output timestamp when one is present and valid."""
         if not isinstance(captured_at, (int, float)) or isinstance(captured_at, bool):
             return None
@@ -167,20 +167,20 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         return -1.0 <= age_seconds <= max_age_seconds
 
     @staticmethod
-    def _relay_output_value(pm_status: Any) -> bool | None:
+    def _relay_output_value(pm_status: object) -> bool | None:
         """Return a normalized relay output from a status payload with an output field."""
         if not isinstance(pm_status, dict) or "output" not in pm_status:
             return None
         return bool(pm_status.get("output"))
 
     @staticmethod
-    def _pending_relay_state_on(sample: Any) -> bool:
+    def _pending_relay_state_on(sample: object) -> bool:
         """Return whether a pending relay sample requests relay-on."""
         if not isinstance(sample, tuple) or not sample:
             return False
         return bool(sample[0])
 
-    def _fresh_confirmed_relay_output(self, snapshot: Any) -> bool | None:
+    def _fresh_confirmed_relay_output(self, snapshot: object) -> bool | None:
         """Return the latest confirmed relay output only when it is still fresh."""
         current_time = self.time_now()
         max_age_seconds = self._relay_status_freshness_seconds()
@@ -204,10 +204,10 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         # relay is already off after startup or an external relay change.
         return True
 
-    def update_worker_snapshot(self, **kwargs: Any) -> Any:
+    def update_worker_snapshot(self, **kwargs: object) -> object:
         return self._service._update_worker_snapshot(**kwargs)
 
-    def publish_dbus_path(self, path: str, value: Any, current_time: float, force: bool = False) -> Any:
+    def publish_dbus_path(self, path: str, value: object, current_time: float, force: bool = False) -> object:
         return self._service._publish_dbus_path(path, value, current_time, force=force)
 
     def time_now(self) -> float:
@@ -221,13 +221,13 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
         backend = getattr(self._service, "_charger_backend", None)
         return backend is not None and hasattr(backend, "set_current")
 
-    def charger_set_enabled(self, enabled: bool) -> Any:
+    def charger_set_enabled(self, enabled: bool) -> object:
         backend = getattr(self._service, "_charger_backend", None)
         if backend is None or not hasattr(backend, "set_enabled"):
             raise RuntimeError("No charger backend with set_enabled configured")
         return backend.set_enabled(bool(enabled))
 
-    def charger_set_current(self, amps: float) -> Any:
+    def charger_set_current(self, amps: float) -> object:
         backend = getattr(self._service, "_charger_backend", None)
         if backend is None or not hasattr(backend, "set_current"):
             raise RuntimeError("No charger backend with set_current configured")
@@ -236,36 +236,34 @@ class WriteControllerPort(_WriteControllerRuntimePortMixin, _BaseServicePort):
     def phase_selection_requires_pause(self) -> bool:
         return bool(self._service._phase_selection_requires_pause())
 
-    def apply_phase_selection(self, selection: Any) -> str:
+    def apply_phase_selection(self, selection: object) -> str:
         return _require_str(self._service._apply_phase_selection(selection), "_apply_phase_selection")
 
-    def normalize_phase_selection(self, value: Any, default: str | None = None) -> str:
+    def normalize_phase_selection(self, value: object, default: str | None = None) -> str:
         fallback = normalize_phase_selection(
             self.supported_phase_selections[0] if default is None else default,
             "P1",
         )
         return str(normalize_phase_selection(value, fallback))
 
-    def normalize_mode(self, value: Any) -> int:
+    def normalize_mode(self, value: object) -> int:
         return int(self._service._normalize_mode(value))
 
-    def mode_uses_auto_logic(self, mode: Any) -> bool:
+    def mode_uses_auto_logic(self, mode: object) -> bool:
         return bool(self._service._mode_uses_auto_logic(mode))
 
     def state_summary(self) -> str:
         return _require_str(self._service._state_summary(), "_state_summary")
 
-    def save_runtime_state(self) -> Any:
+    def save_runtime_state(self) -> object:
         return self._service._save_runtime_state()
 
-    def save_runtime_overrides(self) -> Any:
+    def save_runtime_overrides(self) -> None:
         save_overrides = getattr(self._service, "_save_runtime_overrides", None)
         if callable(save_overrides):
-            return save_overrides()
-        return None
+            save_overrides()
 
-    def validate_runtime_config(self) -> Any:
+    def validate_runtime_config(self) -> None:
         validate_runtime = getattr(self._service, "_validate_runtime_config", None)
         if callable(validate_runtime):
-            return validate_runtime()
-        return None
+            validate_runtime()

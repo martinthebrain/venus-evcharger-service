@@ -16,6 +16,7 @@ from venus_evcharger.update.offline_publish import _UpdateCycleOfflineMixin
 from venus_evcharger.update.pm_snapshot import _UpdateCyclePmSnapshotMixin
 from venus_evcharger.update.relay import _UpdateCycleRelayMixin
 from venus_evcharger.update.runtime_cycle import _UpdateCycleRuntimeMixin
+from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_PROCESS_ERRORS
 from venus_evcharger.update.software_update_support import _UpdateCycleSoftwareUpdateMixin
 from venus_evcharger.update.state import _UpdateCycleStateMixin
 from venus_evcharger.update.victron_ess_balance import _UpdateCycleVictronEssBalanceMixin
@@ -112,7 +113,7 @@ class UpdateCycleController(
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-        except Exception:
+        except SOFTWARE_UPDATE_PROCESS_ERRORS:
             cls._close_open_log_handle(log_handle)
             raise
         return process, log_handle

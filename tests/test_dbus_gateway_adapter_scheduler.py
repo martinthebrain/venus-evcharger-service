@@ -373,6 +373,9 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         scheduler.record_error("grid", now=20.0, interval=2.0)
         self.assertIsNone(scheduler.next_due(now=21.0, circuit_state="ok", priority_allowed=lambda _priority: True))
         self.assertEqual(DbusReadScheduler.effective_interval({"interval": 2.0}, "protective"), 10.0)
+        self.assertEqual(DbusReadScheduler.effective_interval({"interval": True}, "ok"), 2.0)
+        self.assertEqual(DbusReadScheduler.effective_interval({"interval": "bad"}, "ok"), 2.0)
+        self.assertEqual(DbusReadScheduler.effective_interval({"interval": object()}, "ok"), 2.0)
         blocked = DbusReadScheduler({"grid": {"interval": 1.0, "priority": "discovery"}})
         self.assertIsNone(blocked.next_due(now=1.0, circuit_state="ok", priority_allowed=lambda _priority: False))
 
@@ -416,6 +419,19 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
         self.assertEqual(scheduler.next_read_at["pv"], 202.0)
         scheduler.force_due(["missing"])
         self.assertNotIn("missing", scheduler.next_read_at)
+
+    def test_pv_member_backoff_ignores_non_numeric_error_timestamps(self) -> None:
+        key = dbus_path_key("com.victronenergy.system", "/Dc/Pv/Power")
+        for error_at in (True, "bad", object()):
+            cached = {key: {"status": "error", "error_at": error_at}}
+            self.assertFalse(
+                read_pv_module.pv_member_recently_failed(
+                    cached,
+                    "com.victronenergy.system",
+                    "/Dc/Pv/Power",
+                    now=100.0,
+                )
+            )
 
     def test_adapter_static_config_helpers_cover_defaults_and_invalid_instance(self) -> None:
         parser = configparser.ConfigParser()

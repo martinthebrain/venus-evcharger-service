@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from venus_evcharger.backend.config import backend_mode_for_service
+from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.models import PhaseSelection
 from venus_evcharger.backend.shelly_io_types import (
     ShellyIoHost,
@@ -107,7 +108,7 @@ class ShellyIoCapabilitiesMixin:
             return None
         try:
             return cast(_SwitchCapabilitiesBackendLike, backend).capabilities()
-        except Exception:
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return None
 
     def _switching_mode(self) -> str:

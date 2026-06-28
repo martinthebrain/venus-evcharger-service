@@ -21,6 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
+from venus_evcharger.bootstrap.errors import BOOTSTRAP_DBUS_REGISTRATION_ERRORS
 from venus_evcharger.core.common import (
     DEFAULT_SCHEDULED_ENABLED_DAYS,
     mode_uses_scheduled_logic,
@@ -241,7 +242,7 @@ class _ServiceBootstrapPathMixin(_ComposableControllerMixin):
                     writeable=path in self.WRITABLE_PATHS,
                     onchangecallback=svc._handle_write,
                 )
-            except Exception as error:  # pylint: disable=broad-except
+            except BOOTSTRAP_DBUS_REGISTRATION_ERRORS as error:
                 logging.error("Failed to register path %s: %s", path, error, exc_info=error)
                 raise
 

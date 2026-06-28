@@ -28,6 +28,9 @@ from .probe_huawei import _huawei_recommendation
 from .profiles import energy_source_profile_details, energy_source_profile_probe_plan
 
 
+ENERGY_PROBE_READ_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
+
 def detect_modbus_energy_source(
     config_path: str,
     *,
@@ -242,7 +245,7 @@ def _attempt_probe(
             "raw_value": raw_value,
             "scaled_value": numeric_value * scale,
         }
-    except Exception as error:  # noqa: BLE001
+    except ENERGY_PROBE_READ_ERRORS as error:
         return {
             "host": transport_settings.host,
             "port": transport_settings.port,

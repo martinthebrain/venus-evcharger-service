@@ -6,6 +6,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
+from venus_evcharger.dbus_adapter_read_types import ReadSpec
+
 
 class ReadCacheProtocol(Protocol):  # pragma: no cover
     """Cache surface required by scheduled DBus reads."""
@@ -39,7 +41,7 @@ class ReadSchedulerProtocol(Protocol):  # pragma: no cover
     """Read-scheduler surface required by requested refreshes."""
 
     @property
-    def specs(self) -> Mapping[str, Mapping[str, Any]]: ...
+    def specs(self) -> Mapping[str, ReadSpec]: ...
 
 
 class ReadConnectionProtocol(Protocol):  # pragma: no cover

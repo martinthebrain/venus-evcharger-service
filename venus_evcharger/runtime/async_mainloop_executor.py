@@ -8,6 +8,8 @@ import threading
 import time
 from typing import Any, Mapping, cast
 
+ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class _RuntimeSupportAsyncMainloopExecutorMixin:
     def start_update_worker(self: Any) -> None:
@@ -138,7 +140,7 @@ class _RuntimeSupportAsyncMainloopExecutorMixin:
         svc._last_update_cycle_started_at = started_at
         try:
             svc._update()
-        except Exception:  # pylint: disable=broad-except
+        except ASYNC_UPDATE_CYCLE_ERRORS:
             logging.exception("Async update worker cycle failed")
         finally:
             duration = time.monotonic() - started

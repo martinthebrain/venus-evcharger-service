@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 
+from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.models import ChargerState, PhaseSelection, phase_selection_count
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.backend.shelly_io_mixin_contracts import ShellyIoRuntimeMixinContract
@@ -227,7 +228,7 @@ class ShellyIoRuntimeMixin(ShellyIoRuntimeCacheMixin, ShellyIoRuntimeMixinContra
         svc, backend, current = read_context
         try:
             state = backend.read_charger_state()
-        except Exception as error:
+        except BACKEND_IO_ERRORS as error:
             self._handle_charger_state_read_error(svc, error, current)
             return None
         self._sync_charger_runtime_state(state, now=current)

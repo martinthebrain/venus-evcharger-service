@@ -20,6 +20,7 @@ from collections import deque
 from collections.abc import Mapping
 from typing import Any
 
+from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.shelly_io import ShellyIoController
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
@@ -27,6 +28,7 @@ from venus_evcharger.publish.dbus import DbusPublishController
 from venus_evcharger.update.controller import UpdateCycleController
 from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_tuple
+from venus_evcharger.bootstrap.errors import BOOTSTRAP_DEVICE_INFO_ERRORS
 from venus_evcharger.controllers.auto import AutoDecisionController
 from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.controllers.write import DbusWriteController
@@ -60,7 +62,7 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
             return ("P1",)
         try:
             capabilities = capabilities_method()
-        except Exception:  # pylint: disable=broad-except
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return ("P1",)
         return normalize_phase_selection_tuple(
             getattr(capabilities, "supported_phase_selections", ("P1",)),
@@ -268,7 +270,7 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
         for attempt in range(attempts):
             try:
                 return _device_info_payload(svc.fetch_rpc("Shelly.GetDeviceInfo"))
-            except Exception as error:  # pylint: disable=broad-except
+            except BOOTSTRAP_DEVICE_INFO_ERRORS as error:
                 last_error = error
                 if attempt < (attempts - 1) and svc.startup_device_info_retry_seconds > 0:
                     logging.warning(

@@ -8,7 +8,6 @@ import os
 import time
 from collections import deque
 from collections.abc import Mapping
-from typing import Any
 
 import dbus
 
@@ -21,6 +20,7 @@ from venus_evcharger.dbus_adapter_write_support import (
     priority_rank,
 )
 from venus_evcharger.dbus_gateway import command_queue_class, dbus_path_key
+from venus_evcharger.dbus_gateway_command_types import CommandFileList, CommandMapping, CommandPayload
 
 _QUEUE_CLASS_RANKS = {
     "startup/register": 0,
@@ -54,7 +54,7 @@ class DbusWriteSchedulerHealthMixin:
     _lifecycle_events: deque[tuple[float, str, str]]
     _processed_events: deque[float]
 
-    def health(self, *, now: float | None = None) -> dict[str, Any]:  # pragma: no mutate block
+    def health(self, *, now: float | None = None) -> CommandPayload:  # pragma: no mutate block
         current = time.time() if now is None else float(now)  # pragma: no mutate
         self.prune_processed(current)
         self.prune_lifecycle(current)
@@ -94,7 +94,7 @@ class DbusWriteSchedulerHealthMixin:
             self._processed_events.popleft()
 
     @staticmethod
-    def _queue_class_budgets(defaults: Mapping[str, Any]) -> dict[str, int]:  # pragma: no mutate block
+    def _queue_class_budgets(defaults: Mapping[str, object]) -> dict[str, int]:  # pragma: no mutate block
         return {
             "startup/register": max(1, int(config_get_float(defaults, "DbusGatewayQueueBudgetStartupRegister", 100.0))),  # pragma: no mutate
             "gui-critical-publish": max(1, int(config_get_float(defaults, "DbusGatewayQueueBudgetGuiCriticalPublish", 50.0))),  # pragma: no mutate
@@ -107,7 +107,7 @@ class DbusWriteSchedulerHealthMixin:
             "diagnostic": max(0, int(config_get_float(defaults, "DbusGatewayQueueBudgetDiagnostic", 1.0))),  # pragma: no mutate
         }
 
-    def budget_available(self, command: Mapping[str, Any], now: float) -> bool:  # pragma: no mutate block
+    def budget_available(self, command: CommandMapping, now: float) -> bool:  # pragma: no mutate block
         queue_class = str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
         limit = int(self.queue_class_budgets.get(queue_class, 1))  # pragma: no mutate
         if limit <= 0:
@@ -117,7 +117,7 @@ class DbusWriteSchedulerHealthMixin:
     def budget_usage(self, queue_class: str, now: float) -> int:
         return sum(1 for timestamp, item_class in self._budget_events if item_class == queue_class and now - timestamp <= 1.0)  # pragma: no mutate
 
-    def record_budget(self, command: Mapping[str, Any]) -> None:
+    def record_budget(self, command: CommandMapping) -> None:
         now = time.time()  # pragma: no mutate
         self._budget_events.append((now, str(command.get("queue_class") or command_queue_class(command))))  # pragma: no mutate
         self.prune_budget(now)
@@ -134,7 +134,7 @@ class DbusWriteSchedulerHealthMixin:
         return dict(sorted(counts.items()))  # pragma: no mutate
 
     @staticmethod
-    def prioritized_commands(commands: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:  # pragma: no mutate block
+    def prioritized_commands(commands: CommandFileList) -> CommandFileList:  # pragma: no mutate block
         now = time.time()  # pragma: no mutate
         return sorted(
             commands,
@@ -145,7 +145,7 @@ class DbusWriteSchedulerHealthMixin:
             ),
         )
 
-    def record_lifecycle(self, command: Mapping[str, Any], state: str) -> None:  # pragma: no mutate block
+    def record_lifecycle(self, command: CommandMapping, state: str) -> None:  # pragma: no mutate block
         now = time.time()  # pragma: no mutate
         queue_class = str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
         normalized_state = str(state or "unknown")  # pragma: no mutate
@@ -156,7 +156,7 @@ class DbusWriteSchedulerHealthMixin:
 
     def _append_lifecycle_event(
         self,
-        command: Mapping[str, Any],
+        command: CommandMapping,
         state: str,
         queue_class: str,
         now: float,
@@ -188,35 +188,49 @@ class DbusWriteSchedulerHealthMixin:
             counts[state] = counts.get(state, 0) + 1  # pragma: no mutate
         return dict(sorted(counts.items()))  # pragma: no mutate
 
-    def set_remote_value(self, command: Mapping[str, Any]) -> CommandOutcome:  # pragma: no mutate block
-        service = str(command.get("service") or "")  # pragma: no mutate
-        path = str(command.get("path") or "")  # pragma: no mutate
-        if not service or not path:
+    def set_remote_value(self, command: CommandMapping) -> CommandOutcome:  # pragma: no mutate block
+        target = remote_command_target(command)
+        if target is None:
             return "dropped"
+        service, path = target
+        value = command.get("value")
 
-        def _write() -> None:
-            obj = self.adapter.connection.bus().get_object(service, path, introspect=False)  # pragma: no mutate
-            iface = dbus.Interface(obj, "com.victronenergy.BusItem")  # pragma: no mutate
-            iface.SetValue(command.get("value"), timeout=float(command.get("timeout", 1.0)))  # pragma: no mutate
-
-        self.adapter.timed_dbus_operation("write", _write)
+        self.adapter.timed_dbus_operation(
+            "write",
+            lambda: self._write_remote_value(service, path, value, remote_command_timeout(command)),
+        )
         self.adapter.cache.update_value(
             dbus_path_key(service, path),  # pragma: no mutate
-            command.get("value"),  # pragma: no mutate
+            value,  # pragma: no mutate
             source=f"{service}{path}",  # pragma: no mutate
             confidence=0.9,  # pragma: no mutate
         )
         return "applied"  # pragma: no mutate
 
+    def _write_remote_value(self, service: str, path: str, value: object, timeout: float) -> None:
+        obj = self.adapter.connection.bus().get_object(service, path, introspect=False)  # pragma: no mutate
+        iface = dbus.Interface(obj, "com.victronenergy.BusItem")  # pragma: no mutate
+        iface.SetValue(value, timeout=timeout)  # pragma: no mutate
 
-def effective_command_priority_rank(command: Mapping[str, Any], now: float) -> float:
+
+def effective_command_priority_rank(command: CommandMapping, now: float) -> float:
     rank = float(priority_rank(command.get("priority")))  # pragma: no mutate
     if aged_refresh_command(command, now):
         return min(rank, _AGED_REFRESH_PRIORITY_RANK)  # pragma: no mutate
     return rank  # pragma: no mutate
 
 
-def aged_refresh_command(command: Mapping[str, Any], now: float) -> bool:
+def aged_refresh_command(command: CommandMapping, now: float) -> bool:
     queue_class = str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
     created_at = float_or_zero(command.get("created_at"))  # pragma: no mutate
     return queue_class in _AGING_QUEUE_CLASSES and created_at > 0.0 and now - created_at >= _AGED_REFRESH_SECONDS  # pragma: no mutate
+
+
+def remote_command_target(command: CommandMapping) -> tuple[str, str] | None:
+    service = str(command.get("service") or "")  # pragma: no mutate
+    path = str(command.get("path") or "")  # pragma: no mutate
+    return (service, path) if service and path else None
+
+
+def remote_command_timeout(command: CommandMapping) -> float:
+    return float_or_zero(command.get("timeout")) or 1.0

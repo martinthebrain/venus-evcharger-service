@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.models import ChargerState, MeterReading, PhaseSelection
 from venus_evcharger.backend.shelly_io_types import (
     JsonObject,
@@ -117,7 +118,7 @@ class ShellyIoSplitMixin:
     def _relay_state_from_split_switch(self, fallback: bool | None) -> bool | None:
         try:
             state = self._split_switch_state()
-        except Exception:
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return fallback
         if state is None:
             return fallback
@@ -250,7 +251,7 @@ class ShellyIoSplitMixin:
     def _safe_split_switch_state(self) -> object | None:
         try:
             return self._split_switch_state()
-        except Exception:
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             self._store_runtime_switch_snapshot(None)
             return None
 

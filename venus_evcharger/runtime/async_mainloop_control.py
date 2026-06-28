@@ -12,6 +12,8 @@ from typing import Any, cast
 from venus_evcharger.control import ControlCommand
 from venus_evcharger.runtime.async_mainloop_types import QueuedControlCommand
 
+ASYNC_CONTROL_COMMAND_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class _RuntimeSupportAsyncMainloopControlMixin:
     def enqueue_control_command(self: Any, command: ControlCommand) -> bool:
@@ -58,7 +60,7 @@ class _RuntimeSupportAsyncMainloopControlMixin:
             svc._last_write_command_queue_lag_seconds = max(0.0, time.time() - queued_at)
             try:
                 svc._handle_control_command(command)
-            except Exception:  # pylint: disable=broad-except
+            except ASYNC_CONTROL_COMMAND_ERRORS:
                 logging.exception("Async control command failed path=%s", command.path)
             finally:
                 duration = time.monotonic() - started

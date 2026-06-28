@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import cast
 
+from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.backend.shelly_io_mixin_contracts import ShellyIoWorkerMixinContract
 from venus_evcharger.backend.shelly_io_types import (
@@ -98,7 +99,7 @@ class ShellyIoWorkerMixin(ShellyIoWorkerTransportMixin, ShellyIoWorkerLifecycleM
         svc, target_on, source_key, source_label, current = command_context
         try:
             self._apply_pending_relay_target(svc, bool(target_on))
-        except Exception as error:
+        except BACKEND_IO_ERRORS as error:
             self._handle_pending_relay_command_error(svc, source_key, source_label, current, error)
             return
         self._finalize_pending_relay_command(svc, bool(target_on), source_key, source_label)
@@ -255,7 +256,7 @@ class ShellyIoWorkerMixin(ShellyIoWorkerTransportMixin, ShellyIoWorkerLifecycleM
                 pm_status=pm_status,
                 pm_confirmed=True,
             )
-        except Exception as error:
+        except BACKEND_IO_ERRORS as error:
             reason = self._classify_shelly_error(error)
             self._remember_shelly_failure(reason, "read", error, now)
             svc._mark_failure("shelly")

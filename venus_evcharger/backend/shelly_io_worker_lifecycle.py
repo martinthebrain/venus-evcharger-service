@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import requests
 
+from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.shelly_io_types import ShellyIoHost, _CloseableLike, _SettableEventLike
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ class ShellyIoWorkerLifecycleMixin:
             return None
         try:
             snapshot = get_snapshot()
-        except Exception:
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return None
         if not isinstance(snapshot, dict):
             return None

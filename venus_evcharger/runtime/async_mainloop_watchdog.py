@@ -10,6 +10,8 @@ import threading
 import time
 from typing import Any
 
+MAINLOOP_WATCHDOG_TRACEBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
 
 class _RuntimeSupportAsyncMainloopWatchdogMixin:
     def flush_companion_dbus_publish_queue(self: Any) -> bool:
@@ -62,7 +64,7 @@ class _RuntimeSupportAsyncMainloopWatchdogMixin:
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(f"mainloop watchdog dump at {time.time():.3f}\n")
                 faulthandler.dump_traceback(file=handle, all_threads=True)
-        except Exception as error:  # pylint: disable=broad-except
+        except MAINLOOP_WATCHDOG_TRACEBACK_ERRORS as error:
             logging.debug("Unable to write mainloop watchdog traceback: %s", error)
 
     @staticmethod

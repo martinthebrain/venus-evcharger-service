@@ -20,6 +20,18 @@ SUBSCRIPTION_RESOLUTION_ERRORS: tuple[type[BaseException], ...] = (
     *DBUS_SOURCE_READ_ERRORS,
     ValueError,
 )
+# The GLib signal boundary also shields assertion-style foreign callback failures.
+SUBSCRIPTION_CALLBACK_ERRORS: tuple[type[BaseException], ...] = (
+    *SUBSCRIPTION_RESOLUTION_ERRORS,
+    AssertionError,
+    TypeError,
+)
+SUBSCRIPTION_CLEANUP_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 class _AutoInputHelperSubscriptionMixin:
@@ -141,7 +153,7 @@ class _AutoInputHelperSubscriptionMixin:
                 self._subscribe_busitem_path(source_name, service_name, path)
             self._clear_missing_subscriptions(desired_keys)
             self._refresh_all_sources()
-        except Exception as error:  # pylint: disable=broad-except
+        except SUBSCRIPTION_CALLBACK_ERRORS as error:
             self._handle_dbus_callback_error(
                 "auto-helper-refresh-subscriptions",
                 "Auto input helper failed to refresh DBus subscriptions: %s",
@@ -189,7 +201,7 @@ class _AutoInputHelperSubscriptionMixin:
             return
         try:
             self._refresh_source(source_name)
-        except Exception as error:  # pylint: disable=broad-except
+        except SUBSCRIPTION_CALLBACK_ERRORS as error:
             self._handle_dbus_callback_error(
                 f"auto-helper-source-signal-{source_name}",
                 "Auto input helper failed to refresh %s after signal: %s",
@@ -205,7 +217,7 @@ class _AutoInputHelperSubscriptionMixin:
         try:
             if self._is_relevant_name_owner_change(name):
                 self._schedule_refresh_subscriptions()
-        except Exception as error:  # pylint: disable=broad-except
+        except SUBSCRIPTION_CALLBACK_ERRORS as error:
             self._handle_dbus_callback_error(
                 "auto-helper-name-owner-signal",
                 "Auto input helper failed to process DBus owner change for %s: %s",
@@ -334,7 +346,7 @@ class _AutoInputHelperSubscriptionMixin:
             return
         try:
             remove()
-        except Exception:  # pylint: disable=broad-except
+        except SUBSCRIPTION_CLEANUP_ERRORS:
             pass
 
     @staticmethod
@@ -346,5 +358,5 @@ class _AutoInputHelperSubscriptionMixin:
             return
         try:
             close()
-        except Exception:  # pylint: disable=broad-except
+        except SUBSCRIPTION_CLEANUP_ERRORS:
             pass

@@ -12,6 +12,9 @@ from venus_evcharger.core.contracts import finite_float_or_none, normalize_learn
 from venus_evcharger.update.relay_charger_readback import ChargerCurrentBackend
 
 
+CHARGER_CURRENT_APPLY_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
+
 class _RelayChargerCurrentMixin:
     """Derive and apply charger current targets from learned and scheduled policy."""
 
@@ -266,7 +269,7 @@ class _RelayChargerCurrentMixin:
             return last_target
         try:
             backend.set_current(float(target_amps))
-        except Exception as error:
+        except CHARGER_CURRENT_APPLY_ERRORS as error:
             cls._handle_charger_current_target_failure(svc, error, now)
             return last_target
         cls._clear_charger_transport_issue(svc)

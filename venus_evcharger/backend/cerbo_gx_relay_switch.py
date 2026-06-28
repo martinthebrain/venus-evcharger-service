@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from .config_file import config_section
 from .models import PhaseSelection, SwitchCapabilities, SwitchState, normalize_phase_selection_tuple
+from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_binary_flag
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 
@@ -193,7 +194,7 @@ class CerboGxRelaySwitchBackend:
                     return
                 if self._set_manual_function_path(path):
                     return
-            except Exception as exc:
+            except BACKEND_IO_ERRORS as exc:
                 last_error = exc
                 continue
         self._raise_manual_function_error(last_error)

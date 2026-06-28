@@ -11,6 +11,9 @@ from venus_evcharger.core.contracts import finite_float_or_none
 from venus_evcharger.update.relay_phase_contracts import _RelayPhaseSwitchPolicyContractsMixin
 
 
+PHASE_SELECTION_APPLY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
 class _RelayPhaseSwitchPolicyMixin(_RelayPhaseSwitchPolicyContractsMixin):
     """Handle phase-switch cooldowns, lockouts, and pending Auto candidates."""
 
@@ -296,7 +299,7 @@ class _RelayPhaseSwitchPolicyMixin(_RelayPhaseSwitchPolicyContractsMixin):
             return False
         try:
             applied_selection = svc._apply_phase_selection(target_selection)
-        except Exception as error:
+        except PHASE_SELECTION_APPLY_ERRORS as error:
             svc._mark_failure("shelly")
             svc._warning_throttled(
                 "auto-phase-switch-failed",

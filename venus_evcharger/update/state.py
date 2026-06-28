@@ -16,7 +16,8 @@ from venus_evcharger.auto.tracking import clear_auto_decision_tracking
 from venus_evcharger.core.contracts import finite_float_or_none
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
-
+STARTUP_MANUAL_TARGET_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+RUNTIME_STATE_SAVE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 class _UpdateCycleStateMixin(_ComposableControllerMixin):
     @staticmethod
@@ -75,7 +76,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
                 published = publish_local_pm_status(relay_on, now)
                 if isinstance(published, dict):
                     return published
-            except Exception as error:  # pylint: disable=broad-except
+            except STARTUP_MANUAL_TARGET_ERRORS as error:
                 svc._warning_throttled(
                     "startup-manual-target-placeholder-failed",
                     svc.auto_shelly_soft_fail_seconds,
@@ -121,7 +122,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
             # unavailable, we keep the live status and let the normal update loop
             # retry on the next cycle instead of failing startup.
             applied = self._apply_enabled_target(svc, target_on, now)
-        except Exception as error:  # pylint: disable=broad-except
+        except STARTUP_MANUAL_TARGET_ERRORS as error:
             source_key = self._enable_control_source_key(svc)
             source_label = self._enable_control_label(svc)
             svc._mark_failure(source_key)
@@ -188,7 +189,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
             return
         try:
             save_runtime_state()
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_STATE_SAVE_ERRORS as error:
             warning_throttled = getattr(svc, "_warning_throttled", None)
             if callable(warning_throttled):
                 warning_throttled(

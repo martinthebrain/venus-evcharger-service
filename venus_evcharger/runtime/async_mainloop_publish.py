@@ -10,6 +10,8 @@ from typing import Any, cast
 
 from venus_evcharger.runtime.async_mainloop_types import QueuedPublishValue
 
+DBUS_PUBLISH_QUEUE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
 
 class _RuntimeSupportAsyncMainloopPublishMixin:
     def enqueue_dbus_publish_values(self: Any, values: list[tuple[str, Any]], current: float) -> bool:
@@ -122,7 +124,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             try:
                 svc._dbusservice[path] = value
                 svc._dbus_publish_state[path] = {"value": value, "updated_at": current}
-            except Exception:  # pylint: disable=broad-except
+            except DBUS_PUBLISH_QUEUE_ERRORS:
                 failed_paths.append(path)
         return failed_paths
 
@@ -136,7 +138,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
             return []
         try:
             batch_publish(_RuntimeSupportAsyncMainloopPublishMixin._gateway_publish_payload(values))
-        except Exception:  # pylint: disable=broad-except
+        except DBUS_PUBLISH_QUEUE_ERRORS:
             return [path for path, _item in values]
         _RuntimeSupportAsyncMainloopPublishMixin._remember_gateway_publish_success(svc, values)
         return []
@@ -171,7 +173,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
         try:
             self._bump_update_index_direct(svc, now)
             return True
-        except Exception:  # pylint: disable=broad-except
+        except DBUS_PUBLISH_QUEUE_ERRORS:
             logging.warning("DBus publish queue failed to bump /UpdateIndex")
             return False
 

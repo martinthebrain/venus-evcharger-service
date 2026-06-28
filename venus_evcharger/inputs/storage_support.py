@@ -14,6 +14,7 @@ from venus_evcharger.core.shared import (
 )
 from venus_evcharger.dbus_introspection import owner_path_unusable, request_owner_introspection
 from venus_evcharger.energy import EnergySourceDefinition
+from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
@@ -91,7 +92,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
             if self._introspection_says_skip(service_name, self.service.auto_battery_soc_path, priority=80):
                 return False
             soc_value = self.service.get_dbus_value(service_name, self.service.auto_battery_soc_path)
-        except Exception:
+        except DBUS_INPUT_READ_ERRORS:
             self._request_introspection(service_name, self.service.auto_battery_soc_path, priority=95, reason="battery SOC probe failed")
             return False
         return soc_value is not None
@@ -103,7 +104,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
             return False
         try:
             return self.service.get_dbus_value(service_name, path) is not None
-        except Exception:
+        except DBUS_INPUT_READ_ERRORS:
             self._request_introspection(service_name, path, priority=95, reason="energy-source field probe failed")
             return False
 
@@ -252,7 +253,7 @@ class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
             return None
         try:
             value = svc.get_dbus_value(svc.auto_grid_service, path)
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_INPUT_READ_ERRORS as error:
             logging.debug("Auto grid read failed for %s %s: %s", svc.auto_grid_service, path, error)
             self._request_introspection(svc.auto_grid_service, path, priority=95, reason="grid phase read failed")
             return None

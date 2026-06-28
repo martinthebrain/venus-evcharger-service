@@ -24,6 +24,7 @@ from venus_evcharger.auto.policy import AutoPolicy, validate_auto_policy
 from venus_evcharger.control import ControlApiV1Service, ControlCommand, ControlResult
 from venus_evcharger.control.models import ControlCommandSource
 from venus_evcharger.core.contracts import write_failure_is_reversible
+from venus_evcharger.controllers.errors import CONTROL_COMMAND_ERRORS
 from venus_evcharger.controllers.write_support import _DbusWriteSupportMixin
 from venus_evcharger.controllers.write_snapshot import (
     SNAPSHOT_ATTRS,
@@ -346,7 +347,7 @@ class DbusWriteController(_DbusWriteSupportMixin):
                 command,
                 external_side_effect_started=self._external_side_effect_started,
             )
-        except Exception as error:  # pylint: disable=broad-except
+        except CONTROL_COMMAND_ERRORS as error:
             detail = self._write_failure_detail(error)
             if write_failure_is_reversible(self._external_side_effect_started):
                 self._restore_write_state(port._service, snapshot)

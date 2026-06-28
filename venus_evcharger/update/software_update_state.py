@@ -6,6 +6,8 @@ from __future__ import annotations
 import os
 from typing import Any, ClassVar, TYPE_CHECKING
 
+from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_CHECK_ERRORS
+
 
 class _SoftwareUpdateStateMixin:
     SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS: ClassVar[float]
@@ -184,7 +186,7 @@ class _SoftwareUpdateStateMixin:
                 available=available,
                 available_version=available_version,
             )
-        except Exception as error:  # pylint: disable=broad-except
+        except SOFTWARE_UPDATE_CHECK_ERRORS as error:
             svc._software_update_last_check_at = now
             svc._software_update_next_check_at = now + cls.SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS
             cls._set_software_update_state(

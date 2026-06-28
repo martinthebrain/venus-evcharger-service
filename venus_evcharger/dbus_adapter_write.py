@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
 
 from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter_write_core import DbusWriteSchedulerCoreMixin
@@ -21,7 +20,7 @@ class DbusWriteScheduler(
     def __init__(self, adapter: DbusWriteSchedulerAdapter) -> None:
         self.adapter = adapter
         self.registered_paths: set[str] = set()
-        self.last_values: dict[str, Any] = {}
+        self.last_values: dict[str, object] = {}
         defaults = adapter.config["DEFAULT"]
         self.local_publish_burst_limit = max(1, int(config_get_float(defaults, "DbusGatewayLocalPublishBurstLimit", 20.0)))
         self.local_publish_tick_budget_seconds = max(

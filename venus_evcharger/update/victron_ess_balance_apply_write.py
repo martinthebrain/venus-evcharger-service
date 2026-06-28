@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING, Any
 from venus_evcharger.dbus_gateway import GatewayClient, gateway_paths
 
 
+VICTRON_ESS_BALANCE_WRITE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
 class _UpdateCycleVictronEssBalanceApplyWriteMixin:
     """Coalesce and enqueue Victron ESS balance-bias setpoint writes through the gateway."""
 
@@ -118,7 +121,7 @@ class _UpdateCycleVictronEssBalanceApplyWriteMixin:
                     value,
                 )
                 return None
-            except Exception as error:  # pylint: disable=broad-except
+            except VICTRON_ESS_BALANCE_WRITE_ERRORS as error:
                 last_error = error
                 if attempt == 0:
                     self._victron_ess_balance_log_write_retry(normalized_service, normalized_path, error)

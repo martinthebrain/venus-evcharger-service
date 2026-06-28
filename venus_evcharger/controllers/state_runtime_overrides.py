@@ -12,6 +12,7 @@ from typing import Any, Callable
 from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normalize_hhmm_text, scheduled_enabled_days_text
 from venus_evcharger.core.shared import compact_json
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.controllers.errors import RUNTIME_OVERRIDE_READ_ERRORS, RUNTIME_PERSISTENCE_WRITE_ERRORS
 from venus_evcharger.controllers.state_runtime_normalize import _StateRuntimeNormalizeMixin
 from venus_evcharger.controllers.state_specs import (
     RUNTIME_OVERRIDE_BY_CONFIG_KEY,
@@ -36,7 +37,7 @@ class _StateRuntimeOverridesMixin(_ComposableControllerMixin):
         parser = _CasePreservingConfigParser()
         try:
             read_files = parser.read(path)
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_OVERRIDE_READ_ERRORS as error:
             logging.warning("Unable to read runtime overrides from %s: %s", path, error)
             return {}
         if not read_files or not parser.has_section(RUNTIME_OVERRIDE_SECTION):
@@ -185,7 +186,7 @@ class _StateRuntimeOverridesMixin(_ComposableControllerMixin):
                 pending_payload[2],
                 current_time,
             )
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_PERSISTENCE_WRITE_ERRORS as error:
             svc._runtime_overrides_pending_due_at = float(
                 current_time + self._runtime_override_write_min_interval_seconds(svc)
             )
@@ -241,7 +242,7 @@ class _StateRuntimeOverridesMixin(_ComposableControllerMixin):
             return
         try:
             self._write_runtime_overrides_payload(svc, path, payload, serialized, rendered, current_time)
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_PERSISTENCE_WRITE_ERRORS as error:
             self._stage_runtime_overrides_write(svc, payload, serialized, rendered, current_time + min_interval)
             logging.warning("Unable to write runtime overrides to %s: %s", path, error)
 

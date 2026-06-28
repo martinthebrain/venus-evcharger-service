@@ -145,4 +145,4 @@ class TestWallboxPortsWrite(unittest.TestCase):
 
         self.assertTrue(port._fresh_last_output(100.0, 2.0))
         self.assertTrue(port._fresh_confirmed_relay_output({"pm_status": None, "pm_confirmed": False}) is True)
-        self.assertIsNone(port.validate_runtime_config())
+        port.validate_runtime_config()

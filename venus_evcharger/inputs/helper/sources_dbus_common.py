@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS
+
 _EXPECTED_MISSING_DBUS_ERROR_NAMES = frozenset(
     (
         "org.freedesktop.DBus.Error.NameHasNoOwner",
@@ -21,7 +23,8 @@ _EXPECTED_MISSING_DBUS_ERROR_TEXT = (
     "UnknownObject",
     "was not provided by any .service files",
 )
-DBUS_SOURCE_READ_ERRORS: tuple[type[BaseException], ...] = (OSError, RuntimeError)
+DBUS_SOURCE_READ_ERRORS = DBUS_INPUT_READ_ERRORS
+DBUS_ERROR_NAME_ACCESS_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 class _ResolvedAutoBatteryServiceState:
@@ -35,7 +38,7 @@ def _dbus_error_name(error: BaseException) -> str:
     if callable(getter):
         try:
             return str(getter() or "")
-        except Exception:  # pragma: no cover - defensive for foreign DBus objects
+        except DBUS_ERROR_NAME_ACCESS_ERRORS:  # pragma: no cover - defensive for foreign DBus objects
             return ""
     return str(getattr(error, "_dbus_error_name", "") or "")
 

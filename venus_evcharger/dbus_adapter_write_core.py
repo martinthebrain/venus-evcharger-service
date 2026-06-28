@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Mapping
-from typing import Any
+from collections.abc import Callable
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_write_protocols import (
@@ -25,6 +24,9 @@ from venus_evcharger.dbus_adapter_write_support import (
     should_follow_with_local_burst,
 )
 from venus_evcharger.dbus_gateway import DbusCommandInbox
+from venus_evcharger.dbus_gateway_command_types import CommandFile, CommandFileList, CommandMapping
+
+GATEWAY_COMMAND_RETRY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
 class DbusWriteSchedulerCoreMixin:
@@ -35,13 +37,13 @@ class DbusWriteSchedulerCoreMixin:
     drop_stale_coalesced_commands: DropStaleCoalescedCommands
     process_local_publish_burst: ProcessLocalPublishBurst
     publish_command: PublishCommand
-    register_path: Callable[[Mapping[str, Any]], CommandOutcome]
-    set_remote_value: Callable[[Mapping[str, Any]], CommandOutcome]
-    budget_available: Callable[[Mapping[str, Any], float], bool]
-    prioritized_commands: Callable[[list[tuple[str, dict[str, Any]]]], list[tuple[str, dict[str, Any]]]]
+    register_path: Callable[[CommandMapping], CommandOutcome]
+    set_remote_value: Callable[[CommandMapping], CommandOutcome]
+    budget_available: Callable[[CommandMapping, float], bool]
+    prioritized_commands: Callable[[CommandFileList], CommandFileList]
     prune_budget: Callable[[float], None]
-    record_budget: Callable[[Mapping[str, Any]], None]
-    record_lifecycle: Callable[[Mapping[str, Any], str], None]
+    record_budget: Callable[[CommandMapping], None]
+    record_lifecycle: Callable[[CommandMapping, str], None]
     record_processed: Callable[[], None]
 
     def process_one(self, *, include_local_publish: bool = True) -> bool:
@@ -53,12 +55,12 @@ class DbusWriteSchedulerCoreMixin:
             return self.process_startup_registration_batch(coalesced)
         return self.process_next_scheduled_command(coalesced, include_local_publish=include_local_publish)
 
-    def _startup_registration_pending(self, commands: list[tuple[str, dict[str, Any]]]) -> bool:
+    def _startup_registration_pending(self, commands: CommandFileList) -> bool:
         return not self.adapter.dbus_service_registered and has_startup_registration(commands=commands)
 
     def process_next_scheduled_command(
         self,
-        commands: list[tuple[str, dict[str, Any]]],
+        commands: CommandFileList,
         *,
         include_local_publish: bool,
     ) -> bool:
@@ -71,7 +73,7 @@ class DbusWriteSchedulerCoreMixin:
             self.process_local_publish_burst(max(0, self.local_publish_burst_limit - 1))
         return True
 
-    def process_startup_registration_batch(self, commands: list[tuple[str, dict[str, Any]]]) -> bool:
+    def process_startup_registration_batch(self, commands: CommandFileList) -> bool:
         started = time.monotonic()
         register_service = register_service_command(commands)
         did_paths, processed = self.process_startup_register_paths(commands, started)
@@ -84,7 +86,7 @@ class DbusWriteSchedulerCoreMixin:
 
     def process_startup_register_paths(
         self,
-        commands: list[tuple[str, dict[str, Any]]],
+        commands: CommandFileList,
         started: float,
     ) -> tuple[bool, int]:
         did_work = False
@@ -104,7 +106,7 @@ class DbusWriteSchedulerCoreMixin:
 
     def _process_startup_register_service(
         self,
-        register_service: tuple[str, dict[str, Any]] | None,
+        register_service: CommandFile | None,
         *,
         processed: int,
         started: float,
@@ -121,7 +123,7 @@ class DbusWriteSchedulerCoreMixin:
 
     def should_process_startup_service(
         self,
-        register_service: tuple[str, dict[str, Any]] | None,
+        register_service: CommandFile | None,
         *,
         processed: int,
         started: float,
@@ -144,10 +146,10 @@ class DbusWriteSchedulerCoreMixin:
 
     def select_next_command(
         self,
-        commands: list[tuple[str, dict[str, Any]]],
+        commands: CommandFileList,
         *,
         include_local_publish: bool = True,
-    ) -> tuple[str, dict[str, Any]] | None:
+    ) -> CommandFile | None:
         now = time.time()
         self.prune_budget(now)
         for path, command in commands:
@@ -155,15 +157,15 @@ class DbusWriteSchedulerCoreMixin:
                 return path, command
         return None
 
-    def process_command(self, command: Mapping[str, Any], *, command_file: str = "") -> CommandOutcome:
+    def process_command(self, command: CommandMapping, *, command_file: str = "") -> CommandOutcome:
         priority = str(command.get("priority") or "diagnostic")
         if not self.adapter.circuit.allows_priority(priority):
             return "deferred"
         return self.dispatch_command(command, command_file=command_file)
 
-    def dispatch_command(self, command: Mapping[str, Any], *, command_file: str) -> CommandOutcome:
+    def dispatch_command(self, command: CommandMapping, *, command_file: str) -> CommandOutcome:
         kind = command_kind(command)
-        handlers: dict[str, Callable[[Mapping[str, Any]], CommandOutcome]] = {
+        handlers: dict[str, Callable[[CommandMapping], CommandOutcome]] = {
             "register_service": self._register_service_command,
             "register_path": self.register_path,
             "publish_value": lambda item: self.publish_command(item, command_file=command_file),
@@ -175,16 +177,16 @@ class DbusWriteSchedulerCoreMixin:
             return self.adapter.process_non_write_command(command)
         return handler(command)
 
-    def _register_service_command(self, _command: Mapping[str, Any]) -> CommandOutcome:
+    def _register_service_command(self, _command: CommandMapping) -> CommandOutcome:
         self.adapter.register_dbus_service_name()
         return "applied"
 
     def process_loaded_command(
         self,
         path: str,
-        command: Mapping[str, Any],
+        command: CommandMapping,
         *,
-        pending_commands: list[tuple[str, dict[str, Any]]] | None = None,
+        pending_commands: CommandFileList | None = None,
     ) -> CommandOutcome:
         if self.command_expired(command):
             return self._drop_expired_command(path, command, pending_commands=pending_commands)
@@ -196,9 +198,9 @@ class DbusWriteSchedulerCoreMixin:
     def _drop_expired_command(
         self,
         path: str,
-        command: Mapping[str, Any],
+        command: CommandMapping,
         *,
-        pending_commands: list[tuple[str, dict[str, Any]]] | None,
+        pending_commands: CommandFileList | None,
     ) -> CommandOutcome:
         self.adapter.commands.remove(path)
         self.drop_stale_coalesced_commands(path, command, pending_commands=pending_commands)
@@ -206,22 +208,22 @@ class DbusWriteSchedulerCoreMixin:
         self.record_processed()
         return "dropped"
 
-    def command_outcome(self, path: str, command: Mapping[str, Any]) -> CommandOutcome:
+    def command_outcome(self, path: str, command: CommandMapping) -> CommandOutcome:
         try:
             return self.process_command(command, command_file=path)
         except DbusOperationDeferred:
             return "deferred"
-        except Exception as error:  # pylint: disable=broad-except
+        except GATEWAY_COMMAND_RETRY_ERRORS as error:
             logging.exception("Gateway command failed; keeping for retry path=%s: %s", path, error)
             return "deferred"
 
     def _apply_command_result(
         self,
         path: str,
-        command: Mapping[str, Any],
+        command: CommandMapping,
         outcome: CommandOutcome,
         *,
-        pending_commands: list[tuple[str, dict[str, Any]]] | None,
+        pending_commands: CommandFileList | None,
     ) -> None:
         if outcome == "deferred":
             self.record_budget(command)
@@ -232,6 +234,6 @@ class DbusWriteSchedulerCoreMixin:
             self.record_budget(command)
 
     @staticmethod
-    def command_expired(command: Mapping[str, Any]) -> bool:
+    def command_expired(command: CommandMapping) -> bool:
         deadline, created_at = deadline_pair(command)
         return deadline > 0.0 and created_at > 0.0 and time.time() > created_at + deadline

@@ -37,6 +37,9 @@ SECRET_KEYS = ("password", "token", "secret", "auth")
 TRACE_MARKERS = ("Traceback", "malloc()", "NoReply", "dbus down", "Watchdog recovery", "stale")
 MOUNT_PREFIXES = ("/media/", "/run/media/", "/mnt/")
 DEVICE_PREFIXES = ("/dev/sd", "/dev/mmcblk", "/dev/disk/")
+FORENSIC_COMMAND_ERRORS = (OSError, RuntimeError, subprocess.SubprocessError, ValueError)
+FORENSIC_HTTP_ERRORS = (OSError, RuntimeError, TimeoutError, UnicodeDecodeError, ValueError)
+FORENSIC_JSON_READ_ERRORS = (OSError, RuntimeError, UnicodeDecodeError, json.JSONDecodeError)
 
 
 class _CaseSensitiveConfigParser(configparser.ConfigParser):
@@ -151,7 +154,7 @@ def command_output(args: list[str], timeout: float = 3.0) -> dict[str, Any]:
             "stdout": completed.stdout[-4000:],
             "stderr": completed.stderr[-4000:],
         }
-    except Exception as error:  # pylint: disable=broad-except
+    except FORENSIC_COMMAND_ERRORS as error:
         return {"ok": False, "error": str(error)}
 
 
@@ -202,7 +205,7 @@ def fetch_shelly_status(host: str, timeout: float = 2.0) -> dict[str, Any]:
         with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
             payload = response.read(65536).decode("utf-8", errors="replace")
         return {"ok": True, "url": url, "payload": payload}
-    except Exception as error:  # pylint: disable=broad-except
+    except FORENSIC_HTTP_ERRORS as error:
         return {"ok": False, "url": url, "error": str(error)}
 
 
@@ -239,7 +242,7 @@ def read_text_safe(path: str) -> str:
 def read_json_file(path: str) -> dict[str, Any]:
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except Exception as error:  # pylint: disable=broad-except
+    except FORENSIC_JSON_READ_ERRORS as error:
         return {"ok": False, "path": path, "error": str(error)}
     if not isinstance(payload, dict):
         return {"ok": False, "path": path, "error": "not-a-json-object"}

@@ -13,9 +13,10 @@ import logging
 import os
 import time
 from typing import Any
+
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
-
+WATCHDOG_TRACEBACK_DUMP_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
     @staticmethod
@@ -103,7 +104,7 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
         )
         try:
             faulthandler.dump_traceback(all_threads=True)
-        except Exception as error:  # pylint: disable=broad-except
+        except WATCHDOG_TRACEBACK_DUMP_ERRORS as error:
             logging.debug("Unable to dump watchdog traceback before restart: %s", error)
         self._exit_for_watchdog_restart()
 

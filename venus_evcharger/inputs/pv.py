@@ -16,6 +16,7 @@ from venus_evcharger.core.shared import (
 )
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
+from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS, DBUS_INPUT_RESOLUTION_ERRORS
 
 
 def _numeric_dbus_value(value: Any) -> float | int | None:
@@ -232,7 +233,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         except ValueError as error:
             logging.debug("Auto AC PV service resolution found no services: %s", error)
             return [], not bool(svc.auto_pv_service)
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_INPUT_READ_ERRORS as error:
             logging.debug("Auto AC PV service resolution failed: %s", error)
             return [], False
 
@@ -264,7 +265,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         for service_name in service_names:
             try:
                 value = svc.get_dbus_value(service_name, svc.auto_pv_path)
-            except Exception as error:  # pylint: disable=broad-except
+            except DBUS_INPUT_READ_ERRORS as error:
                 logging.debug(
                     "Auto PV read failed%s for %s %s: %s",
                     log_suffix,
@@ -287,7 +288,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
         svc.invalidate_auto_pv_services()
         try:
             rescanned_services = svc.resolve_auto_pv_services()
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_INPUT_RESOLUTION_ERRORS as error:
             logging.debug("Auto AC PV rescan failed: %s", error)
             return 0.0, False
         total, seen_value, _ = self._read_pv_service_values(
@@ -303,7 +304,7 @@ class _DbusInputPvMixin(_ComposableControllerMixin):
             return None, False
         try:
             return svc.get_dbus_value(svc.auto_dc_pv_service, svc.auto_dc_pv_path), False
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_INPUT_READ_ERRORS as error:
             logging.debug(
                 "Auto DC PV read failed for %s %s: %s",
                 svc.auto_dc_pv_service,

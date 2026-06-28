@@ -10,6 +10,8 @@ from typing import Any
 
 from venus_evcharger.publish.dbus_shared import PublishServiceValueSnapshot, PublishStateEntry, PhaseData
 
+PUBLISH_DBUS_SERVICE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
 
 def _publish_state_entry(value: object) -> PublishStateEntry | None:
     if not isinstance(value, Mapping):
@@ -135,7 +137,7 @@ class _DbusPublishCoreMixin:
         self._assert_dbus_access_allowed(f"snapshot {path}")
         try:
             return True, self.service._dbusservice[path]
-        except Exception:  # pylint: disable=broad-except
+        except PUBLISH_DBUS_SERVICE_ERRORS:
             return False, None
 
     def _stage_publish_values(
@@ -170,7 +172,7 @@ class _DbusPublishCoreMixin:
             self._assert_dbus_access_allowed(f"publish {path}")
             try:
                 self.service._dbusservice[path] = value
-            except Exception:  # pylint: disable=broad-except
+            except PUBLISH_DBUS_SERVICE_ERRORS:
                 return changed, published_paths, path
             self.service._dbus_publish_state[path] = {"value": value, "updated_at": current}
             published_paths.append(path)
@@ -189,13 +191,13 @@ class _DbusPublishCoreMixin:
                 self._assert_dbus_access_allowed(f"delete {path}")
                 try:
                     del self.service._dbusservice[path]
-                except Exception:  # pylint: disable=broad-except
+                except PUBLISH_DBUS_SERVICE_ERRORS:
                     pass
                 continue
             self._assert_dbus_access_allowed(f"restore {path}")
             try:
                 self.service._dbusservice[path] = original_value
-            except Exception:  # pylint: disable=broad-except
+            except PUBLISH_DBUS_SERVICE_ERRORS:
                 pass
 
     def _publish_values_transactional(
