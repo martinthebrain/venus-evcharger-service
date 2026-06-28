@@ -11,7 +11,11 @@ from typing import Any
 import dbus
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
-from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
+from venus_evcharger.dbus_adapter_components import (
+    DBUS_GATEWAY_OPERATION_ERRORS,
+    CommandOutcome,
+    DbusOperationDeferred,
+)
 from venus_evcharger.dbus_adapter_read_aggregate import (
     OPTIONAL_MEMBER_FAILED,
     PV_TOTAL_AGGREGATE,
@@ -21,6 +25,8 @@ from venus_evcharger.dbus_adapter_read_aggregate import (
 from venus_evcharger.dbus_adapter_read_protocols import DbusReadAdapter
 from venus_evcharger.dbus_adapter_read_pv import pv_total_members
 from venus_evcharger.dbus_adapter_read_targets import ReadTarget, read_target
+
+DBUS_READ_ERRORS = DBUS_GATEWAY_OPERATION_ERRORS
 
 
 class DbusReadExecutor:
@@ -52,7 +58,7 @@ class DbusReadExecutor:
             value = self.read_busitem(target.service, target.path)
         except DbusOperationDeferred:
             return "deferred"
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_READ_ERRORS as error:
             self.adapter.cache.mark_error(target.cache_key, source=target.source, error=error)
             logging.debug("DBus adapter direct refresh failed key=%s: %s", target.cache_key, error)
             return "dropped"
@@ -65,7 +71,7 @@ class DbusReadExecutor:
             return self._poll_read_spec_unchecked(key, spec)
         except DbusOperationDeferred:
             return "deferred"
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_READ_ERRORS as error:
             if self._optional_zero_on_error(spec):
                 self._mark_optional_zero(key, spec, error)
                 return "applied"
@@ -93,17 +99,16 @@ class DbusReadExecutor:
 
     def _mark_read_error(self, key: str, spec: Mapping[str, Any], error: BaseException) -> None:  # pragma: no mutate block
         self._aggregates.discard(key)
-        self.adapter.cache.mark_error(key, source=str(spec.get("service") or spec.get("prefix") or ""), error=error)
+        self.adapter.cache.mark_error(key, source=self._spec_source(spec), error=error)
         logging.debug("DBus adapter read failed key=%s: %s", key, error)
 
     def _mark_optional_zero(self, key: str, spec: Mapping[str, Any], error: BaseException) -> None:  # pragma: no mutate block
         self._aggregates.discard(key)
-        source = str(spec.get("service") or spec.get("prefix") or key)
         self.adapter.cache.update_value(
             key,
             0.0,
-            source=source,
-            confidence=float(spec.get("optional_confidence", 0.2) or 0.2),
+            source=self._spec_source(spec, fallback=key),
+            confidence=self._optional_confidence(spec),
             last_error=str(error),
         )
         logging.debug("DBus adapter optional read fell back to zero key=%s: %s", key, error)
@@ -111,6 +116,14 @@ class DbusReadExecutor:
     @staticmethod
     def _optional_zero_on_error(spec: Mapping[str, Any]) -> bool:  # pragma: no mutate block
         return str(spec.get("optional_zero_on_error", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _optional_confidence(spec: Mapping[str, Any]) -> float:  # pragma: no mutate block
+        return float(spec.get("optional_confidence", 0.2) or 0.2)
+
+    @staticmethod
+    def _spec_source(spec: Mapping[str, Any], *, fallback: str = "") -> str:  # pragma: no mutate block
+        return str(spec.get("service") or spec.get("prefix") or fallback)
 
     def has_pending_aggregate(self) -> bool:
         return self._aggregates.has_pending()
@@ -143,7 +156,7 @@ class DbusReadExecutor:
             (PV_TOTAL_AGGREGATE, tuple(members)),
             members,
             ignore_member_errors=True,
-            empty_confidence=float(spec.get("optional_confidence", 0.2) or 0.2),
+            empty_confidence=self._optional_confidence(spec),
         )
 
     def _in_progress_pv_total_members(self, key: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
@@ -227,7 +240,7 @@ class DbusReadExecutor:
             return read(service, path)
         except DbusOperationDeferred:
             raise
-        except Exception as error:
+        except DBUS_READ_ERRORS as error:
             if not ignore_member_errors:
                 raise
             self._record_optional_aggregate_error(service, path, state, error)

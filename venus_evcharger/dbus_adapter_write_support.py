@@ -8,6 +8,22 @@ from collections.abc import Mapping
 from typing import Any
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome
+from venus_evcharger.dbus_gateway_core import float_or_zero
+
+__all__ = (
+    "budget_elapsed",
+    "command_kind",
+    "deadline_pair",
+    "float_or_zero",
+    "has_startup_registration",
+    "is_local_publish_command",
+    "lifecycle_payload",
+    "local_publish_action_result",
+    "priority_rank",
+    "register_service_command",
+    "should_follow_with_local_burst",
+    "stale_coalesced_paths",
+)
 
 _PRIORITY_RANKS = {
     "safety": 0,
@@ -23,13 +39,6 @@ _PRIORITY_RANKS = {
 
 def priority_rank(priority: object) -> int:
     return _PRIORITY_RANKS.get(str(priority or "diagnostic").strip().lower(), _PRIORITY_RANKS["diagnostic"])
-
-
-def float_or_zero(value: object) -> float:
-    try:
-        return float(str(value)) if value is not None else 0.0
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def deadline_pair(command: Mapping[str, Any]) -> tuple[float, float]:

@@ -26,6 +26,14 @@ PRIORITY_RANKS = {
 PROTECTIVE_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["read"]
 DEGRADED_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["optional"]
 DEFAULT_PRIORITY_RANK = PRIORITY_RANKS["diagnostic"]
+_DBUS_EXCEPTION_TYPE: type[BaseException] = getattr(dbus, "DBusException", RuntimeError)
+DBUS_GATEWAY_OPERATION_ERRORS: tuple[type[BaseException], ...] = (
+    _DBUS_EXCEPTION_TYPE,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 class DbusOperationDeferred(RuntimeError):
@@ -182,5 +190,5 @@ def _dbus_error_name(error: BaseException) -> str:
         return ""
     try:
         return str(getter()).lower()
-    except Exception:  # pylint: disable=broad-except
+    except DBUS_GATEWAY_OPERATION_ERRORS:
         return ""

@@ -13,6 +13,7 @@ from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 from venus_evcharger.dbus_introspection import owner_path_children, owner_path_unusable
 from venus_evcharger.inputs.helper.sources_dbus_common import (
+    DBUS_SOURCE_READ_ERRORS,
     _ResolvedAutoBatteryServiceState,
     _is_expected_missing_dbus_error,
 )
@@ -141,11 +142,11 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         return max(1.0, min(300.0, configured))
 
     def _dbus_retry_read(self: Any, service_name: str, path: str, label: str, read: Any) -> Any:
-        last_error: Exception | None = None
+        last_error: BaseException | None = None
         for attempt in range(2):
             try:
                 return read()
-            except Exception as error:  # pylint: disable=broad-except
+            except DBUS_SOURCE_READ_ERRORS as error:
                 last_error = error
                 if _is_expected_missing_dbus_error(error):
                     logging.debug("DBus value missing for %s %s: %s", service_name, path, error)
@@ -160,7 +161,7 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         label: str,
         service_name: str,
         path: str,
-        error: Exception,
+        error: BaseException,
     ) -> None:
         self._reset_system_bus()
         if attempt == 0:

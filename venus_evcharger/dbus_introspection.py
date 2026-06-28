@@ -42,7 +42,7 @@ def _read_snapshot_payload(path: str) -> dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
-    except Exception:  # pylint: disable=broad-except
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -247,7 +247,7 @@ def _write_request_payload(request_path: str, payload: dict[str, Any]) -> bool:
     try:
         write_text_atomically(request_path, compact_json(payload))
         return True
-    except Exception:  # pylint: disable=broad-except
+    except (OSError, RuntimeError, TypeError, ValueError):
         return False
 
 
@@ -255,6 +255,6 @@ def _load_request_payload(request_path: str) -> dict[str, Any]:
     try:
         with open(request_path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
-    except Exception:  # pylint: disable=broad-except
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         payload = {}
     return payload if isinstance(payload, dict) else {}

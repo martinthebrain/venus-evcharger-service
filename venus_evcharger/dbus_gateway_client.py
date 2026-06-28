@@ -35,7 +35,7 @@ class GatewayClient:
                 return {"ok": True}
             response = json.loads(data.decode("utf-8").strip())
             return response if isinstance(response, dict) else {"ok": False, "error": "invalid-response"}
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError, TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
 
     def enqueue_command(self, command: Mapping[str, Any]) -> str:  # pragma: no mutate block

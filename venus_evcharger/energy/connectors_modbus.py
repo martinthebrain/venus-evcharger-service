@@ -230,7 +230,7 @@ def _render_scope_key(
     }
     try:
         return normalized.format_map(_ScopeKeyFormatter(values))
-    except Exception:  # noqa: BLE001
+    except (KeyError, IndexError, ValueError):
         return normalized
 
 

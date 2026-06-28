@@ -28,7 +28,10 @@ from ..energy_snapshot_contracts import (
     object_mapping,
 )
 from .sources_dbus import _AutoInputHelperSourceDbusMixin
+from .sources_dbus_common import DBUS_SOURCE_READ_ERRORS
 from .sources_pv_grid import _AutoInputHelperSourcePvGridMixin
+
+BATTERY_SNAPSHOT_SOURCE_ERRORS: tuple[type[BaseException], ...] = (*DBUS_SOURCE_READ_ERRORS, ValueError)
 
 
 class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHelperSourcePvGridMixin):
@@ -117,7 +120,7 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
                 source_payloads,
             )
             return object_mapping(payload)
-        except Exception:
+        except BATTERY_SNAPSHOT_SOURCE_ERRORS:
             self._invalidate_auto_battery_service()
             self._delay_source_retry("battery")
             return object_mapping(self._empty_battery_snapshot())

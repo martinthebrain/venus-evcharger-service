@@ -14,6 +14,7 @@ from venus_evcharger.inputs.helper.capacity_persistence import (
     configured_estimated_capacity_payload,
     persist_estimated_capacity_if_ah_changed,
 )
+from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
 
 
 def _capacity_payload_mapping(value: object) -> dict[str, object] | None:
@@ -55,7 +56,7 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         service_name = self._resolve_energy_source_service(source)
         try:
             return service_name, self._read_dbus_energy_source_fields(source, service_name)
-        except Exception:
+        except DBUS_SOURCE_READ_ERRORS:
             if source.source_id != self._primary_energy_source().source_id:
                 raise
             self._invalidate_auto_battery_service()
@@ -207,7 +208,7 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
             return
         try:
             changed = persist_estimated_capacity_if_ah_changed(str(getattr(self, "config_path", "")), source, payload)
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
             logging.warning("Unable to persist auto-estimated battery capacity: %s", error)
             return
         if changed:

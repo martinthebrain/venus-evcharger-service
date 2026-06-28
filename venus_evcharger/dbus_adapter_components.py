@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from venus_evcharger.dbus_adapter_components_rate import (
+    DBUS_GATEWAY_OPERATION_ERRORS,
     DbusCircuitBreaker,
     DbusConnectionManager,
     DbusOperationDeferred,
@@ -15,6 +16,7 @@ from venus_evcharger.dbus_adapter_components_scheduler import AtomicJsonWriter, 
 CommandOutcome = str
 
 __all__ = [
+    "DBUS_GATEWAY_OPERATION_ERRORS",
     "AtomicJsonWriter",
     "CommandOutcome",
     "DbusCircuitBreaker",

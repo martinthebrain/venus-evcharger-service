@@ -168,7 +168,7 @@ class DbusWriteSchedulerHealthMixin:
             self._ensure_lifecycle_directory(path)
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(compact_json(lifecycle_payload(command, state, queue_class, now)) + "\n")  # pragma: no mutate
-        except Exception:  # pylint: disable=broad-except
+        except (OSError, TypeError, ValueError):
             logging.debug("Unable to append DBus gateway command lifecycle event", exc_info=True)
 
     @staticmethod

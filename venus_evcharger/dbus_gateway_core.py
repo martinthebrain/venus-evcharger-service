@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, SupportsFloat, SupportsIndex
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 
@@ -147,16 +147,9 @@ def write_json_file(path: str, payload: Mapping[str, Any]) -> None:  # pragma: n
 
 
 def float_or_zero(value: object) -> float:  # pragma: no mutate block
-    if isinstance(value, (str, bytes, int, float)):
-        try:
-            return float(value)
-        except ValueError:
-            return 0.0
-    try:
-        method = getattr(value, "__float__")  # noqa: B009 - object protocol probe accepted by mypy
-    except AttributeError:
+    if not isinstance(value, (str, bytes, SupportsFloat, SupportsIndex)):
         return 0.0
     try:
-        return float(method())
+        return float(value)
     except (TypeError, ValueError):
         return 0.0

@@ -52,7 +52,7 @@ class DbusAdapterHealthMixin:
         self._last_health_log_monotonic = time.monotonic()
         try:
             append_health_log(self.health_log_path, health)
-        except Exception:  # pylint: disable=broad-except
+        except (OSError, RuntimeError, TypeError, ValueError):
             logging.debug("Unable to append DBus gateway health history", exc_info=True)
 
     def health_log_due(self: DbusAdapterHealthContext) -> bool:  # pragma: no mutate block

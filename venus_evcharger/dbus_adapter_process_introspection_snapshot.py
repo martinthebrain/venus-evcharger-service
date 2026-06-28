@@ -37,7 +37,7 @@ class DbusAdapterIntrospectionSnapshotMixin:
         }
         try:
             write_text_atomically(self.dbus_introspection_snapshot_path, compact_json(payload))
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
             logging.debug("Unable to write DBus introspection snapshot %s: %s", self.dbus_introspection_snapshot_path, error)
 
     def introspection_services_snapshot(self: DbusAdapterIntrospectionSnapshotContext, now: float) -> dict[str, Any]:
@@ -88,7 +88,7 @@ class DbusAdapterIntrospectionSnapshotMixin:
     def parse_introspection_xml(xml_data: object) -> tuple[list[str], list[str]]:
         try:
             root = xml_et.fromstring(str(xml_data))
-        except Exception:
+        except xml_et.ParseError:
             return [], []
         return _xml_names(root, "interface"), _xml_names(root, "node")
 

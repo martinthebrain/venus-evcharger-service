@@ -16,6 +16,7 @@ from venus_evcharger.core.shared import (
     sum_dbus_numeric,
     grid_values_complete_enough,
 )
+from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
 
 
 class _AutoInputHelperSourcePvGridMixin:
@@ -47,7 +48,7 @@ class _AutoInputHelperSourcePvGridMixin:
     def _resolved_pv_service_names(self: Any) -> tuple[list[str], bool]:
         try:
             service_names = self._resolve_auto_pv_services()
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_SOURCE_READ_ERRORS as error:
             logging.debug("Auto helper AC PV service resolution failed: %s", error)
             return [], False
         return service_names, (not self.auto_pv_service and not service_names)
@@ -60,7 +61,7 @@ class _AutoInputHelperSourcePvGridMixin:
                 continue
             try:
                 value = self._get_dbus_value(service_name, self.auto_pv_path)
-            except Exception as error:  # pylint: disable=broad-except
+            except DBUS_SOURCE_READ_ERRORS as error:
                 logging.debug("Auto helper PV read failed for %s %s: %s", service_name, self.auto_pv_path, error)
                 self._invalidate_auto_pv_services()
                 continue
@@ -76,7 +77,7 @@ class _AutoInputHelperSourcePvGridMixin:
             return None
         try:
             dc_value = self._get_dbus_value(self.auto_dc_pv_service, self.auto_dc_pv_path)
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_SOURCE_READ_ERRORS as error:
             logging.debug("Auto helper DC PV read failed for %s %s: %s", self.auto_dc_pv_service, self.auto_dc_pv_path, error)
             return None
         return sum_dbus_numeric(dc_value)
@@ -131,7 +132,7 @@ class _AutoInputHelperSourcePvGridMixin:
     def _grid_path_numeric_value(self: Any, path: str) -> float | None:
         try:
             value = self._get_dbus_value(self.auto_grid_service, path)
-        except Exception:
+        except DBUS_SOURCE_READ_ERRORS:
             return None
         if value is None:
             return None

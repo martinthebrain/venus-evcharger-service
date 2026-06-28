@@ -197,7 +197,7 @@ def write_text_atomically(path: str | PathLike[str], payload: str, encoding: str
         with open(tmp_path, "w", encoding=encoding) as handle:
             handle.write(payload)
         os.replace(tmp_path, path_str)
-    except Exception:
+    except (OSError, RuntimeError, TypeError, UnicodeEncodeError):
         try:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)

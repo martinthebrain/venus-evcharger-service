@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from venus_evcharger.energy import EnergySourceDefinition
+from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
 
 
 def _energy_source_definitions(value: object) -> tuple[EnergySourceDefinition, ...]:
@@ -141,7 +142,7 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
     def _battery_service_has_soc(self: Any, service_name: str) -> bool:
         try:
             return self._get_dbus_value(service_name, self.auto_battery_soc_path) is not None
-        except Exception:
+        except DBUS_SOURCE_READ_ERRORS:
             return False
 
     def _energy_service_has_readable_field(self: Any, service_name: str, path: str) -> bool:
@@ -149,7 +150,7 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
             return False
         try:
             return self._get_dbus_value(service_name, path) is not None
-        except Exception:
+        except DBUS_SOURCE_READ_ERRORS:
             return False
 
     def _energy_source_has_readable_data(self: Any, source: EnergySourceDefinition, service_name: str) -> bool:

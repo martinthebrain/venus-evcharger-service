@@ -8,7 +8,10 @@ from typing import Any
 
 from venus_evcharger.core.shared import coerce_dbus_numeric, discovery_cache_valid, first_matching_prefixed_service
 from venus_evcharger.energy import EnergySourceDefinition
-from venus_evcharger.inputs.helper.sources_dbus_common import _ResolvedAutoBatteryServiceState
+from venus_evcharger.inputs.helper.sources_dbus_common import (
+    DBUS_SOURCE_READ_ERRORS,
+    _ResolvedAutoBatteryServiceState,
+)
 
 
 def _service_name_or_none(value: object) -> str | None:
@@ -44,11 +47,12 @@ class _AutoInputHelperSourceDbusResolveMixin(_ResolvedAutoBatteryServiceState):
         if not self._dbus_service_name_available(source.service_name):
             return None
         try:
-            if self._energy_source_has_readable_data(source, source.service_name):
-                self._cache_energy_service(source.source_id, source.service_name, now, primary=True)
-                return str(self._resolved_auto_battery_service)
-        except Exception:
+            readable = self._energy_source_has_readable_data(source, source.service_name)
+        except DBUS_SOURCE_READ_ERRORS:
             return None
+        if readable:
+            self._cache_energy_service(source.source_id, source.service_name, now, primary=True)
+            return str(self._resolved_auto_battery_service)
         return None
 
     def _cached_auto_battery_service(self: Any, now: float) -> str | None:

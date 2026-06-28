@@ -17,7 +17,11 @@ from typing import Any
 import dbus
 
 from venus_evcharger.core.shared import compact_json, config_get_float, write_text_atomically
-from venus_evcharger.dbus_adapter_components import CommandOutcome, DbusOperationDeferred
+from venus_evcharger.dbus_adapter_components import (
+    DBUS_GATEWAY_OPERATION_ERRORS,
+    CommandOutcome,
+    DbusOperationDeferred,
+)
 from venus_evcharger.dbus_adapter_process_protocol_introspection import DbusAdapterIntrospectionContext
 
 OPTIONAL_INTROSPECTION_PRIORITY_MIN = 90
@@ -52,14 +56,14 @@ class DbusAdapterIntrospectionMixin:
         try:
             with open(self.dbus_introspection_request_path, encoding="utf-8") as handle:
                 payload = json.load(handle)
-        except Exception:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return {}
         return payload if isinstance(payload, dict) else {}
 
     def clear_introspection_request_payload(self: DbusAdapterIntrospectionContext) -> None:
         try:
             write_text_atomically(self.dbus_introspection_request_path, compact_json({"requests": []}))
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError) as error:
             logging.debug(
                 "Unable to clear DBus introspection request payload %s: %s",
                 self.dbus_introspection_request_path,
@@ -160,7 +164,7 @@ class DbusAdapterIntrospectionMixin:
             self.cache.update_services(self.list_services())
         except DbusOperationDeferred:
             return "deferred"
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             self.discovery.record_error(error, now=time.time())
             self.commands.remove_coalesced("refresh:services")
             return "dropped"
@@ -196,10 +200,10 @@ class DbusAdapterIntrospectionMixin:
         try:
             return "applied", self.timed_dbus_operation(
                 "introspection", lambda: self.read_introspection_xml(service, path, timeout)
-            )
+        )
         except DbusOperationDeferred:
             return "deferred", None
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             return self.drop_failed_introspection(service, path, error), None
 
     def read_introspection_xml(

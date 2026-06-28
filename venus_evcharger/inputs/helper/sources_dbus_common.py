@@ -21,6 +21,7 @@ _EXPECTED_MISSING_DBUS_ERROR_TEXT = (
     "UnknownObject",
     "was not provided by any .service files",
 )
+DBUS_SOURCE_READ_ERRORS: tuple[type[BaseException], ...] = (OSError, RuntimeError)
 
 
 class _ResolvedAutoBatteryServiceState:

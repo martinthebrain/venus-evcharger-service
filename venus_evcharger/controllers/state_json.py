@@ -26,7 +26,7 @@ def read_json_object_file(path: str) -> dict[str, object] | None:
             loaded_state: object = json.load(handle)
     except FileNotFoundError:
         return None
-    except Exception as error:  # pylint: disable=broad-except
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         logging.warning("Unable to read runtime state from %s: %s", path, error)
         return None
     payload = json_object_payload(loaded_state)

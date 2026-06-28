@@ -14,7 +14,7 @@ from typing import Any
 
 import dbus
 
-from venus_evcharger.dbus_adapter_components import DbusOperationDeferred
+from venus_evcharger.dbus_adapter_components import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContext
 
 
@@ -50,7 +50,7 @@ class DbusAdapterIoMixin:
             return True
         except DbusOperationDeferred:
             return False
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             self.commands.remove_coalesced("refresh:services")
             self.discovery.record_error(error, now=now)
             return True
@@ -70,7 +70,7 @@ class DbusAdapterIoMixin:
             result = operation()
             self.circuit.record_success((time.monotonic() - started) * 1000.0, kind=kind)
             return result
-        except Exception as error:
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             self.circuit.record_error(error, kind=kind)
             raise
 
@@ -80,7 +80,7 @@ class DbusAdapterIoMixin:
             result = operation()
             self.circuit.record_success((time.monotonic() - started) * 1000.0, kind="local_publish")
             return result
-        except Exception as error:
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             self.circuit.record_error(error, kind="local_publish")
             raise
 

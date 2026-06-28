@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -33,7 +34,7 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         svc = self.service
         try:
             snapshot = svc._load_json_file(path)
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as error:
             svc._warning_throttled(
                 "auto-input-helper-read-failed",
                 max(1.0, svc.auto_input_helper_restart_seconds),

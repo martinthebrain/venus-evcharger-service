@@ -13,8 +13,13 @@ from typing import Any
 
 from gi.repository import GLib
 
+from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
 
 _GATEWAY_MATCH_SENTINEL = object()
+SUBSCRIPTION_RESOLUTION_ERRORS: tuple[type[BaseException], ...] = (
+    *DBUS_SOURCE_READ_ERRORS,
+    ValueError,
+)
 
 
 class _AutoInputHelperSubscriptionMixin:
@@ -69,7 +74,7 @@ class _AutoInputHelperSubscriptionMixin:
             if configured_service:
                 return [configured_service]
             return list(self._resolve_auto_pv_services())
-        except Exception:  # pylint: disable=broad-except
+        except SUBSCRIPTION_RESOLUTION_ERRORS:
             return []
 
     def _dc_pv_subscription_spec(self: Any) -> tuple[str, str, str] | None:
@@ -88,7 +93,7 @@ class _AutoInputHelperSubscriptionMixin:
     def _battery_subscription_specs_for_source(self: Any, source: Any) -> list[tuple[str, str, str]]:
         try:
             service_name = self._resolve_energy_source_service(source)
-        except Exception:  # pylint: disable=broad-except
+        except SUBSCRIPTION_RESOLUTION_ERRORS:
             return []
         return [
             ("battery", service_name, path)
@@ -307,7 +312,7 @@ class _AutoInputHelperSubscriptionMixin:
             return
         try:
             gateway_client().enqueue_command({"kind": "refresh_services", "priority": "normal"})
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
             logging.debug("Gateway service refresh request failed: %s", error)
             return
         self._name_owner_match = _GATEWAY_MATCH_SENTINEL

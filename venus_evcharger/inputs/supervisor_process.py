@@ -32,7 +32,7 @@ class _AutoInputSupervisorProcessMixin:
                 process.kill()
             else:
                 process.terminate()
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError) as error:
             logging.debug("Unable to stop auto input helper pid=%s: %s", getattr(process, "pid", "na"), error)
 
     def spawn_helper(self, now: float | None = None) -> None:
@@ -93,7 +93,7 @@ class _AutoInputSupervisorProcessMixin:
             svc._auto_input_snapshot_mtime_ns = None
         except FileNotFoundError:
             svc._auto_input_snapshot_mtime_ns = None
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError) as error:
             logging.debug("Unable to remove stale auto input snapshot %s: %s", path, error)
 
     @staticmethod
@@ -113,7 +113,7 @@ class _AutoInputSupervisorProcessMixin:
                 logging.info("Stopped orphaned auto input helper pid=%s", pid)
             except ProcessLookupError:
                 continue
-            except Exception as error:  # pylint: disable=broad-except
+            except (OSError, RuntimeError) as error:
                 logging.debug("Unable to stop orphaned auto input helper pid=%s: %s", pid, error)
 
     def _orphaned_helper_pids(self) -> list[int]:
@@ -223,7 +223,7 @@ class _AutoInputSupervisorProcessMixin:
         svc = self.service
         try:
             svc._spawn_auto_input_helper(current)
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError) as error:
             svc._warning_throttled(
                 "auto-input-helper-start-failed",
                 max(1.0, svc.auto_input_helper_restart_seconds),
