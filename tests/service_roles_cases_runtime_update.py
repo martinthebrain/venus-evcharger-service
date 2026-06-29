@@ -442,6 +442,12 @@ class _ServiceRolesRuntimeUpdateCases:
         self.assertIs(service._update_controller, existing)
         self.assertIs(service._companion_dbus_bridge, existing)
 
+    def test_service_controller_factory_required_controller_rejects_missing_controller(self):
+        from venus_evcharger.service.factory import _required_controller
+
+        with self.assertRaisesRegex(RuntimeError, "_dbus_publisher was not initialized"):
+            _required_controller(None, "_dbus_publisher")
+
     def test_service_controller_factory_creates_companion_bridge_once(self):
         service = _FactoryService()
 
