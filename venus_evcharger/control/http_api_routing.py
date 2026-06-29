@@ -43,14 +43,6 @@ class _LocalControlApiRouting(_LocalControlApiEvents):
 
         def _state_token_headers(self) -> dict[str, str]: ...
 
-        def _write_error(
-            self,
-            handler: BaseHTTPRequestHandler,
-            status: HTTPStatus,
-            code: str,
-            message: str,
-        ) -> None: ...
-
         def _write_command_result(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None: ...
 
         def _write_event_stream(self, handler: BaseHTTPRequestHandler, params: dict[str, list[str]]) -> None: ...
