@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, SupportsFloat, SupportsIndex
+from typing import SupportsFloat, SupportsIndex
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 
@@ -111,7 +111,7 @@ def priority_rank(priority: object) -> int:  # pragma: no mutate block
     return PRIORITY_VALUES.get(str(priority or "diagnostic").strip().lower(), PRIORITY_VALUES["diagnostic"])
 
 
-def _json_ready(value: Any) -> Any:  # pragma: no mutate block
+def _json_ready(value: object) -> object:  # pragma: no mutate block
     if _is_json_scalar(value):
         return value
     if isinstance(value, Mapping):
@@ -121,11 +121,11 @@ def _json_ready(value: Any) -> Any:  # pragma: no mutate block
     return str(value)
 
 
-def _is_json_scalar(value: Any) -> bool:  # pragma: no mutate block
+def _is_json_scalar(value: object) -> bool:  # pragma: no mutate block
     return isinstance(value, (str, int, float, bool)) or value is None
 
 
-def _json_ready_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:  # pragma: no mutate block
+def _json_ready_mapping(value: Mapping[object, object]) -> dict[str, object]:  # pragma: no mutate block
     return {str(key): _json_ready(item) for key, item in value.items()}
 
 
@@ -134,15 +134,16 @@ def dbus_path_key(service_name: str, path: str) -> str:  # pragma: no mutate blo
     return f"path:{service_name!s}{path!s}"
 
 
-def read_json_file(path: str, default: Any = None) -> Any:  # pragma: no mutate block
+def read_json_file(path: str, default: object = None) -> object:  # pragma: no mutate block
     try:
         with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
+            payload: object = json.load(handle)
+            return payload
     except (OSError, json.JSONDecodeError):
         return default
 
 
-def write_json_file(path: str, payload: Mapping[str, Any]) -> None:  # pragma: no mutate block
+def write_json_file(path: str, payload: Mapping[str, object]) -> None:  # pragma: no mutate block
     write_text_atomically(path, compact_json(_json_ready(payload)) + "\n")
 
 

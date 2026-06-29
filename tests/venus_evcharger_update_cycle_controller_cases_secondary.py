@@ -436,7 +436,7 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
     def test_phase_switch_fallback_selection_uses_requested_selection_when_active_normalizes_empty(self):
         svc = SimpleNamespace(active_phase_selection="", requested_phase_selection="P1_P2")
         with patch(
-            "venus_evcharger.update.relay_phase_switch_policy.normalize_phase_selection",
+            "venus_evcharger.update.relay_phase_switch_mismatch.normalize_phase_selection",
             side_effect=["", "P1_P2"],
         ):
             self.assertEqual(

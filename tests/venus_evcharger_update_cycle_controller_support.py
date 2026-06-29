@@ -107,6 +107,32 @@ def _auto_phase_service(**overrides):
     return SimpleNamespace(**data)
 
 
+def _learning_service(**overrides):
+    data = {
+        "charging_started_at": 50.0,
+        "learned_charge_power_watts": 1900.0,
+        "learned_charge_power_updated_at": 90.0,
+        "learned_charge_power_state": "stable",
+        "learned_charge_power_learning_since": None,
+        "learned_charge_power_sample_count": 3,
+        "learned_charge_power_phase": "L1",
+        "learned_charge_power_voltage": 230.0,
+        "learned_charge_power_signature_mismatch_sessions": 0,
+        "learned_charge_power_signature_checked_session_started_at": None,
+        "auto_learn_charge_power_enabled": True,
+        "auto_learn_charge_power_start_delay_seconds": 30.0,
+        "auto_learn_charge_power_window_seconds": 180.0,
+        "auto_learn_charge_power_max_age_seconds": 21600.0,
+        "auto_learn_charge_power_min_watts": 500.0,
+        "auto_learn_charge_power_alpha": 0.2,
+        "phase": "L1",
+        "max_current": 16.0,
+        "_last_voltage": 230.0,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 
 class UpdateCycleControllerTestBase(unittest.TestCase):
     @staticmethod

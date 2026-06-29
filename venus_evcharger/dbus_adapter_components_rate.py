@@ -13,6 +13,14 @@ import dbus
 from venus_evcharger.dbus_gateway import LatencyWindow
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
+
+def _dbus_exception_type() -> type[BaseException]:
+    candidate = getattr(dbus, "DBusException", RuntimeError)
+    if isinstance(candidate, type) and issubclass(candidate, BaseException):
+        return candidate
+    return RuntimeError
+
+
 DBUS_DEGRADED_TIMEOUTS_PER_MINUTE = 3
 DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE = 5
 PRIORITY_RANKS = {
@@ -27,9 +35,8 @@ PRIORITY_RANKS = {
 PROTECTIVE_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["read"]
 DEGRADED_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["optional"]
 DEFAULT_PRIORITY_RANK = PRIORITY_RANKS["diagnostic"]
-_DBUS_EXCEPTION_TYPE: type[BaseException] = getattr(dbus, "DBusException", RuntimeError)
 DBUS_GATEWAY_OPERATION_ERRORS: tuple[type[BaseException], ...] = (
-    _DBUS_EXCEPTION_TYPE,
+    _dbus_exception_type(),
     OSError,
     RuntimeError,
     TypeError,

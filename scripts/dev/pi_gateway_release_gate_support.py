@@ -11,7 +11,11 @@ from typing import Any
 
 from pi_gateway_release_gate_assertions import assert_gui_values, exercise_gui_write
 from pi_gateway_release_gate_common import GateFailure, PiSession
-from pi_gateway_release_gate_health import wait_for_healthy_gateway
+from pi_gateway_release_gate_health import (
+    assert_recent_command_lifecycle,
+    assert_recent_health_history,
+    wait_for_healthy_gateway,
+)
 from pi_gateway_release_gate_remote import (
     assert_single_remote_instance,
     configure_remote,
@@ -64,9 +68,11 @@ def run_gateway_release_checks(args: argparse.Namespace, pi: PiSession, service:
         timeout=float(args.health_wait_seconds),
         poll_seconds=float(args.health_poll_seconds),
     )
+    assert_recent_health_history(pi, str(args.gateway_run_dir))
     values = assert_gui_values(pi, service, expect_power=True)
     if not args.skip_gui_write:
         exercise_gui_write(pi, service)
+        assert_recent_command_lifecycle(pi, str(args.gateway_run_dir))
     return health, values
 
 
