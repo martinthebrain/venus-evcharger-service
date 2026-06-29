@@ -434,6 +434,19 @@ class _ServiceRolesControlCases:
         self.assertIs(idem_a, idem_b)
         self.assertIs(rate_a, rate_b)
 
+    def test_control_api_health_payload_treats_non_callable_stale_hook_as_fresh(self):
+        service = _ControlService()
+        service._last_health_reason = "init"
+        service._is_update_stale = "not-callable"
+        service.control_api_audit_path = "/run/control-audit.jsonl"
+        service.control_api_audit_max_entries = 2
+        service.control_api_idempotency_path = "/run/control-idempotency.json"
+        service.control_api_idempotency_max_entries = 2
+
+        health = service._state_api_health_payload()
+
+        self.assertFalse(health["state"]["update_stale"])
+
     def test_control_api_state_token_changes_when_snapshot_changes(self):
         service = _ControlService()
         first_token = service._control_api_state_token()

@@ -4,9 +4,15 @@ from unittest.mock import MagicMock, patch
 
 from tests.service_mixins_cases_common import _AutoService, _FactoryService, _RuntimeService, _StateService, _UpdateService
 from venus_evcharger.control import ControlCommand, ControlResult
+from venus_evcharger.runtime.async_mainloop_state import _RuntimeAsyncMainloopState
 
 
 class _ServiceRolesRuntimeUpdateCases:
+    def test_runtime_async_float_attr_rejects_bool_and_uses_default(self):
+        self.assertEqual(_RuntimeAsyncMainloopState._float_attr(12), 12.0)
+        self.assertEqual(_RuntimeAsyncMainloopState._float_attr(True, 7.5), 7.5)
+        self.assertEqual(_RuntimeAsyncMainloopState._float_attr("bad", 2.5), 2.5)
+
     def test_runtime_helper_mixin_delegates_runtime_supervisor_and_io_calls(self):
         service = _RuntimeService()
         service._runtime_support_controller = MagicMock()

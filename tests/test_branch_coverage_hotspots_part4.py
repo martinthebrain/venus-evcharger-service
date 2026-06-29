@@ -2,6 +2,32 @@
 from tests.test_branch_coverage_hotspots_support import *  # noqa: F401,F403
 
 class _BranchCoverageVictronApplyCasesPart2:
+    def test_victron_apply_state_wrapper_methods_delegate_to_profile_helpers(self) -> None:
+        from venus_evcharger.update.victron_ess_balance_apply import _UpdateCycleVictronEssBalanceApply
+
+        controller = _UpdateCycleVictronEssBalanceApply()
+        service = SimpleNamespace()
+
+        with patch("venus_evcharger.update.victron_ess_balance_apply._reset_victron_ess_balance_pid_state") as reset_pid:
+            controller._reset_victron_ess_balance_pid(service)
+            reset_pid.assert_called_once_with(service)
+
+        with patch(
+            "venus_evcharger.update.victron_ess_balance_apply._reset_victron_ess_balance_pid_integral_state"
+        ) as reset_integral:
+            controller._reset_victron_ess_balance_pid_integral(service, aggressive=True)
+            reset_integral.assert_called_once_with(service, True)
+
+        with patch("venus_evcharger.update.victron_ess_balance_apply._record_victron_ess_balance_tracking_command") as record:
+            controller._record_victron_ess_balance_command(service, 10.0, 75.0, -25.0, "profile")
+            record.assert_called_once_with(service, 10.0, 75.0, -25.0, "profile")
+
+        with patch(
+            "venus_evcharger.update.victron_ess_balance_apply._clear_victron_ess_balance_tracking_episode_state"
+        ) as clear_episode:
+            controller._clear_victron_ess_balance_tracking_episode(service)
+            clear_episode.assert_called_once_with(service)
+
     def test_victron_apply_prepare_and_telemetry_branches(self) -> None:
         controller = _controller()
         service = SimpleNamespace(
@@ -191,6 +217,4 @@ class _BranchCoverageVictronApplyCasesPart2:
             service._victron_ess_balance_last_setpoint_w = 70.0
             controller._restore_victron_ess_balance_base_setpoint(service, 17.0, metrics, "blocked")
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "blocked-restored")
-
-
 
