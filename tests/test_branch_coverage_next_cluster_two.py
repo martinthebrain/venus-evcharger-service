@@ -28,7 +28,7 @@ class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGrid):
         return list(sources) if isinstance(sources, list) else []
 
 
-class _DummyRuntimeSnapshot(runtime_snapshot_mod._StateRuntimeSnapshotMixin):
+class _DummyRuntimeSnapshot(runtime_snapshot_mod._StateRuntimeSnapshot):
     def __init__(self, service: object) -> None:
         self.service = service
 
@@ -206,12 +206,12 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
         self.assertIn("victron_ess_balance_learning_state", current_state)
         self.assertIn("victron_ess_balance_adaptive_tuning_state", current_state)
         self.assertEqual(
-            runtime_snapshot_mod._StateRuntimeSnapshotMixin._energy_runtime_state(service)["combined_battery_soc"],
+            runtime_snapshot_mod._StateRuntimeSnapshot._energy_runtime_state(service)["combined_battery_soc"],
             62.0,
         )
         non_mapping_service = SimpleNamespace(_get_worker_snapshot=lambda: "bad")
         self.assertIsNone(
-            runtime_snapshot_mod._StateRuntimeSnapshotMixin._energy_runtime_state(non_mapping_service)[
+            runtime_snapshot_mod._StateRuntimeSnapshot._energy_runtime_state(non_mapping_service)[
                 "combined_battery_soc"
             ]
         )

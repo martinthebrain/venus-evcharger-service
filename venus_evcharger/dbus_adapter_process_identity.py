@@ -12,12 +12,13 @@ import platform
 from vedbus import VeDbusService
 
 from venus_evcharger.dbus_adapter_process_config import configured_device_instance
+from venus_evcharger.dbus_adapter_process_io import DbusAdapterIo
 from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterIdentityContext
 from venus_evcharger.dbus_adapter_service_protocol import DbusServiceLike
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
-class DbusAdapterIdentity:
+class DbusAdapterIdentity(DbusAdapterIo):
     _dbusservice: DbusServiceLike | None
 
     @property

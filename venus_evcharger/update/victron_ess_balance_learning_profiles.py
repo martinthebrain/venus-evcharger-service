@@ -7,13 +7,11 @@ telemetry fields close together so adaptive decisions remain traceable.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from venus_evcharger.core.contracts import mutable_dict_attr
 
-from .victron_ess_balance_learning_profiles_contracts import (
-    _VictronEssBalanceLearningProfilesContractsMixin,
-)
+from .victron_ess_balance_learning_telemetry import _UpdateCycleVictronEssBalanceLearningTelemetry
 from .victron_ess_balance_learning_profiles_support import (
     _clear_victron_ess_balance_active_profile_state,
     _victron_ess_balance_action_direction_site_regime,
@@ -36,7 +34,14 @@ from .victron_ess_balance_learning_profiles_support import (
 )
 
 
-class _UpdateCycleVictronEssBalanceLearningProfilesMixin(_VictronEssBalanceLearningProfilesContractsMixin):
+class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanceLearningTelemetry):
+    if TYPE_CHECKING:  # pragma: no cover
+
+        @staticmethod
+        def _victron_ess_balance_ev_active(svc: Any) -> bool: ...
+
+        def _victron_ess_balance_activation_mode(self, svc: Any) -> str: ...
+
     @staticmethod
     def _victron_ess_balance_profile_scalar_fields() -> tuple[str, ...]:
         return (

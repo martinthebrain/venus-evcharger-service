@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from venus_evcharger.backend.config import backend_mode_for_service
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.models import PhaseSelection
+from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
 from venus_evcharger.backend.shelly_io_types import (
     ShellyIoHost,
     _ChargerStateBackendLike,
@@ -25,7 +26,7 @@ from venus_evcharger.backend.shelly_io_types import (
 from venus_evcharger.core.contracts import finite_float_or_none
 
 
-class ShellyIoCapabilities:
+class ShellyIoCapabilities(ShellyIoRequests):
     """Expose split-backend discovery and direct-switch safety helpers."""
 
     if TYPE_CHECKING:

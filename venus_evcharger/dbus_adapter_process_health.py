@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus adapter process mixins.
+"""DBus adapter process roles.
 
 This module is part of the dedicated DBus gateway. Direct Victron DBus access
 is intentionally isolated to the gateway adapter modules only.

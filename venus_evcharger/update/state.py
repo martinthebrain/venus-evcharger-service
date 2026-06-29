@@ -14,12 +14,12 @@ from typing import Any
 
 from venus_evcharger.auto.tracking import clear_auto_decision_tracking
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.update.relay import _UpdateCycleRelay
 
 STARTUP_MANUAL_TARGET_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 RUNTIME_STATE_SAVE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
-class _UpdateCycleStateMixin(_ComposableControllerMixin):
+class _UpdateCycleState(_UpdateCycleRelay):
     @staticmethod
     def _charger_state_max_age_seconds(svc: Any) -> float:
         """Return how fresh charger readback must be before it drives session state."""

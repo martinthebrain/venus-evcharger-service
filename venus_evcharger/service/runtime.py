@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Runtime, helper, and Shelly-I/O mixins for the Venus EV charger service."""
+"""Runtime, helper, and Shelly-I/O roles for the Venus EV charger service."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from typing import Any
 from venus_evcharger.control import ControlCommand
 from venus_evcharger.core.return_contracts import require_bool, require_dict, require_int, require_str, require_tuple2
 
-from .factory import ServiceControllerFactoryMixin
+from .auto import DbusAutoLogic
 
 
-class RuntimeHelperMixin(ServiceControllerFactoryMixin):
+class RuntimeHelper(DbusAutoLogic):
     """Static runtime, helper, and Shelly-I/O delegations."""
 
     def _reset_system_bus(self) -> None:

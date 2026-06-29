@@ -14,6 +14,7 @@ import dbus
 from venus_evcharger.core.shared import compact_json, config_get_float
 from venus_evcharger.dbus_adapter_components import CommandOutcome
 from venus_evcharger.dbus_adapter_write_protocols import DbusWriteSchedulerAdapter
+from venus_evcharger.dbus_adapter_write_publish import DbusWriteSchedulerPublish
 from venus_evcharger.dbus_adapter_write_support import (
     float_or_zero,
     lifecycle_payload,
@@ -39,7 +40,7 @@ _AGED_REFRESH_PRIORITY_RANK = 1.5
 _AGING_QUEUE_CLASSES = {"read-fast", "read-slow", "discovery", "introspection"}
 
 
-class DbusWriteSchedulerHealth:
+class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
     adapter: DbusWriteSchedulerAdapter
     base_queue_class_budgets: dict[str, int]
     dynamic_local_publish_burst_limit: int

@@ -8,12 +8,12 @@ import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.update.relay_phase_switch_runtime import _RelayPhaseSwitchRuntime
 
 RELAY_PLACEHOLDER_PUBLISH_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RelayPhasePublishMixin(_ComposableControllerMixin):
+class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
     """Translate PM metadata into phase displays and track relay confirmations."""
 
     if TYPE_CHECKING:  # pragma: no cover
@@ -24,11 +24,11 @@ class _RelayPhasePublishMixin(_ComposableControllerMixin):
         if not isinstance(raw_value, (tuple, list)) or len(raw_value) != 3:
             return None
         values: tuple[float | None, float | None, float | None] = (
-            _RelayPhasePublishMixin._phase_tuple_item(raw_value[0]),
-            _RelayPhasePublishMixin._phase_tuple_item(raw_value[1]),
-            _RelayPhasePublishMixin._phase_tuple_item(raw_value[2]),
+            _RelayPhasePublish._phase_tuple_item(raw_value[0]),
+            _RelayPhasePublish._phase_tuple_item(raw_value[1]),
+            _RelayPhasePublish._phase_tuple_item(raw_value[2]),
         )
-        return _RelayPhasePublishMixin._resolved_phase_tuple(values)
+        return _RelayPhasePublish._resolved_phase_tuple(values)
 
     @staticmethod
     def _phase_tuple_item(raw_value: Any) -> float | None:
@@ -47,9 +47,9 @@ class _RelayPhasePublishMixin(_ComposableControllerMixin):
 
     @staticmethod
     def _phase_voltage(voltage: float, selection: Any, voltage_mode: Any) -> float:
-        normalized_selection = _RelayPhasePublishMixin._normalized_phase_selection(selection)
-        normalized_voltage_mode = _RelayPhasePublishMixin._normalized_voltage_mode(voltage_mode)
-        if not _RelayPhasePublishMixin._selection_uses_line_to_line_voltage(normalized_selection, normalized_voltage_mode):
+        normalized_selection = _RelayPhasePublish._normalized_phase_selection(selection)
+        normalized_voltage_mode = _RelayPhasePublish._normalized_voltage_mode(voltage_mode)
+        if not _RelayPhasePublish._selection_uses_line_to_line_voltage(normalized_selection, normalized_voltage_mode):
             return float(voltage)
         return float(voltage) / math.sqrt(3.0) if float(voltage) > 0.0 else 0.0
 
@@ -86,7 +86,7 @@ class _RelayPhasePublishMixin(_ComposableControllerMixin):
         for phase_name, phase_values in value.items():
             if not isinstance(phase_name, str) or not isinstance(phase_values, dict):
                 raise TypeError("_phase_values must return dict[str, dict[str, float]]")
-            checked[phase_name] = _RelayPhasePublishMixin._checked_phase_values(phase_values)
+            checked[phase_name] = _RelayPhasePublish._checked_phase_values(phase_values)
         return checked
 
     @staticmethod

@@ -17,9 +17,10 @@ from venus_evcharger.core.common import (
     scheduled_mode_snapshot,
 )
 from venus_evcharger.core.contracts import finite_float_or_none, normalized_auto_state_pair
+from venus_evcharger.publish.dbus_core import _DbusPublishCore
 
 
-class _DbusPublishConfig:
+class _DbusPublishConfig(_DbusPublishCore):
     service: Any
 
     if TYPE_CHECKING:  # pragma: no cover

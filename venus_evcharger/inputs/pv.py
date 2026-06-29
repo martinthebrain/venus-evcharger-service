@@ -14,7 +14,7 @@ from venus_evcharger.core.shared import (
     should_assume_zero_pv,
     sum_dbus_numeric,
 )
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.core.controller_contracts import ComposableControllerRole as _ComposableControllerRole
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS, DBUS_INPUT_RESOLUTION_ERRORS
 
@@ -49,7 +49,7 @@ def _service_name_list(value: object) -> list[str] | None:
     return service_names or None
 
 
-class _DbusInputPv(_ComposableControllerMixin):
+class _DbusInputPv(_ComposableControllerRole):
     def _dbus_module(self) -> Any:
         """Direct DBus access is forbidden outside the gateway adapter."""
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")

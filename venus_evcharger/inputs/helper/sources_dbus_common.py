@@ -28,7 +28,7 @@ DBUS_ERROR_NAME_ACCESS_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 class _ResolvedAutoBatteryServiceState:
-    """Shared state contract for DBus source-resolution mixins."""
+    """Shared state contract for DBus source-resolution roles."""
 
     _resolved_auto_battery_service: str | None
 

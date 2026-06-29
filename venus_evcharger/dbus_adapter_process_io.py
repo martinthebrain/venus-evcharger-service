@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus adapter process mixins.
+"""DBus adapter process roles.
 
 This module is part of the dedicated DBus gateway. Direct Victron DBus access
 is intentionally isolated to the gateway adapter modules only.
@@ -15,10 +15,11 @@ from typing import Any
 import dbus
 
 from venus_evcharger.dbus_adapter_components import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdapterIntrospectionSnapshot
 from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContext
 
 
-class DbusAdapterIo:
+class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
     def poll_one_due_read_once(self: DbusAdapterIoContext) -> bool:
         now = time.time()
         due = self.read_scheduler.next_due(

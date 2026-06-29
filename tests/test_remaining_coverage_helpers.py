@@ -23,7 +23,7 @@ from venus_evcharger.controllers.write_snapshot import (
     _snapshot_dbus_paths,
     _snapshot_direct_dbus_paths,
 )
-from venus_evcharger.controllers.state_restore_support import _StateRuntimeRestoreVictronEssMixin
+from venus_evcharger.controllers.state_restore_support import _StateRuntimeRestoreVictronEss
 from venus_evcharger.controllers import state_runtime_snapshot as runtime_snapshot_mod
 from venus_evcharger.core import common as common_mod
 from venus_evcharger.energy import aggregate as aggregate_mod
@@ -32,8 +32,6 @@ from venus_evcharger.energy.probe import _optional_detected_int
 from venus_evcharger.energy import EnergySourceSnapshot
 from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscription
 from venus_evcharger.inputs.supervisor_process import _AutoInputSupervisorProcess
-from venus_evcharger.inputs.supervisor_snapshot_runtime import _AutoInputSupervisorSnapshotRuntime
-from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidation
 from venus_evcharger.publish.dbus_core import _DbusPublishCore
 from venus_evcharger.publish.dbus_config import _DbusPublishConfig
 from venus_evcharger.publish.dbus_diagnostics import _DbusPublishDiagnostics
@@ -47,8 +45,8 @@ from venus_evcharger.topology.schema import (
     PolicyConfig,
     TopologyConfig,
 )
-from venus_evcharger.update.pm_snapshot import _UpdateCyclePmSnapshotMixin
-from venus_evcharger.update.runtime_cycle import _UpdateCycleRuntimeMixin
+from venus_evcharger.update.pm_snapshot import _UpdateCyclePmSnapshot
+from venus_evcharger.update.runtime_cycle import _UpdateCycleRuntime
 from venus_evcharger_auto_input_helper import AutoInputHelper
 from venus_evcharger_service import ShellyWallboxService
 
@@ -63,11 +61,7 @@ class _DiagnosticsHarness(_DbusPublishDiagnostics):
         self.service = service
 
 
-class _SupervisorHarness(
-    _AutoInputSupervisorSnapshotRuntime,
-    _AutoInputSupervisorSnapshotValidation,
-    _AutoInputSupervisorProcess,
-):
+class _SupervisorHarness(_AutoInputSupervisorProcess):
     SNAPSHOT_SOURCE_KEYS = ()
 
     def __init__(self, service: object) -> None:
@@ -84,11 +78,11 @@ class _RuntimeHealthHarness(_RuntimeHealth):
         self.service = service
 
 
-class _PmSnapshotHarness(_UpdateCyclePmSnapshotMixin):
+class _PmSnapshotHarness(_UpdateCyclePmSnapshot):
     pass
 
 
-class _RuntimeCycleHarness(_UpdateCycleRuntimeMixin):
+class _RuntimeCycleHarness(_UpdateCycleRuntime):
     def __init__(self, service: object) -> None:
         self.service = service
 
@@ -181,18 +175,18 @@ class RemainingCoverageHelperTests(unittest.TestCase):
     def test_state_restore_support_accepts_valid_activation_mode_and_service_fallback(self) -> None:
         service = SimpleNamespace(auto_battery_discharge_balance_victron_bias_activation_mode="export_only")
         self.assertEqual(
-            _StateRuntimeRestoreVictronEssMixin._victron_ess_balance_activation_mode({}, service),
+            _StateRuntimeRestoreVictronEss._victron_ess_balance_activation_mode({}, service),
             "export_only",
         )
         self.assertEqual(
-            _StateRuntimeRestoreVictronEssMixin._victron_ess_balance_activation_mode(
+            _StateRuntimeRestoreVictronEss._victron_ess_balance_activation_mode(
                 {"activation_mode": "export_and_above_reserve_band"},
                 service,
             ),
             "export_and_above_reserve_band",
         )
         self.assertIsNone(
-            _StateRuntimeRestoreVictronEssMixin._victron_ess_balance_activation_mode(
+            _StateRuntimeRestoreVictronEss._victron_ess_balance_activation_mode(
                 {"activation_mode": "invalid"},
                 service,
             )
@@ -399,12 +393,12 @@ class RemainingCoverageHelperTests(unittest.TestCase):
             _enqueue_control_command=MagicMock(return_value=True),
             _control_command_async_enabled=True,
         )
-        from venus_evcharger.service.auto import DbusAutoLogicMixin
+        from venus_evcharger.service.auto import DbusAutoLogic
 
-        self.assertTrue(DbusAutoLogicMixin._handle_write(auto_service, "/StartStop", 1))
+        self.assertTrue(DbusAutoLogic._handle_write(auto_service, "/StartStop", 1))
         auto_service._enqueue_control_command.assert_called_once_with("command")
 
-        from venus_evcharger.service.state_publish import StatePublishMixin
+        from venus_evcharger.service.state_publish import StatePublish
 
         state_service = SimpleNamespace(
             _ensure_companion_dbus_bridge=MagicMock(),
@@ -412,7 +406,7 @@ class RemainingCoverageHelperTests(unittest.TestCase):
             _enqueue_companion_dbus_publish=MagicMock(return_value=True),
             _companion_dbus_bridge=SimpleNamespace(publish=MagicMock(return_value=False)),
         )
-        self.assertTrue(StatePublishMixin._publish_companion_dbus_bridge(state_service, 20.0))
+        self.assertTrue(StatePublish._publish_companion_dbus_bridge(state_service, 20.0))
         state_service._enqueue_companion_dbus_publish.assert_called_once_with(20.0)
         state_service._companion_dbus_bridge.publish.assert_not_called()
 

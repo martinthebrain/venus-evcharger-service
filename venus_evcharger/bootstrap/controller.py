@@ -77,15 +77,10 @@ def _run_service_loop(service_class: Callable[[], Any], gobject_module: Any) -> 
     )
 
 
-from venus_evcharger.bootstrap.config import _ServiceBootstrapConfigMixin
-from venus_evcharger.bootstrap.paths import _ServiceBootstrapPathMixin
-from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntimeMixin
+from venus_evcharger.bootstrap.paths import _ServiceBootstrapPath
 
-class ServiceBootstrapController(
-    _ServiceBootstrapConfigMixin,
-    _ServiceBootstrapRuntimeMixin,
-    _ServiceBootstrapPathMixin,
-):
+
+class ServiceBootstrapController(_ServiceBootstrapPath):
     """Bootstrap controller for the Shelly EV charger service."""
 
     WRITABLE_PATHS = {

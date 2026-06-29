@@ -15,6 +15,7 @@ from venus_evcharger.inputs.helper.capacity_persistence import (
     persist_estimated_capacity_if_ah_changed,
 )
 from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
+from venus_evcharger.inputs.helper.sources_dbus_resolve import _AutoInputHelperSourceDbusResolve
 
 
 def _capacity_payload_mapping(value: object) -> dict[str, object] | None:
@@ -34,7 +35,7 @@ def _capacity_payload_int(payload: Mapping[str, object], key: str) -> int | None
     return optional_int(payload.get(key))
 
 
-class _AutoInputHelperSourceDbusSnapshot:
+class _AutoInputHelperSourceDbusSnapshot(_AutoInputHelperSourceDbusResolve):
     def _read_dbus_energy_source_fields(
         self: Any,
         source: EnergySourceDefinition,

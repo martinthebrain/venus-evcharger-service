@@ -16,13 +16,9 @@ from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.control.openapi import build_control_api_openapi_spec
 from venus_evcharger.control.rate_limit import ControlApiRateLimiter
-from venus_evcharger.control.http_api_response import _LocalControlApiResponse
 from venus_evcharger.control.reference import CONTROL_API_COMMAND_SCOPE_REQUIREMENTS
 from venus_evcharger.core.contracts import normalized_control_api_capabilities_fields, normalized_control_api_health_fields
 
-from .http_api_auth import _LocalControlApiAuth
-from .http_api_commands import _LocalControlApiCommand
-from .http_api_events import _LocalControlApiEvents
 from .http_api_routing import _LocalControlApiRouting
 
 
@@ -36,13 +32,7 @@ class _ThreadingLocalControlUnixHttpServer(socketserver.ThreadingMixIn, socketse
     allow_reuse_address = True
 
 
-class LocalControlApiHttpServer(
-    _LocalControlApiResponse,
-    _LocalControlApiRouting,
-    _LocalControlApiAuth,
-    _LocalControlApiCommand,
-    _LocalControlApiEvents,
-):
+class LocalControlApiHttpServer(_LocalControlApiRouting):
     """Expose one tiny local HTTP surface for Control API v1."""
 
     _STATE_GET_ENDPOINTS = frozenset(

@@ -6,9 +6,10 @@ from __future__ import annotations
 from typing import Any
 
 from venus_evcharger.core.contracts import non_negative_float_or_none, non_negative_int
+from venus_evcharger.controllers.state_runtime import _StateRuntime
 
 
-class _StateRuntimeRestoreVictronEssMixin:
+class _StateRuntimeRestoreVictronEss(_StateRuntime):
     @classmethod
     def _valid_victron_ess_balance_schema_version(cls, payload: dict[str, object]) -> bool:
         return non_negative_int(payload.get("schema_version"), 0) in {1, 2}
@@ -65,86 +66,86 @@ class _StateRuntimeRestoreVictronEssMixin:
     ) -> dict[str, object]:
         return {
             "key": profile_key,
-            "action_direction": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_text(
+            "action_direction": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_text(
                 raw_profile,
                 "action_direction",
             ),
-            "site_regime": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_text(
+            "site_regime": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_text(
                 raw_profile,
                 "site_regime",
                 "direction",
             ),
-            "direction": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_text(
+            "direction": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_text(
                 raw_profile,
                 "direction",
                 "site_regime",
             ),
-            "day_phase": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_text(
+            "day_phase": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_text(
                 raw_profile,
                 "day_phase",
             ),
-            "reserve_phase": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_text(
+            "reserve_phase": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_text(
                 raw_profile,
                 "reserve_phase",
             ),
-            "ev_phase": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_phase(
+            "ev_phase": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_phase(
                 raw_profile,
                 "ev_phase",
                 "ev_idle",
             ),
-            "pv_phase": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_phase(
+            "pv_phase": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_phase(
                 raw_profile,
                 "pv_phase",
                 "pv_weak",
             ),
-            "battery_limit_phase": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_phase(
+            "battery_limit_phase": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_phase(
                 raw_profile,
                 "battery_limit_phase",
                 "mid_band",
             ),
             "delay_samples": non_negative_int(raw_profile.get("delay_samples"), 0),
             "gain_samples": non_negative_int(raw_profile.get("gain_samples"), 0),
-            "response_delay_seconds": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "response_delay_seconds": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "response_delay_seconds",
                 "typical_response_delay_seconds",
             ),
-            "estimated_gain": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "estimated_gain": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "estimated_gain",
                 "effective_gain",
             ),
-            "response_delay_mad_seconds": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "response_delay_mad_seconds": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "response_delay_mad_seconds",
             ),
-            "gain_mad": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "gain_mad": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "gain_mad",
             ),
             "overshoot_count": non_negative_int(raw_profile.get("overshoot_count"), 0),
             "settled_count": non_negative_int(raw_profile.get("settled_count"), 0),
-            "stability_score": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "stability_score": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "stability_score",
             ),
-            "regime_consistency_score": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "regime_consistency_score": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "regime_consistency_score",
             ),
-            "response_variance_score": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "response_variance_score": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "response_variance_score",
             ),
-            "reproducibility_score": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "reproducibility_score": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "reproducibility_score",
             ),
-            "safe_ramp_rate_watts_per_second": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "safe_ramp_rate_watts_per_second": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "safe_ramp_rate_watts_per_second",
             ),
-            "preferred_bias_limit_watts": _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_learning_metric(
+            "preferred_bias_limit_watts": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "preferred_bias_limit_watts",
             ),
@@ -233,37 +234,37 @@ class _StateRuntimeRestoreVictronEssMixin:
 
     @staticmethod
     def _restore_victron_ess_balance_pid_tuning(svc: Any, payload: dict[str, object]) -> None:
-        _StateRuntimeRestoreVictronEssMixin._restore_victron_ess_balance_pid_value(
+        _StateRuntimeRestoreVictronEss._restore_victron_ess_balance_pid_value(
             svc,
             payload,
             "kp",
             "auto_battery_discharge_balance_victron_bias_kp",
         )
-        _StateRuntimeRestoreVictronEssMixin._restore_victron_ess_balance_pid_value(
+        _StateRuntimeRestoreVictronEss._restore_victron_ess_balance_pid_value(
             svc,
             payload,
             "ki",
             "auto_battery_discharge_balance_victron_bias_ki",
         )
-        _StateRuntimeRestoreVictronEssMixin._restore_victron_ess_balance_pid_value(
+        _StateRuntimeRestoreVictronEss._restore_victron_ess_balance_pid_value(
             svc,
             payload,
             "kd",
             "auto_battery_discharge_balance_victron_bias_kd",
         )
-        _StateRuntimeRestoreVictronEssMixin._restore_victron_ess_balance_pid_value(
+        _StateRuntimeRestoreVictronEss._restore_victron_ess_balance_pid_value(
             svc,
             payload,
             "deadband_watts",
             "auto_battery_discharge_balance_victron_bias_deadband_watts",
         )
-        _StateRuntimeRestoreVictronEssMixin._restore_victron_ess_balance_pid_value(
+        _StateRuntimeRestoreVictronEss._restore_victron_ess_balance_pid_value(
             svc,
             payload,
             "max_abs_watts",
             "auto_battery_discharge_balance_victron_bias_max_abs_watts",
         )
-        _StateRuntimeRestoreVictronEssMixin._restore_victron_ess_balance_pid_value(
+        _StateRuntimeRestoreVictronEss._restore_victron_ess_balance_pid_value(
             svc,
             payload,
             "ramp_rate_watts_per_second",
@@ -315,17 +316,17 @@ class _StateRuntimeRestoreVictronEssMixin:
 
     @staticmethod
     def _restore_victron_ess_balance_stable_tuning_state(svc: Any, payload: dict[str, object]) -> None:
-        svc._victron_ess_balance_last_stable_tuning = _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_tuning_mapping(
+        svc._victron_ess_balance_last_stable_tuning = _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_tuning_mapping(
             payload.get("last_stable_tuning")
         )
         svc._victron_ess_balance_last_stable_at = non_negative_float_or_none(payload.get("last_stable_at"))
         svc._victron_ess_balance_last_stable_profile_key = str(
             payload.get("last_stable_profile_key", "") or ""
         )
-        svc._victron_ess_balance_conservative_tuning = _StateRuntimeRestoreVictronEssMixin._normalized_victron_ess_balance_tuning_mapping(
+        svc._victron_ess_balance_conservative_tuning = _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_tuning_mapping(
             payload.get("conservative_tuning")
         )
-        _StateRuntimeRestoreVictronEssMixin._restore_victron_ess_balance_suspend_state(svc, payload)
+        _StateRuntimeRestoreVictronEss._restore_victron_ess_balance_suspend_state(svc, payload)
 
     @classmethod
     def _restore_victron_ess_balance_adaptive_tuning_payload(cls, svc: Any, payload: dict[str, object]) -> None:

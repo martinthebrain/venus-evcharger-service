@@ -14,6 +14,7 @@ from typing import Any
 from gi.repository import GLib
 
 from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
+from venus_evcharger.inputs.helper.sources import _AutoInputHelperSource
 
 _GATEWAY_MATCH_SENTINEL = object()
 SUBSCRIPTION_RESOLUTION_ERRORS: tuple[type[BaseException], ...] = (
@@ -34,7 +35,7 @@ SUBSCRIPTION_CLEANUP_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
-class _AutoInputHelperSubscription:
+class _AutoInputHelperSubscription(_AutoInputHelperSource):
     @staticmethod
     def _dbus_module() -> Any:
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")

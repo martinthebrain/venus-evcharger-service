@@ -12,11 +12,12 @@ import os
 import threading
 import time
 import uuid
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
 import requests
 from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.runtime.async_mainloop import _RuntimeAsyncMainloop
 from venus_evcharger.runtime.setup_support import (
     _first_existing_version_line,
     clone_worker_battery_sources_payload as _clone_worker_battery_sources_payload,
@@ -33,7 +34,15 @@ WorkerSnapshot = dict[str, Any]
 
 
 
-class _RuntimeSetup(_ComposableControllerMixin):
+class _RuntimeSetup(_RuntimeAsyncMainloop):
+    if TYPE_CHECKING:  # pragma: no cover
+        service: Any
+        _health_code: Callable[[str], int]
+
+        def new_error_state(self) -> dict[str, int]: ...
+
+        def new_failure_state(self) -> dict[str, bool]: ...
+
     @staticmethod
     def _service_repo_root(service: Any) -> str:
         """Return the repository root inferred from the main entrypoint path."""

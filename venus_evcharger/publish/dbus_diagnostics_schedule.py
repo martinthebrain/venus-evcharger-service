@@ -9,10 +9,11 @@ from venus_evcharger.core.contracts import (
     normalized_scheduled_state_fields,
     normalized_software_update_state_fields,
 )
-from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContracts
+from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue
+from venus_evcharger.publish.dbus_diagnostics_sources import _DbusDiagnosticsSources
 
 
-class _DbusDiagnosticsSchedule(_DbusDiagnosticsContracts):
+class _DbusDiagnosticsSchedule(_DbusDiagnosticsSources):
     @classmethod
     def _scheduled_counter_values_from_snapshot(cls, scheduled_snapshot: Any) -> dict[str, str | int]:
         """Return normalized outward scheduled-state diagnostics."""

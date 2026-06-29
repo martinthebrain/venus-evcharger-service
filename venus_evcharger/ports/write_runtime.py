@@ -38,6 +38,7 @@ from venus_evcharger.backend.models import (
 )
 from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normalize_hhmm_text, scheduled_enabled_days_text
 from venus_evcharger.core.contracts import finite_float_or_none, non_negative_int, normalize_binary_flag
+from venus_evcharger.ports.base import _BaseServicePort
 
 
 def _finite_service_float(service: Any, attr_name: str, default: float = 0.0) -> float:
@@ -57,8 +58,7 @@ def _set_service_binary_flag(service: Any, attr_name: str, value: object, *, as_
     setattr(service, attr_name, bool(normalized) if as_bool else normalized)
 
 
-class WriteControllerRuntimePort:
-    _service: Any
+class WriteControllerRuntimePort(_BaseServicePort):
 
     @property
     def virtual_mode(self) -> int:

@@ -10,10 +10,12 @@ import threading
 import time
 from typing import Any
 
+from venus_evcharger.runtime.async_mainloop_control import _RuntimeAsyncMainloopControl
+
 MAINLOOP_WATCHDOG_TRACEBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeAsyncMainloopWatchdog:
+class _RuntimeAsyncMainloopWatchdog(_RuntimeAsyncMainloopControl):
     def flush_companion_dbus_publish_queue(self: Any) -> bool:
         """Run any coalesced companion-service publish in the GLib thread."""
         svc = self.service

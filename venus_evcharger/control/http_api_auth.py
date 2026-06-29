@@ -7,8 +7,10 @@ from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
+from venus_evcharger.control.http_api_response import _LocalControlApiResponse
 
-class _LocalControlApiAuth:
+
+class _LocalControlApiAuth(_LocalControlApiResponse):
     if TYPE_CHECKING:
         _auth_token: str
         _admin_token: str

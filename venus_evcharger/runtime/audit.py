@@ -17,7 +17,6 @@ from typing import Any
 from venus_evcharger.core.common import _fresh_confirmed_relay_output
 from venus_evcharger.core.contracts import normalized_auto_state_pair, sanitized_auto_metrics
 from venus_evcharger.core.shared import write_text_atomically
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.runtime.audit_fields import (
     _RuntimeAuditFields,
 )
@@ -30,7 +29,7 @@ AUDIT_LOG_READ_ERRORS = (OSError, RuntimeError, UnicodeDecodeError)
 AUDIT_LOG_WRITE_ERRORS = (OSError, RuntimeError, TypeError, UnicodeEncodeError)
 
 
-class _RuntimeAudit(_RuntimeAuditFields, _ComposableControllerMixin):
+class _RuntimeAudit(_RuntimeAuditFields):
 
     @staticmethod
     def _relay_state_for_audit(svc: Any) -> int:

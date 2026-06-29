@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.common import evse_fault_reason
 from venus_evcharger.core.return_contracts import require_bool
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.update.learning import _UpdateCycleLearning
 
 RELAY_TARGET_APPLY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RelayStatusPublishMixin(_ComposableControllerMixin):
+class _RelayStatusPublish(_UpdateCycleLearning):
     """Apply relay intent, derive outward status, and publish live state."""
 
     if TYPE_CHECKING:  # pragma: no cover

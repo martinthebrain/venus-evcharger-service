@@ -12,9 +12,10 @@ from .victron_ess_balance_learning_profiles_support import (
     _reset_victron_ess_balance_pid_state,
     _victron_ess_balance_update_service_sample,
 )
+from .victron_ess_balance_apply import _UpdateCycleVictronEssBalanceApply
 
 
-class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
+class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalanceApply):
     if TYPE_CHECKING:  # pragma: no cover
         @staticmethod
         def _optional_float(value: Any) -> float | None: ...
@@ -409,12 +410,12 @@ class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
         gain_mean: float | None,
         gain_mad: float | None,
     ) -> float:
-        delay_ratio = _UpdateCycleVictronEssBalanceLearningTelemetryMixin._victron_ess_balance_variance_ratio(
+        delay_ratio = _UpdateCycleVictronEssBalanceLearningTelemetry._victron_ess_balance_variance_ratio(
             delay_mean,
             delay_mad,
             1.0,
         )
-        gain_ratio = _UpdateCycleVictronEssBalanceLearningTelemetryMixin._victron_ess_balance_variance_ratio(
+        gain_ratio = _UpdateCycleVictronEssBalanceLearningTelemetry._victron_ess_balance_variance_ratio(
             gain_mean,
             gain_mad,
             0.1,

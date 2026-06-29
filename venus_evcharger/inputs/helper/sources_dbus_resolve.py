@@ -10,8 +10,8 @@ from venus_evcharger.core.shared import coerce_dbus_numeric, discovery_cache_val
 from venus_evcharger.energy import EnergySourceDefinition
 from venus_evcharger.inputs.helper.sources_dbus_common import (
     DBUS_SOURCE_READ_ERRORS,
-    _ResolvedAutoBatteryServiceState,
 )
+from venus_evcharger.inputs.helper.sources_dbus_primary import _AutoInputHelperSourceDbusPrimary
 
 
 def _service_name_or_none(value: object) -> str | None:
@@ -28,7 +28,7 @@ def _required_service_name(value: object, label: str) -> str:
     return service_name
 
 
-class _AutoInputHelperSourceDbusResolve(_ResolvedAutoBatteryServiceState):
+class _AutoInputHelperSourceDbusResolve(_AutoInputHelperSourceDbusPrimary):
     def _resolve_auto_battery_service(self: Any) -> str:
         now = time.time()
         configured: object = self._configured_auto_battery_service(now)

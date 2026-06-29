@@ -6,12 +6,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
-
+from .logic_gates import _AutoDecisionGates
 from .logic_types import NO_RELAY_DECISION, RelayDecision, RelayDecisionState
 
 
-class _AutoDecisionPreAverageMixin(_ComposableControllerMixin):
+class _AutoDecisionPreAverage(_AutoDecisionGates):
     if TYPE_CHECKING:  # pragma: no cover
         _NO_DECISION: RelayDecisionState
         _mode_uses_auto_logic: Callable[[Any], bool]
@@ -45,7 +44,7 @@ class _AutoDecisionPreAverageMixin(_ComposableControllerMixin):
 
         def _handle_common_runtime_gates(self, relay_on: bool, now: float, cached_inputs: bool) -> RelayDecision: ...
 
-        def is_within_auto_daytime_window(self) -> bool: ...
+        def is_within_auto_daytime_window(self, current_dt: Any | None = None) -> bool: ...
 
         def _update_average_metrics(
             self,

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Lazy controller factory mixin for the Venus EV charger service."""
+"""Lazy controller factory role for the Venus EV charger service."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from venus_evcharger.publish.dbus import DbusPublishController
 from venus_evcharger.runtime import RuntimeSupportController
 
 
-class ServiceControllerFactoryMixin:
-    """Lazy controller builders shared by the wallbox service mixins."""
+class ServiceControllerFactory:
+    """Lazy controller builders shared by the wallbox service roles."""
 
     _normalize_mode_func: Callable[[Any], int]
     _mode_uses_auto_logic_func: Callable[[int], bool]

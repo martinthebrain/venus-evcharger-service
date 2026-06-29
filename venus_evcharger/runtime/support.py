@@ -26,18 +26,10 @@ ErrorState = dict[str, int]
 FailureState = dict[str, bool]
 DefaultFactory = Callable[[], Any]
 
-from venus_evcharger.runtime.audit import _RuntimeAudit
-from venus_evcharger.runtime.async_mainloop import _RuntimeAsyncMainloop
 from venus_evcharger.runtime.health import _RuntimeHealth
-from venus_evcharger.runtime.setup import _RuntimeSetup
 
 
-class RuntimeSupportController(
-    _RuntimeAsyncMainloop,
-    _RuntimeSetup,
-    _RuntimeAudit,
-    _RuntimeHealth,
-):
+class RuntimeSupportController(_RuntimeHealth):
     """Encapsulate runtime caches, worker state, and observability/watchdog logic."""
 
     SOURCE_ERROR_KEYS: tuple[str, ...] = ("dbus", "shelly", "charger", "pv", "battery", "grid")

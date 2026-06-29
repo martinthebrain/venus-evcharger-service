@@ -12,7 +12,7 @@ from unittest.mock import patch
 from venus_evcharger.bootstrap.wizard import WizardAnswers, configure_wallbox, default_template_path, main
 
 
-class _TestShellyWallboxSetupWizardExtensionsHelperMixin:
+class _TestShellyWallboxSetupWizardExtensionsHelperRole:
     def _simple_relay_config(self, temp_dir: str, device_instance: int = 76) -> Path:
         config_path = Path(temp_dir) / "config.ini"
         configure_wallbox(
@@ -45,18 +45,18 @@ class _TestShellyWallboxSetupWizardExtensionsHelperMixin:
     @staticmethod
 
     def _inventory_profile(payload: dict[str, object], profile_id: str) -> dict[str, object]:
-        return cast(dict[str, object], _TestShellyWallboxSetupWizardExtensionsHelperMixin._inventory_item(payload, "profiles", profile_id))
+        return cast(dict[str, object], _TestShellyWallboxSetupWizardExtensionsHelperRole._inventory_item(payload, "profiles", profile_id))
 
     @staticmethod
 
     def _inventory_binding(payload: dict[str, object], binding_id: str) -> dict[str, object]:
-        return cast(dict[str, object], _TestShellyWallboxSetupWizardExtensionsHelperMixin._inventory_item(payload, "bindings", binding_id))
+        return cast(dict[str, object], _TestShellyWallboxSetupWizardExtensionsHelperRole._inventory_item(payload, "bindings", binding_id))
 
     @staticmethod
 
     def _inventory_item(payload: dict[str, object], collection_key: str, item_id: str) -> object:
-        items = _TestShellyWallboxSetupWizardExtensionsHelperMixin._inventory_collection(payload, collection_key)
-        item = next(filter(lambda candidate: _TestShellyWallboxSetupWizardExtensionsHelperMixin._has_item_id(candidate, item_id), items), None)
+        items = _TestShellyWallboxSetupWizardExtensionsHelperRole._inventory_collection(payload, collection_key)
+        item = next(filter(lambda candidate: _TestShellyWallboxSetupWizardExtensionsHelperRole._has_item_id(candidate, item_id), items), None)
         if item is not None:
             return item
         raise AssertionError(f"inventory item not found: {collection_key}.{item_id}")

@@ -8,6 +8,7 @@ from typing import Any
 
 from venus_evcharger.energy import EnergySourceDefinition
 from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
+from venus_evcharger.inputs.helper.sources_dbus_gateway import _AutoInputHelperSourceDbusGateway
 
 
 def _energy_source_definitions(value: object) -> tuple[EnergySourceDefinition, ...]:
@@ -16,7 +17,7 @@ def _energy_source_definitions(value: object) -> tuple[EnergySourceDefinition, .
     return tuple(source for source in value if isinstance(source, EnergySourceDefinition))
 
 
-class _AutoInputHelperSourceDbusPrimary:
+class _AutoInputHelperSourceDbusPrimary(_AutoInputHelperSourceDbusGateway):
     def _configured_primary_energy_sources(self: Any) -> tuple[EnergySourceDefinition, ...]:
         return _energy_source_definitions(getattr(self, "auto_energy_sources", ()) or ())
 

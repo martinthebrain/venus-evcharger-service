@@ -6,10 +6,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .runtime_cycle_contracts import _UpdateCycleRuntimeContractsMixin
+from venus_evcharger.update.runtime_cycle_contracts import _UpdateCycleRuntimeContracts
 
 
-class _UpdateCycleRuntimeMixin(_UpdateCycleRuntimeContractsMixin):
+class _UpdateCycleRuntime(_UpdateCycleRuntimeContracts):
+    service: Any
+
     @staticmethod
     def complete_update_cycle(
         svc: Any,

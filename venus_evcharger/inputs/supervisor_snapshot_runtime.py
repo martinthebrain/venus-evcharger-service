@@ -6,9 +6,10 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.core.contracts import timestamp_not_future
+from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidation
 
 
-class _AutoInputSupervisorSnapshotRuntime:
+class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation):
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
         SNAPSHOT_SOURCE_KEYS: tuple[str, ...]
@@ -16,8 +17,6 @@ class _AutoInputSupervisorSnapshotRuntime:
 
         @classmethod
         def _coerce_snapshot_timestamp(cls, value: Any) -> float | None: ...
-
-        def _coerce_snapshot_int(self, value: Any) -> int | None: ...
 
         def _validate_snapshot_dict(self, path: str, snapshot: Any) -> dict[str, Any] | None: ...
 

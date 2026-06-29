@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Service mixins packaged under ``venus_evcharger.service``."""
+"""Service roles packaged under ``venus_evcharger.service``."""
 
-from .auto import DbusAutoLogicMixin
+from .auto import DbusAutoLogic
 from .bindings import (
-    RuntimeHelperMixin,
-    ServiceControllerFactoryMixin,
-    StatePublishMixin,
-    UpdateCycleMixin,
+    RuntimeHelper,
+    ServiceControllerFactory,
+    StatePublish,
+    UpdateCycle,
 )
 
 __all__ = [
-    "DbusAutoLogicMixin",
-    "RuntimeHelperMixin",
-    "ServiceControllerFactoryMixin",
-    "StatePublishMixin",
-    "UpdateCycleMixin",
+    "DbusAutoLogic",
+    "RuntimeHelper",
+    "ServiceControllerFactory",
+    "StatePublish",
+    "UpdateCycle",
 ]

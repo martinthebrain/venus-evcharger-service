@@ -10,8 +10,10 @@ import sys
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from venus_evcharger.inputs.supervisor_snapshot import _AutoInputSupervisorSnapshot
 
-class _AutoInputSupervisorProcess:
+
+class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
 

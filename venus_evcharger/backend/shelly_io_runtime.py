@@ -4,15 +4,16 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.models import ChargerState, PhaseSelection, phase_selection_count
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.backend.shelly_io_contracts import ShellyIoRuntimeContract
 from venus_evcharger.backend.shelly_io_runtime_cache import ShellyIoRuntimeCache
 from venus_evcharger.backend.shelly_io_types import (
     ShellyIoHost,
     _ChargerStateBackendLike,
+    _PhaseSelectionBackendLike,
 )
 from venus_evcharger.core.common import (
     _charger_transport_retry_delay_seconds,
@@ -21,8 +22,26 @@ from venus_evcharger.core.common import (
 from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
 
 
-class ShellyIoRuntime(ShellyIoRuntimeCache, ShellyIoRuntimeContract):
+class ShellyIoRuntime(ShellyIoRuntimeCache):
     """Mirror charger readback into runtime state and synthesize retry behavior."""
+
+    if TYPE_CHECKING:
+
+        def _runtime_now(self) -> float: ...
+
+        def _phase_selection_switch_backend(self) -> _PhaseSelectionBackendLike | None: ...
+
+        def _charger_supported_phase_selections(self) -> tuple[PhaseSelection, ...]: ...
+
+        def _remember_phase_selection_state(
+            self,
+            *,
+            active: object | None = None,
+            requested: object | None = None,
+            supported: object | None = None,
+        ) -> None: ...
+
+        def _charger_state_backend(self) -> _ChargerStateBackendLike | None: ...
 
     def _sync_charger_runtime_state(self, state: ChargerState, now: float | None = None) -> None:
         svc = self.service

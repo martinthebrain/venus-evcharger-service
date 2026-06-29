@@ -288,18 +288,18 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
             virtual_set_current=None,
         )
 
-        self.assertEqual(_UpdateCycleRelayMixin._charger_state_max_age_seconds(svc), 2.0)
+        self.assertEqual(_UpdateCycleRelay._charger_state_max_age_seconds(svc), 2.0)
         svc._worker_poll_interval_seconds = 0.5
         svc.auto_shelly_soft_fail_seconds = 7.0
-        self.assertEqual(_UpdateCycleRelayMixin._charger_state_max_age_seconds(svc), 1.0)
-        self.assertFalse(_UpdateCycleRelayMixin._fresh_charger_enabled_readback(svc, 100.0))
-        self.assertTrue(_UpdateCycleRelayMixin._charger_requests_load(svc, 100.0))
+        self.assertEqual(_UpdateCycleRelay._charger_state_max_age_seconds(svc), 1.0)
+        self.assertFalse(_UpdateCycleRelay._fresh_charger_enabled_readback(svc, 100.0))
+        self.assertTrue(_UpdateCycleRelay._charger_requests_load(svc, 100.0))
         svc.auto_policy = None
-        self.assertEqual(_UpdateCycleRelayMixin._phase_switch_mismatch_retry_seconds(svc), 300.0)
-        self.assertEqual(_UpdateCycleRelayMixin._phase_switch_lockout_seconds(svc), 1800.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_retry_seconds(svc), 300.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_seconds(svc), 1800.0)
         svc._last_auto_metrics = {"surplus": 2600.0}
         self.assertEqual(
-            _UpdateCycleRelayMixin._surplus_auto_phase_target(
+            _UpdateCycleRelay._surplus_auto_phase_target(
                 svc,
                 SimpleNamespace(downshift_margin_watts=150.0, upshift_headroom_watts=250.0),
                 ("P1", "P1_P2"),
@@ -317,31 +317,31 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
                 raise AttributeError(name)
 
         with self.assertRaises(AttributeError):
-            _UpdateCycleRelayMixin._set_runtime_attr(_NoRuntimeAttr(), "x", 1)
+            _UpdateCycleRelay._set_runtime_attr(_NoRuntimeAttr(), "x", 1)
 
         svc._last_charger_state_status = "fault waiting"
-        self.assertEqual(_UpdateCycleRelayMixin.charger_health_override(svc, 100.0), "charger-fault")
-        self.assertIsNone(_UpdateCycleRelayMixin._derived_learned_current_target(svc, 100.0))
-        self.assertIsNone(_UpdateCycleRelayMixin.apply_charger_current_target(svc, True, 100.0, True))
-        self.assertEqual(_UpdateCycleRelayMixin._phase_switch_fallback_selection(SimpleNamespace(active_phase_selection="P1_P2"), None, "P1"), "P1_P2")
-        self.assertIsNone(_UpdateCycleRelayMixin._phase_tuple_item(True))
-        self.assertIsNone(_UpdateCycleRelayMixin._resolved_phase_tuple((1.0, None, 3.0)))
-        self.assertAlmostEqual(_UpdateCycleRelayMixin._phase_voltage(400.0, "P1_P2_P3", "line"), 400.0 / math.sqrt(3.0))
+        self.assertEqual(_UpdateCycleRelay.charger_health_override(svc, 100.0), "charger-fault")
+        self.assertIsNone(_UpdateCycleRelay._derived_learned_current_target(svc, 100.0))
+        self.assertIsNone(_UpdateCycleRelay.apply_charger_current_target(svc, True, 100.0, True))
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(SimpleNamespace(active_phase_selection="P1_P2"), None, "P1"), "P1_P2")
+        self.assertIsNone(_UpdateCycleRelay._phase_tuple_item(True))
+        self.assertIsNone(_UpdateCycleRelay._resolved_phase_tuple((1.0, None, 3.0)))
+        self.assertAlmostEqual(_UpdateCycleRelay._phase_voltage(400.0, "P1_P2_P3", "line"), 400.0 / math.sqrt(3.0))
         with self.assertRaisesRegex(TypeError, "last charger current target must be available"):
-            _UpdateCycleRelayMixin._known_charger_current_target(None)
+            _UpdateCycleRelay._known_charger_current_target(None)
         self.assertEqual(
-            _UpdateCycleRelayMixin._normalized_contactor_fault_counts({"contactor-suspected-open": True}),
+            _UpdateCycleRelay._normalized_contactor_fault_counts({"contactor-suspected-open": True}),
             {},
         )
-        self.assertEqual(_UpdateCycleRelayMixin._phase_switch_mismatch_count(svc, "P1_P2_P3"), 0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_count(svc, "P1_P2_P3"), 0)
         with self.assertRaisesRegex(TypeError, "_apply_enabled_target must return bool"):
-            _UpdateCycleRelayMixin._relay_apply_result("bad")
+            _UpdateCycleRelay._relay_apply_result("bad")
         with self.assertRaisesRegex(TypeError, "_phase_values must return dict, got list"):
-            _UpdateCycleRelayMixin._checked_phase_data([])
+            _UpdateCycleRelay._checked_phase_data([])
         with self.assertRaisesRegex(TypeError, r"_phase_values must return dict\[str, dict\[str, float\]\]"):
-            _UpdateCycleRelayMixin._checked_phase_data({1: {}})
+            _UpdateCycleRelay._checked_phase_data({1: {}})
         with self.assertRaisesRegex(TypeError, r"_phase_values must return dict\[str, dict\[str, float\]\]"):
-            _UpdateCycleRelayMixin._checked_phase_data({"L1": {"power": True}})
+            _UpdateCycleRelay._checked_phase_data({"L1": {"power": True}})
 
     def test_relay_mixin_direct_helper_edges_cover_remaining_small_branches(self):
         svc = SimpleNamespace(
@@ -371,26 +371,26 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
             max_current=16.0,
         )
 
-        self.assertFalse(_UpdateCycleRelayMixin._phase_switch_mismatch_retry_active(svc, "P1", "P1_P2", 100.0))
-        self.assertIsNone(_UpdateCycleRelayMixin._fresh_charger_enabled_readback(svc, 100.0))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_mismatch_retry_active(svc, "P1", "P1_P2", 100.0))
+        self.assertIsNone(_UpdateCycleRelay._fresh_charger_enabled_readback(svc, 100.0))
         svc._last_charger_state_at = 100.0
-        self.assertTrue(_UpdateCycleRelayMixin._fresh_charger_enabled_readback(svc, 100.0))
-        self.assertTrue(_UpdateCycleRelayMixin._charger_requests_load(svc, 100.0))
-        self.assertIsNone(_UpdateCycleRelayMixin._observed_phase_selection_from_pm_status({}))
-        self.assertEqual(_UpdateCycleRelayMixin._observed_phase_selection(svc, {}, 100.0), "P1_P2")
+        self.assertTrue(_UpdateCycleRelay._fresh_charger_enabled_readback(svc, 100.0))
+        self.assertTrue(_UpdateCycleRelay._charger_requests_load(svc, 100.0))
+        self.assertIsNone(_UpdateCycleRelay._observed_phase_selection_from_pm_status({}))
+        self.assertEqual(_UpdateCycleRelay._observed_phase_selection(svc, {}, 100.0), "P1_P2")
         svc._last_charger_state_phase_selection = None
-        self.assertIsNone(_UpdateCycleRelayMixin._observed_phase_selection(svc, {}, 100.0))
-        self.assertIsNone(_UpdateCycleRelayMixin._phase_switch_verification_deadline(svc))
+        self.assertIsNone(_UpdateCycleRelay._observed_phase_selection(svc, {}, 100.0))
+        self.assertIsNone(_UpdateCycleRelay._phase_switch_verification_deadline(svc))
         svc._phase_switch_requested_at = 95.0
-        self.assertEqual(_UpdateCycleRelayMixin._phase_switch_verification_deadline(svc), 105.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_verification_deadline(svc), 105.0)
 
         controller = UpdateCycleController(svc, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
         controller._record_relay_sync_timeout(svc, relay_on=False, pm_confirmed=False, expected_relay=True, deadline_at=100.0)
         svc._mark_failure.assert_not_called()
         svc._warning_throttled.assert_not_called()
 
-        with patch.object(_UpdateCycleRelayMixin, "_charger_current_target_amps", return_value=None):
-            self.assertIsNone(_UpdateCycleRelayMixin.apply_charger_current_target(svc, True, 100.0, True))
+        with patch.object(_UpdateCycleRelay, "_charger_current_target_amps", return_value=None):
+            self.assertIsNone(_UpdateCycleRelay.apply_charger_current_target(svc, True, 100.0, True))
 
     def test_phase_switch_resume_helper_covers_no_resume_auto_failure_and_noop_paths(self):
         service = _auto_phase_service(
@@ -440,6 +440,6 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
             side_effect=["", "P1_P2"],
         ):
             self.assertEqual(
-                _UpdateCycleRelayMixin._phase_switch_fallback_selection(svc, None, "P1"),
+                _UpdateCycleRelay._phase_switch_fallback_selection(svc, None, "P1"),
                 "P1_P2",
             )

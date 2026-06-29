@@ -12,13 +12,13 @@ from typing import Any
 
 from venus_evcharger.core.common import confirmed_relay_state_max_age_seconds as _confirmed_relay_state_max_age_seconds
 from venus_evcharger.core.contracts import cutover_confirmed_off
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.auto.logic_types import NO_RELAY_DECISION, RelayDecision, require_relay_bool, require_relay_decision
+from .logic_gates_metrics import _AutoDecisionMetrics
 
 AutoDecision = RelayDecision
 
 
-class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
+class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
     def _pending_stop_or_running(
         self,
         now: float,

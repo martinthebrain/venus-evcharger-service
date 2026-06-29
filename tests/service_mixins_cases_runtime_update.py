@@ -6,7 +6,7 @@ from tests.service_mixins_cases_common import _AutoService, _FactoryService, _Ru
 from venus_evcharger.control import ControlCommand, ControlResult
 
 
-class _ServiceMixinsRuntimeUpdateCases:
+class _ServiceRolesRuntimeUpdateCases:
     def test_runtime_helper_mixin_delegates_runtime_supervisor_and_io_calls(self):
         service = _RuntimeService()
         service._runtime_support_controller = MagicMock()

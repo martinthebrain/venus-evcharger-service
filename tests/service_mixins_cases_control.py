@@ -9,7 +9,7 @@ from venus_evcharger.control import ControlApiAuditTrail, ControlApiIdempotencyS
 from venus_evcharger.control.events import ControlApiEventBus
 
 
-class _ServiceMixinsControlCases:
+class _ServiceRolesControlCases:
     def test_control_api_mixin_builds_commands_and_manages_http_server(self):
         service = _ControlService()
         service._write_controller = MagicMock()

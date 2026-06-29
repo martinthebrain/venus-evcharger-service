@@ -7,9 +7,10 @@ import os
 from typing import Any, ClassVar, TYPE_CHECKING
 
 from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_CHECK_ERRORS
+from venus_evcharger.update.pm_snapshot import _UpdateCyclePmSnapshot
 
 
-class _SoftwareUpdateStateMixin:
+class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
     SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS: ClassVar[float]
 
     if TYPE_CHECKING:  # pragma: no cover

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from venus_evcharger.backend.models import ChargerState
+from venus_evcharger.backend.shelly_io_capabilities import ShellyIoCapabilities
 from venus_evcharger.backend.shelly_io_types import normalize_phase_value
 from venus_evcharger.core.contracts import finite_float_or_none
 
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
     from venus_evcharger.backend.shelly_io_types import ShellyIoHost
 
 
-class ShellyIoRuntimeCache:
+class ShellyIoRuntimeCache(ShellyIoCapabilities):
     """Rebuild normalized charger state from the service runtime cache."""
 
     if TYPE_CHECKING:

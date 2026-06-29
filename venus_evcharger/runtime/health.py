@@ -12,13 +12,17 @@ import faulthandler
 import logging
 import os
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.runtime.audit import _RuntimeAudit
 
 WATCHDOG_TRACEBACK_DUMP_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
-class _RuntimeHealth(_ComposableControllerMixin):
+class _RuntimeHealth(_RuntimeAudit):
+    if TYPE_CHECKING:  # pragma: no cover
+        _age_seconds: Callable[[float | int | None, float | int | None], int]
+
     @staticmethod
     def _float_attr(value: Any, default: float = 0.0) -> float:
         """Return one runtime attribute as float with a safe fallback."""

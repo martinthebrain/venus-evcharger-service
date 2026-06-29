@@ -4,23 +4,50 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeGuard
+from typing import TYPE_CHECKING, TypeGuard
 
 from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.backend.shelly_io_contracts import ShellyIoWorkerContract
 from venus_evcharger.backend.shelly_io_types import (
+    _EnableBackendLike,
     PendingRelayCommand,
     ShellyEnergyData,
     ShellyIoHost,
     ShellyPmStatus,
 )
 from venus_evcharger.backend.shelly_io_worker_lifecycle import ShellyIoWorkerLifecycle
-from venus_evcharger.backend.shelly_io_worker_transport import ShellyIoWorkerTransport
 
 
-class ShellyIoWorker(ShellyIoWorkerTransport, ShellyIoWorkerLifecycle, ShellyIoWorkerContract):
+class ShellyIoWorker(ShellyIoWorkerLifecycle):
     """Handle optimistic PM publishing, queued relay writes, and the worker loop."""
+
+    if TYPE_CHECKING:
+
+        def _runtime_now(self) -> float: ...
+
+        def _warn_if_direct_switching_under_load(self, relay_on: bool) -> None: ...
+
+        def _split_enable_source_key(self) -> str: ...
+
+        def _split_enable_source_label(self) -> str: ...
+
+        def _split_enable_backend(self) -> _EnableBackendLike | None: ...
+
+        def _charger_retry_active(self, now: float | None = None) -> bool: ...
+
+        def _remember_charger_transport_issue(
+            self,
+            reason: str,
+            source: str,
+            error: BaseException,
+            now: float | None = None,
+        ) -> None: ...
+
+        def _remember_charger_retry(self, reason: str, source: str, now: float | None = None) -> None: ...
+
+        def _clear_charger_transport_issue(self) -> None: ...
+
+        def _clear_charger_retry(self) -> None: ...
 
     @staticmethod
     def _normalized_energy_payload(value: object) -> ShellyEnergyData:

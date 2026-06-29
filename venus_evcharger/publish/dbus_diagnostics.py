@@ -15,19 +15,9 @@ from venus_evcharger.core.contracts import (
 )
 from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue
 from venus_evcharger.publish.dbus_diagnostics_introspection import _DbusDiagnosticsIntrospection
-from venus_evcharger.publish.dbus_diagnostics_phase import _DbusDiagnosticsPhase
-from venus_evcharger.publish.dbus_diagnostics_runtime import _DbusDiagnosticsRuntime
-from venus_evcharger.publish.dbus_diagnostics_schedule import _DbusDiagnosticsSchedule
-from venus_evcharger.publish.dbus_diagnostics_sources import _DbusDiagnosticsSources
 
 
-class _DbusPublishDiagnostics(
-    _DbusDiagnosticsIntrospection,
-    _DbusDiagnosticsPhase,
-    _DbusDiagnosticsRuntime,
-    _DbusDiagnosticsSchedule,
-    _DbusDiagnosticsSources,
-):
+class _DbusPublishDiagnostics(_DbusDiagnosticsIntrospection):
     @staticmethod
     def _runtime_error_state(service: Any) -> Mapping[str, Any]:
         error_state = getattr(service, "_error_state", {})

@@ -3,31 +3,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+from .victron_ess_balance_recommendation import _UpdateCycleVictronEssBalanceRecommendation
 
 
-class _UpdateCycleVictronEssBalanceAdaptiveMixin:
-    if TYPE_CHECKING:  # pragma: no cover
-        def _optional_float(self, value: Any) -> float | None: ...
-
-        def _victron_ess_balance_activation_mode(self, svc: Any) -> str: ...
-
-        def _victron_ess_balance_auto_apply_suspended(self, svc: Any, now: float) -> bool: ...
-
-        def _victron_ess_balance_should_rollback_stable_tuning(
-            self,
-            svc: Any,
-            metrics: dict[str, Any],
-            now: float,
-        ) -> bool: ...
-
-        def _maybe_restore_victron_ess_balance_stable_tuning(
-            self,
-            svc: Any,
-            metrics: dict[str, Any],
-            reason: str,
-        ) -> bool: ...
-
+class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecommendation):
     @staticmethod
     def _victron_ess_balance_profile_keys(metrics: dict[str, Any]) -> tuple[str, str]:
         recommendation_profile_key = str(

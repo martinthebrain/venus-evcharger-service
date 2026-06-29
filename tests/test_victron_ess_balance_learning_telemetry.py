@@ -2,9 +2,9 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 
-from venus_evcharger.update.victron_ess_balance_apply_write import _UpdateCycleVictronEssBalanceApplyWriteMixin
+from venus_evcharger.update.victron_ess_balance_apply_write import _UpdateCycleVictronEssBalanceApplyWrite
 from venus_evcharger.update.victron_ess_balance_learning_telemetry import (
-    _UpdateCycleVictronEssBalanceLearningTelemetryMixin,
+    _UpdateCycleVictronEssBalanceLearningTelemetry,
     _victron_ess_balance_clamped_stability_score,
     _victron_ess_balance_delay_penalty,
     _victron_ess_balance_gain_bonus,
@@ -13,7 +13,7 @@ from venus_evcharger.update.victron_ess_balance_learning_telemetry import (
 )
 
 
-class _TelemetryHarness(_UpdateCycleVictronEssBalanceLearningTelemetryMixin):
+class _TelemetryHarness(_UpdateCycleVictronEssBalanceLearningTelemetry):
     def __init__(self) -> None:
         self.clean_result = (True, "clean")
         self.delay_updates: list[tuple[str, float]] = []
@@ -220,7 +220,7 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.harness._reset_victron_ess_balance_pid(svc)
         self.harness._reset_victron_ess_balance_pid_integral(svc, aggressive=True)
         with self.assertRaises(RuntimeError):
-            _UpdateCycleVictronEssBalanceApplyWriteMixin._victron_ess_balance_dbus_module()
+            _UpdateCycleVictronEssBalanceApplyWrite._victron_ess_balance_dbus_module()
 
 
 if __name__ == "__main__":

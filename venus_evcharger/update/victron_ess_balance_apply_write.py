@@ -5,19 +5,17 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from venus_evcharger.dbus_gateway import GatewayClient, gateway_paths
+from .victron_ess_balance_apply_pid import _UpdateCycleVictronEssBalanceApplyPid
 
 
 VICTRON_ESS_BALANCE_WRITE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _UpdateCycleVictronEssBalanceApplyWriteMixin:
+class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApplyPid):
     """Coalesce and enqueue Victron ESS balance-bias setpoint writes through the gateway."""
-
-    if TYPE_CHECKING:  # pragma: no cover
-        def _optional_float(self, value: Any) -> float | None: ...
 
     def _victron_ess_balance_should_write(self, svc: Any, now: float, setpoint_w: float) -> bool:
         min_update_seconds = max(
@@ -69,7 +67,7 @@ class _UpdateCycleVictronEssBalanceApplyWriteMixin:
         normalized_path: str,
         error: Exception,
     ) -> None:
-        _UpdateCycleVictronEssBalanceApplyWriteMixin._victron_ess_balance_logging_module().debug(
+        _UpdateCycleVictronEssBalanceApplyWrite._victron_ess_balance_logging_module().debug(
             "Victron ESS balance-bias write retry for %s %s after error: %s",
             normalized_service,
             normalized_path,

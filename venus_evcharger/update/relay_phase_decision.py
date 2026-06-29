@@ -7,9 +7,10 @@ from typing import Any, TYPE_CHECKING
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.contracts import finite_float_or_none, mutable_dict_attr
+from venus_evcharger.update.relay_phase_switch_policy import _RelayPhaseSwitchPolicy
 
 
-class _RelayPhaseDecisionMixin:
+class _RelayPhaseDecision(_RelayPhaseSwitchPolicy):
     """Derive Auto phase targets from policy, surplus, and supported layouts."""
 
     if TYPE_CHECKING:  # pragma: no cover

@@ -9,11 +9,12 @@ import time
 from typing import Any, Mapping
 
 from venus_evcharger.core.return_contracts import require_bool
+from venus_evcharger.runtime.async_mainloop_state import _RuntimeAsyncMainloopState
 
 ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeAsyncMainloopExecutor:
+class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
     def start_update_worker(self: Any) -> None:
         """Enable periodic update cycles in the serialized runtime executor."""
         svc = self.service

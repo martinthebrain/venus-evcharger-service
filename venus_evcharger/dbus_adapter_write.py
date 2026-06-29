@@ -6,17 +6,11 @@ from __future__ import annotations
 from collections import deque
 
 from venus_evcharger.core.shared import config_get_float
-from venus_evcharger.dbus_adapter_write_core import DbusWriteSchedulerCore
 from venus_evcharger.dbus_adapter_write_health import DbusWriteSchedulerHealth
 from venus_evcharger.dbus_adapter_write_protocols import DbusWriteSchedulerAdapter
-from venus_evcharger.dbus_adapter_write_publish import DbusWriteSchedulerPublish
 
 
-class DbusWriteScheduler(
-    DbusWriteSchedulerCore,
-    DbusWriteSchedulerPublish,
-    DbusWriteSchedulerHealth,
-):
+class DbusWriteScheduler(DbusWriteSchedulerHealth):
     def __init__(self, adapter: DbusWriteSchedulerAdapter) -> None:
         self.adapter = adapter
         self.registered_paths: set[str] = set()

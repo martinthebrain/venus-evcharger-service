@@ -5,14 +5,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from .victron_ess_balance_safety_support import _UpdateCycleVictronEssBalanceSafetySupportMixin
+from .victron_ess_balance_safety_support import _UpdateCycleVictronEssBalanceSafetySupport
 
 
 def _optional_numeric_float(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-class _UpdateCycleVictronEssBalanceSafetyMixin(_UpdateCycleVictronEssBalanceSafetySupportMixin):
+class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySupport):
     def _populate_victron_ess_balance_runtime_safety_metrics(
         self,
         svc: Any,
@@ -148,15 +148,15 @@ class _UpdateCycleVictronEssBalanceSafetyMixin(_UpdateCycleVictronEssBalanceSafe
 
     @staticmethod
     def _victron_ess_balance_telemetry_precheck_reason(svc: Any) -> tuple[bool, str] | None:
-        if not _UpdateCycleVictronEssBalanceSafetyMixin._victron_ess_balance_requires_clean_phases(svc):
+        if not _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_requires_clean_phases(svc):
             return True, "clean_not_required"
-        cached_inputs_reason = _UpdateCycleVictronEssBalanceSafetyMixin._victron_ess_balance_cached_input_reason(svc)
+        cached_inputs_reason = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_cached_input_reason(svc)
         if cached_inputs_reason is not None:
             return False, cached_inputs_reason
-        phase_switch_reason = _UpdateCycleVictronEssBalanceSafetyMixin._victron_ess_balance_phase_switch_reason(svc)
+        phase_switch_reason = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_phase_switch_reason(svc)
         if phase_switch_reason is not None:
             return False, phase_switch_reason
-        contactor_reason = _UpdateCycleVictronEssBalanceSafetyMixin._victron_ess_balance_contactor_block_reason(svc)
+        contactor_reason = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_contactor_block_reason(svc)
         if contactor_reason is not None:
             return False, contactor_reason
         return None
@@ -228,11 +228,11 @@ class _UpdateCycleVictronEssBalanceSafetyMixin(_UpdateCycleVictronEssBalanceSafe
 
     @staticmethod
     def _victron_ess_balance_recent_direction_change_count(svc: Any, now: float) -> int:
-        window_seconds = _UpdateCycleVictronEssBalanceSafetyMixin._victron_ess_balance_direction_change_window_seconds(svc)
+        window_seconds = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_direction_change_window_seconds(svc)
         raw_entries = getattr(svc, "_victron_ess_balance_recent_action_changes", None)
         entries = raw_entries if isinstance(raw_entries, list) else []
         cutoff = float(now) - window_seconds
-        kept = _UpdateCycleVictronEssBalanceSafetyMixin._victron_ess_balance_kept_action_changes(entries, cutoff)
+        kept = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_kept_action_changes(entries, cutoff)
         svc._victron_ess_balance_recent_action_changes = kept
         return max(0, len(kept) - 1)
 

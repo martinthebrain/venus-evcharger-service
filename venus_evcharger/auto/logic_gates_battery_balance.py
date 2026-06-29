@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Mapping
 
 from venus_evcharger.energy import derive_energy_forecast, summarize_energy_learning_profiles
+from .logic_gates_battery_learning import _AutoDecisionBatteryLearning
 from .logic_gates_battery_balance_support import (
-    _AutoDecisionBatteryBalanceSupportMixin,
     _battery_discharge_balance_allowed_feasibilities,
     _battery_discharge_balance_coordination_blocked_by_availability,
     _battery_discharge_balance_coordination_counts,
@@ -21,7 +21,7 @@ from .logic_gates_battery_balance_support import (
 )
 
 
-class _AutoDecisionBatteryBalanceMixin(_AutoDecisionBatteryBalanceSupportMixin):
+class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
     if TYPE_CHECKING:  # pragma: no cover
 
         def _source_activity_penalties(

@@ -13,13 +13,14 @@ from collections.abc import Callable
 from contextlib import suppress
 
 from venus_evcharger.core.shared import compact_json
+from venus_evcharger.dbus_adapter_process_identity import DbusAdapterIdentity
 from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterSocketContext
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 SocketHandler = Callable[[CommandPayload, str], CommandPayload]
 
 
-class DbusAdapterSocket:
+class DbusAdapterSocket(DbusAdapterIdentity):
     _server: socket.socket | None
 
     def start_socket(self: DbusAdapterSocketContext) -> None:

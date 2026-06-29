@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.update.relay_status_publish import _RelayStatusPublish
 
 
 PHASE_SWITCH_RUNTIME_APPLY_ERRORS = (
@@ -20,7 +20,7 @@ PHASE_SWITCH_RUNTIME_APPLY_ERRORS = (
 )
 
 
-class _RelayPhaseSwitchRuntimeMixin(_ComposableControllerMixin):
+class _RelayPhaseSwitchRuntime(_RelayStatusPublish):
     """Advance waiting and stabilizing phase-switch state machines."""
 
     if TYPE_CHECKING:  # pragma: no cover

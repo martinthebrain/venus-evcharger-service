@@ -9,13 +9,16 @@ from typing import TYPE_CHECKING, Any
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.common import local_datetime_from_timestamp, mode_uses_scheduled_logic, scheduled_mode_snapshot
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_learning_phase, normalize_learning_state
-from venus_evcharger.update.relay_charger_readback import ChargerCurrentBackend
+from venus_evcharger.update.relay_charger_transport import _RelayChargerTransport
+
+if TYPE_CHECKING:
+    from venus_evcharger.update.relay_charger_readback import ChargerCurrentBackend
 
 
 CHARGER_CURRENT_APPLY_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RelayChargerCurrentMixin:
+class _RelayChargerCurrent(_RelayChargerTransport):
     """Derive and apply charger current targets from learned and scheduled policy."""
 
     if TYPE_CHECKING:  # pragma: no cover

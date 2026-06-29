@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Update-cycle mixin for the Venus EV charger service."""
+"""Update-cycle role for the Venus EV charger service."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ from venus_evcharger.core.return_contracts import (
     require_tuple5,
 )
 
-from .factory import ServiceControllerFactoryMixin
+from .factory import ServiceControllerFactory
 
 
-class UpdateCycleMixin(ServiceControllerFactoryMixin):
+class UpdateCycle(ServiceControllerFactory):
     """Static update-cycle delegations."""
 
     def _ensure_virtual_state_defaults(self) -> None:

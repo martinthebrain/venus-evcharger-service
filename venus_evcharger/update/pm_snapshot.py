@@ -10,9 +10,10 @@ from venus_evcharger.core.contracts import (
     timestamp_age_within,
     timestamp_not_future,
 )
+from venus_evcharger.update.offline_publish import _UpdateCycleOffline
 
 
-class _UpdateCyclePmSnapshotMixin:
+class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
 
     @staticmethod

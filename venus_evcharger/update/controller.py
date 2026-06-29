@@ -9,31 +9,11 @@ from typing import Any
 
 import requests
 
-from venus_evcharger.update.input_cache import _UpdateCycleInputCacheMixin
-from venus_evcharger.update.learning import _UpdateCycleLearningMixin
-from venus_evcharger.update.learning_runtime import _UpdateCycleLearningRuntimeMixin
-from venus_evcharger.update.offline_publish import _UpdateCycleOfflineMixin
-from venus_evcharger.update.pm_snapshot import _UpdateCyclePmSnapshotMixin
-from venus_evcharger.update.relay import _UpdateCycleRelayMixin
-from venus_evcharger.update.runtime_cycle import _UpdateCycleRuntimeMixin
 from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_PROCESS_ERRORS
-from venus_evcharger.update.software_update_support import _UpdateCycleSoftwareUpdateMixin
-from venus_evcharger.update.state import _UpdateCycleStateMixin
-from venus_evcharger.update.victron_ess_balance import _UpdateCycleVictronEssBalanceMixin
+from venus_evcharger.update.software_update_support import _UpdateCycleSoftwareUpdate
 
 
-class UpdateCycleController(
-    _UpdateCycleSoftwareUpdateMixin,
-    _UpdateCyclePmSnapshotMixin,
-    _UpdateCycleOfflineMixin,
-    _UpdateCycleInputCacheMixin,
-    _UpdateCycleLearningRuntimeMixin,
-    _UpdateCycleVictronEssBalanceMixin,
-    _UpdateCycleRuntimeMixin,
-    _UpdateCycleStateMixin,
-    _UpdateCycleRelayMixin,
-    _UpdateCycleLearningMixin,
-):
+class UpdateCycleController(_UpdateCycleSoftwareUpdate):
     """Encapsulate the periodic Shelly/Auto update pipeline."""
 
     LEARNED_POWER_STABLE_MIN_SAMPLES = 3

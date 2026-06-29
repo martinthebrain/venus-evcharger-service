@@ -14,17 +14,11 @@ from __future__ import annotations
 
 import time
 
-from venus_evcharger.auto.logic_decisions import _AutoDecisionDecisionMixin
-from venus_evcharger.auto.logic_gates import _AutoDecisionGatesMixin
-from venus_evcharger.auto.logic_samples import _AutoDecisionSamplesMixin
+from venus_evcharger.auto.logic_decisions import _AutoDecisionDecision
 from venus_evcharger.auto.logic_types import NO_RELAY_DECISION, RelayDecisionState
 
-__all__ = ("AutoDecisionWorkflowMixin", "NO_RELAY_DECISION", "RelayDecisionState")
+__all__ = ("AutoDecisionWorkflow", "NO_RELAY_DECISION", "RelayDecisionState")
 
 
-class AutoDecisionWorkflowMixin(
-    _AutoDecisionSamplesMixin,
-    _AutoDecisionGatesMixin,
-    _AutoDecisionDecisionMixin,
-):
+class AutoDecisionWorkflow(_AutoDecisionDecision):
     """Provide the detailed Auto-mode decision flow used by AutoDecisionController."""

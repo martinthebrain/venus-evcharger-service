@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Audit, event, and server helpers for the Control API mixin."""
+"""Audit, event, and server helpers for the Control API role."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from venus_evcharger.control import ControlApiAuditTrail, ControlApiIdempotencyStore, ControlApiRateLimiter
 from venus_evcharger.control.events import ControlApiEventBus
+from venus_evcharger.service.control_state_meta import _ControlApiStateMeta
 
 
 _RuntimeComponent = TypeVar("_RuntimeComponent")
@@ -41,7 +42,7 @@ def _runtime_component(
     return component
 
 
-class _ControlApiRuntimeMixin:
+class _ControlApiRuntime(_ControlApiStateMeta):
     if TYPE_CHECKING:  # pragma: no cover
         control_api_enabled: bool
         control_api_host: str
@@ -59,8 +60,6 @@ class _ControlApiRuntimeMixin:
         _control_api_server: _ControlApiServerLike | None
 
         def _state_api_event_snapshot_payload(self) -> dict[str, Any]: ...
-
-        def _control_api_server_factory(self) -> Callable[..., _ControlApiServerLike]: ...
 
     def _control_api_audit_trail(self) -> ControlApiAuditTrail:
         return _runtime_component(

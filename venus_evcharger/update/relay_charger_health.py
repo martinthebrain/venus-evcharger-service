@@ -7,7 +7,7 @@ health, retry visibility, contactor suspicion, and feedback mismatch state.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.models import switch_feedback_mismatch
 from venus_evcharger.core.common import (
@@ -17,12 +17,76 @@ from venus_evcharger.core.common import (
 )
 
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.update.relay_charger_contracts import _RelayChargerHealthContractsMixin
-from venus_evcharger.update.relay_charger_transport import _RelayChargerTransportMixin
+from venus_evcharger.update.relay_charger_current import _RelayChargerCurrent
+
+# Safety invariants for charger health:
+# - Direct switch feedback and interlock faults override heuristic contactor guesses.
+# - Transport retry and transport failure windows are surfaced before status text.
+# - Contactor suspicion must persist beyond the configured delay before becoming health.
+# - Repeated contactor suspicions can latch a lockout with an explicit source.
+# - Lockout reasons are normalized to a small public diagnostic vocabulary.
+# - Charger-side power/current can corroborate load when the Shelly reading is stale.
+# - Text status hints influence presentation only; they do not override safety faults.
+# - Runtime fault counters are sanitized before thresholds are evaluated.
+# - Clearing feedback mismatches also clears transient contactor suspicion timers.
+# - Backend enable state is preferred over relay state when fresh readback exists.
 
 
-class _RelayChargerHealthMixin(_RelayChargerTransportMixin, _RelayChargerHealthContractsMixin):
+class _RelayChargerHealth(_RelayChargerCurrent):
     """Combine charger transport, contactor heuristics, and status overrides."""
+
+    if TYPE_CHECKING:
+        CHARGER_STATUS_CHARGING_HINT_TOKENS: frozenset[str]
+        CHARGER_STATUS_READY_HINT_TOKENS: frozenset[str]
+        CHARGER_STATUS_WAITING_HINT_TOKENS: frozenset[str]
+        CHARGER_STATUS_FINISHED_HINT_TOKENS: frozenset[str]
+
+        @staticmethod
+        def _contactor_heuristic_delay_seconds(svc: Any) -> float: ...
+
+        @staticmethod
+        def _contactor_lockout_threshold(svc: Any) -> int: ...
+
+        @staticmethod
+        def _contactor_lockout_persistence_seconds(svc: Any) -> float: ...
+
+        @staticmethod
+        def _contactor_power_threshold_w(svc: Any) -> float: ...
+
+        @staticmethod
+        def _contactor_current_threshold_a(svc: Any) -> float: ...
+
+        @staticmethod
+        def _charger_enable_backend(svc: Any) -> Any | None: ...
+
+        @classmethod
+        def _fresh_charger_power_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        @classmethod
+        def _fresh_charger_actual_current_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        @classmethod
+        def _fresh_charger_text_readback(
+            cls,
+            svc: Any,
+            attribute_name: str,
+            now: float | None = None,
+        ) -> str | None: ...
+
+        @classmethod
+        def _charger_text_tokens(cls, value: str | None) -> set[str]: ...
+
+        @classmethod
+        def _charger_text_indicates_fault(cls, value: str | None) -> bool: ...
+
+        @classmethod
+        def _fresh_switch_interlock_ok(cls, svc: Any, now: float | None = None) -> bool | None: ...
+
+        @classmethod
+        def _fresh_switch_feedback_closed(cls, svc: Any, now: float | None = None) -> bool | None: ...
+
+        @classmethod
+        def _fresh_charger_enabled_readback(cls, svc: Any, now: float | None = None) -> bool | None: ...
 
     @classmethod
     def _pm_load_active(
@@ -104,11 +168,11 @@ class _RelayChargerHealthMixin(_RelayChargerTransportMixin, _RelayChargerHealthC
     def _contactor_fault_counts(svc: Any) -> dict[str, int]:
         counts = getattr(svc, "_contactor_fault_counts", None)
         if isinstance(counts, dict):
-            normalized = _RelayChargerHealthMixin._normalized_contactor_fault_counts(counts)
-            _RelayChargerHealthMixin._set_runtime_attr(svc, "_contactor_fault_counts", normalized)
+            normalized = _RelayChargerHealth._normalized_contactor_fault_counts(counts)
+            _RelayChargerHealth._set_runtime_attr(svc, "_contactor_fault_counts", normalized)
             return normalized
         empty_counts: dict[str, int] = {}
-        _RelayChargerHealthMixin._set_runtime_attr(svc, "_contactor_fault_counts", empty_counts)
+        _RelayChargerHealth._set_runtime_attr(svc, "_contactor_fault_counts", empty_counts)
         return empty_counts
 
     @staticmethod

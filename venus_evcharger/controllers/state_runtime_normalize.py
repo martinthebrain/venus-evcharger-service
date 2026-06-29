@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Normalization helpers for runtime-state controller mixins."""
+"""Normalization helpers for runtime-state controller roles."""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ from typing import Any
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_tuple
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_learning_phase, normalize_learning_state
+from venus_evcharger.core.controller_contracts import ComposableControllerRole as _ComposableControllerRole
 
 
-class _StateRuntimeNormalizeMixin:
+class _StateRuntimeNormalize(_ComposableControllerRole):
     @staticmethod
     def coerce_runtime_int(value: object, default: int = 0) -> int:
         if isinstance(value, bool):
@@ -31,11 +32,11 @@ class _StateRuntimeNormalizeMixin:
     def _coerce_optional_runtime_float(value: object) -> float | None:
         if value is None:
             return None
-        return _StateRuntimeNormalizeMixin.coerce_runtime_float(value)
+        return _StateRuntimeNormalize.coerce_runtime_float(value)
 
     @staticmethod
     def _coerce_optional_runtime_past_time(value: object, now: float | None = None) -> float | None:
-        normalized = _StateRuntimeNormalizeMixin._coerce_optional_runtime_float(value)
+        normalized = _StateRuntimeNormalize._coerce_optional_runtime_float(value)
         if normalized is None:
             return None
         current = time.time() if now is None else float(now)
@@ -89,4 +90,4 @@ class _StateRuntimeNormalizeMixin:
     def _runtime_load_time(svc: Any) -> float:
         time_now = getattr(svc, "_time_now", None)
         raw_current_time: object = time_now() if callable(time_now) else time.time()
-        return _StateRuntimeNormalizeMixin.coerce_runtime_float(raw_current_time, time.time())
+        return _StateRuntimeNormalize.coerce_runtime_float(raw_current_time, time.time())

@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.update.relay_charger_health import _RelayChargerHealth
 
 
 @runtime_checkable
@@ -23,7 +24,7 @@ class ChargerCurrentBackend(Protocol):
     def set_current(self, amps: float) -> None: ...  # pragma: no cover
 
 
-class _RelayChargerReadbackMixin:
+class _RelayChargerReadback(_RelayChargerHealth):
     """Normalize fresh charger and switch readback surfaces for later policy code."""
 
     if TYPE_CHECKING:  # pragma: no cover

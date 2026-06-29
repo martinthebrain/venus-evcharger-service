@@ -3,28 +3,15 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import timestamp_age_within
+from venus_evcharger.update.input_cache import _UpdateCycleInputCache
 
 
-class _UpdateCycleOfflineMixin:
+class _UpdateCycleOffline(_UpdateCycleInputCache):
     FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
     service: Any
-
-    if TYPE_CHECKING:  # pragma: no cover
-
-        def _phase_data_for_pm_status(
-            self,
-            pm_status: dict[str, Any] | None,
-            total_power: float,
-            voltage: float,
-            total_current: float,
-        ) -> dict[str, dict[str, float]]: ...
-
-        def _total_phase_current(self, phase_data: dict[str, dict[str, float]]) -> float: ...
-
-        def update_virtual_state(self, status: int, energy_forward: float, relay_on: bool) -> bool: ...
 
     @staticmethod
     def _offline_health_reason(svc: Any) -> str:
@@ -150,7 +137,7 @@ class _UpdateCycleOfflineMixin:
     @staticmethod
     def _mark_offline_status_state(svc: Any) -> None:
         """Mark service observability fields for one offline Shelly publish."""
-        svc._last_status_source = _UpdateCycleOfflineMixin._offline_health_reason(svc)
+        svc._last_status_source = _UpdateCycleOffline._offline_health_reason(svc)
         svc._last_charger_fault_active = 0
 
     def _publish_offline_live_state(

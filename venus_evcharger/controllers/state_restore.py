@@ -4,21 +4,25 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
 from venus_evcharger.backend.models import PhaseSelection
 from venus_evcharger.core.contracts import non_negative_float_or_none, non_negative_int
 from venus_evcharger.core.shared import write_text_atomically
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.controllers.errors import RUNTIME_PERSISTENCE_WRITE_ERRORS
 from .state_restore_support import (
-    _StateRuntimeRestoreVictronEssMixin,
+    _StateRuntimeRestoreVictronEss,
     _victron_ess_balance_energy_ids,
     _victron_ess_balance_runtime_string,
 )
 
 
-class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin, _ComposableControllerMixin):
+class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
+    if TYPE_CHECKING:  # pragma: no cover
+        _normalize_mode: Callable[[object], int]
+
+        def state_summary(self) -> str: ...
 
     @staticmethod
     def _victron_ess_balance_activation_mode(payload: dict[str, object], svc: Any) -> str | None:

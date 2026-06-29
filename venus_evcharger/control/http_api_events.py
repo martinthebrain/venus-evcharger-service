@@ -7,9 +7,10 @@ from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any, Mapping
 
 from venus_evcharger.core.contracts import CONTROL_API_EVENT_KINDS, normalized_control_api_event_fields
+from venus_evcharger.control.http_api_commands import _LocalControlApiCommand
 
 
-class _LocalControlApiEvents:
+class _LocalControlApiEvents(_LocalControlApiCommand):
     if TYPE_CHECKING:
         _service: Any
         _RETRY_HEADER: str

@@ -3,14 +3,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+from .victron_ess_balance_apply_sources import _UpdateCycleVictronEssBalanceApplySources
 
 
-class _UpdateCycleVictronEssBalanceApplyPidMixin:
+class _UpdateCycleVictronEssBalanceApplyPid(_UpdateCycleVictronEssBalanceApplySources):
     """Compute bounded and ramped Victron ESS balance-bias setpoint offsets."""
-
-    if TYPE_CHECKING:  # pragma: no cover
-        def _optional_float(self, value: Any) -> float | None: ...
 
     @staticmethod
     def _victron_ess_balance_pid_gain_config(svc: Any) -> dict[str, float]:

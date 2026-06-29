@@ -3,19 +3,92 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.common import fresh_confirmed_relay_output
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.update.relay_phase_contracts import _RelayPhaseSwitchPolicyContractsMixin
+from venus_evcharger.update.relay_charger_readback import _RelayChargerReadback
 
 
 PHASE_SELECTION_APPLY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
+# Safety invariants for this policy:
+# - Phase changes never bypass an active pause/staging requirement.
+# - Mismatch retry state only affects upshifts; downshifts stay available for safety.
+# - Lockout state is scoped to the normalized phase target that caused it.
+# - Pending Auto candidates must survive their configured delay before applying.
+# - Failed physical switch attempts clear pending candidates and mark Shelly health.
+# - Runtime state is persisted after staged or applied phase target changes.
+# - Auto mode deactivation clears any pending candidate before returning.
 
-class _RelayPhaseSwitchPolicyMixin(_RelayPhaseSwitchPolicyContractsMixin):
+
+class _RelayPhaseSwitchPolicy(_RelayChargerReadback):
     """Handle phase-switch cooldowns, lockouts, and pending Auto candidates."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+        PHASE_SWITCH_WAITING_STATE: str
+
+        @classmethod
+        def _phase_selection_is_upshift(
+            cls,
+            current_selection: PhaseSelection,
+            target_selection: PhaseSelection,
+        ) -> bool: ...
+
+        @classmethod
+        def _phase_selection_count(cls, selection: object) -> int: ...
+
+        @staticmethod
+        def _auto_phase_policy(svc: Any) -> Any | None: ...
+
+        @classmethod
+        def _phase_selection_min_surplus_watts(
+            cls,
+            svc: Any,
+            selection: PhaseSelection,
+            voltage: float,
+        ) -> float | None: ...
+
+        @classmethod
+        def _ordered_auto_phase_selections(cls, svc: Any) -> tuple[PhaseSelection, ...]: ...
+
+        @classmethod
+        def _current_phase_selection(
+            cls,
+            svc: Any,
+            supported: tuple[PhaseSelection, ...],
+        ) -> PhaseSelection: ...
+
+        @classmethod
+        def _auto_phase_target_selection(
+            cls,
+            svc: Any,
+            supported: tuple[PhaseSelection, ...],
+            current_selection: PhaseSelection,
+            desired_relay: bool,
+            relay_on: bool,
+            voltage: float,
+            now: float,
+        ) -> tuple[PhaseSelection | None, str, float | None]: ...
+
+        @classmethod
+        def _record_auto_phase_metrics(
+            cls,
+            svc: Any,
+            *,
+            current_selection: PhaseSelection,
+            target_selection: PhaseSelection | None,
+            phase_reason: str,
+            threshold_watts: float | None,
+        ) -> None: ...
+
+        @staticmethod
+        def _pending_phase_switch_selection(svc: Any) -> PhaseSelection | None: ...
+
+        def _phase_switch_state_active(self, pending_selection: PhaseSelection | None, switch_state: str) -> bool: ...
+
+        def _publish_local_pm_status_best_effort(self, relay_on: bool, now: float) -> None: ...
 
     @classmethod
     def _phase_switch_mismatch_retry_active(
@@ -70,7 +143,7 @@ class _RelayPhaseSwitchPolicyMixin(_RelayPhaseSwitchPolicyContractsMixin):
     def _phase_switch_mismatch_counts(svc: Any) -> dict[str, int]:
         counts = getattr(svc, "_phase_switch_mismatch_counts", None)
         if isinstance(counts, dict):
-            normalized = _RelayPhaseSwitchPolicyMixin._normalized_phase_switch_mismatch_counts(counts)
+            normalized = _RelayPhaseSwitchPolicy._normalized_phase_switch_mismatch_counts(counts)
             svc._phase_switch_mismatch_counts = normalized
             return normalized
         empty_counts: dict[str, int] = {}

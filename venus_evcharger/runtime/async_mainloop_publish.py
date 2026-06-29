@@ -7,12 +7,13 @@ import logging
 import time
 from typing import Any
 
+from venus_evcharger.runtime.async_mainloop_watchdog import _RuntimeAsyncMainloopWatchdog
 from venus_evcharger.runtime.async_mainloop_types import PublishQueue, QueuedPublishValue, require_publish_queue
 
 DBUS_PUBLISH_QUEUE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeAsyncMainloopPublish:
+class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
     def enqueue_dbus_publish_values(self: Any, values: list[tuple[str, Any]], current: float) -> bool:
         """Coalesce DBus path writes for the GLib thread."""
         svc = self.service

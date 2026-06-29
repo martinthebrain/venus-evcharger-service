@@ -6,9 +6,10 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import timestamp_not_future
+from venus_evcharger.update.learning_runtime import _UpdateCycleLearningRuntime
 
 
-class _UpdateCycleInputCacheMixin:
+class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
     FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
     service: Any
 

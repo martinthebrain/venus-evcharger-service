@@ -9,9 +9,10 @@ from collections.abc import Callable
 
 from venus_evcharger.core.shared import config_get_float, parse_config_bool as _as_bool
 from venus_evcharger.energy import load_energy_source_settings
+from venus_evcharger.inputs.helper.snapshot import _AutoInputHelperSnapshot
 
 
-class _AutoInputHelperConfig:
+class _AutoInputHelperConfig(_AutoInputHelperSnapshot):
     _derive_subscription_refresh_seconds: Callable[[], float]
     _parsed_helper_generation: Callable[[object], int]
     _parsed_parent_pid: Callable[[object], int | None]

@@ -15,7 +15,7 @@ from venus_evcharger.core.shared import (
 from venus_evcharger.dbus_introspection import owner_path_unusable, request_owner_introspection
 from venus_evcharger.energy import EnergySourceDefinition
 from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.inputs.pv import _DbusInputPv
 
 
 def _service_name_or_none(value: object) -> str | None:
@@ -26,7 +26,7 @@ def _service_name_or_none(value: object) -> str | None:
     return service_name or None
 
 
-class _DbusInputStorageSupport(_ComposableControllerMixin):
+class _DbusInputStorageSupport(_DbusInputPv):
     def _configured_primary_energy_sources(self) -> tuple[EnergySourceDefinition, ...]:
         return tuple(getattr(self.service, "auto_energy_sources", ()) or ())
 

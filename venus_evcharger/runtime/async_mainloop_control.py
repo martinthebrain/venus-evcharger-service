@@ -9,12 +9,13 @@ import time
 from typing import Any
 
 from venus_evcharger.control import ControlCommand
+from venus_evcharger.runtime.async_mainloop_executor import _RuntimeAsyncMainloopExecutor
 from venus_evcharger.runtime.async_mainloop_types import require_control_command_queue
 
 ASYNC_CONTROL_COMMAND_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeAsyncMainloopControl:
+class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
     def enqueue_control_command(self: Any, command: ControlCommand) -> bool:
         """Coalesce DBus control commands for a background worker."""
         svc = self.service

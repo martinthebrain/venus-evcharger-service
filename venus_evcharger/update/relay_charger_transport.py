@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.core.common import _charger_transport_retry_delay_seconds, _fresh_charger_retry_until
 from venus_evcharger.core.contracts import exception_detail
+from venus_evcharger.update.relay_phase_publish import _RelayPhasePublish
 
 
-class _RelayChargerTransportMixin:
+class _RelayChargerTransport(_RelayPhasePublish):
     """Store transient charger transport failures and retry windows."""
 
     if TYPE_CHECKING:  # pragma: no cover

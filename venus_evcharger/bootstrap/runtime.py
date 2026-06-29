@@ -20,9 +20,9 @@ from collections import deque
 from collections.abc import Mapping
 from typing import Any
 
+from venus_evcharger.bootstrap.config import _ServiceBootstrapConfig
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.shelly_io import ShellyIoController
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
 from venus_evcharger.publish.dbus import DbusPublishController
 from venus_evcharger.update.controller import UpdateCycleController
@@ -42,7 +42,7 @@ def _device_info_payload(payload: object) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, Mapping) else {}
 
 
-class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
+class _ServiceBootstrapRuntime(_ServiceBootstrapConfig):
     @staticmethod
     def _topology_configured(svc: Any) -> bool:
         """Return whether one service has a configured runtime topology."""

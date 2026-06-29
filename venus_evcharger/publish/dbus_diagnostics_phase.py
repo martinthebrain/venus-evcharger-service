@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContracts
+from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue
+from venus_evcharger.publish.dbus_diagnostics_runtime import _DbusDiagnosticsRuntime
 
 
-class _DbusDiagnosticsPhase(_DbusDiagnosticsContracts):
+class _DbusDiagnosticsPhase(_DbusDiagnosticsRuntime):
     def _phase_counter_values(self, now: float) -> dict[str, DiagnosticValue]:
         """Return outward phase diagnostics and supported-layout information."""
         return {

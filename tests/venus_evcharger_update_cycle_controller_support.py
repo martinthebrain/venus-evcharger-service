@@ -12,7 +12,7 @@ from venus_evcharger.backend.modbus_transport import ModbusRequest, ModbusSlaveO
 from venus_evcharger.backend.shelly_io import ShellyIoController
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.update.controller import UpdateCycleController
-from venus_evcharger.update.relay import _UpdateCycleRelayMixin
+from venus_evcharger.update.relay import _UpdateCycleRelay
 
 
 def _phase_values(total_power, voltage, _phase, _voltage_mode):

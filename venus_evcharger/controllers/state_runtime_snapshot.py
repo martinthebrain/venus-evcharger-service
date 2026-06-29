@@ -7,10 +7,10 @@ from typing import Any
 
 from venus_evcharger.controllers.state_json import read_json_object_file
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.controllers.state_runtime_normalize import _StateRuntimeNormalize
 
 
-class _StateRuntimeSnapshotMixin(_ComposableControllerMixin):
+class _StateRuntimeSnapshot(_StateRuntimeNormalize):
     @staticmethod
     def _victron_ess_balance_runtime_profile_sample_count(profile: dict[str, object]) -> int:
         explicit_sample_count = profile.get("sample_count")
@@ -413,7 +413,7 @@ def _victron_ess_balance_runtime_profile_identity(
 
 def _victron_ess_balance_runtime_profile_counts(profile: dict[str, object]) -> dict[str, object]:
     return {
-        "sample_count": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_sample_count(profile),
+        "sample_count": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_sample_count(profile),
         "delay_samples": _victron_ess_balance_runtime_non_negative_int(profile.get("delay_samples")),
         "gain_samples": _victron_ess_balance_runtime_non_negative_int(profile.get("gain_samples")),
         "overshoot_count": _victron_ess_balance_runtime_non_negative_int(profile.get("overshoot_count")),
@@ -423,23 +423,23 @@ def _victron_ess_balance_runtime_profile_counts(profile: dict[str, object]) -> d
 
 def _victron_ess_balance_runtime_profile_response_metrics(profile: dict[str, object]) -> dict[str, object]:
     return {
-        "response_delay_seconds": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "response_delay_seconds": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "response_delay_seconds",
         ),
-        "estimated_gain": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "estimated_gain": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "estimated_gain",
         ),
-        "response_delay_mad_seconds": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "response_delay_mad_seconds": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "response_delay_mad_seconds",
         ),
-        "gain_mad": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "gain_mad": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "gain_mad",
         ),
-        "stability_score": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "stability_score": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "stability_score",
         ),
@@ -448,25 +448,25 @@ def _victron_ess_balance_runtime_profile_response_metrics(profile: dict[str, obj
 
 def _victron_ess_balance_runtime_profile_learning_metrics(profile: dict[str, object]) -> dict[str, object]:
     return {
-        "typical_response_delay_seconds": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "typical_response_delay_seconds": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "typical_response_delay_seconds",
             "response_delay_seconds",
         ),
-        "effective_gain": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "effective_gain": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "effective_gain",
             "estimated_gain",
         ),
-        "regime_consistency_score": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "regime_consistency_score": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "regime_consistency_score",
         ),
-        "response_variance_score": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "response_variance_score": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "response_variance_score",
         ),
-        "reproducibility_score": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "reproducibility_score": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "reproducibility_score",
         ),
@@ -475,11 +475,11 @@ def _victron_ess_balance_runtime_profile_learning_metrics(profile: dict[str, obj
 
 def _victron_ess_balance_runtime_profile_limit_metrics(profile: dict[str, object]) -> dict[str, object]:
     return {
-        "safe_ramp_rate_watts_per_second": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "safe_ramp_rate_watts_per_second": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "safe_ramp_rate_watts_per_second",
         ),
-        "preferred_bias_limit_watts": _StateRuntimeSnapshotMixin._victron_ess_balance_runtime_profile_metric(
+        "preferred_bias_limit_watts": _StateRuntimeSnapshot._victron_ess_balance_runtime_profile_metric(
             profile,
             "preferred_bias_limit_watts",
         ),

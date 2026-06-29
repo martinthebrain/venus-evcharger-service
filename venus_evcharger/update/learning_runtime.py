@@ -7,9 +7,10 @@ import math
 from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import normalize_learning_phase, normalize_learning_state
+from venus_evcharger.update.victron_ess_balance import _UpdateCycleVictronEssBalance
 
 
-class _UpdateCycleLearningRuntimeMixin:
+class _UpdateCycleLearningRuntime(_UpdateCycleVictronEssBalance):
     LEARNED_POWER_STABLE_TOLERANCE_RATIO: ClassVar[float]
     LEARNED_POWER_STABLE_TOLERANCE_WATTS: ClassVar[float]
     LEARNED_POWER_VOLTAGE_TOLERANCE_VOLTS: ClassVar[float]

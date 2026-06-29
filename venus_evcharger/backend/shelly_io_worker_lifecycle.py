@@ -10,12 +10,13 @@ import requests
 
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.shelly_io_types import ShellyIoHost, is_closeable, is_settable_event
+from venus_evcharger.backend.shelly_io_worker_transport import ShellyIoWorkerTransport
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class ShellyIoWorkerLifecycle:
+class ShellyIoWorkerLifecycle(ShellyIoWorkerTransport):
     """Start, restart, and inspect the Shelly background worker thread."""
 
     if TYPE_CHECKING:

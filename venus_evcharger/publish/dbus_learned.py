@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from venus_evcharger.core.common import (
     _fresh_charger_retry_reason,
@@ -22,15 +22,12 @@ from venus_evcharger.core.contracts import (
     normalize_learning_phase,
     normalize_learning_state,
 )
+from venus_evcharger.publish.dbus_config import _DbusPublishConfig
 from venus_evcharger.publish.dbus_shared import _LearnedDisplayCurrentInputs
 
 
-class _DbusPublishLearned:
+class _DbusPublishLearned(_DbusPublishConfig):
     service: Any
-
-    if TYPE_CHECKING:  # pragma: no cover
-
-        def _diagnostic_text_value(self, raw_value: Any) -> str: ...
 
     def _display_uses_learned_set_current(self) -> bool:
         """Return whether the GUI SetCurrent field should mirror the learned EVSE current."""

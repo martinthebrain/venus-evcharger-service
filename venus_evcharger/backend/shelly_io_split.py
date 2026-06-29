@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.models import ChargerState, MeterReading, PhaseSelection
+from venus_evcharger.backend.shelly_io_runtime import ShellyIoRuntime
 from venus_evcharger.backend.shelly_io_types import (
     JsonObject,
     ShellyIoHost,
@@ -22,7 +23,7 @@ from venus_evcharger.backend.shelly_io_types import (
 from venus_evcharger.core.contracts import finite_float_or_none
 
 
-class ShellyIoSplit:
+class ShellyIoSplit(ShellyIoRuntime):
     """Synthesize PM status from split meter, switch, and charger backends."""
 
     if TYPE_CHECKING:

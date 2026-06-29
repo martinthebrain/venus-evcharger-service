@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Runtime, socket, and identity contracts for DBus adapter process mixins."""
+"""Runtime, socket, and identity contracts for DBus adapter process roles."""
 
 from __future__ import annotations
 

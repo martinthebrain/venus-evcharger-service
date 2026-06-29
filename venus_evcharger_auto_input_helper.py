@@ -26,22 +26,12 @@ from venus_evcharger.core.shared import (
     parse_config_bool as _as_bool,
     write_text_atomically,
 )
-from venus_evcharger.inputs.helper import (
-    _AutoInputHelperSnapshot,
-    _AutoInputHelperSource,
-    _AutoInputHelperSubscription,
-)
 from venus_evcharger.inputs.helper.config_runtime import _AutoInputHelperConfig
 
 __all__ = ["AutoInputHelper", "_as_bool", "main"]
 
 
-class AutoInputHelper(
-    _AutoInputHelperConfig,
-    _AutoInputHelperSnapshot,
-    _AutoInputHelperSubscription,
-    _AutoInputHelperSource,
-):
+class AutoInputHelper(_AutoInputHelperConfig):
     SNAPSHOT_SCHEMA_VERSION = AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION
 
     def __init__(

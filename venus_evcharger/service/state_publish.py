@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""State and DBus-publish mixins for the Venus EV charger service."""
+"""State and DBus-publish roles for the Venus EV charger service."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from venus_evcharger.core.return_contracts import require_bool, require_dict, re
 from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.runtime import RuntimeSupportController
 
-from .factory import ServiceControllerFactoryMixin
+from .runtime import RuntimeHelper
 
 
-class StatePublishMixin(ServiceControllerFactoryMixin):
+class StatePublish(RuntimeHelper):
     """Static state and DBus publish delegations."""
 
     @staticmethod

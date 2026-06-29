@@ -3,10 +3,6 @@
 
 from __future__ import annotations
 
-from venus_evcharger.backend.shelly_io_capabilities import ShellyIoCapabilities
-from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
-from venus_evcharger.backend.shelly_io_runtime import ShellyIoRuntime
-from venus_evcharger.backend.shelly_io_split import ShellyIoSplit
 from venus_evcharger.backend.shelly_io_types import (
     JsonObject,
     PendingRelayCommand,
@@ -21,13 +17,7 @@ from venus_evcharger.backend.shelly_io_types import (
 from venus_evcharger.backend.shelly_io_worker import ShellyIoWorker
 
 
-class ShellyIoController(
-    ShellyIoRequests,
-    ShellyIoCapabilities,
-    ShellyIoRuntime,
-    ShellyIoSplit,
-    ShellyIoWorker,
-):
+class ShellyIoController(ShellyIoWorker):
     """Encapsulate Shelly HTTP access and relay queue/worker behavior."""
 
     def __init__(self, service: ShellyIoHost) -> None:

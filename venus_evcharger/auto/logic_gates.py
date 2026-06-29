@@ -9,22 +9,11 @@ from __future__ import annotations
 
 import logging
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
-
-from .logic_gates_battery_balance import _AutoDecisionBatteryBalanceMixin
-from .logic_gates_battery_learning import _AutoDecisionBatteryLearningMixin
-from .logic_gates_metrics import _AutoDecisionMetricsMixin
-from .logic_gates_runtime import _AutoDecisionRuntimeGatesMixin
+from .logic_gates_runtime import _AutoDecisionRuntimeGates
 
 
-class _AutoDecisionGatesMixin(
-    _AutoDecisionRuntimeGatesMixin,
-    _AutoDecisionMetricsMixin,
-    _AutoDecisionBatteryBalanceMixin,
-    _AutoDecisionBatteryLearningMixin,
-    _ComposableControllerMixin,
-):
+class _AutoDecisionGates(_AutoDecisionRuntimeGates):
     """Composed Auto decision helpers kept under the legacy module path."""
 
 
-__all__ = ["_AutoDecisionGatesMixin", "logging"]
+__all__ = ["_AutoDecisionGates", "logging"]

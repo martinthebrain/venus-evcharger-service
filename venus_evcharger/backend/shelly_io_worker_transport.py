@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import requests
 from requests import exceptions as requests_exceptions
 
+from venus_evcharger.backend.shelly_io_split import ShellyIoSplit
 from venus_evcharger.backend.shelly_io_types import ShellyIoHost, is_transport_session_reset_backend
 
 _SHELLY_TRANSPORT_ERROR_REASONS = frozenset(
@@ -45,7 +46,7 @@ _SHELLY_RETRY_MINIMUMS = {
 }
 
 
-class ShellyIoWorkerTransport:
+class ShellyIoWorkerTransport(ShellyIoSplit):
     """Classify Shelly transport failures and maintain RAM-only retry state."""
 
     if TYPE_CHECKING:

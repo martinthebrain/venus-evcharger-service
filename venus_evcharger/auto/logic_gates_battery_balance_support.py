@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from .logic_samples import _AutoDecisionSamples
 
 
-class _AutoDecisionBatteryBalanceSupportMixin(_ComposableControllerMixin):
+class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
     def _battery_discharge_balance_policy_context(
         self,
         cluster: Mapping[str, Any],

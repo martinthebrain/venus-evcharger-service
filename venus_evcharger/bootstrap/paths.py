@@ -22,12 +22,12 @@ from typing import Any
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.bootstrap.errors import BOOTSTRAP_DBUS_REGISTRATION_ERRORS
+from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntime
 from venus_evcharger.core.common import (
     DEFAULT_SCHEDULED_ENABLED_DAYS,
     mode_uses_scheduled_logic,
     scheduled_mode_snapshot,
 )
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 PathSpec = tuple[Any, Callable[[Any, Any], str] | None]
 PathMap = dict[str, PathSpec]
 
@@ -221,7 +221,7 @@ def _runtime_timing_diagnostic_defaults() -> PathMap:
     }
 
 
-class _ServiceBootstrapPathMixin(_ComposableControllerMixin):
+class _ServiceBootstrapPath(_ServiceBootstrapRuntime):
     @staticmethod
     def _connected_value(svc: Any) -> int:
         """Return one static initial Connected flag for DBus registration."""

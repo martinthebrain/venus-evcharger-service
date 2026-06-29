@@ -3,7 +3,7 @@
 """Expose a Shelly relay meter as a Venus OS EV charger tile.
 
 This is the public entry point of the wallbox service. The module mainly
-assembles the service class from smaller controllers/mixins and then delegates
+assembles the service class from smaller controllers/roles and then delegates
  startup and main-loop setup to the bootstrap helpers.
 """
 
@@ -47,11 +47,7 @@ from venus_evcharger.core.common import (
     read_version,
 )
 from venus_evcharger.service.bindings import (
-    ControlApiMixin,
-    DbusAutoLogicMixin,
-    RuntimeHelperMixin,
-    StatePublishMixin,
-    UpdateCycleMixin,
+    ControlApi,
 )
 from venus_evcharger.controllers.state import ServiceStateController
 
@@ -72,7 +68,7 @@ __all__ = [
 ]
 
 
-class ShellyWallboxService(ControlApiMixin, StatePublishMixin, RuntimeHelperMixin, DbusAutoLogicMixin, UpdateCycleMixin):
+class ShellyWallboxService(ControlApi):
     """Expose a Shelly relay meter as a Venus OS EV charger tile."""
     _normalize_mode_func = staticmethod(normalize_mode)
     _mode_uses_auto_logic_func = staticmethod(mode_uses_auto_logic)

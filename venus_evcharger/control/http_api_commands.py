@@ -32,9 +32,10 @@ from venus_evcharger.control.rate_limit import ControlApiRateLimiter
 from venus_evcharger.control.http_api_response import (
     error_response_payload,
 )
+from venus_evcharger.control.http_api_auth import _LocalControlApiAuth
 
 
-class _LocalControlApiCommand:
+class _LocalControlApiCommand(_LocalControlApiAuth):
     _http_status_for_result = staticmethod(http_status_for_result)
     _idempotency_conflict_response = staticmethod(idempotency_conflict_response)
     _idempotency_fingerprint = staticmethod(idempotency_fingerprint)
@@ -50,36 +51,11 @@ class _LocalControlApiCommand:
         _fallback_rate_limiter: ControlApiRateLimiter
         _service: Any
 
-        def _client_host(self, handler: BaseHTTPRequestHandler) -> str: ...
-
         def _request_state_tokens(self, handler: BaseHTTPRequestHandler) -> set[str]: ...
 
         def _state_token(self) -> str: ...
 
         def _state_token_headers(self) -> dict[str, str]: ...
-
-        def _command_payload(self, command: ControlCommand) -> dict[str, Any]: ...
-
-        def _error_response_payload(self, code: str, message: str) -> dict[str, Any]: ...
-
-        def _result_payload(self, result: ControlResult) -> dict[str, Any]: ...
-
-        def _write_error(
-            self,
-            handler: BaseHTTPRequestHandler,
-            status: HTTPStatus,
-            code: str,
-            message: str,
-        ) -> None: ...
-
-        def _write_json(
-            self,
-            handler: BaseHTTPRequestHandler,
-            status: HTTPStatus,
-            payload: dict[str, Any],
-            *,
-            extra_headers: dict[str, str] | None = None,
-        ) -> None: ...
 
     def _read_json_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
         try:

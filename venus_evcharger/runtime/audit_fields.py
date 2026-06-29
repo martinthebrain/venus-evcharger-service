@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.backend.models import effective_supported_phase_selections, switch_feedback_mismatch
@@ -18,6 +18,7 @@ from venus_evcharger.core.common import (
     evse_fault_reason,
 )
 from venus_evcharger.core.contracts import finite_float_or_none, normalized_auto_state_pair, normalized_worker_snapshot
+from venus_evcharger.runtime.setup import _RuntimeSetup
 
 WorkerSnapshot = dict[str, Any]
 
@@ -28,12 +29,16 @@ def _normalized_optional_audit_text(value: object) -> str | None:
     return normalized or None
 
 
-class _RuntimeAuditFields:
+class _RuntimeAuditFields(_RuntimeSetup):
     service: Any
-    clone_worker_snapshot: Callable[[WorkerSnapshot], WorkerSnapshot]
-    ensure_missing_attributes: Any
-    observability_state_defaults: Any
-    worker_state_defaults: Any
+    if TYPE_CHECKING:  # pragma: no cover
+        @staticmethod
+        def ensure_missing_attributes(service: Any, defaults: dict[str, Callable[[], Any]]) -> None: ...
+
+        def worker_state_defaults(self) -> dict[str, Callable[[], Any]]: ...
+
+        @staticmethod
+        def observability_state_defaults() -> dict[str, Callable[[], Any]]: ...
 
     @staticmethod
     def _backend_value(svc: Any, attribute_name: str, default: str = "") -> str:

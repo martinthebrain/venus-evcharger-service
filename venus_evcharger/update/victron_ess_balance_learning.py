@@ -3,12 +3,8 @@
 
 from __future__ import annotations
 
-from .victron_ess_balance_learning_profiles import _UpdateCycleVictronEssBalanceLearningProfilesMixin
-from .victron_ess_balance_learning_telemetry import _UpdateCycleVictronEssBalanceLearningTelemetryMixin
+from .victron_ess_balance_learning_profiles import _UpdateCycleVictronEssBalanceLearningProfiles
 
 
-class _UpdateCycleVictronEssBalanceLearningMixin(
-    _UpdateCycleVictronEssBalanceLearningTelemetryMixin,
-    _UpdateCycleVictronEssBalanceLearningProfilesMixin,
-):
+class _UpdateCycleVictronEssBalanceLearning(_UpdateCycleVictronEssBalanceLearningProfiles):
     """Composed Victron ESS balance-bias learning helpers."""

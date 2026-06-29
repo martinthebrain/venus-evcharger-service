@@ -5,8 +5,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from venus_evcharger.update.runtime_cycle import _UpdateCycleRuntime
 
-class _UpdateCycleVictronEssBalanceApplySourcesMixin:
+
+class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
     """Resolve eligible Victron-side battery sources and activation policy."""
 
     @staticmethod

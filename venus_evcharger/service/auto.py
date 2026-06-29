@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus-input and Auto-logic mixins for the Venus EV charger service."""
+"""DBus-input and Auto-logic roles for the Venus EV charger service."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from venus_evcharger.core.return_contracts import (
 )
 from venus_evcharger.controllers.auto import AutoDecisionController
 
-from .factory import ServiceControllerFactoryMixin
+from .update import UpdateCycle
 
 
-class DbusAutoLogicMixin(ServiceControllerFactoryMixin):
+class DbusAutoLogic(UpdateCycle):
     """Static DBus-input, Auto-decision, and write-controller delegations."""
 
     @staticmethod

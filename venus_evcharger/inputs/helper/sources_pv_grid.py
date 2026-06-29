@@ -17,9 +17,10 @@ from venus_evcharger.core.shared import (
     grid_values_complete_enough,
 )
 from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
+from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbus
 
 
-class _AutoInputHelperSourcePvGrid:
+class _AutoInputHelperSourcePvGrid(_AutoInputHelperSourceDbus):
     def _invalidate_auto_pv_services(self: Any) -> None:
         setattr(self, "_resolved_auto_pv_services", [])
         self._auto_pv_last_scan = 0.0

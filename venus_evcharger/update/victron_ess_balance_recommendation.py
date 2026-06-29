@@ -6,10 +6,10 @@ from __future__ import annotations
 from typing import Any
 
 from .victron_ess_balance_recommendation_support import (
-    _UpdateCycleVictronEssBalanceRecommendationSupportMixin,
+    _UpdateCycleVictronEssBalanceRecommendationSupport,
 )
 
-class _UpdateCycleVictronEssBalanceRecommendationMixin(_UpdateCycleVictronEssBalanceRecommendationSupportMixin):
+class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceRecommendationSupport):
 
     def _victron_ess_balance_recommendation_source(
         self,
@@ -134,7 +134,7 @@ class _UpdateCycleVictronEssBalanceRecommendationMixin(_UpdateCycleVictronEssBal
 
     @staticmethod
     def _victron_ess_balance_adjusted_tuning(current: dict[str, float], reason: str) -> dict[str, float]:
-        return _UpdateCycleVictronEssBalanceRecommendationSupportMixin._victron_ess_balance_adjusted_tuning(
+        return _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_adjusted_tuning(
             current,
             reason,
         )

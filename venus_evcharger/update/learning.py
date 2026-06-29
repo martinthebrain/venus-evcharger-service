@@ -9,11 +9,11 @@ state back to Venus OS.
 
 from __future__ import annotations
 
-from .learning_support import _UpdateCycleLearningSupportMixin
+from .learning_support import _UpdateCycleLearningSupport
 
 
 
-class _UpdateCycleLearningMixin(_UpdateCycleLearningSupportMixin):
+class _UpdateCycleLearning(_UpdateCycleLearningSupport):
     def refresh_learned_charge_power_state(self, now: float) -> bool:
         """Refresh the coarse learned-power state outside active learning samples."""
         learned_power = self._stored_positive_learned_charge_power()

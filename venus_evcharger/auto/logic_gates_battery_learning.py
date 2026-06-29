@@ -4,10 +4,10 @@ from __future__ import annotations
 import time
 from typing import Any, Mapping
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from .logic_gates_battery_balance_support import _AutoDecisionBatteryBalanceSupport
 
 
-class _AutoDecisionBatteryLearningMixin(_ComposableControllerMixin):
+class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
     def _battery_activity_inputs(self) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         svc = self.service
         cluster = self._normalized_mapping(getattr(svc, "_last_energy_cluster", {}))
@@ -137,7 +137,7 @@ class _AutoDecisionBatteryLearningMixin(_ComposableControllerMixin):
 
     def _cluster_or_forecast_metric(
         self,
-        cluster: dict[str, Any],
+        cluster: Mapping[str, Any],
         forecast: Mapping[str, object],
         key: str,
     ) -> float | None:

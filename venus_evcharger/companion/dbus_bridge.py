@@ -8,11 +8,10 @@ import time
 from typing import Any, Mapping
 
 from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy, gateway_paths
-from .dbus_bridge_grid import _EnergyCompanionDbusBridgeGrid
 from .dbus_bridge_services import _EnergyCompanionDbusBridgeServices
 
 
-class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices, _EnergyCompanionDbusBridgeGrid):
+class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
     """Publish optional aggregated battery, PV, and grid companion services on DBus."""
 
     def __init__(self, service: Any, script_path: str) -> None:

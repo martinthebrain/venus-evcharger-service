@@ -17,12 +17,11 @@ from typing import Any
 from venus_evcharger.auto.tracking import clear_auto_decision_tracking
 from venus_evcharger.auto.logic_types import require_relay_bool
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
-from venus_evcharger.auto.logic_decisions_preaverage import _AutoDecisionPreAverageMixin
+from venus_evcharger.auto.logic_decisions_preaverage import _AutoDecisionPreAverage
 
 
 
-class _AutoDecisionDecisionMixin(_AutoDecisionPreAverageMixin, _ComposableControllerMixin):
+class _AutoDecisionDecision(_AutoDecisionPreAverage):
     def _handle_relay_on(
         self,
         avg_surplus_power: float,

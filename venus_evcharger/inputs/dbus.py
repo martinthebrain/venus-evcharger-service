@@ -6,11 +6,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from venus_evcharger.inputs.pv import _DbusInputPv
 from venus_evcharger.inputs.storage import _DbusInputStorage
 
 
-class DbusInputController(_DbusInputPv, _DbusInputStorage):
+class DbusInputController(_DbusInputStorage):
     """Encapsulate PV, battery, and grid DBus discovery/reads for the main service."""
 
     def __init__(self, port: Any) -> None:

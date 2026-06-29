@@ -14,10 +14,8 @@ from venus_evcharger.core.contracts import (
 from venus_evcharger.core.return_contracts import require_str
 from venus_evcharger.ports.write_runtime import WriteControllerRuntimePort
 
-from .base import _BaseServicePort
 
-
-class WriteControllerPort(WriteControllerRuntimePort, _BaseServicePort):
+class WriteControllerPort(WriteControllerRuntimePort):
     """Expose only the write-path surface needed by ``DbusWriteController``."""
 
     _ALLOWED_ATTRS = {

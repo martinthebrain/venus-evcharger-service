@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Configuration-effective state payload helpers for the Control API mixin."""
+"""Configuration-effective state payload helpers for the Control API role."""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ from typing import Any
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.core.contracts import normalized_state_api_config_effective_fields
 from venus_evcharger.energy import energy_source_profile_details
+from venus_evcharger.service.control_state_victron import _ControlApiStateVictron
 
 
-class _ControlApiStateConfigMixin:
+class _ControlApiStateConfig(_ControlApiStateVictron):
     @staticmethod
     def _config_effective_energy_source_ids(sources: tuple[Any, ...]) -> list[str]:
         return [getattr(source, "source_id", "") for source in sources]

@@ -6,8 +6,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .victron_ess_balance_apply_contracts import _VictronEssBalanceApplyContractsMixin
-from .victron_ess_balance_apply_support import _UpdateCycleVictronEssBalanceApplySupportMixin
+from .victron_ess_balance_apply_support import _UpdateCycleVictronEssBalanceApplySupport
 from .victron_ess_balance_learning_profiles_support import (
     _clear_victron_ess_balance_tracking_episode_state,
     _record_victron_ess_balance_tracking_command,
@@ -16,10 +15,7 @@ from .victron_ess_balance_learning_profiles_support import (
 )
 
 
-class _UpdateCycleVictronEssBalanceApplyMixin(
-    _UpdateCycleVictronEssBalanceApplySupportMixin,
-    _VictronEssBalanceApplyContractsMixin,
-):
+class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySupport):
     """Apply one optional Victron-side ESS balance bias through a GX DBus setpoint."""
 
     @staticmethod

@@ -21,10 +21,10 @@ from venus_evcharger.core.common import (
     scheduled_mode_snapshot,
 )
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.controllers.state_restore import _StateRuntimeRestore
 
 
-class _StateSummaryMixin(_ComposableControllerMixin):
+class _StateSummary(_StateRuntimeRestore):
     @staticmethod
     def _summary_flag(value: object) -> str:
         return str(int(bool(value)))

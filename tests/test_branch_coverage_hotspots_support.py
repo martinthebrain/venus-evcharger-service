@@ -45,7 +45,7 @@ from venus_evcharger.update.victron_ess_balance_learning_profiles import (
     _victron_ess_balance_profile_identity,
 )
 from venus_evcharger.update.victron_ess_balance_learning_telemetry import (
-    _UpdateCycleVictronEssBalanceLearningTelemetryMixin,
+    _UpdateCycleVictronEssBalanceLearningTelemetry,
 )
 
 
@@ -53,14 +53,14 @@ def _controller() -> UpdateCycleController:
     return UpdateCycleController(SimpleNamespace(), _phase_values, lambda _reason: 0)
 
 
-class _TelemetryHarness(_UpdateCycleVictronEssBalanceLearningTelemetryMixin):
+class _TelemetryHarness(_UpdateCycleVictronEssBalanceLearningTelemetry):
     @staticmethod
     def _optional_float(value: object) -> float | None:
         if not isinstance(value, (int, float)):
             return None
         return float(value)
 
-    _ewma_learned_value = staticmethod(_UpdateCycleVictronEssBalanceLearningTelemetryMixin._ewma_learned_value)
+    _ewma_learned_value = staticmethod(_UpdateCycleVictronEssBalanceLearningTelemetry._ewma_learned_value)
 
     def __init__(self) -> None:
         self.delay_updates: list[tuple[str, float]] = []

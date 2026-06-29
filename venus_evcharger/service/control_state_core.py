@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Core state payload helpers for the Control API mixin."""
+"""Core state payload helpers for the Control API role."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from venus_evcharger.core.contracts import (
     normalized_state_api_topology_fields,
     normalized_state_api_update_fields,
 )
+from venus_evcharger.service.state_publish import StatePublish
 
 
 def _plain_state_mapping(value: object) -> dict[str, Any]:
@@ -36,7 +37,7 @@ if TYPE_CHECKING:  # pragma: no cover
         def _diagnostic_age_values(self, now: float) -> Mapping[str, Any]: ...
 
 
-class _ControlApiStateCoreMixin:
+class _ControlApiStateCore(StatePublish):
     if TYPE_CHECKING:  # pragma: no cover
         _write_controller: _WriteControllerLike
         _dbus_publisher: _DbusDiagnosticsPublisherLike
