@@ -78,7 +78,11 @@ class RuntimeAsyncMainloopTypeContractTests(unittest.TestCase):
 
     def test_service_return_contract_compatibility_path_exports_core_contracts(self) -> None:
         self.assertIs(service_return_contracts.require_bool(True, "flag"), True)
+        self.assertIsNone(service_return_contracts.require_none(None, "noop"))
         self.assertEqual(service_return_contracts.require_tuple2(("a", "b"), "pair"), ("a", "b"))
+
+        with self.assertRaisesRegex(TypeError, "noop must return None, got int"):
+            service_return_contracts.require_none(1, "noop")
 
 
 if __name__ == "__main__":
