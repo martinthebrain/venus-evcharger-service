@@ -27,10 +27,10 @@ from .energy_snapshot_contracts import (
     nested_object_mappings,
     object_mapping,
 )
-from .storage_support import _DbusInputStorageSupportMixin
+from .storage_support import _DbusInputStorageSupport
 
 
-class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
+class _DbusInputStorage(_DbusInputStorageSupport):
 
     def _read_optional_energy_value(self, service_name: str, path: str) -> float | None:
         if not path:

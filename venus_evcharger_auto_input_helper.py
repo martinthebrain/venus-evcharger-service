@@ -27,20 +27,20 @@ from venus_evcharger.core.shared import (
     write_text_atomically,
 )
 from venus_evcharger.inputs.helper import (
-    _AutoInputHelperSnapshotMixin,
-    _AutoInputHelperSourceMixin,
-    _AutoInputHelperSubscriptionMixin,
+    _AutoInputHelperSnapshot,
+    _AutoInputHelperSource,
+    _AutoInputHelperSubscription,
 )
-from venus_evcharger.inputs.helper.config_runtime import _AutoInputHelperConfigMixin
+from venus_evcharger.inputs.helper.config_runtime import _AutoInputHelperConfig
 
 __all__ = ["AutoInputHelper", "_as_bool", "main"]
 
 
 class AutoInputHelper(
-    _AutoInputHelperConfigMixin,
-    _AutoInputHelperSnapshotMixin,
-    _AutoInputHelperSubscriptionMixin,
-    _AutoInputHelperSourceMixin,
+    _AutoInputHelperConfig,
+    _AutoInputHelperSnapshot,
+    _AutoInputHelperSubscription,
+    _AutoInputHelperSource,
 ):
     SNAPSHOT_SCHEMA_VERSION = AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION
 

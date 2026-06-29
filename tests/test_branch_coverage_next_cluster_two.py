@@ -17,7 +17,7 @@ from venus_evcharger.energy import probe_core as probe_core_mod
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 
 
-class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin):
+class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGrid):
     def __init__(self, service: object) -> None:
         self.service = service
         self._grid_hold_state: dict[str, dict[str, object]] = {}
@@ -87,27 +87,27 @@ class BranchCoverageNextClusterTwoDbusBridgeGridCases(unittest.TestCase):
         self.assertEqual(bridge._grid_connected(aggregate_snapshot, 101.0), 1)
         self.assertEqual(bridge._grid_power_w(aggregate_snapshot, 101.0), 120.0)
 
-        self.assertIsNone(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_numeric_value("x"))
-        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_normalized_alpha(-1.0), 0.0)
-        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_normalized_alpha(5.0), 1.0)
+        self.assertIsNone(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_numeric_value("x"))
+        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_normalized_alpha(-1.0), 0.0)
+        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_normalized_alpha(5.0), 1.0)
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(200.0, None, 0.5, 0.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, None, 0.5, 0.0),
             200.0,
         )
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(200.0, 100.0, 0.0, 0.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, 100.0, 0.0, 0.0),
             200.0,
         )
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(200.0, 100.0, 0.5, 50.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, 100.0, 0.5, 50.0),
             200.0,
         )
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(130.0, 100.0, 0.5, 50.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(130.0, 100.0, 0.5, 50.0),
             115.0,
         )
         self.assertFalse(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_within_hold_window({}, 100.0, 5.0)
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_within_hold_window({}, 100.0, 5.0)
         )
         self.assertEqual(
             bridge._grid_source_values(

@@ -83,7 +83,7 @@ def write_json(
     handler.wfile.write(raw)
 
 
-class _LocalControlApiResponseMixin:
+class _LocalControlApiResponse:
     _SAFE_EXTRA_RESPONSE_HEADERS = SAFE_EXTRA_RESPONSE_HEADERS
     _command_payload = staticmethod(command_payload)
     _error_response_payload = staticmethod(error_response_payload)

@@ -28,7 +28,7 @@ def _required_service_name(value: object, label: str) -> str:
     return service_name
 
 
-class _AutoInputHelperSourceDbusResolveMixin(_ResolvedAutoBatteryServiceState):
+class _AutoInputHelperSourceDbusResolve(_ResolvedAutoBatteryServiceState):
     def _resolve_auto_battery_service(self: Any) -> str:
         now = time.time()
         configured: object = self._configured_auto_battery_service(now)

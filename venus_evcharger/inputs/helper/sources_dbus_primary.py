@@ -16,7 +16,7 @@ def _energy_source_definitions(value: object) -> tuple[EnergySourceDefinition, .
     return tuple(source for source in value if isinstance(source, EnergySourceDefinition))
 
 
-class _AutoInputHelperSourceDbusPrimaryMixin:
+class _AutoInputHelperSourceDbusPrimary:
     def _configured_primary_energy_sources(self: Any) -> tuple[EnergySourceDefinition, ...]:
         return _energy_source_definitions(getattr(self, "auto_energy_sources", ()) or ())
 
@@ -63,17 +63,17 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
         return max(0.0, float(getattr(self, "auto_battery_capacity_startup_recheck_seconds", 300.0) or 300.0))
 
     def _primary_energy_estimated_capacity_wh(self: Any) -> float | None:
-        return _AutoInputHelperSourceDbusPrimaryMixin._positive_float_or_none(
+        return _AutoInputHelperSourceDbusPrimary._positive_float_or_none(
             getattr(self, "auto_battery_capacity_estimated_wh", None)
         )
 
     def _primary_energy_estimated_capacity_ah(self: Any) -> float | None:
-        return _AutoInputHelperSourceDbusPrimaryMixin._positive_float_or_none(
+        return _AutoInputHelperSourceDbusPrimary._positive_float_or_none(
             getattr(self, "auto_battery_capacity_estimated_ah", None)
         )
 
     def _primary_energy_estimated_capacity_nominal_voltage(self: Any) -> float | None:
-        return _AutoInputHelperSourceDbusPrimaryMixin._positive_float_or_none(
+        return _AutoInputHelperSourceDbusPrimary._positive_float_or_none(
             getattr(self, "auto_battery_capacity_estimated_nominal_voltage", None)
         )
 
@@ -134,10 +134,10 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
         )
 
     def _primary_energy_source(self: Any) -> EnergySourceDefinition:
-        sources = _AutoInputHelperSourceDbusPrimaryMixin._configured_primary_energy_sources(self)
+        sources = _AutoInputHelperSourceDbusPrimary._configured_primary_energy_sources(self)
         if sources:
             return sources[0]
-        return _AutoInputHelperSourceDbusPrimaryMixin._default_primary_energy_source(self)
+        return _AutoInputHelperSourceDbusPrimary._default_primary_energy_source(self)
 
     def _battery_service_has_soc(self: Any, service_name: str) -> bool:
         try:

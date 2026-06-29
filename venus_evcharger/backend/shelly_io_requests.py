@@ -22,7 +22,7 @@ from venus_evcharger.backend.shelly_io_types import (
 )
 
 
-class ShellyIoRequestsMixin:
+class ShellyIoRequests:
     """Encapsulate low-level request and direct RPC helpers."""
 
     if TYPE_CHECKING:

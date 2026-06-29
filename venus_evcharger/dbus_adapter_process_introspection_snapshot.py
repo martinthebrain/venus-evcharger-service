@@ -20,7 +20,7 @@ from venus_evcharger.dbus_gateway_core import float_or_default
 from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
 
 
-class DbusAdapterIntrospectionSnapshotMixin:
+class DbusAdapterIntrospectionSnapshot:
     def write_introspection_snapshot(self: DbusAdapterIntrospectionSnapshotContext) -> None:
         if not self.dbus_introspection_enabled or not self.dbus_introspection_snapshot_path:
             return
@@ -104,7 +104,7 @@ def _paths_payload(service_payload: CommandPayload) -> dict[str, object]:
 
 
 def _fresh_introspection_finding(entry: CommandMapping, now: float) -> CommandPayload:
-    interfaces, children = DbusAdapterIntrospectionSnapshotMixin.parse_introspection_xml(entry.get("value", ""))
+    interfaces, children = DbusAdapterIntrospectionSnapshot.parse_introspection_xml(entry.get("value", ""))
     return {
         "status": "fresh",
         "confidence": entry.get("confidence", 0.8),

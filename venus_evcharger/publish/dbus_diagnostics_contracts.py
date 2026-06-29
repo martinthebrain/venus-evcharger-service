@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Type contracts shared by diagnostic publishing mixins."""
+"""Type contracts shared by diagnostic publishing roles."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from typing import Any, Callable, TYPE_CHECKING
 DiagnosticValue = str | int | float
 
 
-class _DbusDiagnosticsContractsMixin:
-    """Declare sibling-mixin helpers used by diagnostic publishers."""
+class _DbusDiagnosticsContracts:
+    """Declare sibling-role helpers used by diagnostic publishers."""
 
     service: Any
     _age_seconds: Callable[[Any, float], float]

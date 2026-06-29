@@ -12,7 +12,7 @@ from venus_evcharger.runtime.async_mainloop_types import PublishQueue, QueuedPub
 DBUS_PUBLISH_QUEUE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeSupportAsyncMainloopPublishMixin:
+class _RuntimeAsyncMainloopPublish:
     def enqueue_dbus_publish_values(self: Any, values: list[tuple[str, Any]], current: float) -> bool:
         """Coalesce DBus path writes for the GLib thread."""
         svc = self.service
@@ -117,7 +117,7 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
         """Apply drained DBus publish values and return failed paths."""
         batch_publish = getattr(svc._dbusservice, "publish_paths", None)
         if callable(batch_publish):
-            return _RuntimeSupportAsyncMainloopPublishMixin._apply_gateway_publish_values(svc, values, batch_publish)
+            return _RuntimeAsyncMainloopPublish._apply_gateway_publish_values(svc, values, batch_publish)
         failed_paths: list[str] = []
         for path, (value, current, _queued_at) in values:
             try:
@@ -136,10 +136,10 @@ class _RuntimeSupportAsyncMainloopPublishMixin:
         if not values:
             return []
         try:
-            batch_publish(_RuntimeSupportAsyncMainloopPublishMixin._gateway_publish_payload(values))
+            batch_publish(_RuntimeAsyncMainloopPublish._gateway_publish_payload(values))
         except DBUS_PUBLISH_QUEUE_ERRORS:
             return [path for path, _item in values]
-        _RuntimeSupportAsyncMainloopPublishMixin._remember_gateway_publish_success(svc, values)
+        _RuntimeAsyncMainloopPublish._remember_gateway_publish_success(svc, values)
         return []
 
     @staticmethod

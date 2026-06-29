@@ -19,7 +19,7 @@ from venus_evcharger.core.contracts import normalized_auto_state_pair, sanitized
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.runtime.audit_fields import (
-    _RuntimeSupportAuditFieldsMixin,
+    _RuntimeAuditFields,
 )
 
 ErrorState = dict[str, int]
@@ -30,12 +30,12 @@ AUDIT_LOG_READ_ERRORS = (OSError, RuntimeError, UnicodeDecodeError)
 AUDIT_LOG_WRITE_ERRORS = (OSError, RuntimeError, TypeError, UnicodeEncodeError)
 
 
-class _RuntimeSupportAuditMixin(_RuntimeSupportAuditFieldsMixin, _ComposableControllerMixin):
+class _RuntimeAudit(_RuntimeAuditFields, _ComposableControllerMixin):
 
     @staticmethod
     def _relay_state_for_audit(svc: Any) -> int:
         """Return the best-known relay state for audit output."""
-        current_time = _RuntimeSupportAuditMixin._callable_time_or_none(getattr(svc, "_time_now", None))
+        current_time = _RuntimeAudit._callable_time_or_none(getattr(svc, "_time_now", None))
         relay_on = _fresh_confirmed_relay_output(svc, current_time)
         return int(bool(relay_on))
 
@@ -230,44 +230,44 @@ class _RuntimeSupportAuditMixin(_RuntimeSupportAuditFieldsMixin, _ComposableCont
     def _normalized_auto_audit_metrics(svc: Any) -> dict[str, Any]:
         """Return one sanitized metric payload suitable for outward audit formatting."""
         metrics = sanitized_auto_metrics(getattr(svc, "_last_auto_metrics", {}) or {})
-        metrics["backend_mode"] = _RuntimeSupportAuditMixin._backend_value(svc, "backend_mode", "combined")
-        metrics["meter_backend"] = _RuntimeSupportAuditMixin._backend_value(
+        metrics["backend_mode"] = _RuntimeAudit._backend_value(svc, "backend_mode", "combined")
+        metrics["meter_backend"] = _RuntimeAudit._backend_value(
             svc,
             "meter_backend_type",
             "shelly_meter",
         )
-        metrics["switch_backend"] = _RuntimeSupportAuditMixin._backend_value(
+        metrics["switch_backend"] = _RuntimeAudit._backend_value(
             svc,
             "switch_backend_type",
             "shelly_contactor_switch",
         )
-        metrics["charger_backend"] = _RuntimeSupportAuditMixin._backend_value(
+        metrics["charger_backend"] = _RuntimeAudit._backend_value(
             svc,
             "charger_backend_type",
             "na",
         )
-        metrics["charger_target"] = _RuntimeSupportAuditMixin._charger_target_for_audit(svc)
-        metrics["charger_transport_reason"] = _RuntimeSupportAuditMixin._charger_transport_reason_for_audit(svc)
-        metrics["charger_transport_source"] = _RuntimeSupportAuditMixin._charger_transport_source_for_audit(svc)
-        metrics["charger_retry_reason"] = _RuntimeSupportAuditMixin._charger_retry_reason_for_audit(svc)
-        metrics["charger_retry_source"] = _RuntimeSupportAuditMixin._charger_retry_source_for_audit(svc)
-        metrics["phase_observed"] = _RuntimeSupportAuditMixin._observed_phase_for_audit(svc)
-        metrics["phase_mismatch"] = int(_RuntimeSupportAuditMixin._phase_mismatch_active_for_audit(svc))
-        metrics["phase_lockout_target"] = _RuntimeSupportAuditMixin._phase_lockout_target_for_audit(svc)
-        metrics["phase_lockout"] = int(_RuntimeSupportAuditMixin._phase_lockout_active_for_audit(svc))
-        metrics["phase_effective"] = _RuntimeSupportAuditMixin._phase_supported_effective_for_audit(svc)
-        metrics["phase_degraded"] = int(_RuntimeSupportAuditMixin._phase_degraded_active_for_audit(svc))
-        switch_feedback = _RuntimeSupportAuditMixin._switch_feedback_closed_for_audit(svc)
-        switch_interlock = _RuntimeSupportAuditMixin._switch_interlock_ok_for_audit(svc)
+        metrics["charger_target"] = _RuntimeAudit._charger_target_for_audit(svc)
+        metrics["charger_transport_reason"] = _RuntimeAudit._charger_transport_reason_for_audit(svc)
+        metrics["charger_transport_source"] = _RuntimeAudit._charger_transport_source_for_audit(svc)
+        metrics["charger_retry_reason"] = _RuntimeAudit._charger_retry_reason_for_audit(svc)
+        metrics["charger_retry_source"] = _RuntimeAudit._charger_retry_source_for_audit(svc)
+        metrics["phase_observed"] = _RuntimeAudit._observed_phase_for_audit(svc)
+        metrics["phase_mismatch"] = int(_RuntimeAudit._phase_mismatch_active_for_audit(svc))
+        metrics["phase_lockout_target"] = _RuntimeAudit._phase_lockout_target_for_audit(svc)
+        metrics["phase_lockout"] = int(_RuntimeAudit._phase_lockout_active_for_audit(svc))
+        metrics["phase_effective"] = _RuntimeAudit._phase_supported_effective_for_audit(svc)
+        metrics["phase_degraded"] = int(_RuntimeAudit._phase_degraded_active_for_audit(svc))
+        switch_feedback = _RuntimeAudit._switch_feedback_closed_for_audit(svc)
+        switch_interlock = _RuntimeAudit._switch_interlock_ok_for_audit(svc)
         metrics["switch_feedback"] = None if switch_feedback is None else int(switch_feedback)
         metrics["switch_interlock"] = None if switch_interlock is None else int(switch_interlock)
-        metrics["switch_feedback_mismatch"] = int(_RuntimeSupportAuditMixin._switch_feedback_mismatch_for_audit(svc))
-        metrics["contactor_fault_count"] = _RuntimeSupportAuditMixin._contactor_fault_count_for_audit(svc)
-        metrics["contactor_lockout_reason"] = _RuntimeSupportAuditMixin._contactor_lockout_reason_for_audit(svc)
-        metrics["contactor_lockout"] = int(_RuntimeSupportAuditMixin._contactor_lockout_active_for_audit(svc))
-        metrics["fault"] = int(_RuntimeSupportAuditMixin._evse_fault_active_for_audit(svc))
-        metrics["fault_reason"] = _RuntimeSupportAuditMixin._evse_fault_reason_for_audit(svc)
-        metrics["recovery"] = int(_RuntimeSupportAuditMixin._recovery_active_for_audit(svc))
+        metrics["switch_feedback_mismatch"] = int(_RuntimeAudit._switch_feedback_mismatch_for_audit(svc))
+        metrics["contactor_fault_count"] = _RuntimeAudit._contactor_fault_count_for_audit(svc)
+        metrics["contactor_lockout_reason"] = _RuntimeAudit._contactor_lockout_reason_for_audit(svc)
+        metrics["contactor_lockout"] = int(_RuntimeAudit._contactor_lockout_active_for_audit(svc))
+        metrics["fault"] = int(_RuntimeAudit._evse_fault_active_for_audit(svc))
+        metrics["fault_reason"] = _RuntimeAudit._evse_fault_reason_for_audit(svc)
+        metrics["recovery"] = int(_RuntimeAudit._recovery_active_for_audit(svc))
         return metrics
 
     @staticmethod
@@ -401,4 +401,4 @@ class _RuntimeSupportAuditMixin(_RuntimeSupportAuditFieldsMixin, _ComposableCont
             svc._last_auto_audit_event_at = now
         except AUDIT_LOG_WRITE_ERRORS as error:
             logging.debug("Unable to write auto audit log %s: %s", path, error)
-__all__ = ["_RuntimeSupportAuditMixin"]
+__all__ = ["_RuntimeAudit"]

@@ -37,7 +37,7 @@ class IntrospectionRequest(TypedDict):
     reason: str
 
 
-class DbusAdapterIntrospectionMixin:
+class DbusAdapterIntrospection:
     def process_introspection_requests_once(self: DbusAdapterIntrospectionContext) -> None:
         if not self.dbus_introspection_enabled:
             return

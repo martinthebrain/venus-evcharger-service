@@ -34,7 +34,7 @@ SUBSCRIPTION_CLEANUP_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
-class _AutoInputHelperSubscriptionMixin:
+class _AutoInputHelperSubscription:
     @staticmethod
     def _dbus_module() -> Any:
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")

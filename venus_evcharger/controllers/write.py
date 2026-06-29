@@ -25,7 +25,7 @@ from venus_evcharger.control import ControlApiV1Service, ControlCommand, Control
 from venus_evcharger.control.models import ControlCommandSource
 from venus_evcharger.core.contracts import write_failure_is_reversible
 from venus_evcharger.controllers.errors import CONTROL_COMMAND_ERRORS
-from venus_evcharger.controllers.write_support import _DbusWriteSupportMixin
+from venus_evcharger.controllers.write_support import _DbusWriteSupport
 from venus_evcharger.controllers.write_snapshot import (
     SNAPSHOT_ATTRS,
     SNAPSHOT_DBUS_PATHS,
@@ -35,7 +35,7 @@ from venus_evcharger.controllers.write_snapshot import (
 )
 
 
-class DbusWriteController(_DbusWriteSupportMixin):
+class DbusWriteController(_DbusWriteSupport):
     """Encapsulate writable DBus path handling for the Venus EV charger service.
 
     A write handler in this project is more than a simple setter. It may need

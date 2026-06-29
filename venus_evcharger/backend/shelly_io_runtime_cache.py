@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from venus_evcharger.backend.shelly_io_types import ShellyIoHost
 
 
-class ShellyIoRuntimeCacheMixin:
+class ShellyIoRuntimeCache:
     """Rebuild normalized charger state from the service runtime cache."""
 
     if TYPE_CHECKING:

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus gateway write-scheduler mixins."""
+"""Health, budgets, and remote writes for the DBus gateway write scheduler."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ _AGED_REFRESH_PRIORITY_RANK = 1.5
 _AGING_QUEUE_CLASSES = {"read-fast", "read-slow", "discovery", "introspection"}
 
 
-class DbusWriteSchedulerHealthMixin:
+class DbusWriteSchedulerHealth:
     adapter: DbusWriteSchedulerAdapter
     base_queue_class_budgets: dict[str, int]
     dynamic_local_publish_burst_limit: int

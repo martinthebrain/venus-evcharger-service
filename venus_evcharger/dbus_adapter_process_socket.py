@@ -19,7 +19,7 @@ from venus_evcharger.dbus_gateway_command_types import CommandPayload
 SocketHandler = Callable[[CommandPayload, str], CommandPayload]
 
 
-class DbusAdapterSocketMixin:
+class DbusAdapterSocket:
     _server: socket.socket | None
 
     def start_socket(self: DbusAdapterSocketContext) -> None:

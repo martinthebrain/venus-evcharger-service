@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from venus_evcharger.core.contracts import timestamp_not_future
 
 
-class _AutoInputSupervisorSnapshotRuntimeMixin:
+class _AutoInputSupervisorSnapshotRuntime:
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
         SNAPSHOT_SOURCE_KEYS: tuple[str, ...]

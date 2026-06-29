@@ -13,7 +13,7 @@ from typing import Any
 
 
 
-class _AutoInputHelperSnapshotMixin:
+class _AutoInputHelperSnapshot:
     @staticmethod
     def _default_source_poll_schedule() -> dict[str, float]:
         return {

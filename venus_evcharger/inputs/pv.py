@@ -49,7 +49,7 @@ def _service_name_list(value: object) -> list[str] | None:
     return service_names or None
 
 
-class _DbusInputPvMixin(_ComposableControllerMixin):
+class _DbusInputPv(_ComposableControllerMixin):
     def _dbus_module(self) -> Any:
         """Direct DBus access is forbidden outside the gateway adapter."""
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")

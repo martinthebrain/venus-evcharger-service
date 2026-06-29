@@ -17,7 +17,7 @@ from venus_evcharger.dbus_adapter_service_protocol import DbusServiceLike
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
-class DbusAdapterIdentityMixin:
+class DbusAdapterIdentity:
     _dbusservice: DbusServiceLike | None
 
     @property

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 from venus_evcharger.core.contracts import CONTROL_API_EVENT_KINDS, normalized_control_api_event_fields
 
 
-class _LocalControlApiEventsMixin:
+class _LocalControlApiEvents:
     if TYPE_CHECKING:
         _service: Any
         _RETRY_HEADER: str

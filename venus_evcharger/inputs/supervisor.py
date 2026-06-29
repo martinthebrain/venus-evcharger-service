@@ -10,13 +10,13 @@ import sys
 from typing import Any
 
 from venus_evcharger.core.shared import AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION
-from venus_evcharger.inputs.supervisor_process import _AutoInputSupervisorProcessMixin
-from venus_evcharger.inputs.supervisor_snapshot import _AutoInputSupervisorSnapshotMixin
+from venus_evcharger.inputs.supervisor_process import _AutoInputSupervisorProcess
+from venus_evcharger.inputs.supervisor_snapshot import _AutoInputSupervisorSnapshot
 
 
 class AutoInputSupervisor(
-    _AutoInputSupervisorSnapshotMixin,
-    _AutoInputSupervisorProcessMixin,
+    _AutoInputSupervisorSnapshot,
+    _AutoInputSupervisorProcess,
 ):
     """Supervise the external auto-input helper and ingest its RAM snapshot."""
 
@@ -42,4 +42,3 @@ class AutoInputSupervisor(
 
     def __init__(self, service: Any) -> None:
         self.service = service
-

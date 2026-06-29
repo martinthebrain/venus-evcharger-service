@@ -25,7 +25,7 @@ from venus_evcharger.backend.shelly_io_types import (
 from venus_evcharger.core.contracts import finite_float_or_none
 
 
-class ShellyIoCapabilitiesMixin:
+class ShellyIoCapabilities:
     """Expose split-backend discovery and direct-switch safety helpers."""
 
     if TYPE_CHECKING:

@@ -5,17 +5,17 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from venus_evcharger.publish.dbus_config import _DbusPublishConfigMixin
-from venus_evcharger.publish.dbus_core import _DbusPublishCoreMixin
-from venus_evcharger.publish.dbus_diagnostics import _DbusPublishDiagnosticsMixin
-from venus_evcharger.publish.dbus_learned import _DbusPublishLearnedMixin
+from venus_evcharger.publish.dbus_config import _DbusPublishConfig
+from venus_evcharger.publish.dbus_core import _DbusPublishCore
+from venus_evcharger.publish.dbus_diagnostics import _DbusPublishDiagnostics
+from venus_evcharger.publish.dbus_learned import _DbusPublishLearned
 
 
 class DbusPublishController(
-    _DbusPublishDiagnosticsMixin,
-    _DbusPublishConfigMixin,
-    _DbusPublishLearnedMixin,
-    _DbusPublishCoreMixin,
+    _DbusPublishDiagnostics,
+    _DbusPublishConfig,
+    _DbusPublishLearned,
+    _DbusPublishCore,
 ):
     """Publish Venus EV charger DBus paths with simple change and interval throttling."""
 

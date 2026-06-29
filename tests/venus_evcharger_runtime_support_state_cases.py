@@ -6,7 +6,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
-from venus_evcharger.runtime.audit import _RuntimeSupportAuditMixin
+from venus_evcharger.runtime.audit import _RuntimeAudit
 from venus_evcharger.runtime.support import RuntimeSupportController
 from venus_evcharger.control import ControlCommand
 from tests.venus_evcharger_runtime_support_support import RuntimeSupportTestCaseBase
@@ -93,9 +93,9 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
 
     def test_runtime_audit_helpers_cover_remaining_scalar_edges(self) -> None:
         service = SimpleNamespace(_last_charger_state_phase_selection=0, _time_now=lambda: "bad", _phase_switch_lockout_selection=None, _phase_switch_lockout_until=200.0, _contactor_fault_counts=[], _contactor_fault_active_reason="")
-        self.assertEqual(_RuntimeSupportAuditMixin._observed_phase_for_audit(service), "0")
-        self.assertFalse(_RuntimeSupportAuditMixin._phase_lockout_active_for_audit(service))
-        self.assertEqual(_RuntimeSupportAuditMixin._contactor_fault_count_for_audit(service), 0)
+        self.assertEqual(_RuntimeAudit._observed_phase_for_audit(service), "0")
+        self.assertFalse(_RuntimeAudit._phase_lockout_active_for_audit(service))
+        self.assertEqual(_RuntimeAudit._contactor_fault_count_for_audit(service), 0)
 
     def test_worker_snapshot_contract_normalizes_pm_invariants(self) -> None:
         partial_service = SimpleNamespace(poll_interval_ms=500, deviceinstance=61, _time_now=lambda: 100.0)

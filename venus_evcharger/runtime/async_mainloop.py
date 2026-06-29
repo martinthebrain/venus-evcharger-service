@@ -4,19 +4,19 @@
 from __future__ import annotations
 
 from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
-from venus_evcharger.runtime.async_mainloop_control import _RuntimeSupportAsyncMainloopControlMixin
-from venus_evcharger.runtime.async_mainloop_executor import _RuntimeSupportAsyncMainloopExecutorMixin
-from venus_evcharger.runtime.async_mainloop_publish import _RuntimeSupportAsyncMainloopPublishMixin
-from venus_evcharger.runtime.async_mainloop_state import _RuntimeSupportAsyncMainloopStateMixin
-from venus_evcharger.runtime.async_mainloop_watchdog import _RuntimeSupportAsyncMainloopWatchdogMixin
+from venus_evcharger.runtime.async_mainloop_control import _RuntimeAsyncMainloopControl
+from venus_evcharger.runtime.async_mainloop_executor import _RuntimeAsyncMainloopExecutor
+from venus_evcharger.runtime.async_mainloop_publish import _RuntimeAsyncMainloopPublish
+from venus_evcharger.runtime.async_mainloop_state import _RuntimeAsyncMainloopState
+from venus_evcharger.runtime.async_mainloop_watchdog import _RuntimeAsyncMainloopWatchdog
 
 
-class _RuntimeSupportAsyncMainloopMixin(
-    _RuntimeSupportAsyncMainloopWatchdogMixin,
-    _RuntimeSupportAsyncMainloopControlMixin,
-    _RuntimeSupportAsyncMainloopExecutorMixin,
-    _RuntimeSupportAsyncMainloopPublishMixin,
-    _RuntimeSupportAsyncMainloopStateMixin,
+class _RuntimeAsyncMainloop(
+    _RuntimeAsyncMainloopWatchdog,
+    _RuntimeAsyncMainloopControl,
+    _RuntimeAsyncMainloopExecutor,
+    _RuntimeAsyncMainloopPublish,
+    _RuntimeAsyncMainloopState,
     _ComposableControllerMixin,
 ):
     """Compose async runtime queue, executor, and watchdog helpers."""

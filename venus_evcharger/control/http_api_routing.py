@@ -5,10 +5,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any
 
-from venus_evcharger.control.http_api_response import _LocalControlApiResponseMixin
-
-
-class _LocalControlApiRoutingMixin(_LocalControlApiResponseMixin):
+class _LocalControlApiRouting:
     if TYPE_CHECKING:
         _service: Any
         _STATE_GET_ENDPOINTS: frozenset[str]
@@ -44,6 +41,23 @@ class _LocalControlApiRoutingMixin(_LocalControlApiResponseMixin):
         def _read_json_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any] | None: ...
 
         def _state_token_headers(self) -> dict[str, str]: ...
+
+        def _write_error(
+            self,
+            handler: BaseHTTPRequestHandler,
+            status: HTTPStatus,
+            code: str,
+            message: str,
+        ) -> None: ...
+
+        def _write_json(
+            self,
+            handler: BaseHTTPRequestHandler,
+            status: HTTPStatus,
+            payload: dict[str, Any],
+            *,
+            extra_headers: dict[str, str] | None = None,
+        ) -> None: ...
 
         def _write_command_result(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None: ...
 

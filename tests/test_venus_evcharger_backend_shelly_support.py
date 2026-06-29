@@ -20,7 +20,7 @@ from venus_evcharger.backend.shelly_support import (
     resolve_shelly_profile,
     validate_shelly_profile_role,
 )
-from venus_evcharger.backend.shelly_io_requests import ShellyIoRequestsMixin
+from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
 from venus_evcharger.backend.shelly_io_types import is_shelly_io_host, require_shelly_io_host
 from venus_evcharger.backend.shelly_io_worker import (
     _copy_known_status_phase_fields,
@@ -115,7 +115,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
     def test_shelly_response_and_phase_status_contracts_cover_invalid_and_valid_edges(self) -> None:
         with self.assertRaisesRegex(ValueError, "Shelly response must be a JSON object"):
-            ShellyIoRequestsMixin._json_object(["not", "a", "dict"])
+            ShellyIoRequests._json_object(["not", "a", "dict"])
 
         pm_status: dict[str, object] = {}
         _copy_known_status_phase_fields(

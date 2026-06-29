@@ -11,7 +11,7 @@ from gi.repository import GLib
 from venus_evcharger.dbus_adapter_process_protocol_runtime import DbusAdapterRuntimeContext
 
 
-class DbusAdapterRuntimeMixin:
+class DbusAdapterRuntime:
     def install_signal_handlers(self: DbusAdapterRuntimeContext) -> None:
         def _stop(_signum: int, _frame: object) -> None:
             self._stop = True

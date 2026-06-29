@@ -21,7 +21,7 @@ from venus_evcharger.dbus_gateway_core import float_or_zero
 GATEWAY_TICK_RECOVERY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class DbusAdapterLoopMixin:
+class DbusAdapterLoop:
     def run(self: DbusAdapterLoopContext) -> None:  # pragma: no cover - Venus DBus/GLib process loop
         DBusGMainLoop(set_as_default=True)
         self.install_signal_handlers()

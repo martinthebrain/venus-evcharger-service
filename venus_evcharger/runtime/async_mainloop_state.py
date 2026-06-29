@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 
-class _RuntimeSupportAsyncMainloopStateMixin:
+class _RuntimeAsyncMainloopState:
     @staticmethod
     def _float_attr(value: Any, default: float = 0.0) -> float:
         return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float(default)

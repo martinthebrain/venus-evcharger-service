@@ -15,7 +15,7 @@ from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
 class DbusAdapterLoopContext(Protocol):  # pragma: no cover
-    """Main-loop scheduling surface required by ``DbusAdapterLoopMixin``."""
+    """Main-loop scheduling surface required by ``DbusAdapterLoop``."""
 
     paths: GatewayPaths
     cache: DbusCacheStore

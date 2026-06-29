@@ -6,10 +6,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from venus_evcharger.dbus_introspection import IntrospectionPayload, load_owner_introspection_snapshot
-from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContractsMixin
+from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContracts
 
 
-class _DbusDiagnosticsIntrospectionMixin(_DbusDiagnosticsContractsMixin):
+class _DbusDiagnosticsIntrospection(_DbusDiagnosticsContracts):
     def _dbus_introspection_snapshot(self, now: float) -> IntrospectionPayload:
         """Return the owner-introspection snapshot when it has mapping shape."""
         return load_owner_introspection_snapshot(self.service, now=now)

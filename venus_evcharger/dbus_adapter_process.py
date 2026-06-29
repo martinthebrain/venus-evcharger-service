@@ -34,15 +34,15 @@ from venus_evcharger.dbus_adapter_components import (
     TickHealth,
 )
 from venus_evcharger.dbus_adapter_process_config import adapter_settings, load_adapter_config
-from venus_evcharger.dbus_adapter_process_health import DbusAdapterHealthMixin
-from venus_evcharger.dbus_adapter_process_identity import DbusAdapterIdentityMixin
-from venus_evcharger.dbus_adapter_process_introspection import DbusAdapterIntrospectionMixin
-from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdapterIntrospectionSnapshotMixin
-from venus_evcharger.dbus_adapter_process_io import DbusAdapterIoMixin
-from venus_evcharger.dbus_adapter_process_loop import DbusAdapterLoopMixin
+from venus_evcharger.dbus_adapter_process_health import DbusAdapterHealth
+from venus_evcharger.dbus_adapter_process_identity import DbusAdapterIdentity
+from venus_evcharger.dbus_adapter_process_introspection import DbusAdapterIntrospection
+from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdapterIntrospectionSnapshot
+from venus_evcharger.dbus_adapter_process_io import DbusAdapterIo
+from venus_evcharger.dbus_adapter_process_loop import DbusAdapterLoop
 from venus_evcharger.dbus_adapter_process_protocol_runtime import MainLoopLike
-from venus_evcharger.dbus_adapter_process_runtime import DbusAdapterRuntimeMixin
-from venus_evcharger.dbus_adapter_process_socket import DbusAdapterSocketMixin
+from venus_evcharger.dbus_adapter_process_runtime import DbusAdapterRuntime
+from venus_evcharger.dbus_adapter_process_socket import DbusAdapterSocket
 from venus_evcharger.dbus_adapter_read import DbusReadExecutor
 from venus_evcharger.dbus_adapter_service_protocol import DbusServiceLike
 from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
@@ -55,14 +55,14 @@ from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
 class DbusAdapter(
-    DbusAdapterLoopMixin,
-    DbusAdapterIntrospectionMixin,
-    DbusAdapterRuntimeMixin,
-    DbusAdapterSocketMixin,
-    DbusAdapterIdentityMixin,
-    DbusAdapterIoMixin,
-    DbusAdapterIntrospectionSnapshotMixin,
-    DbusAdapterHealthMixin,
+    DbusAdapterLoop,
+    DbusAdapterIntrospection,
+    DbusAdapterRuntime,
+    DbusAdapterSocket,
+    DbusAdapterIdentity,
+    DbusAdapterIo,
+    DbusAdapterIntrospectionSnapshot,
+    DbusAdapterHealth,
 ):
     """Single process owner for Victron DBus interaction."""
 

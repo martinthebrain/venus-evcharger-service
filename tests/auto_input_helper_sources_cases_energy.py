@@ -14,8 +14,8 @@ from venus_evcharger.inputs.energy_snapshot_contracts import (
     nested_object_mappings,
     object_mapping,
 )
-from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbusMixin
-from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscriptionMixin
+from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbus
+from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscription
 
 
 class _AutoInputHelperSourcesEnergyCases:
@@ -44,9 +44,9 @@ class _AutoInputHelperSourcesEnergyCases:
 
     def test_mixin_default_dbus_module_fallbacks_are_disabled(self):
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            _AutoInputHelperSourceDbusMixin._dbus_module()
+            _AutoInputHelperSourceDbus._dbus_module()
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            _AutoInputHelperSubscriptionMixin._dbus_module()
+            _AutoInputHelperSubscription._dbus_module()
 
     def test_dbus_gateway_common_error_helpers_cover_name_and_text_matching(self):
         class NamedDbusError(Exception):

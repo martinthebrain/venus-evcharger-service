@@ -8,8 +8,8 @@ import math
 from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.models import ChargerState, PhaseSelection, phase_selection_count
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.backend.shelly_io_mixin_contracts import ShellyIoRuntimeMixinContract
-from venus_evcharger.backend.shelly_io_runtime_cache import ShellyIoRuntimeCacheMixin
+from venus_evcharger.backend.shelly_io_contracts import ShellyIoRuntimeContract
+from venus_evcharger.backend.shelly_io_runtime_cache import ShellyIoRuntimeCache
 from venus_evcharger.backend.shelly_io_types import (
     ShellyIoHost,
     _ChargerStateBackendLike,
@@ -21,7 +21,7 @@ from venus_evcharger.core.common import (
 from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
 
 
-class ShellyIoRuntimeMixin(ShellyIoRuntimeCacheMixin, ShellyIoRuntimeMixinContract):
+class ShellyIoRuntime(ShellyIoRuntimeCache, ShellyIoRuntimeContract):
     """Mirror charger readback into runtime state and synthesize retry behavior."""
 
     def _sync_charger_runtime_state(self, state: ChargerState, now: float | None = None) -> None:

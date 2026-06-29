@@ -7,10 +7,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
-from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContractsMixin
+from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContracts
 
 
-class _DbusDiagnosticsSourcesMixin(_DbusDiagnosticsContractsMixin):
+class _DbusDiagnosticsSources(_DbusDiagnosticsContracts):
     def _backend_counter_values(self) -> dict[str, DiagnosticValue]:
         """Return backend-composition and runtime-override diagnostics."""
         return {

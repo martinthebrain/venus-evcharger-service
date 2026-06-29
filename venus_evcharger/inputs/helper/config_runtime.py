@@ -11,7 +11,7 @@ from venus_evcharger.core.shared import config_get_float, parse_config_bool as _
 from venus_evcharger.energy import load_energy_source_settings
 
 
-class _AutoInputHelperConfigMixin:
+class _AutoInputHelperConfig:
     _derive_subscription_refresh_seconds: Callable[[], float]
     _parsed_helper_generation: Callable[[object], int]
     _parsed_parent_pid: Callable[[object], int | None]

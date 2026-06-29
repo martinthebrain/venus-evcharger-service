@@ -34,7 +34,7 @@ def _capacity_payload_int(payload: Mapping[str, object], key: str) -> int | None
     return optional_int(payload.get(key))
 
 
-class _AutoInputHelperSourceDbusSnapshotMixin:
+class _AutoInputHelperSourceDbusSnapshot:
     def _read_dbus_energy_source_fields(
         self: Any,
         source: EnergySourceDefinition,
@@ -124,26 +124,26 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         soc_value: float | None,
         now: float,
     ) -> dict[str, object]:
-        configured = _AutoInputHelperSourceDbusSnapshotMixin._configured_dbus_capacity_payload(source)
+        configured = _AutoInputHelperSourceDbusSnapshot._configured_dbus_capacity_payload(source)
         if configured is not None:
             return configured
-        cached = _AutoInputHelperSourceDbusSnapshotMixin._cached_dbus_capacity_payload(self, source, service_name)
-        startup_recheck_due = _AutoInputHelperSourceDbusSnapshotMixin._dbus_capacity_startup_recheck_due(
+        cached = _AutoInputHelperSourceDbusSnapshot._cached_dbus_capacity_payload(self, source, service_name)
+        startup_recheck_due = _AutoInputHelperSourceDbusSnapshot._dbus_capacity_startup_recheck_due(
             self,
             source,
             service_name,
             now,
         )
-        if _AutoInputHelperSourceDbusSnapshotMixin._dbus_cached_capacity_usable(cached, startup_recheck_due):
+        if _AutoInputHelperSourceDbusSnapshot._dbus_cached_capacity_usable(cached, startup_recheck_due):
             return cached
-        inferred = _AutoInputHelperSourceDbusSnapshotMixin._fresh_dbus_capacity_payload(
+        inferred = _AutoInputHelperSourceDbusSnapshot._fresh_dbus_capacity_payload(
             self,
             source,
             service_name,
             soc_value,
             startup_recheck_due,
         )
-        return _AutoInputHelperSourceDbusSnapshotMixin._resolved_dbus_capacity_payload(inferred, cached)
+        return _AutoInputHelperSourceDbusSnapshot._resolved_dbus_capacity_payload(inferred, cached)
 
     @staticmethod
     def _dbus_cached_capacity_usable(
@@ -170,7 +170,7 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         soc_value: float | None,
         startup_recheck_due: bool,
     ) -> dict[str, object] | None:
-        inferred = _AutoInputHelperSourceDbusSnapshotMixin._infer_dbus_capacity_payload(
+        inferred = _AutoInputHelperSourceDbusSnapshot._infer_dbus_capacity_payload(
             self,
             source,
             service_name,
@@ -260,14 +260,14 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
         service_name: str,
         soc_value: float | None,
     ) -> dict[str, object] | None:
-        if not _AutoInputHelperSourceDbusSnapshotMixin._dbus_capacity_inference_allowed(source, soc_value):
+        if not _AutoInputHelperSourceDbusSnapshot._dbus_capacity_inference_allowed(source, soc_value):
             return None
         direct_capacity = self._read_positive_optional_energy_value(service_name, source.capacity_wh_path)
         if direct_capacity is not None:
-            return _AutoInputHelperSourceDbusSnapshotMixin._direct_dbus_capacity_payload(direct_capacity)
+            return _AutoInputHelperSourceDbusSnapshot._direct_dbus_capacity_payload(direct_capacity)
         installed_capacity_ah = self._read_positive_optional_energy_value(service_name, source.capacity_ah_path)
         voltage = self._read_positive_optional_energy_value(service_name, source.voltage_path)
-        return _AutoInputHelperSourceDbusSnapshotMixin._lfp_inferred_dbus_capacity_payload(
+        return _AutoInputHelperSourceDbusSnapshot._lfp_inferred_dbus_capacity_payload(
             self,
             installed_capacity_ah,
             voltage,
@@ -325,7 +325,7 @@ class _AutoInputHelperSourceDbusSnapshotMixin:
             operating_mode,
         ) = fields
         validated_soc = self._validated_energy_source_soc(source, service_name, soc_value)
-        return _AutoInputHelperSourceDbusSnapshotMixin._dbus_energy_source_snapshot_payload(
+        return _AutoInputHelperSourceDbusSnapshot._dbus_energy_source_snapshot_payload(
             self,
             source,
             service_name,

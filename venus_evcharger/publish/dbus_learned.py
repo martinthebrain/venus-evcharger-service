@@ -25,7 +25,7 @@ from venus_evcharger.core.contracts import (
 from venus_evcharger.publish.dbus_shared import _LearnedDisplayCurrentInputs
 
 
-class _DbusPublishLearnedMixin:
+class _DbusPublishLearned:
     service: Any
 
     if TYPE_CHECKING:  # pragma: no cover

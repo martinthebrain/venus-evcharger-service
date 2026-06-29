@@ -8,7 +8,7 @@ from venus_evcharger.control.http_api_command_contracts import (
     require_idempotency_store,
     require_rate_limiter,
 )
-from venus_evcharger.control.http_api_routing import _LocalControlApiRoutingMixin
+from venus_evcharger.control.http_api_routing import _LocalControlApiRouting
 
 
 class _ControlApiHttpStateCases:
@@ -19,7 +19,7 @@ class _ControlApiHttpStateCases:
             require_idempotency_store(object())
 
     def test_state_payload_contracts_reject_non_callable_and_non_mapping_getters(self) -> None:
-        routing = _LocalControlApiRoutingMixin()
+        routing = _LocalControlApiRouting()
         routing._service = SimpleNamespace(_state_api_health_payload=42)
         with self.assertRaisesRegex(TypeError, "is not callable"):
             routing._state_payload("/v1/state/health")

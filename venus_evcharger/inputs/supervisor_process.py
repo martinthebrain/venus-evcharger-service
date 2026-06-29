@@ -11,7 +11,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 
-class _AutoInputSupervisorProcessMixin:
+class _AutoInputSupervisorProcess:
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
 

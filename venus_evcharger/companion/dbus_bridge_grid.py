@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Mapping
 
 
-class _EnergyCompanionDbusBridgeGridMixin:
+class _EnergyCompanionDbusBridgeGrid:
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
         _grid_hold_state: dict[str, dict[str, Any]]

@@ -27,14 +27,14 @@ from ..energy_snapshot_contracts import (
     nested_object_mappings,
     object_mapping,
 )
-from .sources_dbus import _AutoInputHelperSourceDbusMixin
+from .sources_dbus import _AutoInputHelperSourceDbus
 from .sources_dbus_common import DBUS_SOURCE_READ_ERRORS
-from .sources_pv_grid import _AutoInputHelperSourcePvGridMixin
+from .sources_pv_grid import _AutoInputHelperSourcePvGrid
 
 BATTERY_SNAPSHOT_SOURCE_ERRORS: tuple[type[BaseException], ...] = (*DBUS_SOURCE_READ_ERRORS, ValueError)
 
 
-class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHelperSourcePvGridMixin):
+class _AutoInputHelperSource(_AutoInputHelperSourceDbus, _AutoInputHelperSourcePvGrid):
     def _battery_snapshot_sources(self: Any) -> tuple[EnergySourceDefinition, ...]:
         configured = energy_source_definitions(getattr(self, "auto_energy_sources", ()))
         if configured:

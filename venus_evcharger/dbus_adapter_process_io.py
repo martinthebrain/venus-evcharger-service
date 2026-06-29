@@ -18,7 +18,7 @@ from venus_evcharger.dbus_adapter_components import DBUS_GATEWAY_OPERATION_ERROR
 from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContext
 
 
-class DbusAdapterIoMixin:
+class DbusAdapterIo:
     def poll_one_due_read_once(self: DbusAdapterIoContext) -> bool:
         now = time.time()
         due = self.read_scheduler.next_due(

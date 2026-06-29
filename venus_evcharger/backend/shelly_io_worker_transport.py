@@ -45,7 +45,7 @@ _SHELLY_RETRY_MINIMUMS = {
 }
 
 
-class ShellyIoWorkerTransportMixin:
+class ShellyIoWorkerTransport:
     """Classify Shelly transport failures and maintain RAM-only retry state."""
 
     if TYPE_CHECKING:
@@ -209,7 +209,7 @@ class ShellyIoWorkerTransportMixin:
         return tuple(backends)
 
 
-__all__ = ["ShellyIoWorkerTransportMixin"]
+__all__ = ["ShellyIoWorkerTransport"]
 
 
 def _shelly_numeric(value: object) -> bool:

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Static contracts for Shelly I/O mixins.
+"""Static contracts for Shelly I/O roles.
 
-The runtime mixins are composed by ``ShellyIoController``.  These protocols keep
-cross-mixin expectations explicit without placing large type-only method blocks
+The runtime roles are composed by ``ShellyIoController``.  These protocols keep
+cross-role expectations explicit without placing large type-only method blocks
 inside the runtime modules themselves.
 """
 
@@ -14,8 +14,8 @@ from venus_evcharger.backend.models import ChargerState, PhaseSelection
 from venus_evcharger.backend.shelly_io_types import ShellyIoHost, _ChargerStateBackendLike, _EnableBackendLike
 
 
-class ShellyIoRuntimeMixinContract(Protocol):
-    """Methods and state that the runtime mixin receives from sibling mixins."""
+class ShellyIoRuntimeContract(Protocol):
+    """Methods and state that the runtime role receives from sibling roles."""
 
     service: ShellyIoHost
 
@@ -36,8 +36,8 @@ class ShellyIoRuntimeMixinContract(Protocol):
     def _charger_state_backend(self) -> _ChargerStateBackendLike | None: ...  # pragma: no cover
 
 
-class ShellyIoWorkerMixinContract(Protocol):
-    """Methods and state that the worker mixin receives from sibling mixins."""
+class ShellyIoWorkerContract(Protocol):
+    """Methods and state that the worker role receives from sibling roles."""
 
     service: ShellyIoHost
 

@@ -33,7 +33,7 @@ WorkerSnapshot = dict[str, Any]
 
 
 
-class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
+class _RuntimeSetup(_ComposableControllerMixin):
     @staticmethod
     def _service_repo_root(service: Any) -> str:
         """Return the repository root inferred from the main entrypoint path."""
@@ -235,4 +235,4 @@ class _RuntimeSupportSetupMixin(_ComposableControllerMixin):
         svc._auto_input_snapshot_writer_pid = None
         svc._auto_input_snapshot_generation = None
         svc._auto_input_snapshot_runtime_instance_id = None
-__all__ = ["_RuntimeSupportSetupMixin"]
+__all__ = ["_RuntimeSetup"]

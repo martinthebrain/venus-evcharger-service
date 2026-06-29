@@ -19,7 +19,7 @@ def _publish_state_entry(value: object) -> PublishStateEntry | None:
     return {str(key): item for key, item in value.items()}
 
 
-class _DbusPublishCoreMixin:
+class _DbusPublishCore:
     PHASE_NAMES: tuple[str, str, str]
     service: Any
 

@@ -22,7 +22,7 @@ from venus_evcharger.backend.shelly_io_types import (
 from venus_evcharger.core.contracts import finite_float_or_none
 
 
-class ShellyIoSplitMixin:
+class ShellyIoSplit:
     """Synthesize PM status from split meter, switch, and charger backends."""
 
     if TYPE_CHECKING:
@@ -102,8 +102,8 @@ class ShellyIoSplitMixin:
         if reading.current_a is not None:
             pm_status["current"] = float(reading.current_a)
         resolved_relay = reading.relay_on if relay_on is None else relay_on
-        ShellyIoSplitMixin._apply_meter_output(pm_status, resolved_relay)
-        ShellyIoSplitMixin._apply_meter_phase_fields(pm_status, reading)
+        ShellyIoSplit._apply_meter_output(pm_status, resolved_relay)
+        ShellyIoSplit._apply_meter_phase_fields(pm_status, reading)
         return pm_status
 
     @staticmethod

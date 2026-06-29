@@ -11,7 +11,7 @@ from venus_evcharger.controllers.errors import WRITE_SNAPSHOT_DBUS_ERRORS
 from venus_evcharger.controllers.write_snapshot import capture_write_state, restore_write_state
 
 
-class _DbusWriteSupportMixin:
+class _DbusWriteSupport:
     SNAPSHOT_ATTRS: ClassVar[tuple[str, ...]]
     SNAPSHOT_DBUS_PATHS: ClassVar[tuple[str, ...]]
     SNAPSHOT_DEQUE_ATTRS: ClassVar[tuple[str, ...]]
@@ -131,7 +131,7 @@ class _DbusWriteSupportMixin:
     @staticmethod
     def _publish_mode_paths(svc: Any, current_time: float, auto_mode_active: bool) -> None:
         svc.publish_dbus_path("/Mode", svc.virtual_mode, current_time, force=True)
-        _DbusWriteSupportMixin._publish_startstop_enable(svc, current_time, auto_mode_active)
+        _DbusWriteSupport._publish_startstop_enable(svc, current_time, auto_mode_active)
 
     @staticmethod
     def _supported_phase_selection_text(svc: Any, current_time: float) -> str:

@@ -28,7 +28,7 @@ def _normalized_optional_audit_text(value: object) -> str | None:
     return normalized or None
 
 
-class _RuntimeSupportAuditFieldsMixin:
+class _RuntimeAuditFields:
     service: Any
     clone_worker_snapshot: Callable[[WorkerSnapshot], WorkerSnapshot]
     ensure_missing_attributes: Any

@@ -2,7 +2,7 @@
 """Runtime-facing property surface for the DBus write controller port.
 
 The write controller should not know the concrete service object's internal
-attribute layout. This mixin provides that narrow boundary as explicit
+attribute layout. This base class provides that narrow boundary as explicit
 properties for manual control state, Auto thresholds, scheduled charging,
 learning settings, phase switching, and transient runtime flags.
 
@@ -18,7 +18,7 @@ makes tests exercise the same boundary production uses and avoids duplicate
 DBus-write glue in controller code.
 
 If this surface grows further, the safe split point is by setting group while
-preserving this aggregate mixin name for existing imports.
+preserving the aggregate runtime-port boundary.
 Callers should treat every property here as part of the write-controller port
 contract, even when the backing service attribute is private or transitional.
 That makes rollback, runtime persistence, and GUI writes share one consistent
@@ -57,7 +57,7 @@ def _set_service_binary_flag(service: Any, attr_name: str, value: object, *, as_
     setattr(service, attr_name, bool(normalized) if as_bool else normalized)
 
 
-class _WriteControllerRuntimePortMixin:
+class WriteControllerRuntimePort:
     _service: Any
 
     @property

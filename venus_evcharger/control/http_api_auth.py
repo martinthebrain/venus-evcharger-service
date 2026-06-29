@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 
-class _LocalControlApiAuthMixin:
+class _LocalControlApiAuth:
     if TYPE_CHECKING:
         _auth_token: str
         _admin_token: str

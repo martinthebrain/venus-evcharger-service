@@ -8,18 +8,18 @@ from typing import TypeGuard
 
 from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.backend.shelly_io_mixin_contracts import ShellyIoWorkerMixinContract
+from venus_evcharger.backend.shelly_io_contracts import ShellyIoWorkerContract
 from venus_evcharger.backend.shelly_io_types import (
     PendingRelayCommand,
     ShellyEnergyData,
     ShellyIoHost,
     ShellyPmStatus,
 )
-from venus_evcharger.backend.shelly_io_worker_lifecycle import ShellyIoWorkerLifecycleMixin
-from venus_evcharger.backend.shelly_io_worker_transport import ShellyIoWorkerTransportMixin
+from venus_evcharger.backend.shelly_io_worker_lifecycle import ShellyIoWorkerLifecycle
+from venus_evcharger.backend.shelly_io_worker_transport import ShellyIoWorkerTransport
 
 
-class ShellyIoWorkerMixin(ShellyIoWorkerTransportMixin, ShellyIoWorkerLifecycleMixin, ShellyIoWorkerMixinContract):
+class ShellyIoWorker(ShellyIoWorkerTransport, ShellyIoWorkerLifecycle, ShellyIoWorkerContract):
     """Handle optimistic PM publishing, queued relay writes, and the worker loop."""
 
     @staticmethod
@@ -329,7 +329,7 @@ def _copy_known_status_energy(raw_status: dict[object, object], pm_status: Shell
     """Copy the last known Shelly energy payload when present."""
     energy = raw_status.get("aenergy")
     if isinstance(energy, dict):
-        pm_status["aenergy"] = ShellyIoWorkerMixin._normalized_energy_payload(energy)
+        pm_status["aenergy"] = ShellyIoWorker._normalized_energy_payload(energy)
 
 
 def _copy_known_status_phase_fields(raw_status: dict[object, object], pm_status: ShellyPmStatus) -> None:

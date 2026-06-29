@@ -13,7 +13,7 @@ from typing import Any
 MAINLOOP_WATCHDOG_TRACEBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeSupportAsyncMainloopWatchdogMixin:
+class _RuntimeAsyncMainloopWatchdog:
     def flush_companion_dbus_publish_queue(self: Any) -> bool:
         """Run any coalesced companion-service publish in the GLib thread."""
         svc = self.service

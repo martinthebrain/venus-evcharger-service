@@ -14,19 +14,19 @@ from venus_evcharger.core.contracts import (
     normalized_status_source,
 )
 from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue
-from venus_evcharger.publish.dbus_diagnostics_introspection import _DbusDiagnosticsIntrospectionMixin
-from venus_evcharger.publish.dbus_diagnostics_phase import _DbusDiagnosticsPhaseMixin
-from venus_evcharger.publish.dbus_diagnostics_runtime import _DbusDiagnosticsRuntimeMixin
-from venus_evcharger.publish.dbus_diagnostics_schedule import _DbusDiagnosticsScheduleMixin
-from venus_evcharger.publish.dbus_diagnostics_sources import _DbusDiagnosticsSourcesMixin
+from venus_evcharger.publish.dbus_diagnostics_introspection import _DbusDiagnosticsIntrospection
+from venus_evcharger.publish.dbus_diagnostics_phase import _DbusDiagnosticsPhase
+from venus_evcharger.publish.dbus_diagnostics_runtime import _DbusDiagnosticsRuntime
+from venus_evcharger.publish.dbus_diagnostics_schedule import _DbusDiagnosticsSchedule
+from venus_evcharger.publish.dbus_diagnostics_sources import _DbusDiagnosticsSources
 
 
-class _DbusPublishDiagnosticsMixin(
-    _DbusDiagnosticsIntrospectionMixin,
-    _DbusDiagnosticsPhaseMixin,
-    _DbusDiagnosticsRuntimeMixin,
-    _DbusDiagnosticsScheduleMixin,
-    _DbusDiagnosticsSourcesMixin,
+class _DbusPublishDiagnostics(
+    _DbusDiagnosticsIntrospection,
+    _DbusDiagnosticsPhase,
+    _DbusDiagnosticsRuntime,
+    _DbusDiagnosticsSchedule,
+    _DbusDiagnosticsSources,
 ):
     @staticmethod
     def _runtime_error_state(service: Any) -> Mapping[str, Any]:

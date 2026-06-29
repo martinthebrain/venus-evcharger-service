@@ -21,7 +21,7 @@ class MainLoopLike(Protocol):  # pragma: no cover
 
 
 class DbusAdapterRuntimeContext(Protocol):  # pragma: no cover
-    """Signal/runtime surface required by ``DbusAdapterRuntimeMixin``."""
+    """Signal/runtime surface required by ``DbusAdapterRuntime``."""
 
     _main_loop: MainLoopLike | None
     _stop: bool
@@ -30,7 +30,7 @@ class DbusAdapterRuntimeContext(Protocol):  # pragma: no cover
 
 
 class DbusAdapterSocketContext(Protocol):  # pragma: no cover
-    """Unix-socket IPC surface required by ``DbusAdapterSocketMixin``."""
+    """Unix-socket IPC surface required by ``DbusAdapterSocket``."""
 
     paths: GatewayPaths
     cache: DbusCacheStore
@@ -48,7 +48,7 @@ class DbusAdapterSocketContext(Protocol):  # pragma: no cover
 
 
 class DbusAdapterIdentityContext(Protocol):  # pragma: no cover
-    """EV-charger DBus service identity surface required by ``DbusAdapterIdentityMixin``."""
+    """EV-charger DBus service identity surface required by ``DbusAdapterIdentity``."""
 
     config: configparser.ConfigParser
     write_scheduler: DbusWriteScheduler

@@ -46,7 +46,7 @@ SESSION_ACTIVE_POWER_WATTS = 50.0
 SESSION_ACTIVE_CURRENT_AMPS = 0.2
 
 
-class DbusAdapterHealthMixin:
+class DbusAdapterHealth:
     def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, object]) -> None:  # pragma: no mutate block
         if not self.health_log_due():
             return

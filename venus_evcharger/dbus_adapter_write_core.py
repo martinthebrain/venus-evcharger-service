@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus gateway write-scheduler mixins."""
+"""Core command scheduling for the DBus gateway write scheduler."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from venus_evcharger.dbus_gateway_command_types import CommandFile, CommandFileL
 GATEWAY_COMMAND_RETRY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class DbusWriteSchedulerCoreMixin:
+class DbusWriteSchedulerCore:
     adapter: DbusWriteSchedulerAdapter
     local_publish_burst_limit: int
     startup_registration_batch_limit: int

@@ -21,7 +21,7 @@ from venus_evcharger.inputs.helper.sources_dbus_common import (
 _CACHE_VALUE_MISSING = object()
 
 
-class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
+class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
     @staticmethod
     def _dbus_module() -> Any:
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
@@ -33,7 +33,7 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         cache_key = dbus_path_key(service_name, path)
         snapshot = self._gateway_cache_snapshot()
         entry = DbusCacheStore.value_entry(snapshot, cache_key)
-        has_cached_value, cached_value = _AutoInputHelperSourceDbusGatewayMixin._cached_gateway_numeric_value(
+        has_cached_value, cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_numeric_value(
             self,
             entry,
         )
@@ -117,10 +117,10 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         return coerce_dbus_numeric(entry.get("value"))
 
     def _cached_gateway_numeric_value(self: Any, entry: Mapping[str, Any] | None) -> tuple[bool, float | int | None]:
-        cached_value = _AutoInputHelperSourceDbusGatewayMixin._cached_gateway_value(entry)
+        cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_value(entry)
         if cached_value is _CACHE_VALUE_MISSING:
             return False, None
-        return True, _AutoInputHelperSourceDbusGatewayMixin._gateway_numeric_or_none(cached_value)
+        return True, _AutoInputHelperSourceDbusGateway._gateway_numeric_or_none(cached_value)
 
     @staticmethod
     def _gateway_numeric_or_none(value: object) -> float | int | None:

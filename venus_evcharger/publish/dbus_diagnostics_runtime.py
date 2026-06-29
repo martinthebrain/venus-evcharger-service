@@ -7,10 +7,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from venus_evcharger.core.contracts import finite_float_or_none, sanitized_auto_metrics
-from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContractsMixin
+from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue, _DbusDiagnosticsContracts
 
 
-class _DbusDiagnosticsRuntimeMixin(_DbusDiagnosticsContractsMixin):
+class _DbusDiagnosticsRuntime(_DbusDiagnosticsContracts):
     def _runtime_timing_values(self, now: float) -> dict[str, int | float]:
         """Return timing and queue diagnostics for async runtime health."""
         svc = self.service

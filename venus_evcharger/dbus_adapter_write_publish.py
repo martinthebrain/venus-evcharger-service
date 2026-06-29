@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus gateway write-scheduler mixins."""
+"""Local publish scheduling for the DBus gateway write scheduler."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class _LocalPublishCandidate:
     started: float
 
 
-class DbusWriteSchedulerPublishMixin:
+class DbusWriteSchedulerPublish:
     adapter: DbusWriteSchedulerAdapter
     dynamic_local_publish_burst_limit: int
     last_processed_at: float

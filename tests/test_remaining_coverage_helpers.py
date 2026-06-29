@@ -16,7 +16,7 @@ from venus_evcharger.bootstrap.wizard_render import (
     _charger_backend_lines,
     _measurement_backend_lines,
 )
-from venus_evcharger.backend.shelly_io_worker import ShellyIoWorkerMixin
+from venus_evcharger.backend.shelly_io_worker import ShellyIoWorker
 from venus_evcharger.backend.shelly_support import ShellyBackendBase
 from venus_evcharger.controllers.write_snapshot import (
     _restore_dbus_paths_direct,
@@ -30,15 +30,15 @@ from venus_evcharger.energy import aggregate as aggregate_mod
 from venus_evcharger.energy.aggregate import _effective_soc
 from venus_evcharger.energy.probe import _optional_detected_int
 from venus_evcharger.energy import EnergySourceSnapshot
-from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscriptionMixin
-from venus_evcharger.inputs.supervisor_process import _AutoInputSupervisorProcessMixin
-from venus_evcharger.inputs.supervisor_snapshot_runtime import _AutoInputSupervisorSnapshotRuntimeMixin
-from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidationMixin
-from venus_evcharger.publish.dbus_core import _DbusPublishCoreMixin
-from venus_evcharger.publish.dbus_config import _DbusPublishConfigMixin
-from venus_evcharger.publish.dbus_diagnostics import _DbusPublishDiagnosticsMixin
-from venus_evcharger.runtime.audit_fields import _RuntimeSupportAuditFieldsMixin
-from venus_evcharger.runtime.health import _RuntimeSupportHealthMixin
+from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscription
+from venus_evcharger.inputs.supervisor_process import _AutoInputSupervisorProcess
+from venus_evcharger.inputs.supervisor_snapshot_runtime import _AutoInputSupervisorSnapshotRuntime
+from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidation
+from venus_evcharger.publish.dbus_core import _DbusPublishCore
+from venus_evcharger.publish.dbus_config import _DbusPublishConfig
+from venus_evcharger.publish.dbus_diagnostics import _DbusPublishDiagnostics
+from venus_evcharger.runtime.audit_fields import _RuntimeAuditFields
+from venus_evcharger.runtime.health import _RuntimeHealth
 from venus_evcharger.topology.schema import (
     ActuatorConfig,
     ChargerConfig,
@@ -53,20 +53,20 @@ from venus_evcharger_auto_input_helper import AutoInputHelper
 from venus_evcharger_service import ShellyWallboxService
 
 
-class _DbusCoreHarness(_DbusPublishCoreMixin):
+class _DbusCoreHarness(_DbusPublishCore):
     def __init__(self, service: object) -> None:
         self.service = service
 
 
-class _DiagnosticsHarness(_DbusPublishDiagnosticsMixin):
+class _DiagnosticsHarness(_DbusPublishDiagnostics):
     def __init__(self, service: object) -> None:
         self.service = service
 
 
 class _SupervisorHarness(
-    _AutoInputSupervisorSnapshotRuntimeMixin,
-    _AutoInputSupervisorSnapshotValidationMixin,
-    _AutoInputSupervisorProcessMixin,
+    _AutoInputSupervisorSnapshotRuntime,
+    _AutoInputSupervisorSnapshotValidation,
+    _AutoInputSupervisorProcess,
 ):
     SNAPSHOT_SOURCE_KEYS = ()
 
@@ -74,12 +74,12 @@ class _SupervisorHarness(
         self.service = service
 
 
-class _ShellyWorkerHarness(ShellyIoWorkerMixin):
+class _ShellyWorkerHarness(ShellyIoWorker):
     def __init__(self, service: object) -> None:
         self.service = service
 
 
-class _RuntimeHealthHarness(_RuntimeSupportHealthMixin):
+class _RuntimeHealthHarness(_RuntimeHealth):
     def __init__(self, service: object) -> None:
         self.service = service
 
@@ -93,7 +93,7 @@ class _RuntimeCycleHarness(_UpdateCycleRuntimeMixin):
         self.service = service
 
 
-class _SubscriptionHarness(_AutoInputHelperSubscriptionMixin):
+class _SubscriptionHarness(_AutoInputHelperSubscription):
     def __init__(self) -> None:
         self._refresh_scheduled = False
         self._stop_requested = False
@@ -130,10 +130,10 @@ class RemainingCoverageHelperTests(unittest.TestCase):
 
     def test_dbus_and_audit_backend_fallback_helpers_cover_unknown_attributes(self) -> None:
         service = SimpleNamespace(custom_backend="  custom  ", empty_backend=None)
-        self.assertEqual(_DbusPublishConfigMixin._backend_type_value(service, "custom_backend", "fallback"), "custom")
-        self.assertEqual(_DbusPublishConfigMixin._backend_type_value(service, "empty_backend", "fallback"), "fallback")
-        self.assertEqual(_RuntimeSupportAuditFieldsMixin._backend_value(service, "custom_backend", "fallback"), "custom")
-        self.assertEqual(_RuntimeSupportAuditFieldsMixin._backend_value(service, "empty_backend", "fallback"), "fallback")
+        self.assertEqual(_DbusPublishConfig._backend_type_value(service, "custom_backend", "fallback"), "custom")
+        self.assertEqual(_DbusPublishConfig._backend_type_value(service, "empty_backend", "fallback"), "fallback")
+        self.assertEqual(_RuntimeAuditFields._backend_value(service, "custom_backend", "fallback"), "custom")
+        self.assertEqual(_RuntimeAuditFields._backend_value(service, "empty_backend", "fallback"), "fallback")
 
     def test_auto_input_helper_parent_pid_parser_accepts_bool_like_int(self) -> None:
         self.assertEqual(AutoInputHelper._parsed_parent_pid(True), 1)

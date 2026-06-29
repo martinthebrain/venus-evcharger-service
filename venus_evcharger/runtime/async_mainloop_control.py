@@ -14,7 +14,7 @@ from venus_evcharger.runtime.async_mainloop_types import require_control_command
 ASYNC_CONTROL_COMMAND_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeSupportAsyncMainloopControlMixin:
+class _RuntimeAsyncMainloopControl:
     def enqueue_control_command(self: Any, command: ControlCommand) -> bool:
         """Coalesce DBus control commands for a background worker."""
         svc = self.service

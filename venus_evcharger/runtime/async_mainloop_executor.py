@@ -13,7 +13,7 @@ from venus_evcharger.core.return_contracts import require_bool
 ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeSupportAsyncMainloopExecutorMixin:
+class _RuntimeAsyncMainloopExecutor:
     def start_update_worker(self: Any) -> None:
         """Enable periodic update cycles in the serialized runtime executor."""
         svc = self.service

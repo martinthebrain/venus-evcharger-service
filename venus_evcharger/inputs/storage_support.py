@@ -26,7 +26,7 @@ def _service_name_or_none(value: object) -> str | None:
     return service_name or None
 
 
-class _DbusInputStorageSupportMixin(_ComposableControllerMixin):
+class _DbusInputStorageSupport(_ComposableControllerMixin):
     def _configured_primary_energy_sources(self) -> tuple[EnergySourceDefinition, ...]:
         return tuple(getattr(self.service, "auto_energy_sources", ()) or ())
 

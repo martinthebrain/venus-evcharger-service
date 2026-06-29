@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class ShellyIoWorkerLifecycleMixin:
+class ShellyIoWorkerLifecycle:
     """Start, restart, and inspect the Shelly background worker thread."""
 
     if TYPE_CHECKING:
@@ -33,10 +33,10 @@ class ShellyIoWorkerLifecycleMixin:
 
     @staticmethod
     def _worker_snapshot_captured_at(svc: ShellyIoHost) -> float | None:
-        snapshot = ShellyIoWorkerLifecycleMixin._worker_snapshot_payload(svc)
+        snapshot = ShellyIoWorkerLifecycle._worker_snapshot_payload(svc)
         if snapshot is None:
             return None
-        return ShellyIoWorkerLifecycleMixin._worker_snapshot_number(snapshot, "captured_at")
+        return ShellyIoWorkerLifecycle._worker_snapshot_number(snapshot, "captured_at")
 
     @staticmethod
     def _worker_snapshot_payload(svc: ShellyIoHost) -> dict[str, object] | None:

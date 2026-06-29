@@ -18,7 +18,7 @@ from venus_evcharger.core.split_mixins import ComposableControllerMixin as _Comp
 
 WATCHDOG_TRACEBACK_DUMP_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
-class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
+class _RuntimeHealth(_ComposableControllerMixin):
     @staticmethod
     def _float_attr(value: Any, default: float = 0.0) -> float:
         """Return one runtime attribute as float with a safe fallback."""
@@ -43,12 +43,12 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
         last_successful_update_at = getattr(svc, "_last_successful_update_at", None)
         if isinstance(last_successful_update_at, (int, float)):
             return float(last_successful_update_at)
-        return _RuntimeSupportHealthMixin._float_attr(getattr(svc, "started_at", 0.0))
+        return _RuntimeHealth._float_attr(getattr(svc, "started_at", 0.0))
 
     @staticmethod
     def _watchdog_recovery_suppressed(svc: Any, now: float) -> bool:
         """Return whether watchdog recovery is currently rate-limited."""
-        recovery_seconds = _RuntimeSupportHealthMixin._float_attr(
+        recovery_seconds = _RuntimeHealth._float_attr(
             getattr(svc, "auto_watchdog_recovery_seconds", 0.0)
         )
         last_recovery_attempt_at = getattr(svc, "_last_recovery_attempt_at", None)
@@ -188,4 +188,4 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
         svc._source_retry_after[key] = current + delay
 
 
-__all__ = ["_RuntimeSupportHealthMixin"]
+__all__ = ["_RuntimeHealth"]

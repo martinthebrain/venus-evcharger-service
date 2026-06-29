@@ -7,7 +7,7 @@ import re
 from typing import TYPE_CHECKING, Any, Mapping
 
 
-class _EnergyCompanionDbusBridgeServicesMixin:
+class _EnergyCompanionDbusBridgeServices:
     _battery_service: Any
     _pvinverter_service: Any
     _grid_service: Any
