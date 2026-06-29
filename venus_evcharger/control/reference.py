@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,8 +119,13 @@ def _control_api_component_schemas() -> Mapping[str, Any]:
     from venus_evcharger.control.openapi import build_control_api_openapi_spec
 
     spec = build_control_api_openapi_spec()
-    components = cast(Mapping[str, Any], spec["components"])
-    return cast(Mapping[str, Any], components["schemas"])
+    components = spec.get("components")
+    if not isinstance(components, Mapping):
+        raise TypeError("Control API OpenAPI spec must contain components mapping")
+    schemas = components.get("schemas")
+    if not isinstance(schemas, Mapping):
+        raise TypeError("Control API OpenAPI components must contain schemas mapping")
+    return schemas
 
 
 def _named_schema_command_name(schema: Any) -> str | None:

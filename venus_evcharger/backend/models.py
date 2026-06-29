@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import time
-from typing import Literal, cast
+from typing import Literal
 
 PhaseSelection = Literal["P1", "P1_P2", "P1_P2_P3"]
 SwitchingMode = Literal["direct", "contactor"]
@@ -57,11 +57,11 @@ def normalize_phase_selection_tuple(
 def _normalized_phase_selection_values(values: object) -> tuple[PhaseSelection, ...]:
     """Return normalized phase selections from iterable or comma-separated runtime data."""
     if isinstance(values, (tuple, list)):
-        return cast(tuple[PhaseSelection, ...], tuple(normalize_phase_selection(value, "P1") for value in values))
+        return tuple(normalize_phase_selection(value, "P1") for value in values)
     text = _phase_selection_text(values)
     if not text:
         return ()
-    return cast(tuple[PhaseSelection, ...], tuple(normalize_phase_selection(part, "P1") for part in text.split(",")))
+    return tuple(normalize_phase_selection(part, "P1") for part in text.split(","))
 
 
 def _phase_selection_text(values: object) -> str:
@@ -100,10 +100,7 @@ def effective_supported_phase_selections(
     if not phase_switch_lockout_active(lockout_selection, lockout_until, now=now):
         return normalized
     allowed_phase_count = max(1, phase_selection_count(lockout_selection) - 1)
-    filtered = cast(
-        tuple[PhaseSelection, ...],
-        tuple(selection for selection in normalized if phase_selection_count(selection) <= allowed_phase_count),
-    )
+    filtered = tuple(selection for selection in normalized if phase_selection_count(selection) <= allowed_phase_count)
     return filtered or normalized
 
 

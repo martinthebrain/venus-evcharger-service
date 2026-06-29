@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import requests
 from requests import exceptions as requests_exceptions
 
-from venus_evcharger.backend.shelly_io_types import ShellyIoHost, _TransportSessionResetBackendLike
+from venus_evcharger.backend.shelly_io_types import ShellyIoHost, is_transport_session_reset_backend
 
 _SHELLY_TRANSPORT_ERROR_REASONS = frozenset(
     {
@@ -193,9 +193,8 @@ class ShellyIoWorkerTransportMixin:
     def _reset_shelly_backend_sessions(self, svc: ShellyIoHost) -> None:
         shared_session = getattr(svc, "session", None)
         for backend in self._shelly_transport_backends(svc):
-            reset_transport_session = getattr(backend, "reset_transport_session", None)
-            if callable(reset_transport_session):
-                cast(_TransportSessionResetBackendLike, backend).reset_transport_session(shared_session)
+            if is_transport_session_reset_backend(backend):
+                backend.reset_transport_session(shared_session)
 
     @staticmethod
     def _shelly_transport_backends(svc: ShellyIoHost) -> tuple[object, ...]:

@@ -267,7 +267,7 @@ def _legacy_policy_mode(value: object) -> PolicyMode:
 
 def _legacy_runtime_values(config: configparser.ConfigParser) -> _LegacyTopologyRuntime:
     """Return normalized legacy config fields used to build one topology."""
-    defaults: Mapping[str, object] = config["DEFAULT"] if "DEFAULT" in config else {}
+    defaults = _default_mapping(config)
 
     backends: Mapping[str, object] = config["Backends"] if config.has_section("Backends") else defaults
 
@@ -281,6 +281,13 @@ def _legacy_runtime_values(config: configparser.ConfigParser) -> _LegacyTopology
         switch_path=_optional_text(backends.get("SwitchConfigPath")),
         charger_path=_optional_text(backends.get("ChargerConfigPath")),
     )
+
+
+def _default_mapping(config: configparser.ConfigParser) -> Mapping[str, object]:
+    """Return the legacy DEFAULT section with ConfigParser lookup semantics."""
+    if "DEFAULT" not in config:
+        return {}
+    return config["DEFAULT"]
 
 
 def _legacy_charger(charger_type_raw: str, charger_path: str | None) -> ChargerConfig | None:

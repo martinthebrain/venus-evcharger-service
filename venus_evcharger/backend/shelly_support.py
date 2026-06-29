@@ -8,7 +8,7 @@ readback handling while individual meter/switch classes keep role behavior.
 from __future__ import annotations
 
 import configparser
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 from urllib.parse import urlencode
 
 import requests
@@ -20,6 +20,7 @@ from .models import (
     SwitchingMode,
     normalize_phase_selection,
 )
+from .shelly_io_types import _SessionLike
 from .shelly_profiles import (
     ShellyProfileDefaults,
     normalize_shelly_profile_name,
@@ -37,7 +38,7 @@ from .shelly_support_phase import (
 )
 from .shelly_support_types import ShellyBackendSettings, ShellySignalReadbackSettings
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_binary_flag
-from venus_evcharger.backend.shelly_io import ShellyPmStatus, ShellyRpcScalar
+from venus_evcharger.backend.shelly_io import JsonObject, ShellyPmStatus, ShellyRpcScalar
 
 
 def _config_value(defaults: configparser.SectionProxy, key: str, fallback: object) -> str:
@@ -250,14 +251,14 @@ class ShellyBackendBase:
             default_switching_mode=default_switching_mode,
         )
         session = getattr(service, "session", None)
-        self._session = cast(Any, session if session is not None else requests.Session())
+        self._session: _SessionLike = session if session is not None else requests.Session()
 
     def reset_transport_session(self, session: Any | None = None) -> None:
         """Replace the HTTP session after transport-level failures."""
         old_session = getattr(self, "_session", None)
         if old_session is not None and old_session is not session and hasattr(old_session, "close"):
             old_session.close()
-        self._session = cast(Any, session if session is not None else requests.Session())
+        self._session = session if session is not None else requests.Session()
 
     def _auth(self) -> HTTPDigestAuth | tuple[str, str] | None:
         """Return one optional auth object for Shelly HTTP calls."""
@@ -283,7 +284,7 @@ class ShellyBackendBase:
             return base
         return f"{base}?{urlencode(self._encoded_rpc_params(params))}"
 
-    def _request_json(self, url: str) -> dict[str, object]:
+    def _request_json(self, url: str) -> JsonObject:
         """Perform one requests-based JSON call."""
         kwargs: dict[str, object] = {
             "url": url,
@@ -294,15 +295,18 @@ class ShellyBackendBase:
             kwargs["auth"] = auth
         response = self._session.get(**kwargs)
         response.raise_for_status()
-        return cast(dict[str, object], response.json())
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Shelly RPC response must be a JSON object")
+        return {str(key): value for key, value in payload.items()}
 
-    def _rpc_call(self, method: str, **params: ShellyRpcScalar) -> dict[str, object]:
+    def _rpc_call(self, method: str, **params: ShellyRpcScalar) -> JsonObject:
         """Call one Shelly RPC method on the configured backend target."""
         return self._request_json(self._rpc_url(method, params))
 
-    def _pm_status(self) -> ShellyPmStatus:
+    def _pm_status(self) -> JsonObject:
         """Return one Shelly PM status payload."""
-        return cast(ShellyPmStatus, self._rpc_call(f"{self.settings.component}.GetStatus", id=self.settings.device_id))
+        return self._rpc_call(f"{self.settings.component}.GetStatus", id=self.settings.device_id)
 
     def _component_status(self, component: str, device_id: int) -> dict[str, object]:
         """Return one Shelly status payload for an arbitrary configured component."""

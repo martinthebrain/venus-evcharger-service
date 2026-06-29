@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Protocol, TypedDict
+from typing import Protocol, TypeGuard, TypedDict
 
 from requests.auth import HTTPDigestAuth
 
@@ -146,6 +146,81 @@ class _TransportSessionResetBackendLike(Protocol):
     """Backend subset that accepts a new shared transport session."""
 
     def reset_transport_session(self, session: object) -> None: ...  # pragma: no cover
+
+
+def is_meter_backend(value: object) -> TypeGuard[_MeterBackendLike]:
+    """Return whether one object exposes the meter-backend capability."""
+    return callable(getattr(value, "read_meter", None))
+
+
+def is_enable_backend(value: object) -> TypeGuard[_EnableBackendLike]:
+    """Return whether one object exposes the enable/disable capability."""
+    return callable(getattr(value, "set_enabled", None))
+
+
+def is_phase_selection_backend(value: object) -> TypeGuard[_PhaseSelectionBackendLike]:
+    """Return whether one object exposes the phase-selection capability."""
+    return callable(getattr(value, "set_phase_selection", None))
+
+
+def is_switch_state_backend(value: object) -> TypeGuard[_SwitchStateBackendLike]:
+    """Return whether one object exposes normalized switch-state readback."""
+    return callable(getattr(value, "read_switch_state", None))
+
+
+def is_switch_capabilities_backend(value: object) -> TypeGuard[_SwitchCapabilitiesBackendLike]:
+    """Return whether one object exposes normalized switch capabilities."""
+    return callable(getattr(value, "capabilities", None))
+
+
+def is_charger_state_backend(value: object) -> TypeGuard[_ChargerStateBackendLike]:
+    """Return whether one object exposes normalized charger-state readback."""
+    return callable(getattr(value, "read_charger_state", None))
+
+
+def is_transport_session_reset_backend(value: object) -> TypeGuard[_TransportSessionResetBackendLike]:
+    """Return whether one object accepts replacement transport sessions."""
+    return callable(getattr(value, "reset_transport_session", None))
+
+
+def is_closeable(value: object) -> TypeGuard[_CloseableLike]:
+    """Return whether one object exposes a close method."""
+    return callable(getattr(value, "close", None))
+
+
+def is_settable_event(value: object) -> TypeGuard[_SettableEventLike]:
+    """Return whether one object exposes an event-style set method."""
+    return callable(getattr(value, "set", None))
+
+
+_SHELLY_IO_HOST_REQUIRED_ATTRIBUTES: tuple[str, ...] = ()
+
+_SHELLY_IO_HOST_REQUIRED_METHODS = (
+    "_time_now",
+    "_request",
+    "rpc_call",
+    "_peek_pending_relay_command",
+    "_clear_pending_relay_command",
+)
+
+
+def _missing_shelly_io_host_members(value: object) -> tuple[str, ...]:
+    missing_attrs = [name for name in _SHELLY_IO_HOST_REQUIRED_ATTRIBUTES if not hasattr(value, name)]
+    missing_methods = [name for name in _SHELLY_IO_HOST_REQUIRED_METHODS if not callable(getattr(value, name, None))]
+    return tuple(missing_attrs + missing_methods)
+
+
+def is_shelly_io_host(value: object) -> TypeGuard["ShellyIoHost"]:
+    """Return whether one object exposes the core Shelly I/O host contract."""
+    return not _missing_shelly_io_host_members(value)
+
+
+def require_shelly_io_host(value: object) -> "ShellyIoHost":
+    """Return a validated Shelly I/O host or fail with actionable context."""
+    if is_shelly_io_host(value):
+        return value
+    missing = ", ".join(_missing_shelly_io_host_members(value)) or "unknown"
+    raise TypeError(f"ShellyIoController requires a ShellyIoHost-compatible service; missing: {missing}")
 
 
 class _RequestAuthKwargs(TypedDict, total=False):
@@ -334,6 +409,8 @@ __all__ = [
     "_phase_currents_for_selection",
     "_phase_powers_for_selection",
     "_single_phase_vector",
+    "is_shelly_io_host",
     "normalize_phase_value",
     "normalize_supported_phase_tuple",
+    "require_shelly_io_host",
 ]

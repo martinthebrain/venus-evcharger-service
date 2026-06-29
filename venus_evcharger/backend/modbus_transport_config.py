@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import configparser
-from typing import cast
 
 from venus_evcharger.backend.modbus_transport import (
     ModbusParity,
@@ -35,6 +34,12 @@ _MODBUS_TRANSPORT_ISSUE_REASONS: tuple[tuple[type[BaseException] | tuple[type[Ba
     ((ModbusTimeoutError, TimeoutError), "timeout"),
     (ModbusResponseError, "response"),
 )
+
+_PARITY_CHOICES: dict[str, ModbusParity] = {
+    "N": "N",
+    "E": "E",
+    "O": "O",
+}
 
 
 def _normalized_transport_kind(value: object) -> ModbusTransportKind:
@@ -100,10 +105,10 @@ def _normalized_bytesize(value: object) -> int:
 
 def _normalized_parity(value: object) -> ModbusParity:
     """Return one validated serial parity setting."""
-    parity = str(value).strip().upper() or "N"
-    if parity not in {"N", "E", "O"}:
+    parity = _PARITY_CHOICES.get(str(value).strip().upper() or "N")
+    if parity is None:
         raise ValueError(f"Unsupported Modbus parity '{value}'")
-    return cast(ModbusParity, parity)
+    return parity
 
 
 def _normalized_stopbits(value: object) -> int:

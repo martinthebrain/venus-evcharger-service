@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
-from typing import Any, cast
 
 import requests
 
@@ -116,8 +115,8 @@ def _goe_payload(response_payload: object) -> dict[str, object]:
         return {}
     data_payload = response_payload.get("data")
     if isinstance(data_payload, dict):
-        return cast(dict[str, object], data_payload)
-    return cast(dict[str, object], response_payload)
+        return {str(key): value for key, value in data_payload.items()}
+    return {str(key): value for key, value in response_payload.items()}
 
 
 def _goe_optional_int(value: object) -> int | None:
@@ -226,7 +225,7 @@ class GoEChargerBackend:
         self.config_path = str(config_path).strip()
         self.settings = load_goe_charger_settings(service, self.config_path)
         session = getattr(service, "session", None)
-        self._session = cast(Any, session if session is not None else requests.Session())
+        self._session = session if session is not None else requests.Session()
         self._observed_phase_selection: PhaseSelection = "P1"
 
     def _request_kwargs(

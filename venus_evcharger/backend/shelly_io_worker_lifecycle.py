@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import requests
 
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
-from venus_evcharger.backend.shelly_io_types import ShellyIoHost, _CloseableLike, _SettableEventLike
+from venus_evcharger.backend.shelly_io_types import ShellyIoHost, is_closeable, is_settable_event
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,7 +49,7 @@ class ShellyIoWorkerLifecycleMixin:
             return None
         if not isinstance(snapshot, dict):
             return None
-        return cast(dict[str, object], snapshot)
+        return {str(key): value for key, value in snapshot.items()}
 
     @staticmethod
     def _worker_snapshot_number(snapshot: dict[str, object], key: str) -> float | None:
@@ -95,13 +95,13 @@ class ShellyIoWorkerLifecycleMixin:
 
     @staticmethod
     def _set_object_event(candidate: object) -> None:
-        if candidate is not None and hasattr(candidate, "set"):
-            cast(_SettableEventLike, candidate).set()
+        if is_settable_event(candidate):
+            candidate.set()
 
     @staticmethod
     def _close_object(candidate: object) -> None:
-        if candidate is not None and hasattr(candidate, "close"):
-            cast(_CloseableLike, candidate).close()
+        if is_closeable(candidate):
+            candidate.close()
 
     def start_io_worker(self) -> None:
         svc = self.service

@@ -6,9 +6,16 @@ import uuid
 from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
+from venus_evcharger.control.http_api_command_contracts import (
+    ControlApiIdempotencyStoreLike,
+    ControlApiRateLimiterLike,
+    optional_error_payload,
+    require_idempotency_store,
+    require_rate_limiter,
+)
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.control.rate_limit import ControlApiRateLimiter
 from venus_evcharger.control.http_api_response import (
@@ -77,7 +84,7 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             self._record_command_audit(
                 command=tracked_payload,
                 result=None,
-                error=cast(dict[str, Any] | None, response_payload.get("error")),
+                error=optional_error_payload(response_payload),
                 replayed=False,
                 scope="control",
                 client_host=client_host,
@@ -91,7 +98,7 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             self._record_command_audit(
                 command=command,
                 result=None,
-                error=cast(dict[str, Any] | None, response_payload.get("error")),
+                error=optional_error_payload(response_payload),
                 replayed=False,
                 scope="control",
                 client_host=client_host,
@@ -106,7 +113,7 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
         self._record_command_audit(
             command=command,
             result=result,
-            error=cast(dict[str, Any] | None, response_payload.get("error")),
+            error=optional_error_payload(response_payload),
             replayed=False,
             scope="control",
             client_host=client_host,
@@ -155,10 +162,10 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             retry_after,
         )
 
-    def _rate_limiter(self) -> ControlApiRateLimiter:
+    def _rate_limiter(self) -> ControlApiRateLimiterLike:
         rate_limiter_factory = getattr(self._service, "_control_api_rate_limiter", None)
         if callable(rate_limiter_factory):
-            return cast(ControlApiRateLimiter, rate_limiter_factory())
+            return require_rate_limiter(rate_limiter_factory())
         return self._fallback_rate_limiter
 
     @staticmethod
@@ -270,10 +277,10 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             persisted_response,
         )
 
-    def _idempotency_store(self) -> ControlApiIdempotencyStore:
+    def _idempotency_store(self) -> ControlApiIdempotencyStoreLike:
         store_factory = getattr(self._service, "_control_api_idempotency_store", None)
         if callable(store_factory):
-            return cast(ControlApiIdempotencyStore, store_factory())
+            return require_idempotency_store(store_factory())
         return self._fallback_idempotency_store
 
     @staticmethod

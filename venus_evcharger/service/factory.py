@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 from venus_evcharger.bootstrap.controller import ServiceBootstrapController
 from venus_evcharger.backend.shelly_io import ShellyIoController
+from venus_evcharger.backend.shelly_io_types import require_shelly_io_host
 from venus_evcharger.update.controller import UpdateCycleController
 from venus_evcharger.controllers.auto import AutoDecisionController
 from venus_evcharger.companion import EnergyCompanionDbusBridge
@@ -18,9 +19,6 @@ from venus_evcharger.controllers.write import DbusWriteController
 from venus_evcharger.ports import AutoDecisionPort, DbusInputPort, UpdateCyclePort, WriteControllerPort
 from venus_evcharger.publish.dbus import DbusPublishController
 from venus_evcharger.runtime import RuntimeSupportController
-
-if TYPE_CHECKING:
-    from venus_evcharger.backend.shelly_io import ShellyIoHost
 
 
 class ServiceControllerFactoryMixin:
@@ -63,7 +61,7 @@ class ServiceControllerFactoryMixin:
 
     def _ensure_shelly_io_controller(self) -> None:
         if not hasattr(self, "_shelly_io_controller") or self._shelly_io_controller is None:
-            self._shelly_io_controller = ShellyIoController(cast("ShellyIoHost", self))
+            self._shelly_io_controller = ShellyIoController(require_shelly_io_host(self))
 
     def _ensure_state_controller(self) -> None:
         if not hasattr(self, "_state_controller") or self._state_controller is None:

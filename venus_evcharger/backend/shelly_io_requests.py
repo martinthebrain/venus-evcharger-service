@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 from requests.auth import HTTPDigestAuth
@@ -82,7 +82,9 @@ class ShellyIoRequestsMixin:
     @staticmethod
     def _json_object(value: object) -> JsonObject:
         """Return JSON responses as a typed object mapping."""
-        return cast(JsonObject, value)
+        if not isinstance(value, dict):
+            raise ValueError("Shelly response must be a JSON object")
+        return {str(key): item for key, item in value.items()}
 
     def request(self, url: str) -> JsonObject:
         """Perform a Shelly HTTP request through the main-session client."""

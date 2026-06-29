@@ -6,9 +6,9 @@ from __future__ import annotations
 import configparser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
-from .base import SwitchBackend
+from .base import SwitchBackend, is_switch_backend
 from .config_file import config_section, load_required_backend_config
 from .models import (
     PhaseSelection,
@@ -172,7 +172,10 @@ def _child_switch_backend(service: Any, member: SwitchGroupMember) -> SwitchBack
     constructor = SWITCH_BACKENDS.get(member.backend_type)
     if constructor is None:
         raise ValueError(f"Unsupported switch-group child backend '{member.backend_type}'")
-    return cast(SwitchBackend, constructor(service, config_path=str(member.config_path)))
+    backend = constructor(service, config_path=str(member.config_path))
+    if not is_switch_backend(backend):
+        raise TypeError(f"Switch-group child backend '{member.backend_type}' does not implement SwitchBackend")
+    return backend
 
 
 def _validated_member_capabilities(

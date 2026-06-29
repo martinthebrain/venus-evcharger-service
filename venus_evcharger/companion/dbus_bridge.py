@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import platform
 import time
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
 from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy, gateway_paths
 from .dbus_bridge_grid import _EnergyCompanionDbusBridgeGridMixin

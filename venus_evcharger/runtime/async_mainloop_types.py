@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias, TypeGuard
 
 from venus_evcharger.control import ControlCommand
 
@@ -15,21 +15,41 @@ ControlCommandQueue: TypeAlias = OrderedDict[str, QueuedControlCommand]
 
 
 def require_publish_queue(value: object, name: str) -> PublishQueue:
-    if not isinstance(value, OrderedDict):
-        raise TypeError(f"{name} must be OrderedDict, got {type(value).__name__}")
-    for key, item in value.items():
-        _require_str_key(key, name)
-        _require_publish_value(item, name)
-    return cast(PublishQueue, value)
+    if is_publish_queue(value, name):
+        return value
+    raise TypeError(f"{name} must be OrderedDict, got {type(value).__name__}")
 
 
 def require_control_command_queue(value: object, name: str) -> ControlCommandQueue:
+    if is_control_command_queue(value, name):
+        return value
+    raise TypeError(f"{name} must be OrderedDict, got {type(value).__name__}")
+
+
+def is_publish_queue(value: object, name: str = "publish queue") -> TypeGuard[PublishQueue]:
     if not isinstance(value, OrderedDict):
-        raise TypeError(f"{name} must be OrderedDict, got {type(value).__name__}")
+        return False
+    _validate_publish_queue(value, name)
+    return True
+
+
+def is_control_command_queue(value: object, name: str = "control command queue") -> TypeGuard[ControlCommandQueue]:
+    if not isinstance(value, OrderedDict):
+        return False
+    _validate_control_command_queue(value, name)
+    return True
+
+
+def _validate_publish_queue(value: OrderedDict[object, object], name: str) -> None:
+    for key, item in value.items():
+        _require_str_key(key, name)
+        _require_publish_value(item, name)
+
+
+def _validate_control_command_queue(value: OrderedDict[object, object], name: str) -> None:
     for key, item in value.items():
         _require_str_key(key, name)
         _require_control_command_value(item, name)
-    return cast(ControlCommandQueue, value)
 
 
 def _require_str_key(key: object, name: str) -> None:

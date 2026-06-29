@@ -144,6 +144,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             second = inbox.enqueue({"kind": "set_value", "created_at": 2.0, "priority": "diagnostic", "coalesce_key": "k"})
             self.assertEqual(first, second)
             pending_set_value = inbox.load_pending()[0][1]
+            self.assertEqual(pending_set_value["id"], Path(first).stem)
             self.assertEqual(pending_set_value["created_at"], 1.0)
             self.assertEqual(pending_set_value["queue_class"], "remote-write")
             self.assertEqual(pending_set_value["lifecycle_state"], "coalesced")
@@ -194,7 +195,12 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 if command.get("kind") == "refresh_services" and command.get("created_at") == 2.0
             ][0]
             self.assertEqual(legacy_loaded["coalesce_key"], "refresh:services")
+            no_key_path = inbox.enqueue({"kind": "set_value", "created_at": 5.0})
+            literal_x_path = inbox.enqueue({"kind": "set_value", "created_at": 6.0, "coalesce_key": "XXXX"})
             self.assertEqual(inbox.remove_coalesced(""), 0)
+            self.assertTrue(Path(literal_x_path).exists())
+            self.assertEqual(inbox.remove_coalesced("XXXX"), 1)
+            self.assertTrue(Path(no_key_path).exists())
             self.assertEqual(inbox.remove_coalesced("refresh:services"), 2)
             self.assertFalse(any(command.get("kind") == "refresh_services" for _path, command in inbox.load_pending()))
 
@@ -246,6 +252,47 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(keep_old[0][0], "old")
 
     def test_command_inbox_private_helpers_cover_priority_and_publish_ordering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = DbusCommandInbox(str(Path(temp_dir) / "commands"))
+            queued_path = inbox.enqueue({"kind": "set_value", "service": "svc", "path": "/Mode", "value": 1})
+            queued_payload = read_json_file(queued_path, {})
+            self.assertEqual(queued_payload["lifecycle_state"], "queued")
+            self.assertIn("created_at", queued_payload)
+            self.assertIn("queue_class", queued_payload)
+
+        payload = DbusCommandInbox._new_payload(
+            "cmd-1",
+            {"kind": "publish_value", "priority": "publish", "path": "/Mode", "created_at": 11.0},
+        )
+        self.assertEqual(payload["schema_version"], dbus_gateway_commands.DBUS_GATEWAY_SCHEMA_VERSION)
+        self.assertEqual(payload["id"], "cmd-1")
+        self.assertEqual(payload["created_at"], 11.0)
+        self.assertEqual(payload["queue_class"], "gui-critical-publish")
+        self.assertEqual(
+            set(payload),
+            {"schema_version", "id", "created_at", "kind", "priority", "path", "queue_class"},
+        )
+        with patch.object(dbus_gateway_commands, "_now", return_value=44.0):
+            self.assertEqual(DbusCommandInbox._new_payload("cmd-2", {"kind": "set_value"})["created_at"], 44.0)
+            self.assertEqual(
+                DbusCommandInbox._new_payload("cmd-3", {"kind": "set_value", "created_at": "bad"})["created_at"],
+                44.0,
+            )
+        self.assertEqual(
+            DbusCommandInbox._command_id({"coalesce_key": "ev:/Mode"}),
+            DbusCommandInbox._command_id({"coalesce_key": "ev:/Mode"}),
+        )
+        coalesced_id = DbusCommandInbox._command_id({"coalesce_key": "ev:/Mode"})
+        random_id = DbusCommandInbox._command_id({})
+        self.assertTrue(coalesced_id.startswith("coalesced-"))
+        self.assertEqual(len(coalesced_id.removeprefix("coalesced-")), 24)
+        self.assertTrue(random_id.startswith("cmd-"))
+        self.assertEqual(len(random_id.rsplit("-", 1)[1]), 8)
+        self.assertEqual(
+            DbusCommandInbox._normalized_command({"type": "refresh_services"})["coalesce_key"],
+            "refresh:services",
+        )
+
         self.assertTrue(
             DbusCommandInbox._should_replace_existing_payload(
                 {"priority": "diagnostic", "created_at": 10.0},
@@ -264,12 +311,60 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 {"priority": "normal", "created_at": 9.0},
             )
         )
+        self.assertEqual(
+            dbus_gateway_commands._selected_coalesced_command(
+                ("old", {"priority": "safety", "created_at": 20.0}),
+                ("new", {"priority": "diagnostic", "created_at": 30.0}),
+            )[0],
+            "old",
+        )
+        self.assertEqual(
+            dbus_gateway_commands._selected_coalesced_command(
+                ("old", {"priority": "diagnostic", "created_at": 20.0}),
+                ("new", {"priority": "user", "created_at": 10.0}),
+            )[0],
+            "new",
+        )
+        self.assertEqual(
+            dbus_gateway_commands._selected_coalesced_command(
+                ("old", {"priority": "user", "created_at": 20.0}),
+                ("new", {"priority": "user", "created_at": 21.0}),
+            )[0],
+            "new",
+        )
+        self.assertEqual(
+            dbus_gateway_commands._selected_coalesced_command(
+                ("old", {"priority": "user", "created_at": 20.0}),
+                ("new", {"priority": "user", "created_at": 20.0}),
+            )[0],
+            "new",
+        )
+        self.assertEqual(
+            dbus_gateway_commands._selected_coalesced_command(
+                ("old", {"priority": "user", "created_at": 20.0}),
+                ("new", {"priority": "user", "created_at": 19.0}),
+            )[0],
+            "old",
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target = str(Path(temp_dir) / "coalesced.json")
             Path(target).write_text("{}", encoding="utf-8")
             self.assertFalse(dbus_gateway_commands._coalesced_target_exists({}, target))
             self.assertTrue(dbus_gateway_commands._coalesced_target_exists({"coalesce_key": " k "}, target))
+
+            inbox = DbusCommandInbox(str(Path(temp_dir) / "commands"))
+            Path(inbox.command_dir).mkdir(parents=True, exist_ok=True)
+            missing_target = str(Path(temp_dir) / "commands" / "coalesced-missing.json")
+            new_payload = {"priority": "user", "created_at": 12.0, "coalesce_key": "k"}
+            self.assertEqual(inbox._merge_existing_coalesced_payload(new_payload, missing_target, new_payload), "write-new")
+            Path(missing_target).write_text('{"priority":"safety","created_at":20.0}', encoding="utf-8")
+            low_payload = {"priority": "diagnostic", "created_at": 30.0, "coalesce_key": "k"}
+            self.assertEqual(inbox._merge_existing_coalesced_payload(low_payload, missing_target, low_payload), "keep-existing")
+            self.assertFalse(DbusCommandInbox._should_replace_existing(missing_target, low_payload))
+            high_payload = {"priority": "safety", "created_at": 31.0, "coalesce_key": "k"}
+            self.assertEqual(inbox._merge_existing_coalesced_payload(high_payload, missing_target, high_payload), "write-new")
+            self.assertEqual(high_payload["lifecycle_state"], "coalesced")
 
         self.assertTrue(dbus_gateway_commands._replace_existing_coalesced([], {}))
         self.assertTrue(
@@ -278,6 +373,24 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 {"priority": "publish"},
             )
         )
+        self.assertFalse(
+            dbus_gateway_commands._same_publish_desired_payload(
+                {"kind": "publish_desired", "priority": "publish"},
+                {"kind": "publish_desired", "priority": "diagnostic"},
+            )
+        )
+        self.assertFalse(
+            dbus_gateway_commands._same_publish_desired_payload(
+                {"kind": "set_value", "priority": "publish"},
+                {"kind": "publish_desired", "priority": "publish"},
+            )
+        )
+        one_sided_payload = {"kind": "publish_desired", "priority": "publish", "paths": {"/Mode": 1}}
+        dbus_gateway_commands._merge_publish_desired_paths(
+            {"kind": "publish_desired", "priority": "publish", "paths": []},
+            one_sided_payload,
+        )
+        self.assertEqual(one_sided_payload["paths"], {"/Mode": 1})
         payload = {"created_at": 20.0}
         dbus_gateway_commands._mark_coalesced_payload([], payload)
         self.assertEqual(payload, {"created_at": 20.0, "lifecycle_state": "coalesced"})
@@ -290,6 +403,9 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             )
         self.assertEqual(payload["created_at"], 10.0)
         self.assertEqual(payload["updated_at"], 30.0)
+        payload = {"priority": "publish", "created_at": 22.0}
+        dbus_gateway_commands._mark_coalesced_payload({"priority": "publish", "created_at": 0.0}, payload)
+        self.assertEqual(payload["created_at"], 22.0)
 
         ordered = sorted(
             [
@@ -297,11 +413,37 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 {"kind": "register_service", "id": "service", "created_at": 3.0},
                 {"kind": "publish_value", "priority": "publish", "path": "/Session/Time", "id": "time"},
                 {"kind": "publish_value", "priority": "normal", "path": "/Session/Time", "id": "normal"},
+                {"kind": "set_value", "id": "b", "created_at": 4.0},
+                {"kind": "set_value", "id": "a", "created_at": 4.0},
             ],
             key=dbus_gateway_commands._command_order_key,
         )
-        self.assertEqual([command["id"] for command in ordered], ["time", "normal", "service", "path"])
+        self.assertEqual([command["id"] for command in ordered], ["time", "normal", "service", "path", "a", "b"])
+        self.assertEqual(dbus_gateway_commands._command_order_key({})[-1], "")
+        self.assertEqual(dbus_gateway_commands._command_kind_rank({"kind": "register_service"}), 0)
+        self.assertEqual(dbus_gateway_commands._command_kind_rank({"kind": "register_path"}), 1)
+        self.assertEqual(dbus_gateway_commands._command_kind_rank({"type": "register_service"}), 0)
+        self.assertEqual(dbus_gateway_commands._command_kind_rank({"type": "register_path"}), 1)
+        self.assertEqual(dbus_gateway_commands._command_kind_rank({"kind": "set_value"}), 2)
+        self.assertEqual(dbus_gateway_commands._publish_path_rank({"kind": "set_value", "path": "/Mode"}), 0)
+        self.assertEqual(
+            dbus_gateway_commands._publish_path_rank({"kind": "publish_value", "priority": "publish", "path": "/Mode"}),
+            dbus_gateway_commands.PUBLISH_PATH_RANKS["/Mode"],
+        )
+        self.assertEqual(
+            dbus_gateway_commands._publish_path_rank(
+                {"kind": "publish_value", "priority": "publish", "path": "/Unranked"}
+            ),
+            3,
+        )
+        self.assertTrue(dbus_gateway_commands._ranked_publish_command({"kind": "publish_value", "priority": "publish"}))
+        self.assertFalse(dbus_gateway_commands._ranked_publish_command({"kind": "publish_value", "priority": "user"}))
+        self.assertFalse(dbus_gateway_commands._ranked_publish_command({"kind": "set_value", "priority": "publish"}))
+        self.assertTrue(dbus_gateway_commands._publish_priority({"priority": " publish "}))
+        self.assertFalse(dbus_gateway_commands._publish_priority({"priority": "user"}))
         self.assertEqual(dbus_gateway_commands._command_kind({"type": "set_value"}), "set_value")
+        self.assertEqual(dbus_gateway_commands._command_kind({"kind": "publish_value", "type": "set_value"}), "publish_value")
+        self.assertEqual(dbus_gateway_commands._command_kind({}), "")
 
     def test_gateway_client_socket_and_command_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

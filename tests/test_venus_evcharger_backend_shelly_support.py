@@ -20,6 +20,7 @@ from venus_evcharger.backend.shelly_support import (
     resolve_shelly_profile,
     validate_shelly_profile_role,
 )
+from venus_evcharger.backend.shelly_io_types import is_shelly_io_host, require_shelly_io_host
 
 
 class TestShellyWallboxBackendShellySupport(unittest.TestCase):
@@ -114,3 +115,25 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
             old_session.close.assert_called_once_with()
             self.assertIs(backend._session, new_session)
+
+    def test_shelly_io_host_contract_validates_core_service_boundary(self) -> None:
+        service = SimpleNamespace(
+            session=MagicMock(),
+            host="192.168.1.20",
+            pm_component="switch",
+            pm_id=0,
+            _relay_command_lock=MagicMock(),
+            _worker_stop_event=MagicMock(),
+            _time_now=lambda: 123.0,
+            _request=lambda _url: {},
+            rpc_call=lambda _method, **_params: {},
+            _peek_pending_relay_command=lambda: (None, None),
+            _clear_pending_relay_command=lambda _relay_on: None,
+        )
+
+        self.assertTrue(is_shelly_io_host(service))
+        self.assertIs(require_shelly_io_host(service), service)
+
+    def test_shelly_io_host_contract_reports_missing_members(self) -> None:
+        with self.assertRaisesRegex(TypeError, "_request"):
+            require_shelly_io_host(SimpleNamespace(session=MagicMock()))

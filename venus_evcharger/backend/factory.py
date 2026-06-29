@@ -6,7 +6,7 @@ from __future__ import annotations
 import configparser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, TypeVar
 
 from .base import ChargerBackend, MeterBackend, SwitchBackend
 from .config import (
