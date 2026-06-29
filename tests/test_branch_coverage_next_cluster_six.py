@@ -3,7 +3,7 @@ from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from tests.service_mixins_cases_common import _RuntimeService
+from tests.service_roles_cases_common import _RuntimeService
 from tests.wizard_branch_runtime_cases_common import _namespace
 from venus_evcharger.bootstrap import wizard as wizard_mod
 from venus_evcharger.energy import connectors as connectors_mod

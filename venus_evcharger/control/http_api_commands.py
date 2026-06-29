@@ -22,6 +22,7 @@ from venus_evcharger.control.http_api_command_payloads import (
 from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
 from venus_evcharger.control.http_api_command_contracts import (
     ControlApiIdempotencyStoreLike,
+    ControlApiHttpService,
     ControlApiRateLimiterLike,
     optional_error_payload,
     require_idempotency_store,
@@ -49,7 +50,7 @@ class _LocalControlApiCommand(_LocalControlApiAuth):
     if TYPE_CHECKING:
         _fallback_idempotency_store: ControlApiIdempotencyStore
         _fallback_rate_limiter: ControlApiRateLimiter
-        _service: Any
+        _service: ControlApiHttpService
 
         def _request_state_tokens(self, handler: BaseHTTPRequestHandler) -> set[str]: ...
 

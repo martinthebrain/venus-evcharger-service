@@ -6,10 +6,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from venus_evcharger.core.controller_contracts import ComposableControllerRole as _ComposableControllerRole
+from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
 
 
-class _UpdateCycleLearningSupport(_ComposableControllerRole):
+class _UpdateCycleLearningSupport(ControllerAssemblyContract):
     def _signature_checked_session_started_at(self) -> float | None:
         """Return the stored session marker for the last signature check."""
         checked_session_started_at = getattr(

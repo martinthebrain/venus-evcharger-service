@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
+from venus_evcharger.control.http_api_command_contracts import ControlApiHttpService
 from venus_evcharger.control.http_api_response import _LocalControlApiResponse
 
 
@@ -17,7 +18,7 @@ class _LocalControlApiAuth(_LocalControlApiResponse):
         _control_token: str
         _localhost_only: bool
         _read_token: str
-        _service: Any
+        _service: ControlApiHttpService
         _unix_socket_path: str
         _update_token: str
         _COMMAND_SCOPE_REQUIREMENTS: dict[str, str]

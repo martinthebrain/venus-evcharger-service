@@ -12,6 +12,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from venus_evcharger.control.http_api_command_contracts import ControlApiHttpService
 from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.control.openapi import build_control_api_openapi_spec
@@ -76,7 +77,7 @@ class LocalControlApiHttpServer(_LocalControlApiRouting):
 
     def __init__(
         self,
-        service: Any,
+        service: ControlApiHttpService,
         *,
         host: str,
         port: int,

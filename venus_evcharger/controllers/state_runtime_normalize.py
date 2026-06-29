@@ -8,10 +8,10 @@ from typing import Any
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_tuple
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_learning_phase, normalize_learning_state
-from venus_evcharger.core.controller_contracts import ComposableControllerRole as _ComposableControllerRole
+from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
 
 
-class _StateRuntimeNormalize(_ComposableControllerRole):
+class _StateRuntimeNormalize(ControllerAssemblyContract):
     @staticmethod
     def coerce_runtime_int(value: object, default: int = 0) -> int:
         if isinstance(value, bool):

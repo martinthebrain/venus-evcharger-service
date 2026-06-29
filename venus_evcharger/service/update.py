@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from venus_evcharger.core.return_contracts import (
@@ -22,8 +23,7 @@ class UpdateCycle(ServiceControllerFactory):
     """Static update-cycle delegations."""
 
     def _ensure_virtual_state_defaults(self) -> None:
-        self._ensure_update_controller()
-        self._update_controller.ensure_virtual_state_defaults()
+        self._ensure_update_controller().ensure_virtual_state_defaults()
 
     def _session_state_from_status(
         self,
@@ -32,19 +32,25 @@ class UpdateCycle(ServiceControllerFactory):
         relay_on: bool,
         now: float,
     ) -> tuple[int, float]:
-        self._ensure_update_controller()
         return require_tuple2(
-            self._update_controller.session_state_from_status(self, status, current_total_energy, relay_on, now),
+            self._ensure_update_controller().session_state_from_status(self, status, current_total_energy, relay_on, now),
             "session_state_from_status",
         )
 
     def _startstop_display_for_state(self, relay_on: bool) -> int:
-        self._ensure_update_controller()
-        return require_int(self._update_controller.startstop_display_for_state(self, relay_on), "startstop_display_for_state")
+        now_func = getattr(self, "_time_now", None)
+        raw_now = now_func() if callable(now_func) else time.time()
+        now = float(raw_now) if isinstance(raw_now, (int, float)) else time.time()
+        return require_int(
+            self._ensure_update_controller().startstop_display_for_state(self, relay_on, now),
+            "startstop_display_for_state",
+        )
 
     def _phase_energies_for_total(self, current_total_energy: float) -> dict[str, float]:
-        self._ensure_update_controller()
-        return require_dict(self._update_controller.phase_energies_for_total(self, current_total_energy), "phase_energies_for_total")
+        return require_dict(
+            self._ensure_update_controller().phase_energies_for_total(self, current_total_energy),
+            "phase_energies_for_total",
+        )
 
     def _publish_virtual_state_paths(
         self,
@@ -54,9 +60,8 @@ class UpdateCycle(ServiceControllerFactory):
         startstop_display: int,
         now: float,
     ) -> bool:
-        self._ensure_update_controller()
         return require_bool(
-            self._update_controller.publish_virtual_state_paths(
+            self._ensure_update_controller().publish_virtual_state_paths(
                 current_total_energy,
                 charging_time,
                 session_energy,
@@ -67,28 +72,23 @@ class UpdateCycle(ServiceControllerFactory):
         )
 
     def _update_virtual_state(self, status: int, current_total_energy: float, relay_on: bool) -> bool:
-        self._ensure_update_controller()
         return require_bool(
-            self._update_controller.update_virtual_state(status, current_total_energy, relay_on),
+            self._ensure_update_controller().update_virtual_state(status, current_total_energy, relay_on),
             "update_virtual_state",
         )
 
     def _prepare_update_cycle(self, now: float) -> Any:
-        self._ensure_update_controller()
-        return self._update_controller.prepare_update_cycle(self, now)
+        return self._ensure_update_controller().prepare_update_cycle(self, now)
 
     def _resolve_pm_status_for_update(self, worker_snapshot: dict[str, Any], now: float) -> Any:
-        self._ensure_update_controller()
-        return self._update_controller.resolve_pm_status_for_update(self, worker_snapshot, now)
+        return self._ensure_update_controller().resolve_pm_status_for_update(self, worker_snapshot, now)
 
     def _publish_offline_update(self, now: float) -> bool:
-        self._ensure_update_controller()
-        return require_bool(self._update_controller.publish_offline_update(now), "publish_offline_update")
+        return require_bool(self._ensure_update_controller().publish_offline_update(now), "publish_offline_update")
 
     def _extract_pm_measurements(self, pm_status: dict[str, Any]) -> tuple[bool, float, float, float, float]:
-        self._ensure_update_controller()
         return require_tuple5(
-            self._update_controller.extract_pm_measurements(self, pm_status),
+            self._ensure_update_controller().extract_pm_measurements(self, pm_status),
             "extract_pm_measurements",
         )
 
@@ -101,9 +101,8 @@ class UpdateCycle(ServiceControllerFactory):
         now: float,
         max_age_seconds: float | None = None,
     ) -> tuple[float | None, bool]:
-        self._ensure_update_controller()
         return require_tuple2(
-            self._update_controller.resolve_cached_input_value(
+            self._ensure_update_controller().resolve_cached_input_value(
                 self,
                 value,
                 snapshot_at,
@@ -121,15 +120,13 @@ class UpdateCycle(ServiceControllerFactory):
         now: float,
         auto_mode_active: bool,
     ) -> tuple[float | None, float | None, float | None]:
-        self._ensure_update_controller()
         return require_tuple3(
-            self._update_controller.resolve_auto_inputs(worker_snapshot, now, auto_mode_active),
+            self._ensure_update_controller().resolve_auto_inputs(worker_snapshot, now, auto_mode_active),
             "resolve_auto_inputs",
         )
 
     def _log_auto_relay_change(self, desired_relay: bool) -> None:
-        self._ensure_update_controller()
-        self._update_controller.log_auto_relay_change(self, desired_relay)
+        self._ensure_update_controller().log_auto_relay_change(self, desired_relay)
 
     def _apply_relay_decision(
         self,
@@ -141,9 +138,8 @@ class UpdateCycle(ServiceControllerFactory):
         now: float,
         auto_mode_active: bool,
     ) -> tuple[bool, float, float, bool]:
-        self._ensure_update_controller()
         return require_tuple4(
-            self._update_controller.apply_relay_decision(
+            self._ensure_update_controller().apply_relay_decision(
                 desired_relay,
                 relay_on,
                 pm_status,
@@ -156,8 +152,10 @@ class UpdateCycle(ServiceControllerFactory):
         )
 
     def _derive_status_code(self, relay_on: bool, power: float, auto_mode_active: bool) -> int:
-        self._ensure_update_controller()
-        return require_int(self._update_controller.derive_status_code(self, relay_on, power, auto_mode_active), "derive_status_code")
+        return require_int(
+            self._ensure_update_controller().derive_status_code(self, relay_on, power, auto_mode_active),
+            "derive_status_code",
+        )
 
     def _publish_online_update(
         self,
@@ -169,8 +167,7 @@ class UpdateCycle(ServiceControllerFactory):
         voltage: float,
         now: float,
     ) -> None:
-        self._ensure_update_controller()
-        self._update_controller.publish_online_update(pm_status, status, energy_forward, relay_on, power, voltage, now)
+        self._ensure_update_controller().publish_online_update(pm_status, status, energy_forward, relay_on, power, voltage, now)
 
     def _complete_update_cycle(
         self,
@@ -184,8 +181,7 @@ class UpdateCycle(ServiceControllerFactory):
         battery_soc: float | None,
         grid_power: float | None,
     ) -> bool:
-        self._ensure_update_controller()
-        self._update_controller.complete_update_cycle(
+        self._ensure_update_controller().complete_update_cycle(
             self,
             changed,
             now,
@@ -200,9 +196,7 @@ class UpdateCycle(ServiceControllerFactory):
         return bool(changed)
 
     def _sign_of_life(self) -> bool:
-        self._ensure_update_controller()
-        return require_bool(self._update_controller.sign_of_life(), "sign_of_life")
+        return require_bool(self._ensure_update_controller().sign_of_life(), "sign_of_life")
 
     def _update(self) -> bool:
-        self._ensure_update_controller()
-        return require_bool(self._update_controller.update(), "update")
+        return require_bool(self._ensure_update_controller().update(), "update")

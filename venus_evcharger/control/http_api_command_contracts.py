@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, TypeGuard
+
+from venus_evcharger.control.models import ControlCommand, ControlCommandSource, ControlResult
 
 
 class ControlApiRateLimiterLike(Protocol):
@@ -24,6 +27,45 @@ class ControlApiIdempotencyStoreLike(Protocol):
     def get(self, key: str) -> tuple[str, int, dict[str, Any]] | None: ...  # pragma: no cover
 
     def put(self, key: str, fingerprint: str, status: int, response: dict[str, Any]) -> None: ...  # pragma: no cover
+
+
+class ControlApiEventBusLike(Protocol):
+    """Event-bus contract used by the HTTP event-stream endpoint."""
+
+    def recent(
+        self,
+        *,
+        limit: int,
+        after_seq: int,
+    ) -> Iterable[Mapping[str, Any]]: ...  # pragma: no cover
+
+    def wait_for_next(
+        self,
+        *,
+        after_seq: int,
+        timeout: float,
+    ) -> Mapping[str, Any] | None: ...  # pragma: no cover
+
+
+class ControlApiHttpService(Protocol):
+    """Service boundary required by the local Control API HTTP adapter."""
+
+    def _control_api_capabilities_payload(self) -> dict[str, Any]: ...  # pragma: no cover
+
+    def _control_api_event_bus(self) -> ControlApiEventBusLike: ...  # pragma: no cover
+
+    def _control_command_from_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        source: ControlCommandSource,
+    ) -> ControlCommand: ...  # pragma: no cover
+
+    def _handle_control_command(self, command: ControlCommand) -> ControlResult: ...  # pragma: no cover
+
+    def _state_api_event_snapshot_payload(self) -> dict[str, Any]: ...  # pragma: no cover
+
+    def __getattr__(self, name: str) -> Any: ...  # pragma: no cover
 
 
 def optional_error_payload(response_payload: dict[str, Any]) -> dict[str, Any] | None:

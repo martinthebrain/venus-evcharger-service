@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -73,6 +75,68 @@ FORBIDDEN_FILE_PATTERNS = {
 }
 
 
+@dataclass(frozen=True)
+class _AllowedMultipleInheritance:
+    bases: tuple[str, ...]
+    reason: str
+
+
+ALLOWED_MULTIPLE_INHERITANCE = {
+    "venus_evcharger/dbus_adapter_process_protocols.py": {
+        "DbusAdapterProcessContext": _AllowedMultipleInheritance(
+            bases=(
+                "DbusAdapterRuntimeContext",
+                "DbusAdapterSocketContext",
+                "DbusAdapterIdentityContext",
+                "DbusAdapterLoopContext",
+                "DbusAdapterIoContext",
+                "DbusAdapterHealthContext",
+                "DbusAdapterIntrospectionContext",
+                "DbusAdapterIntrospectionSnapshotContext",
+                "Protocol",
+            ),
+            reason="Protocol-only composition of adapter process contracts.",
+        ),
+    },
+    "venus_evcharger/control/http_api.py": {
+        "_ThreadingLocalControlUnixHttpServer": _AllowedMultipleInheritance(
+            bases=("socketserver.ThreadingMixIn", "socketserver.UnixStreamServer"),
+            reason="stdlib server composition for threaded Unix-domain HTTP.",
+        ),
+    },
+}
+
+EXPECTED_CLASS_BASES = {
+    "venus_evcharger/dbus_adapter_process.py": {
+        "DbusAdapter": ("DbusAdapterLoop",),
+    },
+    "venus_evcharger/update/controller.py": {
+        "UpdateCycleController": ("_UpdateCycleSoftwareUpdate",),
+    },
+    "venus_evcharger/service/factory.py": {
+        "ServiceControllerFactory": (),
+    },
+    "venus_evcharger/service/update.py": {
+        "UpdateCycle": ("ServiceControllerFactory",),
+    },
+    "venus_evcharger/service/auto.py": {
+        "DbusAutoLogic": ("UpdateCycle",),
+    },
+    "venus_evcharger/service/runtime.py": {
+        "RuntimeHelper": ("DbusAutoLogic",),
+    },
+    "venus_evcharger/service/state_publish.py": {
+        "StatePublish": ("RuntimeHelper",),
+    },
+    "venus_evcharger/service/control.py": {
+        "ControlApi": ("_ControlApiRuntime",),
+    },
+    "venus_evcharger_auto_input_helper.py": {
+        "AutoInputHelper": ("_AutoInputHelperConfig",),
+    },
+}
+
+
 def _repo_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -116,8 +180,106 @@ def _check_forbidden_patterns() -> list[str]:
     return failures
 
 
+def _class_base_name(base: ast.expr) -> str:
+    if isinstance(base, ast.Name):
+        return base.id
+    if isinstance(base, ast.Attribute):
+        prefix = _class_base_name(base.value)
+        return f"{prefix}.{base.attr}" if prefix else base.attr
+    return ast.unparse(base)
+
+
+def _multiple_inheritance_classes(path: Path) -> list[tuple[int, str, tuple[str, ...]]]:
+    tree = ast.parse(_repo_text(path), filename=str(path))
+    return [
+        (node.lineno, node.name, tuple(_class_base_name(base) for base in node.bases))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and len(node.bases) > 1
+    ]
+
+
+def _top_level_class_bases(path: Path) -> dict[str, tuple[int, tuple[str, ...]]]:
+    tree = ast.parse(_repo_text(path), filename=str(path))
+    classes: dict[str, tuple[int, tuple[str, ...]]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            classes[node.name] = (node.lineno, tuple(_class_base_name(base) for base in node.bases))
+    return classes
+
+
+def _check_expected_class_bases() -> list[str]:
+    failures: list[str] = []
+    for relative_path, expected_classes in EXPECTED_CLASS_BASES.items():
+        classes = _top_level_class_bases(REPO / relative_path)
+        for class_name, expected_bases in expected_classes.items():
+            if class_name not in classes:
+                failures.append(f"{relative_path}: expected class {class_name} is missing")
+                continue
+            line_number, actual_bases = classes[class_name]
+            if actual_bases != expected_bases:
+                failures.append(
+                    f"{relative_path}:{line_number}: {class_name} direct bases changed "
+                    f"from {expected_bases!r} to {actual_bases!r}"
+                )
+    return failures
+
+
+def _multiple_inheritance_contract_failure(
+    relative_path: str,
+    line_number: int,
+    class_name: str,
+    bases: tuple[str, ...],
+) -> str | None:
+    allowed = ALLOWED_MULTIPLE_INHERITANCE.get(relative_path, {}).get(class_name)
+    if allowed is None:
+        return (
+            f"{relative_path}:{line_number}: unexpected multiple inheritance "
+            f"on {class_name}: {', '.join(bases)}"
+        )
+    if bases != allowed.bases:
+        return (
+            f"{relative_path}:{line_number}: allowed multiple inheritance "
+            f"on {class_name} changed from {allowed.bases!r} to {bases!r}"
+        )
+    return None
+
+
+def _scan_multiple_inheritance_contracts() -> tuple[list[str], set[tuple[str, str]]]:
+    failures: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for path in sorted((REPO / "venus_evcharger").rglob("*.py")):
+        relative_path = str(path.relative_to(REPO))
+        for line_number, class_name, bases in _multiple_inheritance_classes(path):
+            failure = _multiple_inheritance_contract_failure(relative_path, line_number, class_name, bases)
+            if failure:
+                failures.append(failure)
+            else:
+                seen.add((relative_path, class_name))
+    return failures, seen
+
+
+def _missing_allowed_multiple_inheritance(seen: set[tuple[str, str]]) -> list[str]:
+    return [
+        f"{relative_path}: allowed multiple inheritance class {class_name} is missing"
+        for relative_path, classes in ALLOWED_MULTIPLE_INHERITANCE.items()
+        for class_name in classes
+        if (relative_path, class_name) not in seen
+    ]
+
+
+def _check_multiple_inheritance_contract() -> list[str]:
+    failures, seen = _scan_multiple_inheritance_contracts()
+    failures.extend(_missing_allowed_multiple_inheritance(seen))
+    return failures
+
+
 def main() -> int:
-    failures = [*_check_forbidden_substrings(), *_check_forbidden_patterns()]
+    failures = [
+        *_check_forbidden_substrings(),
+        *_check_forbidden_patterns(),
+        *_check_expected_class_bases(),
+        *_check_multiple_inheritance_contract(),
+    ]
     if failures:
         print("Architecture contract violations found:", file=sys.stderr)
         for failure in failures:

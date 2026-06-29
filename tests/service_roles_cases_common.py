@@ -35,18 +35,18 @@ class _RuntimeService(RuntimeHelper):
     _health_code_func = _ServiceRoleDefaults._health_code_func
 
     def _ensure_runtime_support_controller(self):
-        return None
+        return self._runtime_support_controller
 
     def _ensure_auto_input_supervisor(self):
-        return None
+        return self._auto_input_supervisor
 
     def _ensure_shelly_io_controller(self):
-        return None
+        return self._shelly_io_controller
 
 
 class _UpdateService(UpdateCycle):
     def _ensure_update_controller(self):
-        return None
+        return self._update_controller
 
 
 class _AutoService(DbusAutoLogic):
@@ -60,16 +60,16 @@ class _AutoService(DbusAutoLogic):
     _read_version_func = _ServiceRoleDefaults._read_version_func
 
     def _ensure_dbus_input_controller(self):
-        return None
+        return self._dbus_input_controller
 
     def _ensure_auto_controller(self):
-        return None
+        return self._auto_controller
 
     def _ensure_write_controller(self):
-        return None
+        return self._write_controller
 
     def _ensure_bootstrap_controller(self):
-        return None
+        return self._bootstrap_controller
 
 
 class _StateService(StatePublish):
@@ -77,10 +77,10 @@ class _StateService(StatePublish):
     _health_code_func = _ServiceRoleDefaults._health_code_func
 
     def _ensure_state_controller(self):
-        return None
+        return self._state_controller
 
     def _ensure_dbus_publisher(self):
-        return None
+        return self._dbus_publisher
 
 
 class _ControlService(ControlApi):
@@ -88,10 +88,10 @@ class _ControlService(ControlApi):
     _health_code_func = _ServiceRoleDefaults._health_code_func
 
     def _ensure_write_controller(self):
-        return None
+        return self._write_controller
 
     def _ensure_dbus_publisher(self):
-        return None
+        return self._dbus_publisher
 
     def _state_summary(self):
         return "mode=1 enable=1"

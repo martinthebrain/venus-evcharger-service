@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from tests.service_mixins_cases_common import _AutoService, _FactoryService, _RuntimeService, _StateService, _UpdateService
+from tests.service_roles_cases_common import _AutoService, _FactoryService, _RuntimeService, _StateService, _UpdateService
 from venus_evcharger.control import ControlCommand, ControlResult
 from venus_evcharger.runtime.async_mainloop_state import _RuntimeAsyncMainloopState
 
@@ -209,6 +209,7 @@ class _ServiceRolesRuntimeUpdateCases:
         service._update_controller.derive_status_code.return_value = 2
         service._update_controller.sign_of_life.return_value = True
         service._update_controller.update.return_value = True
+        service._time_now = MagicMock(return_value=123.0)
 
         service._ensure_virtual_state_defaults()
         self.assertEqual(service._session_state_from_status(2, 1.5, True, 100.0), (4, 1.5))
@@ -239,7 +240,7 @@ class _ServiceRolesRuntimeUpdateCases:
         controller = service._update_controller
         controller.ensure_virtual_state_defaults.assert_called_once_with()
         controller.session_state_from_status.assert_called_once_with(service, 2, 1.5, True, 100.0)
-        controller.startstop_display_for_state.assert_called_once_with(service, True)
+        controller.startstop_display_for_state.assert_called_once_with(service, True, 123.0)
         controller.phase_energies_for_total.assert_called_once_with(service, 2.5)
         controller.publish_virtual_state_paths.assert_called_once_with(3.0, 4, 5.0, 1, 100.0)
         controller.update_virtual_state.assert_called_once_with(2, 1.5, True)
@@ -594,10 +595,10 @@ class _ServiceRolesRuntimeUpdateCases:
         with self.assertRaisesRegex(TypeError, "enqueue_control_command must return bool"):
             service._handle_write("/Mode", 1)
 
-    def test_auto_logic_mixin_rejects_non_none_health_result(self):
+    def test_auto_logic_mixin_delegates_health_update(self):
         service = _AutoService()
         service._auto_controller = MagicMock()
-        service._auto_controller.set_health.return_value = 1
 
-        with self.assertRaisesRegex(TypeError, "set_health must return None"):
-            service._set_health("running")
+        service._set_health("running", cached=True)
+
+        service._auto_controller.set_health.assert_called_once_with("running", True)

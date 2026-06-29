@@ -4,7 +4,7 @@ import configparser
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from tests.service_mixins_cases_common import _ControlService, _configured_control_service
+from tests.service_roles_cases_common import _ControlService, _configured_control_service
 from venus_evcharger.control import ControlApiAuditTrail, ControlApiIdempotencyStore, ControlApiRateLimiter, ControlCommand
 from venus_evcharger.control.events import ControlApiEventBus
 

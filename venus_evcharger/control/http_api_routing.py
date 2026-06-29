@@ -5,12 +5,13 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any
 
+from venus_evcharger.control.http_api_command_contracts import ControlApiHttpService
 from venus_evcharger.control.http_api_events import _LocalControlApiEvents
 
 
 class _LocalControlApiRouting(_LocalControlApiEvents):
     if TYPE_CHECKING:
-        _service: Any
+        _service: ControlApiHttpService
         _STATE_GET_ENDPOINTS: frozenset[str]
 
         def capabilities_payload(self) -> dict[str, Any]: ...

@@ -43,10 +43,6 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
         svc._control_command_async_enabled = True
         self._start_runtime_executor()
 
-    def _control_command_worker_loop(self: Any) -> None:
-        """Compatibility entry point for older tests; use the serialized executor."""
-        self._runtime_executor_loop()
-
     def _drain_control_commands_once(self: Any) -> bool:
         svc = self.service
         with svc._control_command_lock:

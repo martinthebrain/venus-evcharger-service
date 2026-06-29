@@ -45,10 +45,6 @@ class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
             svc._runtime_executor_event.set()
         return True
 
-    def _update_worker_loop(self: Any) -> None:
-        """Compatibility entry point for older tests; use the serialized executor."""
-        self._runtime_executor_loop()
-
     def _runtime_executor_stop_requested(self: Any) -> bool:
         svc = self.service
         return bool(

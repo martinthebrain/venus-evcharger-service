@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.control import ControlCommand
+from venus_evcharger.control.models import ControlCommandSource
 from venus_evcharger.core.contracts import (
     normalized_state_api_dbus_diagnostics_fields,
     normalized_state_api_runtime_fields,
@@ -25,35 +26,20 @@ def _plain_state_mapping(value: object) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
-if TYPE_CHECKING:  # pragma: no cover
-    from typing import Protocol
-
-    class _WriteControllerLike(Protocol):
-        def build_control_command_from_payload(self, payload: dict[str, Any], source: str = "http") -> ControlCommand: ...
-
-    class _DbusDiagnosticsPublisherLike(Protocol):
-        def _diagnostic_counter_values(self, now: float) -> Mapping[str, Any]: ...
-
-        def _diagnostic_age_values(self, now: float) -> Mapping[str, Any]: ...
-
-
 class _ControlApiStateCore(StatePublish):
     if TYPE_CHECKING:  # pragma: no cover
-        _write_controller: _WriteControllerLike
-        _dbus_publisher: _DbusDiagnosticsPublisherLike
         active_phase_selection: str
         requested_phase_selection: str
         supported_phase_selections: tuple[str, ...]
         service_name: str
         connection_name: str
 
-        def _ensure_write_controller(self) -> None: ...
-
-        def _ensure_dbus_publisher(self) -> None: ...
-
-    def _control_command_from_payload(self, payload: dict[str, Any], source: str = "http") -> ControlCommand:
-        self._ensure_write_controller()
-        command = self._write_controller.build_control_command_from_payload(payload, source=source)
+    def _control_command_from_payload(
+        self,
+        payload: dict[str, Any],
+        source: ControlCommandSource = "http",
+    ) -> ControlCommand:
+        command = self._ensure_write_controller().build_control_command_from_payload(payload, source=source)
         if not isinstance(command, ControlCommand):
             raise TypeError("write controller returned non-ControlCommand payload")
         return command
@@ -81,12 +67,12 @@ class _ControlApiStateCore(StatePublish):
         )
 
     def _state_api_dbus_diagnostics_payload(self) -> dict[str, Any]:
-        self._ensure_dbus_publisher()
+        publisher = self._ensure_dbus_publisher()
         now_func = getattr(self, "_time_now", None)
         raw_now = now_func() if callable(now_func) else time.time()
         now = float(raw_now) if isinstance(raw_now, (int, float)) else time.time()
-        counters = _plain_state_mapping(self._dbus_publisher._diagnostic_counter_values(now))
-        ages = _plain_state_mapping(self._dbus_publisher._diagnostic_age_values(now))
+        counters = _plain_state_mapping(publisher._diagnostic_counter_values(now))
+        ages = _plain_state_mapping(publisher._diagnostic_age_values(now))
         return normalized_state_api_dbus_diagnostics_fields(
             {
                 "ok": True,

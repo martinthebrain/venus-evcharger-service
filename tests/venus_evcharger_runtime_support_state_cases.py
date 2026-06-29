@@ -484,7 +484,6 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         service._update = MagicMock(return_value=True)
         self.assertTrue(controller.schedule_update_cycle())
         service._update.assert_called_once_with()
-        controller._update_worker_loop = controller._update_worker_loop
 
         command = ControlCommand(name="set_start_stop", path="/StartStop", value=1)
         service._handle_control_command = MagicMock(return_value=SimpleNamespace(accepted=True))
@@ -576,17 +575,6 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         service._handle_control_command.assert_called_once()
         self.assertEqual(inbox.remove.call_args_list[-2][0][0], "ignored")
         self.assertEqual(inbox.remove.call_args_list[-1][0][0], "second")
-
-    def test_runtime_executor_compatibility_loops_delegate_to_serialized_executor(self) -> None:
-        service = make_runtime_support_service()
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        controller._runtime_executor_loop = MagicMock()
-
-        controller._update_worker_loop()
-        controller._control_command_worker_loop()
-
-        self.assertEqual(controller._runtime_executor_loop.call_count, 2)
 
     def test_companion_flush_heartbeat_watchdog_start_and_dump_paths(self) -> None:
         service = make_runtime_support_service()

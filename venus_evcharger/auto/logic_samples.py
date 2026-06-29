@@ -28,7 +28,7 @@ from venus_evcharger.core.common import (
     scheduled_mode_snapshot as _scheduled_mode_snapshot,
 )
 from venus_evcharger.core.contracts import normalized_auto_decision_trace, thresholds_ordered
-from venus_evcharger.core.controller_contracts import ComposableControllerRole as _ComposableControllerRole
+from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
 
 AutoSample = tuple[float, float, float]
 AutoDecision = bool | object
@@ -36,7 +36,7 @@ MonthWindow = tuple[tuple[int, int], tuple[int, int]]
 
 
 
-class _AutoDecisionSamples(_ComposableControllerRole):
+class _AutoDecisionSamples(ControllerAssemblyContract):
     @staticmethod
     def get_available_surplus_watts(pv_power: float | int, grid_power: float | int) -> float:
         """Compute PV-backed export as available charging surplus."""
