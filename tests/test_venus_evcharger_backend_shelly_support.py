@@ -20,7 +20,13 @@ from venus_evcharger.backend.shelly_support import (
     resolve_shelly_profile,
     validate_shelly_profile_role,
 )
+from venus_evcharger.backend.shelly_io_requests import ShellyIoRequestsMixin
 from venus_evcharger.backend.shelly_io_types import is_shelly_io_host, require_shelly_io_host
+from venus_evcharger.backend.shelly_io_worker import (
+    _copy_known_status_phase_fields,
+    _numeric_phase_triplet,
+    _phase_tuple,
+)
 
 
 class TestShellyWallboxBackendShellySupport(unittest.TestCase):
@@ -102,6 +108,29 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
             backend.settings = SimpleNamespace(username="user", password="secret", use_digest_auth=False, timeout_seconds=2.0)
             self.assertEqual(backend._auth(), ("user", "secret"))
+
+            response.json.return_value = ["not", "a", "dict"]
+            with self.assertRaisesRegex(ValueError, "Shelly RPC response must be a JSON object"):
+                backend._request_json("http://192.168.1.20/rpc/Test")
+
+    def test_shelly_response_and_phase_status_contracts_cover_invalid_and_valid_edges(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Shelly response must be a JSON object"):
+            ShellyIoRequestsMixin._json_object(["not", "a", "dict"])
+
+        pm_status: dict[str, object] = {}
+        _copy_known_status_phase_fields(
+            {
+                "_phase_selection": "P1_P2",
+                "_phase_powers_w": (1200, 800.0, 0),
+                "_phase_currents_a": [5, 3.5, 0],
+            },
+            pm_status,
+        )
+        self.assertEqual(pm_status["_phase_selection"], "P1_P2")
+        self.assertEqual(pm_status["_phase_powers_w"], (1200.0, 800.0, 0.0))
+        self.assertEqual(pm_status["_phase_currents_a"], (5.0, 3.5, 0.0))
+        self.assertIsNone(_phase_tuple(("bad", 1, 2)))
+        self.assertIsNone(_numeric_phase_triplet(1, True, 3))
 
     def test_shelly_backend_base_can_reset_transport_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

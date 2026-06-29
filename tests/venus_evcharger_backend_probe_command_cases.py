@@ -10,9 +10,15 @@ from tests.venus_evcharger_backend_probe_support import (
     redirect_stdout,
     tempfile,
 )
+from venus_evcharger.backend.probe import _probe_command_payload
 
 
 class TestShellyWallboxBackendProbeCommands(BackendProbeTestCase):
+    def test_probe_command_payload_requires_mapping_payloads(self) -> None:
+        with patch("venus_evcharger.backend.probe.validate_backend_config", return_value=[]):
+            with self.assertRaisesRegex(TypeError, "must return dict"):
+                _probe_command_payload("validate", "/tmp/config.ini")
+
     def test_probe_meter_command_prints_normalized_meter_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             meter_path = self._write_config(

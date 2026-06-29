@@ -2,6 +2,7 @@
 import configparser
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 from venus_evcharger.backend.models import SwitchState
 from venus_evcharger.backend.shelly_contactor_switch import ShellyContactorSwitchBackend
@@ -122,6 +123,10 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
         )
         with self.assertRaisesRegex(ValueError, "Unsupported phase selection"):
             backend.set_phase_selection(cast(Any, "P1_P2_P3"))
+        member = SwitchGroupMember("P1", "bad_switch", Path("/tmp/bad-switch.ini"))
+        with patch.dict("venus_evcharger.backend.registry.SWITCH_BACKENDS", {"bad_switch": lambda *_args, **_kwargs: object()}):
+            with self.assertRaisesRegex(TypeError, "does not implement SwitchBackend"):
+                _child_switch_backend(self._service(MagicMock()), member)
 
     def test_contactor_mode_has_no_direct_switch_power_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

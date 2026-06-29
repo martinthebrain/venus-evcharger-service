@@ -22,6 +22,7 @@ from venus_evcharger.backend.modbus_profiles import (
     load_generic_modbus_charger_profile,
     load_modbus_charger_profile,
 )
+from venus_evcharger.backend.modbus_profile_models import _modbus_scalar
 
 
 class _FakeModbusClient:
@@ -205,3 +206,7 @@ class TestShellyWallboxBackendModbusProfiles(unittest.TestCase):
         client.scalar_values[("holding", 1, "uint16", "big")] = None
         self.assertIsNone(_optional_text_value(field, client))
         self.assertIsNone(_optional_bool(None))
+
+    def test_modbus_scalar_rejects_non_primitive_values(self) -> None:
+        with self.assertRaisesRegex(TypeError, "Unsupported Modbus scalar object"):
+            _modbus_scalar(object())

@@ -4,9 +4,30 @@ from unittest.mock import MagicMock, patch
 
 from tests.control_api_http_cases_common import _FakeHandler
 from venus_evcharger.control import ControlCommand, ControlResult, LocalControlApiHttpServer
+from venus_evcharger.control.http_api_command_contracts import (
+    require_idempotency_store,
+    require_rate_limiter,
+)
+from venus_evcharger.control.http_api_routing import _LocalControlApiRoutingMixin
 
 
 class _ControlApiHttpStateCases:
+    def test_control_api_contract_helpers_reject_invalid_factories(self) -> None:
+        with self.assertRaisesRegex(TypeError, "_control_api_rate_limiter must return"):
+            require_rate_limiter(object())
+        with self.assertRaisesRegex(TypeError, "_control_api_idempotency_store must return"):
+            require_idempotency_store(object())
+
+    def test_state_payload_contracts_reject_non_callable_and_non_mapping_getters(self) -> None:
+        routing = _LocalControlApiRoutingMixin()
+        routing._service = SimpleNamespace(_state_api_health_payload=42)
+        with self.assertRaisesRegex(TypeError, "is not callable"):
+            routing._state_payload("/v1/state/health")
+
+        routing._service = SimpleNamespace(_state_api_health_payload=lambda: ["not", "a", "dict"])
+        with self.assertRaisesRegex(TypeError, "must return dict"):
+            routing._state_payload("/v1/state/health")
+
     def test_capabilities_and_state_get_endpoints_return_payloads(self) -> None:
         service = SimpleNamespace(
             _control_command_from_payload=MagicMock(),

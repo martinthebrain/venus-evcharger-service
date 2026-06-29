@@ -15,6 +15,7 @@ from venus_evcharger.backend.template_support import (
     json_path_value,
     load_template_auth_settings,
     load_template_config,
+    payload_object,
     render_json_payload,
     resolved_url,
 )
@@ -46,6 +47,8 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing response path"):
             json_path_value({"outer": {}}, "outer.missing")
         self.assertEqual(json_path_value({"outer": {"x": 1}}, "outer..x"), 1)
+        with self.assertRaisesRegex(ValueError, "Template backend response must be a JSON object"):
+            payload_object(["not", "a", "dict"])
         self.assertIsNone(render_json_payload(None, {}))
         self.assertIsNone(render_json_payload("   ", {}))
 

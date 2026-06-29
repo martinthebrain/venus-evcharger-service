@@ -552,6 +552,10 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         inbox.load_pending = MagicMock(return_value=[("first", {"kind": "user_command", "path": "/Mode", "value": 2})])
         inbox.coalesce = MagicMock(return_value=[("first", {"kind": "user_command", "path": "/Mode", "value": 2})])
         inbox.remove = MagicMock()
+        service._dbusservice = SimpleNamespace()
+        self.assertFalse(controller._apply_gateway_write_if_supported({"path": "/Mode", "value": 2}))
+
+        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=True))
         self.assertTrue(controller._drain_gateway_core_commands_once())
         service._dbusservice.apply_gateway_write.assert_called_once_with("/Mode", 2)
         inbox.remove.assert_called_once_with("first")
