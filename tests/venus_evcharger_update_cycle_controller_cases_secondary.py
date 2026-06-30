@@ -56,7 +56,7 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
 
     def test_runtime_count_helpers_normalize_invalid_state(self):
         controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        service = SimpleNamespace(
+        service = _phase_switch_mismatch_service(
             _contactor_fault_counts={
                 "contactor-suspected-open": 2,
                 "contactor-suspected-welded": -1,
@@ -88,6 +88,204 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
         self.assertEqual(service._contactor_fault_counts, {})
         self.assertEqual(controller._phase_switch_mismatch_counts(service), {})
         self.assertEqual(service._phase_switch_mismatch_counts, {})
+
+    def test_phase_switch_mismatch_contract_helpers_cover_thresholds_retry_and_lockout(self):
+        service = _phase_switch_mismatch_service(
+            auto_policy=SimpleNamespace(
+                phase=SimpleNamespace(
+                    mismatch_retry_seconds=45.0,
+                    mismatch_lockout_count=2,
+                    mismatch_lockout_seconds=120.0,
+                )
+            )
+        )
+
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_retry_seconds(service), 45.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_threshold(service), 2)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_seconds(service), 120.0)
+
+        count = _UpdateCycleRelay._remember_phase_switch_mismatch(service, "P1_P2", 100.0)
+        self.assertEqual(count, 1)
+        self.assertTrue(service._phase_switch_mismatch_active)
+        self.assertEqual(service._phase_switch_last_mismatch_selection, "P1_P2")
+        self.assertEqual(service._phase_switch_last_mismatch_at, 100.0)
+        self.assertTrue(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1", "P1_P2", 130.0))
+        self.assertTrue(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1", "P1_P2", 100.5))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1", "P1_P2", 145.0))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1_P2", "P1", 130.0))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1_P2", "P1_P2", 130.0))
+
+        service._phase_switch_last_mismatch_selection = None
+        self.assertFalse(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1", "P1_P2", 130.0))
+        service._phase_switch_last_mismatch_selection = "P1_P2"
+        service.auto_policy.phase.mismatch_retry_seconds = 1.0
+        self.assertTrue(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1", "P1_P2", 100.5))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_mismatch_retry_active(service, "P1", "P1_P2", 101.0))
+        service.auto_policy.phase.mismatch_retry_seconds = 45.0
+
+        _UpdateCycleRelay._engage_phase_switch_lockout(service, "P1_P2", 200.0)
+        self.assertEqual(service._phase_switch_lockout_selection, "P1_P2")
+        self.assertEqual(service._phase_switch_lockout_reason, "mismatch-threshold")
+        self.assertEqual(service._phase_switch_lockout_at, 200.0)
+        self.assertEqual(service._phase_switch_lockout_until, 320.0)
+        self.assertTrue(_UpdateCycleRelay._phase_switch_lockout_active(service, 250.0, "P1_P2"))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(service, 250.0, "P1"))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(service, 320.0, "P1_P2"))
+        self.assertIsNone(service._phase_switch_lockout_selection)
+
+    def test_phase_switch_mismatch_contract_helpers_cover_fallbacks_and_normalization(self):
+        service = _phase_switch_mismatch_service(
+            auto_policy=None,
+            auto_phase_mismatch_retry_seconds=75.0,
+            auto_phase_mismatch_lockout_count=4,
+            auto_phase_mismatch_lockout_seconds=600.0,
+            _phase_switch_last_mismatch_selection="P1",
+            _phase_switch_last_mismatch_at=float("nan"),
+        )
+
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_retry_seconds(service), 75.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_threshold(service), 4)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_seconds(service), 600.0)
+        service.auto_phase_mismatch_retry_seconds = -1.0
+        service.auto_phase_mismatch_lockout_count = -3
+        service.auto_phase_mismatch_lockout_seconds = 0.0
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_retry_seconds(service), 0.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_threshold(service), 0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_seconds(service), 0.0)
+        self.assertIsNone(_UpdateCycleRelay._phase_switch_mismatch_timestamp(service, "P1"))
+        self.assertIsNone(_UpdateCycleRelay._phase_switch_mismatch_timestamp(service, "P1_P2"))
+        service._phase_switch_last_mismatch_selection = "P1_P2_P3"
+        service._phase_switch_last_mismatch_at = 10.0
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_timestamp(service, "P1_P2_P3"), 10.0)
+        self.assertIsNone(_UpdateCycleRelay._phase_switch_mismatch_timestamp(service, "P1_P2"))
+
+        self.assertEqual(
+            _UpdateCycleRelay._normalized_phase_switch_mismatch_counts(
+                {
+                    "bad-first": 11,
+                    "P1": -4,
+                    "bad-count": "2",
+                    "P1_P2": 2,
+                    "P1_P2_P3": 4,
+                    "bad": 7,
+                    1: 8,
+                    "P1-bool": False,
+                }
+            ),
+            {"P1": 0, "P1_P2": 2, "P1_P2_P3": 4},
+        )
+        self.assertEqual(
+            _UpdateCycleRelay._normalized_phase_switch_mismatch_counts({"P1": "bad", "P1_P2": 2}),
+            {"P1_P2": 2},
+        )
+        service._phase_switch_mismatch_counts = {"P1": 4, "P1_P2": 6}
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_count(service, "P1"), 4)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_count(service, "P1_P2"), 6)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_count(service, "P1_P2_P3"), 0)
+        self.assertEqual(_UpdateCycleRelay._remember_phase_switch_mismatch(service, "P1", 50.0), 5)
+        self.assertEqual(service._phase_switch_mismatch_counts["P1"], 5)
+
+        _UpdateCycleRelay._engage_phase_switch_lockout(service, "P1", 500.0)
+        self.assertIsNone(service._phase_switch_lockout_selection)
+        self.assertEqual(service._phase_switch_lockout_reason, "")
+        self.assertIsNone(service._phase_switch_lockout_at)
+        self.assertIsNone(service._phase_switch_lockout_until)
+
+        service._phase_switch_mismatch_counts = {"P1": 1, "P1_P2": 2}
+        service._phase_switch_last_mismatch_selection = "P1_P2"
+        service._phase_switch_last_mismatch_at = 600.0
+        _UpdateCycleRelay._clear_phase_switch_mismatch_tracking(service, "P1")
+        self.assertEqual(service._phase_switch_mismatch_counts, {"P1_P2": 2})
+        self.assertEqual(service._phase_switch_last_mismatch_selection, "P1_P2")
+        _UpdateCycleRelay._clear_phase_switch_mismatch_tracking(service, "P1_P2")
+        self.assertEqual(service._phase_switch_mismatch_counts, {})
+        self.assertIs(service._phase_switch_mismatch_active, False)
+        self.assertIsNone(service._phase_switch_last_mismatch_selection)
+        self.assertIsNone(service._phase_switch_last_mismatch_at)
+        service._phase_switch_mismatch_active = True
+        service._phase_switch_mismatch_counts = {"P1": 1}
+        service._phase_switch_last_mismatch_selection = "P1"
+        service._phase_switch_last_mismatch_at = 700.0
+        _UpdateCycleRelay._clear_phase_switch_mismatch_tracking(service)
+        self.assertIs(service._phase_switch_mismatch_active, False)
+        self.assertEqual(service._phase_switch_mismatch_counts, {})
+        self.assertIsNone(service._phase_switch_last_mismatch_selection)
+        self.assertIsNone(service._phase_switch_last_mismatch_at)
+        partial_service = SimpleNamespace(_phase_switch_mismatch_active=True, _phase_switch_mismatch_counts={"P1": 1})
+        _UpdateCycleRelay._clear_phase_switch_mismatch_tracking(partial_service, "P1")
+        self.assertIs(partial_service._phase_switch_mismatch_active, False)
+        self.assertEqual(partial_service._phase_switch_mismatch_counts, {})
+
+    def test_phase_switch_mismatch_contract_helpers_cover_default_and_clamped_policy_values(self):
+        policy_service = _phase_switch_mismatch_service(
+            auto_policy=SimpleNamespace(phase=SimpleNamespace())
+        )
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_retry_seconds(policy_service), 300.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_threshold(policy_service), 3)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_seconds(policy_service), 1800.0)
+
+        policy_service.auto_policy.phase.mismatch_retry_seconds = -5.0
+        policy_service.auto_policy.phase.mismatch_lockout_count = -2
+        policy_service.auto_policy.phase.mismatch_lockout_seconds = -10.0
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_retry_seconds(policy_service), 0.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_threshold(policy_service), 0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_seconds(policy_service), 0.0)
+        self.assertFalse(
+            _UpdateCycleRelay._phase_switch_mismatch_retry_active(policy_service, "P1", "P1_P2", 10.0)
+        )
+
+        legacy_service = _phase_switch_mismatch_service(auto_policy=None)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_retry_seconds(legacy_service), 300.0)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_threshold(legacy_service), 3)
+        self.assertEqual(_UpdateCycleRelay._phase_switch_lockout_seconds(legacy_service), 1800.0)
+        policy_service.auto_policy.phase.mismatch_lockout_seconds = 1.0
+        _UpdateCycleRelay._engage_phase_switch_lockout(policy_service, "P1_P2", 20.0)
+        self.assertEqual(policy_service._phase_switch_lockout_until, 21.0)
+        self.assertTrue(_UpdateCycleRelay._phase_switch_lockout_active(policy_service, 20.5, "P1_P2"))
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(policy_service, 21.0, "P1_P2"))
+
+    def test_phase_switch_mismatch_timestamp_normalizes_empty_selection_to_default_phase(self):
+        service = _phase_switch_mismatch_service(
+            _phase_switch_last_mismatch_selection="",
+            _phase_switch_last_mismatch_at=42.0,
+        )
+
+        self.assertEqual(_UpdateCycleRelay._phase_switch_mismatch_timestamp(service, "P1"), 42.0)
+        self.assertIsNone(_UpdateCycleRelay._phase_switch_mismatch_timestamp(service, "P1_P2"))
+
+    def test_phase_switch_mismatch_contract_helpers_cover_empty_lockout_and_selection_fallbacks(self):
+        service = _phase_switch_mismatch_service(active_phase_selection="P1", requested_phase_selection="P1_P2")
+
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(service, 100.0))
+        service._phase_switch_lockout_selection = "P1_P2"
+        service._phase_switch_lockout_until = None
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(service, 100.0, "P1_P2"))
+        service._phase_switch_lockout_until = float("nan")
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(service, 100.0, "P1_P2"))
+        bare_service = SimpleNamespace()
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(bare_service, 100.0))
+        service._phase_switch_lockout_selection = ""
+        service._phase_switch_lockout_until = 200.0
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(service, 100.0, "P1"))
+        self.assertIsNone(service._phase_switch_lockout_selection)
+        service._phase_switch_lockout_selection = "bad"
+        service._phase_switch_lockout_until = 200.0
+        self.assertFalse(_UpdateCycleRelay._phase_switch_lockout_active(service, 100.0, "P1_P2"))
+        self.assertIsNone(service._phase_switch_lockout_selection)
+
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(service, "P1_P2_P3", "P1"), "P1_P2_P3")
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(service, None, "P1"), "P1")
+
+        service.active_phase_selection = ""
+        service.requested_phase_selection = "P1_P2"
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(service, None, "P1"), "P1_P2")
+        service.requested_phase_selection = ""
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(service, None, "P1_P2_P3"), "P1_P2_P3")
+        service.active_phase_selection = "bad"
+        service.requested_phase_selection = "3P"
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(service, None, "P1"), "P1_P2_P3")
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(service, None, "P1_P2"), "P1_P2_P3")
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(bare_service, None, "P1_P2"), "P1_P2")
 
     def test_relay_helper_edges_cover_health_status_and_learned_current_helpers(self):
         service = _auto_phase_service(
@@ -259,7 +457,7 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
         )
 
     def test_relay_mixin_direct_helper_edges_cover_shadowed_remaining_branches(self):
-        svc = SimpleNamespace(
+        svc = _phase_switch_mismatch_service(
             _worker_poll_interval_seconds=None,
             auto_shelly_soft_fail_seconds=None,
             _charger_backend=object(),
@@ -323,7 +521,14 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
         self.assertEqual(_UpdateCycleRelay.charger_health_override(svc, 100.0), "charger-fault")
         self.assertIsNone(_UpdateCycleRelay._derived_learned_current_target(svc, 100.0))
         self.assertIsNone(_UpdateCycleRelay.apply_charger_current_target(svc, True, 100.0, True))
-        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(SimpleNamespace(active_phase_selection="P1_P2"), None, "P1"), "P1_P2")
+        self.assertEqual(
+            _UpdateCycleRelay._phase_switch_fallback_selection(
+                _phase_switch_mismatch_service(active_phase_selection="P1_P2"),
+                None,
+                "P1",
+            ),
+            "P1_P2",
+        )
         self.assertIsNone(_UpdateCycleRelay._phase_tuple_item(True))
         self.assertIsNone(_UpdateCycleRelay._resolved_phase_tuple((1.0, None, 3.0)))
         self.assertAlmostEqual(_UpdateCycleRelay._phase_voltage(400.0, "P1_P2_P3", "line"), 400.0 / math.sqrt(3.0))
@@ -344,7 +549,7 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
             _UpdateCycleRelay._checked_phase_data({"L1": {"power": True}})
 
     def test_relay_mixin_direct_helper_edges_cover_remaining_small_branches(self):
-        svc = SimpleNamespace(
+        svc = _phase_switch_mismatch_service(
             auto_policy=SimpleNamespace(phase=SimpleNamespace(mismatch_retry_seconds=0.0)),
             _phase_switch_last_mismatch_selection="P1_P2",
             _phase_switch_last_mismatch_at=95.0,
@@ -434,12 +639,5 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
             )
 
     def test_phase_switch_fallback_selection_uses_requested_selection_when_active_normalizes_empty(self):
-        svc = SimpleNamespace(active_phase_selection="", requested_phase_selection="P1_P2")
-        with patch(
-            "venus_evcharger.update.relay_phase_switch_mismatch.normalize_phase_selection",
-            side_effect=["", "P1_P2"],
-        ):
-            self.assertEqual(
-                _UpdateCycleRelay._phase_switch_fallback_selection(svc, None, "P1"),
-                "P1_P2",
-            )
+        svc = _phase_switch_mismatch_service(active_phase_selection="", requested_phase_selection="P1_P2")
+        self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(svc, None, "P1"), "P1_P2")

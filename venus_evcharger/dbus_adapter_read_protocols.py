@@ -7,24 +7,26 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from venus_evcharger.dbus_adapter_read_types import ReadSpec
+from venus_evcharger.dbus_gateway_cache import CacheValueMetadata
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
 class ReadCacheProtocol(Protocol):  # pragma: no cover
     """Cache surface required by scheduled DBus reads."""
 
     @property
-    def services(self) -> Mapping[str, Mapping[str, Any]]: ...
+    def services(self) -> Mapping[str, CommandPayload]: ...
 
     @property
-    def values(self) -> Mapping[str, Mapping[str, Any]]: ...
+    def values(self) -> Mapping[str, CommandPayload]: ...
 
     def update_value(
         self,
         key: str,
-        value: Any,
+        value: object,
         *,
-        metadata: Any | None = None,
-        **metadata_fields: Any,
+        metadata: CacheValueMetadata | None = None,
+        **metadata_fields: object,
     ) -> None: ...
 
     def mark_error(

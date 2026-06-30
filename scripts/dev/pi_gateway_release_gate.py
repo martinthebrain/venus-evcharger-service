@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--settle-seconds", type=float, default=20.0)
     parser.add_argument("--health-wait-seconds", type=float, default=90.0)
     parser.add_argument("--health-poll-seconds", type=float, default=5.0)
+    parser.add_argument("--skip-chaos", action="store_true", help="Skip offline gateway chaos scenarios on the Pi.")
     parser.add_argument("--skip-gui-write", action="store_true")
     return parser
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Run a focused mutmut audit for gateway-critical logic.
+"""Run a focused mutmut audit for gateway and runtime-safety logic.
 
 The audit is intentionally optional and slow.  It mutates one target module at a
 time, writes a full log per target, and creates a compact JSON summary that can
@@ -23,6 +23,11 @@ from pathlib import Path
 DEFAULT_TEST_SELECTION = (
     "tests/test_dbus_gateway_adapter_scheduler.py",
     "tests/test_dbus_gateway_primitives.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_secondary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_tertiary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_septenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quaternary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_octonary.py",
 )
 DEFAULT_TARGETS = (
     "venus_evcharger/dbus_gateway_policy.py",
@@ -36,11 +41,14 @@ DEFAULT_TARGETS = (
     "venus_evcharger/dbus_adapter_write_publish.py",
     "venus_evcharger/dbus_adapter_read.py",
     "venus_evcharger/dbus_adapter_process_health.py",
+    "venus_evcharger/dbus_adapter_process_loop.py",
+    "venus_evcharger/update/learning_signature.py",
+    "venus_evcharger/update/relay_phase_switch_mismatch.py",
 )
 MUTMUT_CACHE = ".mutmut-cache"
 MUTMUT_WORKTREE = "mutants"
-RESULT_WORDS = ("killed", "survived", "timeout", "suspicious", "skipped")
-ATTENTION_WORDS = ("survived", "timeout", "suspicious")
+RESULT_WORDS = ("killed", "survived", "timeout", "suspicious", "skipped", "no_tests")
+ATTENTION_WORDS = ("survived", "timeout", "suspicious", "no_tests")
 TIMEOUT_RETURNCODE = 124
 
 
@@ -164,6 +172,8 @@ def _run_target(
     result_text = results_path.read_text(errors="replace") if results_path.exists() else ""
     log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
     counts = _parse_counts(result_text)
+    if _no_mutant_test_mapping(run_result.returncode, results_result.returncode, counts, log_text):
+        counts["no_tests"] += 1
     duration = time.monotonic() - started
     status = _target_status(run_result.returncode, results_result.returncode, counts, log_text=log_text)
     return TargetResult(
@@ -242,8 +252,9 @@ def _capture_results(*, mutmut: list[str], cwd: Path, results_path: Path) -> sub
 def _parse_counts(text: str) -> dict[str, int]:
     counts = dict.fromkeys(RESULT_WORDS, 0)
     for word in RESULT_WORDS:
-        counts[word] += sum(int(value) for value in re.findall(rf"\b(\d+)\s+{word}\b", text, flags=re.I))
-        counts[word] += len(re.findall(rf":\s+{word}\b", text, flags=re.I))
+        phrase = "no tests" if word == "no_tests" else word
+        counts[word] += sum(int(value) for value in re.findall(rf"\b(\d+)\s+{phrase}\b", text, flags=re.I))
+        counts[word] += len(re.findall(rf":\s+{phrase}\b", text, flags=re.I))
     return counts
 
 
@@ -251,7 +262,7 @@ def _target_status(run_returncode: int, results_returncode: int, counts: dict[st
     if run_returncode == TIMEOUT_RETURNCODE:
         return "timeout"
     if _no_mutant_test_mapping(run_returncode, results_returncode, counts, log_text):
-        return "ok"
+        return "needs_attention"
     if _command_failed(run_returncode, results_returncode):
         return "error"
     return _status_from_counts(counts)

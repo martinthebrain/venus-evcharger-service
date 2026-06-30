@@ -272,7 +272,14 @@ class DbusReadExecutor:
         state.record_member(service, path, value)
 
     def _complete_aggregate(self, key: str, state: AggregateState) -> None:  # pragma: no mutate block
-        self.adapter.cache.update_value(key, **state.payload(key))
+        payload = state.payload(key)
+        self.adapter.cache.update_value(
+            key,
+            payload["value"],
+            source=payload["source"],
+            confidence=payload["confidence"],
+            last_error=payload["last_error"],
+        )
         self._aggregates.discard(key)
 
     def read_busitem(self, service: str, path: str) -> object:  # pragma: no mutate block

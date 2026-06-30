@@ -65,7 +65,7 @@ class _FakeSmartEvseTransport:
         raise AssertionError(f"Unexpected Modbus function code {request.function_code}")
 
 
-def _auto_phase_service(**overrides):
+def _auto_phase_service(**overrides: object) -> SimpleNamespace:
     auto_policy = AutoPolicy()
     auto_policy.phase.upshift_delay_seconds = 10.0
     auto_policy.phase.downshift_delay_seconds = 5.0
@@ -107,30 +107,86 @@ def _auto_phase_service(**overrides):
     return SimpleNamespace(**data)
 
 
-def _learning_service(**overrides):
-    data = {
-        "charging_started_at": 50.0,
-        "learned_charge_power_watts": 1900.0,
-        "learned_charge_power_updated_at": 90.0,
-        "learned_charge_power_state": "stable",
-        "learned_charge_power_learning_since": None,
-        "learned_charge_power_sample_count": 3,
-        "learned_charge_power_phase": "L1",
-        "learned_charge_power_voltage": 230.0,
-        "learned_charge_power_signature_mismatch_sessions": 0,
-        "learned_charge_power_signature_checked_session_started_at": None,
-        "auto_learn_charge_power_enabled": True,
-        "auto_learn_charge_power_start_delay_seconds": 30.0,
-        "auto_learn_charge_power_window_seconds": 180.0,
-        "auto_learn_charge_power_max_age_seconds": 21600.0,
-        "auto_learn_charge_power_min_watts": 500.0,
-        "auto_learn_charge_power_alpha": 0.2,
-        "phase": "L1",
-        "max_current": 16.0,
-        "_last_voltage": 230.0,
-    }
-    data.update(overrides)
-    return SimpleNamespace(**data)
+class LearningServiceStub:
+    charging_started_at: float | None
+    learned_charge_power_watts: float | None
+    learned_charge_power_updated_at: float | None
+    learned_charge_power_state: str
+    learned_charge_power_learning_since: float | None
+    learned_charge_power_sample_count: int
+    learned_charge_power_phase: str | None
+    learned_charge_power_voltage: float | None
+    learned_charge_power_signature_mismatch_sessions: int
+    learned_charge_power_signature_checked_session_started_at: float | None
+    auto_learn_charge_power_enabled: bool
+    auto_learn_charge_power_start_delay_seconds: float
+    auto_learn_charge_power_window_seconds: float
+    auto_learn_charge_power_max_age_seconds: float
+    auto_learn_charge_power_min_watts: float
+    auto_learn_charge_power_alpha: float
+    phase: str
+    max_current: float
+    _last_voltage: float
+
+    def __init__(self, **overrides: object) -> None:
+        self.charging_started_at = 50.0
+        self.learned_charge_power_watts = 1900.0
+        self.learned_charge_power_updated_at = 90.0
+        self.learned_charge_power_state = "stable"
+        self.learned_charge_power_learning_since = None
+        self.learned_charge_power_sample_count = 3
+        self.learned_charge_power_phase = "L1"
+        self.learned_charge_power_voltage = 230.0
+        self.learned_charge_power_signature_mismatch_sessions = 0
+        self.learned_charge_power_signature_checked_session_started_at = None
+        self.auto_learn_charge_power_enabled = True
+        self.auto_learn_charge_power_start_delay_seconds = 30.0
+        self.auto_learn_charge_power_window_seconds = 180.0
+        self.auto_learn_charge_power_max_age_seconds = 21600.0
+        self.auto_learn_charge_power_min_watts = 500.0
+        self.auto_learn_charge_power_alpha = 0.2
+        self.phase = "L1"
+        self.max_current = 16.0
+        self._last_voltage = 230.0
+        for name, value in overrides.items():
+            setattr(self, name, value)
+
+
+def _learning_service(**overrides: object) -> LearningServiceStub:
+    return LearningServiceStub(**overrides)
+
+
+class PhaseSwitchMismatchServiceStub:
+    auto_policy: object | None
+    active_phase_selection: str
+    requested_phase_selection: str
+    _phase_switch_mismatch_active: bool
+    _phase_switch_mismatch_counts: dict[str, int]
+    _phase_switch_last_mismatch_selection: str | None
+    _phase_switch_last_mismatch_at: float | None
+    _phase_switch_lockout_selection: str | None
+    _phase_switch_lockout_reason: str
+    _phase_switch_lockout_at: float | None
+    _phase_switch_lockout_until: float | None
+
+    def __init__(self, **overrides: object) -> None:
+        self.auto_policy = None
+        self.active_phase_selection = "P1"
+        self.requested_phase_selection = "P1"
+        self._phase_switch_mismatch_active = False
+        self._phase_switch_mismatch_counts = {}
+        self._phase_switch_last_mismatch_selection = None
+        self._phase_switch_last_mismatch_at = None
+        self._phase_switch_lockout_selection = None
+        self._phase_switch_lockout_reason = ""
+        self._phase_switch_lockout_at = None
+        self._phase_switch_lockout_until = None
+        for name, value in overrides.items():
+            setattr(self, name, value)
+
+
+def _phase_switch_mismatch_service(**overrides: object) -> PhaseSwitchMismatchServiceStub:
+    return PhaseSwitchMismatchServiceStub(**overrides)
 
 
 

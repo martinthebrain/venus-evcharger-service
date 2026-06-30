@@ -12,6 +12,20 @@ PhaseSelection = Literal["P1", "P1_P2", "P1_P2_P3"]
 SwitchingMode = Literal["direct", "contactor"]
 BackendMode = Literal["combined", "split"]
 
+_PHASE_SELECTION_ALIASES: dict[str, PhaseSelection] = {
+    "P1": "P1",
+    "L1": "P1",
+    "L2": "P1",
+    "L3": "P1",
+    "1P": "P1",
+    "P1_P2": "P1_P2",
+    "P1+P2": "P1_P2",
+    "2P": "P1_P2",
+    "P1_P2_P3": "P1_P2_P3",
+    "P1+P2+P3": "P1_P2_P3",
+    "3P": "P1_P2_P3",
+}
+
 
 def phase_selection_count(value: object) -> int:
     """Return how many energized phases one normalized phase selection represents."""
@@ -25,14 +39,13 @@ def phase_selection_count(value: object) -> int:
 
 def normalize_phase_selection(value: object, default: PhaseSelection = "P1") -> PhaseSelection:
     """Return one normalized phase-selection value."""
+    return normalize_phase_selection_or_none(value) or default
+
+
+def normalize_phase_selection_or_none(value: object) -> PhaseSelection | None:
+    """Return a normalized phase selection only when the input explicitly names one."""
     selection = str(value).strip().upper() if value is not None else ""
-    if selection in {"P1", "L1", "L2", "L3", "1P"}:
-        return "P1"
-    if selection in {"P1_P2", "P1+P2", "2P"}:
-        return "P1_P2"
-    if selection in {"P1_P2_P3", "P1+P2+P3", "3P"}:
-        return "P1_P2_P3"
-    return default
+    return _PHASE_SELECTION_ALIASES.get(selection)
 
 
 def normalize_switching_mode(value: object, default: SwitchingMode = "direct") -> SwitchingMode:

@@ -47,6 +47,23 @@ make typecheck
 make stress
 ```
 
+For DBus gateway or GUI-visible EVCS changes, run the Raspberry-Pi release gate
+when the Pi test target is available:
+
+```bash
+python3 scripts/dev/pi_gateway_release_gate.py \
+  --pi root@192.168.142.129 \
+  --deploy \
+  --configure-host \
+  --start-host-shelly \
+  --restart
+```
+
+This deploys the current workspace to the Pi, drives a host-side Shelly
+simulator over the real network path, runs offline gateway chaos scenarios on
+the Pi, checks gateway health/lifecycle logs, and verifies GUI-visible DBus
+values and writes.
+
 The optional audit target runs the focused pylint audit, a high-severity Bandit
 security audit, spellcheck, and the shell audit when `shellcheck` and `shfmt`
 are installed. The individual `make shell-audit` target requires both system

@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
 
-from pi_gateway_release_gate_common import GateFailure, PiSession
+from pi_gateway_release_gate_common import GateFailure, PiSession, json_object, object_dict
 
 MAX_OLD_COMMAND_AGE_SECONDS = 30.0
 MAX_PENDING_COMMANDS = 80
@@ -18,9 +17,9 @@ MAX_COMMAND_LIFECYCLE_AGE_SECONDS = 300.0
 LIFECYCLE_STATES = {"queued", "coalesced", "applied", "dropped", "deferred", "expired"}
 
 
-def wait_for_healthy_gateway(pi: PiSession, run_dir: str, *, timeout: float, poll_seconds: float) -> dict[str, Any]:
+def wait_for_healthy_gateway(pi: PiSession, run_dir: str, *, timeout: float, poll_seconds: float) -> dict[str, object]:
     deadline = time.time() + max(0.1, float(timeout))
-    last_health: dict[str, Any] = {}
+    last_health: dict[str, object] = {}
     last_failures: list[str] = ["health was not checked"]
     while time.time() < deadline:
         last_health = _health(pi, run_dir)
@@ -31,11 +30,11 @@ def wait_for_healthy_gateway(pi: PiSession, run_dir: str, *, timeout: float, pol
     raise GateFailure("; ".join(last_failures) + f"\nlast_health={json.dumps(last_health, sort_keys=True)}")
 
 
-def _health(pi: PiSession, run_dir: str) -> dict[str, Any]:
+def _health(pi: PiSession, run_dir: str) -> dict[str, object]:
     raw = pi.ssh(f"cat {run_dir.rstrip('/') + '/dbus-health.json'!r}", timeout=8.0)
-    payload = json.loads(raw)
-    health = payload.get("dbus_health")
-    if not isinstance(health, dict):
+    payload = json_object(raw, detail="health.json")
+    health = object_dict(payload.get("dbus_health"))
+    if health is None:
         raise GateFailure("health.json has no dbus_health object")
     return health
 
@@ -50,7 +49,7 @@ def assert_recent_command_lifecycle(pi: PiSession, run_dir: str) -> None:
     _raise_payload_failures(_command_lifecycle_failures(payload), payload)
 
 
-def _health_history_failures(payload: dict[str, Any]) -> list[str]:
+def _health_history_failures(payload: dict[str, object]) -> list[str]:
     age = _payload_age(payload, label="health history")
     failures: list[str] = []
     if age > MAX_HEALTH_HISTORY_AGE_SECONDS:
@@ -64,7 +63,7 @@ def _health_history_failures(payload: dict[str, Any]) -> list[str]:
     return failures
 
 
-def _command_lifecycle_failures(payload: dict[str, Any]) -> list[str]:
+def _command_lifecycle_failures(payload: dict[str, object]) -> list[str]:
     age = _payload_age(payload, label="command lifecycle")
     failures: list[str] = []
     if age > MAX_COMMAND_LIFECYCLE_AGE_SECONDS:
@@ -78,19 +77,19 @@ def _command_lifecycle_failures(payload: dict[str, Any]) -> list[str]:
     return failures
 
 
-def _raise_payload_failures(failures: list[str], payload: dict[str, Any]) -> None:
+def _raise_payload_failures(failures: list[str], payload: dict[str, object]) -> None:
     if failures:
         raise GateFailure("; ".join(failures) + f"\npayload={json.dumps(payload, sort_keys=True)}")
 
 
-def _payload_text(payload: dict[str, Any], key: str) -> str:
+def _payload_text(payload: dict[str, object], key: str) -> str:
     return str(payload.get(key) or "").strip()
 
 
-def _health_failures(health: dict[str, Any]) -> list[str]:
-    queues = health.get("queues", {}) if isinstance(health.get("queues"), dict) else {}
-    eventloop = health.get("eventloop", {}) if isinstance(health.get("eventloop"), dict) else {}
-    freshness = health.get("cache_freshness", {}) if isinstance(health.get("cache_freshness"), dict) else {}
+def _health_failures(health: dict[str, object]) -> list[str]:
+    queues = object_dict(health.get("queues")) or {}
+    eventloop = object_dict(health.get("eventloop")) or {}
+    freshness = object_dict(health.get("cache_freshness")) or {}
     failures: list[str] = []
     failures.extend(_health_state_failures(health))
     failures.extend(_health_queue_failures(queues))
@@ -103,12 +102,9 @@ def _run_path(run_dir: str, filename: str) -> str:
     return run_dir.rstrip("/") + "/" + filename
 
 
-def _latest_jsonl_payload(pi: PiSession, path: str) -> dict[str, Any]:
+def _latest_jsonl_payload(pi: PiSession, path: str) -> dict[str, object]:
     raw = pi.ssh(_latest_jsonl_script(path), timeout=8.0)
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        raise GateFailure(f"{path} latest JSONL entry is not an object")
-    return payload
+    return json_object(raw, detail=f"{path} latest JSONL entry")
 
 
 def _latest_jsonl_script(path: str) -> str:
@@ -130,20 +126,20 @@ def _latest_jsonl_script(path: str) -> str:
     )
 
 
-def _payload_age(payload: dict[str, Any], *, label: str) -> float:
+def _payload_age(payload: dict[str, object], *, label: str) -> float:
     try:
         return max(0.0, time.time() - float(payload.get("at")))
     except (TypeError, ValueError) as error:
         raise GateFailure(f"{label} has invalid timestamp: {payload.get('at')!r}") from error
 
 
-def _health_state_failures(health: dict[str, Any]) -> list[str]:
+def _health_state_failures(health: dict[str, object]) -> list[str]:
     if str(health.get("state")) in {"ok", "degraded"}:
         return []
     return [f"unexpected gateway state {health.get('state')!r}"]
 
 
-def _health_queue_failures(queues: dict[str, Any]) -> list[str]:
+def _health_queue_failures(queues: dict[str, object]) -> list[str]:
     failures: list[str] = []
     if float(queues.get("oldest_command_age_s", 0.0) or 0.0) > MAX_OLD_COMMAND_AGE_SECONDS:
         failures.append(f"old command age {queues.get('oldest_command_age_s')}s")
@@ -152,13 +148,13 @@ def _health_queue_failures(queues: dict[str, Any]) -> list[str]:
     return failures
 
 
-def _health_eventloop_failures(eventloop: dict[str, Any]) -> list[str]:
+def _health_eventloop_failures(eventloop: dict[str, object]) -> list[str]:
     if float(eventloop.get("max_tick_gap_ms_60s", 0.0) or 0.0) <= MAX_TICK_GAP_MS:
         return []
     return [f"event-loop gap {eventloop.get('max_tick_gap_ms_60s')}ms"]
 
 
-def _health_freshness_failures(freshness: dict[str, Any]) -> list[str]:
+def _health_freshness_failures(freshness: dict[str, object]) -> list[str]:
     failures: list[str] = []
     for key in ("grid_power_w", "pv_power_w"):
         failure = _health_freshness_failure(freshness, key)
@@ -167,7 +163,7 @@ def _health_freshness_failures(freshness: dict[str, Any]) -> list[str]:
     return failures
 
 
-def _health_freshness_failure(freshness: dict[str, Any], key: str) -> str:
+def _health_freshness_failure(freshness: dict[str, object], key: str) -> str:
     status = freshness.get(f"{key}_status")
     age = float(freshness.get(f"{key}_age_s", 0.0) or 0.0)
     return f"{key} age {age}s" if status == "fresh" and age > MAX_FRESH_CORE_VALUE_AGE_SECONDS else ""

@@ -4,6 +4,7 @@ import unittest
 from venus_evcharger.backend.models import (
     effective_supported_phase_selections,
     normalize_phase_selection,
+    normalize_phase_selection_or_none,
     normalize_phase_selection_tuple,
     phase_selection_count,
     phase_switch_lockout_active,
@@ -19,6 +20,14 @@ class TestBackendModelHelpers(unittest.TestCase):
         self.assertEqual(phase_selection_count("3P"), 3)
         self.assertEqual(normalize_phase_selection("unknown", "P1_P2"), "P1_P2")
         self.assertEqual(normalize_phase_selection_tuple("", ("P1_P2",)), ("P1_P2",))
+
+    def test_phase_selection_or_none_requires_explicit_supported_layout(self) -> None:
+        self.assertEqual(normalize_phase_selection_or_none("L1"), "P1")
+        self.assertEqual(normalize_phase_selection_or_none("2p"), "P1_P2")
+        self.assertEqual(normalize_phase_selection_or_none("P1+P2+P3"), "P1_P2_P3")
+        self.assertIsNone(normalize_phase_selection_or_none(""))
+        self.assertIsNone(normalize_phase_selection_or_none(None))
+        self.assertIsNone(normalize_phase_selection_or_none("unknown"))
 
     def test_phase_switch_lockout_active_rejects_missing_or_expired_values(self) -> None:
         self.assertFalse(phase_switch_lockout_active(None, 200.0, now=100.0))

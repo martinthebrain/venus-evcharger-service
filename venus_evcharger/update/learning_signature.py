@@ -4,26 +4,50 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Protocol, TypedDict
 
 from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
+from venus_evcharger.core.contracts import finite_float_or_none
+
+
+class _LearningSignatureSnapshot(TypedDict):
+    phase_signature: str | None
+    voltage_signature: float | None
+    signature_mismatch_sessions: int
+    checked_session_started_at: float | None
+
+
+class _LearningSignatureService(Protocol):
+    charging_started_at: float | None
+    learned_charge_power_watts: float | None
+    learned_charge_power_updated_at: float | None
+    learned_charge_power_state: str
+    learned_charge_power_sample_count: int
+    learned_charge_power_phase: str | None
+    learned_charge_power_voltage: float | None
+    learned_charge_power_signature_mismatch_sessions: int
+    learned_charge_power_signature_checked_session_started_at: float | None
+    auto_learn_charge_power_start_delay_seconds: float
 
 
 class _UpdateCycleLearningSignature(ControllerAssemblyContract):
     """Reconcile stable learned power against per-session signatures."""
 
+    def _learning_signature_service(self) -> _LearningSignatureService:
+        """Return the initialized runtime service fields used by signature reconciliation."""
+        service: _LearningSignatureService = self.service
+        return service
+
     def _signature_checked_session_started_at(self) -> float | None:
         """Return the stored session marker for the last signature check."""
-        checked_session_started_at = getattr(
-            self.service,
-            "learned_charge_power_signature_checked_session_started_at",
-            None,
+        checked_session_started_at = (
+            self._learning_signature_service().learned_charge_power_signature_checked_session_started_at
         )
-        return None if checked_session_started_at is None else float(checked_session_started_at)
+        return finite_float_or_none(checked_session_started_at)
 
     def _signature_session_delay_elapsed(self, current_session_started_at: float, now: float) -> bool:
         """Return whether the current session is old enough for signature checks."""
-        minimum_seconds = float(getattr(self.service, "auto_learn_charge_power_start_delay_seconds", 30.0))
+        minimum_seconds = float(self._learning_signature_service().auto_learn_charge_power_start_delay_seconds)
         return (float(now) - current_session_started_at) >= minimum_seconds
 
     def _signature_session_already_checked(self, current_session_started_at: float) -> bool:
@@ -33,30 +57,29 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
 
     def _stable_learned_power(self) -> float | None:
         """Return the current learned power only when the stored state is stable."""
-        learned_power = getattr(self.service, "learned_charge_power_watts", None)
+        svc = self._learning_signature_service()
+        learned_power = svc.learned_charge_power_watts
         current_state = self._normalize_learned_charge_power_state(
-            getattr(self.service, "learned_charge_power_state", "unknown")
+            svc.learned_charge_power_state
         )
         if current_state != "stable" or learned_power is None or float(learned_power) <= 0:
             return None
         return float(learned_power)
 
-    def _signature_preserving_snapshot(self) -> dict[str, Any]:
+    def _signature_preserving_snapshot(self) -> _LearningSignatureSnapshot:
         """Return the current learned-power signature fields in normalized form."""
-        svc = self.service
+        svc = self._learning_signature_service()
         return {
             "phase_signature": self._normalize_learned_charge_power_phase(
-                getattr(svc, "learned_charge_power_phase", None)
+                svc.learned_charge_power_phase
             ),
-            "voltage_signature": getattr(svc, "learned_charge_power_voltage", None),
+            "voltage_signature": finite_float_or_none(svc.learned_charge_power_voltage),
             "signature_mismatch_sessions": max(
                 0,
-                int(getattr(svc, "learned_charge_power_signature_mismatch_sessions", 0)),
+                int(svc.learned_charge_power_signature_mismatch_sessions),
             ),
-            "checked_session_started_at": getattr(
-                svc,
-                "learned_charge_power_signature_checked_session_started_at",
-                None,
+            "checked_session_started_at": finite_float_or_none(
+                svc.learned_charge_power_signature_checked_session_started_at
             ),
         }
 
@@ -79,7 +102,7 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
 
     def _stable_sample_count(self) -> int:
         """Return the persisted sample count clamped to the stable minimum."""
-        current = int(getattr(self.service, "learned_charge_power_sample_count", 0))
+        current = int(self._learning_signature_service().learned_charge_power_sample_count)
         return int(max(self.LEARNED_POWER_STABLE_MIN_SAMPLES, current))
 
     def _phase_change_reset(
@@ -129,7 +152,7 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
 
     def _eligible_signature_session_started_at(self, relay_on: bool, now: float) -> float | None:
         """Return the current charging-session start when signature checks may run."""
-        charging_started_at = getattr(self.service, "charging_started_at", None)
+        charging_started_at = self._learning_signature_service().charging_started_at
         if not relay_on or charging_started_at is None:
             return None
         current_session_started_at = float(charging_started_at)
@@ -147,7 +170,7 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
     ) -> tuple[list[str], float | None]:
         """Return active signature mismatch reasons and the current voltage signature."""
         mismatch_reasons: list[str] = []
-        stored_voltage_signature = getattr(self.service, "learned_charge_power_voltage", None)
+        stored_voltage_signature = self._learning_signature_service().learned_charge_power_voltage
         current_voltage_signature = self._current_learning_voltage_signature(voltage)
         if (
             stored_voltage_signature is not None
@@ -193,12 +216,12 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
         learned_power: float,
         current_phase_signature: str | None,
         current_session_started_at: float,
-        signature_snapshot: dict[str, Any],
+        signature_snapshot: _LearningSignatureSnapshot,
     ) -> bool:
         """Persist one successful per-session signature check."""
         return self._apply_stable_learning(
             learned_power,
-            updated_at=getattr(self.service, "learned_charge_power_updated_at", None),
+            updated_at=self._learning_signature_service().learned_charge_power_updated_at,
             phase_signature=signature_snapshot["phase_signature"] or current_phase_signature,
             voltage_signature=signature_snapshot["voltage_signature"],
             signature_mismatch_sessions=0,
@@ -206,7 +229,7 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
         )
 
     @staticmethod
-    def _signature_mismatch_count(signature_snapshot: dict[str, Any]) -> int:
+    def _signature_mismatch_count(signature_snapshot: _LearningSignatureSnapshot) -> int:
         """Return the incremented mismatch-session count for one signature snapshot."""
         return int(signature_snapshot["signature_mismatch_sessions"]) + 1
 
@@ -228,7 +251,7 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
         power: float,
         current_phase_signature: str | None,
         current_voltage_signature: float | None,
-        signature_snapshot: dict[str, Any],
+        signature_snapshot: _LearningSignatureSnapshot,
     ) -> None:
         """Log the final warning before one learned signature is discarded."""
         logging.warning(
@@ -251,7 +274,7 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
         current_voltage_signature: float | None,
         current_session_started_at: float,
         mismatch_reasons: list[str],
-        signature_snapshot: dict[str, Any],
+        signature_snapshot: _LearningSignatureSnapshot,
     ) -> bool:
         """Persist one mismatching per-session signature check."""
         mismatch_sessions = self._signature_mismatch_count(signature_snapshot)
@@ -275,7 +298,7 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
         )
         return self._apply_stable_learning(
             learned_power,
-            updated_at=getattr(self.service, "learned_charge_power_updated_at", None),
+            updated_at=self._learning_signature_service().learned_charge_power_updated_at,
             phase_signature=signature_snapshot["phase_signature"] or current_phase_signature,
             voltage_signature=signature_snapshot["voltage_signature"],
             signature_mismatch_sessions=mismatch_sessions,

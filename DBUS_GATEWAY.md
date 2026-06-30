@@ -34,6 +34,9 @@ By default the gateway uses `/run/venus-evcharger`:
 - `dbus-cache.json`: atomic read cache snapshot
 - `dbus-cache.seq`: monotonic cache sequence
 - `dbus-health.json`: DBus health summary
+- `dbus-health-history.jsonl`: compact rolling health timeline for field diagnosis
+- `dbus-command-lifecycle.jsonl`: command lifecycle events such as queued,
+  coalesced, applied, deferred, dropped, and expired
 - `dbus-commands/`: command inbox for DBus writes, refreshes, and introspection
 - `core-commands/`: command inbox from GUI DBus writes back to the core service
 
@@ -45,6 +48,11 @@ By default the gateway uses `/run/venus-evcharger`:
 the adapter writes the RAM-backed cache and health files every tick. A positive
 value throttles unchanged snapshot writes, while cache sequence changes still
 flush immediately.
+
+`DbusGatewayHealthLogPath`, `DbusGatewayHealthLogIntervalSeconds`, and
+`DbusGatewayCommandLifecyclePath` control the JSONL diagnostics. These files are
+operational evidence, not control surfaces: readers may tail or archive them,
+but must not derive runtime decisions from them.
 
 ## Read Model
 
@@ -112,6 +120,42 @@ tick because they do not touch Victron DBus.
 Fast read groups must not perform service discovery. For example, PV prefix
 polling may only consume the cached service list. `ListNames()` and
 introspection belong to slow discovery work or explicit requests.
+
+## Release Gate
+
+Gateway changes should be exercised on the Raspberry Pi test target before they
+are considered ready for a real GX device:
+
+```sh
+python3 scripts/dev/pi_gateway_release_gate.py \
+  --pi root@192.168.142.129 \
+  --deploy \
+  --configure-host \
+  --start-host-shelly \
+  --restart
+```
+
+The gate deploys the current workspace to the Pi test directory, starts a
+host-side Shelly simulator, configures the Pi service to use that simulated
+endpoint, runs offline gateway chaos scenarios on the Pi, restarts the Pi
+services, and then checks:
+
+- remote syntax and DBus isolation
+- bounded behavior during simulated DBus hangs, GUI publish bursts, queue
+  overproduction, adapter restart during queued work, and tick pressure
+- exactly one service, adapter, and observer instance
+- gateway health state, queue age, cache freshness, and event-loop gap
+- recent `dbus-health-history.jsonl`
+- GUI-visible EVCS values such as power, current, session energy, and time
+- GUI `/Mode` writes flowing through the gateway back to the core
+- recent `dbus-command-lifecycle.jsonl`
+
+The Pi gate is a pre-release integration check. It does not replace final
+observation on the target GX, but it should catch gateway, queue, GUI-write, and
+Shelly-integration regressions before customer hardware is touched.
+
+Use `--skip-chaos` only when the offline chaos scenarios were already run in the
+same workspace and the current task is strictly about live Pi wiring.
 
 ## Development Rule
 

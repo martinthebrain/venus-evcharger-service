@@ -3,12 +3,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import SupportsFloat, SupportsIndex
+from typing import SupportsFloat, SupportsIndex, TypedDict
 
 PV_TOTAL_AGGREGATE = "pv-total"
 OPTIONAL_MEMBER_FAILED = object()
+
+
+class AggregatePayload(TypedDict):
+    value: float
+    source: str
+    confidence: float
+    last_error: str
 
 
 def aggregate_signature_members(signature: object, aggregate: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
@@ -63,7 +69,7 @@ class AggregateState:
     def complete(self, member_count: int) -> bool:
         return self.index >= member_count
 
-    def payload(self, key: str) -> Mapping[str, object]:  # pragma: no mutate block
+    def payload(self, key: str) -> AggregatePayload:  # pragma: no mutate block
         return {
             "value": self.total,
             "source": ",".join(self.sources) if self.sources else key,
