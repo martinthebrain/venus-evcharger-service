@@ -47,7 +47,7 @@ SESSION_ACTIVE_CURRENT_AMPS = 0.2
 
 
 class DbusAdapterHealth:
-    def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, object]) -> None:  # pragma: no mutate block
+    def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, object]) -> None:
         if not self.health_log_due():
             return
         self._last_health_log_monotonic = time.monotonic()
@@ -56,12 +56,12 @@ class DbusAdapterHealth:
         except (OSError, RuntimeError, TypeError, ValueError):
             logging.debug("Unable to append DBus gateway health history", exc_info=True)
 
-    def health_log_due(self: DbusAdapterHealthContext) -> bool:  # pragma: no mutate block
+    def health_log_due(self: DbusAdapterHealthContext) -> bool:
         if not self.health_log_path or self.health_log_interval_seconds <= 0.0:
             return False
         return bool(time.monotonic() - self._last_health_log_monotonic >= self.health_log_interval_seconds)
 
-    def health_snapshot(self: DbusAdapterHealthContext) -> CommandPayload:  # pragma: no mutate block
+    def health_snapshot(self: DbusAdapterHealthContext) -> CommandPayload:
         current_monotonic = time.monotonic()
         current_time = time.time()
         pending = self.commands.load_pending()
@@ -122,7 +122,7 @@ class DbusAdapterHealth:
             },
         }
 
-    def cache_freshness_snapshot(self: DbusAdapterHealthContext, now: float) -> CommandPayload:  # pragma: no mutate block
+    def cache_freshness_snapshot(self: DbusAdapterHealthContext, now: float) -> CommandPayload:
         return cache_freshness(self.cache, now)
 
     def slo_snapshot(
@@ -132,13 +132,13 @@ class DbusAdapterHealth:
         cache_freshness: Mapping[str, object],
         now: float,
         current_monotonic: float,
-    ) -> CommandPayload:  # pragma: no mutate block
+    ) -> CommandPayload:
         observed = self.slo_observed(queue_health, cache_freshness, now, current_monotonic)
         thresholds = self.slo_thresholds()
         checks = slo_checks_from_observed(observed, thresholds)
         return slo_payload(checks, slo_targets(thresholds), observed)
 
-    def slo_thresholds(self: DbusAdapterHealthContext) -> SloThresholds:  # pragma: no mutate block
+    def slo_thresholds(self: DbusAdapterHealthContext) -> SloThresholds:
         return SloThresholds(
             gui_max_age_seconds=self.slo_gui_max_age_seconds,
             core_read_max_age_seconds=self.slo_core_read_max_age_seconds,
@@ -154,7 +154,7 @@ class DbusAdapterHealth:
         cache_freshness: Mapping[str, object],
         now: float,
         current_monotonic: float,
-    ) -> dict[str, float]:  # pragma: no mutate block
+    ) -> dict[str, float]:
         eventloop = self.tick_health.snapshot(now=current_monotonic)
         measurement_age = self.max_cached_path_age_for_paths(GUI_MEASUREMENT_FRESHNESS_PATHS, now)
         control_age = self.max_cached_path_age_for_paths(GUI_CONTROL_FRESHNESS_PATHS, now)
@@ -194,7 +194,7 @@ class DbusAdapterHealth:
             return 0.0
         return cached_entry_float(entry)
 
-    def apply_slo_regulation(self: DbusAdapterHealthContext) -> None:  # pragma: no mutate block
+    def apply_slo_regulation(self: DbusAdapterHealthContext) -> None:
         now = time.time()
         pending = DbusCommandInbox.coalesce(self.commands.load_pending())
         queue_age = oldest_command_age(pending, now)
@@ -221,13 +221,13 @@ class DbusAdapterHealth:
         if self.circuit.state() != "ok":
             self.quiet_discovery_and_introspection(now)
 
-    def quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:  # pragma: no mutate block
+    def quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:
         quiet_until = now + 60.0
         self.discovery.next_scan_at = max(self.discovery.next_scan_at, quiet_until)
         self._last_introspection_full_scan_at = max(self._last_introspection_full_scan_at, now)
 
-    def max_cached_path_age_for_paths(self: DbusAdapterHealthContext, paths: set[str], now: float) -> float:  # pragma: no mutate block
+    def max_cached_path_age_for_paths(self: DbusAdapterHealthContext, paths: set[str], now: float) -> float:
         return max_cached_path_age(self.cache.values, self.service_name, paths, now)
 
-    def missing_cached_path_count_for_paths(self: DbusAdapterHealthContext, paths: set[str]) -> float:  # pragma: no mutate block
+    def missing_cached_path_count_for_paths(self: DbusAdapterHealthContext, paths: set[str]) -> float:
         return missing_cached_path_count(self.cache.values, self.service_name, paths)

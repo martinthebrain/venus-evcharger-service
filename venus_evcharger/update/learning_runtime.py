@@ -4,25 +4,56 @@
 from __future__ import annotations
 
 import math
-from typing import Any, ClassVar
+from typing import ClassVar, Protocol, SupportsFloat, SupportsIndex, TypeAlias, TypedDict
 
 from venus_evcharger.core.contracts import normalize_learning_phase, normalize_learning_state
 from venus_evcharger.update.victron_ess_balance import _UpdateCycleVictronEssBalance
+
+_NumericInput: TypeAlias = str | bytes | bytearray | SupportsFloat | SupportsIndex | None
+
+
+class _LearningRuntimeService(Protocol):
+    learned_charge_power_state: str
+    learned_charge_power_watts: float | None
+    learned_charge_power_updated_at: float | None
+    learned_charge_power_learning_since: float | None
+    learned_charge_power_sample_count: int
+    learned_charge_power_phase: str | None
+    learned_charge_power_voltage: float | None
+    learned_charge_power_signature_mismatch_sessions: int
+    learned_charge_power_signature_checked_session_started_at: float | None
+    phase: str
+    max_current: float
+    voltage_mode: str
+    _last_voltage: float | None
+    auto_learn_charge_power_max_age_seconds: float
+
+
+class _LearningTrackingSnapshot(TypedDict):
+    state: str
+    power: float | None
+    updated_at: float | None
+    learning_since: float | None
+    sample_count: int
+    phase_signature: str | None
+    voltage_signature: float | None
+    signature_mismatch_sessions: int
+    checked_session_started_at: float | None
 
 
 class _UpdateCycleLearningRuntime(_UpdateCycleVictronEssBalance):
     LEARNED_POWER_STABLE_TOLERANCE_RATIO: ClassVar[float]
     LEARNED_POWER_STABLE_TOLERANCE_WATTS: ClassVar[float]
     LEARNED_POWER_VOLTAGE_TOLERANCE_VOLTS: ClassVar[float]
-    service: Any
+    service: _LearningRuntimeService
 
     @staticmethod
-    def _normalize_learned_charge_power_state(value: Any) -> str:
+    def _normalize_learned_charge_power_state(value: object) -> str:
         """Return one supported learned-power state string."""
         return str(normalize_learning_state(value))
 
     @staticmethod
-    def _normalize_learned_charge_power_phase(value: Any) -> str | None:
+    def _normalize_learned_charge_power_phase(value: object) -> str | None:
         """Return one supported phase signature for a learned charging profile."""
         normalized = normalize_learning_phase(value)
         return None if normalized is None else str(normalized)
@@ -30,7 +61,7 @@ class _UpdateCycleLearningRuntime(_UpdateCycleVictronEssBalance):
     @classmethod
     def _set_learning_tracking(
         cls,
-        svc: Any,
+        svc: _LearningRuntimeService,
         *,
         state: str,
         learned_power: float | None,
@@ -54,56 +85,88 @@ class _UpdateCycleLearningRuntime(_UpdateCycleVictronEssBalance):
             signature_mismatch_sessions=signature_mismatch_sessions,
             checked_session_started_at=checked_session_started_at,
         )
-        attr_map = {
-            "state": "learned_charge_power_state",
-            "power": "learned_charge_power_watts",
-            "updated_at": "learned_charge_power_updated_at",
-            "learning_since": "learned_charge_power_learning_since",
-            "sample_count": "learned_charge_power_sample_count",
-            "phase_signature": "learned_charge_power_phase",
-            "voltage_signature": "learned_charge_power_voltage",
-            "signature_mismatch_sessions": "learned_charge_power_signature_mismatch_sessions",
-            "checked_session_started_at": "learned_charge_power_signature_checked_session_started_at",
-        }
-        changed = False
-        for key, attr_name in attr_map.items():
-            if getattr(svc, attr_name, None) != normalized[key]:
-                changed = True
-            setattr(svc, attr_name, normalized[key])
+        changed = cls._learning_tracking_changed(svc, normalized)
+        cls._apply_learning_tracking(svc, normalized)
         return changed
 
     @staticmethod
-    def _normalized_learning_power_value(value: Any) -> float | None:
+    def _learning_tracking_changed(
+        svc: _LearningRuntimeService,
+        normalized: _LearningTrackingSnapshot,
+    ) -> bool:
+        """Return whether a normalized learned-power snapshot differs from the service."""
+        return any(
+            (
+                getattr(svc, "learned_charge_power_state", None) != normalized["state"],
+                getattr(svc, "learned_charge_power_watts", None) != normalized["power"],
+                getattr(svc, "learned_charge_power_updated_at", None) != normalized["updated_at"],
+                getattr(svc, "learned_charge_power_learning_since", None) != normalized["learning_since"],
+                getattr(svc, "learned_charge_power_sample_count", None) != normalized["sample_count"],
+                getattr(svc, "learned_charge_power_phase", None) != normalized["phase_signature"],
+                getattr(svc, "learned_charge_power_voltage", None) != normalized["voltage_signature"],
+                getattr(svc, "learned_charge_power_signature_mismatch_sessions", None)
+                != normalized["signature_mismatch_sessions"],
+                getattr(svc, "learned_charge_power_signature_checked_session_started_at", None)
+                != normalized["checked_session_started_at"],
+            )
+        )
+
+    @staticmethod
+    def _apply_learning_tracking(
+        svc: _LearningRuntimeService,
+        normalized: _LearningTrackingSnapshot,
+    ) -> None:
+        """Store a normalized learned-power snapshot on the service."""
+        svc.learned_charge_power_state = normalized["state"]
+        svc.learned_charge_power_watts = normalized["power"]
+        svc.learned_charge_power_updated_at = normalized["updated_at"]
+        svc.learned_charge_power_learning_since = normalized["learning_since"]
+        svc.learned_charge_power_sample_count = normalized["sample_count"]
+        svc.learned_charge_power_phase = normalized["phase_signature"]
+        svc.learned_charge_power_voltage = normalized["voltage_signature"]
+        svc.learned_charge_power_signature_mismatch_sessions = normalized["signature_mismatch_sessions"]
+        svc.learned_charge_power_signature_checked_session_started_at = normalized["checked_session_started_at"]
+
+    @staticmethod
+    def _normalized_learning_power_value(value: _NumericInput) -> float | None:
         """Return the normalized learned charging power in watts."""
         return None if value is None else round(float(value), 1)
 
     @staticmethod
-    def _normalized_learning_timestamp(value: Any) -> float | None:
+    def _normalized_learning_timestamp(value: _NumericInput) -> float | None:
         """Return one normalized learned-power timestamp."""
         return None if value is None else float(value)
 
     @staticmethod
-    def _normalized_learning_count(value: Any) -> int:
+    def _normalized_learning_count(value: int) -> int:
         """Return one normalized non-negative learning counter."""
         return max(0, int(value))
 
     @classmethod
-    def _normalized_learning_tracking_values(cls, **values: Any) -> dict[str, Any]:
+    def _normalized_learning_tracking_values(
+        cls,
+        *,
+        state: str,
+        learned_power: float | None,
+        updated_at: float | None,
+        learning_since: float | None,
+        sample_count: int,
+        phase_signature: str | None,
+        voltage_signature: float | None,
+        signature_mismatch_sessions: int,
+        checked_session_started_at: float | None,
+    ) -> _LearningTrackingSnapshot:
         """Normalize one coherent learned-power snapshot before storing it on the service."""
         return {
-            "state": cls._normalize_learned_charge_power_state(values["state"]),
-            "power": cls._normalized_learning_power_value(values["learned_power"]),
-            "updated_at": cls._normalized_learning_timestamp(values["updated_at"]),
-            "learning_since": cls._normalized_learning_timestamp(values["learning_since"]),
-            "sample_count": cls._normalized_learning_count(values["sample_count"]),
-            "phase_signature": cls._normalize_learned_charge_power_phase(values["phase_signature"]),
-            "voltage_signature": cls._normalized_learning_power_value(values["voltage_signature"]),
-            "signature_mismatch_sessions": cls._normalized_learning_count(
-                values["signature_mismatch_sessions"]
-            ),
-            "checked_session_started_at": cls._normalized_learning_timestamp(
-                values["checked_session_started_at"]
-            ),
+            "state": cls._normalize_learned_charge_power_state(state),
+            "power": cls._normalized_learning_power_value(learned_power),
+            "updated_at": cls._normalized_learning_timestamp(updated_at),
+            "learning_since": cls._normalized_learning_timestamp(learning_since),
+            "sample_count": cls._normalized_learning_count(sample_count),
+            "phase_signature": cls._normalize_learned_charge_power_phase(phase_signature),
+            "voltage_signature": cls._normalized_learning_power_value(voltage_signature),
+            "signature_mismatch_sessions": cls._normalized_learning_count(signature_mismatch_sessions),
+            "checked_session_started_at": cls._normalized_learning_timestamp(checked_session_started_at),
         }
 
     @classmethod

@@ -15,22 +15,44 @@ select = [
 
 [tool.mutmut]
 source_paths = ["venus_evcharger"]
-only_mutate = [
-    "venus_evcharger/dbus_gateway_policy.py",
-    "venus_evcharger/dbus_gateway_commands.py",
-    "venus_evcharger/dbus_gateway_cache.py",
-    "venus_evcharger/dbus_gateway_core.py",
-    "venus_evcharger/dbus_gateway_client.py",
-    "venus_evcharger/dbus_gateway_latency.py",
-    "venus_evcharger/dbus_adapter_write_health.py",
-    "venus_evcharger/dbus_adapter_write_core.py",
-    "venus_evcharger/dbus_adapter_write_publish.py",
-    "venus_evcharger/dbus_adapter_read.py",
-    "venus_evcharger/dbus_adapter_process_health.py",
-]
+only_mutate = ["venus_evcharger/backend/shelly_support.py"]
 also_copy = ["venus_evcharger_dbus_adapter.py"]
 pytest_add_cli_args = ["-k", "not socket"]
 pytest_add_cli_args_test_selection = [
     "tests/test_dbus_gateway_adapter_scheduler.py",
     "tests/test_dbus_gateway_primitives.py",
+    "tests/test_core_dbus_backpressure.py",
+    "tests/test_auto_logic_types.py",
+    "tests/test_venus_evcharger_auto_policy.py",
+    "tests/test_venus_evcharger_auto_controller.py",
+    "tests/venus_evcharger_auto_controller_cases_primary.py",
+    "tests/venus_evcharger_auto_controller_cases_recovery.py",
+    "tests/test_venus_evcharger_backend_shelly_meter.py",
+    "tests/test_venus_evcharger_backend_shelly_support.py",
+    "tests/test_venus_evcharger_backend_switch.py",
+    "tests/test_venus_evcharger_shelly_io_controller.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_primary.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_secondary.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_tertiary.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_quaternary.py",
+    "tests/test_venus_evcharger_update_cycle_controller.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_learning.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_runtime.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_victron_adaptive.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_victron_core.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_primary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_secondary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_tertiary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quaternary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quinary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_senary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_septenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_octonary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_nonary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_denary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_undenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_duodenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_trecenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quattuordenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quindenary.py",
 ]

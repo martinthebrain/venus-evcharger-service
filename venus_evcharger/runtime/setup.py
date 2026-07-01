@@ -26,9 +26,9 @@ from venus_evcharger.runtime.setup_support import (
     default_auto_metrics,
     empty_worker_snapshot as _empty_worker_snapshot,
     initialize_runtime_override_state,
-    initialize_software_update_runtime_state,
     initialize_victron_balance_runtime_state,
 )
+from venus_evcharger.runtime.software_update_setup import initialize_software_update_runtime_state
 
 WorkerSnapshot = dict[str, Any]
 

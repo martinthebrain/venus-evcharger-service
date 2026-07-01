@@ -641,3 +641,492 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
     def test_phase_switch_fallback_selection_uses_requested_selection_when_active_normalizes_empty(self):
         svc = _phase_switch_mismatch_service(active_phase_selection="", requested_phase_selection="P1_P2")
         self.assertEqual(_UpdateCycleRelay._phase_switch_fallback_selection(svc, None, "P1"), "P1_P2")
+
+    def test_phase_switch_policy_contract_helpers_cover_candidate_delay_and_staging_edges(self):
+        service = _auto_phase_service(
+            _auto_phase_target_candidate="P1_P2",
+            _auto_phase_target_since=80.0,
+            _last_confirmed_pm_status={"output": False},
+            _last_confirmed_pm_status_at=99.5,
+            _peek_pending_relay_command=MagicMock(return_value=(None, None)),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(service, "P1", "P1_P2"), 10.0)
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(service, "P1_P2", "P1"), 5.0)
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(service, "P1", "P1"), 5.0)
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(service, "P1_P2", "P1_P2"), 5.0)
+        default_policy_service = _auto_phase_service(auto_policy=SimpleNamespace(phase=SimpleNamespace()))
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(default_policy_service, "P1", "P1_P2"), 120.0)
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(default_policy_service, "P1_P2", "P1"), 30.0)
+        service.auto_policy.phase.upshift_delay_seconds = -10.0
+        service.auto_policy.phase.downshift_delay_seconds = -5.0
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(service, "P1", "P1_P2"), 0.0)
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(service, "P1_P2", "P1"), 0.0)
+        service.auto_policy = None
+        self.assertEqual(controller._auto_phase_switch_delay_seconds(service, "P1", "P1_P2"), 0.0)
+
+        controller._clear_auto_phase_candidate(service)
+        self.assertIsNone(service._auto_phase_target_candidate)
+        self.assertIsNone(service._auto_phase_target_since)
+        self.assertFalse(controller._auto_phase_candidate_ready(service, "P1", "P1_P2", 100.0))
+        self.assertEqual(service._auto_phase_target_candidate, "P1_P2")
+        self.assertEqual(service._auto_phase_target_since, 100.0)
+        service._auto_phase_target_since = None
+        self.assertFalse(controller._auto_phase_candidate_ready(service, "P1", "P1_P2", 101.0))
+        self.assertEqual(service._auto_phase_target_since, 101.0)
+        bare_candidate_service = SimpleNamespace()
+        self.assertFalse(controller._auto_phase_candidate_ready(bare_candidate_service, "P1", "P1_P2", 102.0))
+        self.assertEqual(bare_candidate_service._auto_phase_target_candidate, "P1_P2")
+        self.assertEqual(bare_candidate_service._auto_phase_target_since, 102.0)
+        missing_since_service = SimpleNamespace(_auto_phase_target_candidate="P1_P2")
+        self.assertFalse(controller._auto_phase_candidate_ready(missing_since_service, "P1", "P1_P2", 103.0))
+        self.assertEqual(missing_since_service._auto_phase_target_since, 103.0)
+        service.auto_policy = _auto_phase_service().auto_policy
+        service._auto_phase_target_candidate = "P1_P2"
+        service._auto_phase_target_since = 90.0
+        self.assertFalse(controller._auto_phase_candidate_ready(service, "P1", "P1_P2", 99.9))
+        self.assertTrue(controller._auto_phase_candidate_ready(service, "P1", "P1_P2", 100.0))
+        with patch.object(UpdateCycleController, "_auto_phase_switch_delay_seconds", return_value=10.0) as delay:
+            self.assertTrue(controller._auto_phase_candidate_ready(service, "P1", "P1_P2", 100.0))
+        delay.assert_called_once_with(service, "P1", "P1_P2")
+
+        controller._stage_phase_switch(service, "P1_P2", 123.0, resume_relay=False)
+        self.assertEqual(service.requested_phase_selection, "P1_P2")
+        self.assertEqual(service._phase_switch_pending_selection, "P1_P2")
+        self.assertEqual(service._phase_switch_state, controller.PHASE_SWITCH_WAITING_STATE)
+        self.assertEqual(service._phase_switch_requested_at, 123.0)
+        self.assertIsNone(service._phase_switch_stable_until)
+        self.assertFalse(service._phase_switch_resume_relay)
+
+    def test_phase_switch_policy_contract_helpers_cover_downshift_threshold_edges(self):
+        service = _auto_phase_service()
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        policy = service.auto_policy.phase
+
+        self.assertIsNone(
+            controller._downshift_auto_phase_target(
+                service,
+                policy,
+                ("P1", "P1_P2"),
+                "P1",
+                0,
+                0.0,
+                230.0,
+            )
+        )
+        self.assertEqual(
+            controller._downshift_auto_phase_target(
+                service,
+                policy,
+                ("P1", "P1_P2"),
+                "P1_P2",
+                1,
+                2609.9,
+                230.0,
+            ),
+            ("P1", "phase-downshift", 2610.0),
+        )
+        self.assertIsNone(
+            controller._downshift_auto_phase_target(
+                service,
+                policy,
+                ("P1", "P1_P2"),
+                "P1_P2",
+                1,
+                2610.0,
+                230.0,
+            )
+        )
+        default_policy = SimpleNamespace()
+        self.assertEqual(
+            controller._downshift_auto_phase_target(
+                service,
+                default_policy,
+                ("P1", "P1_P2"),
+                "P1_P2",
+                1,
+                2609.9,
+                230.0,
+            ),
+            ("P1", "phase-downshift", 2610.0),
+        )
+        policy.downshift_margin_watts = 9999.0
+        self.assertIsNone(
+            controller._downshift_auto_phase_target(
+                service,
+                policy,
+                ("P1", "P1_P2"),
+                "P1_P2",
+                1,
+                0.0,
+                230.0,
+            )
+        )
+        service.min_current = 0.0
+        self.assertIsNone(
+            controller._downshift_auto_phase_target(
+                service,
+                policy,
+                ("P1", "P1_P2"),
+                "P1_P2",
+                1,
+                -1.0,
+                230.0,
+            )
+        )
+
+    def test_phase_switch_policy_contract_helpers_cover_apply_success_and_staged_paths(self):
+        staged_service = _auto_phase_service(
+            _phase_selection_requires_pause=MagicMock(return_value=True),
+            _peek_pending_relay_command=MagicMock(return_value=(False, 99.0)),
+            _auto_phase_target_candidate="P1_P2",
+            _auto_phase_target_since=80.0,
+        )
+        controller = UpdateCycleController(staged_service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertFalse(controller._apply_auto_phase_target(staged_service, "P1_P2", True, False, 100.0))
+        self.assertEqual(staged_service.requested_phase_selection, "P1_P2")
+        self.assertEqual(staged_service._phase_switch_pending_selection, "P1_P2")
+        self.assertEqual(staged_service._phase_switch_state, controller.PHASE_SWITCH_WAITING_STATE)
+        self.assertEqual(staged_service._phase_switch_requested_at, 100.0)
+        self.assertTrue(staged_service._phase_switch_resume_relay)
+        self.assertIsNone(staged_service._auto_phase_target_candidate)
+        staged_service._save_runtime_state.assert_called_once()
+
+        applied_service = _auto_phase_service(
+            active_phase_selection="P1",
+            requested_phase_selection="P1",
+            _phase_selection_requires_pause=MagicMock(return_value=False),
+            _apply_phase_selection=MagicMock(return_value="P1_P2"),
+            _phase_switch_mismatch_counts={"P1_P2": 2},
+            _phase_switch_mismatch_active=True,
+            _phase_switch_last_mismatch_selection="P1_P2",
+            _phase_switch_last_mismatch_at=90.0,
+            _phase_switch_lockout_selection="P1_P2",
+            _phase_switch_lockout_reason="mismatch-threshold",
+            _phase_switch_lockout_at=80.0,
+            _phase_switch_lockout_until=180.0,
+            _auto_phase_target_candidate="P1_P2",
+            _auto_phase_target_since=80.0,
+        )
+
+        with patch.object(controller, "_clear_phase_switch_mismatch_tracking") as clear_mismatch:
+            self.assertIsNone(controller._apply_auto_phase_target(applied_service, "P1_P2", True, False, 100.0))
+        clear_mismatch.assert_called_once_with(applied_service, "P1_P2")
+        applied_service._apply_phase_selection.assert_called_once_with("P1_P2")
+        self.assertEqual(applied_service.requested_phase_selection, "P1_P2")
+        self.assertEqual(applied_service.active_phase_selection, "P1_P2")
+        self.assertIsNone(applied_service._phase_switch_lockout_selection)
+        self.assertIsNone(applied_service._auto_phase_target_candidate)
+        applied_service._save_runtime_state.assert_called_once()
+
+        invalid_lockout_service = _auto_phase_service(
+            active_phase_selection="P1_P2",
+            requested_phase_selection="P1_P2",
+            _phase_selection_requires_pause=MagicMock(return_value=False),
+            _apply_phase_selection=MagicMock(return_value="P1"),
+            _phase_switch_lockout_selection="bad-selection",
+            _phase_switch_lockout_reason="mismatch-threshold",
+            _phase_switch_lockout_at=80.0,
+            _phase_switch_lockout_until=180.0,
+        )
+        self.assertIsNone(controller._apply_auto_phase_target(invalid_lockout_service, "P1", True, False, 100.0))
+        self.assertIsNone(invalid_lockout_service._phase_switch_lockout_selection)
+        self.assertEqual(invalid_lockout_service._phase_switch_lockout_reason, "")
+        self.assertIsNone(invalid_lockout_service._phase_switch_lockout_at)
+        self.assertIsNone(invalid_lockout_service._phase_switch_lockout_until)
+
+        relay_on_fallback_service = _auto_phase_service(
+            _phase_selection_requires_pause=MagicMock(return_value=True),
+            _peek_pending_relay_command=MagicMock(return_value=(None, None)),
+            _last_confirmed_pm_status={"output": False},
+            _last_confirmed_pm_status_at=0.0,
+            _apply_phase_selection=MagicMock(return_value="P1_P2"),
+        )
+        self.assertFalse(controller._apply_auto_phase_target(relay_on_fallback_service, "P1_P2", True, True, 100.0))
+        relay_on_fallback_service._apply_phase_selection.assert_not_called()
+
+        confirmed_output_service = _auto_phase_service(
+            _phase_selection_requires_pause=MagicMock(return_value=True),
+            _peek_pending_relay_command=MagicMock(return_value=(None, None)),
+            _last_confirmed_pm_status={"output": True},
+            _last_confirmed_pm_status_at=99.5,
+            _apply_phase_selection=MagicMock(return_value="P1_P2"),
+        )
+        self.assertFalse(controller._apply_auto_phase_target(confirmed_output_service, "P1_P2", True, False, 100.0))
+        confirmed_output_service._apply_phase_selection.assert_not_called()
+
+    def test_phase_switch_policy_contract_helpers_cover_apply_failure_warning_contract(self):
+        error = RuntimeError("phase relay failed")
+        service = _auto_phase_service(
+            _phase_selection_requires_pause=MagicMock(return_value=False),
+            _apply_phase_selection=MagicMock(side_effect=error),
+            _auto_phase_target_candidate="P1_P2",
+            _auto_phase_target_since=90.0,
+            auto_shelly_soft_fail_seconds=12.5,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertIsNone(controller._apply_auto_phase_target(service, "P1_P2", True, False, 100.0))
+
+        service._mark_failure.assert_called_once_with("shelly")
+        service._warning_throttled.assert_called_once_with(
+            "auto-phase-switch-failed",
+            12.5,
+            "Failed to apply Auto phase selection %s: %s",
+            "P1_P2",
+            error,
+            exc_info=error,
+        )
+        self.assertIsNone(service._auto_phase_target_candidate)
+        self.assertIsNone(service._auto_phase_target_since)
+        service._save_runtime_state.assert_not_called()
+
+    def test_phase_switch_policy_contract_helpers_cover_wrapper_delegation_contracts(self):
+        service = _auto_phase_service(_phase_switch_state="waiting-relay-off")
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        with (
+            patch.object(controller, "_pending_phase_switch_selection", return_value="P1_P2") as pending,
+            patch.object(controller, "_phase_switch_state_active", return_value=True) as active,
+        ):
+            self.assertTrue(controller._auto_phase_switch_already_active(service))
+        pending.assert_called_once_with(service)
+        active.assert_called_once_with("P1_P2", "waiting-relay-off")
+
+        partial_service = SimpleNamespace()
+        with (
+            patch.object(controller, "_pending_phase_switch_selection", return_value=None) as partial_pending,
+            patch.object(controller, "_phase_switch_state_active", return_value=False) as partial_active,
+        ):
+            self.assertFalse(controller._auto_phase_switch_already_active(partial_service))
+        partial_pending.assert_called_once_with(partial_service)
+        partial_active.assert_called_once_with(None, "")
+
+        with (
+            patch.object(controller, "_auto_phase_selection_inactive", return_value=False) as inactive,
+            patch.object(controller, "_auto_phase_switch_already_active", return_value=True) as already_active,
+        ):
+            self.assertTrue(controller._auto_phase_selection_blocked(service, auto_mode_active=True))
+        inactive.assert_called_once_with(service, True)
+        already_active.assert_called_once_with(service)
+
+        with patch.object(controller, "_clear_auto_phase_candidate") as clear_candidate:
+            self.assertTrue(controller._auto_phase_selection_inactive(service, auto_mode_active=False))
+        clear_candidate.assert_called_once_with(service)
+
+        with (
+            patch.object(controller, "_ordered_auto_phase_selections", return_value=("P1", "P1_P2")) as ordered,
+            patch.object(controller, "_current_phase_selection", return_value="P1") as current,
+            patch.object(
+                controller,
+                "_auto_phase_target_selection",
+                return_value=("P1_P2", "phase-upshift", 2500.0),
+            ) as target,
+            patch.object(controller, "_record_auto_phase_metrics") as record,
+        ):
+            self.assertEqual(
+                controller._auto_phase_selection_decision(service, True, False, 231.0, 123.0),
+                ("P1", "P1_P2", "phase-upshift", 2500.0),
+            )
+        ordered.assert_called_once_with(service)
+        current.assert_called_once_with(service, ("P1", "P1_P2"))
+        target.assert_called_once_with(service, ("P1", "P1_P2"), "P1", True, False, 231.0, 123.0)
+        record.assert_called_once_with(
+            service,
+            current_selection="P1",
+            target_selection="P1_P2",
+            phase_reason="phase-upshift",
+            threshold_watts=2500.0,
+        )
+
+        with (
+            patch.object(controller, "_auto_phase_candidate_ready", return_value=False) as candidate_ready,
+            patch.object(controller, "_record_auto_phase_metrics") as pending_record,
+        ):
+            self.assertFalse(
+                controller._pending_auto_phase_target_ready(
+                    service,
+                    "P1",
+                    "P1_P2",
+                    130.0,
+                    "phase-upshift",
+                    2600.0,
+                )
+            )
+        candidate_ready.assert_called_once_with(service, "P1", "P1_P2", 130.0)
+        pending_record.assert_called_once_with(
+            service,
+            current_selection="P1",
+            target_selection="P1_P2",
+            phase_reason="phase-upshift-pending",
+            threshold_watts=2600.0,
+        )
+
+        with (
+            patch.object(controller, "_auto_phase_selection_blocked", return_value=False) as blocked,
+            patch.object(
+                controller,
+                "_auto_phase_selection_decision",
+                return_value=("P1", "P1_P2", "phase-upshift", 2500.0),
+            ) as decision,
+            patch.object(controller, "_pending_auto_phase_target_ready", return_value=False) as ready,
+        ):
+            self.assertIsNone(
+                controller.maybe_apply_auto_phase_selection(
+                    service,
+                    desired_relay=True,
+                    relay_on=False,
+                    voltage=231.0,
+                    now=140.0,
+                    auto_mode_active=True,
+                )
+            )
+        blocked.assert_called_once_with(service, True)
+        decision.assert_called_once_with(service, True, False, 231.0, 140.0)
+        ready.assert_called_once_with(service, "P1", "P1_P2", 140.0, "phase-upshift", 2500.0)
+
+        with (
+            patch.object(controller, "_auto_phase_selection_blocked", return_value=False),
+            patch.object(
+                controller,
+                "_auto_phase_selection_decision",
+                return_value=("P1", "P1_P2", "phase-upshift", 2500.0),
+            ),
+            patch.object(controller, "_pending_auto_phase_target_ready", return_value=True),
+            patch.object(controller, "_apply_auto_phase_target", return_value=None) as apply_target,
+        ):
+            self.assertIsNone(
+                controller.maybe_apply_auto_phase_selection(
+                    service,
+                    desired_relay=True,
+                    relay_on=True,
+                    voltage=231.0,
+                    now=141.0,
+                    auto_mode_active=True,
+                )
+            )
+        apply_target.assert_called_once_with(service, "P1_P2", True, True, 141.0)
+
+    def test_phase_switch_policy_contract_helpers_cover_staging_gate_inputs(self):
+        service = _auto_phase_service(
+            _phase_selection_requires_pause=MagicMock(return_value=False),
+            _peek_pending_relay_command=MagicMock(return_value=(True, 99.0)),
+            _last_confirmed_pm_status={"output": True, "apower": 1200.0, "current": 5.0},
+            _last_confirmed_pm_status_at=99.5,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertFalse(controller._phase_change_requires_staging(service, relay_on=True, now=100.0))
+        service._phase_selection_requires_pause = MagicMock(return_value=True)
+        self.assertTrue(controller._phase_change_requires_staging(service, relay_on=False, now=100.0))
+        service._peek_pending_relay_command = MagicMock(return_value=(False, 99.0))
+        self.assertTrue(controller._phase_change_requires_staging(service, relay_on=False, now=100.0))
+        service._peek_pending_relay_command = MagicMock(return_value=(None, None))
+        self.assertTrue(controller._phase_change_requires_staging(service, relay_on=False, now=100.0))
+        service._last_confirmed_pm_status = {"output": False, "apower": 0.0, "current": 0.0}
+        self.assertFalse(controller._phase_change_requires_staging(service, relay_on=False, now=100.0))
+        service._last_confirmed_pm_status_at = 0.0
+        self.assertTrue(controller._phase_change_requires_staging(service, relay_on=True, now=100.0))
+        self.assertFalse(controller._phase_change_requires_staging(SimpleNamespace(), relay_on=True, now=100.0))
+
+    def test_phase_switch_runtime_contract_helpers_cover_deadlines_observation_and_clearing(self):
+        service = _auto_phase_service(
+            _phase_switch_pending_selection="P1_P2",
+            _phase_switch_requested_at=90.0,
+            _phase_switch_stable_until=None,
+            phase_switch_pause_seconds=-2.0,
+            phase_switch_stabilization_seconds=-3.0,
+            auto_shelly_soft_fail_seconds=-4.0,
+            _charger_backend=object(),
+            _last_charger_state_at=None,
+            _last_charger_state_phase_selection="P1_P2",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertEqual(controller._phase_switch_pause_seconds(service), 0.0)
+        self.assertEqual(controller._phase_switch_stabilization_seconds(service), 0.0)
+        self.assertEqual(controller._pending_phase_switch_selection(service), "P1_P2")
+        self.assertEqual(controller._observed_phase_selection_from_pm_status({"_phase_selection": "3P"}), "P1_P2_P3")
+        self.assertIsNone(controller._observed_phase_selection_from_pm_status({}))
+        self.assertIsNone(controller._observed_phase_selection(service, {}, 100.0))
+        service._last_charger_state_at = 100.0
+        self.assertEqual(controller._observed_phase_selection(service, {}, 100.0), "P1_P2")
+        self.assertEqual(controller._phase_switch_verification_deadline(service), 90.0)
+        self.assertTrue(controller._phase_switch_verification_expired(service, 90.0))
+        service._phase_switch_stable_until = 95.0
+        service.auto_shelly_soft_fail_seconds = 7.0
+        self.assertEqual(controller._phase_switch_verification_deadline(service), 102.0)
+        self.assertFalse(controller._phase_switch_verification_expired(service, 101.9))
+        self.assertTrue(controller._phase_switch_verification_expired(service, 102.0))
+
+        service._phase_switch_resume_relay = True
+        service._phase_switch_mismatch_active = True
+        controller._clear_phase_switch_state(service)
+        self.assertIsNone(service._phase_switch_pending_selection)
+        self.assertIsNone(service._phase_switch_state)
+        self.assertIsNone(service._phase_switch_requested_at)
+        self.assertIsNone(service._phase_switch_stable_until)
+        self.assertFalse(service._phase_switch_resume_relay)
+        self.assertFalse(service._phase_switch_mismatch_active)
+
+    def test_phase_switch_runtime_contract_helpers_cover_mismatch_reporting_and_abort(self):
+        service = _auto_phase_service(
+            auto_policy=SimpleNamespace(
+                phase=SimpleNamespace(
+                    mismatch_retry_seconds=60.0,
+                    mismatch_lockout_count=1,
+                    mismatch_lockout_seconds=30.0,
+                )
+            ),
+            _phase_switch_requested_at=80.0,
+            _phase_switch_mismatch_counts={},
+            _phase_switch_last_mismatch_selection=None,
+            _phase_switch_last_mismatch_at=None,
+            _phase_switch_lockout_selection=None,
+            _phase_switch_lockout_reason="",
+            _phase_switch_lockout_at=None,
+            _phase_switch_lockout_until=None,
+            _set_health=MagicMock(),
+            _mark_failure=MagicMock(),
+            _warning_throttled=MagicMock(),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        controller._report_phase_switch_mismatch(service, "P1_P2", None, 100.0)
+
+        self.assertEqual(service._phase_switch_mismatch_counts, {"P1_P2": 1})
+        self.assertEqual(service._phase_switch_last_mismatch_selection, "P1_P2")
+        self.assertEqual(service._phase_switch_last_mismatch_at, 100.0)
+        self.assertEqual(service._phase_switch_lockout_selection, "P1_P2")
+        self.assertEqual(service._phase_switch_lockout_reason, "mismatch-threshold")
+        self.assertEqual(service._phase_switch_lockout_at, 100.0)
+        self.assertEqual(service._phase_switch_lockout_until, 130.0)
+        service._mark_failure.assert_called_once_with("shelly")
+        service._set_health.assert_called_once_with("phase-switch-mismatch", cached=False)
+        warning_args = service._warning_throttled.call_args.args
+        self.assertEqual(warning_args[0], "phase-switch-mismatch")
+        self.assertEqual(warning_args[1], 10.0)
+        self.assertEqual(warning_args[3:8], ("P1_P2", 20.0, "unknown", 1, 1))
+
+        service._phase_switch_pending_selection = "P1_P2"
+        service._phase_switch_state = controller.PHASE_SWITCH_STABILIZING_STATE
+        service._phase_switch_resume_relay = False
+        service.active_phase_selection = "P1"
+        service.requested_phase_selection = "P1_P2"
+        relay_on, power, current, confirmed = controller._abort_phase_switch_after_mismatch(
+            service,
+            "P1_P2",
+            "P1",
+            True,
+            1200.0,
+            5.0,
+            True,
+            101.0,
+            False,
+        )
+        self.assertEqual((relay_on, power, current, confirmed), (True, 1200.0, 5.0, True))
+        self.assertEqual(service.requested_phase_selection, "P1")
+        self.assertEqual(service.active_phase_selection, "P1")
+        self.assertIsNone(service._phase_switch_pending_selection)

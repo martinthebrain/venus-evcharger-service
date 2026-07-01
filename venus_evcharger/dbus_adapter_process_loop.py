@@ -73,7 +73,10 @@ class DbusAdapterLoop(DbusAdapterIntrospection):
         self._last_resource_snapshot = resources
         self.apply_slo_regulation()
         resource_state = str(resources.get("state", "ok"))
-        if float_or_zero(self.tick_health.snapshot().get("max_tick_duration_ms_60s")) > self.slo_mainloop_gap_max_ms:
+        if (
+            resource_state == "ok"
+            and float_or_zero(self.tick_health.snapshot().get("max_tick_duration_ms_60s")) > self.slo_mainloop_gap_max_ms
+        ):
             resource_state = "busy"
         self.tick_seconds = self.adaptive_tick_seconds(
             circuit_state=self.circuit.state(),

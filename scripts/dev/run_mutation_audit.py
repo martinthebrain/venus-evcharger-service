@@ -20,14 +20,45 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import mutation_audit_support as audit_support
+
 DEFAULT_TEST_SELECTION = (
     "tests/test_dbus_gateway_adapter_scheduler.py",
     "tests/test_dbus_gateway_primitives.py",
+    "tests/test_core_dbus_backpressure.py",
+    "tests/test_auto_logic_types.py",
+    "tests/test_venus_evcharger_auto_policy.py",
+    "tests/test_venus_evcharger_auto_controller.py",
+    "tests/venus_evcharger_auto_controller_cases_primary.py",
+    "tests/venus_evcharger_auto_controller_cases_recovery.py",
+    "tests/test_venus_evcharger_backend_shelly_meter.py",
+    "tests/test_venus_evcharger_backend_shelly_support.py",
+    "tests/test_venus_evcharger_backend_switch.py",
+    "tests/test_venus_evcharger_shelly_io_controller.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_primary.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_secondary.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_tertiary.py",
+    "tests/venus_evcharger_shelly_io_controller_cases_quaternary.py",
+    "tests/test_venus_evcharger_update_cycle_controller.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_learning.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_runtime.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_victron_adaptive.py",
+    "tests/venus_evcharger_update_cycle_cases_quaternary_victron_core.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_primary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_secondary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_tertiary.py",
-    "tests/venus_evcharger_update_cycle_controller_cases_septenary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_quaternary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quinary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_senary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_septenary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_octonary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_nonary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_denary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_undenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_duodenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_trecenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quattuordenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_quindenary.py",
 )
 DEFAULT_TARGETS = (
     "venus_evcharger/dbus_gateway_policy.py",
@@ -42,19 +73,34 @@ DEFAULT_TARGETS = (
     "venus_evcharger/dbus_adapter_read.py",
     "venus_evcharger/dbus_adapter_process_health.py",
     "venus_evcharger/dbus_adapter_process_loop.py",
+    "venus_evcharger/core/dbus_backpressure.py",
+    "venus_evcharger/auto/policy.py",
+    "venus_evcharger/auto/logic_decisions.py",
+    "venus_evcharger/auto/logic_gates_runtime.py",
+    "venus_evcharger/backend/shelly_support.py",
+    "venus_evcharger/backend/shelly_io_runtime.py",
+    "venus_evcharger/backend/shelly_meter.py",
+    "venus_evcharger/update/offline_publish.py",
+    "venus_evcharger/update/learning_runtime.py",
+    "venus_evcharger/update/relay_phase_decision.py",
+    "venus_evcharger/update/relay_phase_switch_policy.py",
+    "venus_evcharger/update/relay_status_publish.py",
     "venus_evcharger/update/learning_signature.py",
     "venus_evcharger/update/relay_phase_switch_mismatch.py",
 )
 MUTMUT_CACHE = ".mutmut-cache"
 MUTMUT_WORKTREE = "mutants"
-RESULT_WORDS = ("killed", "survived", "timeout", "suspicious", "skipped", "no_tests")
-ATTENTION_WORDS = ("survived", "timeout", "suspicious", "no_tests")
-TIMEOUT_RETURNCODE = 124
+RESULT_WORDS = audit_support.RESULT_WORDS
+TIMEOUT_RETURNCODE = audit_support.TIMEOUT_RETURNCODE
+OK_STATUSES = audit_support.OK_STATUSES
 
-
-@dataclass(frozen=True)
-class MutationTarget:
-    path: str
+_parse_counts = audit_support.parse_counts
+_survivor_names = audit_support.survivor_names
+_mutant_names = audit_support.mutant_names
+_target_status = audit_support.target_status
+_no_mutant_test_mapping = audit_support.no_mutant_test_mapping
+_status_from_counts = audit_support.status_from_counts
+_slug = audit_support.slug
 
 
 @dataclass
@@ -86,16 +132,17 @@ def _run_cli(args: argparse.Namespace) -> int:
     repo = _repo_dir()
     out_dir = _output_dir(repo, args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    results = [
-        _run_target(repo=repo, out_dir=out_dir, mutmut=mutmut, target=target, args=args) for target in selected
-    ]
+    with audit_support.mutmut_audit_lock(repo):
+        results = [
+            _run_target(repo=repo, out_dir=out_dir, mutmut=mutmut, target=target, args=args) for target in selected
+        ]
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps([asdict(result) for result in results], indent=2, sort_keys=True) + "\n")
     _print_summary(results, summary_path)
     return _exit_code(results, no_fail=args.no_fail)
 
 
-def _print_targets(targets: list[MutationTarget]) -> int:
+def _print_targets(targets: list[audit_support.MutationTarget]) -> int:
     for target in targets:
         print(target.path)
     return 0
@@ -108,6 +155,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--out-dir", help="Output directory for logs. Defaults to build/mutation-audit/<timestamp>.")
     parser.add_argument("--timeout-s", type=float, default=1800.0, help="Timeout per mutated module.")
     parser.add_argument("--reuse-cache", action="store_true", help="Do not clear .mutmut-cache between target modules.")
+    parser.add_argument(
+        "--verify-survivors",
+        action="store_true",
+        help="Re-apply surviving mutants and run the selected tests in a clean subprocess.",
+    )
     parser.add_argument("--no-fail", action="store_true", help="Always exit 0 after writing logs and summary.")
     return parser.parse_args(argv)
 
@@ -138,9 +190,9 @@ def _current_python_has_mutmut() -> bool:
     return probe.returncode == 0
 
 
-def _selected_targets(paths: list[str]) -> list[MutationTarget]:
+def _selected_targets(paths: list[str]) -> list[audit_support.MutationTarget]:
     selected = paths or list(DEFAULT_TARGETS)
-    return [MutationTarget(path=path) for path in selected]
+    return [audit_support.MutationTarget(path=path) for path in selected]
 
 
 def _output_dir(repo: Path, requested: str | None) -> Path:
@@ -155,37 +207,199 @@ def _run_target(
     repo: Path,
     out_dir: Path,
     mutmut: list[str],
-    target: MutationTarget,
+    target: audit_support.MutationTarget,
     args: argparse.Namespace,
 ) -> TargetResult:
     started = time.monotonic()
     slug = _slug(target.path)
-    log_path = out_dir / f"{slug}.log"
-    results_path = out_dir / f"{slug}.results.txt"
-    if not args.reuse_cache:
-        shutil.rmtree(repo / MUTMUT_CACHE, ignore_errors=True)
-        shutil.rmtree(repo / MUTMUT_WORKTREE, ignore_errors=True)
+    artifacts = audit_support.TargetArtifacts(
+        log_path=out_dir / f"{slug}.log",
+        results_path=out_dir / f"{slug}.results.txt",
+    )
+    command = audit_support.MutationCommandContext(repo=repo, mutmut=mutmut)
+    not_applicable_reason = _not_applicable_mutation_target(repo, target.path)
+    if not_applicable_reason is not None:
+        return _not_applicable_result(
+            target=target,
+            started=started,
+            log_path=artifacts.log_path,
+            results_path=artifacts.results_path,
+            reason=not_applicable_reason,
+        )
+    _clear_mutmut_worktree(repo, reuse_cache=args.reuse_cache)
 
-    with _mutmut_config_for_target(repo, target.path):
-        run_result = _run_logged([*mutmut, "run"], cwd=repo, log_path=log_path, timeout_s=args.timeout_s)
-        results_result = _capture_results(mutmut=mutmut, cwd=repo, results_path=results_path)
-    result_text = results_path.read_text(errors="replace") if results_path.exists() else ""
-    log_text = log_path.read_text(errors="replace") if log_path.exists() else ""
-    counts = _parse_counts(result_text)
-    if _no_mutant_test_mapping(run_result.returncode, results_result.returncode, counts, log_text):
-        counts["no_tests"] += 1
+    run = _run_mutmut_for_target(
+        command=command,
+        target=target,
+        artifacts=artifacts,
+        timeout_s=args.timeout_s,
+    )
+    counts = _target_counts(
+        command=command,
+        target=target,
+        run=run,
+        artifacts=artifacts,
+        verify_survivors=args.verify_survivors,
+    )
     duration = time.monotonic() - started
-    status = _target_status(run_result.returncode, results_result.returncode, counts, log_text=log_text)
+    status = _target_status(
+        run.run_result.returncode,
+        run.results_result.returncode,
+        counts,
+        log_text=run.log_text,
+    )
     return TargetResult(
         path=target.path,
         status=status,
         duration_s=round(duration, 3),
-        run_returncode=run_result.returncode,
-        results_returncode=results_result.returncode,
+        run_returncode=run.run_result.returncode,
+        results_returncode=run.results_result.returncode,
+        log_path=str(artifacts.log_path),
+        results_path=str(artifacts.results_path),
+        counts=counts,
+    )
+
+
+def _not_applicable_result(
+    *,
+    target: audit_support.MutationTarget,
+    started: float,
+    log_path: Path,
+    results_path: Path,
+    reason: str,
+) -> TargetResult:
+    counts = dict.fromkeys(RESULT_WORDS, 0)
+    counts["skipped"] = 1
+    _write_not_applicable_result(log_path, results_path, target.path, reason)
+    return TargetResult(
+        path=target.path,
+        status="not_applicable",
+        duration_s=round(time.monotonic() - started, 3),
+        run_returncode=0,
+        results_returncode=0,
         log_path=str(log_path),
         results_path=str(results_path),
         counts=counts,
     )
+
+
+def _clear_mutmut_worktree(repo: Path, *, reuse_cache: bool) -> None:
+    if reuse_cache:
+        return
+    shutil.rmtree(repo / MUTMUT_CACHE, ignore_errors=True)
+    shutil.rmtree(repo / MUTMUT_WORKTREE, ignore_errors=True)
+
+
+def _run_mutmut_for_target(
+    *,
+    command: audit_support.MutationCommandContext,
+    target: audit_support.MutationTarget,
+    artifacts: audit_support.TargetArtifacts,
+    timeout_s: float,
+) -> audit_support.TargetMutmutRun:
+    with _mutmut_config_for_target(command.repo, target.path):
+        run_result = _run_logged(
+            [*command.mutmut, "run"],
+            cwd=command.repo,
+            log_path=artifacts.log_path,
+            timeout_s=timeout_s,
+        )
+        results_result = _capture_results(
+            mutmut=command.mutmut,
+            cwd=command.repo,
+            results_path=artifacts.results_path,
+        )
+    return audit_support.TargetMutmutRun(
+        run_result=run_result,
+        results_result=results_result,
+        result_text=artifacts.results_path.read_text(errors="replace") if artifacts.results_path.exists() else "",
+        log_text=artifacts.log_path.read_text(errors="replace") if artifacts.log_path.exists() else "",
+    )
+
+
+def _target_counts(
+    *,
+    command: audit_support.MutationCommandContext,
+    target: audit_support.MutationTarget,
+    run: audit_support.TargetMutmutRun,
+    artifacts: audit_support.TargetArtifacts,
+    verify_survivors: bool,
+) -> dict[str, int]:
+    counts = _parse_counts(run.result_text)
+    if _run_has_no_test_mapping(run, counts):
+        counts["no_tests"] += 1
+    if verify_survivors:
+        _verify_target_attention_counts(command=command, target=target, run=run, artifacts=artifacts, counts=counts)
+    return counts
+
+
+def _run_has_no_test_mapping(run: audit_support.TargetMutmutRun, counts: dict[str, int]) -> bool:
+    return _no_mutant_test_mapping(
+        run.run_result.returncode,
+        run.results_result.returncode,
+        counts,
+        run.log_text,
+    )
+
+
+def _verify_target_attention_counts(
+    *,
+    command: audit_support.MutationCommandContext,
+    target: audit_support.MutationTarget,
+    run: audit_support.TargetMutmutRun,
+    artifacts: audit_support.TargetArtifacts,
+    counts: dict[str, int],
+) -> None:
+    if counts["survived"]:
+        _verify_survived_mutants(command=command, target=target, run=run, artifacts=artifacts, counts=counts)
+    if counts["no_tests"]:
+        _verify_no_test_mutants(command=command, target=target, run=run, artifacts=artifacts, counts=counts)
+
+
+def _verify_survived_mutants(
+    *,
+    command: audit_support.MutationCommandContext,
+    target: audit_support.MutationTarget,
+    run: audit_support.TargetMutmutRun,
+    artifacts: audit_support.TargetArtifacts,
+    counts: dict[str, int],
+) -> None:
+    verified = audit_support.verify_survivors(
+        repo=command.repo,
+        mutmut=command.mutmut,
+        target_path=target.path,
+        survivor_names=_survivor_names(run.result_text),
+        log_path=artifacts.log_path,
+        test_selection=DEFAULT_TEST_SELECTION,
+        configure_target=_mutmut_config_for_target,
+    )
+    _move_verified_mutants_to_killed(counts, "survived", verified)
+
+
+def _verify_no_test_mutants(
+    *,
+    command: audit_support.MutationCommandContext,
+    target: audit_support.MutationTarget,
+    run: audit_support.TargetMutmutRun,
+    artifacts: audit_support.TargetArtifacts,
+    counts: dict[str, int],
+) -> None:
+    verified = audit_support.verify_mutants(
+        repo=command.repo,
+        mutmut=command.mutmut,
+        target_path=target.path,
+        mutant_names=_mutant_names(run.result_text, "no tests"),
+        log_path=artifacts.log_path,
+        test_selection=DEFAULT_TEST_SELECTION,
+        configure_target=_mutmut_config_for_target,
+        status_label="no-tests",
+    )
+    _move_verified_mutants_to_killed(counts, "no_tests", verified)
+
+
+def _move_verified_mutants_to_killed(counts: dict[str, int], source_status: str, verified: int) -> None:
+    counts[source_status] = max(0, counts[source_status] - verified)
+    counts["killed"] += verified
 
 
 @contextlib.contextmanager
@@ -223,7 +437,7 @@ def _mutmut_config_toml(target_path: str) -> str:
 
 def _run_logged(command: list[str], *, cwd: Path, log_path: Path, timeout_s: float) -> subprocess.CompletedProcess[str]:
     with log_path.open("w", encoding="utf-8") as log:
-        log.write(f"$ {_shellish(command)}\n\n")
+        log.write(f"$ {audit_support.shellish(command)}\n\n")
         log.flush()
         try:
             process = subprocess.run(
@@ -244,56 +458,13 @@ def _run_logged(command: list[str], *, cwd: Path, log_path: Path, timeout_s: flo
 def _capture_results(*, mutmut: list[str], cwd: Path, results_path: Path) -> subprocess.CompletedProcess[str]:
     command = [*mutmut, "results", "--all", "true"]
     with results_path.open("w", encoding="utf-8") as output:
-        output.write(f"$ {_shellish(command)}\n\n")
+        output.write(f"$ {audit_support.shellish(command)}\n\n")
         output.flush()
         return subprocess.run(command, cwd=cwd, check=False, stdout=output, stderr=subprocess.STDOUT, text=True)
 
 
-def _parse_counts(text: str) -> dict[str, int]:
-    counts = dict.fromkeys(RESULT_WORDS, 0)
-    for word in RESULT_WORDS:
-        phrase = "no tests" if word == "no_tests" else word
-        counts[word] += sum(int(value) for value in re.findall(rf"\b(\d+)\s+{phrase}\b", text, flags=re.I))
-        counts[word] += len(re.findall(rf":\s+{phrase}\b", text, flags=re.I))
-    return counts
-
-
-def _target_status(run_returncode: int, results_returncode: int, counts: dict[str, int], *, log_text: str = "") -> str:
-    if run_returncode == TIMEOUT_RETURNCODE:
-        return "timeout"
-    if _no_mutant_test_mapping(run_returncode, results_returncode, counts, log_text):
-        return "needs_attention"
-    if _command_failed(run_returncode, results_returncode):
-        return "error"
-    return _status_from_counts(counts)
-
-
-def _no_mutant_test_mapping(
-    run_returncode: int,
-    results_returncode: int,
-    counts: dict[str, int],
-    log_text: str,
-) -> bool:
-    no_results = results_returncode == 0 and not any(counts.values())
-    return (
-        run_returncode == 1
-        and no_results
-        and "could not find any test case for any mutant" in log_text
-    )
-
-
-def _command_failed(run_returncode: int, results_returncode: int) -> bool:
-    return run_returncode != 0 or results_returncode != 0
-
-
-def _status_from_counts(counts: dict[str, int]) -> str:
-    return "needs_attention" if any(counts[word] for word in ATTENTION_WORDS) else "ok"
-
-
 def _exit_code(results: list[TargetResult], *, no_fail: bool) -> int:
-    if no_fail:
-        return 0
-    return 1 if any(result.status != "ok" for result in results) else 0
+    return audit_support.exit_code([result.status for result in results], no_fail=no_fail)
 
 
 def _print_summary(results: list[TargetResult], summary_path: Path) -> None:
@@ -303,18 +474,20 @@ def _print_summary(results: list[TargetResult], summary_path: Path) -> None:
         print(f"- {result.status:15} {result.duration_s:8.1f}s {result.path} {counts}")
 
 
-def _slug(path: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", path).strip("_")
+def _not_applicable_mutation_target(repo: Path, target_path: str) -> str | None:
+    return audit_support.not_applicable_mutation_target(repo, target_path)
 
 
-def _shellish(command: list[str]) -> str:
-    return " ".join(_quote(part) for part in command)
+def _is_constant_only_module(path: Path) -> bool:
+    return audit_support.is_constant_only_module(path)
 
 
-def _quote(part: str) -> str:
-    if re.fullmatch(r"[A-Za-z0-9_./:=+-]+", part):
-        return part
-    return "'" + part.replace("'", "'\"'\"'") + "'"
+def _write_not_applicable_result(log_path: Path, results_path: Path, target_path: str, reason: str) -> None:
+    audit_support.write_not_applicable_result(log_path, results_path, target_path, reason)
+
+
+def _survivor_verification_test_command(mutmut: list[str]) -> list[str]:
+    return audit_support.survivor_verification_test_command(mutmut, DEFAULT_TEST_SELECTION)
 
 
 if __name__ == "__main__":

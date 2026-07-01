@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from venus_evcharger.dbus_gateway_command_types import CommandMapping
-from venus_evcharger.dbus_gateway_core import FAST_READ_KEYS, GUI_CRITICAL_PUBLISH_PATHS, priority_rank
+from venus_evcharger.dbus_gateway_core import FAST_READ_KEYS, GUI_CRITICAL_PUBLISH_PATHS
 
 _STATIC_QUEUE_CLASSES = {
     "register_path": "startup/register",
@@ -16,6 +16,12 @@ _STATIC_QUEUE_CLASSES = {
     "refresh_services": "discovery",
     "introspect": "introspection",
 }
+
+
+def _command_text(command: CommandMapping, key: str) -> str:
+    if key not in command:
+        return ""
+    return str(command[key] or "")
 
 
 def command_queue_class(command: CommandMapping) -> str:
@@ -43,29 +49,26 @@ def command_allowed_by_backpressure(command: CommandMapping, state: str) -> bool
 
 
 def _backpressure_rule(state: str, priority: str, queue_class: str) -> bool:
-    if _state_allows_everything(state) or _is_startup_registration(queue_class):  # pragma: no mutate
+    if _is_startup_registration(queue_class):
         return True
-    rules = {
-        "congested": _allowed_when_congested,
-        "slow": _allowed_when_slow,
-        "protective": _allowed_when_protective,
-    }
-    return rules.get(state, _allow_any)(priority_rank(priority), priority, queue_class)  # pragma: no mutate
-
-
-def _allow_any(_rank: int, _priority: str, _queue_class: str) -> bool:
+    if state == "congested":
+        return _allowed_when_congested(priority, queue_class)
+    if state == "slow":
+        return _allowed_when_slow(priority, queue_class)
+    if state == "protective":
+        return _allowed_when_protective(priority, queue_class)
     return True
 
 
-def _allowed_when_congested(_rank: int, priority: str, queue_class: str) -> bool:
+def _allowed_when_congested(priority: str, queue_class: str) -> bool:
     return priority not in {"optional", "diagnostic"} and queue_class != "diagnostic"
 
 
-def _allowed_when_slow(_rank: int, priority: str, queue_class: str) -> bool:
+def _allowed_when_slow(priority: str, queue_class: str) -> bool:
     return queue_class == "gui-critical-publish" or priority in {"safety", "user"}
 
 
-def _allowed_when_protective(_rank: int, priority: str, queue_class: str) -> bool:
+def _allowed_when_protective(priority: str, queue_class: str) -> bool:
     return priority == "safety" or (priority == "user" and queue_class == "gui-critical-publish")
 
 
@@ -79,7 +82,7 @@ def _is_gui_critical_publish(command: CommandMapping) -> bool:
 
 
 def _command_kind(command: CommandMapping) -> str:
-    return str(command.get("kind") or command.get("type") or "")  # pragma: no mutate
+    return _command_text(command, "kind") or _command_text(command, "type")
 
 
 def _is_publish_command(kind: str) -> bool:
@@ -87,23 +90,21 @@ def _is_publish_command(kind: str) -> bool:
 
 
 def _refresh_key(command: CommandMapping) -> str:
-    return str(command.get("key") or "")  # pragma: no mutate
+    return _command_text(command, "key")
 
 
 def _normalized_state(state: str) -> str:
-    return str(state or "unknown")  # pragma: no mutate
+    return str(state).strip().lower()
 
 
 def _normalized_priority(command: CommandMapping) -> str:
-    return str(command.get("priority") or "diagnostic").strip().lower()  # pragma: no mutate
+    priority = _command_text(command, "priority").strip().lower()
+    return priority or "diagnostic"
 
 
 def _effective_queue_class(command: CommandMapping) -> str:
-    return str(command.get("queue_class") or command_queue_class(command))  # pragma: no mutate
-
-
-def _state_allows_everything(state: str) -> bool:
-    return state in {"ok", "unknown"}  # pragma: no mutate
+    configured = _command_text(command, "queue_class")
+    return configured or command_queue_class(command)
 
 
 def _is_startup_registration(queue_class: str) -> bool:
@@ -111,4 +112,4 @@ def _is_startup_registration(queue_class: str) -> bool:
 
 
 def _publish_path(command: CommandMapping) -> str:
-    return str(command.get("path") or "")  # pragma: no mutate
+    return _command_text(command, "path")

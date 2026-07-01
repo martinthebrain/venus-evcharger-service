@@ -96,11 +96,20 @@ class _UpdateCycleOffline(_UpdateCycleInputCache):
         )
         if changed:
             svc._bump_update_index(now)
-        svc.last_update = svc._time_now()
+        completed_at = self._mark_offline_update_completed(svc)
         publish_companion = getattr(svc, "_publish_companion_dbus_bridge", None)
         if callable(publish_companion):
-            publish_companion(now)
+            publish_companion(completed_at)
         return True
+
+    @staticmethod
+    def _mark_offline_update_completed(svc: Any) -> float:
+        """Mark one offline publish as a completed, watchdog-fresh update cycle."""
+        completed_at = float(svc._time_now())
+        svc._last_successful_update_at = completed_at
+        svc._last_recovery_attempt_at = None
+        svc.last_update = completed_at
+        return completed_at
 
     @staticmethod
     def _offline_voltage(svc: Any) -> float:

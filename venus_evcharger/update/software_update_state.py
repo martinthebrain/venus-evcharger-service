@@ -7,6 +7,16 @@ import os
 from typing import Any, ClassVar, TYPE_CHECKING
 
 from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_CHECK_ERRORS
+from venus_evcharger.update.software_update_contracts import (
+    SoftwareUpdateLastResult,
+    SoftwareUpdateState,
+    UPDATE_STATE_AVAILABLE,
+    UPDATE_STATE_AVAILABLE_BLOCKED,
+    UPDATE_STATE_CHECK_FAILED,
+    UPDATE_STATE_CHECKING,
+    UPDATE_STATE_IDLE,
+    UPDATE_STATE_UP_TO_DATE,
+)
 from venus_evcharger.update.pm_snapshot import _UpdateCyclePmSnapshot
 
 
@@ -51,11 +61,31 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
         except OSError:
             return ""
 
+    @staticmethod
+    def _software_update_text_attr(svc: Any, name: str) -> str:
+        """Return one optional service attribute as normalized text."""
+        try:
+            value = getattr(svc, name)
+        except AttributeError:
+            return ""
+        return "" if value is None else str(value)
+
+    @staticmethod
+    def _software_update_bool_attr(svc: Any, name: str) -> bool:
+        """Return one optional service attribute as a boolean flag."""
+        try:
+            return bool(getattr(svc, name))
+        except AttributeError:
+            return False
+
     @classmethod
     def _local_software_update_version(cls, svc: Any) -> str:
         """Return the local wallbox version text used for update diagnostics."""
+        repo_root = cls._software_update_text_attr(svc, "software_update_repo_root")
+        if not repo_root:
+            return ""
         installed_version_path = os.path.join(
-            str(getattr(svc, "software_update_repo_root", "") or ""),
+            repo_root,
             ".bootstrap-state",
             "installed_version",
         )
@@ -63,7 +93,7 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
         if installed_version:
             return installed_version.splitlines()[0].strip()
         version_path = os.path.join(
-            str(getattr(svc, "software_update_repo_root", "") or ""),
+            repo_root,
             "version.txt",
         )
         version_text = cls._read_text_file(version_path)
@@ -72,18 +102,22 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
     @classmethod
     def _local_installed_bundle_hash(cls, svc: Any) -> str:
         """Return the locally remembered bundle hash when one exists."""
+        repo_root = cls._software_update_text_attr(svc, "software_update_repo_root")
+        if not repo_root:
+            return ""
         path = os.path.join(
-            str(getattr(svc, "software_update_repo_root", "") or ""),
+            repo_root,
             ".bootstrap-state",
             "installed_bundle_sha256",
         )
         payload = cls._read_text_file(path)
-        return payload.split(" ", 1)[0].strip() if payload else ""
+        parts = payload.split()
+        return parts[0].strip() if parts else ""
 
     @staticmethod
     def _software_update_no_update_active(svc: Any) -> bool:
         """Return whether the local installation currently blocks refreshes."""
-        path = str(getattr(svc, "software_update_no_update_file", "") or "")
+        path = _SoftwareUpdateState._software_update_text_attr(svc, "software_update_no_update_file")
         return bool(path) and os.path.isfile(path)
 
     @classmethod
@@ -95,12 +129,12 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
     @staticmethod
     def _set_software_update_state(
         svc: Any,
-        state: str,
+        state: SoftwareUpdateState,
         *,
         detail: str = "",
         available: bool | None = None,
         available_version: str | None = None,
-        last_result: str | None = None,
+        last_result: SoftwareUpdateLastResult | None = None,
     ) -> None:
         """Update the outward software-update state fields in one place."""
         svc._software_update_state = state
@@ -113,18 +147,26 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
             svc._software_update_last_result = last_result
 
     @classmethod
-    def _software_update_state_for_no_update_block(cls, svc: Any) -> str:
+    def _software_update_state_for_no_update_block(cls, svc: Any) -> SoftwareUpdateState:
         """Return the outward state that best describes a ``noUpdate`` block."""
-        if bool(getattr(svc, "_software_update_available", False)):
-            return "available-blocked"
-        if getattr(svc, "_software_update_last_check_at", None) is not None:
-            return "up-to-date"
-        return "idle"
+        if cls._software_update_bool_attr(svc, "_software_update_available"):
+            return UPDATE_STATE_AVAILABLE_BLOCKED
+        try:
+            last_check_at = getattr(svc, "_software_update_last_check_at")
+        except AttributeError:
+            last_check_at = None
+        if last_check_at is not None:
+            return UPDATE_STATE_UP_TO_DATE
+        return UPDATE_STATE_IDLE
 
     @staticmethod
     def _software_update_payload_value(payload: dict[str, Any], key: str) -> str:
         """Return one trimmed string value from an update payload."""
-        return str(payload.get(key, "") or "").strip()
+        try:
+            value = payload[key]
+        except KeyError:
+            return ""
+        return "" if value is None else str(value).strip()
 
     @staticmethod
     def _software_update_manifest_available(
@@ -139,19 +181,19 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
         return bool(available_version and available_version != current_version)
 
     @classmethod
-    def _software_update_availability_state(cls, svc: Any, available: bool) -> str:
+    def _software_update_availability_state(cls, svc: Any, available: bool) -> SoftwareUpdateState:
         """Return the outward software-update state for one availability result."""
         if available and cls._software_update_no_update_active(svc):
-            return "available-blocked"
-        return "available" if available else "up-to-date"
+            return UPDATE_STATE_AVAILABLE_BLOCKED
+        return UPDATE_STATE_AVAILABLE if available else UPDATE_STATE_UP_TO_DATE
 
     @classmethod
     def _software_update_check_sources(cls, svc: Any) -> tuple[str, str, str, str]:
         """Return normalized software-update source inputs and local identifiers."""
         return (
-            str(getattr(svc, "software_update_manifest_source", "") or "").strip(),
-            str(getattr(svc, "software_update_version_source", "") or "").strip(),
-            str(getattr(svc, "_software_update_current_version", "") or ""),
+            cls._software_update_text_attr(svc, "software_update_manifest_source").strip(),
+            cls._software_update_text_attr(svc, "software_update_version_source").strip(),
+            cls._software_update_text_attr(svc, "_software_update_current_version"),
             cls._local_installed_bundle_hash(svc),
         )
 
@@ -166,7 +208,7 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
         available = False
         detail = ""
         try:
-            cls._set_software_update_state(svc, "checking", detail="")
+            cls._set_software_update_state(svc, UPDATE_STATE_CHECKING, detail="")
             if manifest_source:
                 available_version, available, detail = cls._software_update_manifest_result(
                     manifest_source,
@@ -192,7 +234,7 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
             svc._software_update_next_check_at = now + cls.SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS
             cls._set_software_update_state(
                 svc,
-                "check-failed",
+                UPDATE_STATE_CHECK_FAILED,
                 detail=str(error),
                 available=False,
                 available_version="",

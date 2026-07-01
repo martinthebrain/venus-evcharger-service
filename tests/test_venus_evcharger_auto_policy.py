@@ -3,6 +3,7 @@ import configparser
 import unittest
 from unittest.mock import patch
 
+import venus_evcharger.auto.policy as auto_policy_module
 from venus_evcharger.auto.policy import (
     AutoLearnChargePowerPolicy,
     AutoPhasePolicy,
@@ -13,6 +14,22 @@ from venus_evcharger.auto.policy import (
 
 
 class TestAutoPolicy(unittest.TestCase):
+    def test_non_negative_helper_preserves_zero_and_logs_negative_values(self) -> None:
+        with patch("venus_evcharger.auto.policy.logging.warning") as warning_mock:
+            self.assertEqual(auto_policy_module._clamp_non_negative_value(0.0, "ExactZero"), 0.0)
+            self.assertEqual(auto_policy_module._clamp_non_negative_value(0.5, "SmallPositive"), 0.5)
+
+        warning_mock.assert_not_called()
+
+        with patch("venus_evcharger.auto.policy.logging.warning") as warning_mock:
+            self.assertEqual(auto_policy_module._clamp_non_negative_value(-0.5, "NegativeLabel"), 0.0)
+
+        warning_mock.assert_called_once_with(
+            "%s %s invalid, clamping to 0",
+            "NegativeLabel",
+            -0.5,
+        )
+
     def test_ewma_policy_clamps_negative_volatility_bounds(self) -> None:
         policy = AutoStopEwmaPolicy(
             base_alpha=0.35,

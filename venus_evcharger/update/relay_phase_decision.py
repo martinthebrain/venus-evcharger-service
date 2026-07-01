@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
+from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, phase_selection_count
 from venus_evcharger.core.contracts import finite_float_or_none, mutable_dict_attr
 from venus_evcharger.update.relay_phase_switch_policy import _RelayPhaseSwitchPolicy
 
@@ -49,12 +49,7 @@ class _RelayPhaseDecision(_RelayPhaseSwitchPolicy):
 
     @staticmethod
     def _phase_selection_count(selection: object) -> int:
-        normalized = normalize_phase_selection(selection, "P1")
-        if normalized == "P1_P2_P3":
-            return 3
-        if normalized == "P1_P2":
-            return 2
-        return 1
+        return phase_selection_count(selection)
 
     @classmethod
     def _phase_selection_is_upshift(

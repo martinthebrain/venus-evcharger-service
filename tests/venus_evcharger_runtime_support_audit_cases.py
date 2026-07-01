@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import configparser
+import json
 import tempfile
+from pathlib import Path
 from unittest.mock import mock_open, patch
 
 from venus_evcharger.runtime.support import RuntimeSupportController
@@ -57,6 +59,38 @@ class TestRuntimeSupportControllerAudit(RuntimeSupportTestCaseBase):
             controller.write_auto_audit_event("waiting-surplus", cached=False)
             current_time[0] = 1031.0
             controller.write_auto_audit_event("waiting-surplus", cached=False)
+            with open(path, "r", encoding="utf-8") as handle:
+                lines = handle.readlines()
+            self.assertEqual(len(lines), 2)
+
+    def test_auto_audit_repeat_interval_follows_gateway_backpressure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = f"{temp_dir}/auto-reasons.log"
+            health_path = f"{temp_dir}/dbus-health.json"
+            Path(health_path).write_text(
+                json.dumps(
+                    {
+                        "captured_at": 1000.0,
+                        "dbus_health": {"backpressure": {"state": "protective"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            current_time = [1000.0]
+            service = make_runtime_support_service(
+                _time_now=lambda: current_time[0],
+                auto_audit_log_path=path,
+                dbus_gateway_health_path=health_path,
+                _last_auto_metrics=make_auto_metrics(),
+            )
+            controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+
+            controller.write_auto_audit_event("waiting-surplus", cached=False)
+            current_time[0] = 1100.0
+            controller.write_auto_audit_event("waiting-surplus", cached=False)
+            current_time[0] = 1241.0
+            controller.write_auto_audit_event("waiting-surplus", cached=False)
+
             with open(path, "r", encoding="utf-8") as handle:
                 lines = handle.readlines()
             self.assertEqual(len(lines), 2)

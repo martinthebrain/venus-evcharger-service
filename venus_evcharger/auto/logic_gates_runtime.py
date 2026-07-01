@@ -359,7 +359,7 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
     ) -> str | None:
         """Return a concrete stop reason when inputs are missing but stopping is still warranted."""
         svc = self.service
-        if getattr(svc, "auto_night_lock_stop", False) and not daytime_window_open:
+        if getattr(svc, "auto_night_lock_stop", False) or not daytime_window_open:
             return "night-lock"
         return self._policy_stop_reason(battery_soc, grid_power)
 

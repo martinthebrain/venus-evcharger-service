@@ -14,6 +14,7 @@ import os
 import time
 from typing import Any
 
+from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.core.common import _fresh_confirmed_relay_output
 from venus_evcharger.core.contracts import normalized_auto_state_pair, sanitized_auto_metrics
 from venus_evcharger.core.shared import write_text_atomically
@@ -316,7 +317,8 @@ class _RuntimeAudit(_RuntimeAuditFields):
         svc = self.service
         if not path:
             return False
-        return (now - float(getattr(svc, "_last_auto_audit_cleanup_at", 0.0))) >= 300.0
+        cleanup_interval = service_dbus_backpressure_policy(svc).audit_cleanup_interval_seconds(300.0)
+        return (now - float(getattr(svc, "_last_auto_audit_cleanup_at", 0.0))) >= cleanup_interval
 
     @staticmethod
     def _auto_audit_cutoff_epoch(svc: Any, now: float) -> float | None:
@@ -378,7 +380,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
             return
         now = svc._time_now()
         audit_key = self._auto_audit_key(svc, reason, cached)
-        repeat_seconds = float(getattr(svc, "auto_audit_log_repeat_seconds", 30.0))
+        repeat_seconds = service_dbus_backpressure_policy(svc).audit_repeat_seconds(
+            float(getattr(svc, "auto_audit_log_repeat_seconds", 30.0))
+        )
         last_audit_key = getattr(svc, "_last_auto_audit_key", None)
         last_audit_event_at = getattr(svc, "_last_auto_audit_event_at", None)
         if self._auto_audit_repeat_suppressed(

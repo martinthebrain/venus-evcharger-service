@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Protocol
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
 from venus_evcharger.core.common import fresh_confirmed_relay_output
@@ -23,6 +24,42 @@ PHASE_SELECTION_APPLY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, Valu
 # - Auto mode deactivation clears any pending candidate before returning.
 
 
+class _AutoPhasePolicyLike(Protocol):
+    upshift_delay_seconds: float
+    downshift_delay_seconds: float
+    downshift_margin_watts: float
+    mismatch_retry_seconds: float
+    mismatch_lockout_count: int
+    mismatch_lockout_seconds: float
+
+
+class _AutoPhaseSwitchService(Protocol):
+    requested_phase_selection: PhaseSelection
+    active_phase_selection: PhaseSelection
+    auto_shelly_soft_fail_seconds: float
+    _phase_switch_mismatch_active: bool
+    _phase_switch_mismatch_counts: dict[str, int]
+    _phase_switch_last_mismatch_selection: str | None
+    _phase_switch_last_mismatch_at: float | None
+    _phase_switch_lockout_selection: str | None
+    _phase_switch_lockout_reason: str
+    _phase_switch_lockout_at: float | None
+    _phase_switch_lockout_until: float | None
+    _auto_phase_target_candidate: PhaseSelection | None
+    _auto_phase_target_since: float | None
+    _phase_switch_pending_selection: PhaseSelection | None
+    _phase_switch_state: str | None
+    _phase_switch_requested_at: float | None
+    _phase_switch_stable_until: float | None
+    _phase_switch_resume_relay: bool
+    _peek_pending_relay_command: Callable[[], tuple[bool | None, float | None]]
+    _phase_selection_requires_pause: Callable[[], bool]
+    _apply_phase_selection: Callable[[PhaseSelection], PhaseSelection]
+    _save_runtime_state: Callable[[], object]
+    _mark_failure: Callable[[str], object]
+    _warning_throttled: Callable[..., object]
+
+
 class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
     """Handle phase-switch cooldowns, lockouts, and pending Auto candidates."""
 
@@ -40,30 +77,30 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
         def _phase_selection_count(cls, selection: object) -> int: ...
 
         @staticmethod
-        def _auto_phase_policy(svc: Any) -> Any | None: ...
+        def _auto_phase_policy(svc: object) -> _AutoPhasePolicyLike | None: ...
 
         @classmethod
         def _phase_selection_min_surplus_watts(
             cls,
-            svc: Any,
+            svc: object,
             selection: PhaseSelection,
             voltage: float,
         ) -> float | None: ...
 
         @classmethod
-        def _ordered_auto_phase_selections(cls, svc: Any) -> tuple[PhaseSelection, ...]: ...
+        def _ordered_auto_phase_selections(cls, svc: object) -> tuple[PhaseSelection, ...]: ...
 
         @classmethod
         def _current_phase_selection(
             cls,
-            svc: Any,
+            svc: object,
             supported: tuple[PhaseSelection, ...],
         ) -> PhaseSelection: ...
 
         @classmethod
         def _auto_phase_target_selection(
             cls,
-            svc: Any,
+            svc: object,
             supported: tuple[PhaseSelection, ...],
             current_selection: PhaseSelection,
             desired_relay: bool,
@@ -75,7 +112,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
         @classmethod
         def _record_auto_phase_metrics(
             cls,
-            svc: Any,
+            svc: object,
             *,
             current_selection: PhaseSelection,
             target_selection: PhaseSelection | None,
@@ -84,7 +121,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
         ) -> None: ...
 
         @staticmethod
-        def _pending_phase_switch_selection(svc: Any) -> PhaseSelection | None: ...
+        def _pending_phase_switch_selection(svc: object) -> PhaseSelection | None: ...
 
         def _phase_switch_state_active(self, pending_selection: PhaseSelection | None, switch_state: str) -> bool: ...
 
@@ -93,8 +130,8 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
     @classmethod
     def _downshift_auto_phase_target(
         cls,
-        svc: Any,
-        phase_policy: Any,
+        svc: object,
+        phase_policy: _AutoPhasePolicyLike,
         supported: tuple[PhaseSelection, ...],
         current_selection: PhaseSelection,
         current_index: int,
@@ -115,14 +152,14 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
         return supported[current_index - 1], "phase-downshift", threshold
 
     @staticmethod
-    def _clear_auto_phase_candidate(svc: Any) -> None:
+    def _clear_auto_phase_candidate(svc: _AutoPhaseSwitchService) -> None:
         svc._auto_phase_target_candidate = None
         svc._auto_phase_target_since = None
 
     @classmethod
     def _auto_phase_switch_delay_seconds(
         cls,
-        svc: Any,
+        svc: object,
         current_selection: PhaseSelection,
         target_selection: PhaseSelection,
     ) -> float:
@@ -136,7 +173,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
     @classmethod
     def _auto_phase_candidate_ready(
         cls,
-        svc: Any,
+        svc: _AutoPhaseSwitchService,
         current_selection: PhaseSelection,
         target_selection: PhaseSelection,
         now: float,
@@ -159,7 +196,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
     @classmethod
     def _stage_phase_switch(
         cls,
-        svc: Any,
+        svc: _AutoPhaseSwitchService,
         requested_selection: PhaseSelection,
         current_time: float,
         *,
@@ -175,7 +212,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
     @classmethod
     def _phase_change_requires_staging(
         cls,
-        svc: Any,
+        svc: _AutoPhaseSwitchService,
         relay_on: bool,
         now: float,
     ) -> bool:
@@ -193,7 +230,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
 
     def _apply_auto_phase_target(
         self,
-        svc: Any,
+        svc: _AutoPhaseSwitchService,
         target_selection: PhaseSelection,
         desired_relay: bool,
         relay_on: bool,
@@ -236,7 +273,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
 
     def maybe_apply_auto_phase_selection(
         self,
-        svc: Any,
+        svc: _AutoPhaseSwitchService,
         desired_relay: bool,
         relay_on: bool,
         voltage: float,
@@ -272,7 +309,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
             now,
         )
 
-    def _auto_phase_selection_blocked(self, svc: Any, auto_mode_active: bool) -> bool:
+    def _auto_phase_selection_blocked(self, svc: _AutoPhaseSwitchService, auto_mode_active: bool) -> bool:
         return any(
             (
                 self._auto_phase_selection_inactive(svc, auto_mode_active),
@@ -282,7 +319,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
 
     def _auto_phase_selection_decision(
         self,
-        svc: Any,
+        svc: _AutoPhaseSwitchService,
         desired_relay: bool,
         relay_on: bool,
         voltage: float,
@@ -308,20 +345,20 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
         )
         return current_selection, target_selection, phase_reason, threshold_watts
 
-    def _auto_phase_selection_inactive(self, svc: Any, auto_mode_active: bool) -> bool:
+    def _auto_phase_selection_inactive(self, svc: _AutoPhaseSwitchService, auto_mode_active: bool) -> bool:
         if auto_mode_active:
             return False
         self._clear_auto_phase_candidate(svc)
         return True
 
-    def _auto_phase_switch_already_active(self, svc: Any) -> bool:
+    def _auto_phase_switch_already_active(self, svc: _AutoPhaseSwitchService) -> bool:
         pending_selection = self._pending_phase_switch_selection(svc)
         switch_state = str(getattr(svc, "_phase_switch_state", "") or "")
         return bool(self._phase_switch_state_active(pending_selection, switch_state))
 
     def _pending_auto_phase_target_ready(
         self,
-        svc: Any,
+        svc: _AutoPhaseSwitchService,
         current_selection: PhaseSelection,
         target_selection: PhaseSelection,
         now: float,

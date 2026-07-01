@@ -6,6 +6,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.core.contracts import timestamp_not_future
+from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidation
 
 
@@ -51,7 +52,10 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
         heartbeat_at = self._coerce_snapshot_timestamp(snapshot.get("heartbeat_at"))
         freshness_timestamp = heartbeat_at if heartbeat_at is not None else captured_at
         snapshot_age = None if freshness_timestamp is None else max(0.0, current - freshness_timestamp)
-        stale = snapshot_age is not None and snapshot_age > svc.auto_input_helper_stale_seconds
+        stale_after = service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
+            svc.auto_input_helper_stale_seconds,
+        )
+        stale = snapshot_age is not None and snapshot_age > stale_after
         return captured_at, freshness_timestamp, stale
 
     @classmethod

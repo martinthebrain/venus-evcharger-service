@@ -224,6 +224,37 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         self.assertEqual(service._last_pm_status, {"output": True})
 
+    def test_short_network_gap_uses_confirmed_pm_cache_without_offline_panic(self):
+        service = SimpleNamespace(
+            _time_now=MagicMock(return_value=100.0),
+            _state_summary=lambda: "state",
+            _watchdog_recover=MagicMock(),
+            _ensure_auto_input_helper_process=MagicMock(),
+            _refresh_auto_input_snapshot=MagicMock(),
+            _get_worker_snapshot=MagicMock(return_value={"pm_status": None}),
+            _last_pm_status=None,
+            _last_pm_status_at=None,
+            _last_pm_status_confirmed=False,
+            _last_confirmed_pm_status={"output": True, "apower": 1800.0},
+            _last_confirmed_pm_status_at=95.0,
+            auto_shelly_soft_fail_seconds=10.0,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        with (
+            patch.object(controller, "_run_online_update_cycle") as online_update,
+            patch.object(controller, "publish_offline_update") as offline_update,
+            patch.object(controller, "_software_update_housekeeping") as housekeeping,
+        ):
+            result = controller.update()
+
+        self.assertTrue(result)
+        service._watchdog_recover.assert_called_once_with(100.0)
+        service._get_worker_snapshot.assert_called_once_with()
+        online_update.assert_called_once_with({"output": True, "apower": 1800.0, "_pm_confirmed": True}, {"pm_status": None}, 100.0)
+        offline_update.assert_not_called()
+        housekeeping.assert_called_once_with(service, 100.0)
+
     def test_update_offline_path_publishes_disconnected_state(self):
         service = SimpleNamespace(
             _time_now=MagicMock(return_value=200.0),
@@ -261,9 +292,12 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             _dbusservice={"/Ac/Power": 0.0},
             service_name="com.victronenergy.evcharger.http_60",
             last_update=0.0,
+            _last_successful_update_at=None,
+            _last_recovery_attempt_at=150.0,
             _dbus_publish_state={},
             _dbus_live_publish_interval_seconds=1.0,
             _dbus_slow_publish_interval_seconds=5.0,
+            _publish_companion_dbus_bridge=MagicMock(),
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
@@ -276,6 +310,9 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         service._bump_update_index.assert_called_once_with(200.0)
         self.assertEqual(service.virtual_startstop, 0)
         self.assertEqual(service.last_update, 200.0)
+        self.assertEqual(service._last_successful_update_at, 200.0)
+        self.assertIsNone(service._last_recovery_attempt_at)
+        service._publish_companion_dbus_bridge.assert_called_once_with(200.0)
 
     def test_publish_offline_update_uses_recent_confirmed_relay_state_only(self):
         service = SimpleNamespace(

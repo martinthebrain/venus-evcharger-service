@@ -8,6 +8,7 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.publish.dbus_shared import PublishServiceValueSnapshot, PublishStateEntry, PhaseData
 
 PUBLISH_DBUS_SERVICE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
@@ -31,6 +32,21 @@ class _DbusPublishCore:
             self.service._dbus_live_publish_interval_seconds = 1.0
         if not hasattr(self.service, "_dbus_slow_publish_interval_seconds"):
             self.service._dbus_slow_publish_interval_seconds = 5.0
+
+    def _effective_publish_interval(
+        self,
+        interval_seconds: float | None,
+        *,
+        group_name: str,
+        force: bool,
+    ) -> float | None:
+        """Return the interval after advisory gateway-health throttling."""
+        if force or interval_seconds is None:
+            return interval_seconds
+        return service_dbus_backpressure_policy(self.service).publish_interval_seconds(
+            float(interval_seconds),
+            group=group_name,
+        )
 
     def _should_enqueue_publish(self) -> bool:
         """Return whether DBus writes must be handed to the GLib thread."""
@@ -60,7 +76,12 @@ class _DbusPublishCore:
         """Publish a DBus path immediately, on change, or with a minimum interval."""
         self.ensure_state()
         current = time.time() if now is None else float(now)
-        should_write, _entry = self._publish_decision(path, value, current, interval_seconds, force)
+        effective_interval = self._effective_publish_interval(
+            interval_seconds,
+            group_name="single-path",
+            force=force,
+        )
+        should_write, _entry = self._publish_decision(path, value, current, effective_interval, force)
         if not should_write:
             return False
 
@@ -221,13 +242,18 @@ class _DbusPublishCore:
         """
         self.ensure_state()
         current = time.time() if now is None else float(now)
+        effective_interval = self._effective_publish_interval(
+            interval_seconds,
+            group_name=group_name,
+            force=force,
+        )
         if self._should_enqueue_publish():
-            return self._enqueue_transactional_publish(values, current, interval_seconds, force)
+            return self._enqueue_transactional_publish(values, current, effective_interval, force)
 
         staged_values, staged_entries, original_service_values = self._stage_publish_values(
             values,
             current,
-            interval_seconds,
+            effective_interval,
             force,
         )
 

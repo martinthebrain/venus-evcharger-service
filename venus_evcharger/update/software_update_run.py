@@ -6,7 +6,19 @@ from __future__ import annotations
 import os
 from typing import Any, TYPE_CHECKING
 
+from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_PROCESS_ERRORS
+from venus_evcharger.update.software_update_contracts import (
+    SoftwareUpdateLastResult,
+    SoftwareUpdateState,
+    UPDATE_RESULT_FAILED,
+    UPDATE_RESULT_RUNNING,
+    UPDATE_RESULT_SUCCESS,
+    UPDATE_STATE_INSTALL_FAILED,
+    UPDATE_STATE_INSTALLED,
+    UPDATE_STATE_RUNNING,
+    UPDATE_STATE_UNAVAILABLE,
+)
 from venus_evcharger.update.software_update_state import _SoftwareUpdateState
 
 
@@ -44,7 +56,7 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
     ) -> bool:
         """Spawn the detached update process and publish the running state."""
         repo_root, restart_script = run_paths
-        log_path = str(getattr(svc, "software_update_log_path", "") or "")
+        log_path = cls._software_update_text_attr(svc, "software_update_log_path")
         try:
             process, log_handle = cls._spawn_software_update_process(
                 log_path,
@@ -58,7 +70,12 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         svc._software_update_process_log_handle = log_handle
         svc._software_update_last_run_at = now
         svc._software_update_run_requested_at = None
-        cls._set_software_update_state(svc, "running", detail=source, last_result="running")
+        cls._set_software_update_state(
+            svc,
+            UPDATE_STATE_RUNNING,
+            detail=source,
+            last_result=UPDATE_RESULT_RUNNING,
+        )
         return True
 
     @classmethod
@@ -75,19 +92,27 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         cls._software_update_mark_unavailable(svc, unavailable_detail)
         return None
 
-    @staticmethod
-    def _software_update_run_paths(svc: Any) -> tuple[str, str, str]:
+    @classmethod
+    def _software_update_run_paths(cls, svc: Any) -> tuple[str, str, str]:
         """Return normalized install, repo-root, and restart paths for update runs."""
         return (
-            str(getattr(svc, "software_update_install_script", "") or ""),
-            str(getattr(svc, "software_update_repo_root", "") or ""),
-            str(getattr(svc, "software_update_restart_script", "") or ""),
+            cls._software_update_text_attr(svc, "software_update_install_script"),
+            cls._software_update_text_attr(svc, "software_update_repo_root"),
+            cls._software_update_text_attr(svc, "software_update_restart_script"),
         )
+
+    @staticmethod
+    def _software_update_optional_attr(svc: Any, name: str) -> Any:
+        """Return one optional software-update runtime attribute."""
+        try:
+            return getattr(svc, name)
+        except AttributeError:
+            return None
 
     @classmethod
     def _software_update_run_already_active(cls, svc: Any) -> bool:
         """Return whether an update run is already active and clear the queued trigger."""
-        if getattr(svc, "_software_update_process", None) is None:
+        if cls._software_update_optional_attr(svc, "_software_update_process") is None:
             return False
         svc._software_update_run_requested_at = None
         return True
@@ -124,9 +149,9 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         """Publish one unavailable update-run state."""
         cls._set_software_update_state(
             svc,
-            "update-unavailable",
+            UPDATE_STATE_UNAVAILABLE,
             detail=detail,
-            last_result="failed",
+            last_result=UPDATE_RESULT_FAILED,
         )
         svc._software_update_run_requested_at = None
 
@@ -135,9 +160,9 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         """Publish one failed update-run start result."""
         cls._set_software_update_state(
             svc,
-            "install-failed",
+            UPDATE_STATE_INSTALL_FAILED,
             detail=str(error),
-            last_result="failed",
+            last_result=UPDATE_RESULT_FAILED,
         )
         svc._software_update_run_requested_at = None
 
@@ -164,10 +189,10 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         except OSError:
             pass
 
-    @staticmethod
-    def _close_software_update_log_handle(svc: Any) -> None:
+    @classmethod
+    def _close_software_update_log_handle(cls, svc: Any) -> None:
         """Close the current update log handle when one is open."""
-        log_handle = getattr(svc, "_software_update_process_log_handle", None)
+        log_handle = cls._software_update_optional_attr(svc, "_software_update_process_log_handle")
         if log_handle is None:
             return
         try:
@@ -180,22 +205,22 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         cls,
         svc: Any,
         return_code: int,
-    ) -> tuple[str, str, Any, Any, str]:
+    ) -> tuple[SoftwareUpdateState, str, bool, str, SoftwareUpdateLastResult]:
         """Return the final outward state fields for one completed update process."""
         if int(return_code) == 0:
-            return "installed", "completed", False, "", "success"
+            return UPDATE_STATE_INSTALLED, "completed", False, "", UPDATE_RESULT_SUCCESS
         return (
-            "install-failed",
+            UPDATE_STATE_INSTALL_FAILED,
             f"exit {int(return_code)}",
-            getattr(svc, "_software_update_available", False),
-            getattr(svc, "_software_update_available_version", ""),
-            "failed",
+            cls._software_update_bool_attr(svc, "_software_update_available"),
+            cls._software_update_text_attr(svc, "_software_update_available_version"),
+            UPDATE_RESULT_FAILED,
         )
 
     @classmethod
     def _poll_software_update_process(cls, svc: Any) -> None:
         """Refresh the software-update run state from the detached child process."""
-        process = getattr(svc, "_software_update_process", None)
+        process = cls._software_update_optional_attr(svc, "_software_update_process")
         if process is None:
             return
         return_code = process.poll()
@@ -230,11 +255,11 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         process_running: bool,
     ) -> None:
         """Clear queued update triggers that became irrelevant while a run is active."""
-        if process_running and getattr(svc, "_software_update_run_requested_at", None) is not None:
+        if process_running and cls._software_update_optional_attr(svc, "_software_update_run_requested_at") is not None:
             svc._software_update_run_requested_at = None
         if process_running and cls._software_update_due(
             now,
-            getattr(svc, "_software_update_boot_auto_due_at", None),
+            cls._software_update_optional_attr(svc, "_software_update_boot_auto_due_at"),
         ):
             svc._software_update_boot_auto_due_at = None
 
@@ -243,7 +268,7 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         """Drive periodic update checks and deferred update runs from the main loop."""
         cls._poll_software_update_process(svc)
         cls._refresh_software_update_local_state(svc)
-        process_running = getattr(svc, "_software_update_process", None) is not None
+        process_running = cls._software_update_optional_attr(svc, "_software_update_process") is not None
         cls._clear_software_update_triggers_while_running(svc, now, process_running)
         if process_running:
             return
@@ -254,16 +279,21 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
     @classmethod
     def _software_update_run_due_check(cls, svc: Any, now: float) -> None:
         """Run the periodic update check when its due timestamp has arrived."""
-        if cls._software_update_due(now, getattr(svc, "_software_update_next_check_at", None)):
-            cls._run_software_update_check(svc, float(now))
+        if not cls._software_update_due(now, cls._software_update_optional_attr(svc, "_software_update_next_check_at")):
+            return
+        if cls._defer_optional_software_update_work(svc, now, "_software_update_next_check_at"):
+            return
+        cls._run_software_update_check(svc, float(now))
 
     @classmethod
     def _software_update_run_due_boot_update(cls, svc: Any, now: float) -> None:
         """Run the deferred boot-time update when due."""
         if not cls._software_update_due(
             now,
-            getattr(svc, "_software_update_boot_auto_due_at", None),
+            cls._software_update_optional_attr(svc, "_software_update_boot_auto_due_at"),
         ):
+            return
+        if cls._defer_optional_software_update_work(svc, now, "_software_update_boot_auto_due_at"):
             return
         svc._software_update_boot_auto_due_at = None
         cls._start_software_update_run(svc, float(now), "boot-auto")
@@ -271,5 +301,14 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
     @classmethod
     def _software_update_run_due_manual_trigger(cls, svc: Any, now: float) -> None:
         """Run a queued manual update trigger."""
-        if getattr(svc, "_software_update_run_requested_at", None) is not None:
+        if cls._software_update_optional_attr(svc, "_software_update_run_requested_at") is not None:
             cls._start_software_update_run(svc, float(now), "manual")
+
+    @staticmethod
+    def _defer_optional_software_update_work(svc: Any, now: float, due_attr: str) -> bool:
+        """Defer automatic updater work while the DBus gateway reports pressure."""
+        policy = service_dbus_backpressure_policy(svc)
+        if not policy.should_throttle_optional_work():
+            return False
+        setattr(svc, due_attr, float(now) + policy.optional_work_interval_seconds(60.0))
+        return True

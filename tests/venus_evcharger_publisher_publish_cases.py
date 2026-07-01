@@ -1,4 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import json
+import tempfile
+from pathlib import Path
+
 from tests.venus_evcharger_publisher_support import (
     DbusPublishController,
     DbusPublishControllerTestCase,
@@ -30,6 +34,32 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
 
         self.assertFalse(controller.publish_path("/IntervalMissing", 7, now=103.0, interval_seconds=5.0))
         self.assertTrue(controller.publish_path("/IntervalMissing", 7, now=106.0, interval_seconds=5.0))
+
+    def test_publish_intervals_follow_gateway_backpressure_without_blocking_force(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            health_path = f"{temp_dir}/dbus-health.json"
+            Path(health_path).write_text(
+                json.dumps(
+                    {
+                        "captured_at": 100.0,
+                        "dbus_health": {"backpressure": {"state": "protective"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service = SimpleNamespace(
+                _dbusservice={},
+                _dbus_publish_state={},
+                _dbus_live_publish_interval_seconds=1.0,
+                _dbus_slow_publish_interval_seconds=5.0,
+                dbus_gateway_health_path=health_path,
+            )
+            controller = DbusPublishController(service, self._age_seconds)
+
+            self.assertTrue(controller.publish_path("/Optional", 1, now=100.0, interval_seconds=1.0))
+            self.assertFalse(controller.publish_path("/Optional", 2, now=104.0, interval_seconds=1.0))
+            self.assertTrue(controller.publish_path("/Optional", 2, now=112.0, interval_seconds=1.0))
+            self.assertTrue(controller.publish_path("/Optional", 3, now=113.0, interval_seconds=1.0, force=True))
 
     def test_publish_live_measurements_rolls_back_publish_state_and_marks_failure(self) -> None:
         class FlakyDbusService(dict[str, float]):

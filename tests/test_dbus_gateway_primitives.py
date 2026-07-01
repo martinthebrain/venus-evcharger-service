@@ -7,6 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import venus_evcharger.dbus_gateway_client as gateway_client_module
+import venus_evcharger.dbus_gateway_core as gateway_core_module
+import venus_evcharger.dbus_gateway_latency as gateway_latency_module
 from venus_evcharger import dbus_gateway
 from venus_evcharger import dbus_gateway_cache, dbus_gateway_commands
 from venus_evcharger.dbus_gateway import (
@@ -27,6 +30,75 @@ from venus_evcharger.dbus_gateway import (
 
 
 class DbusGatewayPrimitiveTests(unittest.TestCase):
+    def test_gateway_core_paths_priority_json_and_read_edges(self) -> None:
+        with patch.dict(
+            gateway_core_module.os.environ,
+            {"VENUS_EVCHARGER_GATEWAY_RUN_DIR": " /tmp/env-gateway "},
+        ):
+            env_paths = gateway_paths()
+        self.assertEqual(env_paths.run_dir, "/tmp/env-gateway")
+        self.assertEqual(env_paths.socket_path, "/tmp/env-gateway/gateway.sock")
+        self.assertEqual(env_paths.cache_path, "/tmp/env-gateway/dbus-cache.json")
+        self.assertEqual(env_paths.cache_sequence_path, "/tmp/env-gateway/dbus-cache.seq")
+        self.assertEqual(env_paths.health_path, "/tmp/env-gateway/dbus-health.json")
+        self.assertEqual(env_paths.command_dir, "/tmp/env-gateway/dbus-commands")
+        self.assertEqual(env_paths.core_command_dir, "/tmp/env-gateway/core-commands")
+
+        explicit_paths = gateway_paths(" /tmp/explicit-gateway ")
+        self.assertEqual(explicit_paths.run_dir, "/tmp/explicit-gateway")
+        self.assertEqual(dbus_path_key("svc", "/Path"), "path:svc/Path")
+
+        self.assertEqual(gateway_core_module.priority_rank(" safety "), 0)
+        self.assertEqual(gateway_core_module.priority_rank("USER"), 1)
+        self.assertEqual(gateway_core_module.priority_rank("unknown"), gateway_core_module.PRIORITY_VALUES["diagnostic"])
+        self.assertEqual(gateway_core_module.priority_rank(None), gateway_core_module.PRIORITY_VALUES["diagnostic"])
+
+        payload = gateway_core_module._json_ready({"nested": (object(), {"k": True}), 4: None})
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(payload["4"], None)
+        self.assertTrue(payload["nested"][1]["k"])
+        self.assertIn("object object", payload["nested"][0])
+        self.assertTrue(gateway_core_module._is_json_scalar(False))
+        self.assertFalse(gateway_core_module._is_json_scalar(object()))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            default = {"fallback": True}
+            missing = Path(temp_dir) / "missing.json"
+            self.assertIs(read_json_file(str(missing), default), default)
+
+            list_path = Path(temp_dir) / "list.json"
+            list_path.write_text("[1, 2]", encoding="utf-8")
+            self.assertEqual(read_json_file(str(list_path), default), [1, 2])
+
+            object_path = Path(temp_dir) / "object.json"
+            object_path.write_text('{"ok": true}', encoding="utf-8")
+            self.assertEqual(read_json_file(str(object_path), default), {"ok": True})
+
+            broken = Path(temp_dir) / "broken.json"
+            broken.write_text("{", encoding="utf-8")
+            self.assertIs(read_json_file(str(broken), default), default)
+
+            handle = MagicMock()
+            opened = object()
+            handle.__enter__.return_value = opened
+            with patch("builtins.open", MagicMock(return_value=handle)) as open_mock, patch.object(
+                gateway_core_module.json,
+                "load",
+                return_value={"opened": True},
+            ) as json_load:
+                self.assertEqual(read_json_file("explicit-encoding.json", default), {"opened": True})
+            open_mock.assert_called_once_with("explicit-encoding.json", encoding="utf-8")
+            json_load.assert_called_once_with(opened)
+
+        class BadFloat:
+            def __float__(self) -> float:
+                raise ValueError("bad")
+
+        self.assertEqual(gateway_core_module.float_or_default("2.5", 0.0), 2.5)
+        self.assertEqual(gateway_core_module.float_or_default(BadFloat(), 4.0), 4.0)
+        self.assertEqual(gateway_core_module.float_or_default(object(), 4.0), 4.0)
+
     def test_json_helpers_cache_snapshot_and_load_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = gateway_paths(str(Path(temp_dir) / "run"))
@@ -101,23 +173,82 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertEqual(dbus_gateway_cache._value_age(120.0, 100.0), 0.0)
         self.assertFalse(dbus_gateway_cache._value_is_stale("error", 20.0, 1.0))
         self.assertFalse(dbus_gateway_cache._value_is_stale("fresh", 20.0, 0.0))
+        self.assertFalse(dbus_gateway_cache._value_is_stale("fresh", 1.0, 1.0))
         self.assertTrue(dbus_gateway_cache._value_is_stale("fresh", 20.0, 1.0))
+        self.assertTrue(dbus_gateway_cache._valid_snapshot_payload({"captured_at": 1.0}))
         self.assertFalse(dbus_gateway_cache._valid_snapshot_payload({"captured_at": 0.0}))
         self.assertFalse(dbus_gateway_cache._valid_snapshot_payload({"captured_at": object()}))
         self.assertFalse(dbus_gateway_cache._valid_snapshot_payload([]))
+        valid_payload = {"captured_at": 1.0, "values": {}}
+        self.assertIs(dbus_gateway_cache._snapshot_payload(valid_payload), valid_payload)
+        self.assertFalse(dbus_gateway_cache._snapshot_too_old(100.0, 100.0, 0.0))
+        self.assertTrue(dbus_gateway_cache._snapshot_too_old(100.0, 100.1, 0.0))
+        self.assertFalse(dbus_gateway_cache._snapshot_too_old(99.0, 100.0, 1.0))
         self.assertFalse(dbus_gateway_cache._snapshot_too_old(1.0, 100.0, -1.0))
         self.assertTrue(dbus_gateway_cache._snapshot_too_old(1.0, 100.0, 1.0))
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            store = DbusCacheStore(gateway_paths(str(Path(temp_dir) / "run")), stale_after_seconds=-1)
+            paths = gateway_paths(str(Path(temp_dir) / "run"))
+            self.assertEqual(DbusCacheStore(paths).stale_after_seconds, 10.0)
+            store = DbusCacheStore(paths, stale_after_seconds=-1)
+            self.assertIs(store.paths, paths)
             self.assertEqual(store.stale_after_seconds, 0.0)
+            self.assertEqual(store.sequence, 0)
+            self.assertEqual(store.values, {})
+            self.assertEqual(store.services, {})
+            self.assertEqual(
+                store.health,
+                {
+                    "state": "init",
+                    "degraded_until": 0.0,
+                    "timeouts_60s": 0,
+                    "avg_latency_ms": 0.0,
+                    "max_latency_ms": 0.0,
+                },
+            )
             with patch.object(dbus_gateway_cache, "_now", return_value=42.0):
                 store.update_value("defaulted", 5)
+            self.assertEqual(store.values["defaulted"]["age_s"], 0.0)
             entry = store.snapshot(now=50.0)["values"]["defaulted"]
+            self.assertEqual(store.sequence, 1)
+            self.assertEqual(entry["value"], 5)
             self.assertEqual(entry["source"], "")
             self.assertEqual(entry["status"], "fresh")
             self.assertEqual(entry["confidence"], 1.0)
+            self.assertEqual(entry["last_error"], "")
             self.assertEqual(entry["updated_at"], 42.0)
+            self.assertEqual(entry["age_s"], 8.0)
+
+            merged = dbus_gateway_cache._cache_value_metadata(
+                CacheValueMetadata(source="old", status="cached", confidence=0.4, last_error="old-error", now=7.0),
+                {"source": "new", "status": "fresh", "confidence": "0.9", "last_error": "new-error", "now": "8.5"},
+            )
+            self.assertEqual(
+                merged,
+                CacheValueMetadata(
+                    source="new",
+                    status="fresh",
+                    confidence=0.9,
+                    last_error="new-error",
+                    now=8.5,
+                ),
+            )
+            metadata_fallback = dbus_gateway_cache._cache_value_metadata(
+                CacheValueMetadata(source="old", status="cached", confidence=0.4, last_error="old-error", now=7.0),
+                {"source": "new"},
+            )
+            self.assertEqual(
+                metadata_fallback,
+                CacheValueMetadata(source="new", status="cached", confidence=0.4, last_error="old-error", now=7.0),
+            )
+            field_only = dbus_gateway_cache._cache_value_metadata(
+                None,
+                {"source": "field", "status": "cached", "confidence": b"0.6", "last_error": "warn", "now": bytearray(b"9")},
+            )
+            self.assertEqual(
+                field_only,
+                CacheValueMetadata(source="field", status="cached", confidence=0.6, last_error="warn", now=9.0),
+            )
 
             store.update_value(
                 "metadata-fallback",
@@ -127,15 +258,74 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 now=object(),
             )
             fallback_entry = store.snapshot(now=90.0)["values"]["metadata-fallback"]
+            self.assertEqual(store.sequence, 2)
             self.assertEqual(fallback_entry["confidence"], 0.55)
             self.assertEqual(fallback_entry["updated_at"], 88.0)
+            self.assertEqual(fallback_entry["source"], "svc/fallback")
 
             store.mark_error("missing", source="svc/path", error=RuntimeError("boom"), now=60.0)
+            self.assertEqual(store.values["missing"]["age_s"], 60.0)
             error_entry = store.snapshot(now=60.0)["values"]["missing"]
+            self.assertEqual(store.sequence, 3)
             self.assertIsNone(error_entry["value"])
+            self.assertEqual(error_entry["source"], "svc/path")
+            self.assertEqual(error_entry["updated_at"], 0.0)
+            self.assertEqual(error_entry["error_at"], 60.0)
             self.assertEqual(error_entry["age_s"], 0.0)
+            self.assertEqual(error_entry["status"], "error")
             self.assertEqual(error_entry["last_error"], "boom")
             self.assertEqual(error_entry["confidence"], 0.0)
+
+            store.update_value(123, {"x": object()}, source="svc/value", status="cached", confidence=0.25, last_error="soft", now=70.0)
+            store.mark_error(123, source="svc/error", error="failed", now=75.5)
+            self.assertEqual(store.sequence, 5)
+            self.assertEqual(store.values["123"]["age_s"], 5.5)
+            numeric_error = store.snapshot(now=76.0)["values"]["123"]
+            self.assertEqual(numeric_error["value"]["x"].split()[0], "<object")
+            self.assertEqual(numeric_error["source"], "svc/error")
+            self.assertEqual(numeric_error["updated_at"], 70.0)
+            self.assertEqual(numeric_error["error_at"], 75.5)
+            self.assertEqual(numeric_error["age_s"], 6.0)
+            self.assertEqual(numeric_error["last_error"], "failed")
+
+            store.update_value("instant-error", 1, source="svc/value", now=77.0)
+            store.mark_error("instant-error", source="svc/error", error="same-tick", now=77.0)
+            self.assertEqual(store.values["instant-error"]["age_s"], 0.0)
+
+            store.update_services(["svc.a", 42], now=80.0)
+            self.assertEqual(store.sequence, 8)
+            self.assertEqual(
+                store.services,
+                {
+                    "svc.a": {"seen_at": 80.0, "status": "present"},
+                    "42": {"seen_at": 80.0, "status": "present"},
+                },
+            )
+            snapshot = store.snapshot(now=81.0)
+            self.assertEqual(snapshot["schema_version"], dbus_gateway_cache.DBUS_GATEWAY_SCHEMA_VERSION)
+            self.assertEqual(snapshot["sequence"], store.sequence)
+            self.assertEqual(snapshot["captured_at"], 81.0)
+            self.assertEqual(snapshot["dbus_health"], store.health)
+            self.assertEqual(snapshot["services"], store.services)
+            self.assertEqual(store.value_snapshot({"updated_at": 0.0}, 82.0)["status"], "unknown")
+            self.assertEqual(store.value_snapshot({"updated_at": 80.0, "status": "cached"}, 82.0)["status"], "cached")
+
+            store.write_snapshot_files()
+            self.assertEqual(Path(paths.cache_sequence_path).read_text(encoding="utf-8"), f"{store.sequence}\n")
+            health = read_json_file(paths.health_path, {})
+            self.assertEqual(
+                health,
+                {
+                    "schema_version": dbus_gateway_cache.DBUS_GATEWAY_SCHEMA_VERSION,
+                    "sequence": store.sequence,
+                    "captured_at": health["captured_at"],
+                    "dbus_health": store.health,
+                },
+            )
+            self.assertEqual(DbusCacheStore.load_snapshot(paths.cache_path, max_age_seconds=-1.0, now=99999.0)["sequence"], store.sequence)
+            default_age_path = Path(temp_dir) / "default-age.json"
+            default_age_path.write_text(json.dumps({"captured_at": 1.0}), encoding="utf-8")
+            self.assertEqual(DbusCacheStore.load_snapshot(str(default_age_path), now=31.5), {})
 
     def test_command_inbox_coalesce_ordering_and_error_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -311,6 +501,12 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 {"priority": "normal", "created_at": 9.0},
             )
         )
+        self.assertTrue(
+            DbusCommandInbox._should_replace_existing_payload(
+                {"priority": "normal", "created_at": 10.0},
+                {"priority": "normal", "created_at": 10.0},
+            )
+        )
         self.assertEqual(
             dbus_gateway_commands._selected_coalesced_command(
                 ("old", {"priority": "safety", "created_at": 20.0}),
@@ -441,11 +637,13 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertFalse(dbus_gateway_commands._ranked_publish_command({"kind": "set_value", "priority": "publish"}))
         self.assertTrue(dbus_gateway_commands._publish_priority({"priority": " publish "}))
         self.assertFalse(dbus_gateway_commands._publish_priority({"priority": "user"}))
+        self.assertEqual(dbus_gateway_commands._command_text({"priority": ""}, "priority"), "")
+        self.assertEqual(dbus_gateway_commands._command_text({}, "priority"), "")
         self.assertEqual(dbus_gateway_commands._command_kind({"type": "set_value"}), "set_value")
         self.assertEqual(dbus_gateway_commands._command_kind({"kind": "publish_value", "type": "set_value"}), "publish_value")
         self.assertEqual(dbus_gateway_commands._command_kind({}), "")
 
-    def test_gateway_client_socket_and_command_helpers(self) -> None:
+    def test_gateway_client_transport_and_command_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = gateway_paths(str(Path(temp_dir) / "run"))
             client = GatewayClient(paths, timeout_seconds=0.01)
@@ -514,6 +712,236 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             ][0]
             self.assertEqual(mode["value"], 2)
 
+    def test_gateway_client_contracts_for_transport_commands_and_backpressure_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = gateway_paths(str(Path(temp_dir) / "run"))
+            client = GatewayClient(paths, timeout_seconds=0.0)
+            self.assertEqual(client.timeout_seconds, 0.05)
+            default_client = GatewayClient(paths)
+            self.assertEqual(default_client.timeout_seconds, 0.5)
+            self.assertEqual(default_client.paths, paths)
+            self.assertEqual(default_client.commands.command_dir, paths.command_dir)
+            self.assertEqual(default_client._backpressure_cache, (0.0, "unknown"))
+
+            class InspectableSocket:
+                def __init__(self, response: bytes) -> None:
+                    self.response = response
+                    self.timeout: float | None = None
+                    self.connected_path = ""
+                    self.sent = b""
+
+                def __enter__(self) -> "InspectableSocket":
+                    return self
+
+                def __exit__(self, *_args: object) -> None:
+                    return None
+
+                def settimeout(self, timeout: float) -> None:
+                    self.timeout = timeout
+
+                def connect(self, path: str) -> None:
+                    self.connected_path = path
+
+                def sendall(self, data: bytes) -> None:
+                    self.sent = data
+
+                def recv(self, size: int) -> bytes:
+                    self.recv_size = size
+                    return self.response
+
+            sock = InspectableSocket(b'{"ok":true,"answer":42}')
+            with patch.object(gateway_client_module.socket, "socket", return_value=sock) as socket_factory:
+                response = client.send({"value": object()})
+            socket_factory.assert_called_once_with(gateway_client_module.socket.AF_UNIX, gateway_client_module.socket.SOCK_STREAM)
+            self.assertEqual(response, {"ok": True, "answer": 42})
+            self.assertEqual(sock.timeout, 0.05)
+            self.assertEqual(sock.connected_path, paths.socket_path)
+            self.assertEqual(sock.recv_size, 65536)
+            self.assertIn(b'"value"', sock.sent)
+            self.assertIn(b"object object", sock.sent)
+            self.assertTrue(sock.sent.endswith(b"\n"))
+            self.assertEqual(sock.sent.count(b"\n"), 1)
+
+            invalid_sock = InspectableSocket(b"[]")
+            with patch.object(gateway_client_module.socket, "socket", return_value=invalid_sock):
+                self.assertEqual(client.send({"request": "bad"}), {"ok": False, "error": "invalid-response"})
+
+            class FailingSocket(InspectableSocket):
+                def connect(self, path: str) -> None:
+                    self.connected_path = path
+                    raise RuntimeError("offline")
+
+            failing_sock = FailingSocket(b"")
+            with patch.object(gateway_client_module.socket, "socket", return_value=failing_sock):
+                self.assertEqual(client.send({"request": "fail"}), {"ok": False, "error": "offline"})
+
+            enqueuer = GatewayClient(paths)
+            with patch.object(enqueuer, "backpressure_state", return_value="ok") as backpressure_state, patch.object(
+                enqueuer.commands,
+                "enqueue",
+                return_value="command-id",
+            ) as enqueue:
+                self.assertEqual(enqueuer.enqueue_command({"kind": "publish_value", "path": "/Mode"}), "command-id")
+            backpressure_state.assert_called_once_with(max_age_seconds=2.0)
+            enqueue.assert_called_once_with({"kind": "publish_value", "path": "/Mode"})
+
+            blocked = GatewayClient(paths)
+            with patch.object(blocked, "backpressure_state", return_value="protective"), patch.object(
+                blocked.commands,
+                "enqueue",
+                return_value="blocked",
+            ) as enqueue:
+                self.assertEqual(blocked.enqueue_command({"kind": "publish_value", "path": "/Auto/Reason"}), "")
+            enqueue.assert_not_called()
+
+            with patch.object(client, "enqueue_command", return_value="queued") as enqueue_command:
+                client.publish_path("/Default", 7)
+                client.publish_path("/Mode", 1, priority="user", source="gui")
+                client.publish_paths({"/DefaultPaths": 8})
+                client.publish_paths({"/Ac/Power": 1200, "": "ignored", "/Obj": object()}, source="core")
+                client.publish_paths({"": "ignored"})
+                client.register_path("/Readonly", 0)
+                client.register_path("/Enable", True, writeable=True, source="startup")
+                client.request_read("default_reason_key")
+                client.request_read("grid_power_w", reason="stale")
+                client.request_read("svc", "/Path", priority="safety", reason="manual")
+
+            queued = [call.args[0] for call in enqueue_command.call_args_list]
+            self.assertEqual([command["kind"] for command in queued], [
+                "publish_value",
+                "publish_value",
+                "publish_desired",
+                "publish_desired",
+                "register_path",
+                "register_path",
+                "refresh_value",
+                "refresh_value",
+                "refresh_value",
+            ])
+            self.assertEqual(
+                queued[0],
+                {
+                    "kind": "publish_value",
+                    "source": "core",
+                    "path": "/Default",
+                    "value": 7,
+                    "priority": "publish",
+                    "coalesce_key": "publish:/Default",
+                },
+            )
+            self.assertEqual(
+                queued[1],
+                {
+                    "kind": "publish_value",
+                    "source": "gui",
+                    "path": "/Mode",
+                    "value": 1,
+                    "priority": "user",
+                    "coalesce_key": "publish:/Mode",
+                },
+            )
+            self.assertEqual(
+                queued[2],
+                {
+                    "kind": "publish_desired",
+                    "source": "core",
+                    "paths": {"/DefaultPaths": 8},
+                    "priority": "publish",
+                    "coalesce_key": "publish:desired",
+                },
+            )
+            self.assertEqual(queued[3]["paths"]["/Ac/Power"], 1200)
+            self.assertIn("object object", queued[3]["paths"]["/Obj"])
+            self.assertEqual(queued[3]["source"], "core")
+            self.assertEqual(queued[3]["priority"], "publish")
+            self.assertEqual(queued[3]["coalesce_key"], "publish:desired")
+            self.assertEqual(
+                queued[4],
+                {
+                    "kind": "register_path",
+                    "source": "core",
+                    "path": "/Readonly",
+                    "value": 0,
+                    "writeable": False,
+                    "priority": "publish",
+                    "coalesce_key": "register:/Readonly",
+                },
+            )
+            self.assertEqual(
+                queued[5],
+                {
+                    "kind": "register_path",
+                    "source": "startup",
+                    "path": "/Enable",
+                    "value": True,
+                    "writeable": True,
+                    "priority": "publish",
+                    "coalesce_key": "register:/Enable",
+                },
+            )
+            self.assertEqual(queued[6]["key"], "default_reason_key")
+            self.assertEqual(queued[6]["source"], "core")
+            self.assertEqual(queued[6]["priority"], "read")
+            self.assertEqual(queued[6]["reason"], "")
+            self.assertEqual(queued[6]["coalesce_key"], "refresh:default_reason_key")
+            self.assertEqual(queued[7]["key"], "grid_power_w")
+            self.assertEqual(queued[7]["source"], "core")
+            self.assertEqual(queued[7]["priority"], "read")
+            self.assertEqual(queued[7]["reason"], "stale")
+            self.assertEqual(queued[7]["coalesce_key"], "refresh:grid_power_w")
+            self.assertEqual(queued[8]["service"], "svc")
+            self.assertEqual(queued[8]["path"], "/Path")
+            self.assertEqual(queued[8]["source"], "core")
+            self.assertEqual(queued[8]["priority"], "safety")
+            self.assertEqual(queued[8]["reason"], "manual")
+            self.assertEqual(queued[8]["coalesce_key"], "refresh:svc:/Path")
+
+            with patch.object(
+                gateway_client_module.DbusCacheStore,
+                "load_snapshot",
+                return_value={"values": {"ok": {"value": 1}}},
+            ) as load_snapshot:
+                self.assertEqual(client.load_cache(), {"values": {"ok": {"value": 1}}})
+            load_snapshot.assert_called_once_with(paths.cache_path, max_age_seconds=10.0)
+
+            with patch.object(
+                gateway_client_module.DbusCacheStore,
+                "load_snapshot",
+                return_value={"dbus_health": {"state": "ok"}},
+            ) as load_snapshot:
+                self.assertEqual(client.load_health(), {"state": "ok"})
+            load_snapshot.assert_called_once_with(paths.health_path, max_age_seconds=10.0)
+
+            cache_client = GatewayClient(paths)
+            with patch.object(cache_client, "load_health", return_value={"backpressure": {"state": "slow"}}) as load_health, patch.object(
+                gateway_client_module,
+                "_now",
+                return_value=10.0,
+            ):
+                self.assertEqual(cache_client.backpressure_state(max_age_seconds=2.5), "slow")
+            load_health.assert_called_once_with(max_age_seconds=2.5)
+            self.assertEqual(cache_client._backpressure_cache, (10.0, "slow"))
+
+            with patch.object(cache_client, "load_health") as load_health, patch.object(gateway_client_module, "_now", return_value=10.5):
+                self.assertEqual(cache_client.backpressure_state(), "slow")
+            load_health.assert_not_called()
+
+            with patch.object(cache_client, "load_health", return_value={}) as load_health, patch.object(
+                gateway_client_module,
+                "_now",
+                return_value=11.1,
+            ):
+                self.assertEqual(cache_client.backpressure_state(), "unknown")
+            load_health.assert_called_once_with(max_age_seconds=10.0)
+            self.assertEqual(cache_client._backpressure_cache, (11.1, "unknown"))
+            self.assertFalse(gateway_client_module._backpressure_cache_fresh(10.0, "unknown", 10.5))
+            self.assertFalse(gateway_client_module._backpressure_cache_fresh(10.0, "ok", 11.0))
+            self.assertTrue(gateway_client_module._backpressure_cache_fresh(10.0, "ok", 10.999))
+            self.assertEqual(gateway_client_module._backpressure_state_from_health({}), "unknown")
+            self.assertEqual(gateway_client_module._backpressure_state_from_health({"backpressure": []}), "unknown")
+            self.assertEqual(gateway_client_module._backpressure_state_from_health({"backpressure": {"state": ""}}), "unknown")
+            self.assertEqual(gateway_client_module._backpressure_state_from_health({"backpressure": {"state": "protective"}}), "protective")
+
     def test_command_queue_class_maps_gateway_workloads(self) -> None:
         self.assertLess(
             dbus_gateway.PRIORITY_VALUES["normal"],
@@ -525,9 +953,11 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             ({"kind": "publish_value", "path": "/Mode"}, "gui-critical-publish"),
             ({"kind": "publish_value", "path": "/UpdateIndex"}, "gui-critical-publish"),
             ({"kind": "publish_desired", "paths": {"/Session/Time": 1}}, "gui-critical-publish"),
+            ({"type": "publish_desired", "paths": {"/Mode": 1}}, "gui-critical-publish"),
             ({"kind": "publish_desired", "paths": {"/Auto/Reason": 1}}, "local-publish"),
             ({"kind": "publish_desired", "paths": ["/Mode"]}, "local-publish"),
             ({"kind": "publish_value", "path": "/Auto/Reason"}, "local-publish"),
+            ({"kind": "publish_value", "path": ""}, "local-publish"),
             ({"kind": "set_value"}, "remote-write"),
             ({"type": "set_value"}, "remote-write"),
             ({"kind": "refresh_value", "key": "grid_power_w"}, "read-fast"),
@@ -545,6 +975,8 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 self.assertEqual(command_queue_class(command), expected)
         self.assertTrue(command_allowed_by_backpressure({"kind": "register_path"}, "slow"))
         self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, "mystery"))
+        self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, " OK "))
+        self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, ""))
 
     def test_backpressure_command_filter_keeps_critical_work(self) -> None:
         cases = [
@@ -565,12 +997,28 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             ({"kind": "refresh_services", "priority": "safety"}, "protective", True),
             ({"kind": "publish_value", "path": "/StartStop", "priority": "publish"}, "protective", False),
             ({"kind": "publish_value", "path": "/Mode", "queue_class": "diagnostic"}, "congested", False),
+            ({"kind": "publish_value", "path": "/Mode", "priority": "normal", "queue_class": "diagnostic"}, "congested", False),
+            (
+                {"kind": "publish_value", "path": "/Auto/Reason", "priority": "user", "queue_class": "gui-critical-publish"},
+                "protective",
+                True,
+            ),
+            ({"kind": "publish_value", "path": "/Mode", "queue_class": ""}, "protective", False),
+            ({"kind": "publish_value", "path": "/Mode", "priority": ""}, "congested", False),
+            ({"kind": "publish_value", "path": "/Mode", "priority": " USER "}, " protective ", True),
+            ({"kind": "refresh_value", "key": "grid_power_w", "priority": "read", "queue_class": ""}, " slow ", False),
         ]
         for command, state, expected in cases:
             with self.subTest(command=command, state=state):
                 self.assertEqual(command_allowed_by_backpressure(command, state), expected)
 
     def test_gateway_proxy_gateway_value_and_latency_window(self) -> None:
+        proxy_paths = gateway_paths("/tmp/proxy-gateway")
+        with patch.object(gateway_client_module, "GatewayClient") as client_factory:
+            constructed = GatewayDbusServiceProxy(123, paths=proxy_paths)
+        client_factory.assert_called_once_with(proxy_paths)
+        self.assertEqual(constructed.name, "123")
+
         fake_client = MagicMock()
         proxy = GatewayDbusServiceProxy("svc", client=fake_client)
         callback = MagicMock(return_value=True)
@@ -578,6 +1026,8 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         proxy.add_path("/Readonly", 0)
         proxy.register()
         self.assertEqual(proxy["/Mode"], 1)
+        self.assertEqual(proxy._writeable, {"/Mode"})
+        self.assertEqual(set(proxy._callbacks), {"/Mode"})
         proxy["/Mode"] = 2
         self.assertEqual(proxy["/Mode"], 2)
         proxy.publish_paths({"/Mode": 5, "/Ac/Power": 1200.0, "": "ignored"})
@@ -591,13 +1041,24 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         fake_client.register_path.assert_any_call("/Readonly", 0, writeable=False)
         fake_client.publish_path.assert_called_once_with("/Mode", 2)
         fake_client.publish_paths.assert_called_once_with({"/Mode": 5, "/Ac/Power": 1200.0})
-        fake_client.enqueue_command.assert_called_once()
+        fake_client.enqueue_command.assert_called_once_with(
+            {
+                "kind": "register_service",
+                "service": "svc",
+                "source": "core",
+                "priority": "publish",
+                "coalesce_key": "register-service",
+            }
+        )
 
         snapshot = {
             "values": {
                 "fresh": {"status": "fresh", "age_s": 1.0, "value": 1},
                 "stale": {"status": "stale", "age_s": 2.0, "value": 2},
                 "error": {"status": "error", "age_s": 0.0, "value": 3},
+                "missing-status": {"age_s": 0.0, "value": 4},
+                "blank-status": {"status": "", "age_s": 0.0, "value": 5},
+                "bad-age": {"status": "fresh", "age_s": object(), "value": 6},
             }
         }
         self.assertEqual(gateway_value(snapshot, "fresh", max_age_seconds=5.0), 1)
@@ -605,17 +1066,42 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertIsNone(gateway_value(snapshot, "missing", max_age_seconds=5.0))
         self.assertIsNone(gateway_value(snapshot, "error", max_age_seconds=5.0))
         self.assertIsNone(gateway_value(snapshot, "stale", max_age_seconds=1.0))
+        self.assertIsNone(gateway_value(snapshot, "missing-status", max_age_seconds=5.0))
+        self.assertIsNone(gateway_value(snapshot, "blank-status", max_age_seconds=5.0))
+        self.assertEqual(gateway_value(snapshot, "bad-age", max_age_seconds=0.0), 6)
         self.assertEqual(dbus_path_key("svc", "/P"), "path:svc/P")
 
+        self.assertEqual(LatencyWindow().window_seconds, 60.0)
         window = LatencyWindow(window_seconds=10.0)
+        self.assertEqual(LatencyWindow(window_seconds=-5.0).window_seconds, 1.0)
         window.record_latency(-1.0, now=0.0)
         window.record_latency(20.0, now=5.0)
         window.record_timeout(now=5.0)
         self.assertEqual(window.summary(now=5.0)["max_latency_ms"], 20.0)
+        self.assertEqual(window.summary(now=5.0)["avg_latency_ms"], 10.0)
         window.record_latency(30.0, now=20.0)
         summary = window.summary(now=20.0)
         self.assertEqual(summary["timeouts_60s"], 0)
         self.assertEqual(summary["avg_latency_ms"], 30.0)
+
+        boundary = LatencyWindow(window_seconds=10.0)
+        boundary.record_latency(10.0, now=0.0)
+        boundary.record_timeout(now=0.0)
+        self.assertEqual(boundary.summary(now=10.0), {
+            "timeouts_60s": 1,
+            "avg_latency_ms": 10.0,
+            "max_latency_ms": 10.0,
+        })
+        self.assertEqual(boundary.summary(now=10.001), {
+            "timeouts_60s": 0,
+            "avg_latency_ms": 0.0,
+            "max_latency_ms": 0.0,
+        })
+        implicit_now = LatencyWindow(window_seconds=2.0)
+        with patch.object(gateway_latency_module, "_now", return_value=50.0):
+            implicit_now.record_latency(8.0)
+        with patch.object(gateway_latency_module, "_now", return_value=51.0):
+            self.assertEqual(implicit_now.summary()["avg_latency_ms"], 8.0)
 
 
 if __name__ == "__main__":

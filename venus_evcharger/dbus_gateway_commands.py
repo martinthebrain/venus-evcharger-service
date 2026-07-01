@@ -32,24 +32,24 @@ class DbusCommandInbox:
 
     def enqueue(self, command: CommandMapping) -> str:
         os.makedirs(self.command_dir, exist_ok=True)
-        normalized = self._normalized_command(command) 
-        command_id = self._command_id(normalized) 
-        payload = self._new_payload(command_id, normalized) 
-        target = os.path.join(self.command_dir, f"{command_id}.json") 
+        normalized = self._normalized_command(command)
+        command_id = self._command_id(normalized)
+        payload = self._new_payload(command_id, normalized)
+        target = os.path.join(self.command_dir, f"{command_id}.json")
         if self._merge_existing_coalesced_payload(normalized, target, payload) == "keep-existing":
             return target
-        payload.setdefault("lifecycle_state", "queued") 
+        payload.setdefault("lifecycle_state", "queued")
         write_json_file(target, payload)
         return target
 
     @staticmethod
-    def _new_payload(command_id: str, normalized: CommandMapping) -> CommandPayload: 
+    def _new_payload(command_id: str, normalized: CommandMapping) -> CommandPayload:
         payload: CommandPayload = dict(normalized)
         payload.update({
-            "schema_version": DBUS_GATEWAY_SCHEMA_VERSION, 
-            "id": command_id, 
-            "created_at": float_or_zero(normalized.get("created_at")) or _now(), 
-            "queue_class": command_queue_class(normalized), 
+            "schema_version": DBUS_GATEWAY_SCHEMA_VERSION,
+            "id": command_id,
+            "created_at": float_or_zero(normalized.get("created_at")) or _now(),
+            "queue_class": command_queue_class(normalized),
         })
         return payload
 
@@ -60,57 +60,56 @@ class DbusCommandInbox:
         payload: CommandPayload,
     ) -> str:
         if not _coalesced_target_exists(normalized, target):
-            return "write-new" 
-        existing = read_json_file(target, {})  # pragma: no mutate
+            return "write-new"
+        existing = read_json_file(target)
         if not _replace_existing_coalesced(existing, payload):
-            return "keep-existing" 
+            return "keep-existing"
         _merge_publish_desired_paths(existing, payload)
         _mark_coalesced_payload(existing, payload)
-        return "write-new" 
+        return "write-new"
 
     @staticmethod
     def _should_replace_existing(path: str, payload: CommandMapping) -> bool:
-        existing = read_json_file(path, {})  # pragma: no mutate
+        existing = read_json_file(path)
         if not isinstance(existing, Mapping):
             return True
-        return DbusCommandInbox._should_replace_existing_payload(existing, payload) 
+        return DbusCommandInbox._should_replace_existing_payload(existing, payload)
 
     @staticmethod
     def _should_replace_existing_payload(existing: CommandMapping, payload: CommandMapping) -> bool:
         existing_rank = priority_rank(existing.get("priority"))
         new_rank = priority_rank(payload.get("priority"))
         if new_rank < existing_rank:
-            return True 
+            return True
         if new_rank > existing_rank:
-            return False 
-        return float_or_zero(payload.get("created_at")) >= float_or_zero(existing.get("created_at")) 
+            return False
+        return float_or_zero(payload.get("created_at")) >= float_or_zero(existing.get("created_at"))
 
     @staticmethod
     def _normalized_command(command: CommandMapping) -> CommandPayload:
-        payload = dict(command) 
-        kind = str(payload.get("kind") or payload.get("type") or "")  # pragma: no mutate
-        if kind == "refresh_services":
-            payload["coalesce_key"] = "refresh:services" 
-        return payload 
+        payload = dict(command)
+        if _command_kind(payload) == "refresh_services":
+            payload["coalesce_key"] = "refresh:services"
+        return payload
 
     @staticmethod
     def _command_id(command: CommandMapping) -> str:
-        coalesce_key = str(command.get("coalesce_key") or "").strip() 
+        coalesce_key = str(command.get("coalesce_key") or "").strip()
         if coalesce_key:
-            digest = hashlib.sha256(coalesce_key.encode("utf-8")).hexdigest()[:24]  # pragma: no mutate
-            return f"coalesced-{digest}" 
-        return f"cmd-{time.time_ns()}-{uuid.uuid4().hex[:8]}" 
+            digest = hashlib.sha256(coalesce_key.encode()).hexdigest()[:24]
+            return f"coalesced-{digest}"
+        return f"cmd-{time.time_ns()}-{uuid.uuid4().hex[:8]}"
 
-    def load_pending(self) -> CommandFileList: 
+    def load_pending(self) -> CommandFileList:
         try:
-            paths = sorted(Path(self.command_dir).glob("*.json")) 
+            paths = sorted(Path(self.command_dir).glob("*.json"))
         except OSError:
             return []
         pending: CommandFileList = []
         for path in paths:
-            payload = read_json_file(str(path), {})  # pragma: no mutate
+            payload = read_json_file(str(path))
             if isinstance(payload, dict):
-                pending.append((str(path), self._normalized_command(payload))) 
+                pending.append((str(path), self._normalized_command(payload)))
         return pending
 
     def remove(self, path: str) -> None:
@@ -120,19 +119,19 @@ class DbusCommandInbox:
             return
 
     def remove_coalesced(self, coalesce_key: str) -> int:
-        normalized_key = str(coalesce_key or "").strip() 
-        paths = self._coalesced_paths(normalized_key) 
+        normalized_key = str(coalesce_key or "").strip()
+        paths = self._coalesced_paths(normalized_key)
         for path in paths:
             self.remove(path)
-        return len(paths) 
+        return len(paths)
 
-    def _coalesced_paths(self, coalesce_key: str) -> list[str]: 
+    def _coalesced_paths(self, coalesce_key: str) -> list[str]:
         if not coalesce_key:
-            return [] 
+            return []
         return [
             path
             for path, command in self.load_pending()
-            if str(command.get("coalesce_key") or "") == coalesce_key 
+            if str(command.get("coalesce_key") or "") == coalesce_key
         ]
 
     @staticmethod
@@ -141,7 +140,7 @@ class DbusCommandInbox:
         selected: OrderedDict[str, CommandFile] = OrderedDict()
         passthrough: CommandFileList = []
         for path, command in commands:
-            key = str(command.get("coalesce_key") or "") 
+            key = str(command.get("coalesce_key") or "")
             if not key:
                 passthrough.append((path, command))
                 continue
@@ -149,40 +148,40 @@ class DbusCommandInbox:
                 selected[key] = (path, command)
                 continue
             selected[key] = _selected_coalesced_command(selected[key], (path, command))
-        return sorted(passthrough + list(selected.values()), key=lambda item: _command_order_key(item[1])) 
+        return sorted(passthrough + list(selected.values()), key=lambda item: _command_order_key(item[1]))
 
 
 def _selected_coalesced_command(
     existing: CommandFile,
     candidate: CommandFile,
-) -> CommandFile: 
-    old_path, old_command = existing 
-    path, command = candidate 
-    old_rank = priority_rank(old_command.get("priority")) 
-    new_rank = priority_rank(command.get("priority")) 
-    old_created = float_or_zero(old_command.get("created_at")) 
-    new_created = float_or_zero(command.get("created_at")) 
+) -> CommandFile:
+    old_path, old_command = existing
+    path, command = candidate
+    old_rank = priority_rank(old_command.get("priority"))
+    new_rank = priority_rank(command.get("priority"))
+    old_created = float_or_zero(old_command.get("created_at"))
+    new_created = float_or_zero(command.get("created_at"))
     if new_rank < old_rank or (new_rank == old_rank and new_created >= old_created):
-        return path, command 
-    return old_path, old_command 
+        return path, command
+    return old_path, old_command
 
 
 def _coalesced_target_exists(normalized: CommandMapping, target: str) -> bool:
-    return bool(str(normalized.get("coalesce_key") or "").strip()) and os.path.exists(target) 
+    return bool(str(normalized.get("coalesce_key") or "").strip()) and os.path.exists(target)
 
 
 def _replace_existing_coalesced(existing: object, payload: CommandMapping) -> bool:
     if not isinstance(existing, Mapping):
-        return True 
-    return DbusCommandInbox._should_replace_existing_payload(existing, payload) 
+        return True
+    return DbusCommandInbox._should_replace_existing_payload(existing, payload)
 
 
 def _same_priority(existing: CommandMapping, payload: CommandMapping) -> bool:
-    return priority_rank(existing.get("priority")) == priority_rank(payload.get("priority")) 
+    return priority_rank(existing.get("priority")) == priority_rank(payload.get("priority"))
 
 
 def _same_kind(existing: CommandMapping, payload: CommandMapping) -> bool:
-    return _command_kind(existing) == _command_kind(payload) 
+    return _command_kind(existing) == _command_kind(payload)
 
 
 def _merge_publish_desired_paths(existing: object, payload: CommandPayload) -> None:
@@ -216,44 +215,50 @@ def _path_mapping(command: CommandMapping) -> CommandMapping | None:
 
 
 def _mark_coalesced_payload(existing: object, payload: CommandPayload) -> None:
-    payload["lifecycle_state"] = "coalesced" 
+    payload["lifecycle_state"] = "coalesced"
     if isinstance(existing, Mapping) and _same_priority(existing, payload):
-        payload["created_at"] = float_or_zero(existing.get("created_at")) or payload["created_at"] 
-        payload["updated_at"] = _now() 
+        payload["created_at"] = float_or_zero(existing.get("created_at")) or payload["created_at"]
+        payload["updated_at"] = _now()
 
 
-def _command_order_key(command: CommandMapping) -> tuple[int, int, float, int, str]: 
+def _command_order_key(command: CommandMapping) -> tuple[int, int, float, int, str]:
     return (
-        priority_rank(command.get("priority")), 
-        _command_kind_rank(command), 
-        float_or_zero(command.get("created_at")), 
-        _publish_path_rank(command), 
-        str(command.get("id") or ""), 
+        priority_rank(command.get("priority")),
+        _command_kind_rank(command),
+        float_or_zero(command.get("created_at")),
+        _publish_path_rank(command),
+        str(command.get("id") or ""),
     )
 
 
-def _command_kind_rank(command: CommandMapping) -> int: 
-    kind = str(command.get("kind") or command.get("type") or "")  # pragma: no mutate
+def _command_kind_rank(command: CommandMapping) -> int:
+    kind = _command_kind(command)
     if kind == "register_service":
-        return 0 
+        return 0
     if kind == "register_path":
-        return 1 
-    return 2 
+        return 1
+    return 2
 
 
-def _publish_path_rank(command: CommandMapping) -> int: 
+def _publish_path_rank(command: CommandMapping) -> int:
     if not _ranked_publish_command(command):
-        return 0 
-    return PUBLISH_PATH_RANKS.get(str(command.get("path") or ""), 3)  # pragma: no mutate
+        return 0
+    return PUBLISH_PATH_RANKS.get(_command_text(command, "path"), 3)
 
 
 def _ranked_publish_command(command: CommandMapping) -> bool:
-    return _publish_priority(command) and _command_kind(command) == "publish_value" 
+    return _publish_priority(command) and _command_kind(command) == "publish_value"
 
 
 def _publish_priority(command: CommandMapping) -> bool:
-    return str(command.get("priority") or "").strip().lower() == "publish"  # pragma: no mutate
+    return _command_text(command, "priority").strip().lower() == "publish"
 
 
 def _command_kind(command: CommandMapping) -> str:
-    return str(command.get("kind") or command.get("type") or "") 
+    return _command_text(command, "kind") or _command_text(command, "type")
+
+
+def _command_text(command: CommandMapping, key: str) -> str:
+    if key not in command:
+        return ""
+    return str(command[key] or "")
