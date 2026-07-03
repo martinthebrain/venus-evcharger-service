@@ -20,6 +20,7 @@ class _ServiceRolesRuntimeUpdateCases:
         service._runtime_support_controller.worker_state_defaults.return_value = {"state": "default"}
         service._runtime_support_controller.dbus_publish_direct_allowed.return_value = True
         service._runtime_support_controller.enqueue_dbus_publish_values.return_value = True
+        service._runtime_support_controller.enqueue_dbus_publish_fields.return_value = True
         service._runtime_support_controller.enqueue_companion_dbus_publish.return_value = True
         service._runtime_support_controller.flush_dbus_publish_queue.return_value = True
         service._runtime_support_controller.schedule_update_cycle.return_value = True
@@ -46,6 +47,7 @@ class _ServiceRolesRuntimeUpdateCases:
         self.assertTrue(service._dbus_publish_direct_allowed())
         service._assert_dbus_mainloop_thread("test")
         self.assertTrue(service._enqueue_dbus_publish_values([("/Path", 1)], 12.0))
+        self.assertTrue(service._enqueue_dbus_publish_fields([("mode", 1)], 12.0))
         service._enqueue_dbus_update_index_bump(12.0)
         self.assertTrue(service._enqueue_companion_dbus_publish(12.0))
         self.assertTrue(service._flush_dbus_publish_queue())

@@ -256,6 +256,37 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         self.assertEqual(service._dbus_publish_state["/Ac/Power"], {"value": 1200.0, "updated_at": 101.0})
         self.assertEqual(service._dbus_publish_state["/Session/Time"], {"value": 30, "updated_at": 101.0})
 
+    def test_async_publish_fields_skip_empty_and_fallback_to_paths_without_gateway_fields(self) -> None:
+        service = make_runtime_support_service()
+        service._dbusservice = {"/Ac/Power": 0, "/Session/Time": 0, "/UpdateIndex": 0}
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        controller.mark_mainloop_thread()
+        service._dbus_publish_state = {}
+
+        self.assertFalse(controller.enqueue_dbus_publish_fields([], 100.0))
+        self.assertTrue(controller.enqueue_dbus_publish_fields([("ac_power_w", 1200.0)], 101.0))
+        self.assertTrue(controller.flush_dbus_publish_queue())
+
+        self.assertEqual(service._dbusservice["/Ac/Power"], 1200.0)
+        self.assertEqual(service._dbus_publish_state["/Ac/Power"], {"value": 1200.0, "updated_at": 101.0})
+
+    def test_async_publish_fields_report_gateway_field_failures_as_paths(self) -> None:
+        service = make_runtime_support_service()
+        gateway_proxy = SimpleNamespace(publish_fields=MagicMock(side_effect=RuntimeError("fields down")))
+        service._dbusservice = gateway_proxy
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+
+        failures = controller._apply_gateway_publish_fields(
+            service,
+            [("ac_power_w", (1200.0, 101.0, 99.0)), ("unknown_field", (1, 101.0, 99.0))],
+            gateway_proxy.publish_fields,
+        )
+
+        gateway_proxy.publish_fields.assert_called_once_with({"ac_power_w": 1200.0, "unknown_field": 1})
+        self.assertEqual(failures, ["/Ac/Power"])
+
     def test_async_gateway_publish_edges_skip_empty_and_retry_failed_batch(self) -> None:
         service = make_runtime_support_service()
         gateway_proxy = SimpleNamespace(publish_paths=MagicMock(side_effect=RuntimeError("gateway down")))

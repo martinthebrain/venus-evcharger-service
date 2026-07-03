@@ -729,6 +729,18 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             one_sided_payload,
         )
         self.assertEqual(one_sided_payload["paths"], {"/Mode": 1})
+        field_payload = {"kind": "publish_fields", "priority": "publish", "fields": {"mode": 1}}
+        dbus_gateway_commands._merge_publish_fields(
+            {"kind": "publish_fields", "priority": "publish", "fields": {"auto_start": 1}},
+            field_payload,
+        )
+        self.assertEqual(field_payload["fields"], {"auto_start": 1, "mode": 1})
+        one_sided_field_payload = {"kind": "publish_fields", "priority": "publish", "fields": {"mode": 1}}
+        dbus_gateway_commands._merge_publish_fields(
+            {"kind": "publish_fields", "priority": "publish", "fields": []},
+            one_sided_field_payload,
+        )
+        self.assertEqual(one_sided_field_payload["fields"], {"mode": 1})
         payload = {"created_at": 20.0}
         dbus_gateway_commands._mark_coalesced_payload([], payload)
         self.assertEqual(payload, {"created_at": 20.0, "lifecycle_state": "coalesced"})

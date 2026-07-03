@@ -15,7 +15,7 @@ select = [
 
 [tool.mutmut]
 source_paths = ["venus_evcharger"]
-only_mutate = ["venus_evcharger/inputs/storage.py"]
+only_mutate = ["venus_evcharger/inputs/helper/sources.py"]
 also_copy = [
     "venus_evcharger_auto_input_helper.py",
     "venus_evcharger_dbus_adapter.py",

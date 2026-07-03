@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import tempfile
+from types import SimpleNamespace
 
 from tests.auto_input_helper_sources_cases_common import *
 from venus_evcharger.inputs.helper.sources_dbus_common import (
@@ -219,6 +220,33 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertEqual(battery_sources[1]["discharge_balance_control_support"], "experimental")
 
     def test_helper_source_helpers_cover_invalidations_dict_init_and_non_primary_errors(self):
+        helper = self._make_helper()
+        helper.auto_energy_sources = ()
+        default_sources = helper._battery_snapshot_sources()
+        self.assertEqual(len(default_sources), 1)
+        self.assertEqual(default_sources[0].source_id, "primary_battery")
+        self.assertIsNone(
+            helper._battery_snapshot_effective_soc(SimpleNamespace(sources=[SimpleNamespace(soc="bad")], effective_soc="bad"))
+        )
+
+        helper = self._make_helper()
+        helper._source_retry_after["battery"] = 200.0
+        with patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            self.assertEqual(helper._get_energy_source_battery_snapshot(), {"battery_soc": None})
+
+        helper = self._make_helper()
+        helper.auto_energy_sources = (EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus"),)
+        helper._invalidate_auto_battery_service = MagicMock()
+        helper._delay_source_retry = MagicMock()
+        with patch(
+            "venus_evcharger.inputs.helper.sources.read_energy_source_snapshot",
+            side_effect=RuntimeError("primary offline"),
+        ), patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            snapshot = helper._get_energy_source_battery_snapshot()
+        self.assertIsNone(snapshot["battery_soc"])
+        helper._invalidate_auto_battery_service.assert_called_once_with()
+        helper._delay_source_retry.assert_called_once_with("battery")
+
         helper = self._make_helper()
         helper._resolved_auto_energy_services = {"primary_battery": "svc"}
         helper._auto_energy_last_scan = {"primary_battery": 10.0}

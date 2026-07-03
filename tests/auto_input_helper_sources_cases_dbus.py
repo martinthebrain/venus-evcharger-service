@@ -192,6 +192,18 @@ class _AutoInputHelperSourcesDbusCases:
         )
         helper._delay_source_retry.assert_called_once_with("grid")
 
+    def test_semantic_gateway_read_suppresses_fresh_cached_errors(self):
+        helper = self._make_helper()
+        paths = self._prepare_gateway(helper)
+        store = DbusCacheStore(paths)
+        store.mark_error(PV_POWER_READ_KEY, source="read-key:pv", error="sleeping", now=100.0)
+        store.write_snapshot_files()
+
+        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=101.0):
+            self.assertIsNone(helper._get_gateway_read_value(PV_POWER_READ_KEY, reason="pv retry"))
+
+        self.assertEqual(self._gateway_commands(paths), [])
+
     def test_semantic_pv_and_grid_reads_do_not_query_gateway_during_retry_cooldown(self):
         helper = self._make_helper()
         helper._source_retry_after["pv"] = 200.0

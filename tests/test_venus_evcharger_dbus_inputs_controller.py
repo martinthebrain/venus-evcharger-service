@@ -19,7 +19,7 @@ from venus_evcharger.dbus_gateway import (
     dbus_path_key,
     gateway_paths,
 )
-from venus_evcharger.energy import EnergyLearningProfile, EnergySourceDefinition, EnergySourceSnapshot
+from venus_evcharger.energy import EnergyClusterSnapshot, EnergyLearningProfile, EnergySourceDefinition, EnergySourceSnapshot
 
 
 class TestDbusInputController(unittest.TestCase):
@@ -197,6 +197,9 @@ class TestDbusInputController(unittest.TestCase):
 
         self.assertEqual(controller._gateway_snapshot()["values"][PV_POWER_READ_KEY]["value"], True)
         self.assertEqual(controller._gateway_cache_max_age_seconds(), 0.5)
+        self.assertIsNone(controller._coerce_dbus_value(True))
+        with patch("venus_evcharger.inputs.gateway_read.coerce_dbus_numeric", return_value=True):
+            self.assertIsNone(controller._coerce_dbus_value("truthy-but-not-a-number"))
         self.assertIsNone(controller.get_gateway_read_value(PV_POWER_READ_KEY, reason="invalid boolean pv"))
 
         pending = [command for _, command in DbusCommandInbox(paths.command_dir).load_pending()]
@@ -698,6 +701,43 @@ class TestDbusInputController(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No DBus service found"):
             controller._resolve_energy_source_service(prefixed_source)
 
+        service.auto_energy_sources = ()
+        default_sources = controller._battery_snapshot_sources()
+        self.assertEqual(len(default_sources), 1)
+        self.assertEqual(default_sources[0].source_id, "primary_battery")
+
+        service.get_dbus_value = MagicMock(return_value="12.5")
+        self.assertEqual(controller._read_optional_energy_value("svc", "/Soc"), 12.5)
+        self.assertIsNone(controller._battery_soc_numeric("bad"))
+        self.assertEqual(controller._battery_soc_numeric("34.5"), 34.5)
+        with self.assertRaisesRegex(TypeError, "Battery SOC is not numeric"):
+            controller._battery_snapshot_validate_soc(
+                None,
+                EnergyClusterSnapshot(
+                    sources=(EnergySourceSnapshot(source_id="primary_battery", role="battery", service_name="svc"),)
+                ),
+            )
+
+        primary_source = EnergySourceDefinition(
+            source_id="primary_battery",
+            role="battery",
+            connector_type="dbus",
+            service_name="primary",
+            soc_path="/Soc",
+            battery_power_path="/Power",
+            operating_mode_path="/Mode",
+        )
+        service.invalidate_auto_battery_service = MagicMock()
+        controller_any._resolve_energy_source_service = MagicMock(return_value="primary")
+        controller_any._read_optional_energy_value = MagicMock(
+            side_effect=[OSError("offline"), 45.0, -100.0, None, None, None]
+        )
+        controller_any._read_optional_energy_text = MagicMock(return_value="mode")
+        snapshot = controller._dbus_energy_source_snapshot(primary_source, 123.0)
+        self.assertEqual(snapshot.soc, 45.0)
+        self.assertEqual(snapshot.net_battery_power_w, -100.0)
+        service.invalidate_auto_battery_service.assert_called_once_with()
+
     def test_get_battery_snapshot_returns_forecast_payload_and_failure_fallback(self) -> None:
         service = self._make_service()
         controller = DbusInputController(service)
@@ -747,6 +787,12 @@ class TestDbusInputController(unittest.TestCase):
 
         self.assertIsNone(failed["battery_soc"])
         self.assertEqual(failed["battery_source_count"], 0)
+
+        service._handle_source_failure.reset_mock()
+        with patch("venus_evcharger.inputs.storage_support.logging.debug") as debug_log:
+            self.assertIsNone(controller._handle_missing_grid_values(True, ["/L2"], 100.0))
+        debug_log.assert_called_once()
+        service._handle_source_failure.assert_called_once()
 
     def test_get_battery_snapshot_includes_discharge_balance_diagnostics(self) -> None:
         service = self._make_service()

@@ -851,6 +851,8 @@ class _UpdateCycleQuaternaryLearningCases:
         service._last_voltage = 400.0
         self.assertEqual(controller._accepted_learning_sample_result(400.0, 230.0), (None, "below-min"))
         self.assertEqual(controller._accepted_learning_sample_result(1000.0, 230.0), (1000.0, "accepted"))
+        self.assertIsNone(controller._accepted_learning_sample(400.0, 230.0))
+        self.assertEqual(controller._accepted_learning_sample(1000.0, 230.0), 1000.0)
         self.assertAlmostEqual(
             controller._plausible_learning_power_max(0.5),
             10.0 * (0.5 / math.sqrt(3.0)) * 3.0 * 1.1,

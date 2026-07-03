@@ -2148,6 +2148,8 @@ class TestUpdateCycleControllerSecondary(UpdateCycleControllerTestBase):
         self.assertEqual(controller._observed_phase_selection(service, {}, 100.0), "P1")
         service._last_charger_state_phase_selection = None
         self.assertIsNone(controller._observed_phase_selection(service, {}, 100.0))
+        delattr(service, "_last_charger_state_phase_selection")
+        self.assertIsNone(controller._observed_phase_selection(service, {}, 100.0))
         service._last_charger_state_phase_selection = "P1_P2"
         service.phase_switch_pause_seconds = 1.0
         service.phase_switch_stabilization_seconds = 2.0

@@ -432,9 +432,23 @@ class RemainingCoverageHelperTests(unittest.TestCase):
         harness = _DbusCoreHarness(enqueue_service)
         self.assertFalse(_DbusCoreHarness(SimpleNamespace())._enqueue_publish_values([("/A", 1)], 10.0))
         self.assertFalse(harness._enqueue_publish_values([("/A", 1)], 10.0) is False)
+        self.assertTrue(harness._enqueue_publish_fields([("ac_power_w", 55.0)], 10.0))
+        enqueue_service._enqueue_dbus_publish_values.assert_any_call([("/Ac/Power", 55.0)], 10.0)
+        self.assertEqual(harness._field_items_to_path_items([("ac_power_w", 55.0), ("unknown", 1)]), [("/Ac/Power", 55.0)])
         self.assertTrue(harness.publish_path("/A", 1, now=10.0, force=True))
         enqueue_service._dbus_publish_state["/A"] = {"value": 1, "updated_at": 10.0}
         self.assertEqual(harness._staged_values_for_enqueue({"/A": 1}, 10.0, None, False), [])
+        enqueue_service._dbus_publish_state["/Ac/Power"] = {"value": 55.0, "updated_at": 10.0}
+        self.assertEqual(
+            harness._staged_fields_for_enqueue(
+                {"unknown": 1, "ac_power_w": 55.0},
+                {"/Ac/Power": 55.0},
+                10.0,
+                None,
+                False,
+            ),
+            [],
+        )
         self.assertFalse(harness._enqueue_transactional_publish({}, 10.0, None, False))
 
         enqueue_service._enqueue_dbus_update_index_bump = None
