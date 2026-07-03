@@ -2184,6 +2184,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
             publish = {"kind": "publish_value", "path": "/Mode"}
             desired = {"kind": "publish_desired", "paths": {"/Mode": 1}}
+            fields = {"kind": "publish_fields", "fields": {"mode": 2}}
             remote = {"kind": "set_value", "service": "svc", "path": "/Mode"}
             unknown = {"kind": "unknown"}
 
@@ -2191,10 +2192,39 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.write_scheduler.publish_command.assert_called_with(publish, command_file="publish.json")
             self.assertEqual(adapter.write_scheduler.dispatch_command(desired, command_file="desired.json"), "applied")
             adapter.write_scheduler.publish_command.assert_called_with(desired, command_file="desired.json")
+            self.assertEqual(adapter.write_scheduler.dispatch_command(fields, command_file="fields.json"), "applied")
+            adapter.write_scheduler.publish_command.assert_called_with(fields, command_file="fields.json")
             self.assertEqual(adapter.write_scheduler.dispatch_command(remote, command_file="remote.json"), "applied")
             adapter.write_scheduler.set_remote_value.assert_called_once_with(remote)
             self.assertEqual(adapter.write_scheduler.dispatch_command(unknown, command_file="unknown.json"), "dropped")
             adapter.process_non_write_command.assert_called_once_with(unknown)
+
+    def test_publish_fields_rewrites_to_desired_paths_and_preserves_command_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            _install_mock(adapter.write_scheduler, "_publish_desired", MagicMock(return_value="deferred"))
+
+            command = {
+                "kind": "publish_fields",
+                "fields": {"mode": 2, "ac_power_w": 1200.0},
+                "priority": "publish",
+            }
+
+            self.assertEqual(
+                adapter.write_scheduler.publish_command(command, command_file="fields.json"),
+                "deferred",
+            )
+            adapter.write_scheduler._publish_desired.assert_called_once_with(
+                {
+                    "kind": "publish_desired",
+                    "fields": {"mode": 2, "ac_power_w": 1200.0},
+                    "priority": "publish",
+                    "paths": {"/Mode": 2, "/Ac/Power": 1200.0},
+                },
+                command_file="fields.json",
+            )
 
     def test_next_scheduled_command_runs_followup_burst_only_after_local_publish_completion(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

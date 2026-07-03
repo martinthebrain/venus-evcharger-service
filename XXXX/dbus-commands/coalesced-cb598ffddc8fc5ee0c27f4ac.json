@@ -1,1 +1,0 @@
-{"coalesce_key":"refresh:battery_soc","created_at":1783040257.3354747,"id":"coalesced-cb598ffddc8fc5ee0c27f4ac","key":"battery_soc","kind":"refresh_value","lifecycle_state":"coalesced","priority":"read","queue_class":"read-fast","reason":"helper semantic battery SOC read","schema_version":1,"source":"auto-input-helper","updated_at":1783042667.0826464}

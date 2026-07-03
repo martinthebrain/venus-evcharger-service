@@ -904,6 +904,120 @@ class _UpdateCycleQuaternaryLearningCases:
         self.assertFalse(controller._stable_learning_ready(3, 5.0, 0.9))
         self.assertFalse(controller._stable_learning_ready(3, 20.0, 0.5))
 
+    def test_learning_profile_normalizes_each_runtime_field_as_contract(self):
+        service = _learning_service(
+            learned_charge_power_state=" stable ",
+            learned_charge_power_watts="1900.04",
+            learned_charge_power_updated_at="42.5",
+            learned_charge_power_learning_since="31.25",
+            learned_charge_power_sample_count="-3",
+            learned_charge_power_phase=" 3p ",
+            learned_charge_power_voltage="231.24",
+            learned_charge_power_signature_mismatch_sessions="-2",
+            learned_charge_power_signature_checked_session_started_at="77.75",
+            learned_charge_power_confidence="1.25",
+            learned_charge_power_stability_score=float("nan"),
+            learned_charge_power_reason=" ",
+            learned_charge_power_detail=" stable sample ",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        profile = controller._learning_profile()
+
+        self.assertEqual(profile.state, "stable")
+        self.assertEqual(profile.power, 1900.0)
+        self.assertEqual(profile.updated_at, 42.5)
+        self.assertEqual(profile.learning_since, 31.25)
+        self.assertEqual(profile.sample_count, 0)
+        self.assertEqual(profile.phase_signature, "3P")
+        self.assertEqual(profile.voltage_signature, 231.24)
+        self.assertEqual(profile.signature_mismatch_sessions, 0)
+        self.assertEqual(profile.checked_session_started_at, 77.75)
+        self.assertEqual(profile.confidence, 1.0)
+        self.assertEqual(profile.stability_score, 0.0)
+        self.assertEqual(profile.reason, "na")
+        self.assertEqual(profile.detail, "stable sample")
+        self.assertEqual(controller._stored_positive_learned_charge_power(), 1900.0)
+        self.assertEqual(controller._stored_learning_state(), "stable")
+        self.assertEqual(controller._stored_learning_phase_signature(), "3P")
+        self.assertEqual(controller._learning_signature_context(), (231.24, 0, 77.75))
+
+    def test_learning_profile_preserves_non_default_diagnostic_runtime_fields(self):
+        service = _learning_service(
+            learned_charge_power_sample_count=5,
+            learned_charge_power_confidence=0.25,
+            learned_charge_power_stability_score=0.42,
+            learned_charge_power_reason="calibrated",
+            learned_charge_power_detail="matched-signature",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        profile = controller._learning_profile()
+
+        self.assertEqual(profile.sample_count, 5)
+        self.assertEqual(profile.confidence, 0.25)
+        self.assertEqual(profile.stability_score, 0.42)
+        self.assertEqual(profile.reason, "calibrated")
+        self.assertEqual(profile.detail, "matched-signature")
+
+    def test_learning_profile_missing_runtime_fields_use_explicit_raw_defaults(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        with (
+            patch.object(
+                controller,
+                "_normalized_learning_count",
+                wraps=controller._normalized_learning_count,
+            ) as normalize_count,
+            patch.object(
+                controller,
+                "_normalized_learning_score",
+                wraps=controller._normalized_learning_score,
+            ) as normalize_score,
+        ):
+            profile = controller._learning_profile()
+
+        self.assertEqual(profile.sample_count, 0)
+        self.assertEqual(profile.signature_mismatch_sessions, 0)
+        self.assertEqual(profile.confidence, 0.0)
+        self.assertEqual(profile.stability_score, 0.0)
+        self.assertIn((0,), [args for args, _kwargs in normalize_count.call_args_list])
+        self.assertEqual([args for args, _kwargs in normalize_score.call_args_list], [(0.0,), (0.0,)])
+
+    def test_learning_diagnostic_updates_contract_is_exact_and_sparse(self):
+        self.assertEqual(
+            UpdateCycleController._learning_diagnostic_updates(
+                confidence=0.4567,
+                stability_score=2.0,
+                reason=" ",
+                detail=" accepted ",
+            ),
+            (
+                ("learned_charge_power_confidence", 0.457),
+                ("learned_charge_power_stability_score", 1.0),
+                ("learned_charge_power_reason", "na"),
+                ("learned_charge_power_detail", "accepted"),
+            ),
+        )
+        self.assertEqual(
+            UpdateCycleController._learning_diagnostic_updates(
+                confidence=None,
+                stability_score=None,
+                reason=None,
+                detail=None,
+            ),
+            (),
+        )
+        self.assertEqual(
+            UpdateCycleController._learning_diagnostic_updates(
+                confidence=None,
+                stability_score=None,
+                reason=None,
+                detail=" ",
+            ),
+            (("learned_charge_power_detail", ""),),
+        )
+
     def test_learning_profile_normalizers_cover_score_and_text_edges(self):
         self.assertEqual(normalized_learning_score(None), 0.0)
         self.assertEqual(normalized_learning_score(object()), 0.0)
