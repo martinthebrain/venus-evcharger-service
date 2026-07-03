@@ -723,6 +723,30 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 {"kind": "publish_desired", "priority": "publish"},
             )
         )
+        self.assertFalse(
+            dbus_gateway_commands._same_publish_fields_payload(
+                [],
+                {"kind": "publish_fields", "priority": "publish"},
+            )
+        )
+        self.assertFalse(
+            dbus_gateway_commands._same_publish_fields_payload(
+                {"kind": "publish_fields", "priority": "diagnostic"},
+                {"kind": "publish_fields", "priority": "publish"},
+            )
+        )
+        self.assertFalse(
+            dbus_gateway_commands._same_publish_fields_payload(
+                {"kind": "publish_desired", "priority": "publish"},
+                {"kind": "publish_fields", "priority": "publish"},
+            )
+        )
+        self.assertTrue(
+            dbus_gateway_commands._same_publish_fields_payload(
+                {"kind": "publish_fields", "priority": "publish"},
+                {"kind": "publish_fields", "priority": "publish"},
+            )
+        )
         one_sided_payload = {"kind": "publish_desired", "priority": "publish", "paths": {"/Mode": 1}}
         dbus_gateway_commands._merge_publish_desired_paths(
             {"kind": "publish_desired", "priority": "publish", "paths": []},
@@ -741,6 +765,23 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             one_sided_field_payload,
         )
         self.assertEqual(one_sided_field_payload["fields"], {"mode": 1})
+        mixed_publish_payload = {
+            "kind": "publish_fields",
+            "priority": "publish",
+            "paths": {"/Mode": 1},
+            "fields": {"mode": 1},
+        }
+        dbus_gateway_commands._merge_coalesced_publish_payload(
+            {
+                "kind": "publish_fields",
+                "priority": "publish",
+                "paths": {"/AutoStart": 0},
+                "fields": {"auto_start": 0},
+            },
+            mixed_publish_payload,
+        )
+        self.assertEqual(mixed_publish_payload["paths"], {"/Mode": 1})
+        self.assertEqual(mixed_publish_payload["fields"], {"auto_start": 0, "mode": 1})
         payload = {"created_at": 20.0}
         dbus_gateway_commands._mark_coalesced_payload([], payload)
         self.assertEqual(payload, {"created_at": 20.0, "lifecycle_state": "coalesced"})
