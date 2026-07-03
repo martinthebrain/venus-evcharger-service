@@ -1,25 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.auto_input_helper_sources_cases_common import *
+from venus_evcharger.dbus_gateway import GRID_POWER_READ_KEY
 
 
 class _AutoInputHelperSourcesRuntimeCases:
     def test_get_grid_power_returns_total_and_handles_no_paths(self):
         helper = self._make_helper()
 
-        def fake_get_value(service_name, path):
-            values = {
-                "/Ac/Grid/L1/Power": -500.0,
-                "/Ac/Grid/L2/Power": -400.0,
-                "/Ac/Grid/L3/Power": 100.0,
-            }
-            return values[path]
-
-        helper._get_dbus_value = MagicMock(side_effect=fake_get_value)
+        self._write_gateway_cache(helper, key_values={GRID_POWER_READ_KEY: -800.0})
         self.assertEqual(helper._get_grid_power(), -800.0)
 
-        helper.auto_grid_l1_path = ""
-        helper.auto_grid_l2_path = ""
-        helper.auto_grid_l3_path = ""
+        helper = self._make_helper()
         self.assertIsNone(helper._get_grid_power())
 
     def test_get_grid_power_covers_retry_guard_and_partial_failures(self):
@@ -30,20 +21,10 @@ class _AutoInputHelperSourcesRuntimeCases:
 
         helper = self._make_helper()
 
-        def fake_get_value(_service_name, path):
-            if path == "/Ac/Grid/L1/Power":
-                raise RuntimeError("offline")
-            if path == "/Ac/Grid/L2/Power":
-                return "not-numeric"
-            return 200.0
-
-        helper.auto_grid_require_all_phases = False
-        helper._get_dbus_value = MagicMock(side_effect=fake_get_value)
+        self._write_gateway_cache(helper, key_values={GRID_POWER_READ_KEY: 200.0})
         self.assertEqual(helper._get_grid_power(), 200.0)
 
         helper = self._make_helper()
-        helper.auto_grid_require_all_phases = True
-        helper._get_dbus_value = MagicMock(side_effect=fake_get_value)
         helper._delay_source_retry = MagicMock()
         self.assertIsNone(helper._get_grid_power())
         helper._delay_source_retry.assert_called_once_with("grid")

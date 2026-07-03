@@ -26,16 +26,16 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", return_value=snapshot):
             values = controller._dbus_introspection_counter_values(100.0)
 
-        self.assertEqual(values["/Auto/DbusIntrospectionState"], "running")
-        self.assertEqual(values["/Auto/DbusIntrospectionQueueDepth"], 3)
-        self.assertEqual(values["/Auto/DbusIntrospectionServiceCount"], 4)
-        self.assertEqual(values["/Auto/DbusIntrospectionUnusablePathCount"], 2)
+        self.assertEqual(values["auto_dbus_introspection_state"], "running")
+        self.assertEqual(values["auto_dbus_introspection_queue_depth"], 3)
+        self.assertEqual(values["auto_dbus_introspection_service_count"], 4)
+        self.assertEqual(values["auto_dbus_introspection_unusable_path_count"], 2)
 
         with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", return_value={"services": []}):
             odd_values = controller._dbus_introspection_counter_values(101.0)
 
-        self.assertEqual(odd_values["/Auto/DbusIntrospectionServiceCount"], 0)
-        self.assertEqual(odd_values["/Auto/DbusIntrospectionUnusablePathCount"], 0)
+        self.assertEqual(odd_values["auto_dbus_introspection_service_count"], 0)
+        self.assertEqual(odd_values["auto_dbus_introspection_unusable_path_count"], 0)
 
     def test_diagnostic_values_keep_fault_and_recovery_visible_while_scheduled_and_retry_are_also_active(self) -> None:
         current_time = 1776718800.0
@@ -94,17 +94,17 @@ class _TestDbusPublishControllerDiagnosticsPart2:
 
         counter_values = controller._diagnostic_counter_values(current_time)
 
-        self.assertEqual(counter_values["/Status"], 0)
-        self.assertEqual(counter_values["/Auto/RecoveryActive"], 1)
-        self.assertEqual(counter_values["/Auto/FaultActive"], 1)
-        self.assertEqual(counter_values["/Auto/FaultReason"], "contactor-lockout-open")
-        self.assertEqual(counter_values["/Auto/StatusSource"], "contactor-lockout-open")
-        self.assertEqual(counter_values["/Auto/ScheduledState"], "night-boost")
-        self.assertEqual(counter_values["/Auto/ScheduledReason"], "night-boost-window")
-        self.assertEqual(counter_values["/Auto/ChargerTransportActive"], 1)
-        self.assertEqual(counter_values["/Auto/ChargerRetryActive"], 1)
-        self.assertEqual(counter_values["/Auto/ContactorLockoutActive"], 1)
-        self.assertEqual(counter_values["/Auto/ContactorLockoutReason"], "contactor-suspected-open")
+        self.assertEqual(counter_values["status"], 0)
+        self.assertEqual(counter_values["auto_recovery_active"], 1)
+        self.assertEqual(counter_values["auto_fault_active"], 1)
+        self.assertEqual(counter_values["auto_fault_reason"], "contactor-lockout-open")
+        self.assertEqual(counter_values["auto_status_source"], "contactor-lockout-open")
+        self.assertEqual(counter_values["auto_scheduled_state"], "night-boost")
+        self.assertEqual(counter_values["auto_scheduled_reason"], "night-boost-window")
+        self.assertEqual(counter_values["auto_charger_transport_active"], 1)
+        self.assertEqual(counter_values["auto_charger_retry_active"], 1)
+        self.assertEqual(counter_values["auto_contactor_lockout_active"], 1)
+        self.assertEqual(counter_values["auto_contactor_lockout_reason"], "contactor-suspected-open")
 
     def test_diagnostic_values_keep_retry_visible_after_transport_detail_has_gone_stale(self) -> None:
         current_time = 200.0
@@ -164,16 +164,16 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         counter_values = controller._diagnostic_counter_values(current_time)
         age_values = controller._diagnostic_age_values(current_time)
 
-        self.assertEqual(counter_values["/Status"], 6)
-        self.assertEqual(counter_values["/Auto/FaultActive"], 0)
-        self.assertEqual(counter_values["/Auto/FaultReason"], "")
-        self.assertEqual(counter_values["/Auto/ChargerTransportActive"], 0)
-        self.assertEqual(counter_values["/Auto/ChargerTransportReason"], "")
-        self.assertEqual(counter_values["/Auto/ChargerRetryActive"], 1)
-        self.assertEqual(counter_values["/Auto/ChargerRetryReason"], "offline")
-        self.assertEqual(counter_values["/Auto/StatusSource"], "charger-status-ready")
-        self.assertEqual(age_values["/Auto/LastChargerTransportAge"], -1.0)
-        self.assertEqual(age_values["/Auto/ChargerRetryRemaining"], 10.0)
+        self.assertEqual(counter_values["status"], 6)
+        self.assertEqual(counter_values["auto_fault_active"], 0)
+        self.assertEqual(counter_values["auto_fault_reason"], "")
+        self.assertEqual(counter_values["auto_charger_transport_active"], 0)
+        self.assertEqual(counter_values["auto_charger_transport_reason"], "")
+        self.assertEqual(counter_values["auto_charger_retry_active"], 1)
+        self.assertEqual(counter_values["auto_charger_retry_reason"], "offline")
+        self.assertEqual(counter_values["auto_status_source"], "charger-status-ready")
+        self.assertEqual(age_values["auto_last_charger_transport_age"], -1.0)
+        self.assertEqual(age_values["auto_charger_retry_remaining"], 10.0)
 
     def test_diagnostic_values_prefer_confirmed_switch_group_phase_over_native_charger_phase(self) -> None:
         current_time = 200.0
@@ -225,7 +225,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
 
         counter_values = controller._diagnostic_counter_values(current_time)
 
-        self.assertEqual(counter_values["/Status"], 2)
-        self.assertEqual(counter_values["/Auto/StatusSource"], "charger-status-charging")
-        self.assertEqual(counter_values["/Auto/PhaseObserved"], "P1_P2")
-        self.assertEqual(counter_values["/Auto/PhaseMismatchActive"], 1)
+        self.assertEqual(counter_values["status"], 2)
+        self.assertEqual(counter_values["auto_status_source"], "charger-status-charging")
+        self.assertEqual(counter_values["auto_phase_observed"], "P1_P2")
+        self.assertEqual(counter_values["auto_phase_mismatch_active"], 1)

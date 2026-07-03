@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import SupportsFloat, SupportsIndex
+from typing import Literal, SupportsFloat, SupportsIndex
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 
@@ -75,7 +75,32 @@ GUI_CRITICAL_PUBLISH_PATHS = {
     "/Session/Energy",
 }
 
-FAST_READ_KEYS = {"grid_power_w", "pv_power_w", "battery_soc"}
+GatewayReadKey = Literal["grid_power_w", "pv_power_w", "battery_soc"]
+
+GRID_POWER_READ_KEY: GatewayReadKey = "grid_power_w"
+PV_POWER_READ_KEY: GatewayReadKey = "pv_power_w"
+BATTERY_SOC_READ_KEY: GatewayReadKey = "battery_soc"
+FAST_READ_KEYS: frozenset[GatewayReadKey] = frozenset(
+    {
+        GRID_POWER_READ_KEY,
+        PV_POWER_READ_KEY,
+        BATTERY_SOC_READ_KEY,
+    }
+)
+
+
+def require_gateway_read_key(value: object) -> GatewayReadKey:
+    """Return one supported semantic read key, or raise for raw DBus details."""
+    if value is None:
+        raise ValueError(f"Unsupported gateway read key: {value!r}")
+    key = str(value).strip()
+    if key == GRID_POWER_READ_KEY:
+        return GRID_POWER_READ_KEY
+    if key == PV_POWER_READ_KEY:
+        return PV_POWER_READ_KEY
+    if key == BATTERY_SOC_READ_KEY:
+        return BATTERY_SOC_READ_KEY
+    raise ValueError(f"Unsupported gateway read key: {value!r}")
 
 @dataclass(frozen=True)
 class GatewayPaths:

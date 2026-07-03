@@ -105,12 +105,18 @@ class TestRuntimeSupportControllerAudit(RuntimeSupportTestCaseBase):
                 switch_type="template_switch",
                 charger_type="template_charger",
             )
+            service.learned_charge_power_confidence = 0.92
+            service.learned_charge_power_stability_score = 0.88
+            service.learned_charge_power_reason = "learning-stable"
             controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
             controller.write_auto_audit_event("auto-stop", cached=False)
             with open(path, "r", encoding="utf-8") as handle:
                 payload = handle.read()
             self.assertIn("detail=surplus", payload)
             self.assertIn("charger_backend=template_charger", payload)
+            self.assertIn("learned_charge_power_confidence=0.920", payload)
+            self.assertIn("learned_charge_power_stability=0.880", payload)
+            self.assertIn("learned_charge_power_reason=learning-stable", payload)
 
     def test_write_auto_audit_event_retry_and_state_change_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -51,7 +51,7 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         normalized_voltage_mode = _RelayPhasePublish._normalized_voltage_mode(voltage_mode)
         if not _RelayPhasePublish._selection_uses_line_to_line_voltage(normalized_selection, normalized_voltage_mode):
             return float(voltage)
-        return float(voltage) / math.sqrt(3.0) if float(voltage) > 0.0 else 0.0
+        return max(0.0, float(voltage)) / math.sqrt(3.0)
 
     @staticmethod
     def _normalized_phase_selection(selection: Any) -> str:
@@ -70,7 +70,6 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         pm_status: dict[str, Any] | None,
         power: float,
         voltage: float,
-        current: float,
     ) -> dict[str, dict[str, float]]:
         svc = self.service
         phase_data = self._phase_data_from_backend_metadata(pm_status, voltage, getattr(svc, "voltage_mode", "phase"))
@@ -162,7 +161,16 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
 
     @staticmethod
     def _pm_status_confirmed(pm_status: dict[str, Any]) -> bool:
-        return bool(pm_status.get("_pm_confirmed", False))
+        return bool(pm_status.get("_pm_confirmed"))
+
+    @staticmethod
+    def _relay_sync_timeout_warning_window_seconds(svc: Any) -> float:
+        raw_timeout = svc.relay_sync_timeout_seconds if hasattr(svc, "relay_sync_timeout_seconds") else 2.0
+        return max(1.0, float(raw_timeout or 2.0))
+
+    @staticmethod
+    def _relay_sync_failure_reported(svc: Any) -> bool:
+        return bool(svc._relay_sync_failure_reported) if hasattr(svc, "_relay_sync_failure_reported") else False
 
     def _publish_local_pm_status_best_effort(self, relay_on: bool, now: float) -> None:
         svc = self.service
@@ -171,7 +179,7 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         except RELAY_PLACEHOLDER_PUBLISH_ERRORS as error:
             svc._warning_throttled(
                 "relay-placeholder-publish-failed",
-                max(1.0, float(getattr(svc, "relay_sync_timeout_seconds", 2.0) or 2.0)),
+                self._relay_sync_timeout_warning_window_seconds(svc),
                 "Local relay placeholder publish failed after queueing relay=%s: %s",
                 int(bool(relay_on)),
                 error,
@@ -202,7 +210,7 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
     ) -> bool:
         if not pm_confirmed or bool(relay_on) != expected_relay:
             return False
-        if getattr(svc, "_relay_sync_failure_reported", False):
+        if self._relay_sync_failure_reported(svc):
             svc._mark_recovery("shelly", "Shelly relay confirmation recovered")
         self._clear_relay_sync_tracking(svc)
         return True
@@ -229,7 +237,7 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         expected_relay: bool,
         deadline_at: Any,
     ) -> None:
-        if getattr(svc, "_relay_sync_failure_reported", False):
+        if self._relay_sync_failure_reported(svc):
             return
         svc._relay_sync_failure_reported = True
         timeout_seconds = max(0.0, float(deadline_at) - float(getattr(svc, "_relay_sync_requested_at", deadline_at)))

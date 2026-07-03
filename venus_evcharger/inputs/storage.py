@@ -20,6 +20,7 @@ from venus_evcharger.energy import (
     update_energy_learning_profiles,
 )
 from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS, DBUS_INPUT_SNAPSHOT_ERRORS
+from venus_evcharger.dbus_gateway import BATTERY_SOC_READ_KEY, GRID_POWER_READ_KEY
 from .energy_snapshot_contracts import (
     energy_source_definitions,
     learning_profile_payloads,
@@ -137,7 +138,7 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             {
                 "battery_combined_charge_power_w": cluster.combined_charge_power_w,
                 "battery_combined_discharge_power_w": cluster.combined_discharge_power_w,
-                "battery_combined_charge_limit_power_w": cluster.combined_charge_limit_power_w,
+                "BATTERY_COMBINED_CHARGE_LIMIT_POWER_W": cluster.combined_charge_limit_power_w,
                 "battery_combined_discharge_limit_power_w": cluster.combined_discharge_limit_power_w,
                 "battery_combined_grid_interaction_w": cluster.combined_grid_interaction_w,
             },
@@ -315,23 +316,22 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             return self._failed_battery_snapshot_payload(now, error)
 
     def get_battery_soc(self) -> float | None:
-        """Read battery SOC from the resolved battery service."""
-        snapshot = self.get_battery_snapshot()
-        battery_soc = snapshot.get("battery_soc")
-        if isinstance(battery_soc, (int, float)):
+        """Read battery SOC from the gateway read contract."""
+        now = time.time()
+        if not self._source_retry_ready("battery", now):
+            return None
+        battery_soc = self.get_gateway_read_value(BATTERY_SOC_READ_KEY, reason="main semantic battery SOC read")
+        if isinstance(battery_soc, (int, float)) and 0.0 <= float(battery_soc) <= 100.0:
+            self._mark_source_recovery("battery", "Battery SOC readings recovered")
             return float(battery_soc)
+        self._handle_source_failure(
+            "battery",
+            now,
+            "battery-missing",
+            self.service.auto_battery_scan_interval_seconds,
+            "Auto mode could not read battery SOC from the DBus gateway read contract.",
+        )
         return None
-
-    def _read_battery_soc_value(self) -> object:
-        """Read one raw battery SOC value, retrying once after invalidating cached service discovery."""
-        svc = self.service
-        service_name = svc.resolve_auto_battery_service()
-        try:
-            return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)
-        except DBUS_INPUT_READ_ERRORS:
-            svc.invalidate_auto_battery_service()
-            service_name = svc.resolve_auto_battery_service()
-            return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)
 
     def _battery_soc_numeric(self, value: object) -> float | None:
         """Return one numeric battery SOC value after DBus coercion."""
@@ -341,12 +341,12 @@ class _DbusInputStorage(_DbusInputStorageSupport):
         return float(coerced_value)
 
     def get_grid_power(self) -> float | None:
-        """Read and sum grid power from per-phase paths."""
+        """Read grid power from the gateway read contract."""
         now = time.time()
         if not self._source_retry_ready("grid", now):
             return None
-        configured_paths = self._configured_grid_paths()
-        if not configured_paths:
-            return None
-        total, seen_value, missing_paths = self._read_grid_phase_values(configured_paths)
-        return self._finalize_grid_power(total, seen_value, missing_paths, now)
+        grid_power = self.get_gateway_read_value(GRID_POWER_READ_KEY, reason="main semantic grid power read")
+        if isinstance(grid_power, (int, float)):
+            self._mark_source_recovery("grid", "Grid readings recovered")
+            return float(grid_power)
+        return self._handle_missing_grid_values(False, [], now)

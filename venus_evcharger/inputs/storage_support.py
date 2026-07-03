@@ -7,10 +7,8 @@ import logging
 import time
 
 from venus_evcharger.core.shared import (
-    configured_grid_paths,
     discovery_cache_valid,
     first_matching_prefixed_service,
-    grid_values_complete_enough,
 )
 from venus_evcharger.dbus_introspection import owner_path_unusable, request_owner_introspection
 from venus_evcharger.energy import EnergySourceDefinition
@@ -229,36 +227,6 @@ class _DbusInputStorageSupport(_DbusInputPv):
             return cached_service
         return self._scan_auto_battery_service(now)
 
-    def _configured_grid_paths(self) -> list[str]:
-        svc = self.service
-        return configured_grid_paths(svc.auto_grid_l1_path, svc.auto_grid_l2_path, svc.auto_grid_l3_path)
-
-    def _read_grid_phase_values(self, configured_paths: list[str]) -> tuple[float, bool, list[str]]:
-        total = 0.0
-        seen_value = False
-        missing_paths = []
-        for path in configured_paths:
-            numeric_value = self._read_one_grid_phase(path)
-            if numeric_value is None:
-                missing_paths.append(path)
-                continue
-            total += numeric_value
-            seen_value = True
-        return total, seen_value, missing_paths
-
-    def _read_one_grid_phase(self, path: str) -> float | None:
-        """Read one configured grid phase path as a numeric contribution."""
-        svc = self.service
-        if self._introspection_says_skip(svc.auto_grid_service, path, priority=85):
-            return None
-        try:
-            value = svc.get_dbus_value(svc.auto_grid_service, path)
-        except DBUS_INPUT_READ_ERRORS as error:
-            logging.debug("Auto grid read failed for %s %s: %s", svc.auto_grid_service, path, error)
-            self._request_introspection(svc.auto_grid_service, path, priority=95, reason="grid phase read failed")
-            return None
-        return self._numeric_sum(value) if value is not None else None
-
     def _introspection_says_skip(self, service_name: str, path: str, *, priority: int) -> bool:
         skip, reason = owner_path_unusable(self.service, service_name, path)
         if skip:
@@ -274,13 +242,6 @@ class _DbusInputStorageSupport(_DbusInputPv):
             priority=priority,
             reason=reason,
             source="evcharger-inputs",
-        )
-
-    def _grid_values_complete_enough(self, seen_value: bool, missing_paths: list[str]) -> bool:
-        return grid_values_complete_enough(
-            seen_value,
-            missing_paths,
-            self.service.auto_grid_require_all_phases,
         )
 
     def _handle_missing_grid_values(self, seen_value: bool, missing_paths: list[str], now: float) -> float | None:
@@ -300,15 +261,3 @@ class _DbusInputStorageSupport(_DbusInputPv):
             svc.auto_grid_service,
         )
         return None
-
-    def _finalize_grid_power(
-        self,
-        total: float,
-        seen_value: bool,
-        missing_paths: list[str],
-        now: float,
-    ) -> float | None:
-        if self._grid_values_complete_enough(seen_value, missing_paths):
-            self._mark_source_recovery("grid", "Grid readings recovered")
-            return total
-        return self._handle_missing_grid_values(seen_value, missing_paths, now)

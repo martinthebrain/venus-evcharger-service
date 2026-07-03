@@ -18,6 +18,9 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
         self.assertFalse(clear_auto_decision_tracking(service))
 
     def test_runtime_state_save_best_effort_covers_missing_and_warning_paths(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+        controller.save_runtime_state_best_effort("missing-attr")
+
         controller = UpdateCycleController(SimpleNamespace(_save_runtime_state=None), _phase_values, lambda reason: 0)
         controller.save_runtime_state_best_effort("missing")
 
@@ -38,6 +41,12 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service_without_warning, _phase_values, lambda reason: 0)
         controller.save_runtime_state_best_effort("silent")
+
+        service_without_warning_attr = SimpleNamespace(
+            _save_runtime_state=MagicMock(side_effect=RuntimeError("boom")),
+        )
+        controller = UpdateCycleController(service_without_warning_attr, _phase_values, lambda reason: 0)
+        controller.save_runtime_state_best_effort("missing-warning-attr")
 
     def test_update_virtual_state_keeps_dbus_publish_alive_when_runtime_save_fails(self):
         service = SimpleNamespace(
@@ -86,6 +95,520 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
 
         service._last_charger_state_at = 100.0
         self.assertEqual(controller.startstop_display_for_state(service, False, 100.0), 1)
+
+    def test_charger_state_freshness_prefers_strictest_positive_runtime_budget(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+        service = SimpleNamespace(
+            _worker_poll_interval_seconds=3.0,
+            auto_shelly_soft_fail_seconds=5.0,
+            _last_charger_state_at=100.0,
+        )
+
+        self.assertEqual(controller._charger_state_max_age_seconds(service), 2.0)
+        self.assertFalse(controller._stale_charger_enabled_readback(service, 102.0))
+        self.assertTrue(controller._stale_charger_enabled_readback(service, 102.001))
+        self.assertFalse(controller._stale_charger_enabled_readback(service, 98.0))
+        self.assertTrue(controller._stale_charger_enabled_readback(service, 97.999))
+
+        service._worker_poll_interval_seconds = 0.25
+        service.auto_shelly_soft_fail_seconds = 0.75
+        self.assertEqual(controller._charger_state_max_age_seconds(service), 1.0)
+
+        service._worker_poll_interval_seconds = 4.0
+        service.auto_shelly_soft_fail_seconds = 1.5
+        self.assertEqual(controller._charger_state_max_age_seconds(service), 1.5)
+
+        service._worker_poll_interval_seconds = float("nan")
+        service.auto_shelly_soft_fail_seconds = 0.5
+        self.assertEqual(controller._charger_state_max_age_seconds(service), 1.0)
+
+        service._worker_poll_interval_seconds = 0.0
+        service.auto_shelly_soft_fail_seconds = 0.0
+        self.assertEqual(controller._charger_state_max_age_seconds(service), 2.0)
+
+        self.assertEqual(controller._charger_state_max_age_seconds(SimpleNamespace()), 2.0)
+
+    def test_charger_enabled_readback_requires_backend_value_and_fresh_timestamp(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+        service = SimpleNamespace(
+            _charger_backend=None,
+            _last_charger_state_enabled=True,
+            _last_charger_state_at=100.0,
+            auto_shelly_soft_fail_seconds=10.0,
+        )
+
+        self.assertIsNone(controller._fresh_charger_enabled_readback(service, 100.0))
+
+        service._charger_backend = object()
+        service._last_charger_state_enabled = None
+        self.assertIsNone(controller._fresh_charger_enabled_readback(service, 100.0))
+
+        service._last_charger_state_enabled = 0
+        self.assertFalse(controller._fresh_charger_enabled_readback(service, 100.0))
+
+        service._last_charger_state_enabled = ""
+        self.assertFalse(controller._fresh_charger_enabled_readback(service, 100.0))
+
+        service._last_charger_state_enabled = "enabled"
+        self.assertTrue(controller._fresh_charger_enabled_readback(service, 100.0))
+
+        service._last_charger_state_at = 120.1
+        self.assertIsNone(controller._fresh_charger_enabled_readback(service, 100.0))
+
+        service_without_enabled_attr = SimpleNamespace(
+            _charger_backend=object(),
+            _last_charger_state_at=100.0,
+            auto_shelly_soft_fail_seconds=10.0,
+        )
+        self.assertIsNone(controller._fresh_charger_enabled_readback(service_without_enabled_attr, 100.0))
+
+        service_without_state_at = SimpleNamespace(auto_shelly_soft_fail_seconds=10.0)
+        self.assertTrue(controller._stale_charger_enabled_readback(service_without_state_at, 100.0))
+
+        strict_age_service = SimpleNamespace(
+            _last_charger_state_at=100.0,
+            _worker_poll_interval_seconds=4.0,
+            auto_shelly_soft_fail_seconds=1.5,
+        )
+        self.assertTrue(controller._stale_charger_enabled_readback(strict_age_service, 101.6))
+
+    def test_startstop_display_contract_for_native_auto_and_manual_modes(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+        service = SimpleNamespace(
+            _charger_backend=object(),
+            _last_charger_state_enabled=False,
+            _last_charger_state_at=100.0,
+            auto_shelly_soft_fail_seconds=10.0,
+            virtual_startstop=1,
+            virtual_enable=1,
+            virtual_mode=1,
+            _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
+        )
+
+        self.assertEqual(controller.startstop_display_for_state(service, True, 100.0), 0)
+        self.assertEqual(service.virtual_startstop, 1)
+
+        service._charger_backend = None
+        self.assertEqual(controller.startstop_display_for_state(service, False, 100.0), 1)
+        self.assertEqual(service.virtual_startstop, 0)
+
+        service.virtual_mode = 0
+        service.virtual_enable = 1
+        service.virtual_startstop = 1
+        self.assertEqual(controller.startstop_display_for_state(service, False, 100.0), 0)
+
+    def test_startup_manual_target_contract_covers_missing_none_and_bool_coercion(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+        service = SimpleNamespace()
+
+        self.assertIsNone(controller._startup_manual_target(service))
+        self.assertTrue(hasattr(service, "_startup_manual_target"))
+
+        service._startup_manual_target = None
+        self.assertIsNone(controller._startup_manual_target(service))
+
+        service._startup_manual_target = 0
+        self.assertFalse(controller._startup_manual_target(service))
+
+        service._startup_manual_target = "on"
+        self.assertTrue(controller._startup_manual_target(service))
+
+    def test_startup_manual_target_skips_auto_modes_and_clears_when_already_matched(self):
+        service = SimpleNamespace(
+            _startup_manual_target=True,
+            virtual_mode=1,
+            _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+        pm_status = {"output": False, "apower": 12.0}
+
+        self.assertIs(controller.apply_startup_manual_target(pm_status, 100.0), pm_status)
+        self.assertTrue(service._startup_manual_target)
+
+        service.virtual_mode = 0
+        service._startup_manual_target = False
+        pm_status = {}
+        self.assertIs(controller.apply_startup_manual_target(pm_status, 99.0), pm_status)
+        self.assertIsNone(service._startup_manual_target)
+
+        service._startup_manual_target = True
+        pm_status = {"output": True, "apower": 12.0}
+        self.assertIs(controller.apply_startup_manual_target(pm_status, 100.0), pm_status)
+        self.assertIsNone(service._startup_manual_target)
+
+    def test_startup_manual_target_applies_and_publishes_placeholder_or_fallback(self):
+        service = SimpleNamespace(
+            _startup_manual_target=True,
+            virtual_mode=0,
+            auto_shelly_soft_fail_seconds=10.0,
+            _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
+            _publish_local_pm_status=MagicMock(return_value={"output": True, "apower": 4.0}),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+        controller._apply_enabled_target = MagicMock(return_value=True)
+
+        published = controller.apply_startup_manual_target({"output": False, "apower": 12.0}, 100.0)
+
+        self.assertEqual(published, {"output": True, "apower": 4.0})
+        self.assertIsNone(service._startup_manual_target)
+        controller._apply_enabled_target.assert_called_once_with(service, True, 100.0)
+        service._publish_local_pm_status.assert_called_once_with(True, 100.0)
+
+        service._startup_manual_target = False
+        service._publish_local_pm_status = MagicMock(return_value=None)
+        controller._apply_enabled_target = MagicMock(return_value=True)
+
+        fallback = controller.apply_startup_manual_target({"output": True, "apower": 12.0, "current": 3.0}, 101.0)
+
+        self.assertEqual(fallback, {"output": False, "apower": 0.0, "current": 0.0})
+        self.assertIsNone(service._startup_manual_target)
+
+    def test_startup_manual_target_keeps_live_status_on_apply_failure_or_deferred_apply(self):
+        service = SimpleNamespace(
+            _startup_manual_target=False,
+            virtual_mode=0,
+            auto_shelly_soft_fail_seconds=8.0,
+            _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
+            _mark_failure=MagicMock(),
+            _warning_throttled=MagicMock(),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+        controller._enable_control_source_key = MagicMock(return_value="relay")
+        controller._enable_control_label = MagicMock(return_value="relay")
+        controller._apply_enabled_target = MagicMock(side_effect=RuntimeError("offline"))
+        pm_status = {"output": True, "apower": 12.0}
+
+        self.assertIs(controller.apply_startup_manual_target(pm_status, 100.0), pm_status)
+        self.assertFalse(service._startup_manual_target)
+        service._mark_failure.assert_called_once_with("relay")
+        service._warning_throttled.assert_called_once()
+
+        service._mark_failure.reset_mock()
+        service._warning_throttled.reset_mock()
+        controller._apply_enabled_target = MagicMock(return_value=False)
+
+        self.assertIs(controller.apply_startup_manual_target(pm_status, 101.0), pm_status)
+        self.assertFalse(service._startup_manual_target)
+        service._mark_failure.assert_not_called()
+        service._warning_throttled.assert_not_called()
+
+    def test_startup_manual_placeholder_warns_and_falls_back_when_publish_fails(self):
+        service = SimpleNamespace(
+            auto_shelly_soft_fail_seconds=6.0,
+            _publish_local_pm_status=MagicMock(side_effect=RuntimeError("publish failed")),
+            _warning_throttled=MagicMock(),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+
+        fallback = controller._publish_startup_local_pm_status(
+            {"output": False, "apower": 99.0, "current": 11.0},
+            True,
+            100.0,
+        )
+
+        self.assertEqual(fallback, {"output": True, "apower": 0.0, "current": 0.0})
+        service._warning_throttled.assert_called_once()
+        placeholder_args = service._warning_throttled.call_args.args
+        placeholder_kwargs = service._warning_throttled.call_args.kwargs
+        self.assertEqual(service._warning_throttled.call_args.args[0], "startup-manual-target-placeholder-failed")
+        self.assertEqual(service._warning_throttled.call_args.args[1], 6.0)
+        self.assertEqual(
+            service._warning_throttled.call_args.args[2],
+            "Failed to publish startup manual placeholder state %s: %s",
+        )
+        self.assertIs(placeholder_args[3], True)
+        self.assertIs(placeholder_args[4], placeholder_kwargs["exc_info"])
+
+        service_without_publisher = SimpleNamespace()
+        controller = UpdateCycleController(service_without_publisher, _phase_values, lambda reason: 0)
+        self.assertEqual(
+            controller._publish_startup_local_pm_status({"output": False, "apower": 99.0}, False, 101.0),
+            {"output": False, "apower": 0.0, "current": 0.0},
+        )
+
+    def test_startup_manual_apply_failure_warning_contract_is_explicit(self):
+        service = SimpleNamespace(
+            _startup_manual_target=True,
+            virtual_mode=0,
+            auto_shelly_soft_fail_seconds=9.0,
+            _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
+            _mark_failure=MagicMock(),
+            _warning_throttled=MagicMock(),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+        controller._enable_control_source_key = MagicMock(
+            side_effect=lambda candidate: "native-charger" if candidate is service else "wrong-service"
+        )
+        controller._enable_control_label = MagicMock(
+            side_effect=lambda candidate: "native charger" if candidate is service else "wrong-service"
+        )
+        controller._apply_enabled_target = MagicMock(side_effect=ValueError("offline"))
+
+        pm_status = {"output": False, "apower": 12.0}
+        self.assertIs(controller.apply_startup_manual_target(pm_status, 100.0), pm_status)
+
+        service._mark_failure.assert_called_once_with("native-charger")
+        self.assertEqual(service._warning_throttled.call_args.args[0], "startup-manual-target-failed")
+        self.assertEqual(service._warning_throttled.call_args.args[1], 9.0)
+        self.assertEqual(
+            service._warning_throttled.call_args.args[2],
+            "Failed to apply startup manual %s state %s: %s",
+        )
+        self.assertEqual(service._warning_throttled.call_args.args[3:6], ("native charger", True, service._warning_throttled.call_args.kwargs["exc_info"]))
+
+    def test_session_state_contract_covers_start_delta_clamp_and_tracking_clear(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+        service = SimpleNamespace(charging_started_at=None, energy_at_start=9.0)
+
+        self.assertEqual(controller.session_state_from_status(service, 2, 10.0, False, 100.0), (0, 0.0))
+        self.assertEqual(service.charging_started_at, 100.0)
+        self.assertEqual(service.energy_at_start, 10.0)
+
+        self.assertEqual(controller.session_state_from_status(service, 2, 10.75, False, 112.9), (12, 0.75))
+        self.assertEqual(controller.session_state_from_status(service, 2, 9.5, False, 113.0), (13, 0.0))
+
+        service.auto_start_condition_since = 1.0
+        service.auto_stop_condition_since = 2.0
+        service.auto_stop_condition_reason = "auto-stop-surplus"
+        self.assertEqual(controller.session_state_from_status(service, 1, 11.0, True, 114.0), (0, 0.0))
+        self.assertIsNone(service.charging_started_at)
+        self.assertEqual(service.energy_at_start, 11.0)
+        self.assertIsNone(service.auto_start_condition_since)
+        self.assertIsNone(service.auto_stop_condition_since)
+        self.assertIsNone(service.auto_stop_condition_reason)
+        self.assertEqual(controller._session_energy(10.23456, 9.0), 1.235)
+
+    def test_session_state_does_not_clear_tracking_when_relay_already_off(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+        service = SimpleNamespace(
+            charging_started_at=90.0,
+            energy_at_start=1.0,
+            auto_start_condition_since=1.0,
+            auto_stop_condition_since=2.0,
+            auto_stop_condition_reason="auto-stop-surplus",
+        )
+
+        self.assertEqual(controller.session_state_from_status(service, 0, 2.0, False, 100.0), (0, 0.0))
+        self.assertIsNone(service.charging_started_at)
+        self.assertEqual(service.energy_at_start, 2.0)
+        self.assertEqual(service.auto_start_condition_since, 1.0)
+        self.assertEqual(service.auto_stop_condition_since, 2.0)
+        self.assertEqual(service.auto_stop_condition_reason, "auto-stop-surplus")
+        self.assertFalse(controller._session_was_active(SimpleNamespace()))
+
+    def test_virtual_state_defaults_initializes_missing_health_and_preserves_existing(self):
+        service = SimpleNamespace(_ensure_observability_state=MagicMock())
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 4, "running": 7}[reason])
+
+        controller.ensure_virtual_state_defaults()
+
+        service._ensure_observability_state.assert_called_once()
+        self.assertEqual(service._last_health_reason, "init")
+        self.assertEqual(service._last_health_code, 4)
+
+        service._ensure_observability_state.reset_mock()
+        service._last_health_reason = "running"
+        service._last_health_code = 99
+        controller.ensure_virtual_state_defaults()
+
+        service._ensure_observability_state.assert_called_once()
+        self.assertEqual(service._last_health_reason, "running")
+        self.assertEqual(service._last_health_code, 99)
+
+    def test_save_runtime_state_best_effort_warns_with_full_context_and_ignores_uncallable(self):
+        controller = UpdateCycleController(SimpleNamespace(_save_runtime_state=object()), _phase_values, lambda reason: 0)
+        controller.save_runtime_state_best_effort("uncallable")
+
+        service = SimpleNamespace(
+            _save_runtime_state=MagicMock(side_effect=OSError("disk")),
+            _warning_throttled=MagicMock(),
+            auto_shelly_soft_fail_seconds=12.0,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+
+        controller.save_runtime_state_best_effort("state-contract")
+
+        service._save_runtime_state.assert_called_once_with()
+        self.assertEqual(service._warning_throttled.call_args.args[0], "runtime-state-save-failed-state-contract")
+        self.assertEqual(service._warning_throttled.call_args.args[1], 12.0)
+        self.assertEqual(
+            service._warning_throttled.call_args.args[2],
+            "Unable to save runtime state during %s update: %s",
+        )
+        self.assertEqual(service._warning_throttled.call_args.args[3], "state-contract")
+        self.assertIs(service._warning_throttled.call_args.args[4], service._warning_throttled.call_args.kwargs["exc_info"])
+
+        service_without_delay = SimpleNamespace(
+            _save_runtime_state=MagicMock(side_effect=RuntimeError("disk")),
+            _warning_throttled=MagicMock(),
+        )
+        controller = UpdateCycleController(service_without_delay, _phase_values, lambda reason: 0)
+        controller.save_runtime_state_best_effort("default-delay")
+        self.assertEqual(service_without_delay._warning_throttled.call_args.args[1], 10.0)
+
+    def test_phase_energy_contract_covers_all_single_phase_and_three_phase_modes(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+
+        self.assertEqual(
+            controller.phase_energies_for_total(SimpleNamespace(phase="L1"), 9.0),
+            {"L1": 9.0, "L2": 0.0, "L3": 0.0},
+        )
+        self.assertEqual(
+            controller.phase_energies_for_total(SimpleNamespace(phase="L2"), 9.0),
+            {"L1": 0.0, "L2": 9.0, "L3": 0.0},
+        )
+        self.assertEqual(
+            controller.phase_energies_for_total(SimpleNamespace(phase="L3"), 9.0),
+            {"L1": 0.0, "L2": 0.0, "L3": 9.0},
+        )
+        self.assertEqual(
+            controller.phase_energies_for_total(SimpleNamespace(phase="3P"), 9.0),
+            {"L1": 3.0, "L2": 3.0, "L3": 3.0},
+        )
+        self.assertEqual(
+            controller.phase_energies_for_total(SimpleNamespace(phase="unknown"), 9.0),
+            {"L1": 0.0, "L2": 0.0, "L3": 0.0},
+        )
+        self.assertEqual(
+            controller.phase_energies_for_total(SimpleNamespace(), 9.0),
+            {"L1": 9.0, "L2": 0.0, "L3": 0.0},
+        )
+
+    def test_total_phase_current_sums_all_declared_phases_only(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: 0)
+
+        self.assertEqual(
+            controller._total_phase_current(
+                {
+                    "L1": {"current": 1.5},
+                    "L2": {"current": 2.5},
+                    "L3": {"current": 3.5},
+                    "extra": {"current": 99.0},
+                }
+            ),
+            7.5,
+        )
+
+    def test_publish_virtual_state_paths_contract_uses_session_energy_for_total_and_phases(self):
+        service = SimpleNamespace(
+            phase="L2",
+            _publish_energy_time_measurements=MagicMock(return_value=True),
+            _publish_config_paths=MagicMock(return_value=True),
+            _publish_diagnostic_paths=MagicMock(return_value=False),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+
+        self.assertTrue(controller.publish_virtual_state_paths(123.0, 45, 6.0, 1, 100.0))
+        service._publish_energy_time_measurements.assert_called_once_with(
+            6.0,
+            {"L1": 0.0, "L2": 6.0, "L3": 0.0},
+            45,
+            6.0,
+            100.0,
+        )
+        service._publish_config_paths.assert_called_once_with(1, 100.0)
+        service._publish_diagnostic_paths.assert_called_once_with(100.0)
+
+    def test_update_virtual_state_normalizes_inputs_and_records_status(self):
+        service = SimpleNamespace(
+            charging_started_at=None,
+            energy_at_start=0.0,
+            phase="L1",
+            virtual_startstop=0,
+            virtual_enable=0,
+            virtual_mode=0,
+            _charger_backend=None,
+            _time_now=MagicMock(return_value=100.0),
+            _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
+            _ensure_observability_state=MagicMock(),
+            _publish_energy_time_measurements=MagicMock(return_value=False),
+            _publish_config_paths=MagicMock(return_value=False),
+            _publish_diagnostic_paths=MagicMock(return_value=True),
+            _save_runtime_state=MagicMock(),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertTrue(controller.update_virtual_state("2", "7.25", 1))
+        self.assertEqual(service.last_status, 2)
+        self.assertEqual(service.charging_started_at, 100.0)
+        self.assertEqual(service.energy_at_start, 7.25)
+        service._save_runtime_state.assert_called_once()
+
+    def test_update_virtual_state_delegates_with_normalized_values_and_reason_contract(self):
+        service = SimpleNamespace(_time_now=MagicMock(return_value=100.0))
+        controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
+        controller.ensure_virtual_state_defaults = MagicMock()
+        controller.session_state_from_status = MagicMock(return_value=(7, 2.5))
+        controller.startstop_display_for_state = MagicMock(return_value=1)
+        controller.publish_virtual_state_paths = MagicMock(return_value=False)
+        controller.save_runtime_state_best_effort = MagicMock()
+
+        self.assertFalse(controller.update_virtual_state("2", "7.25", 1))
+
+        controller.ensure_virtual_state_defaults.assert_called_once_with()
+        controller.session_state_from_status.assert_called_once_with(service, 2, 7.25, True, 100.0)
+        controller.startstop_display_for_state.assert_called_once_with(service, True, 100.0)
+        controller.publish_virtual_state_paths.assert_called_once_with(7.25, 7, 2.5, 1, 100.0)
+        controller.save_runtime_state_best_effort.assert_called_once_with("virtual-state")
+        self.assertEqual(service.last_status, 2)
+
+    def test_prepare_update_cycle_starts_io_worker_only_for_configured_topology(self):
+        service = SimpleNamespace(
+            topology_configured=True,
+            host_configured=False,
+            _start_io_worker=MagicMock(),
+            _watchdog_recover=MagicMock(),
+            _ensure_auto_input_helper_process=MagicMock(),
+            _refresh_auto_input_snapshot=MagicMock(),
+            _get_worker_snapshot=MagicMock(return_value={"pm_status": {"output": True}}),
+        )
+
+        self.assertEqual(
+            UpdateCycleController.prepare_update_cycle(service, 100.0),
+            {"pm_status": {"output": True}},
+        )
+        service._start_io_worker.assert_called_once_with()
+        service._watchdog_recover.assert_called_once_with(100.0)
+        service._ensure_auto_input_helper_process.assert_called_once_with(100.0)
+        service._refresh_auto_input_snapshot.assert_called_once_with(100.0)
+        service._get_worker_snapshot.assert_called_once_with()
+
+        service = SimpleNamespace(
+            topology_configured=False,
+            host_configured=False,
+            _start_io_worker=MagicMock(),
+            _watchdog_recover=MagicMock(),
+            _ensure_auto_input_helper_process=MagicMock(),
+            _refresh_auto_input_snapshot=MagicMock(),
+            _get_worker_snapshot=MagicMock(return_value={}),
+        )
+
+        self.assertEqual(UpdateCycleController.prepare_update_cycle(service, 101.0), {})
+        service._start_io_worker.assert_not_called()
+        service._watchdog_recover.assert_called_once_with(101.0)
+
+        service_without_config_flags = SimpleNamespace(
+            _start_io_worker=MagicMock(),
+            _watchdog_recover=MagicMock(),
+            _ensure_auto_input_helper_process=MagicMock(),
+            _refresh_auto_input_snapshot=MagicMock(),
+            _get_worker_snapshot=MagicMock(return_value={}),
+        )
+        self.assertEqual(UpdateCycleController.prepare_update_cycle(service_without_config_flags, 101.5), {})
+        service_without_config_flags._start_io_worker.assert_not_called()
+
+    def test_prepare_update_cycle_uses_legacy_host_configured_when_topology_flag_is_absent(self):
+        service = SimpleNamespace(
+            host_configured=True,
+            _start_io_worker=MagicMock(),
+            _watchdog_recover=MagicMock(),
+            _ensure_auto_input_helper_process=MagicMock(),
+            _refresh_auto_input_snapshot=MagicMock(),
+            _get_worker_snapshot=MagicMock(return_value={"legacy": True}),
+        )
+
+        self.assertEqual(UpdateCycleController.prepare_update_cycle(service, 102.0), {"legacy": True})
+        service._start_io_worker.assert_called_once_with()
 
     def test_auto_phase_selection_tracks_candidate_before_staged_upshift(self):
         service = _auto_phase_service(

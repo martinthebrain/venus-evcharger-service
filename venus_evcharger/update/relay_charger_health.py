@@ -150,7 +150,9 @@ class _RelayChargerHealth(_RelayChargerCurrent):
 
     @staticmethod
     def _base_contactor_fault_reason(reason: object) -> str | None:
-        normalized = str(reason).strip() if reason is not None else ""
+        if reason is None:
+            return None
+        normalized = str(reason).strip()
         if normalized in {"contactor-suspected-open", "contactor-suspected-welded"}:
             return normalized
         return None
@@ -231,7 +233,9 @@ class _RelayChargerHealth(_RelayChargerCurrent):
 
     @classmethod
     def _active_contactor_lockout_health(cls, svc: Any) -> str | None:
-        return cls._contactor_lockout_health_reason(getattr(svc, "_contactor_lockout_reason", ""))
+        if not hasattr(svc, "_contactor_lockout_reason"):
+            return None
+        return cls._contactor_lockout_health_reason(getattr(svc, "_contactor_lockout_reason"))
 
     @classmethod
     def _remember_contactor_fault(cls, svc: Any, reason: object, now: float | None) -> str | None:

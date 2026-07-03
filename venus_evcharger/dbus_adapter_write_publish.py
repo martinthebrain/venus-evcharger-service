@@ -22,6 +22,7 @@ from venus_evcharger.dbus_gateway import (
     PUBLISH_PATH_RANKS,
     DbusCommandInbox,
     dbus_path_key,
+    evcs_fields_to_paths,
 )
 from venus_evcharger.dbus_gateway_command_types import CommandFile, CommandFileList, CommandMapping
 from venus_evcharger.dbus_gateway_core import _json_ready
@@ -148,9 +149,22 @@ class DbusWriteSchedulerPublish(DbusWriteSchedulerCore):
         return True
 
     def publish_command(self, command: CommandMapping, *, command_file: str = "") -> CommandOutcome:
-        if str(command.get("kind")) == "publish_desired":
+        kind = str(command.get("kind"))
+        if kind == "publish_fields":
+            return self._publish_fields(command, command_file=command_file)
+        if kind == "publish_desired":
             return self._publish_desired(command, command_file=command_file)
         return self.publish_path(str(command.get("path") or ""), command.get("value"))
+
+    def _publish_fields(self, command: CommandMapping, *, command_file: str) -> CommandOutcome:
+        fields = command.get("fields")
+        if not isinstance(fields, Mapping):
+            return "dropped"
+        normalized_fields = {str(field): value for field, value in fields.items()}
+        return self._publish_desired(
+            {**dict(command), "kind": "publish_desired", "paths": evcs_fields_to_paths(normalized_fields)},
+            command_file=command_file,
+        )
 
     def _publish_desired(self, command: CommandMapping, *, command_file: str) -> CommandOutcome:
         paths = command.get("paths")

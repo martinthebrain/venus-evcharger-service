@@ -12,13 +12,12 @@ into many small helper methods. The high-level behavior is:
 
 from __future__ import annotations
 
-import logging
 import math
 import time
 from datetime import datetime
 from typing import Any, Deque
 
-from .policy import AutoPolicy, validate_auto_policy
+from .logic_learning import _AutoDecisionLearning
 from venus_evcharger.core.common import (
     auto_state_code as _auto_state_code,
     derive_auto_state as _derive_auto_state,
@@ -27,16 +26,21 @@ from venus_evcharger.core.common import (
     mode_uses_scheduled_logic as _mode_uses_scheduled_logic,
     scheduled_mode_snapshot as _scheduled_mode_snapshot,
 )
-from venus_evcharger.core.contracts import normalized_auto_decision_trace, thresholds_ordered
-from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
+from venus_evcharger.core.contracts import normalized_auto_decision_trace
 
 AutoSample = tuple[float, float, float]
 AutoDecision = bool | object
 MonthWindow = tuple[tuple[int, int], tuple[int, int]]
+DEFAULT_DAYTIME_WINDOW: MonthWindow = ((8, 0), (18, 0))
+DEFAULT_SCHEDULE_TIMEZONE = "UTC"
+DEFAULT_SCHEDULE_ENABLED_DAYS = "Mon,Tue,Wed,Thu,Fri"
+DEFAULT_SCHEDULE_NIGHT_START_DELAY_SECONDS = 3600.0
+DEFAULT_SCHEDULE_LATEST_END_TIME = "04:30"
+MINUTES_PER_DAY = 24 * 60
 
 
 
-class _AutoDecisionSamples(ControllerAssemblyContract):
+class _AutoDecisionSamples(_AutoDecisionLearning):
     @staticmethod
     def get_available_surplus_watts(pv_power: float | int, grid_power: float | int) -> float:
         """Compute PV-backed export as available charging surplus."""
@@ -72,170 +76,6 @@ class _AutoDecisionSamples(ControllerAssemblyContract):
             return float(current)
         return float(previous) + (float(alpha) * (float(current) - float(previous)))
 
-    def _learning_policy_now(self) -> float:
-        """Return the current timestamp for learned-power freshness checks."""
-        time_now = getattr(self.service, "_time_now", None)
-        if callable(time_now):
-            current_time = time_now()
-            if isinstance(current_time, (int, float)):
-                return float(current_time)
-        return time.time()
-
-    @staticmethod
-    def _normalize_learned_charge_power_state(value: Any) -> str:
-        """Return one supported learned-power state string."""
-        state = str(value).strip().lower() if value is not None else "unknown"
-        if state in {"unknown", "learning", "stable", "stale"}:
-            return state
-        return "unknown"
-
-    def _current_learned_charge_power_state(self, now: float | None = None) -> str:
-        """Return the effective learned-power state, including age-based staleness."""
-        state = self._stored_learned_charge_power_state()
-        if not self._has_positive_learned_charge_power():
-            return "unknown"
-        stale_state = self._stale_learned_charge_power_state(state, now)
-        return state if stale_state is None else stale_state
-
-    def _active_learned_charge_power(self, now: float | None = None) -> float | None:
-        """Return the learned charging power when it is present and still fresh."""
-        learned_value = self._positive_learned_charge_power()
-        if self._learned_charge_power_inactive_for_auto(learned_value, now):
-            return None
-        return learned_value
-
-    def _stored_learned_charge_power_state(self) -> str:
-        """Return the normalized learned-power state stored on the service."""
-        return self._normalize_learned_charge_power_state(
-            getattr(self.service, "learned_charge_power_state", "unknown")
-        )
-
-    def _positive_learned_charge_power(self) -> float | None:
-        """Return the learned charging power when it is positive."""
-        learned_power = getattr(self.service, "learned_charge_power_watts", None)
-        if learned_power is None:
-            return None
-        learned_value = float(learned_power)
-        if learned_value <= 0:
-            return None
-        return learned_value
-
-    def _has_positive_learned_charge_power(self) -> bool:
-        """Return True when a usable learned charging power is present."""
-        return self._positive_learned_charge_power() is not None
-
-    def _learned_charge_power_can_expire(self) -> bool:
-        """Return True when learned charging power has an age limit."""
-        return float(self._auto_policy().learn_charge_power.max_age_seconds) > 0
-
-    def _learned_charge_power_missing_update_time(self) -> bool:
-        """Return True when learned charging power has no update timestamp."""
-        return getattr(self.service, "learned_charge_power_updated_at", None) is None
-
-    @staticmethod
-    def _unknown_or_stale_learning_state(state: str) -> str:
-        """Return the fallback state used when learning data has no timestamp."""
-        return "unknown" if state == "unknown" else "stale"
-
-    def _learned_charge_power_age_seconds(self, now: float | None = None) -> float | None:
-        """Return the age of the learned charging power, if it is timestamped."""
-        updated_at = getattr(self.service, "learned_charge_power_updated_at", None)
-        if updated_at is None:
-            return None
-        current_time = self._learning_policy_now() if now is None else float(now)
-        return current_time - float(updated_at)
-
-    def _learned_charge_power_expired(self, now: float | None = None) -> bool:
-        """Return True when the learned charging power is older than its max age."""
-        age_seconds = self._learned_charge_power_age_seconds(now)
-        if age_seconds is None:
-            return True
-        max_age_seconds = float(self._auto_policy().learn_charge_power.max_age_seconds)
-        return age_seconds > max_age_seconds
-
-    def _stale_learned_charge_power_state(self, state: str, now: float | None = None) -> str | None:
-        """Return an overridden state when learned power is missing freshness."""
-        if not self._learned_charge_power_can_expire():
-            return None
-        if self._learned_charge_power_missing_update_time():
-            return self._unknown_or_stale_learning_state(state)
-        if self._learned_charge_power_expired(now):
-            return "stale"
-        return None
-
-    def _learned_charge_power_policy_enabled(self) -> bool:
-        """Return True when adaptive learned-power scaling is enabled."""
-        return bool(self._auto_policy().learn_charge_power.enabled)
-
-    def _learned_charge_power_age_invalid_for_auto(self, now: float | None = None) -> bool:
-        """Return True when learned power cannot be trusted because of age metadata."""
-        return self._learned_charge_power_can_expire() and (
-            self._learned_charge_power_missing_update_time() or self._learned_charge_power_expired(now)
-        )
-
-    def _learned_charge_power_inactive_for_auto(
-        self,
-        learned_value: float | None,
-        now: float | None = None,
-    ) -> bool:
-        """Return True when learned power must not influence Auto thresholds."""
-        return any(
-            (
-                not self._learned_charge_power_policy_enabled(),
-                self._current_learned_charge_power_state(now) != "stable",
-                learned_value is None,
-                self._learned_charge_power_age_invalid_for_auto(now),
-            )
-        )
-
-    def _learned_charge_power_scale(self, now: float | None = None) -> float:
-        """Return a linear threshold scale derived from the learned charging power."""
-        policy = self._auto_policy().learn_charge_power
-        learned_value = self._active_learned_charge_power(now)
-        if not policy.enabled or learned_value is None:
-            return 1.0
-        return learned_value / float(policy.reference_power_watts)
-
-    def _scale_surplus_thresholds(self, start_watts: float, stop_watts: float) -> tuple[float, float]:
-        """Scale the configured surplus thresholds around the reference charging load."""
-        scale = self._learned_charge_power_scale()
-        return round(float(start_watts) * scale, 1), round(float(stop_watts) * scale, 1)
-
-    def _surplus_thresholds_for_soc(self, battery_soc: float) -> tuple[float, float, str]:
-        """Return the active start/stop surplus thresholds for the current battery SOC."""
-        svc = self.service
-        policy = self._auto_policy()
-        profile, active, profile_name = policy.resolve_threshold_profile(
-            battery_soc,
-            getattr(svc, "_auto_high_soc_profile_active", None),
-        )
-        svc._auto_high_soc_profile_active = bool(active)
-        start_watts, stop_watts = self._scale_surplus_thresholds(
-            float(profile.start_surplus_watts),
-            float(profile.stop_surplus_watts),
-        )
-        if not thresholds_ordered(start_watts, stop_watts):
-            logging.warning(
-                "Adaptive surplus thresholds became invalid for profile %s: start=%s stop=%s; falling back to static profile values",
-                profile_name,
-                start_watts,
-                stop_watts,
-            )
-            return float(profile.start_surplus_watts), float(profile.stop_surplus_watts), profile_name
-        return start_watts, stop_watts, profile_name
-
-    def _auto_policy(self) -> AutoPolicy:
-        """Return the structured AutoPolicy, synthesizing it from legacy attrs when needed."""
-        svc = self.service
-        policy = getattr(svc, "auto_policy", None)
-        if policy is None:
-            policy = validate_auto_policy(AutoPolicy.from_service(svc))
-            try:
-                svc.auto_policy = policy
-            except AttributeError:
-                pass
-        return policy
-
     def _stop_surplus_volatility(self) -> float | None:
         """Return the population standard deviation of recent raw surplus samples."""
         samples: Deque[AutoSample] = self.service.auto_samples
@@ -260,7 +100,7 @@ class _AutoDecisionSamples(ControllerAssemblyContract):
 
     def is_within_auto_daytime_window(self, current_dt: datetime | None = None) -> bool:
         """Return True if current time is inside the seasonal day window."""
-        if not getattr(self.service, "auto_daytime_only", False):
+        if not self._auto_daytime_only_enabled():
             return True
 
         current_dt = datetime.now() if current_dt is None else current_dt
@@ -270,34 +110,80 @@ class _AutoDecisionSamples(ControllerAssemblyContract):
 
     def _scheduled_night_charge_active(self, now: float | None = None) -> bool:
         """Return whether scheduled/plan mode should force nighttime charging."""
-        svc = self.service
-        if not _mode_uses_scheduled_logic(getattr(svc, "virtual_mode", 0)):
+        if not _mode_uses_scheduled_logic(self._service_virtual_mode()):
             return False
         current_time = self._learning_policy_now() if now is None else float(now)
         return _scheduled_mode_snapshot(
-            _local_datetime_from_timestamp(current_time, getattr(svc, "auto_schedule_timezone", "UTC")),
-            getattr(svc, "auto_month_windows", {}),
-            getattr(svc, "auto_scheduled_enabled_days", "Mon,Tue,Wed,Thu,Fri"),
-            delay_seconds=float(getattr(svc, "auto_scheduled_night_start_delay_seconds", 3600.0)),
-            latest_end_time=getattr(svc, "auto_scheduled_latest_end_time", "04:30"),
+            _local_datetime_from_timestamp(current_time, self._schedule_timezone()),
+            self._auto_month_windows(),
+            self._scheduled_enabled_days(),
+            delay_seconds=self._scheduled_night_start_delay_seconds(),
+            latest_end_time=self._scheduled_latest_end_time(),
         ).night_boost_active
 
     def _daytime_window_minutes_for_month(self, month: int) -> tuple[int, int]:
         """Return configured daytime start/end minutes for one month."""
-        month_windows: dict[int, MonthWindow] = getattr(self.service, "auto_month_windows", {})
-        start_window, end_window = month_windows.get(month, ((8, 0), (18, 0)))
+        start_window, end_window = self._auto_month_windows().get(month, DEFAULT_DAYTIME_WINDOW)
         start_hour, start_minute = start_window
         end_hour, end_minute = end_window
         return start_hour * 60 + start_minute, end_hour * 60 + end_minute
 
+    def _auto_daytime_only_enabled(self) -> bool:
+        """Return True when Auto decisions must respect the daylight window."""
+        if not hasattr(self.service, "auto_daytime_only"):
+            return False
+        return bool(self.service.auto_daytime_only)
+
+    def _service_virtual_mode(self) -> int:
+        """Return the service mode used for scheduled-mode decisions."""
+        if not hasattr(self.service, "virtual_mode"):
+            return 0
+        mode = self.service.virtual_mode
+        return 0 if mode is None else int(mode)
+
+    def _schedule_timezone(self) -> str:
+        """Return the configured schedule timezone or its documented default."""
+        if not hasattr(self.service, "auto_schedule_timezone"):
+            return DEFAULT_SCHEDULE_TIMEZONE
+        timezone_name = self.service.auto_schedule_timezone
+        return DEFAULT_SCHEDULE_TIMEZONE if timezone_name is None else str(timezone_name)
+
+    def _auto_month_windows(self) -> dict[int, MonthWindow]:
+        """Return the configured monthly daylight windows."""
+        if not hasattr(self.service, "auto_month_windows"):
+            return {}
+        month_windows = self.service.auto_month_windows
+        return {} if month_windows is None else dict(month_windows)
+
+    def _scheduled_enabled_days(self) -> str:
+        """Return the scheduled-mode enabled-day expression."""
+        if not hasattr(self.service, "auto_scheduled_enabled_days"):
+            return DEFAULT_SCHEDULE_ENABLED_DAYS
+        days = self.service.auto_scheduled_enabled_days
+        return DEFAULT_SCHEDULE_ENABLED_DAYS if days is None else str(days)
+
+    def _scheduled_night_start_delay_seconds(self) -> float:
+        """Return the scheduled nighttime start delay."""
+        if not hasattr(self.service, "auto_scheduled_night_start_delay_seconds"):
+            return DEFAULT_SCHEDULE_NIGHT_START_DELAY_SECONDS
+        delay_seconds = self.service.auto_scheduled_night_start_delay_seconds
+        return DEFAULT_SCHEDULE_NIGHT_START_DELAY_SECONDS if delay_seconds is None else float(delay_seconds)
+
+    def _scheduled_latest_end_time(self) -> str:
+        """Return the latest scheduled nighttime end time."""
+        if not hasattr(self.service, "auto_scheduled_latest_end_time"):
+            return DEFAULT_SCHEDULE_LATEST_END_TIME
+        latest_end_time = self.service.auto_scheduled_latest_end_time
+        return DEFAULT_SCHEDULE_LATEST_END_TIME if latest_end_time is None else str(latest_end_time)
+
     @staticmethod
     def _minutes_within_daytime_window(current_minutes: int, start_minutes: int, end_minutes: int) -> bool:
         """Return True when current minutes fall inside one daytime window."""
-        if start_minutes == end_minutes:
+        window_length = (end_minutes - start_minutes) % MINUTES_PER_DAY
+        if window_length == 0:
             return True
-        if start_minutes < end_minutes:
-            return start_minutes <= current_minutes < end_minutes
-        return current_minutes >= start_minutes or current_minutes < end_minutes
+        elapsed_since_start = (current_minutes - start_minutes) % MINUTES_PER_DAY
+        return elapsed_since_start < window_length
 
     def _apply_decision_trace_postconditions(
         self,
@@ -312,7 +198,7 @@ class _AutoDecisionSamples(ControllerAssemblyContract):
             cached_inputs=cached,
             relay_intent=relay_intent,
             learned_charge_power_state=getattr(svc, "learned_charge_power_state", "unknown"),
-            metrics=getattr(svc, "_last_auto_metrics", {}) or {},
+            metrics=self._last_auto_metrics_source(),
             health_code_func=self._health_code,
             derive_auto_state_func=_derive_auto_state,
         )
@@ -331,8 +217,21 @@ class _AutoDecisionSamples(ControllerAssemblyContract):
         base_reason = reason
         effective_relay_intent = self._observed_relay_state() if relay_intent is None else bool(relay_intent)
         self._apply_decision_trace_postconditions(base_reason, cached, effective_relay_intent)
-        if getattr(self.service, "auto_audit_log", False):
+        if self._auto_audit_log_enabled():
             self.write_auto_audit_event(base_reason, cached)
+
+    def _last_auto_metrics_source(self) -> dict[str, Any]:
+        """Return the current metrics dict passed into decision-trace normalization."""
+        if not hasattr(self.service, "_last_auto_metrics"):
+            return {}
+        metrics = self.service._last_auto_metrics
+        return metrics if isinstance(metrics, dict) else {}
+
+    def _auto_audit_log_enabled(self) -> bool:
+        """Return True when Auto decision audit events should be written."""
+        if not hasattr(self.service, "auto_audit_log"):
+            return False
+        return bool(self.service.auto_audit_log)
 
     def _observed_relay_state(self) -> bool:
         """Return the best current relay state hint for broad Auto-state classification."""
@@ -359,6 +258,7 @@ class _AutoDecisionSamples(ControllerAssemblyContract):
         svc = self.service
         svc.auto_start_condition_since = None
         svc.auto_stop_condition_since = None
+        svc.auto_stop_condition_reason = None
         self.clear_auto_samples()
 
     def _clear_auto_start_tracking(self, clear_samples: bool = False) -> None:

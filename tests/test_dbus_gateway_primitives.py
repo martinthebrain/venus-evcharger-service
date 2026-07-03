@@ -10,26 +10,144 @@ from unittest.mock import MagicMock, patch
 import venus_evcharger.dbus_gateway_client as gateway_client_module
 import venus_evcharger.dbus_gateway_core as gateway_core_module
 import venus_evcharger.dbus_gateway_latency as gateway_latency_module
-from venus_evcharger import dbus_gateway
+from venus_evcharger.dbus_gateway import (
+    VENUS_EV_CHARGER_WRITABLE_PATHS,
+    missing_required_venus_paths,
+    mismatched_venus_writeability,
+    venus_path_writeable,
+)
+from venus_evcharger import dbus_gateway, dbus_gateway_surface
 from venus_evcharger import dbus_gateway_cache, dbus_gateway_commands
 from venus_evcharger.dbus_gateway import (
     CacheValueMetadata,
+    BATTERY_SOC_READ_KEY,
     DbusCacheStore,
     DbusCommandInbox,
+    EVCS_FIELD_TO_PATH,
+    EVCS_PATH_TO_FIELD,
+    GRID_POWER_READ_KEY,
     GatewayClient,
     GatewayDbusServiceProxy,
     LatencyWindow,
+    PV_POWER_READ_KEY,
     command_allowed_by_backpressure,
     command_queue_class,
     dbus_path_key,
+    evcs_fields_to_paths,
+    evcs_path_to_field,
     gateway_paths,
+    gateway_read_value,
     gateway_value,
     read_json_file,
+    require_gateway_read_key,
     write_json_file,
 )
 
 
 class DbusGatewayPrimitiveTests(unittest.TestCase):
+    def test_venus_surface_contract_reports_missing_paths_and_writeability_mismatches(self) -> None:
+        registered = {
+            "/Mgmt/ProcessName",
+            "/Mgmt/ProcessVersion",
+            "/Mgmt/Connection",
+            "/DeviceInstance",
+            "/ProductId",
+            "/ProductName",
+            "/CustomName",
+            "/FirmwareVersion",
+            "/HardwareVersion",
+            "/Serial",
+            "/Connected",
+            "/Position",
+            "/UpdateIndex",
+            "/Ac/Power",
+            "/Ac/Current",
+            "/Ac/Voltage",
+            "/Ac/Energy/Forward",
+            "/Session/Energy",
+            "/Session/Time",
+            "/Status",
+            "/Auto/Health",
+            "/Auto/State",
+            "/Auto/StatusSource",
+            "/Mode",
+            "/StartStop",
+            "/Enable",
+            "/SetCurrent",
+            "/AutoStart",
+        }
+        self.assertEqual(missing_required_venus_paths(registered), ())
+        self.assertEqual(missing_required_venus_paths(registered - {"/Mode"}), ("/Mode",))
+        self.assertTrue(mismatched_venus_writeability("/Mode", False))
+        self.assertFalse(mismatched_venus_writeability("/Mode", True))
+        self.assertTrue(mismatched_venus_writeability("/Ac/Power", True))
+        self.assertFalse(mismatched_venus_writeability("/Ac/Power", False))
+        self.assertTrue(venus_path_writeable("/Mode"))
+        self.assertFalse(venus_path_writeable("/Ac/Power"))
+        self.assertIn("/Auto/LearnChargePowerWindowSeconds", VENUS_EV_CHARGER_WRITABLE_PATHS)
+        self.assertEqual(
+            evcs_fields_to_paths({"ac_power_w": 1200.0, "session_time_s": 30, "unknown": "ignored"}),
+            {"/Ac/Power": 1200.0, "/Session/Time": 30},
+        )
+
+    def test_evcs_semantic_field_contract_maps_gateway_surface_paths(self) -> None:
+        expected_fields = {
+            "update_index": "/UpdateIndex",
+            "connected": "/Connected",
+            "status": "/Status",
+            "mode": "/Mode",
+            "auto_start": "/AutoStart",
+            "start_stop": "/StartStop",
+            "enable": "/Enable",
+            "set_current": "/SetCurrent",
+            "min_current": "/MinCurrent",
+            "max_current": "/MaxCurrent",
+            "phase_selection": "/PhaseSelection",
+            "phase_selection_active": "/PhaseSelectionActive",
+            "supported_phase_selections": "/SupportedPhaseSelections",
+            "auto_start_surplus_watts": "/Auto/StartSurplusWatts",
+            "auto_dbus_backoff_base_seconds": "/Auto/DbusBackoffBaseSeconds",
+            "auto_grid_recovery_start_seconds": "/Auto/GridRecoveryStartSeconds",
+            "auto_learn_charge_power_window_seconds": "/Auto/LearnChargePowerWindowSeconds",
+            "auto_phase_mismatch_lockout_seconds": "/Auto/PhaseMismatchLockoutSeconds",
+            "auto_phase_lockout_reset": "/Auto/PhaseLockoutReset",
+            "auto_contactor_lockout_reset": "/Auto/ContactorLockoutReset",
+            "auto_software_update_run": "/Auto/SoftwareUpdateRun",
+            "auto_software_update_available_version": "/Auto/SoftwareUpdateAvailableVersion",
+            "auto_dbus_introspection_snapshot_age": "/Auto/DbusIntrospectionSnapshotAge",
+            "auto_pv_read_errors": "/Auto/PvReadErrors",
+            "auto_shelly_consecutive_errors": "/Auto/ShellyConsecutiveErrors",
+        }
+
+        for field, path in expected_fields.items():
+            with self.subTest(field=field):
+                self.assertEqual(EVCS_FIELD_TO_PATH[field], path)
+                self.assertEqual(EVCS_PATH_TO_FIELD[path], field)
+                self.assertEqual(evcs_path_to_field(path), field)
+
+        self.assertEqual(evcs_path_to_field("/Not/Registered"), "")
+        self.assertEqual(len(EVCS_FIELD_TO_PATH), len(set(EVCS_FIELD_TO_PATH)))
+        self.assertEqual(len(EVCS_FIELD_TO_PATH), len(set(EVCS_FIELD_TO_PATH.values())))
+
+    def test_evcs_generated_field_name_contract_handles_camel_case_paths(self) -> None:
+        self.assertEqual(dbus_gateway_surface._snake_case("DbusBackoffBaseSeconds"), "dbus_backoff_base_seconds")
+        self.assertEqual(dbus_gateway_surface._snake_case("PvReadErrors"), "pv_read_errors")
+        self.assertEqual(dbus_gateway_surface._snake_case("SoftwareUpdateRun"), "software_update_run")
+        self.assertEqual(dbus_gateway_surface._snake_case(" Bad-Name.Path "), "bad_name_path")
+        self.assertEqual(dbus_gateway_surface._snake_case("XBadX"), "x_bad_x")
+        self.assertEqual(
+            dbus_gateway_surface._snake_case("DbusIntrospectionSnapshotAge"),
+            "dbus_introspection_snapshot_age",
+        )
+        self.assertEqual(
+            dbus_gateway_surface._field_name_from_venus_path("/Auto/DbusIntrospectionSnapshotAge"),
+            "auto_dbus_introspection_snapshot_age",
+        )
+        self.assertEqual(
+            dbus_gateway_surface._field_name_from_venus_path("///Auto//PvReadErrors//"),
+            "auto_pv_read_errors",
+        )
+
     def test_gateway_core_paths_priority_json_and_read_edges(self) -> None:
         with patch.dict(
             gateway_core_module.os.environ,
@@ -98,6 +216,30 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertEqual(gateway_core_module.float_or_default("2.5", 0.0), 2.5)
         self.assertEqual(gateway_core_module.float_or_default(BadFloat(), 4.0), 4.0)
         self.assertEqual(gateway_core_module.float_or_default(object(), 4.0), 4.0)
+
+    def test_gateway_read_key_contract_is_semantic_and_strict(self) -> None:
+        self.assertEqual(require_gateway_read_key(" grid_power_w "), GRID_POWER_READ_KEY)
+        self.assertEqual(require_gateway_read_key(" pv_power_w "), PV_POWER_READ_KEY)
+        self.assertEqual(require_gateway_read_key(" battery_soc "), BATTERY_SOC_READ_KEY)
+        self.assertEqual(
+            {GRID_POWER_READ_KEY, PV_POWER_READ_KEY, BATTERY_SOC_READ_KEY},
+            set(gateway_core_module.FAST_READ_KEYS),
+        )
+        for invalid_key in ("", None, "path:svc/Raw", "com.victronenergy.system:/Dc/Pv/Power"):
+            with self.subTest(invalid_key=invalid_key):
+                with self.assertRaisesRegex(ValueError, "Unsupported gateway read key"):
+                    require_gateway_read_key(invalid_key)
+
+        snapshot = {
+            "values": {
+                GRID_POWER_READ_KEY: {"value": -20.0, "status": "fresh", "age_s": 0.5},
+                "path:svc/Raw": {"value": 12.0, "status": "fresh", "age_s": 0.5},
+            }
+        }
+        self.assertEqual(gateway_read_value(snapshot, GRID_POWER_READ_KEY, max_age_seconds=5.0), -20.0)
+        self.assertEqual(gateway_value(snapshot, "path:svc/Raw", max_age_seconds=5.0), 12.0)
+        with self.assertRaisesRegex(ValueError, "Unsupported gateway read key"):
+            gateway_read_value(snapshot, "path:svc/Raw", max_age_seconds=5.0)
 
     def test_json_helpers_cache_snapshot_and_load_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -684,14 +826,18 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             client.publish_path("/Mode", 1)
             client.publish_paths({"/Ac/Power": 1200.0, "/Auto/Reason": "ok", "": "ignored"})
             client.publish_paths({"": "ignored"})
+            client.publish_fields({"ac_power_w": 1200.0, "session_time_s": 30, "": "ignored"})
+            client.publish_fields({"": "ignored"})
             client.register_path("/Mode", 1, writeable=True)
-            client.request_read("grid_power_w")
-            client.request_read("svc", "/Path", reason="freshen")
+            client.request_read(GRID_POWER_READ_KEY)
+            client.request_raw_value("svc", "/Path", reason="freshen")
             client.enqueue_command({"kind": "custom"})
             pending = DbusCommandInbox(paths.command_dir).load_pending()
-            self.assertEqual(len(pending), 6)
+            self.assertEqual(len(pending), 7)
             desired = [command for _path, command in pending if command.get("kind") == "publish_desired"][0]
             self.assertEqual(desired["paths"], {"/Ac/Power": 1200.0, "/Auto/Reason": "ok"})
+            fields = [command for _path, command in pending if command.get("kind") == "publish_fields"][0]
+            self.assertEqual(fields["fields"], {"ac_power_w": 1200.0, "session_time_s": 30})
 
             store = DbusCacheStore(paths)
             store.update_value("grid_power_w", 12.0, source="svc/path")
@@ -701,10 +847,10 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(client.load_health()["backpressure"]["state"], "slow")
             self.assertEqual(client.backpressure_state(), "slow")
             client.publish_path("/Auto/Reason", "optional")
-            self.assertEqual(len(DbusCommandInbox(paths.command_dir).load_pending()), 6)
+            self.assertEqual(len(DbusCommandInbox(paths.command_dir).load_pending()), 7)
             client.publish_path("/Mode", 2, priority="user")
             pending = DbusCommandInbox(paths.command_dir).load_pending()
-            self.assertEqual(len(pending), 6)
+            self.assertEqual(len(pending), 7)
             mode = [
                 command
                 for _path, command in pending
@@ -800,11 +946,18 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 client.publish_paths({"/DefaultPaths": 8})
                 client.publish_paths({"/Ac/Power": 1200, "": "ignored", "/Obj": object()}, source="core")
                 client.publish_paths({"": "ignored"})
+                client.publish_fields(
+                    {"ac_power_w": 1300, "session_time_s": 31, "": "ignored", "debug_object": object()},
+                    priority="user",
+                    source="metrics",
+                )
                 client.register_path("/Readonly", 0)
                 client.register_path("/Enable", True, writeable=True, source="startup")
-                client.request_read("default_reason_key")
-                client.request_read("grid_power_w", reason="stale")
-                client.request_read("svc", "/Path", priority="safety", reason="manual")
+                client.request_read(BATTERY_SOC_READ_KEY)
+                client.request_read(GRID_POWER_READ_KEY, reason="stale")
+                client.request_read(PV_POWER_READ_KEY, priority="read", source="helper", reason="missing")
+                client.request_read_key(" battery_soc ", priority="safety", source="storage", reason="startup")
+                client.request_raw_value(123, 456, priority="diagnostic", source="probe", reason="manual")
 
             queued = [call.args[0] for call in enqueue_command.call_args_list]
             self.assertEqual([command["kind"] for command in queued], [
@@ -812,8 +965,11 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 "publish_value",
                 "publish_desired",
                 "publish_desired",
+                "publish_fields",
                 "register_path",
                 "register_path",
+                "refresh_value",
+                "refresh_value",
                 "refresh_value",
                 "refresh_value",
                 "refresh_value",
@@ -855,8 +1011,15 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(queued[3]["source"], "core")
             self.assertEqual(queued[3]["priority"], "publish")
             self.assertEqual(queued[3]["coalesce_key"], "publish:desired")
+            self.assertEqual(queued[4]["fields"]["ac_power_w"], 1300)
+            self.assertEqual(queued[4]["fields"]["session_time_s"], 31)
+            self.assertIn("object object", queued[4]["fields"]["debug_object"])
+            self.assertNotIn("", queued[4]["fields"])
+            self.assertEqual(queued[4]["source"], "metrics")
+            self.assertEqual(queued[4]["priority"], "user")
+            self.assertEqual(queued[4]["coalesce_key"], "publish:fields")
             self.assertEqual(
-                queued[4],
+                queued[5],
                 {
                     "kind": "register_path",
                     "source": "core",
@@ -868,7 +1031,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 },
             )
             self.assertEqual(
-                queued[5],
+                queued[6],
                 {
                     "kind": "register_path",
                     "source": "startup",
@@ -879,22 +1042,32 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                     "coalesce_key": "register:/Enable",
                 },
             )
-            self.assertEqual(queued[6]["key"], "default_reason_key")
-            self.assertEqual(queued[6]["source"], "core")
-            self.assertEqual(queued[6]["priority"], "read")
-            self.assertEqual(queued[6]["reason"], "")
-            self.assertEqual(queued[6]["coalesce_key"], "refresh:default_reason_key")
-            self.assertEqual(queued[7]["key"], "grid_power_w")
+            self.assertEqual(queued[7]["key"], BATTERY_SOC_READ_KEY)
             self.assertEqual(queued[7]["source"], "core")
             self.assertEqual(queued[7]["priority"], "read")
-            self.assertEqual(queued[7]["reason"], "stale")
-            self.assertEqual(queued[7]["coalesce_key"], "refresh:grid_power_w")
-            self.assertEqual(queued[8]["service"], "svc")
-            self.assertEqual(queued[8]["path"], "/Path")
+            self.assertEqual(queued[7]["reason"], "")
+            self.assertEqual(queued[7]["coalesce_key"], f"refresh:{BATTERY_SOC_READ_KEY}")
+            self.assertEqual(queued[8]["key"], GRID_POWER_READ_KEY)
             self.assertEqual(queued[8]["source"], "core")
-            self.assertEqual(queued[8]["priority"], "safety")
-            self.assertEqual(queued[8]["reason"], "manual")
-            self.assertEqual(queued[8]["coalesce_key"], "refresh:svc:/Path")
+            self.assertEqual(queued[8]["priority"], "read")
+            self.assertEqual(queued[8]["reason"], "stale")
+            self.assertEqual(queued[8]["coalesce_key"], f"refresh:{GRID_POWER_READ_KEY}")
+            self.assertEqual(queued[9]["key"], PV_POWER_READ_KEY)
+            self.assertEqual(queued[9]["source"], "helper")
+            self.assertEqual(queued[9]["priority"], "read")
+            self.assertEqual(queued[9]["reason"], "missing")
+            self.assertEqual(queued[9]["coalesce_key"], f"refresh:{PV_POWER_READ_KEY}")
+            self.assertEqual(queued[10]["key"], BATTERY_SOC_READ_KEY)
+            self.assertEqual(queued[10]["source"], "storage")
+            self.assertEqual(queued[10]["priority"], "safety")
+            self.assertEqual(queued[10]["reason"], "startup")
+            self.assertEqual(queued[10]["coalesce_key"], f"refresh:{BATTERY_SOC_READ_KEY}")
+            self.assertEqual(queued[11]["service"], "123")
+            self.assertEqual(queued[11]["path"], "456")
+            self.assertEqual(queued[11]["source"], "probe")
+            self.assertEqual(queued[11]["priority"], "diagnostic")
+            self.assertEqual(queued[11]["reason"], "manual")
+            self.assertEqual(queued[11]["coalesce_key"], "refresh:123:456")
 
             with patch.object(
                 gateway_client_module.DbusCacheStore,
@@ -903,6 +1076,19 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             ) as load_snapshot:
                 self.assertEqual(client.load_cache(), {"values": {"ok": {"value": 1}}})
             load_snapshot.assert_called_once_with(paths.cache_path, max_age_seconds=10.0)
+
+            cache_snapshot = {
+                "values": {
+                    GRID_POWER_READ_KEY: {"status": "fresh", "age_s": 2.0, "value": -12.5},
+                    PV_POWER_READ_KEY: {"status": "stale", "age_s": 11.0, "value": 200.0},
+                }
+            }
+            with patch.object(client, "load_cache", return_value=cache_snapshot) as load_cache:
+                self.assertEqual(client.read_key_value(" grid_power_w ", max_age_seconds=5.0), -12.5)
+                self.assertIsNone(client.read_key_value(PV_POWER_READ_KEY, max_age_seconds=5.0))
+            load_cache.assert_any_call(max_age_seconds=5.0)
+            with self.assertRaisesRegex(ValueError, "Unsupported gateway read key"):
+                client.read_key_value("path:svc/Raw")
 
             with patch.object(
                 gateway_client_module.DbusCacheStore,
@@ -941,6 +1127,61 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(gateway_client_module._backpressure_state_from_health({"backpressure": []}), "unknown")
             self.assertEqual(gateway_client_module._backpressure_state_from_health({"backpressure": {"state": ""}}), "unknown")
             self.assertEqual(gateway_client_module._backpressure_state_from_health({"backpressure": {"state": "protective"}}), "protective")
+
+    def test_gateway_client_default_read_and_publish_payload_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = gateway_paths(str(Path(temp_dir) / "run"))
+            client = GatewayClient(paths)
+
+            with patch.object(client, "enqueue_command", return_value="queued") as enqueue_command:
+                client.publish_fields({"ac_power_w": 1.5})
+                client.request_read(PV_POWER_READ_KEY, priority="safety", source="helper", reason="missing")
+                client.request_raw_value("svc", "/Path")
+                client.request_read_key(BATTERY_SOC_READ_KEY)
+
+            queued = [call.args[0] for call in enqueue_command.call_args_list]
+            self.assertEqual(
+                queued,
+                [
+                    {
+                        "kind": "publish_fields",
+                        "source": "core",
+                        "fields": {"ac_power_w": 1.5},
+                        "priority": "publish",
+                        "coalesce_key": "publish:fields",
+                    },
+                    {
+                        "kind": "refresh_value",
+                        "source": "helper",
+                        "priority": "safety",
+                        "reason": "missing",
+                        "key": PV_POWER_READ_KEY,
+                        "coalesce_key": f"refresh:{PV_POWER_READ_KEY}",
+                    },
+                    {
+                        "kind": "refresh_value",
+                        "source": "core",
+                        "service": "svc",
+                        "path": "/Path",
+                        "priority": "read",
+                        "reason": "",
+                        "coalesce_key": "refresh:svc:/Path",
+                    },
+                    {
+                        "kind": "refresh_value",
+                        "source": "core",
+                        "priority": "read",
+                        "reason": "",
+                        "key": BATTERY_SOC_READ_KEY,
+                        "coalesce_key": f"refresh:{BATTERY_SOC_READ_KEY}",
+                    },
+                ],
+            )
+
+            cache_snapshot = {"values": {GRID_POWER_READ_KEY: {"status": "fresh", "age_s": 9.5, "value": 44.0}}}
+            with patch.object(client, "load_cache", return_value=cache_snapshot) as load_cache:
+                self.assertEqual(client.read_key_value(GRID_POWER_READ_KEY), 44.0)
+            load_cache.assert_called_once_with(max_age_seconds=10.0)
 
     def test_command_queue_class_maps_gateway_workloads(self) -> None:
         self.assertLess(
@@ -1024,23 +1265,28 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         callback = MagicMock(return_value=True)
         proxy.add_path("/Mode", 1, gettextcallback=object(), writeable=True, onchangecallback=callback)
         proxy.add_path("/Readonly", 0)
+        proxy.add_path("/StartStop", 0)
         proxy.register()
         self.assertEqual(proxy["/Mode"], 1)
-        self.assertEqual(proxy._writeable, {"/Mode"})
+        self.assertEqual(proxy._writeable, {"/Mode", "/StartStop"})
         self.assertEqual(set(proxy._callbacks), {"/Mode"})
         proxy["/Mode"] = 2
         self.assertEqual(proxy["/Mode"], 2)
         proxy.publish_paths({"/Mode": 5, "/Ac/Power": 1200.0, "": "ignored"})
+        proxy.publish_fields({"ac_power_w": 1300.0, "session_energy_kwh": 0.2, "": "ignored"})
         self.assertEqual(proxy["/Mode"], 5)
-        self.assertEqual(proxy["/Ac/Power"], 1200.0)
+        self.assertEqual(proxy["/Ac/Power"], 1300.0)
+        self.assertEqual(proxy["/Session/Energy"], 0.2)
         self.assertTrue(proxy.apply_gateway_write("/Mode", 3))
         callback.assert_called_once_with("/Mode", 3)
         self.assertTrue(proxy.apply_gateway_write("/Other", 4))
         self.assertEqual(proxy["/Other"], 4)
         fake_client.register_path.assert_any_call("/Mode", 1, writeable=True)
         fake_client.register_path.assert_any_call("/Readonly", 0, writeable=False)
+        fake_client.register_path.assert_any_call("/StartStop", 0, writeable=True)
         fake_client.publish_path.assert_called_once_with("/Mode", 2)
         fake_client.publish_paths.assert_called_once_with({"/Mode": 5, "/Ac/Power": 1200.0})
+        fake_client.publish_fields.assert_called_once_with({"ac_power_w": 1300.0, "session_energy_kwh": 0.2})
         fake_client.enqueue_command.assert_called_once_with(
             {
                 "kind": "register_service",

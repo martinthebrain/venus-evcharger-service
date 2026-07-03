@@ -84,6 +84,8 @@ These documents carry the main project contracts:
 - [DIAGNOSTICS.md](DIAGNOSTICS.md)
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 - [STATE_MODEL.md](STATE_MODEL.md)
+- [DBUS_GATEWAY.md](DBUS_GATEWAY.md)
+- [VENUS_DBUS_SURFACE.md](VENUS_DBUS_SURFACE.md)
 
 When a change touches behavior, these documents are part of the review surface.
 

@@ -239,7 +239,6 @@ class _ServiceBootstrapPath(_ServiceBootstrapRuntime):
                     path,
                     initial,
                     gettextcallback=formatter,
-                    writeable=path in self.WRITABLE_PATHS,
                     onchangecallback=svc._handle_write,
                 )
             except BOOTSTRAP_DBUS_REGISTRATION_ERRORS as error:

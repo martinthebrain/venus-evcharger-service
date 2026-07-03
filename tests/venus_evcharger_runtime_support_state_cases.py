@@ -238,7 +238,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
 
     def test_async_publish_flush_batches_gateway_proxy_writes(self) -> None:
         service = make_runtime_support_service()
-        gateway_proxy = SimpleNamespace(publish_paths=MagicMock())
+        gateway_proxy = SimpleNamespace(publish_paths=MagicMock(), publish_fields=MagicMock())
         service._dbusservice = gateway_proxy
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
         controller.initialize_runtime_support()
@@ -246,11 +246,15 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         service._dbus_publish_state = {}
 
         controller.enqueue_dbus_publish_values([("/A", 1), ("/B", 2)], 100.0)
+        controller.enqueue_dbus_publish_fields([("ac_power_w", 1200.0), ("session_time_s", 30)], 101.0)
         self.assertTrue(controller.flush_dbus_publish_queue())
 
         gateway_proxy.publish_paths.assert_called_once_with({"/A": 1, "/B": 2})
+        gateway_proxy.publish_fields.assert_called_once_with({"ac_power_w": 1200.0, "session_time_s": 30})
         self.assertEqual(service._dbus_publish_state["/A"], {"value": 1, "updated_at": 100.0})
         self.assertEqual(service._dbus_publish_state["/B"], {"value": 2, "updated_at": 100.0})
+        self.assertEqual(service._dbus_publish_state["/Ac/Power"], {"value": 1200.0, "updated_at": 101.0})
+        self.assertEqual(service._dbus_publish_state["/Session/Time"], {"value": 30, "updated_at": 101.0})
 
     def test_async_gateway_publish_edges_skip_empty_and_retry_failed_batch(self) -> None:
         service = make_runtime_support_service()

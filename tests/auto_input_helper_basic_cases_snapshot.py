@@ -29,27 +29,23 @@ class _AutoInputHelperBasicSnapshotCases:
         helper._ensure_poll_state()
         self.assertEqual(helper.poll_interval_seconds, 2.0)
 
-    def test_get_pv_power_returns_zero_when_no_ac_or_dc_pv_is_found(self):
+    def test_get_pv_power_returns_zero_when_gateway_reports_zero(self):
         helper = self._make_helper()
-        helper._resolve_auto_pv_services = MagicMock(return_value=[])
-        helper._get_dbus_value = MagicMock(return_value=None)
+        helper._get_gateway_read_value = MagicMock(return_value=0.0)
         self.assertEqual(helper._get_pv_power(), 0.0)
+        helper._get_gateway_read_value.assert_called_once()
 
-    def test_get_pv_power_sums_dc_sequence_values(self):
+    def test_get_pv_power_returns_semantic_gateway_value(self):
         helper = self._make_helper()
-        helper._resolve_auto_pv_services = MagicMock(return_value=[])
-        helper._get_dbus_value = MagicMock(return_value=[400.0, 350.0])
+        helper._get_gateway_read_value = MagicMock(return_value=750.0)
         self.assertEqual(helper._get_pv_power(), 750.0)
 
-    def test_get_grid_power_requires_all_phases(self):
+    def test_get_grid_power_backs_off_when_gateway_value_is_missing(self):
         helper = self._make_helper()
-
-        def fake_get_value(service_name, path):
-            values = {"/Ac/Grid/L1/Power": -500.0, "/Ac/Grid/L2/Power": None, "/Ac/Grid/L3/Power": -400.0}
-            return values[path]
-
-        helper._get_dbus_value = MagicMock(side_effect=fake_get_value)
+        helper._get_gateway_read_value = MagicMock(return_value=None)
+        helper._delay_source_retry = MagicMock()
         self.assertIsNone(helper._get_grid_power())
+        helper._delay_source_retry.assert_called_once_with("grid")
 
     def test_write_snapshot_uses_atomic_ram_file(self):
         helper = self._make_helper()
@@ -234,14 +230,18 @@ class _AutoInputHelperBasicSnapshotCases:
         helper._refresh_source.assert_any_call("grid", 123.0)
         self.assertEqual(helper._refresh_source.call_count, 3)
 
-    def test_get_pv_power_sums_ac_numeric_values_without_dc(self):
+    def test_get_pv_power_ignores_legacy_ac_resolution_when_gateway_has_value(self):
         helper = self._make_helper()
-        helper.auto_use_dc_pv = False
         helper._resolve_auto_pv_services = MagicMock(return_value=["com.victronenergy.pvinverter.http_40"])
-        helper._get_dbus_value = MagicMock(return_value=500.0)
+        helper._get_dbus_value = MagicMock(return_value=999.0)
+        helper._get_gateway_read_value = MagicMock(return_value=500.0)
         self.assertEqual(helper._get_pv_power(), 500.0)
+        helper._resolve_auto_pv_services.assert_not_called()
+        helper._get_dbus_value.assert_not_called()
 
-    def test_read_ac_pv_total_ignores_non_numeric_values(self):
+    def test_get_pv_power_backs_off_when_gateway_value_is_missing(self):
         helper = self._make_helper()
-        helper._get_dbus_value = MagicMock(return_value="invalid")
-        self.assertEqual(helper._read_ac_pv_total(["com.victronenergy.pvinverter.http_40"]), (0.0, False))
+        helper._get_gateway_read_value = MagicMock(return_value=None)
+        helper._delay_source_retry = MagicMock()
+        self.assertIsNone(helper._get_pv_power())
+        helper._delay_source_retry.assert_called_once_with("pv")

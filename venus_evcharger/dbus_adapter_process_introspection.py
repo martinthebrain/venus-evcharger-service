@@ -160,7 +160,10 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         return sorted(name for name in self.cache.services if name.startswith(prefix))[:10]
 
     def process_non_write_command(self: DbusAdapterIntrospectionContext, command: CommandMapping) -> CommandOutcome:
-        kind = str(command.get("kind") or command.get("type") or "")
+        raw_kind = command.get("kind") or command.get("type")
+        if not raw_kind:
+            return "dropped"
+        kind = str(raw_kind)
         handlers = {
             "refresh_value": self.read_executor.refresh_requested_value,
             "refresh_services": self.refresh_services_command,
@@ -223,7 +226,7 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         path: str,
         timeout: float,
     ) -> object:
-        obj = self.connection.bus().get_object(service, path, introspect=False)
+        obj = self.connection.get_object(service, path, introspect=False)
         iface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
         return iface.Introspect(timeout=timeout)
 
@@ -249,7 +252,7 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
 
 
 def _valid_introspection_requests(payload: CommandMapping) -> list[IntrospectionRequest]:
-    requests = payload.get("requests", [])
+    requests = payload.get("requests")
     if not isinstance(requests, list):
         return []
     normalized: list[IntrospectionRequest] = []
@@ -270,7 +273,7 @@ def _normalized_introspection_request(request: object) -> IntrospectionRequest |
 
 
 def _introspection_request_target(request: Mapping[str, object]) -> tuple[str, str]:
-    return str(request.get("service", "") or "").strip(), str(request.get("path", "") or "").strip()
+    return str(request.get("service") or "").strip(), str(request.get("path") or "").strip()
 
 
 def _introspection_request_payload(request: Mapping[str, object], service: str, path: str) -> IntrospectionRequest:
@@ -278,8 +281,8 @@ def _introspection_request_payload(request: Mapping[str, object], service: str, 
         "service": service,
         "path": path,
         "priority": _introspection_request_priority(request),
-        "source": str(request.get("source", "request") or "request"),
-        "reason": str(request.get("reason", "requested") or "requested"),
+        "source": str(request.get("source") or "request"),
+        "reason": str(request.get("reason") or "requested"),
     }
 
 

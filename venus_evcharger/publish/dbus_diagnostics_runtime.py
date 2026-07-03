@@ -22,15 +22,15 @@ class _DbusDiagnosticsRuntime(_DbusDiagnosticsSchedule):
             else -1.0
         )
         return {
-            "/Auto/UpdateWorkerDurationSeconds": float(getattr(svc, "_last_update_cycle_duration_seconds", 0.0)),
-            "/Auto/UpdateWorkerPending": int(bool(getattr(svc, "_update_worker_pending", False))),
-            "/Auto/UpdateWorkerSkipped": int(getattr(svc, "_update_worker_skipped_count", 0)),
-            "/Auto/PublishFlushDurationSeconds": float(getattr(svc, "_last_publish_flush_duration_seconds", 0.0)),
-            "/Auto/PublishQueueLagSeconds": float(getattr(svc, "_last_dbus_publish_queue_lag_seconds", 0.0)),
-            "/Auto/PublishQueueDropped": int(getattr(svc, "_dbus_publish_dropped_count", 0)),
-            "/Auto/WriteCommandDurationSeconds": float(getattr(svc, "_last_write_command_duration_seconds", 0.0)),
-            "/Auto/WriteCommandQueueLagSeconds": float(getattr(svc, "_last_write_command_queue_lag_seconds", 0.0)),
-            "/Auto/MainloopHeartbeatAge": heartbeat_age,
+            "auto_update_worker_duration_seconds": float(getattr(svc, "_last_update_cycle_duration_seconds", 0.0)),
+            "auto_update_worker_pending": int(bool(getattr(svc, "_update_worker_pending", False))),
+            "auto_update_worker_skipped": int(getattr(svc, "_update_worker_skipped_count", 0)),
+            "auto_publish_flush_duration_seconds": float(getattr(svc, "_last_publish_flush_duration_seconds", 0.0)),
+            "auto_publish_queue_lag_seconds": float(getattr(svc, "_last_dbus_publish_queue_lag_seconds", 0.0)),
+            "auto_publish_queue_dropped": int(getattr(svc, "_dbus_publish_dropped_count", 0)),
+            "auto_write_command_duration_seconds": float(getattr(svc, "_last_write_command_duration_seconds", 0.0)),
+            "auto_write_command_queue_lag_seconds": float(getattr(svc, "_last_write_command_queue_lag_seconds", 0.0)),
+            "auto_mainloop_heartbeat_age": heartbeat_age,
         }
 
     @staticmethod
@@ -58,15 +58,15 @@ class _DbusDiagnosticsRuntime(_DbusDiagnosticsSchedule):
         """Return the compact 'why did it start/stop?' diagnostic surface."""
         metrics = sanitized_auto_metrics(self._auto_metrics(self.service))
         return {
-            "/Auto/DecisionReason": str(self.service._last_health_reason),
-            "/Auto/DecisionState": auto_state,
-            "/Auto/DecisionStateCode": auto_state_code,
-            "/Auto/DecisionRelayIntent": self._auto_decision_relay_intent(metrics),
-            "/Auto/DecisionSurplusWatts": self._auto_decision_metric_float(metrics, "surplus"),
-            "/Auto/DecisionGridWatts": self._auto_decision_metric_float(metrics, "grid"),
-            "/Auto/DecisionSocPercent": self._auto_decision_metric_float(metrics, "soc"),
-            "/Auto/DecisionStartThresholdWatts": self._auto_decision_metric_float(metrics, "start_threshold"),
-            "/Auto/DecisionStopThresholdWatts": self._auto_decision_metric_float(metrics, "stop_threshold"),
-            "/Auto/DecisionProfile": self._auto_decision_metric_text(metrics, "profile"),
-            "/Auto/DecisionThresholdMode": self._auto_decision_metric_text(metrics, "threshold_mode"),
+            "auto_decision_reason": str(self.service._last_health_reason),
+            "auto_decision_state": auto_state,
+            "auto_decision_state_code": auto_state_code,
+            "auto_decision_relay_intent": self._auto_decision_relay_intent(metrics),
+            "auto_decision_surplus_watts": self._auto_decision_metric_float(metrics, "surplus"),
+            "auto_decision_grid_watts": self._auto_decision_metric_float(metrics, "grid"),
+            "auto_decision_soc_percent": self._auto_decision_metric_float(metrics, "soc"),
+            "auto_decision_start_threshold_watts": self._auto_decision_metric_float(metrics, "start_threshold"),
+            "auto_decision_stop_threshold_watts": self._auto_decision_metric_float(metrics, "stop_threshold"),
+            "auto_decision_profile": self._auto_decision_metric_text(metrics, "profile"),
+            "auto_decision_threshold_mode": self._auto_decision_metric_text(metrics, "threshold_mode"),
         }

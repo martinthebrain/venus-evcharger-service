@@ -211,7 +211,7 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
         return "applied"
 
     def _write_remote_value(self, service: str, path: str, value: object, timeout: float) -> None:
-        obj = self.adapter.connection.bus().get_object(service, path, introspect=False)
+        obj = self.adapter.connection.get_object(service, path, introspect=False)
         iface = dbus.Interface(obj, "com.victronenergy.BusItem")
         iface.SetValue(value, timeout=timeout)
 

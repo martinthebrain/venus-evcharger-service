@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Protocol, TypeVar
 
 from venus_evcharger.dbus_adapter_components import (
     DbusCircuitBreaker,
@@ -17,6 +17,8 @@ from venus_evcharger.dbus_adapter_components import (
 from venus_evcharger.dbus_adapter_read import DbusReadExecutor
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
+
+_T = TypeVar("_T")
 
 
 class DbusAdapterIoContext(Protocol):  # pragma: no cover
@@ -37,7 +39,7 @@ class DbusAdapterIoContext(Protocol):  # pragma: no cover
     def poll_one_due_read_once(self) -> bool: ...
     def refresh_services_if_due_once(self) -> bool: ...
     def list_services(self) -> list[str]: ...
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], Any]) -> Any: ...
+    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T: ...
     def health_snapshot(self) -> CommandPayload: ...
     def append_health_log(self, health: Mapping[str, object]) -> None: ...
     def write_introspection_snapshot(self) -> None: ...

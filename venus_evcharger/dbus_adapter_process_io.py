@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import TypeVar
 
 import dbus
 
 from venus_evcharger.dbus_adapter_components import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
 from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdapterIntrospectionSnapshot
 from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContext
+
+_T = TypeVar("_T")
 
 
 class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
@@ -58,13 +60,13 @@ class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
 
     def list_services(self: DbusAdapterIoContext) -> list[str]:
         def _read() -> object:
-            obj = self.connection.bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
+            obj = self.connection.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
             iface = dbus.Interface(obj, "org.freedesktop.DBus")
             return iface.ListNames()
 
         return _service_names(self.timed_dbus_operation("read", _read))
 
-    def timed_dbus_operation(self: DbusAdapterIoContext, kind: str, operation: Callable[[], Any]) -> Any:
+    def timed_dbus_operation(self: DbusAdapterIoContext, kind: str, operation: Callable[[], _T]) -> _T:
         self.rate_limiter.require_due(kind)
         started = time.monotonic()
         try:
@@ -75,7 +77,7 @@ class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
             self.circuit.record_error(error, kind=kind)
             raise
 
-    def timed_local_publish(self: DbusAdapterIoContext, operation: Callable[[], Any]) -> Any:
+    def timed_local_publish(self: DbusAdapterIoContext, operation: Callable[[], _T]) -> _T:
         started = time.monotonic()
         try:
             result = operation()

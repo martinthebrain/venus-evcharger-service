@@ -10,12 +10,9 @@ from venus_evcharger.core.shared import (
     _iter_numeric_container_items,
     coerce_dbus_numeric,
     compact_json,
-    configured_grid_paths,
     discovery_cache_valid,
     first_matching_prefixed_service,
-    grid_values_complete_enough,
     prefixed_service_names,
-    should_assume_zero_pv,
     sum_dbus_numeric,
     write_text_atomically,
 )
@@ -51,21 +48,12 @@ class TestShellyWallboxShared(unittest.TestCase):
         self.assertEqual(sum_dbus_numeric(["bad", None]), None)
 
     def test_discovery_and_grid_helpers_cover_branches(self):
-        self.assertEqual(configured_grid_paths("/a", "", None, "/b"), ["/a", "/b"])
         self.assertTrue(discovery_cache_valid(["svc"], 100.0, 60.0, 120.0))
         self.assertFalse(discovery_cache_valid([], 100.0, 60.0, 120.0))
         self.assertEqual(prefixed_service_names(["a.1", "b.2", "a.3"], "a.", max_services=1, sort_names=True), ["a.1"])
         self.assertEqual(prefixed_service_names(["a.2", "a.1"], "a."), ["a.2", "a.1"])
         self.assertEqual(first_matching_prefixed_service(["x", "a.1", "a.2"], "a.", lambda s: s.endswith("2")), "a.2")
         self.assertIsNone(first_matching_prefixed_service(["x"], "a.", lambda _s: True))
-        self.assertTrue(grid_values_complete_enough(True, [], True))
-        self.assertTrue(grid_values_complete_enough(True, ["/L2"], False))
-        self.assertFalse(grid_values_complete_enough(False, [], False))
-        self.assertFalse(grid_values_complete_enough(True, ["/L2"], True))
-
-        self.assertTrue(should_assume_zero_pv("", [], True, False, None))
-        self.assertTrue(should_assume_zero_pv("", ["svc"], False, True, None))
-        self.assertFalse(should_assume_zero_pv("explicit", ["svc"], True, False, None))
 
     def test_compact_json_and_write_text_atomically_cover_success_and_cleanup(self):
         self.assertEqual(compact_json({"b": 1, "a": 2}), '{"a":2,"b":1}')

@@ -23,6 +23,7 @@ class _RuntimeAsyncMainloopState:
         svc._dbus_async_publish_enabled = False
         svc._dbus_publish_queue_lock = threading.Lock()
         svc._dbus_publish_pending = OrderedDict()
+        svc._dbus_publish_field_pending = OrderedDict()
         svc._dbus_publish_bump_pending = 0
         svc._dbus_publish_oldest_queued_at = None
         svc._dbus_publish_dropped_count = 0

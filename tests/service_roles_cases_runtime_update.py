@@ -323,7 +323,7 @@ class _ServiceRolesRuntimeUpdateCases:
         service._state_controller.state_summary.return_value = "state"
         service._state_controller.current_runtime_state.return_value = {"state": "current"}
         service._dbus_publisher = MagicMock()
-        service._dbus_publisher.publish_path.return_value = True
+        service._dbus_publisher.publish_field.return_value = True
         service._dbus_publisher.publish_live_measurements.return_value = True
         service._dbus_publisher.publish_energy_time_measurements.return_value = True
         service._dbus_publisher.publish_config_paths.return_value = True
@@ -340,7 +340,7 @@ class _ServiceRolesRuntimeUpdateCases:
         service._validate_runtime_config()
         service._load_config()
         service._ensure_dbus_publish_state()
-        self.assertTrue(service._publish_dbus_path("/Path", 1, 100.0, force=True))
+        self.assertTrue(service._publish_dbus_field("status", 1, 100.0, force=True))
         service._bump_update_index(100.0)
         self.assertTrue(service._publish_live_measurements(1000.0, 230.0, 4.3, {"L1": {}}, 100.0))
         self.assertTrue(service._publish_energy_time_measurements(1.2, {"L1": 1.2}, 10, 0.3, 100.0))
@@ -361,7 +361,7 @@ class _ServiceRolesRuntimeUpdateCases:
         state.load_config.assert_called_once_with()
         publisher = service._dbus_publisher
         publisher.ensure_state.assert_called_once_with()
-        publisher.publish_path.assert_called_once_with("/Path", 1, 100.0, force=True)
+        publisher.publish_field.assert_called_once_with("status", 1, 100.0, force=True)
         publisher.bump_update_index.assert_called_once_with(100.0)
         publisher.publish_live_measurements.assert_called_once_with(1000.0, 230.0, 4.3, {"L1": {}}, 100.0)
         publisher.publish_energy_time_measurements.assert_called_once_with(1.2, {"L1": 1.2}, 10, 0.3, 100.0)
@@ -395,13 +395,13 @@ class _ServiceRolesRuntimeUpdateCases:
         with self.assertRaisesRegex(TypeError, "current_runtime_state must return dict"):
             service._current_runtime_state()
 
-    def test_state_publish_mixin_rejects_non_bool_publish_result(self):
+    def test_state_publish_mixin_rejects_non_bool_field_publish_result(self):
         service = _StateService()
         service._dbus_publisher = MagicMock()
-        service._dbus_publisher.publish_path.return_value = "bad"
+        service._dbus_publisher.publish_field.return_value = "bad"
 
-        with self.assertRaisesRegex(TypeError, "publish_path must return bool"):
-            service._publish_dbus_path("/Path", 1, 100.0)
+        with self.assertRaisesRegex(TypeError, "publish_field must return bool"):
+            service._publish_dbus_field("status", 1, 100.0)
 
     def test_service_controller_factory_skips_recreating_existing_controllers(self):
         service = _FactoryService()

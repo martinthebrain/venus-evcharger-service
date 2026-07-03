@@ -104,11 +104,6 @@ def sum_dbus_numeric(value: Any) -> float | None:
     return _sum_numeric_items(items)
 
 
-def configured_grid_paths(*paths: str | None) -> list[str]:
-    """Return only configured non-empty per-phase grid paths."""
-    return [path for path in paths if path]
-
-
 def discovery_cache_valid(cached_value: object, last_scan: float | int, scan_interval: float | int, now: float | int) -> bool:
     """Return whether a cached discovery result may still be reused."""
     return bool(cached_value) and (now - float(last_scan)) < float(scan_interval)
@@ -155,30 +150,6 @@ def first_matching_prefixed_service(
         if predicate(service_name_str):
             return service_name_str
     return None
-
-
-def grid_values_complete_enough(
-    seen_value: object,
-    missing_paths: Sequence[object],
-    require_all_phases: bool,
-) -> bool:
-    """Return whether available grid readings are sufficient for control logic."""
-    return bool(seen_value) and not (bool(require_all_phases) and bool(missing_paths))
-
-
-def should_assume_zero_pv(
-    explicit_service: str | None,
-    service_names: Sequence[object],
-    no_auto_ac_services_found: bool,
-    auto_use_dc_pv: bool,
-    dc_value: object,
-) -> bool:
-    """Return whether missing PV inputs should conservatively map to 0 W."""
-    return (
-        not explicit_service
-        and (bool(no_auto_ac_services_found) or bool(service_names))
-        and (not bool(auto_use_dc_pv) or dc_value is None)
-    )
 
 
 def compact_json(data: Any) -> str:

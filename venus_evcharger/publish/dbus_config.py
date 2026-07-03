@@ -34,7 +34,7 @@ class _DbusPublishConfig(_DbusPublishCore):
 
         def ensure_state(self) -> None: ...
 
-        def _publish_values_transactional(
+        def _publish_fields_transactional(
             self,
             group_name: str,
             values: Mapping[str, Any],
@@ -44,7 +44,7 @@ class _DbusPublishConfig(_DbusPublishCore):
         ) -> bool: ...
 
     def _config_values(self, startstop_display: int, now: float | None) -> dict[str, Any]:
-        """Return mode and control values keyed by DBus path."""
+        """Return mode and control values keyed by semantic EVCS field."""
         charger_enabled = self._charger_enabled_readback(now)
         current_time = time.time() if now is None else float(now)
         effective_supported = effective_supported_phase_selections(
@@ -60,80 +60,80 @@ class _DbusPublishConfig(_DbusPublishCore):
         )
         startstop_value = int(bool(charger_enabled)) if charger_enabled is not None else int(startstop_display)
         return {
-            "/Connected": self._connected_display(now),
-            "/Status": int(getattr(self.service, "last_status", 0)),
-            "/Mode": int(getattr(self.service, "virtual_mode", 0)),
-            "/AutoStart": int(getattr(self.service, "virtual_autostart", 1)),
-            "/StartStop": startstop_value,
-            "/Enable": enable_display,
-            "/PhaseSelection": str(getattr(self.service, "requested_phase_selection", "P1")),
-            "/PhaseSelectionActive": str(getattr(self.service, "active_phase_selection", "P1")),
-            "/SupportedPhaseSelections": ",".join(effective_supported),
-            "/SetCurrent": self._display_set_current(now),
-            "/MinCurrent": getattr(self.service, "min_current", 0.0),
-            "/MaxCurrent": getattr(self.service, "max_current", 0.0),
-            "/Auto/StartSurplusWatts": getattr(self.service, "auto_start_surplus_watts", 0.0),
-            "/Auto/StopSurplusWatts": getattr(self.service, "auto_stop_surplus_watts", 0.0),
-            "/Auto/MinSoc": getattr(self.service, "auto_min_soc", 0.0),
-            "/Auto/ResumeSoc": getattr(self.service, "auto_resume_soc", 0.0),
-            "/Auto/StartDelaySeconds": getattr(self.service, "auto_start_delay_seconds", 0.0),
-            "/Auto/StopDelaySeconds": getattr(self.service, "auto_stop_delay_seconds", 0.0),
-            "/Auto/ScheduledEnabledDays": str(
+            "connected": self._connected_display(now),
+            "status": int(getattr(self.service, "last_status", 0)),
+            "mode": int(getattr(self.service, "virtual_mode", 0)),
+            "auto_start": int(getattr(self.service, "virtual_autostart", 1)),
+            "start_stop": startstop_value,
+            "enable": enable_display,
+            "phase_selection": str(getattr(self.service, "requested_phase_selection", "P1")),
+            "phase_selection_active": str(getattr(self.service, "active_phase_selection", "P1")),
+            "supported_phase_selections": ",".join(effective_supported),
+            "set_current": self._display_set_current(now),
+            "min_current": getattr(self.service, "min_current", 0.0),
+            "max_current": getattr(self.service, "max_current", 0.0),
+            "auto_start_surplus_watts": getattr(self.service, "auto_start_surplus_watts", 0.0),
+            "auto_stop_surplus_watts": getattr(self.service, "auto_stop_surplus_watts", 0.0),
+            "auto_min_soc": getattr(self.service, "auto_min_soc", 0.0),
+            "auto_resume_soc": getattr(self.service, "auto_resume_soc", 0.0),
+            "auto_start_delay_seconds": getattr(self.service, "auto_start_delay_seconds", 0.0),
+            "auto_stop_delay_seconds": getattr(self.service, "auto_stop_delay_seconds", 0.0),
+            "auto_scheduled_enabled_days": str(
                 getattr(self.service, "auto_scheduled_enabled_days", "Mon,Tue,Wed,Thu,Fri")
             ),
-            "/Auto/ScheduledFallbackDelaySeconds": getattr(
+            "auto_scheduled_fallback_delay_seconds": getattr(
                 self.service,
                 "auto_scheduled_night_start_delay_seconds",
                 0.0,
             ),
-            "/Auto/ScheduledLatestEndTime": str(
+            "auto_scheduled_latest_end_time": str(
                 getattr(self.service, "auto_scheduled_latest_end_time", "06:30")
             ),
-            "/Auto/ScheduledNightCurrent": getattr(self.service, "auto_scheduled_night_current_amps", 0.0),
-            "/Auto/DbusBackoffBaseSeconds": getattr(self.service, "auto_dbus_backoff_base_seconds", 0.0),
-            "/Auto/DbusBackoffMaxSeconds": getattr(self.service, "auto_dbus_backoff_max_seconds", 0.0),
-            "/Auto/GridRecoveryStartSeconds": getattr(self.service, "auto_grid_recovery_start_seconds", 0.0),
-            "/Auto/StopSurplusDelaySeconds": getattr(self.service, "auto_stop_surplus_delay_seconds", 0.0),
-            "/Auto/StopSurplusVolatilityLowWatts": getattr(
+            "auto_scheduled_night_current": getattr(self.service, "auto_scheduled_night_current_amps", 0.0),
+            "auto_dbus_backoff_base_seconds": getattr(self.service, "auto_dbus_backoff_base_seconds", 0.0),
+            "auto_dbus_backoff_max_seconds": getattr(self.service, "auto_dbus_backoff_max_seconds", 0.0),
+            "auto_grid_recovery_start_seconds": getattr(self.service, "auto_grid_recovery_start_seconds", 0.0),
+            "auto_stop_surplus_delay_seconds": getattr(self.service, "auto_stop_surplus_delay_seconds", 0.0),
+            "auto_stop_surplus_volatility_low_watts": getattr(
                 self.service,
                 "auto_stop_surplus_volatility_low_watts",
                 0.0,
             ),
-            "/Auto/StopSurplusVolatilityHighWatts": getattr(
+            "auto_stop_surplus_volatility_high_watts": getattr(
                 self.service,
                 "auto_stop_surplus_volatility_high_watts",
                 0.0,
             ),
-            "/Auto/ReferenceChargePowerWatts": getattr(self.service, "auto_reference_charge_power_watts", 0.0),
-            "/Auto/LearnChargePowerEnabled": int(bool(getattr(self.service, "auto_learn_charge_power_enabled", True))),
-            "/Auto/LearnChargePowerMinWatts": getattr(self.service, "auto_learn_charge_power_min_watts", 0.0),
-            "/Auto/LearnChargePowerAlpha": getattr(self.service, "auto_learn_charge_power_alpha", 0.0),
-            "/Auto/LearnChargePowerStartDelaySeconds": getattr(
+            "auto_reference_charge_power_watts": getattr(self.service, "auto_reference_charge_power_watts", 0.0),
+            "auto_learn_charge_power_enabled": int(bool(getattr(self.service, "auto_learn_charge_power_enabled", True))),
+            "auto_learn_charge_power_min_watts": getattr(self.service, "auto_learn_charge_power_min_watts", 0.0),
+            "auto_learn_charge_power_alpha": getattr(self.service, "auto_learn_charge_power_alpha", 0.0),
+            "auto_learn_charge_power_start_delay_seconds": getattr(
                 self.service,
                 "auto_learn_charge_power_start_delay_seconds",
                 0.0,
             ),
-            "/Auto/LearnChargePowerWindowSeconds": getattr(
+            "auto_learn_charge_power_window_seconds": getattr(
                 self.service,
                 "auto_learn_charge_power_window_seconds",
                 0.0,
             ),
-            "/Auto/LearnChargePowerMaxAgeSeconds": getattr(
+            "auto_learn_charge_power_max_age_seconds": getattr(
                 self.service,
                 "auto_learn_charge_power_max_age_seconds",
                 0.0,
             ),
-            "/Auto/PhaseSwitching": int(bool(getattr(self.service, "auto_phase_switching_enabled", True))),
-            "/Auto/PhasePreferLowestWhenIdle": int(
+            "auto_phase_switching": int(bool(getattr(self.service, "auto_phase_switching_enabled", True))),
+            "auto_phase_prefer_lowest_when_idle": int(
                 bool(getattr(self.service, "auto_phase_prefer_lowest_when_idle", True))
             ),
-            "/Auto/PhaseUpshiftDelaySeconds": getattr(self.service, "auto_phase_upshift_delay_seconds", 0.0),
-            "/Auto/PhaseDownshiftDelaySeconds": getattr(self.service, "auto_phase_downshift_delay_seconds", 0.0),
-            "/Auto/PhaseUpshiftHeadroomWatts": getattr(self.service, "auto_phase_upshift_headroom_watts", 0.0),
-            "/Auto/PhaseDownshiftMarginWatts": getattr(self.service, "auto_phase_downshift_margin_watts", 0.0),
-            "/Auto/PhaseMismatchRetrySeconds": getattr(self.service, "auto_phase_mismatch_retry_seconds", 0.0),
-            "/Auto/PhaseMismatchLockoutCount": getattr(self.service, "auto_phase_mismatch_lockout_count", 0),
-            "/Auto/PhaseMismatchLockoutSeconds": getattr(self.service, "auto_phase_mismatch_lockout_seconds", 0.0),
+            "auto_phase_upshift_delay_seconds": getattr(self.service, "auto_phase_upshift_delay_seconds", 0.0),
+            "auto_phase_downshift_delay_seconds": getattr(self.service, "auto_phase_downshift_delay_seconds", 0.0),
+            "auto_phase_upshift_headroom_watts": getattr(self.service, "auto_phase_upshift_headroom_watts", 0.0),
+            "auto_phase_downshift_margin_watts": getattr(self.service, "auto_phase_downshift_margin_watts", 0.0),
+            "auto_phase_mismatch_retry_seconds": getattr(self.service, "auto_phase_mismatch_retry_seconds", 0.0),
+            "auto_phase_mismatch_lockout_count": getattr(self.service, "auto_phase_mismatch_lockout_count", 0),
+            "auto_phase_mismatch_lockout_seconds": getattr(self.service, "auto_phase_mismatch_lockout_seconds", 0.0),
         }
 
     def _connected_display(self, now: float | None) -> int:
@@ -437,7 +437,7 @@ class _DbusPublishConfig(_DbusPublishCore):
     def publish_config_paths(self, startstop_display: int, now: float | None) -> bool:
         """Publish configuration-like EV charger paths and refresh GUI controls periodically."""
         self.ensure_state()
-        return self._publish_values_transactional(
+        return self._publish_fields_transactional(
             "config",
             self._config_values(startstop_display, now),
             now,

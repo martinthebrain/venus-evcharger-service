@@ -20,10 +20,10 @@ class _DbusDiagnosticsIntrospection(_DbusDiagnosticsPhase):
         snapshot = self._dbus_introspection_snapshot(now)
         services = snapshot.get("services", {})
         return {
-            "/Auto/DbusIntrospectionState": self._dbus_introspection_state(snapshot),
-            "/Auto/DbusIntrospectionQueueDepth": self._dbus_introspection_queue_depth(snapshot),
-            "/Auto/DbusIntrospectionServiceCount": self._dbus_introspection_service_count(services),
-            "/Auto/DbusIntrospectionUnusablePathCount": self._dbus_introspection_unusable_count(services),
+            "auto_dbus_introspection_state": self._dbus_introspection_state(snapshot),
+            "auto_dbus_introspection_queue_depth": self._dbus_introspection_queue_depth(snapshot),
+            "auto_dbus_introspection_service_count": self._dbus_introspection_service_count(services),
+            "auto_dbus_introspection_unusable_path_count": self._dbus_introspection_unusable_count(services),
         }
 
     @staticmethod

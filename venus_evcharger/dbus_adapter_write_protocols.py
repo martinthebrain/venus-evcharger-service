@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import configparser
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Protocol, TypeVar
 
 from venus_evcharger.dbus_adapter_components import (
     AtomicJsonWriter,
@@ -16,6 +16,8 @@ from venus_evcharger.dbus_adapter_components import (
 from venus_evcharger.dbus_adapter_service_protocol import DbusServiceLike
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox
 from venus_evcharger.dbus_gateway_command_types import CommandFileList, CommandMapping
+
+_T = TypeVar("_T")
 
 
 class DbusWriteSchedulerAdapter(Protocol):  # pragma: no cover
@@ -37,8 +39,8 @@ class DbusWriteSchedulerAdapter(Protocol):  # pragma: no cover
     def dbus_service_registered(self) -> bool: ...
     def process_non_write_command(self, command: CommandMapping) -> CommandOutcome: ...
     def register_dbus_service_name(self) -> None: ...
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], Any]) -> Any: ...
-    def timed_local_publish(self, operation: Callable[[], Any]) -> Any: ...
+    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T: ...
+    def timed_local_publish(self, operation: Callable[[], _T]) -> _T: ...
 
 
 class DropStaleCoalescedCommands(Protocol):  # pragma: no cover

@@ -10,6 +10,7 @@ from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import float_or_zero
 
 BACKPRESSURE_SLO_REASONS = {"core_reads_fresh", "queue_age_ok"}
+SLO_VIOLATION_SEQUENCE_TYPES = (list, tuple, set)
 
 
 def backpressure_snapshot(
@@ -50,8 +51,10 @@ def backpressure_slo_reasons(slo: Mapping[str, object]) -> list[str]:
 
 
 def slo_violations(slo: Mapping[str, object]) -> list[object]:
-    raw_violations = slo.get("violated", [])
-    return list(raw_violations) if isinstance(raw_violations, list | tuple | set) else []
+    if "violated" not in slo:
+        return []
+    raw_violations = slo["violated"]
+    return list(raw_violations) if isinstance(raw_violations, SLO_VIOLATION_SEQUENCE_TYPES) else []
 
 
 def backpressure_state(

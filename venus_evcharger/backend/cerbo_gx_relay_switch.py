@@ -230,7 +230,7 @@ class CerboGxRelaySwitchBackend:
         entry = self._dbus_value_entry(service, path)
         if entry is None:
             try:
-                self._gateway_client().request_read(
+                self._gateway_client().request_raw_value(
                     service,
                     path,
                     priority="read",

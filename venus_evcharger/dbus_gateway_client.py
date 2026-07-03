@@ -11,8 +11,16 @@ from venus_evcharger.core.shared import compact_json
 from venus_evcharger.dbus_gateway_cache import DbusCacheStore
 from venus_evcharger.dbus_gateway_command_types import CommandMapping, CommandPayload
 from venus_evcharger.dbus_gateway_commands import DbusCommandInbox
-from venus_evcharger.dbus_gateway_core import GatewayPaths, _json_ready, _now, float_or_zero, gateway_paths
+from venus_evcharger.dbus_gateway_core import (
+    GatewayPaths,
+    _json_ready,
+    _now,
+    float_or_zero,
+    gateway_paths,
+    require_gateway_read_key,
+)
 from venus_evcharger.dbus_gateway_policy import command_allowed_by_backpressure
+from venus_evcharger.dbus_gateway_surface import evcs_fields_to_paths, venus_path_writeable
 
 GatewayWriteCallback = Callable[[str, object], object]
 
@@ -77,6 +85,26 @@ class GatewayClient:
             }
         )
 
+    def publish_fields(
+        self,
+        fields: Mapping[str, object],
+        *,
+        priority: str = "publish",
+        source: str = "core",
+    ) -> None:
+        normalized = {str(field): _json_ready(value) for field, value in fields.items() if str(field)}
+        if not normalized:
+            return
+        self.enqueue_command(
+            {
+                "kind": "publish_fields",
+                "source": source,
+                "fields": normalized,
+                "priority": priority,
+                "coalesce_key": "publish:fields",
+            }
+        )
+
     def register_path(self, path: str, value: object, *, writeable: bool = False, source: str = "core") -> None:
         self.enqueue_command(
             {
@@ -92,32 +120,59 @@ class GatewayClient:
 
     def request_read(
         self,
-        key_or_service: str,
-        path: str = "",
+        key: object,
         *,
         priority: str = "read",
         source: str = "core",
         reason: str = "",
     ) -> None:
-        command: CommandPayload = {
-            "kind": "refresh_value",
-            "source": source,
-            "priority": priority,
-            "reason": reason,
-        }
-        if path:
-            service = str(key_or_service)
-            command.update(
-                {
-                    "service": service,
-                    "path": str(path),
-                    "coalesce_key": f"refresh:{service}:{path}",
-                }
-            )
-        else:
-            key = str(key_or_service)
-            command.update({"key": key, "coalesce_key": f"refresh:{key}"})
-        self.enqueue_command(command)
+        self.request_read_key(key, priority=priority, source=source, reason=reason)
+
+    def request_raw_value(
+        self,
+        service: str,
+        path: str,
+        *,
+        priority: str = "read",
+        source: str = "core",
+        reason: str = "",
+    ) -> None:
+        service_name = str(service)
+        object_path = str(path)
+        self.enqueue_command(
+            {
+                "kind": "refresh_value",
+                "source": source,
+                "service": service_name,
+                "path": object_path,
+                "priority": priority,
+                "reason": reason,
+                "coalesce_key": f"refresh:{service_name}:{object_path}",
+            }
+        )
+
+    def request_read_key(
+        self,
+        key: object,
+        *,
+        priority: str = "read",
+        source: str = "core",
+        reason: str = "",
+    ) -> None:
+        read_key = require_gateway_read_key(key)
+        self.enqueue_command(
+            {
+                "kind": "refresh_value",
+                "source": source,
+                "priority": priority,
+                "reason": reason,
+                "key": read_key,
+                "coalesce_key": f"refresh:{read_key}",
+            }
+        )
+
+    def read_key_value(self, key: object, *, max_age_seconds: float = 10.0) -> object:
+        return gateway_read_value(self.load_cache(max_age_seconds=max_age_seconds), key, max_age_seconds=max_age_seconds)
 
     def load_cache(self, *, max_age_seconds: float = 10.0) -> CommandPayload:
         return DbusCacheStore.load_snapshot(self.paths.cache_path, max_age_seconds=max_age_seconds)
@@ -153,17 +208,18 @@ class GatewayDbusServiceProxy:
         path: str,
         value: object,
         gettextcallback: object = None,
-        writeable: bool = False,
+        writeable: bool | None = None,
         onchangecallback: GatewayWriteCallback | None = None,
     ) -> None:
         del gettextcallback
         path = str(path)
+        path_writeable = venus_path_writeable(path) if writeable is None else bool(writeable)
         self._values[path] = value
-        if writeable:
+        if path_writeable:
             self._writeable.add(path)
         if onchangecallback is not None:
             self._callbacks[path] = onchangecallback
-        self._client.register_path(path, value, writeable=writeable)
+        self._client.register_path(path, value, writeable=path_writeable)
 
     def register(self) -> None:
         self._client.enqueue_command(
@@ -189,6 +245,11 @@ class GatewayDbusServiceProxy:
         self._values.update(normalized)
         self._client.publish_paths(normalized)
 
+    def publish_fields(self, fields: Mapping[str, object]) -> None:
+        paths = evcs_fields_to_paths(fields)
+        self._values.update(paths)
+        self._client.publish_fields({str(field): value for field, value in fields.items() if str(field)})
+
     def apply_gateway_write(self, path: str, value: object) -> bool:
         """Compatibility hook for tests and future in-process gateway delivery."""
         callback = self._callbacks.get(str(path))
@@ -196,6 +257,10 @@ class GatewayDbusServiceProxy:
             self._values[str(path)] = value
             return True
         return bool(callback(str(path), value))
+
+
+def gateway_read_value(snapshot: CommandMapping, key: object, *, max_age_seconds: float) -> object:
+    return gateway_value(snapshot, require_gateway_read_key(key), max_age_seconds=max_age_seconds)
 
 
 def gateway_value(snapshot: CommandMapping, key: str, *, max_age_seconds: float) -> object:

@@ -64,7 +64,7 @@ class DbusCommandInbox:
         existing = read_json_file(target)
         if not _replace_existing_coalesced(existing, payload):
             return "keep-existing"
-        _merge_publish_desired_paths(existing, payload)
+        _merge_coalesced_publish_payload(existing, payload)
         _mark_coalesced_payload(existing, payload)
         return "write-new"
 
@@ -184,6 +184,11 @@ def _same_kind(existing: CommandMapping, payload: CommandMapping) -> bool:
     return _command_kind(existing) == _command_kind(payload)
 
 
+def _merge_coalesced_publish_payload(existing: object, payload: CommandPayload) -> None:
+    _merge_publish_desired_paths(existing, payload)
+    _merge_publish_fields(existing, payload)
+
+
 def _merge_publish_desired_paths(existing: object, payload: CommandPayload) -> None:
     existing_paths, payload_paths = _coalesced_publish_path_maps(existing, payload)
     if existing_paths is None or payload_paths is None:
@@ -209,9 +214,39 @@ def _same_publish_desired_payload(existing: object, payload: CommandMapping) -> 
     return _command_kind(payload) == "publish_desired"
 
 
+def _merge_publish_fields(existing: object, payload: CommandPayload) -> None:
+    existing_fields, payload_fields = _coalesced_publish_field_maps(existing, payload)
+    if existing_fields is None or payload_fields is None:
+        return
+    payload["fields"] = {**dict(existing_fields), **dict(payload_fields)}
+
+
+def _coalesced_publish_field_maps(
+    existing: object,
+    payload: CommandMapping,
+) -> tuple[CommandMapping | None, CommandMapping | None]:
+    if not _same_publish_fields_payload(existing, payload):
+        return None, None
+    assert isinstance(existing, Mapping)
+    return _field_mapping(existing), _field_mapping(payload)
+
+
+def _same_publish_fields_payload(existing: object, payload: CommandMapping) -> bool:
+    if not isinstance(existing, Mapping):
+        return False
+    if not (_same_kind(existing, payload) and _same_priority(existing, payload)):
+        return False
+    return _command_kind(payload) == "publish_fields"
+
+
 def _path_mapping(command: CommandMapping) -> CommandMapping | None:
     paths = command.get("paths")
     return paths if isinstance(paths, Mapping) else None
+
+
+def _field_mapping(command: CommandMapping) -> CommandMapping | None:
+    fields = command.get("fields")
+    return fields if isinstance(fields, Mapping) else None
 
 
 def _mark_coalesced_payload(existing: object, payload: CommandPayload) -> None:

@@ -19,11 +19,12 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
         pm_status: dict[str, Any],
     ) -> tuple[bool, float, float, float, float]:
         """Extract normalized relay/power/current/energy values from a Shelly status dict."""
-        relay_on = bool(pm_status.get("output", False))
+        relay_on = bool(pm_status.get("output"))
         power = svc._safe_float(pm_status.get("apower", 0.0), 0.0)
         voltage = svc._safe_float(pm_status.get("voltage", 0.0), 0.0)
         current = svc._safe_float(pm_status.get("current", 0.0), 0.0)
-        energy_forward = svc._safe_float(pm_status.get("aenergy", {}).get("total", 0.0), 0.0) / 1000.0
+        energy_values = pm_status.get("aenergy") or {}
+        energy_forward = svc._safe_float(energy_values.get("total", 0.0), 0.0) / 1000.0
         return relay_on, power, voltage, current, energy_forward
 
     @classmethod
@@ -120,8 +121,10 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
     @staticmethod
     def _auto_input_source_max_age_seconds(svc: Any, poll_interval_attr: str) -> float:
         """Return the maximum tolerated age for one helper-fed source value."""
-        poll_interval_seconds = max(0.0, float(getattr(svc, poll_interval_attr, 0.0) or 0.0))
-        validation_seconds = max(0.0, float(getattr(svc, "auto_input_validation_poll_seconds", 30.0) or 30.0))
+        raw_poll_interval = getattr(svc, poll_interval_attr, None)
+        poll_interval_seconds = 0.0 if raw_poll_interval is None else max(0.0, float(raw_poll_interval))
+        raw_validation = getattr(svc, "auto_input_validation_poll_seconds", None)
+        validation_seconds = 30.0 if raw_validation is None or float(raw_validation) == 0.0 else float(raw_validation)
         freshness_limit = validation_seconds if poll_interval_seconds <= 0.0 else min(
             validation_seconds,
             poll_interval_seconds * 2.0,
@@ -284,7 +287,7 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
             "battery_battery_source_count": worker_snapshot.get("battery_battery_source_count", 0),
             "battery_hybrid_inverter_source_count": worker_snapshot.get("battery_hybrid_inverter_source_count", 0),
             "battery_inverter_source_count": worker_snapshot.get("battery_inverter_source_count", 0),
-            "battery_sources": list(worker_snapshot.get("battery_sources", []) or []),
+            "battery_sources": list(worker_snapshot.get("battery_sources") or []),
         }
 
     @staticmethod

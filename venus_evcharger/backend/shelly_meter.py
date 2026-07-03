@@ -81,7 +81,7 @@ class ShellyMeterBackend(ShellyBackendBase):
     def read_meter(self) -> MeterReading:
         """Return one normalized Shelly meter reading."""
         pm_status = self._pm_status()
-        relay_on = bool(pm_status.get("output", False)) if "output" in pm_status else None
+        relay_on = bool(pm_status["output"]) if "output" in pm_status else None
         phase_powers, phase_currents, phase_voltages, phase_energies_wh = self._phase_measurements(pm_status)
         power_w = self._total_power_w(pm_status, phase_powers)
         current_a = self._total_current_a(pm_status, phase_currents)
@@ -160,7 +160,7 @@ class ShellyMeterBackend(ShellyBackendBase):
         if phase_powers is not None:
             return phase_powers
         normalized_selection = self._meter_phase_selection(selection)
-        return phase_powers_for_selection(power_w or 0.0, normalized_selection, getattr(self.service, "phase", "L1"))
+        return phase_powers_for_selection(power_w or 0.0, normalized_selection, self._single_phase_line())
 
     def _normalized_phase_currents(
         self,
@@ -172,9 +172,21 @@ class ShellyMeterBackend(ShellyBackendBase):
         if phase_currents is not None:
             return phase_currents
         normalized_selection = self._meter_phase_selection(selection)
-        return phase_currents_for_selection(current_a, normalized_selection, getattr(self.service, "phase", "L1"))
+        return phase_currents_for_selection(current_a, normalized_selection, self._single_phase_line())
 
     @staticmethod
     def _meter_phase_selection(selection: object) -> PhaseSelection:
         """Return one normalized phase selection for derived meter projections."""
-        return normalize_phase_selection(selection, "P1")
+        return normalize_phase_selection(selection)
+
+    def _single_phase_line(self) -> str:
+        """Return the configured single measured line for derived phase vectors."""
+        raw_line = getattr(self.service, "phase", None)
+        if raw_line is None:
+            return "L1"
+        line = str(raw_line).strip().upper()
+        if line == "L2":
+            return "L2"
+        if line == "L3":
+            return "L3"
+        return "L1"

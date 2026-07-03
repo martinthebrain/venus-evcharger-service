@@ -93,9 +93,9 @@ class MutationAuditScriptTests(unittest.TestCase):
     def test_constant_only_modules_are_reported_as_not_applicable(self) -> None:
         path = Path(__file__).resolve().parents[1] / "venus_evcharger/update/software_update_contracts.py"
 
-        self.assertTrue(mutation_audit._is_constant_only_module(path))
+        self.assertTrue(mutation_audit.audit_support.is_constant_only_module(path))
         self.assertEqual(
-            mutation_audit._not_applicable_mutation_target(
+            mutation_audit.audit_support.not_applicable_mutation_target(
                 Path(__file__).resolve().parents[1],
                 "venus_evcharger/update/software_update_contracts.py",
             ),
@@ -105,16 +105,19 @@ class MutationAuditScriptTests(unittest.TestCase):
     def test_non_constant_modules_stay_mutation_targets(self) -> None:
         path = Path(__file__).resolve().parents[1] / "venus_evcharger/update/software_update_state.py"
 
-        self.assertFalse(mutation_audit._is_constant_only_module(path))
+        self.assertFalse(mutation_audit.audit_support.is_constant_only_module(path))
         self.assertIsNone(
-            mutation_audit._not_applicable_mutation_target(
+            mutation_audit.audit_support.not_applicable_mutation_target(
                 Path(__file__).resolve().parents[1],
                 "venus_evcharger/update/software_update_state.py",
             )
         )
 
     def test_survivor_verification_uses_mutmut_virtualenv_when_available(self) -> None:
-        command = mutation_audit._survivor_verification_test_command(["/tmp/python", "-m", "mutmut"])
+        command = mutation_audit.audit_support.survivor_verification_test_command(
+            ["/tmp/python", "-m", "mutmut"],
+            mutation_audit.DEFAULT_TEST_SELECTION,
+        )
 
         self.assertEqual(command[:4], ["/tmp/python", "-m", "pytest", "-q"])
         self.assertIn("tests/venus_evcharger_update_cycle_controller_cases_tertiary.py", command)

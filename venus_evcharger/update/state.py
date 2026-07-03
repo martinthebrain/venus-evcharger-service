@@ -27,7 +27,7 @@ class _UpdateCycleState(_UpdateCycleRelay):
         worker_poll_interval = finite_float_or_none(getattr(svc, "_worker_poll_interval_seconds", None))
         if worker_poll_interval is not None and worker_poll_interval > 0.0:
             candidates.append(float(worker_poll_interval) * 2.0)
-        soft_fail_seconds = finite_float_or_none(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
+        soft_fail_seconds = finite_float_or_none(getattr(svc, "auto_shelly_soft_fail_seconds", None))
         if soft_fail_seconds is not None and soft_fail_seconds > 0.0:
             candidates.append(float(soft_fail_seconds))
         return max(1.0, min(candidates))
@@ -93,7 +93,7 @@ class _UpdateCycleState(_UpdateCycleRelay):
         target_on = self._startup_manual_target(svc)
         if target_on is None or svc._mode_uses_auto_logic(svc.virtual_mode):
             return pm_status
-        relay_on = bool(pm_status.get("output", False))
+        relay_on = bool(pm_status.get("output"))
         if relay_on == target_on:
             svc._startup_manual_target = None
             return pm_status
@@ -105,7 +105,7 @@ class _UpdateCycleState(_UpdateCycleRelay):
         """Return the pending startup manual target, initializing the field when needed."""
         if not hasattr(svc, "_startup_manual_target"):
             svc._startup_manual_target = None
-        value = getattr(svc, "_startup_manual_target", None)
+        value = getattr(svc, "_startup_manual_target")
         return None if value is None else bool(value)
 
     def _apply_startup_manual_target(
@@ -306,7 +306,10 @@ class _UpdateCycleState(_UpdateCycleRelay):
     def prepare_update_cycle(svc: Any, now: float) -> Any:
         """Run pre-update recovery/supervision hooks and return the latest worker snapshot."""
         start_io_worker = getattr(svc, "_start_io_worker", None)
-        topology_configured = bool(getattr(svc, "topology_configured", getattr(svc, "host_configured", False)))
+        if hasattr(svc, "topology_configured"):
+            topology_configured = bool(svc.topology_configured)
+        else:
+            topology_configured = bool(svc.host_configured) if hasattr(svc, "host_configured") else False
         if topology_configured and callable(start_io_worker):
             start_io_worker()
         svc._watchdog_recover(now)

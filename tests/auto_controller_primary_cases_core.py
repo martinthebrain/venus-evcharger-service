@@ -139,7 +139,7 @@ class _AutoControllerPrimaryCoreCases:
         self.assertEqual(pending_stop.call_args.args[1], "auto-stop")
 
         service._time_now = lambda: "bad"
-        with patch("venus_evcharger.auto.logic_samples.time.time", return_value=123.0):
+        with patch("venus_evcharger.auto.logic_learning.time.time", return_value=123.0):
             self.assertEqual(controller._learning_policy_now(), 123.0)
 
     def test_relay_on_helpers_keep_custom_stop_reason_reporting_outside_grid_and_soc(self):

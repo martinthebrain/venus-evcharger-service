@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, phase_selection_count
+from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection_or_none, phase_selection_count
 from venus_evcharger.core.contracts import finite_float_or_none, mutable_dict_attr
 from venus_evcharger.update.relay_phase_switch_policy import _RelayPhaseSwitchPolicy
 
@@ -61,16 +61,11 @@ class _RelayPhaseDecision(_RelayPhaseSwitchPolicy):
 
     @classmethod
     def _ordered_auto_phase_selections(cls, svc: Any) -> tuple[PhaseSelection, ...]:
-        raw_supported = tuple(getattr(svc, "supported_phase_selections", ("P1",)))
+        raw_supported = tuple(getattr(svc, "supported_phase_selections", ()))
         normalized_supported: set[PhaseSelection] = {
-            normalize_phase_selection(selection, "P1") for selection in raw_supported
+            normalize_phase_selection_or_none(selection) or "P1" for selection in raw_supported
         }
-        ordered = tuple(
-            sorted(
-                normalized_supported,
-                key=cls._phase_selection_count,
-            )
-        )
+        ordered = tuple(sorted(normalized_supported))
         return ordered or ("P1",)
 
     @classmethod
@@ -80,15 +75,13 @@ class _RelayPhaseDecision(_RelayPhaseSwitchPolicy):
         supported: tuple[PhaseSelection, ...],
     ) -> PhaseSelection:
         default_selection = supported[0]
-        requested = normalize_phase_selection(
-            getattr(svc, "requested_phase_selection", default_selection),
-            default_selection,
+        requested = (
+            normalize_phase_selection_or_none(getattr(svc, "requested_phase_selection", None)) or default_selection
         )
         if requested in supported:
             return requested
-        active = normalize_phase_selection(
-            getattr(svc, "active_phase_selection", default_selection),
-            default_selection,
+        active = (
+            normalize_phase_selection_or_none(getattr(svc, "active_phase_selection", None)) or default_selection
         )
         return active if active in supported else default_selection
 
@@ -135,7 +128,7 @@ class _RelayPhaseDecision(_RelayPhaseSwitchPolicy):
         selection: PhaseSelection,
         voltage: float,
     ) -> float | None:
-        phase_voltage = cls._phase_voltage(voltage, selection, getattr(svc, "voltage_mode", "phase"))
+        phase_voltage = cls._phase_voltage(voltage, selection, getattr(svc, "voltage_mode", None))
         return None if phase_voltage <= 0.0 else float(phase_voltage)
 
     @classmethod

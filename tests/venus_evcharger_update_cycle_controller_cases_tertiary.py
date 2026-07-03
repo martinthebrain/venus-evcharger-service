@@ -136,6 +136,27 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
             "P1",
         )
         self.assertEqual(controller._current_phase_selection(SimpleNamespace(), ("P1_P2", "P1_P2_P3")), "P1_P2")
+        self.assertEqual(
+            controller._current_phase_selection(
+                SimpleNamespace(requested_phase_selection=None, active_phase_selection="P1_P2_P3"),
+                ("P1_P2", "P1_P2_P3"),
+            ),
+            "P1_P2",
+        )
+        self.assertEqual(
+            controller._current_phase_selection(
+                SimpleNamespace(requested_phase_selection="bad", active_phase_selection=None),
+                ("P1_P2", "P1_P2_P3"),
+            ),
+            "P1_P2",
+        )
+        self.assertEqual(
+            controller._current_phase_selection(
+                SimpleNamespace(requested_phase_selection="P1"),
+                ("P1_P2", "P1_P2_P3"),
+            ),
+            "P1_P2",
+        )
 
     def test_auto_phase_policy_and_metric_helpers_cover_absent_and_invalid_inputs(self):
         controller = UpdateCycleController(
@@ -155,6 +176,25 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
         self.assertIsNone(controller._auto_phase_metric_surplus_watts(SimpleNamespace(_last_auto_metrics={"surplus": "bad"})))
         self.assertEqual(controller._auto_phase_metric_surplus_watts(SimpleNamespace(_last_auto_metrics={"surplus": 0.0})), 0.0)
 
+    def test_auto_phase_policy_defaults_treat_missing_flags_as_enabled(self):
+        controller = UpdateCycleController(
+            _auto_phase_service(),
+            _phase_values,
+            lambda reason: {"init": 0}.get(reason, 99),
+        )
+        policy = SimpleNamespace()
+
+        self.assertIsNone(
+            controller._auto_phase_policy_state(
+                SimpleNamespace(auto_policy=SimpleNamespace(phase=policy)),
+                ("P1", "P1_P2"),
+            )
+        )
+        self.assertEqual(
+            controller._idle_auto_phase_target(policy, ("P1", "P1_P2"), "P1_P2", False, False),
+            ("P1", "idle-lowest-phase", None),
+        )
+
     def test_auto_phase_voltage_and_min_surplus_helpers_cover_line_voltage_edges(self):
         service = _auto_phase_service(min_current=6.0, voltage_mode="line")
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
@@ -163,6 +203,7 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
         self.assertAlmostEqual(phase_voltage, 400.0 / math.sqrt(3.0))
         self.assertIsNone(controller._phase_selection_voltage(service, "P1_P2_P3", 0.0))
         self.assertIsNone(controller._phase_selection_voltage(service, "P1_P2_P3", -1.0))
+        self.assertEqual(controller._phase_selection_voltage(service, "P1", 0.5), 0.5)
 
         expected_three_phase_min = 6.0 * (400.0 / math.sqrt(3.0)) * 3.0
         self.assertAlmostEqual(
@@ -171,21 +212,42 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
         )
         service.min_current = "bad"
         self.assertIsNone(controller._phase_selection_min_surplus_watts(service, "P1_P2_P3", 400.0))
+        self.assertEqual(controller._phase_selection_voltage(SimpleNamespace(), "P1_P2_P3", 400.0), 400.0)
+        self.assertEqual(
+            controller._phase_selection_min_surplus_watts(
+                _auto_phase_service(min_current=0.5, voltage_mode="phase"),
+                "P1",
+                230.0,
+            ),
+            115.0,
+        )
+        self.assertIsNone(
+            controller._phase_selection_min_surplus_watts(SimpleNamespace(voltage_mode="phase"), "P1", 230.0)
+        )
 
     def test_auto_phase_upshift_helpers_cover_thresholds_and_block_reasons(self):
         service = _auto_phase_service(min_current=6.0, voltage_mode="phase")
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
         policy = service.auto_policy.phase
+        policy.upshift_headroom_watts = 123.0
 
         self.assertIsNone(
             controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 1, "P1_P2", 9999.0, 230.0, 100.0)
         )
         self.assertIsNone(
-            controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 0, "P1", 3009.9, 230.0, 100.0)
+            controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 0, "P1", 2882.9, 230.0, 100.0)
         )
         self.assertEqual(
-            controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 0, "P1", 3010.0, 230.0, 100.0),
-            ("P1_P2", "phase-upshift", 3010.0),
+            controller._phase_upshift_threshold(service, policy, "P1_P2", 230.0),
+            2883.0,
+        )
+        self.assertEqual(
+            controller._phase_upshift_threshold(service, SimpleNamespace(), "P1_P2", 230.0),
+            3010.0,
+        )
+        self.assertEqual(
+            controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 0, "P1", 2883.0, 230.0, 100.0),
+            ("P1_P2", "phase-upshift", 2883.0),
         )
 
         with patch.object(UpdateCycleController, "_phase_switch_lockout_active", return_value=True) as lockout:
@@ -208,9 +270,59 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
 
         with patch.object(UpdateCycleController, "_phase_switch_lockout_active", return_value=True):
             self.assertEqual(
-                controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 0, "P1", 3010.0, 230.0, 102.0),
-                (None, "phase-upshift-blocked-lockout", 3010.0),
+                controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 0, "P1", 2883.0, 230.0, 102.0),
+                (None, "phase-upshift-blocked-lockout", 2883.0),
             )
+
+    def test_auto_phase_target_helpers_delegate_complete_contract_arguments(self):
+        service = _auto_phase_service()
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        policy = service.auto_policy.phase
+
+        with patch.object(UpdateCycleController, "_auto_phase_policy_state", return_value=None), patch.object(
+            UpdateCycleController,
+            "_auto_phase_policy",
+            return_value=policy,
+        ), patch.object(
+            UpdateCycleController,
+            "_idle_auto_phase_target",
+            return_value=None,
+        ) as idle_target, patch.object(
+            UpdateCycleController,
+            "_surplus_auto_phase_target",
+            return_value=("P1_P2", "phase-upshift", 2883.0),
+        ) as surplus_target:
+            self.assertEqual(
+                controller._auto_phase_target_selection(service, ("P1", "P1_P2"), "P1", True, False, 230.0, 111.0),
+                ("P1_P2", "phase-upshift", 2883.0),
+            )
+        idle_target.assert_called_once_with(policy, ("P1", "P1_P2"), "P1", True, False)
+        surplus_target.assert_called_once_with(service, policy, ("P1", "P1_P2"), "P1", 230.0, 111.0)
+
+        service._last_auto_metrics = {"surplus": 2883.0}
+        with patch.object(UpdateCycleController, "_upshift_auto_phase_target", return_value=None) as upshift, patch.object(
+            UpdateCycleController,
+            "_downshift_auto_phase_target",
+            return_value=("P1", "phase-downshift", 2610.0),
+        ) as downshift:
+            self.assertEqual(
+                controller._surplus_auto_phase_target(service, policy, ("P1", "P1_P2"), "P1_P2", 230.0, 112.0),
+                ("P1", "phase-downshift", 2610.0),
+            )
+        upshift.assert_called_once_with(service, policy, ("P1", "P1_P2"), 1, "P1_P2", 2883.0, 230.0, 112.0)
+        downshift.assert_called_once_with(service, policy, ("P1", "P1_P2"), "P1_P2", 1, 2883.0, 230.0)
+
+        with patch.object(UpdateCycleController, "_phase_upshift_threshold", return_value=2883.0) as threshold, patch.object(
+            UpdateCycleController,
+            "_phase_upshift_block_reason",
+            return_value=None,
+        ) as block_reason:
+            self.assertEqual(
+                controller._upshift_auto_phase_target(service, policy, ("P1", "P1_P2"), 0, "P1", 2883.0, 230.0, 113.0),
+                ("P1_P2", "phase-upshift", 2883.0),
+            )
+        threshold.assert_called_once_with(service, policy, "P1_P2", 230.0)
+        block_reason.assert_called_once_with(service, "P1", "P1_P2", 113.0)
 
     def test_auto_phase_target_selection_delegates_policy_idle_and_surplus_paths(self):
         service = _auto_phase_service()

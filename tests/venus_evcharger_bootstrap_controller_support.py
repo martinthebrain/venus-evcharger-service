@@ -21,6 +21,7 @@ from venus_evcharger.bootstrap.controller import (
     _seasonal_month_windows,
     run_service_main,
 )
+from venus_evcharger.dbus_gateway import venus_path_writeable
 from venus_evcharger.ports import AutoDecisionPort, UpdateCyclePort, WriteControllerPort
 
 
@@ -30,6 +31,7 @@ class _FakeDbusService:
         self.register_called = False
 
     def add_path(self, path: str, value: object, **kwargs: object) -> None:
+        kwargs.setdefault("writeable", venus_path_writeable(path))
         self.paths[path] = {"value": value, **kwargs}
 
     def register(self) -> None:

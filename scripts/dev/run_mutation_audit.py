@@ -26,6 +26,12 @@ DEFAULT_TEST_SELECTION = (
     "tests/test_dbus_gateway_adapter_scheduler.py",
     "tests/test_dbus_gateway_primitives.py",
     "tests/test_core_dbus_backpressure.py",
+    "tests/test_venus_evcharger_shared.py",
+    "tests/test_venus_evcharger_dbus_inputs_controller.py",
+    "tests/venus_evcharger_helpers_cases_primary.py",
+    "tests/venus_evcharger_helpers_cases_quaternary.py",
+    "tests/venus_evcharger_auto_input_helper_cases_basic.py",
+    "tests/venus_evcharger_auto_input_helper_cases_sources.py",
     "tests/test_auto_logic_types.py",
     "tests/test_venus_evcharger_auto_policy.py",
     "tests/test_venus_evcharger_auto_controller.py",
@@ -59,6 +65,8 @@ DEFAULT_TEST_SELECTION = (
     "tests/venus_evcharger_update_cycle_controller_cases_trecenary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_quattuordenary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_quindenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_sexdecenary.py",
+    "tests/venus_evcharger_update_cycle_controller_cases_septendecenary.py",
 )
 DEFAULT_TARGETS = (
     "venus_evcharger/dbus_gateway_policy.py",
@@ -75,6 +83,7 @@ DEFAULT_TARGETS = (
     "venus_evcharger/dbus_adapter_process_loop.py",
     "venus_evcharger/core/dbus_backpressure.py",
     "venus_evcharger/auto/policy.py",
+    "venus_evcharger/auto/logic_learning.py",
     "venus_evcharger/auto/logic_decisions.py",
     "venus_evcharger/auto/logic_gates_runtime.py",
     "venus_evcharger/backend/shelly_support.py",
@@ -82,17 +91,20 @@ DEFAULT_TARGETS = (
     "venus_evcharger/backend/shelly_meter.py",
     "venus_evcharger/update/offline_publish.py",
     "venus_evcharger/update/learning_runtime.py",
+    "venus_evcharger/update/runtime_cycle.py",
+    "venus_evcharger/update/relay_charger_current_targets.py",
+    "venus_evcharger/update/relay_charger_current.py",
     "venus_evcharger/update/relay_phase_decision.py",
     "venus_evcharger/update/relay_phase_switch_policy.py",
+    "venus_evcharger/update/relay_phase_switch_runtime.py",
+    "venus_evcharger/update/relay_phase_switch_runtime_recovery.py",
     "venus_evcharger/update/relay_status_publish.py",
     "venus_evcharger/update/learning_signature.py",
     "venus_evcharger/update/relay_phase_switch_mismatch.py",
 )
-MUTMUT_CACHE = ".mutmut-cache"
-MUTMUT_WORKTREE = "mutants"
+MUTMUT_CACHE, MUTMUT_WORKTREE = ".mutmut-cache", "mutants"
 RESULT_WORDS = audit_support.RESULT_WORDS
-TIMEOUT_RETURNCODE = audit_support.TIMEOUT_RETURNCODE
-OK_STATUSES = audit_support.OK_STATUSES
+TIMEOUT_RETURNCODE, OK_STATUSES = audit_support.TIMEOUT_RETURNCODE, audit_support.OK_STATUSES
 
 _parse_counts = audit_support.parse_counts
 _survivor_names = audit_support.survivor_names
@@ -217,7 +229,7 @@ def _run_target(
         results_path=out_dir / f"{slug}.results.txt",
     )
     command = audit_support.MutationCommandContext(repo=repo, mutmut=mutmut)
-    not_applicable_reason = _not_applicable_mutation_target(repo, target.path)
+    not_applicable_reason = audit_support.not_applicable_mutation_target(repo, target.path)
     if not_applicable_reason is not None:
         return _not_applicable_result(
             target=target,
@@ -427,7 +439,11 @@ def _mutmut_config_toml(target_path: str) -> str:
         "[tool.mutmut]",
         'source_paths = ["venus_evcharger"]',
         f'only_mutate = ["{target_path}"]',
-        'also_copy = ["venus_evcharger_dbus_adapter.py"]',
+        "also_copy = [",
+        '    "venus_evcharger_auto_input_helper.py",',
+        '    "venus_evcharger_dbus_adapter.py",',
+        '    "venus_evcharger_service.py",',
+        "]",
         'pytest_add_cli_args = ["-k", "not socket"]',
         "pytest_add_cli_args_test_selection = [",
     ]
@@ -474,20 +490,8 @@ def _print_summary(results: list[TargetResult], summary_path: Path) -> None:
         print(f"- {result.status:15} {result.duration_s:8.1f}s {result.path} {counts}")
 
 
-def _not_applicable_mutation_target(repo: Path, target_path: str) -> str | None:
-    return audit_support.not_applicable_mutation_target(repo, target_path)
-
-
-def _is_constant_only_module(path: Path) -> bool:
-    return audit_support.is_constant_only_module(path)
-
-
 def _write_not_applicable_result(log_path: Path, results_path: Path, target_path: str, reason: str) -> None:
     audit_support.write_not_applicable_result(log_path, results_path, target_path, reason)
-
-
-def _survivor_verification_test_command(mutmut: list[str]) -> list[str]:
-    return audit_support.survivor_verification_test_command(mutmut, DEFAULT_TEST_SELECTION)
 
 
 if __name__ == "__main__":

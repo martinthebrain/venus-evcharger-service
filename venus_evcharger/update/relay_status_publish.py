@@ -82,7 +82,6 @@ class _RelayStatusPublish(_UpdateCycleLearning):
             pm_status: dict[str, Any] | None,
             power: float,
             voltage: float,
-            current: float,
         ) -> dict[str, dict[str, float]]: ...
 
         @staticmethod
@@ -256,6 +255,32 @@ class _RelayStatusPublish(_UpdateCycleLearning):
         svc._last_status_source = "auto-waiting" if auto_mode_active else "manual-off"
         return 4 if auto_mode_active else 6
 
+    def _resolved_live_readbacks(
+        self,
+        power: float,
+        energy_forward: float,
+        now: float,
+    ) -> tuple[float, float, float]:
+        svc = self.service
+        resolved_power = self._fresh_charger_power_readback(svc, now)
+        resolved_current = self._fresh_charger_actual_current_readback(svc, now)
+        resolved_energy_forward = self._fresh_charger_energy_readback(svc, now)
+        return (
+            float(power) if resolved_power is None else resolved_power,
+            0.0 if resolved_current is None else resolved_current,
+            float(energy_forward) if resolved_energy_forward is None else resolved_energy_forward,
+        )
+
+    @classmethod
+    def _resolved_total_current(
+        cls,
+        phase_data: dict[str, dict[str, float]],
+        resolved_current: float,
+    ) -> float:
+        if resolved_current > 0.0:
+            return float(resolved_current)
+        return cls._total_phase_current(phase_data)
+
     def publish_online_update(
         self,
         pm_status: dict[str, Any],
@@ -267,22 +292,14 @@ class _RelayStatusPublish(_UpdateCycleLearning):
         now: float,
     ) -> bool:
         svc = self.service
-        resolved_power = self._fresh_charger_power_readback(svc, now)
-        if resolved_power is None:
-            resolved_power = float(power)
-        resolved_current = self._fresh_charger_actual_current_readback(svc, now)
-        if resolved_current is None:
-            resolved_current = 0.0
-        resolved_energy_forward = self._fresh_charger_energy_readback(svc, now)
-        if resolved_energy_forward is None:
-            resolved_energy_forward = float(energy_forward)
+        resolved_power, resolved_current, resolved_energy_forward = self._resolved_live_readbacks(
+            power,
+            energy_forward,
+            now,
+        )
+        phase_data = self._phase_data_for_pm_status(pm_status, resolved_power, voltage)
+        total_current = self._resolved_total_current(phase_data, resolved_current)
 
-        phase_data = self._phase_data_for_pm_status(pm_status, resolved_power, voltage, resolved_current)
-        total_current = self._total_phase_current(phase_data)
-        if resolved_current > 0.0:
-            total_current = float(resolved_current)
-
-        changed = False
-        changed |= svc._publish_live_measurements(resolved_power, voltage, total_current, phase_data, now)
-        changed |= self.update_virtual_state(status, resolved_energy_forward, relay_on)
-        return bool(changed)
+        measurements_changed = svc._publish_live_measurements(resolved_power, voltage, total_current, phase_data, now)
+        state_changed = self.update_virtual_state(status, resolved_energy_forward, relay_on)
+        return bool(measurements_changed or state_changed)

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import (
+    finite_float_or_none,
     normalized_worker_snapshot,
     timestamp_age_within,
     timestamp_not_future,
@@ -15,9 +16,11 @@ from venus_evcharger.update.offline_publish import _UpdateCycleOffline
 
 class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
+    CLAMP_WORKER_PM_FUTURE_TIMESTAMPS: ClassVar[bool] = False
 
-    @staticmethod
+    @classmethod
     def _worker_pm_snapshot_data(
+        cls,
         worker_snapshot: dict[str, Any],
         now: float,
     ) -> tuple[dict[str, Any] | None, bool, float]:
@@ -25,18 +28,35 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         normalized_snapshot = normalized_worker_snapshot(
             worker_snapshot,
             now=now,
-            clamp_future_timestamps=False,
+            clamp_future_timestamps=cls.CLAMP_WORKER_PM_FUTURE_TIMESTAMPS,
         )
-        pm_status = normalized_snapshot.get("pm_status")
+        pm_status = cls._worker_pm_status_payload(normalized_snapshot)
         if pm_status is None:
             return None, False, float(now)
-        pm_status = dict(pm_status)
-        pm_confirmed = bool(normalized_snapshot.get("pm_confirmed", False))
-        snapshot_at = normalized_snapshot.get(
-            "pm_captured_at",
-            normalized_snapshot.get("captured_at", now),
+        return (
+            pm_status,
+            cls._worker_pm_confirmed(normalized_snapshot),
+            cls._worker_pm_snapshot_timestamp(normalized_snapshot),
         )
-        return pm_status, pm_confirmed, float(now if snapshot_at is None else snapshot_at)
+
+    @staticmethod
+    def _worker_pm_status_payload(normalized_snapshot: dict[str, Any]) -> dict[str, Any] | None:
+        """Return a defensive copy of normalized PM payload data."""
+        pm_status = normalized_snapshot["pm_status"]
+        return dict(pm_status) if isinstance(pm_status, dict) else None
+
+    @staticmethod
+    def _worker_pm_confirmed(normalized_snapshot: dict[str, Any]) -> bool:
+        """Return whether the normalized PM payload is confirmed by the helper."""
+        return bool(normalized_snapshot["pm_confirmed"])
+
+    @staticmethod
+    def _worker_pm_snapshot_timestamp(normalized_snapshot: dict[str, Any]) -> float:
+        """Return the PM sample timestamp from normalized worker data."""
+        snapshot_at = normalized_snapshot["pm_captured_at"]
+        if snapshot_at is None:
+            snapshot_at = normalized_snapshot["captured_at"]
+        return float(snapshot_at)
 
     @staticmethod
     def _remember_pm_snapshot(
@@ -83,7 +103,9 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     @staticmethod
     def _last_pm_status_marked_confirmed(svc: Any) -> bool:
         """Return whether the legacy last-PM cache is confirmed."""
-        return bool(getattr(svc, "_last_pm_status_confirmed", False))
+        if not hasattr(svc, "_last_pm_status_confirmed"):
+            return False
+        return bool(getattr(svc, "_last_pm_status_confirmed"))
 
     @classmethod
     def _fresh_confirmed_pm_status(
@@ -109,17 +131,11 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
 
     @staticmethod
     def _direct_pm_snapshot_max_age_seconds(svc: Any) -> float:
-        """Return the minimum freshness window for directly supplied worker PM snapshots."""
-        candidates = [1.0]
-        worker_poll_seconds = getattr(svc, "_worker_poll_interval_seconds", None)
-        if worker_poll_seconds is not None:
-            try:
-                worker_poll_seconds = float(worker_poll_seconds)
-            except (TypeError, ValueError):
-                worker_poll_seconds = None
-            if worker_poll_seconds is not None and worker_poll_seconds > 0:
-                candidates.append(worker_poll_seconds * 2.0)
-        return max(1.0, min(candidates))
+        """Return the freshness window for directly supplied worker PM snapshots."""
+        worker_poll_seconds = finite_float_or_none(getattr(svc, "_worker_poll_interval_seconds", None))
+        if worker_poll_seconds is None:
+            return 1.0
+        return max(1.0, worker_poll_seconds * 2.0)
 
     @classmethod
     def resolve_pm_status_for_update(
@@ -131,7 +147,7 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         """Return the freshest Shelly status, including short soft-fail reuse."""
         soft_fail_seconds = float(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
         pm_status, pm_confirmed, snapshot_at = cls._worker_pm_snapshot_data(worker_snapshot, now)
-        if pm_status is None or not cls._worker_pm_snapshot_usable(pm_status, pm_confirmed, snapshot_at, now):
+        if pm_status is None or not cls._worker_pm_snapshot_usable(pm_confirmed, snapshot_at, now):
             return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
         pm_status["_pm_confirmed"] = True
         should_remember, within_soft_fail = cls._pm_snapshot_storage_decision(
@@ -149,7 +165,6 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     @classmethod
     def _worker_pm_snapshot_usable(
         cls,
-        pm_status: dict[str, Any],
         pm_confirmed: bool,
         snapshot_at: float,
         now: float,
@@ -186,9 +201,19 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         return (float(now) - snapshot_at) <= max(soft_fail_seconds, direct_snapshot_max_age)
 
     @staticmethod
-    def _pm_snapshot_newer_than_last(svc: Any, snapshot_at: float) -> bool:
+    def _remembered_pm_snapshot_timestamp(svc: Any) -> float | None:
+        """Return the newest known PM timestamp across direct and confirmed caches."""
+        candidates = [
+            finite_float_or_none(getattr(svc, "_last_pm_status_at", None)),
+            finite_float_or_none(getattr(svc, "_last_confirmed_pm_status_at", None)),
+        ]
+        fresh_candidates = [candidate for candidate in candidates if candidate is not None]
+        return max(fresh_candidates) if fresh_candidates else None
+
+    @classmethod
+    def _pm_snapshot_newer_than_last(cls, svc: Any, snapshot_at: float) -> bool:
         """Return True when a PM snapshot is at least as new as the stored one."""
-        last_snapshot_at = getattr(svc, "_last_pm_status_at", None)
+        last_snapshot_at = cls._remembered_pm_snapshot_timestamp(svc)
         return last_snapshot_at is None or snapshot_at >= float(last_snapshot_at)
 
     @classmethod

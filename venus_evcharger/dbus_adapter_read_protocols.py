@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Protocol, TypeVar
 
 from venus_evcharger.dbus_adapter_read_types import ReadSpec
 from venus_evcharger.dbus_gateway_cache import CacheValueMetadata
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
+
+_T = TypeVar("_T")
 
 
 class ReadCacheProtocol(Protocol):  # pragma: no cover
@@ -49,7 +51,7 @@ class ReadSchedulerProtocol(Protocol):  # pragma: no cover
 class ReadConnectionProtocol(Protocol):  # pragma: no cover
     """DBus connection surface required by read execution."""
 
-    def bus(self) -> Any: ...
+    def get_object(self, bus_name: str, object_path: str, *, introspect: bool = False) -> object: ...
 
 
 class ReadRateLimiterProtocol(Protocol):  # pragma: no cover
@@ -82,4 +84,4 @@ class DbusReadAdapter(Protocol):  # pragma: no cover
     @property
     def circuit(self) -> ReadCircuitProtocol: ...
 
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], Any]) -> Any: ...
+    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T: ...

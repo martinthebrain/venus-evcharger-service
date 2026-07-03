@@ -101,13 +101,18 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
 
     def _phase_voltage_for_selection(self, selection: PhaseSelection, cached_voltage: float) -> float:
         phase_voltage = float(cached_voltage)
-        if selection != "P1" and str(getattr(self.service, "voltage_mode", "phase")).strip().lower() != "phase":
+        voltage_mode = getattr(self.service, "voltage_mode", None)
+        uses_phase_voltage = voltage_mode is None or str(voltage_mode).strip().lower() == "phase"
+        if selection != "P1" and not uses_phase_voltage:
             phase_voltage = phase_voltage / math.sqrt(3.0)
         return 230.0 if phase_voltage <= 0.0 else float(phase_voltage)
 
     @staticmethod
     def _charging_like_status(state: ChargerState) -> bool:
-        status = str(getattr(state, "status_text", "") or "").strip().lower()
+        raw_status = getattr(state, "status_text", None)
+        if raw_status is None:
+            return False
+        status = str(raw_status).strip().lower()
         return status.startswith("charging")
 
     @classmethod
@@ -153,8 +158,9 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         energy_kwh = finite_float_or_none(getattr(svc, "_charger_estimated_energy_kwh", None)) or 0.0
         last_at = finite_float_or_none(getattr(svc, "_charger_estimated_energy_at", None))
         last_power = finite_float_or_none(getattr(svc, "_charger_estimated_power_w", None))
-        if last_at is not None and last_power is not None and float(now) > last_at:
-            energy_kwh += (max(0.0, float(last_power)) * ((float(now) - last_at) / 3600.0)) / 1000.0
+        if last_at is not None and last_power is not None:
+            elapsed_seconds = max(0.0, float(now) - last_at)
+            energy_kwh += (max(0.0, float(last_power)) * (elapsed_seconds / 3600.0)) / 1000.0
         self._sync_estimated_charger_energy_cache(energy_kwh, power_w, now)
         return energy_kwh
 

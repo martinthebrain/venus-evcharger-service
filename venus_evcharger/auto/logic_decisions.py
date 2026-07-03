@@ -46,7 +46,7 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
 
         if stop_reason is None:
             return require_relay_bool(self._running_result_with_health("running", cached_inputs))
-        stop_delay_seconds = svc.auto_stop_delay_seconds
+        stop_delay_seconds = None
         reported_reason = stop_reason
         if stop_reason == "auto-stop-surplus":
             stop_delay_seconds = float(self._auto_policy().stop_surplus_delay_seconds)
@@ -73,12 +73,17 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         minimum_runtime_elapsed: bool,
     ) -> str | None:
         """Return the concrete stop reason while Auto is already running."""
-        svc = self.service
-        if getattr(svc, "auto_night_lock_stop", False) and not daytime_window_open and minimum_runtime_elapsed:
-            return "night-lock"
         if not minimum_runtime_elapsed:
             return None
+        if self._night_lock_stop_requested(daytime_window_open):
+            return "night-lock"
         return self._policy_relay_on_stop_reason(avg_surplus_power, avg_grid_power, battery_soc)
+
+    def _night_lock_stop_requested(self, daytime_window_open: bool) -> bool:
+        """Return whether the configured night lock should stop the running relay."""
+        if not hasattr(self.service, "auto_night_lock_stop"):
+            return False
+        return getattr(self.service, "auto_night_lock_stop") is True and not daytime_window_open
 
     def _policy_relay_on_stop_reason(
         self,

@@ -237,7 +237,7 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             virtual_autostart=0,
             _dbusservice={"/AutoStart": 0},
             _time_now=MagicMock(return_value=10.0),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
             _save_runtime_overrides=MagicMock(),
@@ -255,12 +255,12 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             virtual_autostart=0,
             _dbusservice={"/AutoStart": 0},
             _time_now=MagicMock(return_value=10.0),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
             _save_runtime_overrides=MagicMock(),
         )
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
         command = ControlCommand(name="set_auto_start", path="/AutoStart", value=1)
 
@@ -281,11 +281,11 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             virtual_autostart=0,
             _dbusservice={"/AutoStart": 0},
             _time_now=MagicMock(return_value=10.0),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
         )
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
         command = ControlCommand(name="set_auto_start", path="/AutoStart", value=1)
 
@@ -307,11 +307,11 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             _charger_backend=backend,
             _dbusservice={"/SetCurrent": 6.0},
             _time_now=MagicMock(return_value=10.0),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
         )
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
         command = ControlCommand(name="set_current_setting", path="/SetCurrent", value=12.5)
 

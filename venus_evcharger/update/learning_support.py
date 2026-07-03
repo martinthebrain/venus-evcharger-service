@@ -3,34 +3,47 @@
 
 from __future__ import annotations
 
-from typing import Any
-
+from venus_evcharger.update.learning_engine import (
+    LearningEngine,
+    LearningPlausibilityConfig,
+    LearningStableConfig,
+    LearningWindowConfig,
+)
+from venus_evcharger.update.learning_profile import normalized_learning_score
 from venus_evcharger.update.learning_signature import _UpdateCycleLearningSignature
 
 
 class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
+    _MIN_STABLE_LEARNING_SCORE = 0.65
+
     def _learning_window_status(self, now: float) -> tuple[str, float | None]:
         """Return whether the current charging session is ready for learning samples."""
         charging_started_at = getattr(self.service, "charging_started_at", None)
-        if charging_started_at is None:
-            return "waiting", None
-        session_started_at = float(charging_started_at)
-        minimum_seconds = float(getattr(self.service, "auto_learn_charge_power_start_delay_seconds", 30.0))
-        if (float(now) - session_started_at) < minimum_seconds:
-            return "waiting", None
-        learning_window_seconds = float(getattr(self.service, "auto_learn_charge_power_window_seconds", 180.0))
-        if learning_window_seconds > 0 and (float(now) - session_started_at) > (minimum_seconds + learning_window_seconds):
-            return "expired", session_started_at
-        return "ready", session_started_at
+        return LearningEngine.window_status(
+            None if charging_started_at is None else float(charging_started_at),
+            LearningWindowConfig(
+                start_delay_seconds=float(
+                    getattr(self.service, "auto_learn_charge_power_start_delay_seconds", 30.0)
+                ),
+                window_seconds=float(getattr(self.service, "auto_learn_charge_power_window_seconds", 180.0)),
+            ),
+            now,
+        )
 
     def _accepted_learning_sample(self, power: float, voltage: float) -> float | None:
         """Return one plausible learning sample or ``None`` when it should be ignored."""
-        measured_power = float(power)
-        if measured_power < float(getattr(self.service, "auto_learn_charge_power_min_watts", 500.0)):
-            return None
-        if measured_power > self._plausible_learning_power_max(voltage):
-            return None
+        measured_power, _reason = self._accepted_learning_sample_result(power, voltage)
         return measured_power
+
+    def _accepted_learning_sample_result(self, power: float, voltage: float) -> tuple[float | None, str]:
+        """Return one plausible learning sample and the explainable outcome reason."""
+        return LearningEngine.accepted_sample(
+            power,
+            LearningPlausibilityConfig(
+                min_watts=float(getattr(self.service, "auto_learn_charge_power_min_watts", 500.0)),
+                max_watts=self._plausible_learning_power_max(voltage),
+            ),
+        )
 
     def _learning_session_result(
         self,
@@ -99,17 +112,14 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
     ) -> tuple[float, float | None]:
         """Return EWMA-smoothed learned power and voltage signature."""
         alpha = float(getattr(self.service, "auto_learn_charge_power_alpha", 0.2))
-        learned_power = previous_value + alpha * (measured_power - previous_value)
         previous_voltage_signature = getattr(self.service, "learned_charge_power_voltage", None)
-        if current_voltage_signature is None:
-            learned_voltage_signature = previous_voltage_signature
-        elif previous_voltage_signature is None or float(previous_voltage_signature) <= 0:
-            learned_voltage_signature = current_voltage_signature
-        else:
-            learned_voltage_signature = float(previous_voltage_signature) + alpha * (
-                float(current_voltage_signature) - float(previous_voltage_signature)
-            )
-        return learned_power, learned_voltage_signature
+        return LearningEngine.smoothed_values(
+            previous_value,
+            measured_power,
+            None if previous_voltage_signature is None else float(previous_voltage_signature),
+            current_voltage_signature,
+            alpha,
+        )
 
     def _restart_learning_sample(
         self,
@@ -117,21 +127,79 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
         now: float,
         current_phase_signature: str | None,
         current_voltage_signature: float | None,
+        *,
+        reason: str = "learning-restart",
+        detail: str = "new-baseline",
     ) -> bool:
         """Start or restart the learning window from the current sample."""
         return bool(
             self._set_learning_tracking(
-            self.service,
-            state="learning",
-            learned_power=measured_power,
-            updated_at=now,
-            learning_since=now,
-            sample_count=1,
-            phase_signature=current_phase_signature,
-            voltage_signature=current_voltage_signature,
-            signature_mismatch_sessions=0,
-            checked_session_started_at=None,
+                self.service,
+                state="learning",
+                learned_power=measured_power,
+                updated_at=now,
+                learning_since=now,
+                sample_count=1,
+                phase_signature=current_phase_signature,
+                voltage_signature=current_voltage_signature,
+                signature_mismatch_sessions=0,
+                checked_session_started_at=None,
+                confidence=self._learning_confidence_score("learning", 1, now, now, 1.0),
+                stability_score=1.0,
+                reason=reason,
+                detail=detail,
             )
+        )
+
+    def _learning_sample_stability_score(self, measured_power: float, previous_value: float) -> float:
+        """Return how well one sample matches the current learned baseline."""
+        tolerance = self._learning_stability_tolerance(previous_value)
+        return LearningEngine.sample_stability_score(measured_power, previous_value, tolerance)
+
+    def _combined_learning_stability_score(self, sample_score: float) -> float:
+        """Return an EWMA stability score for the current learning session."""
+        previous_score = normalized_learning_score(
+            getattr(self.service, "learned_charge_power_stability_score", 0.0)
+        )
+        return LearningEngine.combined_stability_score(previous_score, sample_score)
+
+    def _adaptive_stable_learning_seconds(self, stability_score: float) -> float:
+        """Return the minimum learning span adjusted by observed sample stability."""
+        return LearningEngine.adaptive_stable_seconds(
+            float(self.LEARNED_POWER_STABLE_MIN_SECONDS),
+            stability_score,
+        )
+
+    def _learning_confidence_score(
+        self,
+        state: str,
+        sample_count: int,
+        learning_since: float | None,
+        now: float,
+        stability_score: float,
+    ) -> float:
+        """Return a confidence estimate for the current learned-power profile."""
+        return LearningEngine.confidence_score(
+            state,
+            sample_count,
+            self.LEARNED_POWER_STABLE_MIN_SAMPLES,
+            learning_since,
+            now,
+            stability_score,
+            self._adaptive_stable_learning_seconds(stability_score),
+        )
+
+    def _stable_learning_ready(self, sample_count: int, learning_span: float, stability_score: float) -> bool:
+        """Return whether the current learning window is mature enough to become stable."""
+        return LearningEngine.stable_ready(
+            sample_count,
+            learning_span,
+            stability_score,
+            LearningStableConfig(
+                min_samples=self.LEARNED_POWER_STABLE_MIN_SAMPLES,
+                base_seconds=float(self.LEARNED_POWER_STABLE_MIN_SECONDS),
+                min_stability_score=self._MIN_STABLE_LEARNING_SCORE,
+            ),
         )
 
     def _apply_learning_progress(
@@ -150,11 +218,27 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
         if learning_since is None:
             learning_since = now
         sample_count = max(1, int(getattr(self.service, "learned_charge_power_sample_count", 0)))
-        if abs(measured_power - previous_value) > self._learning_stability_tolerance(previous_value):
-            return self._restart_learning_sample(measured_power, now, current_phase_signature, current_voltage_signature)
+        sample_stability_score = self._learning_sample_stability_score(measured_power, previous_value)
+        if sample_stability_score <= 0:
+            return self._restart_learning_sample(
+                measured_power,
+                now,
+                current_phase_signature,
+                current_voltage_signature,
+                reason="learning-restart",
+                detail="sample-unstable",
+            )
         sample_count += 1
         learning_span = float(now) - float(learning_since)
-        if sample_count >= self.LEARNED_POWER_STABLE_MIN_SAMPLES and learning_span >= self.LEARNED_POWER_STABLE_MIN_SECONDS:
+        stability_score = self._combined_learning_stability_score(sample_stability_score)
+        confidence = self._learning_confidence_score(
+            "learning",
+            sample_count,
+            float(learning_since),
+            now,
+            stability_score,
+        )
+        if self._stable_learning_ready(sample_count, learning_span, stability_score):
             return self._apply_stable_learning(
                 learned_power,
                 updated_at=now,
@@ -162,19 +246,27 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
                 voltage_signature=learned_voltage_signature,
                 signature_mismatch_sessions=0,
                 checked_session_started_at=charging_started_at,
+                confidence=1.0,
+                stability_score=stability_score,
+                reason="learning-stable",
+                detail=f"samples={sample_count}",
             )
         return bool(
             self._set_learning_tracking(
-            self.service,
-            state="learning",
-            learned_power=learned_power,
-            updated_at=now,
-            learning_since=float(learning_since),
-            sample_count=sample_count,
-            phase_signature=current_phase_signature,
-            voltage_signature=learned_voltage_signature,
-            signature_mismatch_sessions=0,
-            checked_session_started_at=None,
+                self.service,
+                state="learning",
+                learned_power=learned_power,
+                updated_at=now,
+                learning_since=float(learning_since),
+                sample_count=sample_count,
+                phase_signature=current_phase_signature,
+                voltage_signature=learned_voltage_signature,
+                signature_mismatch_sessions=0,
+                checked_session_started_at=None,
+                confidence=confidence,
+                stability_score=stability_score,
+                reason="learning-sample",
+                detail=f"samples={sample_count}",
             )
         )
 
@@ -205,6 +297,7 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
             current_voltage_signature,
         )
         if current_state == "stable":
+            stability_score = self._learning_sample_stability_score(measured_power, previous_value)
             return self._apply_stable_learning(
                 learned_power,
                 updated_at=now,
@@ -212,6 +305,10 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
                 voltage_signature=learned_voltage_signature,
                 signature_mismatch_sessions=0,
                 checked_session_started_at=charging_started_at,
+                confidence=1.0,
+                stability_score=stability_score,
+                reason="learning-stable-refresh",
+                detail="stable-sample",
             )
         return self._apply_learning_progress(
             measured_power,

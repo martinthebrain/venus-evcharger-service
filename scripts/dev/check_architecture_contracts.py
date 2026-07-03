@@ -12,12 +12,38 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
+from architecture_gateway_read_contracts import check_gateway_read_contracts
+
 REPO = Path(__file__).resolve().parents[2]
 
 FORBIDDEN_SUBSTRINGS = {
     "venus_evcharger/ports/base.py": (
         "_resolve_compat_method_alias",
         "legacy ``_method`` lookups",
+    ),
+    "venus_evcharger/inputs/helper/sources_pv_grid.py": (
+        "_read_ac_pv_total",
+        "_read_dc_pv_power",
+        "_grid_total_and_missing_paths",
+        "_grid_path_numeric_value",
+    ),
+    "venus_evcharger/inputs/pv.py": (
+        "_resolve_pv_service_names",
+        "_read_pv_service_values",
+        "_read_rescanned_pv_services",
+        "_read_dc_pv_value",
+        "_handle_missing_pv_power",
+        "_ac_pv_total_with_optional_rescan",
+        "_dc_pv_total",
+    ),
+    "venus_evcharger/inputs/storage.py": (
+        "_read_battery_soc_value",
+    ),
+    "venus_evcharger/inputs/storage_support.py": (
+        "_configured_grid_paths",
+        "_read_grid_phase_values",
+        "_read_one_grid_phase",
+        "_finalize_grid_power",
     ),
 }
 
@@ -151,6 +177,8 @@ NO_MUTATE_FILE_PREFIXES = (
     "venus_evcharger/dbus_adapter",
     "venus_evcharger/dbus_gateway",
 )
+
+GATEWAY_SURFACE_IMPORT_PATTERN = re.compile(r"\b(?:from|import)\s+venus_evcharger\.dbus_gateway_surface\b")
 
 
 def _repo_text(path: Path) -> str:
@@ -395,6 +423,18 @@ def _check_suppression_contracts() -> list[str]:
     return failures
 
 
+def _check_gateway_surface_boundary() -> list[str]:
+    failures: list[str] = []
+    for path in sorted((REPO / "venus_evcharger").rglob("*.py")):
+        relative_path = str(path.relative_to(REPO))
+        text = _repo_text(path)
+        if "dbus_venus_surface" in text:
+            failures.append(f"{relative_path}: legacy dbus_venus_surface import/name is forbidden")
+        if GATEWAY_SURFACE_IMPORT_PATTERN.search(text) and not relative_path.startswith("venus_evcharger/dbus_gateway"):
+            failures.append(f"{relative_path}: import Venus surface contracts through venus_evcharger.dbus_gateway")
+    return failures
+
+
 def main() -> int:
     failures = [
         *_check_forbidden_substrings(),
@@ -402,6 +442,8 @@ def main() -> int:
         *_check_expected_class_bases(),
         *_check_multiple_inheritance_contract(),
         *_check_suppression_contracts(),
+        *_check_gateway_surface_boundary(),
+        *check_gateway_read_contracts(REPO),
     ]
     if failures:
         print("Architecture contract violations found:", file=sys.stderr)

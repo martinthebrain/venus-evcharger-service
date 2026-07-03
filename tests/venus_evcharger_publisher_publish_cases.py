@@ -365,6 +365,37 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         self.assertEqual(service._dbusservice["/UpdateIndex"], 7)
         service._enqueue_dbus_update_index_bump.assert_called_once_with(100.0)
 
+    def test_off_mainloop_live_measurements_are_queued_as_gateway_fields(self) -> None:
+        service = SimpleNamespace(
+            _dbusservice={"/Ac/Power": 1},
+            _dbus_publish_state={},
+            _dbus_live_publish_interval_seconds=1.0,
+            _dbus_slow_publish_interval_seconds=5.0,
+            _dbus_publish_direct_allowed=MagicMock(return_value=False),
+            _enqueue_dbus_publish_fields=MagicMock(return_value=True),
+        )
+        controller = DbusPublishController(service, self._age_seconds)
+
+        changed = controller.publish_live_measurements(
+            1000.0,
+            230.0,
+            4.3,
+            {
+                "L1": {"power": 1000.0, "current": 4.3, "voltage": 230.0},
+                "L2": {"power": 0.0, "current": 0.0, "voltage": 0.0},
+                "L3": {"power": 0.0, "current": 0.0, "voltage": 0.0},
+            },
+            100.0,
+        )
+
+        self.assertTrue(changed)
+        service._enqueue_dbus_publish_fields.assert_called_once()
+        fields, current = service._enqueue_dbus_publish_fields.call_args.args
+        self.assertEqual(current, 100.0)
+        self.assertIn(("ac_power_w", 1000.0), fields)
+        self.assertIn(("charge_current_a", 4.3), fields)
+        self.assertIn(("l1_voltage_v", 230.0), fields)
+
     def test_direct_dbus_publish_guard_fails_when_wrong_thread_touches_service(self) -> None:
         service = SimpleNamespace(
             _dbusservice={"/Path": 1},

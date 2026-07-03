@@ -28,6 +28,10 @@ def _snapshot_mapping(snapshot: object) -> dict[str, Any]:
     return _mapping_payload(snapshot) or {}
 
 
+def _normalized_clamp_future_timestamps(value: object) -> bool:
+    return value if isinstance(value, bool) else True
+
+
 def _resolved_snapshot_captured_at(
     captured_at: float | None,
     pm_captured_at: float | None,
@@ -130,6 +134,7 @@ def normalized_worker_snapshot(
 ) -> dict[str, Any]:
     normalized = _snapshot_mapping(snapshot)
     current = None if now is None else float(now)
+    clamp_future_timestamps = _normalized_clamp_future_timestamps(clamp_future_timestamps)
     captured_at = non_negative_float_or_none(normalized.get("captured_at"))
     pm_status, pm_captured_at, pm_confirmed = _snapshot_pm_payload(normalized)
     resolved_captured_at = _resolved_snapshot_captured_at(captured_at, pm_captured_at, current)

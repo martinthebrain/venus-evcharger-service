@@ -19,6 +19,7 @@ from venus_evcharger.energy import (
     summarize_energy_learning_profiles,
     update_energy_learning_profiles,
 )
+from venus_evcharger.dbus_gateway import BATTERY_SOC_READ_KEY
 
 from ..energy_snapshot_contracts import (
     energy_source_definitions,
@@ -97,7 +98,17 @@ class _AutoInputHelperSource(_AutoInputHelperSourcePvGrid):
         return source_payloads
 
     def _get_battery_snapshot(self: Any) -> dict[str, object]:
-        """Read combined battery data from one or more energy sources."""
+        """Read battery data from the gateway contract."""
+        if not self._source_retry_ready("battery"):
+            return {"battery_soc": None}
+        gateway_soc = self._get_gateway_read_value(BATTERY_SOC_READ_KEY, reason="helper semantic battery SOC read")
+        if gateway_soc is not None and 0.0 <= float(gateway_soc) <= 100.0:
+            return _AutoInputHelperSource._gateway_battery_snapshot(self, float(gateway_soc))
+        self._delay_source_retry("battery")
+        return object_mapping(self._empty_battery_snapshot())
+
+    def _get_energy_source_battery_snapshot(self: Any) -> dict[str, object]:
+        """Read combined battery data from configured energy-source definitions."""
         if not self._source_retry_ready("battery"):
             return {"battery_soc": None}
         try:
@@ -123,6 +134,21 @@ class _AutoInputHelperSource(_AutoInputHelperSourcePvGrid):
             self._invalidate_auto_battery_service()
             self._delay_source_retry("battery")
             return object_mapping(self._empty_battery_snapshot())
+
+    def _gateway_battery_snapshot(self: Any, battery_soc: float) -> dict[str, object]:
+        payload = _AutoInputHelperSource._empty_battery_snapshot()
+        payload.update(
+            {
+                "battery_soc": battery_soc,
+                "battery_combined_soc": battery_soc,
+                "battery_average_confidence": 1.0,
+                "battery_source_count": 1,
+                "battery_online_source_count": 1,
+                "battery_valid_soc_source_count": 1,
+                "battery_battery_source_count": 1,
+            }
+        )
+        return payload
 
     def _battery_snapshot_now(self: Any) -> float:
         return float(time.time())

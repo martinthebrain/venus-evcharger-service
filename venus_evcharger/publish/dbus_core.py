@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
+from venus_evcharger.dbus_gateway import EVCS_FIELD_TO_PATH, evcs_fields_to_paths
 from venus_evcharger.publish.dbus_shared import PublishServiceValueSnapshot, PublishStateEntry, PhaseData
 
 PUBLISH_DBUS_SERVICE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
@@ -52,13 +53,23 @@ class _DbusPublishCore:
         """Return whether DBus writes must be handed to the GLib thread."""
         direct_allowed = getattr(self.service, "_dbus_publish_direct_allowed", None)
         enqueue = getattr(self.service, "_enqueue_dbus_publish_values", None)
-        return callable(direct_allowed) and callable(enqueue) and not bool(direct_allowed())
+        enqueue_fields = getattr(self.service, "_enqueue_dbus_publish_fields", None)
+        return callable(direct_allowed) and (callable(enqueue) or callable(enqueue_fields)) and not bool(direct_allowed())
 
     def _enqueue_publish_values(self, staged_values: Sequence[tuple[str, Any]], current: float) -> bool:
         enqueue = getattr(self.service, "_enqueue_dbus_publish_values", None)
         if not callable(enqueue):
             return False
         return bool(enqueue(list(staged_values), current))
+
+    def _enqueue_publish_fields(self, staged_fields: Sequence[tuple[str, Any]], current: float) -> bool:
+        enqueue = getattr(self.service, "_enqueue_dbus_publish_fields", None)
+        if callable(enqueue):
+            return bool(enqueue(list(staged_fields), current))
+        return self._enqueue_publish_values(
+            self._field_items_to_path_items(staged_fields),
+            current,
+        )
 
     def _assert_dbus_access_allowed(self, operation: str) -> None:
         assert_allowed = getattr(self.service, "_assert_dbus_mainloop_thread", None)
@@ -92,6 +103,23 @@ class _DbusPublishCore:
         self.service._dbusservice[path] = value
         self.service._dbus_publish_state[path] = {"value": value, "updated_at": current}
         return True
+
+    def publish_field(
+        self,
+        field: str,
+        value: Any,
+        now: float | None = None,
+        interval_seconds: float | None = None,
+        force: bool = False,
+    ) -> bool:
+        """Publish one semantic EVCS field immediately, on change, or by interval."""
+        return self._publish_fields_transactional(
+            "single-field",
+            {str(field): value},
+            now,
+            interval_seconds=interval_seconds,
+            force=force,
+        )
 
     def _publish_decision(
         self,
@@ -269,6 +297,34 @@ class _DbusPublishCore:
         self._publish_group_failure(group_name, [failed_path], current)
         return False
 
+    def _publish_fields_transactional(
+        self,
+        group_name: str,
+        fields: Mapping[str, Any],
+        now: float | None,
+        interval_seconds: float | None = None,
+        force: bool = False,
+    ) -> bool:
+        """Publish one semantic EVCS field group through the gateway contract."""
+        self.ensure_state()
+        paths = evcs_fields_to_paths(fields)
+        current = time.time() if now is None else float(now)
+        effective_interval = self._effective_publish_interval(
+            interval_seconds,
+            group_name=group_name,
+            force=force,
+        )
+        if self._should_enqueue_publish():
+            staged_fields = self._staged_fields_for_enqueue(fields, paths, current, effective_interval, force)
+            return bool(staged_fields) and self._enqueue_publish_fields(staged_fields, current)
+        return self._publish_values_transactional(
+            group_name,
+            paths,
+            now,
+            interval_seconds=interval_seconds,
+            force=force,
+        )
+
     def _enqueue_transactional_publish(
         self,
         values: Mapping[str, Any],
@@ -297,6 +353,35 @@ class _DbusPublishCore:
                 staged_values.append((path, value))
         return staged_values
 
+    def _staged_fields_for_enqueue(
+        self,
+        fields: Mapping[str, Any],
+        paths: Mapping[str, Any],
+        current: float,
+        interval_seconds: float | None,
+        force: bool,
+    ) -> list[tuple[str, Any]]:
+        """Return semantic fields whose mapped DBus path should be written."""
+        staged_fields: list[tuple[str, Any]] = []
+        for field, value in fields.items():
+            path = EVCS_FIELD_TO_PATH.get(str(field), "")
+            if not path:
+                continue
+            should_write, _entry = self._publish_decision(path, paths[path], current, interval_seconds, force)
+            if should_write:
+                staged_fields.append((str(field), value))
+        return staged_fields
+
+    @staticmethod
+    def _field_items_to_path_items(fields: Sequence[tuple[str, Any]]) -> list[tuple[str, Any]]:
+        """Map semantic field tuples to DBus path tuples for legacy direct queues."""
+        return [
+            (path, value)
+            for field, value in fields
+            for path in [EVCS_FIELD_TO_PATH.get(str(field), "")]
+            if path
+        ]
+
     def _publish_values(
         self,
         values: Mapping[str, Any],
@@ -322,30 +407,32 @@ class _DbusPublishCore:
             if callable(enqueue_bump):
                 enqueue_bump(current)
                 return
-        self._assert_dbus_access_allowed("bump /UpdateIndex")
-        index = int(self.service._dbusservice["/UpdateIndex"]) + 1
+        update_index_path = EVCS_FIELD_TO_PATH["update_index"]
+        self._assert_dbus_access_allowed(f"bump {update_index_path}")
+        index = int(self.service._dbusservice[update_index_path]) + 1
         next_index = 0 if index > 255 else index
-        self.service._dbusservice["/UpdateIndex"] = next_index
-        self.service._dbus_publish_state["/UpdateIndex"] = {"value": next_index, "updated_at": current}
+        self.service._dbusservice[update_index_path] = next_index
+        self.service._dbus_publish_state[update_index_path] = {"value": next_index, "updated_at": current}
 
-    def _live_measurement_values(
+    def _live_measurement_fields(
         self,
         power: float,
         voltage: float,
         total_current: float,
         phase_data: PhaseData,
     ) -> dict[str, float]:
-        """Return fast-moving AC measurement values keyed by DBus path."""
+        """Return fast-moving AC measurement values keyed by semantic EVCS field."""
         values: dict[str, float] = {
-            "/Ac/Power": power,
-            "/Ac/Voltage": voltage,
-            "/Ac/Current": total_current,
-            "/Current": total_current,
+            "ac_power_w": power,
+            "ac_voltage_v": voltage,
+            "ac_current_a": total_current,
+            "charge_current_a": total_current,
         }
         for phase_name in self.PHASE_NAMES:
-            values[f"/Ac/{phase_name}/Power"] = phase_data[phase_name]["power"]
-            values[f"/Ac/{phase_name}/Current"] = phase_data[phase_name]["current"]
-            values[f"/Ac/{phase_name}/Voltage"] = phase_data[phase_name]["voltage"]
+            normalized = phase_name.lower()
+            values[f"{normalized}_power_w"] = phase_data[phase_name]["power"]
+            values[f"{normalized}_current_a"] = phase_data[phase_name]["current"]
+            values[f"{normalized}_voltage_v"] = phase_data[phase_name]["voltage"]
         return values
 
     def publish_live_measurements(
@@ -358,29 +445,29 @@ class _DbusPublishCore:
     ) -> bool:
         """Publish fast-changing AC measurements once per second."""
         self.ensure_state()
-        return self._publish_values_transactional(
+        return self._publish_fields_transactional(
             "live-measurements",
-            self._live_measurement_values(power, voltage, total_current, phase_data),
+            self._live_measurement_fields(power, voltage, total_current, phase_data),
             now,
             interval_seconds=self.service._dbus_live_publish_interval_seconds,
         )
 
-    def _energy_time_values(
+    def _energy_time_fields(
         self,
         energy_forward: float,
         phase_energies: Mapping[str, float],
         charging_time: int,
         session_energy: float,
     ) -> dict[str, float | int]:
-        """Return slower-moving energy and time values keyed by DBus path."""
+        """Return slower-moving energy and time values keyed by semantic EVCS field."""
         return {
-            "/Ac/Energy/Forward": energy_forward,
-            "/Ac/L1/Energy/Forward": phase_energies["L1"],
-            "/Ac/L2/Energy/Forward": phase_energies["L2"],
-            "/Ac/L3/Energy/Forward": phase_energies["L3"],
-            "/ChargingTime": charging_time,
-            "/Session/Energy": session_energy,
-            "/Session/Time": charging_time,
+            "energy_forward_kwh": energy_forward,
+            "l1_energy_forward_kwh": phase_energies["L1"],
+            "l2_energy_forward_kwh": phase_energies["L2"],
+            "l3_energy_forward_kwh": phase_energies["L3"],
+            "charging_time_s": charging_time,
+            "session_energy_kwh": session_energy,
+            "session_time_s": charging_time,
         }
 
     def publish_energy_time_measurements(
@@ -393,9 +480,9 @@ class _DbusPublishCore:
     ) -> bool:
         """Publish energy and time related values at most every five seconds."""
         self.ensure_state()
-        return self._publish_values_transactional(
+        return self._publish_fields_transactional(
             "energy-time",
-            self._energy_time_values(energy_forward, phase_energies, charging_time, session_energy),
+            self._energy_time_fields(energy_forward, phase_energies, charging_time, session_energy),
             now,
             interval_seconds=self.service._dbus_slow_publish_interval_seconds,
         )

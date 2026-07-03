@@ -265,7 +265,7 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
         svc.active_phase_selection = applied_selection
         self._clear_phase_switch_mismatch_tracking(svc, applied_selection)
         lockout_selection = getattr(svc, "_phase_switch_lockout_selection", None)
-        if lockout_selection is not None and normalize_phase_selection(lockout_selection, "P1") == applied_selection:
+        if lockout_selection is not None and normalize_phase_selection(lockout_selection) == applied_selection:
             self._clear_phase_switch_lockout(svc)
         svc._save_runtime_state()
         self._clear_auto_phase_candidate(svc)
@@ -353,7 +353,8 @@ class _RelayPhaseSwitchPolicy(_RelayPhaseSwitchMismatch):
 
     def _auto_phase_switch_already_active(self, svc: _AutoPhaseSwitchService) -> bool:
         pending_selection = self._pending_phase_switch_selection(svc)
-        switch_state = str(getattr(svc, "_phase_switch_state", "") or "")
+        raw_switch_state = svc._phase_switch_state if hasattr(svc, "_phase_switch_state") else None
+        switch_state = "" if raw_switch_state is None else str(raw_switch_state)
         return bool(self._phase_switch_state_active(pending_selection, switch_state))
 
     def _pending_auto_phase_target_ready(

@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_update_cycle_controller_support import *
+from venus_evcharger.update.learning_engine import (
+    LearningEngine,
+    LearningPlausibilityConfig,
+    LearningStableConfig,
+    LearningWindowConfig,
+)
+from venus_evcharger.update.learning_profile import normalized_learning_score, normalized_learning_text
 
 
 class _UpdateCycleQuaternaryLearningCases:
@@ -65,12 +72,21 @@ class _UpdateCycleQuaternaryLearningCases:
         self.assertEqual(service.learned_charge_power_state, "learning")
         self.assertEqual(service.learned_charge_power_learning_since, 100.0)
         self.assertEqual(service.learned_charge_power_sample_count, 1)
+        self.assertGreater(service.learned_charge_power_confidence, 0.0)
+        self.assertLess(service.learned_charge_power_confidence, 1.0)
+        self.assertEqual(service.learned_charge_power_stability_score, 1.0)
+        self.assertEqual(service.learned_charge_power_reason, "learning-restart")
+        self.assertEqual(service.learned_charge_power_detail, "new-baseline")
 
         self.assertTrue(controller.update_learned_charge_power(True, 2, 1940.0, 230.0, 110.0))
         self.assertEqual(service.learned_charge_power_watts, 1908.0)
         self.assertEqual(service.learned_charge_power_updated_at, 110.0)
         self.assertEqual(service.learned_charge_power_state, "learning")
         self.assertEqual(service.learned_charge_power_sample_count, 2)
+        self.assertGreater(service.learned_charge_power_confidence, 0.5)
+        self.assertGreater(service.learned_charge_power_stability_score, 0.9)
+        self.assertEqual(service.learned_charge_power_reason, "learning-sample")
+        self.assertEqual(service.learned_charge_power_detail, "samples=2")
 
         self.assertTrue(controller.update_learned_charge_power(True, 2, 1920.0, 230.0, 116.0))
         self.assertEqual(service.learned_charge_power_watts, 1910.4)
@@ -78,6 +94,13 @@ class _UpdateCycleQuaternaryLearningCases:
         self.assertEqual(service.learned_charge_power_state, "stable")
         self.assertIsNone(service.learned_charge_power_learning_since)
         self.assertEqual(service.learned_charge_power_sample_count, 3)
+        self.assertEqual(service.learned_charge_power_phase, "L1")
+        self.assertEqual(service.learned_charge_power_voltage, 230.0)
+        self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 50.0)
+        self.assertEqual(service.learned_charge_power_confidence, 1.0)
+        self.assertGreater(service.learned_charge_power_stability_score, 0.9)
+        self.assertEqual(service.learned_charge_power_reason, "learning-stable")
+        self.assertEqual(service.learned_charge_power_detail, "samples=3")
 
     def test_update_learned_charge_power_respects_disable_and_configurable_learning_parameters(self):
         disabled_service = _learning_service(
@@ -126,6 +149,8 @@ class _UpdateCycleQuaternaryLearningCases:
             lambda reason: {"init": 0}.get(reason, 99),
         )
         self.assertFalse(tuned_controller.update_learned_charge_power(True, 2, 650.0, 230.0, 95.0))
+        self.assertEqual(tuned_service.learned_charge_power_reason, "sample-rejected")
+        self.assertEqual(tuned_service.learned_charge_power_detail, "below-min")
         self.assertTrue(tuned_controller.update_learned_charge_power(True, 2, 2000.0, 230.0, 100.0))
         self.assertEqual(tuned_service.learned_charge_power_watts, 1900.0)
         self.assertEqual(tuned_service.learned_charge_power_updated_at, 100.0)
@@ -162,6 +187,56 @@ class _UpdateCycleQuaternaryLearningCases:
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertIsNone(controller._stored_positive_learned_charge_power())
+        service.learned_charge_power_watts = 0.5
+        self.assertEqual(controller._stored_positive_learned_charge_power(), 0.5)
+
+    def test_learning_storage_helpers_default_missing_optional_runtime_fields(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertIsNone(controller._stored_positive_learned_charge_power())
+        self.assertEqual(controller._stored_learning_state(), "unknown")
+        self.assertIsNone(controller._stored_learning_phase_signature())
+        self.assertEqual(controller._learning_signature_context(), (None, 0, None))
+        self.assertFalse(controller._should_restore_stable_learning("unknown"))
+
+        with patch.object(controller, "_normalize_learned_charge_power_state", side_effect=lambda value: value) as normalize:
+            self.assertEqual(controller._stored_learning_state(), "unknown")
+        normalize.assert_called_once_with("unknown")
+
+        controller.service = SimpleNamespace(
+            learned_charge_power_voltage=231.2,
+            learned_charge_power_signature_mismatch_sessions=2,
+            learned_charge_power_signature_checked_session_started_at=44.0,
+        )
+        self.assertEqual(controller._learning_signature_context(), (231.2, 2, 44.0))
+
+    def test_update_learned_charge_power_defaults_missing_learning_switch_to_enabled(self):
+        service = SimpleNamespace(charging_started_at=50.0)
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertTrue(controller.update_learned_charge_power(True, 2, 1900.0, 230.0, 100.0))
+        self.assertEqual(service.learned_charge_power_state, "learning")
+        self.assertEqual(service.learned_charge_power_watts, 1900.0)
+        self.assertEqual(service.learned_charge_power_updated_at, 100.0)
+        self.assertEqual(service.learned_charge_power_learning_since, 100.0)
+        self.assertEqual(service.learned_charge_power_sample_count, 1)
+        self.assertEqual(service.learned_charge_power_phase, "L1")
+        self.assertEqual(service.learned_charge_power_voltage, 230.0)
+        self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 0)
+        self.assertIsNone(service.learned_charge_power_signature_checked_session_started_at)
+
+    def test_update_learned_charge_power_passes_canonical_unknown_state_to_session_contract(self):
+        controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        with (
+            patch.object(controller, "_normalize_learned_charge_power_state", side_effect=lambda value: value),
+            patch.object(controller, "_current_learning_phase_signature", return_value="L1"),
+            patch.object(controller, "_current_learning_voltage_signature", return_value=230.0),
+            patch.object(controller, "_learning_session_result", return_value=(None, False)) as session_result,
+        ):
+            self.assertFalse(controller.update_learned_charge_power(False, 1, 0.0, 0.0, 100.0))
+
+        session_result.assert_called_once_with(True, True, False, 1, 100.0, "unknown")
 
     def test_learning_signature_contract_helpers_cover_session_delay_and_stable_power(self):
         service = _learning_service(
@@ -405,6 +480,51 @@ class _UpdateCycleQuaternaryLearningCases:
         self.assertEqual(service.learned_charge_power_updated_at, 92.0)
         self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 130.0)
 
+    def test_reconcile_learned_charge_power_signature_uses_current_session_signatures(self):
+        service = _learning_service(
+            charging_started_at=50.0,
+            learned_charge_power_watts=1900.0,
+            learned_charge_power_updated_at=91.0,
+            learned_charge_power_state="stable",
+            learned_charge_power_phase=None,
+            learned_charge_power_voltage=230.0,
+            learned_charge_power_signature_mismatch_sessions=0,
+            learned_charge_power_signature_checked_session_started_at=None,
+            auto_learn_charge_power_start_delay_seconds=30.0,
+            phase="3P",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertTrue(controller.reconcile_learned_charge_power_signature(True, 1900.0, 230.0, 100.0))
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+        self.assertEqual(service.learned_charge_power_voltage, 230.0)
+        self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 50.0)
+
+        service.learned_charge_power_signature_checked_session_started_at = None
+        service.learned_charge_power_signature_mismatch_sessions = 1
+        with self.assertLogs(level="WARNING") as logs:
+            self.assertTrue(controller.reconcile_learned_charge_power_signature(True, 1900.0, 255.0, 101.0))
+        self.assertIn("voltage=230.0/255.0V", logs.output[0])
+        self.assertEqual(service.learned_charge_power_state, "unknown")
+        self.assertIsNone(service.learned_charge_power_watts)
+
+    def test_reconcile_learned_charge_power_signature_defaults_missing_stored_phase_before_session(self):
+        service = SimpleNamespace(
+            charging_started_at=None,
+            learned_charge_power_watts=1900.0,
+            learned_charge_power_updated_at=91.0,
+            learned_charge_power_state="stable",
+            learned_charge_power_sample_count=3,
+            learned_charge_power_voltage=230.0,
+            learned_charge_power_signature_mismatch_sessions=0,
+            learned_charge_power_signature_checked_session_started_at=None,
+            auto_learn_charge_power_start_delay_seconds=30.0,
+            phase="L1",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertFalse(controller.reconcile_learned_charge_power_signature(True, 1900.0, 230.0, 100.0))
+
     def test_learning_signature_contract_helpers_cover_stable_reconcile_labels_and_logging(self):
         service = _learning_service(
             charging_started_at=50.0,
@@ -497,6 +617,73 @@ class _UpdateCycleQuaternaryLearningCases:
         self.assertFalse(controller.update_learned_charge_power(True, 2, 5000.0, 230.0, 100.0))
         self.assertEqual(service.learned_charge_power_watts, 1900.0)
 
+    def test_refresh_learning_tracking_without_phase_reset_contract_edges(self):
+        service = _learning_service(
+            learned_charge_power_watts=1900.04,
+            learned_charge_power_updated_at=80.0,
+            learned_charge_power_state="unknown",
+            learned_charge_power_learning_since=70.0,
+            learned_charge_power_sample_count=3,
+            learned_charge_power_phase="3P",
+            learned_charge_power_voltage=230.04,
+            learned_charge_power_signature_mismatch_sessions=1,
+            learned_charge_power_signature_checked_session_started_at=55.0,
+            auto_learn_charge_power_max_age_seconds=100.0,
+            phase="L1",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertTrue(
+            controller._refresh_learning_tracking_without_phase_reset(
+                100.0,
+                1900.0,
+                "unknown",
+                "3P",
+                "L1",
+            )
+        )
+        self.assertEqual(service.learned_charge_power_state, "stable")
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+
+        service.learned_charge_power_state = "stale"
+        service.learned_charge_power_phase = None
+        self.assertFalse(
+            controller._refresh_learning_tracking_without_phase_reset(
+                100.1,
+                1900.0,
+                "stale",
+                None,
+                "L1",
+            )
+        )
+        self.assertIsNone(service.learned_charge_power_phase)
+
+        self.assertTrue(
+            controller._refresh_learning_tracking_without_phase_reset(
+                100.2,
+                1900.0,
+                "STALE",
+                None,
+                "L1",
+            )
+        )
+        self.assertEqual(service.learned_charge_power_state, "stale")
+        self.assertEqual(service.learned_charge_power_phase, "L1")
+
+        service.learned_charge_power_state = "learning"
+        service.learned_charge_power_phase = None
+        self.assertTrue(
+            controller._refresh_learning_tracking_without_phase_reset(
+                100.3,
+                1900.0,
+                "learning",
+                "3P",
+                "L1",
+            )
+        )
+        self.assertEqual(service.learned_charge_power_state, "learning")
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+
     def test_learning_refresh_contract_preserves_restores_and_marks_stale_snapshots(self):
         service = _learning_service(
             learned_charge_power_watts=1900.04,
@@ -548,6 +735,98 @@ class _UpdateCycleQuaternaryLearningCases:
         self.assertEqual(service.learned_charge_power_state, "unknown")
         self.assertIsNone(service.learned_charge_power_watts)
 
+    def test_learning_refresh_helpers_preserve_signature_metadata_explicitly(self):
+        service = _learning_service(
+            learned_charge_power_watts=1900.04,
+            learned_charge_power_updated_at=42.0,
+            learned_charge_power_state="stable",
+            learned_charge_power_learning_since=31.0,
+            learned_charge_power_sample_count=2,
+            learned_charge_power_phase="3P",
+            learned_charge_power_voltage=231.2,
+            learned_charge_power_signature_mismatch_sessions=2,
+            learned_charge_power_signature_checked_session_started_at=77.0,
+            auto_learn_charge_power_max_age_seconds=10.0,
+            phase="3P",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertTrue(controller._apply_stale_learning(1900.04, "3P"))
+        self.assertEqual(service.learned_charge_power_state, "stale")
+        self.assertEqual(service.learned_charge_power_watts, 1900.0)
+        self.assertEqual(service.learned_charge_power_updated_at, 42.0)
+        self.assertIsNone(service.learned_charge_power_learning_since)
+        self.assertEqual(service.learned_charge_power_sample_count, 0)
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+        self.assertEqual(service.learned_charge_power_voltage, 231.2)
+        self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 2)
+        self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 77.0)
+
+        service.learned_charge_power_state = "learning"
+        service.learned_charge_power_learning_since = 31.0
+        service.learned_charge_power_sample_count = 2
+        self.assertFalse(controller._preserve_learning_tracking(1900.04, "learning", "3P", "L1"))
+        self.assertEqual(service.learned_charge_power_state, "learning")
+        self.assertEqual(service.learned_charge_power_updated_at, 42.0)
+        self.assertEqual(service.learned_charge_power_learning_since, 31.0)
+        self.assertEqual(service.learned_charge_power_sample_count, 2)
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+        self.assertEqual(service.learned_charge_power_voltage, 231.2)
+        self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 2)
+        self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 77.0)
+
+        with patch.object(controller, "_set_learning_tracking", return_value=True) as set_tracking:
+            self.assertTrue(controller._apply_stale_learning(1900.04, "3P"))
+        self.assertEqual(set_tracking.call_args.kwargs["state"], "stale")
+
+    def test_learning_refresh_helpers_default_missing_preserved_runtime_fields(self):
+        service = SimpleNamespace(
+            learned_charge_power_sample_count=0,
+            learned_charge_power_voltage=231.2,
+            learned_charge_power_signature_mismatch_sessions=2,
+            learned_charge_power_signature_checked_session_started_at=77.0,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertTrue(controller._apply_stale_learning(1900.04, "3P"))
+        self.assertEqual(service.learned_charge_power_state, "stale")
+        self.assertEqual(service.learned_charge_power_watts, 1900.0)
+        self.assertIsNone(service.learned_charge_power_updated_at)
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+        self.assertEqual(service.learned_charge_power_voltage, 231.2)
+        self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 2)
+        self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 77.0)
+
+        service = SimpleNamespace(
+            learned_charge_power_sample_count=0,
+            learned_charge_power_voltage=231.2,
+            learned_charge_power_signature_mismatch_sessions=2,
+            learned_charge_power_signature_checked_session_started_at=77.0,
+        )
+        controller.service = service
+        self.assertTrue(controller._restore_stable_learning(1900.04, "3P", "L1"))
+        self.assertEqual(service.learned_charge_power_state, "stable")
+        self.assertIsNone(service.learned_charge_power_updated_at)
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+        self.assertEqual(service.learned_charge_power_sample_count, controller.LEARNED_POWER_STABLE_MIN_SAMPLES)
+
+        service = SimpleNamespace(
+            learned_charge_power_voltage=231.2,
+            learned_charge_power_signature_mismatch_sessions=2,
+            learned_charge_power_signature_checked_session_started_at=77.0,
+        )
+        controller.service = service
+        self.assertTrue(controller._preserve_learning_tracking(1900.04, "learning", "3P", "L1"))
+        self.assertEqual(service.learned_charge_power_state, "learning")
+        self.assertEqual(service.learned_charge_power_watts, 1900.0)
+        self.assertIsNone(service.learned_charge_power_updated_at)
+        self.assertIsNone(service.learned_charge_power_learning_since)
+        self.assertEqual(service.learned_charge_power_sample_count, 0)
+        self.assertEqual(service.learned_charge_power_phase, "3P")
+        self.assertEqual(service.learned_charge_power_voltage, 231.2)
+        self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 2)
+        self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 77.0)
+
     def test_learning_runtime_contract_helpers_cover_phase_voltage_and_plausibility_edges(self):
         service = _learning_service(
             phase=" 3p ",
@@ -570,6 +849,8 @@ class _UpdateCycleQuaternaryLearningCases:
         service._last_voltage = 0.0
         self.assertIsNone(controller._current_learning_voltage_signature(0.0))
         service._last_voltage = 400.0
+        self.assertEqual(controller._accepted_learning_sample_result(400.0, 230.0), (None, "below-min"))
+        self.assertEqual(controller._accepted_learning_sample_result(1000.0, 230.0), (1000.0, "accepted"))
         self.assertAlmostEqual(
             controller._plausible_learning_power_max(0.5),
             10.0 * (0.5 / math.sqrt(3.0)) * 3.0 * 1.1,
@@ -584,6 +865,217 @@ class _UpdateCycleQuaternaryLearningCases:
         self.assertAlmostEqual(controller._plausible_learning_power_max(230.0), 10.0 * 230.0 * 3.0 * 1.1)
         service.max_current = -1.0
         self.assertEqual(controller._plausible_learning_power_max(230.0), 0.0)
+        self.assertEqual(controller._accepted_learning_sample_result(1000.0, 230.0), (None, "above-plausible"))
+
+    def test_learning_profile_confidence_and_adaptive_stability_contract(self):
+        service = _learning_service(
+            learned_charge_power_confidence=float("inf"),
+            learned_charge_power_stability_score=-1.0,
+            learned_charge_power_reason=" ",
+            learned_charge_power_detail=None,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        profile = controller._learning_profile()
+        self.assertEqual(profile.state, "stable")
+        self.assertEqual(profile.power, 1900.0)
+        self.assertEqual(profile.confidence, 0.0)
+        self.assertEqual(profile.stability_score, 0.0)
+        self.assertEqual(profile.reason, "na")
+        self.assertEqual(profile.detail, "")
+
+        self.assertEqual(controller._learning_sample_stability_score(1900.0, 1900.0), 1.0)
+        self.assertEqual(controller._learning_sample_stability_score(3000.0, 1900.0), 0.0)
+        service.learned_charge_power_stability_score = 0.0
+        self.assertEqual(controller._combined_learning_stability_score(0.8), 0.8)
+        service.learned_charge_power_stability_score = 1.0
+        self.assertEqual(controller._combined_learning_stability_score(0.0), 0.7)
+
+        self.assertEqual(controller._adaptive_stable_learning_seconds(0.95), 7.5)
+        self.assertEqual(controller._adaptive_stable_learning_seconds(0.80), 15.0)
+        self.assertEqual(controller._adaptive_stable_learning_seconds(0.70), 18.75)
+        self.assertEqual(controller._learning_confidence_score("stable", 3, None, 100.0, 0.7), 0.85)
+        self.assertEqual(controller._learning_confidence_score("unknown", 0, None, 100.0, 1.0), 0.0)
+        self.assertEqual(controller._learning_confidence_score("learning", 1, 100.0, 100.0, 1.0), 0.083)
+        self.assertTrue(controller._stable_learning_ready(3, 20.0, 0.7))
+        self.assertFalse(controller._stable_learning_ready(2, 20.0, 0.9))
+        self.assertFalse(controller._stable_learning_ready(3, 5.0, 0.9))
+        self.assertFalse(controller._stable_learning_ready(3, 20.0, 0.5))
+
+    def test_learning_profile_normalizers_cover_score_and_text_edges(self):
+        self.assertEqual(normalized_learning_score(None), 0.0)
+        self.assertEqual(normalized_learning_score(object()), 0.0)
+        self.assertEqual(normalized_learning_score("bad"), 0.0)
+        self.assertEqual(normalized_learning_score(float("nan")), 0.0)
+        self.assertEqual(normalized_learning_score(float("-inf")), 0.0)
+        self.assertEqual(normalized_learning_score(-0.01), 0.0)
+        self.assertEqual(normalized_learning_score(1.25), 1.0)
+        self.assertEqual(normalized_learning_score(b"0.4567"), 0.457)
+
+        self.assertEqual(normalized_learning_text(None, "fallback"), "fallback")
+        self.assertEqual(normalized_learning_text("  ", "fallback"), "fallback")
+        self.assertEqual(normalized_learning_text(" stable ", "fallback"), "stable")
+        self.assertEqual(normalized_learning_text(42, "fallback"), "42")
+
+    def test_learning_engine_contract_is_pure_and_explicit(self):
+        window = LearningWindowConfig(start_delay_seconds=10.0, window_seconds=20.0)
+        self.assertEqual(LearningEngine.window_status(None, window, 100.0), ("waiting", None))
+        self.assertEqual(LearningEngine.window_status(95.0, window, 100.0), ("waiting", None))
+        self.assertEqual(LearningEngine.window_status(90.0, window, 100.0), ("ready", 90.0))
+        self.assertEqual(LearningEngine.window_status(70.0, window, 100.0), ("ready", 70.0))
+        self.assertEqual(LearningEngine.window_status(69.0, window, 100.0), ("expired", 69.0))
+        self.assertEqual(LearningEngine.window_status(80.0, window, 100.0), ("ready", 80.0))
+        self.assertEqual(
+            LearningEngine.window_status(0.0, LearningWindowConfig(start_delay_seconds=10.0, window_seconds=0.0), 100.0),
+            ("ready", 0.0),
+        )
+        self.assertEqual(
+            LearningEngine.window_status(88.9, LearningWindowConfig(start_delay_seconds=10.0, window_seconds=1.0), 100.0),
+            ("expired", 88.9),
+        )
+
+        plausibility = LearningPlausibilityConfig(min_watts=500.0, max_watts=2500.0)
+        self.assertEqual(LearningEngine.accepted_sample(499.9, plausibility), (None, "below-min"))
+        self.assertEqual(LearningEngine.accepted_sample(500.0, plausibility), (500.0, "accepted"))
+        self.assertEqual(LearningEngine.accepted_sample(2500.0, plausibility), (2500.0, "accepted"))
+        self.assertEqual(LearningEngine.accepted_sample(2500.1, plausibility), (None, "above-plausible"))
+        self.assertEqual(LearningEngine.accepted_sample(1900.0, plausibility), (1900.0, "accepted"))
+
+        self.assertEqual(LearningEngine.smoothed_values(1900.0, 2000.0, None, None, 0.2), (1920.0, None))
+        self.assertEqual(LearningEngine.smoothed_values(1900.0, 2000.0, None, 231.0, 0.2), (1920.0, 231.0))
+        self.assertEqual(LearningEngine.smoothed_values(1900.0, 2000.0, 0.0, 231.0, 0.2), (1920.0, 231.0))
+        self.assertEqual(LearningEngine.smoothed_values(1900.0, 2000.0, -1.0, 231.0, 0.2), (1920.0, 231.0))
+        self.assertEqual(LearningEngine.smoothed_values(1900.0, 2000.0, 1.0, 231.0, 0.2), (1920.0, 47.0))
+        self.assertEqual(LearningEngine.smoothed_values(1900.0, 2000.0, 230.0, 235.0, 0.2), (1920.0, 231.0))
+
+        self.assertEqual(LearningEngine.sample_stability_score(1900.0, 1900.0, 0.0), 0.0)
+        self.assertEqual(LearningEngine.sample_stability_score(1900.0, 1900.0, -1.0), 0.0)
+        self.assertEqual(LearningEngine.sample_stability_score(1900.0, 1900.0, 0.5), 1.0)
+        self.assertEqual(LearningEngine.sample_stability_score(1900.0, 1900.0, 100.0), 1.0)
+        self.assertEqual(LearningEngine.sample_stability_score(1950.0, 1900.0, 100.0), 0.5)
+        self.assertEqual(LearningEngine.sample_stability_score(1850.0, 1900.0, 100.0), 0.5)
+        self.assertEqual(LearningEngine.sample_stability_score(2000.0, 1900.0, 100.0), 0.0)
+        self.assertEqual(LearningEngine.combined_stability_score(0.0, 0.8), 0.8)
+        self.assertEqual(LearningEngine.combined_stability_score(-1.0, 2.0), 1.0)
+        self.assertEqual(LearningEngine.combined_stability_score(1.0, 0.0), 0.7)
+        self.assertEqual(LearningEngine.combined_stability_score(0.5, 0.5), 0.5)
+        self.assertEqual(LearningEngine.adaptive_stable_seconds(1.0, 0.95), 1.0)
+        self.assertEqual(LearningEngine.adaptive_stable_seconds(15.0, 0.95), 7.5)
+        self.assertEqual(LearningEngine.adaptive_stable_seconds(15.0, 0.90), 7.5)
+        self.assertEqual(LearningEngine.adaptive_stable_seconds(15.0, 0.75), 15.0)
+        self.assertEqual(LearningEngine.adaptive_stable_seconds(15.0, 0.749), 18.75)
+
+        stable_config = LearningStableConfig(min_samples=3, base_seconds=15.0, min_stability_score=0.65)
+        self.assertTrue(LearningEngine.stable_ready(3, 20.0, 0.7, stable_config))
+        self.assertTrue(LearningEngine.stable_ready(3, 18.75, 0.65, stable_config))
+        self.assertFalse(LearningEngine.stable_ready(2, 20.0, 0.9, stable_config))
+        self.assertFalse(LearningEngine.stable_ready(3, 18.74, 0.65, stable_config))
+        self.assertFalse(LearningEngine.stable_ready(3, 20.0, 0.649, stable_config))
+        self.assertEqual(
+            LearningEngine.confidence_score("stable", 3, 3, None, 100.0, 0.9, 7.5),
+            0.9,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("stable", 3, 3, None, 100.0, 0.1, 7.5),
+            0.85,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("unknown", 3, 3, 90.0, 100.0, 1.0, 7.5),
+            0.0,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 3, 3, 92.5, 100.0, 1.0, 7.5),
+            1.0,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 6, 3, 80.0, 100.0, 0.5, 7.5),
+            0.5,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 1, 1, 99.0, 100.0, 1.0, 1.0),
+            1.0,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 1, 3, 100.0, 100.0, 1.0, 7.5),
+            0.083,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 3, 3, None, 100.0, 1.0, 2.0),
+            0.25,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 1, 3, 101.0, 100.0, 1.0, 7.5),
+            0.083,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 3, 3, 101.0, 100.0, 1.0, 2.0),
+            0.25,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 1, 2, 80.0, 100.0, 1.0, 2.0),
+            0.5,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 1, 3, 99.0, 100.0, 0.6, 0.0),
+            0.2,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 3, 3, 99.5, 100.0, 0.6, 10.0),
+            0.15,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", 3, 0, 99.0, 100.0, 1.0, 1.0),
+            1.0,
+        )
+        self.assertEqual(
+            LearningEngine.confidence_score("learning", -1, 3, None, 100.0, 1.0, 7.5),
+            0.0,
+        )
+
+    def test_learning_diagnostics_contract_applies_only_requested_normalized_fields(self):
+        service = _learning_service(
+            learned_charge_power_confidence=0.5,
+            learned_charge_power_stability_score=0.75,
+            learned_charge_power_reason="existing",
+            learned_charge_power_detail="detail",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertFalse(
+            controller._apply_learning_diagnostics(
+                service,
+                confidence=None,
+                stability_score=None,
+                reason=None,
+                detail=None,
+            )
+        )
+        self.assertEqual(service.learned_charge_power_confidence, 0.5)
+        self.assertEqual(service.learned_charge_power_reason, "existing")
+
+        self.assertTrue(
+            controller._apply_learning_diagnostics(
+                service,
+                confidence=2.0,
+                stability_score=-1.0,
+                reason="  ",
+                detail=" stable sample ",
+            )
+        )
+        self.assertEqual(service.learned_charge_power_confidence, 1.0)
+        self.assertEqual(service.learned_charge_power_stability_score, 0.0)
+        self.assertEqual(service.learned_charge_power_reason, "na")
+        self.assertEqual(service.learned_charge_power_detail, "stable sample")
+
+        self.assertFalse(
+            controller._apply_learning_diagnostics(
+                service,
+                confidence=1.0,
+                stability_score=0.0,
+                reason="na",
+                detail="stable sample",
+            )
+        )
 
     def test_set_learning_tracking_contract_reports_change_only_after_normalized_difference(self):
         service = _learning_service(

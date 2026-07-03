@@ -310,7 +310,7 @@ class DbusReadExecutor:
         return value
 
     def read_busitem_now(self, service: str, path: str) -> object:
-        obj = self.adapter.connection.bus().get_object(service, path, introspect=False)
+        obj = self.adapter.connection.get_object(service, path, introspect=False)
         iface = dbus.Interface(obj, "com.victronenergy.BusItem")
         value: object = coerce_dbus_numeric(iface.GetValue(timeout=1.0))
         return value

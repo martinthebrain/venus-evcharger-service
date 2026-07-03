@@ -170,6 +170,7 @@ class DbusWriteSchedulerCore:
             "register_path": self.register_path,
             "publish_value": lambda item: self.publish_command(item, command_file=command_file),
             "publish_desired": lambda item: self.publish_command(item, command_file=command_file),
+            "publish_fields": lambda item: self.publish_command(item, command_file=command_file),
             "set_value": self.set_remote_value,
         }
         handler = handlers.get(kind)

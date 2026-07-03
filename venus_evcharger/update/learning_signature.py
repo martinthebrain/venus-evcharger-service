@@ -133,6 +133,10 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
         voltage_signature: float | None,
         signature_mismatch_sessions: int,
         checked_session_started_at: float | None,
+        confidence: float | None = None,
+        stability_score: float | None = None,
+        reason: str | None = None,
+        detail: str | None = None,
     ) -> bool:
         """Persist one stable learned-power snapshot."""
         return bool(
@@ -147,6 +151,10 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
                 voltage_signature=voltage_signature,
                 signature_mismatch_sessions=signature_mismatch_sessions,
                 checked_session_started_at=checked_session_started_at,
+                confidence=confidence,
+                stability_score=stability_score,
+                reason=reason,
+                detail=detail,
             )
         )
 

@@ -89,6 +89,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
             cls._string_metric(metrics.get("stop_alpha_stage")),
             cls._string_metric(metrics.get("threshold_mode")),
             cls._string_metric(metrics.get("learned_charge_power_state")),
+            cls._bucket_metric(metrics.get("learned_charge_power_confidence"), step=0.05),
+            cls._bucket_metric(metrics.get("learned_charge_power_stability_score"), step=0.05),
+            cls._string_metric(metrics.get("learned_charge_power_reason")),
             cls._bucket_metric(metrics.get("start_threshold"), step=50.0),
             cls._bucket_metric(metrics.get("stop_threshold"), step=50.0),
             cls._bucket_metric(metrics.get("threshold_scale"), step=0.02),
@@ -147,6 +150,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
             f"stop_threshold={fields['stop_threshold']}\t"
             f"learned_charge_power={fields['learned_charge_power']}\t"
             f"learned_charge_power_state={fields['learned_charge_power_state']}\t"
+            f"learned_charge_power_confidence={fields['learned_charge_power_confidence']}\t"
+            f"learned_charge_power_stability={fields['learned_charge_power_stability']}\t"
+            f"learned_charge_power_reason={fields['learned_charge_power_reason']}\t"
             f"threshold_scale={fields['threshold_scale']}\t"
             f"threshold_mode={fields['threshold_mode']}\t"
             f"backend_mode={fields['backend_mode']}\t"
@@ -194,6 +200,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
             "stop_threshold": ("stop_threshold", "{:.0f}W"),
             "learned_charge_power": ("learned_charge_power", "{:.0f}W"),
             "learned_charge_power_state": ("learned_charge_power_state", None),
+            "learned_charge_power_confidence": ("learned_charge_power_confidence", "{:.3f}"),
+            "learned_charge_power_stability": ("learned_charge_power_stability_score", "{:.3f}"),
+            "learned_charge_power_reason": ("learned_charge_power_reason", None),
             "threshold_scale": ("threshold_scale", "{:.3f}"),
             "threshold_mode": ("threshold_mode", None),
             "backend_mode": ("backend_mode", None),
@@ -251,6 +260,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
         metrics["charger_transport_source"] = _RuntimeAudit._charger_transport_source_for_audit(svc)
         metrics["charger_retry_reason"] = _RuntimeAudit._charger_retry_reason_for_audit(svc)
         metrics["charger_retry_source"] = _RuntimeAudit._charger_retry_source_for_audit(svc)
+        metrics["learned_charge_power_confidence"] = getattr(svc, "learned_charge_power_confidence", None)
+        metrics["learned_charge_power_stability_score"] = getattr(svc, "learned_charge_power_stability_score", None)
+        metrics["learned_charge_power_reason"] = getattr(svc, "learned_charge_power_reason", None)
         metrics["phase_observed"] = _RuntimeAudit._observed_phase_for_audit(svc)
         metrics["phase_mismatch"] = int(_RuntimeAudit._phase_mismatch_active_for_audit(svc))
         metrics["phase_lockout_target"] = _RuntimeAudit._phase_lockout_target_for_audit(svc)

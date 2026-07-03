@@ -41,9 +41,46 @@ from venus_evcharger.core.contracts import finite_float_or_none, normalize_binar
 from venus_evcharger.backend.shelly_io import JsonObject, ShellyPmStatus, ShellyRpcScalar
 
 
-def _config_value(defaults: configparser.SectionProxy, key: str, fallback: object) -> str:
+ConfigValues = Mapping[str, str]
+
+
+def _section_values(section: configparser.SectionProxy) -> dict[str, str]:
+    """Return one case-insensitive, testable view of a config section."""
+    return {str(key).strip().lower(): str(value) for key, value in section.items()}
+
+
+def _config_value(defaults: ConfigValues, key: str, fallback: object) -> str:
     """Return one config value with a typed fallback."""
     return defaults.get(key, str(fallback))
+
+
+def _optional_config_value(defaults: ConfigValues, key: str) -> str | None:
+    """Return one optional normalized config value."""
+    return defaults.get(key)
+
+
+def _binary_config_flag(defaults: ConfigValues, key: str, *, default: bool = False) -> bool:
+    """Return one bool config flag without hiding absent values in coercion defaults."""
+    raw = _optional_config_value(defaults, key)
+    if raw is None:
+        return bool(default)
+    return bool(normalize_binary_flag(raw))
+
+
+def _default_phase_selection(
+    profile_defaults: ShellyProfileDefaults | None,
+    service: object,
+) -> PhaseSelection:
+    """Return the profile or service default measured phase selection."""
+    if profile_defaults is not None and profile_defaults.default_phase_selection is not None:
+        return profile_defaults.default_phase_selection
+    raw = getattr(service, "phase", None)
+    return "P1" if raw is None else normalize_phase_selection(raw)
+
+
+def _service_digest_auth_default(service: object) -> bool:
+    """Return the service-level digest-auth default when explicitly present."""
+    return bool(getattr(service, "use_digest_auth")) if hasattr(service, "use_digest_auth") else False
 
 
 def _config(defaults_path: str) -> configparser.ConfigParser:
@@ -78,16 +115,17 @@ def _optional_signal_readback_settings(
     """Return one optional Shelly signal-readback descriptor from config."""
     if _empty_signal_section(section):
         return None
-    component = str(section.get("Component", default_component)).strip() or str(default_component)
-    device_id = int(section.get("Id", str(default_id)))
-    value_path = str(section.get("ValuePath", _default_signal_value_path(component))).strip()
+    values = _section_values(section)
+    component = _config_value(values, "component", default_component).strip() or str(default_component)
+    device_id = int(_config_value(values, "id", default_id))
+    value_path = _config_value(values, "valuepath", _default_signal_value_path(component)).strip()
     if not value_path:
         raise ValueError(f"Shelly signal readback for [{section.name}] requires ValuePath")
     return ShellySignalReadbackSettings(
         component=component,
         device_id=device_id,
         value_path=value_path,
-        invert=bool(normalize_binary_flag(section.get("Invert", "0"))),
+        invert=_binary_config_flag(values, "invert"),
     )
 
 
@@ -118,15 +156,15 @@ def load_shelly_backend_settings(
     phase_map = config_section(parser, "PhaseMap")
     feedback = config_section(parser, "Feedback")
     interlock = config_section(parser, "Interlock")
-    profile_name = normalize_shelly_profile_name(adapter.get("ShellyProfile", ""))
+    adapter_values = _section_values(adapter)
+    capability_values = _section_values(capabilities)
+    profile_name = normalize_shelly_profile_name(_config_value(adapter_values, "shellyprofile", ""))
     profile_defaults = resolve_shelly_profile(profile_name)
-    default_phase = normalize_phase_selection(
-        profile_defaults.default_phase_selection if profile_defaults is not None else getattr(service, "phase", "P1")
-    )
+    default_phase = _default_phase_selection(profile_defaults, service)
     device_id = int(
         _config_value(
-            adapter,
-            "Id",
+            adapter_values,
+            "id",
             profile_defaults.device_id if profile_defaults is not None else getattr(service, "pm_id", 0),
         )
     )
@@ -136,22 +174,23 @@ def load_shelly_backend_settings(
     component = _resolved_shelly_component(adapter, profile_defaults, service)
     return ShellyBackendSettings(
         profile_name=profile_name,
-        host=str(adapter.get("Host", getattr(service, "host", ""))).strip(),
+        host=_config_value(adapter_values, "host", getattr(service, "host", "")).strip(),
         component=component,
         device_id=device_id,
         timeout_seconds=_resolved_timeout_seconds(adapter, service),
-        username=str(adapter.get("Username", getattr(service, "username", ""))).strip(),
-        password=str(adapter.get("Password", getattr(service, "password", ""))).strip(),
-        use_digest_auth=bool(
-            normalize_binary_flag(
-                adapter.get("DigestAuth", "1" if bool(getattr(service, "use_digest_auth", False)) else "0")
-            )
+        username=_config_value(adapter_values, "username", getattr(service, "username", "")).strip(),
+        password=_config_value(adapter_values, "password", getattr(service, "password", "")).strip(),
+        use_digest_auth=_binary_config_flag(
+            adapter_values,
+            "digestauth",
+            default=_service_digest_auth_default(service),
         ),
         phase_selection=_resolved_phase_selection(phase, default_phase),
         switching_mode=switching_mode,
         supported_phase_selections=supported_phase_selections,
-        requires_charge_pause_for_phase_change=bool(
-            normalize_binary_flag(capabilities.get("RequiresChargePauseForPhaseChange", "0"))
+        requires_charge_pause_for_phase_change=_binary_config_flag(
+            capability_values,
+            "requireschargepauseforphasechange",
         ),
         max_direct_switch_power_w=max_power,
         phase_switch_targets=_phase_switch_targets(phase_map, device_id, supported_phase_selections),
@@ -166,8 +205,9 @@ def _resolved_shelly_component(
     service: Any,
 ) -> str:
     """Return the effective Shelly RPC component for one backend."""
+    values = _section_values(adapter)
     default_component = profile_defaults.component if profile_defaults is not None else getattr(service, "pm_component", "Switch")
-    return str(adapter.get("Component", default_component)).strip() or "Switch"
+    return _config_value(values, "component", default_component).strip() or "Switch"
 
 
 def _resolved_switching_mode(
@@ -175,20 +215,24 @@ def _resolved_switching_mode(
     default_switching_mode: SwitchingMode,
 ) -> SwitchingMode:
     """Return the normalized switching mode from backend capabilities."""
+    values = _section_values(capabilities)
     return normalize_switching_mode(
-        capabilities.get("SwitchingMode", default_switching_mode),
+        values.get("switchingmode"),
         default_switching_mode,
     )
 
 
 def _supported_phase_selections(capabilities: configparser.SectionProxy) -> tuple[PhaseSelection, ...]:
     """Return the normalized supported phase selections from backend capabilities."""
-    return parse_phase_selection_list(capabilities.get("SupportedPhaseSelections", "P1"), default=("P1",))
+    values = _section_values(capabilities)
+    raw = _optional_config_value(values, "supportedphaseselections")
+    return ("P1",) if raw is None else parse_phase_selection_list(raw)
 
 
 def _configured_max_direct_switch_power_w(capabilities: configparser.SectionProxy) -> float | None:
     """Return the explicitly configured direct-switch power limit when present."""
-    return finite_float_or_none(capabilities.get("MaxDirectSwitchPowerWatts", None))
+    values = _section_values(capabilities)
+    return finite_float_or_none(values.get("maxdirectswitchpowerwatts"))
 
 
 def _derived_max_direct_switch_power_w(service: Any) -> float | None:
@@ -214,7 +258,8 @@ def _resolved_max_direct_switch_power_w(
 
 def _resolved_timeout_seconds(adapter: configparser.SectionProxy, service: Any) -> float:
     """Return the normalized Shelly backend timeout in seconds."""
-    return float(_config_value(adapter, "RequestTimeoutSeconds", getattr(service, "shelly_request_timeout_seconds", 2.0)))
+    values = _section_values(adapter)
+    return float(_config_value(values, "requesttimeoutseconds", getattr(service, "shelly_request_timeout_seconds", 2.0)))
 
 
 def _resolved_phase_selection(
@@ -222,10 +267,11 @@ def _resolved_phase_selection(
     default_phase: PhaseSelection,
 ) -> PhaseSelection:
     """Return the normalized measured phase selection for one Shelly backend."""
-    return normalize_phase_selection(
-        phase.get("MeasuredPhaseSelection", phase.get("MeasuredPhase", default_phase)),
-        default_phase,
-    )
+    values = _section_values(phase)
+    raw = _optional_config_value(values, "measuredphaseselection")
+    if raw is None:
+        raw = _optional_config_value(values, "measuredphase")
+    return default_phase if raw is None else normalize_phase_selection(raw, default_phase)
 
 
 def _has_credentials(username: str, password: str) -> bool:

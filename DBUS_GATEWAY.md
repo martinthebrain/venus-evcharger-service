@@ -26,6 +26,11 @@ The adapter owns:
 
 The rest of the project reads gateway snapshots or submits gateway commands.
 
+The gateway owns DBus transport; it does not own the semantic Venus EV charger
+surface. GUI/VRM-visible path requirements live in
+[VENUS_DBUS_SURFACE.md](VENUS_DBUS_SURFACE.md) and
+`venus_evcharger/dbus_gateway_surface.py`, exported through the gateway facade.
+
 ## Runtime Files
 
 By default the gateway uses `/run/venus-evcharger`:
@@ -68,6 +73,25 @@ Consumers read `dbus-cache.json`. Every value is more than a scalar:
 
 If a value is missing or too old, consumers request a refresh from the gateway.
 They still do not read DBus directly.
+
+Standard Auto inputs do not use raw DBus service/path keys. PV power, grid
+power, and battery SOC are gateway-owned semantic read keys:
+
+- `pv_power_w`
+- `grid_power_w`
+- `battery_soc`
+
+Core and helper code must request these through `GatewayClient.request_read_key`
+or the strict `gateway_read_value` helpers. This mirrors the publish-side
+semantic field contract: backend policy consumes domain values and does not
+know whether the gateway obtained them from AC PV services, DC PV paths,
+three grid phases, or another future transport.
+
+Explicit service/path reads are still possible for deliberately raw detail
+surfaces such as relay readback or configured energy-source diagnostics, but
+they must use the visibly named `GatewayClient.request_raw_value`. Raw reads are
+not a standard Auto input path, and architecture checks reject the old
+`request_read(service, path)` shape.
 
 ## Write Model
 

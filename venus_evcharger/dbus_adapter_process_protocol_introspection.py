@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import configparser
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from venus_evcharger.dbus_adapter_components import (
     CommandOutcome,
@@ -17,6 +17,8 @@ from venus_evcharger.dbus_adapter_components import (
 from venus_evcharger.dbus_adapter_read import DbusReadExecutor
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox
 from venus_evcharger.dbus_gateway_command_types import CommandMapping, CommandPayload
+
+_T = TypeVar("_T")
 
 
 class DbusAdapterIntrospectionContext(Protocol):  # pragma: no cover
@@ -65,7 +67,7 @@ class DbusAdapterIntrospectionContext(Protocol):  # pragma: no cover
     def drop_failed_introspection(self, service: str, path: str, error: BaseException) -> CommandOutcome: ...
     def record_introspection_xml(self, service: str, path: str, xml_data: object) -> None: ...
     def list_services(self) -> list[str]: ...
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], Any]) -> Any: ...
+    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T: ...
 
 
 class DbusAdapterIntrospectionSnapshotContext(Protocol):  # pragma: no cover

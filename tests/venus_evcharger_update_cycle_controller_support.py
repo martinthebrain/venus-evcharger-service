@@ -147,6 +147,10 @@ class LearningServiceStub:
     learned_charge_power_voltage: float | None
     learned_charge_power_signature_mismatch_sessions: int
     learned_charge_power_signature_checked_session_started_at: float | None
+    learned_charge_power_confidence: float
+    learned_charge_power_stability_score: float
+    learned_charge_power_reason: str
+    learned_charge_power_detail: str
     auto_learn_charge_power_enabled: bool
     auto_learn_charge_power_start_delay_seconds: float
     auto_learn_charge_power_window_seconds: float
@@ -168,6 +172,10 @@ class LearningServiceStub:
         self.learned_charge_power_voltage = 230.0
         self.learned_charge_power_signature_mismatch_sessions = 0
         self.learned_charge_power_signature_checked_session_started_at = None
+        self.learned_charge_power_confidence = 1.0
+        self.learned_charge_power_stability_score = 1.0
+        self.learned_charge_power_reason = "stable"
+        self.learned_charge_power_detail = ""
         self.auto_learn_charge_power_enabled = True
         self.auto_learn_charge_power_start_delay_seconds = 30.0
         self.auto_learn_charge_power_window_seconds = 180.0

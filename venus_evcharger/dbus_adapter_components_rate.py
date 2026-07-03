@@ -5,17 +5,22 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Callable
 from contextlib import suppress
-from typing import Any
 
 import dbus
 
 from venus_evcharger.dbus_gateway import LatencyWindow
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
+DBUS_OPERATION_KIND = "dbus"
+DBUS_EXCEPTION_ATTRIBUTE = "DBusException"
+
 
 def _dbus_exception_type() -> type[BaseException]:
-    candidate = getattr(dbus, "DBusException", RuntimeError)
+    if not hasattr(dbus, DBUS_EXCEPTION_ATTRIBUTE):
+        return RuntimeError
+    candidate = getattr(dbus, DBUS_EXCEPTION_ATTRIBUTE)
     if isinstance(candidate, type) and issubclass(candidate, BaseException):
         return candidate
     return RuntimeError
@@ -42,6 +47,16 @@ DBUS_GATEWAY_OPERATION_ERRORS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
 )
+
+
+def _normalized_kind(kind: str) -> str:
+    normalized = str(kind).strip()
+    return normalized if normalized else DBUS_OPERATION_KIND
+
+
+def _normalized_priority(priority: str) -> str:
+    normalized = str(priority).strip().lower()
+    return normalized if normalized else "diagnostic"
 
 
 class DbusOperationDeferred(RuntimeError):
@@ -94,25 +109,27 @@ class DbusCircuitBreaker:
         self._successes: deque[tuple[float, str]] = deque()
         self.consecutive_failures = 0
 
-    def record_success(self, latency_ms: float, *, kind: str = "dbus") -> None:
+    def record_success(self, latency_ms: float, *, kind: str = DBUS_OPERATION_KIND) -> None:
         now = time.time()
+        normalized_kind = _normalized_kind(kind)
         self.latencies.record_latency(latency_ms, now=now)
-        self._kind_window(kind).record_latency(latency_ms, now=now)
-        self._successes.append((now, str(kind or "dbus")))
+        self._kind_window(normalized_kind).record_latency(latency_ms, now=now)
+        self._successes.append((now, normalized_kind))
         self._prune_events(now)
         self.last_success_at = now
         self.last_error = ""
         self.consecutive_failures = 0
 
-    def record_error(self, error: BaseException, *, kind: str = "dbus") -> None:
+    def record_error(self, error: BaseException, *, kind: str = DBUS_OPERATION_KIND) -> None:
         now = time.time()
+        normalized_kind = _normalized_kind(kind)
         self.last_error = str(error)
-        self._errors.append((now, str(kind or "dbus")))
+        self._errors.append((now, normalized_kind))
         self._prune_events(now)
         self.consecutive_failures += 1
         if self._looks_like_timeout(error):
             self.latencies.record_timeout(now=now)
-            self._kind_window(kind).record_timeout(now=now)
+            self._kind_window(normalized_kind).record_timeout(now=now)
             count = int(self.latencies.summary(now=now)["timeouts_60s"])
             if count > DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE:
                 self.protective_until = max(self.protective_until, now + self.protective_seconds)
@@ -128,7 +145,7 @@ class DbusCircuitBreaker:
         return "ok"
 
     def allows_priority(self, priority: str) -> bool:
-        rank = PRIORITY_RANKS.get(str(priority or "diagnostic"), DEFAULT_PRIORITY_RANK)
+        rank = PRIORITY_RANKS.get(_normalized_priority(priority), DEFAULT_PRIORITY_RANK)
         state = self.state()
         if state == "protective":
             return rank <= PROTECTIVE_MAX_ALLOWED_PRIORITY_RANK
@@ -154,7 +171,7 @@ class DbusCircuitBreaker:
         }
 
     def _kind_window(self, kind: str) -> LatencyWindow:
-        normalized = str(kind or "dbus")
+        normalized = _normalized_kind(kind)
         if normalized not in self.latencies_by_kind:
             self.latencies_by_kind[normalized] = LatencyWindow()
         return self.latencies_by_kind[normalized]
@@ -170,19 +187,32 @@ class DbusCircuitBreaker:
     def _looks_like_timeout(error: BaseException) -> bool:
         detail = str(error).lower()
         name = _dbus_error_name(error)
-        return "timeout" in detail or "noreply" in detail or "no_reply" in detail or "noreply" in name
+        return (
+            "timeout" in detail
+            or "timed out" in detail
+            or "noreply" in detail
+            or "no_reply" in detail
+            or "noreply" in name
+        )
 
 
 class DbusConnectionManager:
     """Own the private system bus connection."""
 
     def __init__(self) -> None:
-        self._bus: Any = None
+        self._bus: object | None = None
 
-    def bus(self) -> Any:
+    def bus(self) -> object:
         if self._bus is None:
             self._bus = dbus.SystemBus(private=True)
         return self._bus
+
+    def get_object(self, bus_name: str, object_path: str, *, introspect: bool = False) -> object:
+        raw_get_object = getattr(self.bus(), "get_object", None)
+        if not callable(raw_get_object):
+            raise TypeError("DBus bus does not provide get_object")
+        get_object: Callable[..., object] = raw_get_object
+        return get_object(bus_name, object_path, introspect=introspect)
 
     def reset(self) -> None:
         close = getattr(self._bus, "close", None)

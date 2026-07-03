@@ -79,8 +79,9 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "is not valid for switch backends"):
             validate_shelly_profile_role("pm1_meter", "switch")
         self.assertEqual(_config("").sections(), [])
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(FileNotFoundError) as missing_config:
             _config("/definitely/missing.ini")
+        self.assertEqual(missing_config.exception.args, ("/definitely/missing.ini",))
 
         section = self._section("Feedback", {"Component": "Input", "ValuePath": ""})
         with self.assertRaisesRegex(ValueError, "requires ValuePath"):
@@ -174,6 +175,43 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         self.assertEqual(settings.phase_switch_targets, {"P1": (3,)})
         self.assertIsNone(settings.feedback_readback)
         self.assertIsNone(settings.interlock_readback)
+
+    def test_shelly_settings_minimal_service_defaults_are_stable(self) -> None:
+        settings = load_shelly_backend_settings(SimpleNamespace())
+
+        self.assertEqual(settings.host, "")
+        self.assertEqual(settings.component, "Switch")
+        self.assertEqual(settings.device_id, 0)
+        self.assertEqual(settings.username, "")
+        self.assertEqual(settings.password, "")
+        self.assertFalse(settings.use_digest_auth)
+        self.assertEqual(settings.phase_selection, "P1")
+        self.assertEqual(settings.phase_switch_targets, {"P1": (0,)})
+
+    def test_shelly_profile_default_phase_overrides_service_default_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "shelly.ini"
+            config_path.write_text("[Adapter]\nShellyProfile=em_meter\n", encoding="utf-8")
+
+            settings = load_shelly_backend_settings(
+                SimpleNamespace(phase="P1", use_digest_auth=True),
+                str(config_path),
+            )
+
+        self.assertEqual(settings.component, "EM")
+        self.assertEqual(settings.device_id, 0)
+        self.assertEqual(settings.phase_selection, "P1_P2_P3")
+        self.assertTrue(settings.use_digest_auth)
+
+    def test_shelly_profile_without_phase_default_uses_service_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "shelly.ini"
+            config_path.write_text("[Adapter]\nShellyProfile=switch_1ch\n", encoding="utf-8")
+
+            settings = load_shelly_backend_settings(SimpleNamespace(phase="P1_P2"), str(config_path))
+
+        self.assertEqual(settings.component, "Switch")
+        self.assertEqual(settings.phase_selection, "P1_P2")
 
     def test_shelly_settings_config_overrides_are_a_single_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -269,8 +307,10 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         service = SimpleNamespace(pm_component="PM1", shelly_request_timeout_seconds=3.0, max_current=10.0, _last_voltage=230.0)
 
         self.assertEqual(_resolved_shelly_component(adapter, None, service), "Switch")
+        self.assertEqual(_resolved_shelly_component(self._section("Adapter", {}), None, SimpleNamespace()), "Switch")
         self.assertEqual(_resolved_timeout_seconds(adapter, service), 6.0)
         self.assertEqual(_resolved_switching_mode(capabilities, "direct"), "contactor")
+        self.assertEqual(_resolved_switching_mode(self._section("Capabilities", {"SwitchingMode": "invalid"}), "contactor"), "contactor")
         self.assertEqual(_supported_phase_selections(capabilities), ("P1", "P1_P2"))
         self.assertEqual(_resolved_phase_selection(phase, "P1"), "P1_P2")
         self.assertIsNone(_resolved_max_direct_switch_power_w(service, capabilities, "contactor"))
@@ -286,6 +326,8 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
         empty_capabilities = self._section("Capabilities", {})
         self.assertEqual(_resolved_max_direct_switch_power_w(service, empty_capabilities, "direct"), 2300.0)
+        self.assertEqual(_derived_max_direct_switch_power_w(SimpleNamespace(max_current=0.5, _last_voltage=230.0)), 115.0)
+        self.assertEqual(_derived_max_direct_switch_power_w(SimpleNamespace(max_current=10.0, _last_voltage=0.5)), 5.0)
         self.assertIsNone(_derived_max_direct_switch_power_w(SimpleNamespace(max_current=0.0, _last_voltage=230.0)))
         self.assertIsNone(_derived_max_direct_switch_power_w(SimpleNamespace(max_current=10.0, _last_voltage=0.0)))
         self.assertIsNone(_derived_max_direct_switch_power_w(SimpleNamespace(max_current=None, _last_voltage=230.0)))
@@ -431,6 +473,10 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
             backend.reset_transport_session(new_session)
             self.assertTrue(strict_old_session.closed)
             self.assertIs(backend._session, new_session)
+
+            uninitialized_backend = object.__new__(ShellyBackendBase)
+            uninitialized_backend.reset_transport_session(new_session)
+            self.assertIs(uninitialized_backend._session, new_session)
 
     def test_shelly_io_host_contract_validates_core_service_boundary(self) -> None:
         service = SimpleNamespace(

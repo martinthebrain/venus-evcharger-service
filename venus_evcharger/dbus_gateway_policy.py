@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from venus_evcharger.dbus_gateway_command_types import CommandMapping
 from venus_evcharger.dbus_gateway_core import FAST_READ_KEYS, GUI_CRITICAL_PUBLISH_PATHS
+from venus_evcharger.dbus_gateway_surface import evcs_fields_to_paths
 
 _STATIC_QUEUE_CLASSES = {
     "register_path": "startup/register",
@@ -73,12 +74,28 @@ def _allowed_when_protective(priority: str, queue_class: str) -> bool:
 
 
 def _is_gui_critical_publish(command: CommandMapping) -> bool:
-    if _publish_path(command) in GUI_CRITICAL_PUBLISH_PATHS:
-        return True
+    return (
+        _single_publish_path_is_gui_critical(command)
+        or _publish_paths_are_gui_critical(command)
+        or _publish_fields_are_gui_critical(command)
+    )
+
+
+def _single_publish_path_is_gui_critical(command: CommandMapping) -> bool:
+    return _publish_path(command) in GUI_CRITICAL_PUBLISH_PATHS
+
+
+def _publish_paths_are_gui_critical(command: CommandMapping) -> bool:
     paths = command.get("paths")
-    if isinstance(paths, Mapping):
-        return any(str(item) in GUI_CRITICAL_PUBLISH_PATHS for item in paths)
-    return False
+    return isinstance(paths, Mapping) and any(str(item) in GUI_CRITICAL_PUBLISH_PATHS for item in paths)
+
+
+def _publish_fields_are_gui_critical(command: CommandMapping) -> bool:
+    fields = command.get("fields")
+    if not isinstance(fields, Mapping):
+        return False
+    mapped_paths = evcs_fields_to_paths({str(field): value for field, value in fields.items()})
+    return any(path in GUI_CRITICAL_PUBLISH_PATHS for path in mapped_paths)
 
 
 def _command_kind(command: CommandMapping) -> str:
@@ -86,7 +103,7 @@ def _command_kind(command: CommandMapping) -> str:
 
 
 def _is_publish_command(kind: str) -> bool:
-    return kind in {"publish_value", "publish_desired"}
+    return kind in {"publish_value", "publish_desired", "publish_fields"}
 
 
 def _refresh_key(command: CommandMapping) -> str:

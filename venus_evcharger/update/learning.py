@@ -12,7 +12,6 @@ from __future__ import annotations
 from .learning_support import _UpdateCycleLearningSupport
 
 
-
 class _UpdateCycleLearning(_UpdateCycleLearningSupport):
     def refresh_learned_charge_power_state(self, now: float) -> bool:
         """Refresh the coarse learned-power state outside active learning samples."""
@@ -125,8 +124,15 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
         if decision is not None:
             return decision
 
-        measured_power = self._accepted_learning_sample(power, voltage)
+        measured_power, sample_reason = self._accepted_learning_sample_result(power, voltage)
         if measured_power is None:
+            self._apply_learning_diagnostics(
+                self.service,
+                confidence=0.0,
+                stability_score=0.0,
+                reason="sample-rejected",
+                detail=sample_reason,
+            )
             return False
         assert charging_started_at is not None
         return self._apply_learning_sample(
@@ -136,40 +142,6 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
             current_voltage_signature,
             charging_started_at,
             now,
-        )
-
-    def _stored_positive_learned_charge_power(self) -> float | None:
-        """Return the stored learned charging power when it is positive."""
-        learned_power = getattr(self.service, "learned_charge_power_watts", None)
-        if learned_power is None:
-            return None
-        learned_value = float(learned_power)
-        if learned_value <= 0:
-            return None
-        return learned_value
-
-    def _stored_learning_state(self) -> str:
-        """Return the normalized stored learned-power state."""
-        return str(
-            self._normalize_learned_charge_power_state(
-                getattr(self.service, "learned_charge_power_state", "unknown")
-            )
-        )
-
-    def _stored_learning_phase_signature(self) -> str | None:
-        """Return the normalized stored phase signature."""
-        normalized = self._normalize_learned_charge_power_phase(
-            getattr(self.service, "learned_charge_power_phase", None)
-        )
-        return None if normalized is None else str(normalized)
-
-    def _learning_signature_context(self) -> tuple[float | None, int, float | None]:
-        """Return stored learning signature metadata."""
-        svc = self.service
-        return (
-            getattr(svc, "learned_charge_power_voltage", None),
-            max(0, int(getattr(svc, "learned_charge_power_signature_mismatch_sessions", 0))),
-            getattr(svc, "learned_charge_power_signature_checked_session_started_at", None),
         )
 
     def _resolved_learning_phase_signature(
@@ -186,16 +158,20 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
         voltage_signature, signature_mismatch_sessions, checked_session_started_at = self._learning_signature_context()
         return bool(
             self._set_learning_tracking(
-            svc,
-            state="stale",
-            learned_power=learned_power,
-            updated_at=getattr(svc, "learned_charge_power_updated_at", None),
-            learning_since=None,
-            sample_count=0,
-            phase_signature=stored_phase_signature,
-            voltage_signature=voltage_signature,
-            signature_mismatch_sessions=signature_mismatch_sessions,
-            checked_session_started_at=checked_session_started_at,
+                svc,
+                state="stale",
+                learned_power=learned_power,
+                updated_at=getattr(svc, "learned_charge_power_updated_at", None),
+                learning_since=None,
+                sample_count=0,
+                phase_signature=stored_phase_signature,
+                voltage_signature=voltage_signature,
+                signature_mismatch_sessions=signature_mismatch_sessions,
+                checked_session_started_at=checked_session_started_at,
+                confidence=0.0,
+                stability_score=getattr(svc, "learned_charge_power_stability_score", 0.0),
+                reason="learning-stale",
+                detail="max-age",
             )
         )
 
@@ -218,6 +194,10 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
             voltage_signature=voltage_signature,
             signature_mismatch_sessions=signature_mismatch_sessions,
             checked_session_started_at=checked_session_started_at,
+            confidence=1.0,
+            stability_score=getattr(self.service, "learned_charge_power_stability_score", 1.0),
+            reason="learning-restored",
+            detail="stored-value",
         )
 
     def _preserve_learning_tracking(
@@ -232,15 +212,15 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
         voltage_signature, signature_mismatch_sessions, checked_session_started_at = self._learning_signature_context()
         return bool(
             self._set_learning_tracking(
-            svc,
-            state=current_state,
-            learned_power=learned_power,
-            updated_at=getattr(svc, "learned_charge_power_updated_at", None),
-            learning_since=getattr(svc, "learned_charge_power_learning_since", None),
-            sample_count=max(0, int(getattr(svc, "learned_charge_power_sample_count", 0))),
-            phase_signature=self._resolved_learning_phase_signature(stored_phase_signature, current_phase_signature),
-            voltage_signature=voltage_signature,
-            signature_mismatch_sessions=signature_mismatch_sessions,
-            checked_session_started_at=checked_session_started_at,
+                svc,
+                state=current_state,
+                learned_power=learned_power,
+                updated_at=getattr(svc, "learned_charge_power_updated_at", None),
+                learning_since=getattr(svc, "learned_charge_power_learning_since", None),
+                sample_count=max(0, int(getattr(svc, "learned_charge_power_sample_count", 0))),
+                phase_signature=self._resolved_learning_phase_signature(stored_phase_signature, current_phase_signature),
+                voltage_signature=voltage_signature,
+                signature_mismatch_sessions=signature_mismatch_sessions,
+                checked_session_started_at=checked_session_started_at,
             )
         )

@@ -70,10 +70,10 @@ class StatePublish(RuntimeHelper):
     def _ensure_dbus_publish_state(self) -> None:
         self._ensure_dbus_publisher().ensure_state()
 
-    def _publish_dbus_path(self, path: str, value: Any, current_time: float | None, force: bool = False) -> bool:
+    def _publish_dbus_field(self, field: str, value: Any, current_time: float | None, force: bool = False) -> bool:
         return require_bool(
-            self._ensure_dbus_publisher().publish_path(path, value, current_time, force=force),
-            "publish_path",
+            self._ensure_dbus_publisher().publish_field(field, value, current_time, force=force),
+            "publish_field",
         )
 
     def _bump_update_index(self, current_time: float | None) -> None:

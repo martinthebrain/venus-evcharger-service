@@ -3,6 +3,7 @@ import configparser
 from datetime import datetime
 from pathlib import Path
 import tempfile
+from typing import Any
 import unittest
 from unittest.mock import mock_open, patch
 
@@ -200,6 +201,20 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
             now=100.0,
             clamp_future_timestamps=True,
         )
+        self.assertIsNone(worker_snapshot["pm_status"])
+        self.assertFalse(worker_snapshot["pm_confirmed"])
+        invalid_clamp_flag: Any = None
+        worker_snapshot = normalized_worker_snapshot(
+            {
+                "captured_at": 110.0,
+                "pm_status": {"output": True},
+                "pm_captured_at": 115.0,
+                "pm_confirmed": True,
+            },
+            now=100.0,
+            clamp_future_timestamps=invalid_clamp_flag,
+        )
+        self.assertEqual(worker_snapshot["captured_at"], 100.0)
         self.assertIsNone(worker_snapshot["pm_status"])
         self.assertFalse(worker_snapshot["pm_confirmed"])
         worker_snapshot = normalized_worker_snapshot(

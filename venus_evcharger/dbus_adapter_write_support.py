@@ -37,7 +37,8 @@ _PRIORITY_RANKS = {
 
 
 def priority_rank(priority: object) -> int:
-    return _PRIORITY_RANKS.get(str(priority or "diagnostic").strip().lower(), _PRIORITY_RANKS["diagnostic"])
+    normalized = str(priority).strip().lower()
+    return _PRIORITY_RANKS.get(normalized, _PRIORITY_RANKS["diagnostic"])
 
 
 def deadline_pair(command: CommandMapping) -> tuple[float, float]:
@@ -49,7 +50,7 @@ def has_startup_registration(*, commands: CommandFileList) -> bool:
 
 
 def is_local_publish_command(command: CommandMapping) -> bool:
-    return command_kind(command) in {"publish_value", "publish_desired"}
+    return command_kind(command) in {"publish_value", "publish_desired", "publish_fields"}
 
 
 def should_follow_with_local_burst(command: CommandMapping, outcome: CommandOutcome) -> bool:
@@ -81,11 +82,12 @@ def stale_coalesced_paths(
     processed_path: str,
     key: str,
 ) -> list[str]:
-    return [
-        path
-        for path, command in commands
-        if path != processed_path and str(command.get("coalesce_key") or "") == key
-    ]
+    stale: list[str] = []
+    for path, command in commands:
+        coalesce_key = command.get("coalesce_key")
+        if path != processed_path and coalesce_key and str(coalesce_key) == key:
+            stale.append(path)
+    return stale
 
 
 def lifecycle_payload(command: CommandMapping, state: str, queue_class: str, now: float) -> CommandPayload:

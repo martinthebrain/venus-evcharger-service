@@ -80,7 +80,7 @@ class _UpdateCycleOffline(_UpdateCycleInputCache):
         relay_on = self._offline_confirmed_relay_state(svc, now)
         power, energy_forward, status = self._offline_power_state()
         self._mark_offline_status_state(svc)
-        phase_data = self._phase_data_for_pm_status(offline_pm_status, power, voltage, 0.0)
+        phase_data = self._phase_data_for_pm_status(offline_pm_status, power, voltage)
         svc._set_health(self._offline_health_reason(svc), cached=False)
         total_current = self._total_phase_current(phase_data)
         changed = self._publish_offline_live_state(
@@ -163,7 +163,6 @@ class _UpdateCycleOffline(_UpdateCycleInputCache):
         relay_on: bool,
     ) -> bool:
         """Publish one offline measurement set and matching virtual charger state."""
-        changed = False
-        changed |= svc._publish_live_measurements(power, voltage, total_current, phase_data, now)
-        changed |= self.update_virtual_state(status, energy_forward, relay_on)
-        return bool(changed)
+        measurements_changed = bool(svc._publish_live_measurements(power, voltage, total_current, phase_data, now))
+        virtual_state_changed = bool(self.update_virtual_state(status, energy_forward, relay_on))
+        return measurements_changed or virtual_state_changed

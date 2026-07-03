@@ -156,7 +156,7 @@ class _AutoInputHelperSourcesEnergyCases:
                 captured_at=100.0,
             ),
         ), patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
-            snapshot = helper._get_battery_snapshot()
+            snapshot = helper._get_energy_source_battery_snapshot()
 
         self.assertEqual(snapshot["battery_soc"], 55.0)
         self.assertEqual(snapshot["battery_combined_soc"], 55.0)
@@ -204,7 +204,7 @@ class _AutoInputHelperSourcesEnergyCases:
                 ),
             ],
         ), patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
-            snapshot = helper._get_battery_snapshot()
+            snapshot = helper._get_energy_source_battery_snapshot()
 
         battery_sources = cast(list[dict[str, Any]], snapshot["battery_sources"])
         self.assertEqual(snapshot["battery_discharge_balance_mode"], "capacity_reserve_weighted")

@@ -199,8 +199,8 @@ class WriteControllerPort(WriteControllerRuntimePort):
     def update_worker_snapshot(self, **kwargs: object) -> object:
         return self._service._update_worker_snapshot(**kwargs)
 
-    def publish_dbus_path(self, path: str, value: object, current_time: float, force: bool = False) -> object:
-        return self._service._publish_dbus_path(path, value, current_time, force=force)
+    def publish_dbus_field(self, field: str, value: object, current_time: float, force: bool = False) -> object:
+        return self._service._publish_dbus_field(field, value, current_time, force=force)
 
     def time_now(self) -> float:
         return float(self._service._time_now())

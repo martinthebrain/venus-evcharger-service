@@ -40,7 +40,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _peek_pending_relay_command=MagicMock(return_value=(None, None)),
             _get_worker_snapshot=MagicMock(return_value={"pv_power": 10, "battery_soc": 50, "grid_power": -10}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
@@ -55,7 +55,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
 
         service._queue_relay_command = MagicMock(side_effect=_queue_side_effect)
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -94,7 +94,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _ignore_min_offtime_once=False,
             _dbusservice={"/AutoStart": 0},
             _time_now=MagicMock(return_value=100.0),
-            _publish_dbus_path=MagicMock(side_effect=RuntimeError("fail")),
+            _publish_dbus_field=MagicMock(side_effect=RuntimeError("fail")),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
@@ -185,12 +185,12 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _peek_pending_relay_command=MagicMock(return_value=(None, None)),
             _get_worker_snapshot=MagicMock(return_value={"pv_power": 10, "battery_soc": 50, "grid_power": -10}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
 
         self.assertTrue(controller.handle_write("/Mode", 1))
@@ -225,12 +225,12 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _last_pm_status_at=199.5,
             _get_worker_snapshot=MagicMock(return_value={"pm_status": {"output": True}, "pm_confirmed": True}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -271,12 +271,12 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _last_pm_status={"output": True},
             _get_worker_snapshot=MagicMock(return_value={"pv_power": 10, "battery_soc": 50, "grid_power": -10}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -303,11 +303,11 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _dbusservice={"/AutoStart": 0},
             _dbus_publish_state={"/AutoStart": {"value": 0, "updated_at": 10.0}},
             _time_now=MagicMock(return_value=200.0),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
         )
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -340,12 +340,12 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _publish_local_pm_status=MagicMock(),
             _get_worker_snapshot=MagicMock(return_value={"pv_power": 10, "battery_soc": 50, "grid_power": -10}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
 
         self.assertTrue(controller.handle_write("/Mode", 5))
@@ -366,7 +366,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
         self.assertEqual(service.min_current, 4.0)
 
         service._save_runtime_state.reset_mock()
-        service._publish_dbus_path.side_effect = RuntimeError("fail")
+        service._publish_dbus_field.side_effect = RuntimeError("fail")
         self.assertFalse(controller.handle_write("/AutoStart", 1))
         self.assertEqual(service.virtual_autostart, 1)
         service._save_runtime_state.assert_not_called()

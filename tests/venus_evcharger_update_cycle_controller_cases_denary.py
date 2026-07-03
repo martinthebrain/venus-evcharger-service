@@ -88,7 +88,7 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
             _publish_energy_time_measurements=MagicMock(return_value=False),
             _publish_config_paths=MagicMock(return_value=False),
             _publish_diagnostic_paths=MagicMock(return_value=False),
-            _publish_dbus_path=MagicMock(return_value=False),
+            _publish_dbus_field=MagicMock(return_value=False),
             _save_runtime_state=MagicMock(),
             _ensure_observability_state=MagicMock(),
             _publish_companion_dbus_bridge=MagicMock(),
@@ -536,6 +536,14 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
         service._mark_failure.assert_called_once_with("shelly")
         service._warning_throttled.assert_called_once()
 
+        apply_error = RuntimeError("switch failed")
+        with patch.object(UpdateCycleController, "_apply_enabled_target", side_effect=apply_error), patch.object(
+            UpdateCycleController,
+            "_handle_relay_decision_failure",
+        ) as handle_failure:
+            self.assertIsNone(controller._apply_relay_target_best_effort(service, False, 103.0))
+        handle_failure.assert_called_once_with(service, apply_error)
+
     def test_relay_status_publish_apply_relay_decision_branch_contracts(self):
         service = SimpleNamespace()
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
@@ -688,6 +696,36 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
         self.assertEqual(live_args[2], 9.5)
         controller.update_virtual_state.assert_called_once_with(2, 4.25, True)
 
+    def test_publish_online_update_prefers_small_positive_current_readback_over_phase_sum(self):
+        service = SimpleNamespace(
+            _charger_backend=SimpleNamespace(),
+            _last_charger_state_at=200.0,
+            _last_charger_state_power_w=None,
+            _last_charger_state_actual_current_amps=0.5,
+            _last_charger_state_energy_kwh=None,
+            auto_shelly_soft_fail_seconds=10.0,
+            _publish_live_measurements=MagicMock(return_value=False),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        controller.update_virtual_state = MagicMock(return_value=False)
+
+        self.assertFalse(
+            controller.publish_online_update(
+                {
+                    "_phase_selection": "P1_P2_P3",
+                    "_phase_powers_w": (100.0, 200.0, 300.0),
+                    "_phase_currents_a": (1.0, 2.0, 3.0),
+                },
+                2,
+                1.0,
+                True,
+                1150.0,
+                230.0,
+                200.0,
+            )
+        )
+        self.assertEqual(service._publish_live_measurements.call_args.args[2], 0.5)
+
     def test_publish_online_update_uses_phase_metadata_and_keeps_zero_current_readback_as_phase_sum(self):
         service = SimpleNamespace(
             phase="L1",
@@ -757,7 +795,7 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
         power_read.assert_called_once_with(service, 300.0)
         current_read.assert_called_once_with(service, 300.0)
         energy_read.assert_called_once_with(service, 300.0)
-        phase_data_for_pm_status.assert_called_once_with({"output": True}, 1150.0, 230.0, 0.0)
+        phase_data_for_pm_status.assert_called_once_with({"output": True}, 1150.0, 230.0)
         total_current.assert_called_once_with(phase_data)
         service._publish_live_measurements.assert_called_once_with(1150.0, 230.0, 6.0, phase_data, 300.0)
         controller.update_virtual_state.assert_called_once_with(4, 2.5, False)

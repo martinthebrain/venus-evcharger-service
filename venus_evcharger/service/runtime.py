@@ -56,6 +56,12 @@ class RuntimeHelper(DbusAutoLogic):
             "enqueue_dbus_publish_values",
         )
 
+    def _enqueue_dbus_publish_fields(self, fields: list[tuple[str, Any]], current: float) -> bool:
+        return require_bool(
+            self._ensure_runtime_support_controller().enqueue_dbus_publish_fields(fields, current),
+            "enqueue_dbus_publish_fields",
+        )
+
     def _enqueue_dbus_update_index_bump(self, current: float) -> None:
         self._ensure_runtime_support_controller().enqueue_dbus_update_index_bump(current)
 
