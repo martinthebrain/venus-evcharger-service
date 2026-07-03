@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from .logic_gates_battery_balance import _AutoDecisionBatteryBalance
 
 
-class _AutoDecisionMetricsMixin(_ComposableControllerMixin):
+class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
     def _update_average_metrics(
         self,
         now: float,

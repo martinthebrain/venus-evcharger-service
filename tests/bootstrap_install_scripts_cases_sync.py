@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import json
+
 from tests.bootstrap_install_scripts_cases_common import Path, _BootstrapInstallScriptsBase, os, subprocess, tempfile, UPDATER_SCRIPT
+from venus_evcharger.core.contracts import normalized_bootstrap_update_status_fields
 
 
 class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
@@ -218,8 +221,7 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                 env={**os.environ, "VENUS_EVCHARGER_SOURCE_DIR": str(source_dir)},
             )
 
-            preview = self._read_normalized_status  # type: ignore[assignment]
-            preview = __import__("venus_evcharger.core.contracts", fromlist=["normalized_bootstrap_update_status_fields"]).normalized_bootstrap_update_status_fields(__import__("json").loads(completed.stdout.strip()))
+            preview = normalized_bootstrap_update_status_fields(json.loads(completed.stdout.strip()))
             self.assertEqual(preview["mode"], "dry-run")
             self.assertEqual(preview["result"], "preview")
             self.assertEqual(preview["new_version"], "2.0.0")

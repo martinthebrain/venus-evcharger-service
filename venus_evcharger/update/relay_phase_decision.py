@@ -1,27 +1,55 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Automatic phase-selection decision helpers for the update cycle."""
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, TYPE_CHECKING
 
-from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection
+from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection_or_none, phase_selection_count
 from venus_evcharger.core.contracts import finite_float_or_none, mutable_dict_attr
+from venus_evcharger.update.relay_phase_switch_policy import _RelayPhaseSwitchPolicy
 
 
-class _RelayPhaseDecisionMixin:
+class _RelayPhaseDecision(_RelayPhaseSwitchPolicy):
     """Derive Auto phase targets from policy, surplus, and supported layouts."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+
+        @staticmethod
+        def _phase_voltage(voltage: float, selection: Any, voltage_mode: Any) -> float: ...
+
+        @classmethod
+        def _downshift_auto_phase_target(
+            cls,
+            svc: Any,
+            phase_policy: Any,
+            supported: tuple[PhaseSelection, ...],
+            current_selection: PhaseSelection,
+            current_index: int,
+            surplus_watts: float,
+            voltage: float,
+        ) -> tuple[PhaseSelection | None, str, float | None] | None: ...
+
+        @classmethod
+        def _phase_switch_lockout_active(
+            cls,
+            svc: Any,
+            now: float,
+            selection: PhaseSelection | None = None,
+        ) -> bool: ...
+
+        @classmethod
+        def _phase_switch_mismatch_retry_active(
+            cls,
+            svc: Any,
+            current_selection: PhaseSelection,
+            target_selection: PhaseSelection,
+            now: float,
+        ) -> bool: ...
 
     @staticmethod
     def _phase_selection_count(selection: object) -> int:
-        normalized = normalize_phase_selection(selection, "P1")
-        if normalized == "P1_P2_P3":
-            return 3
-        if normalized == "P1_P2":
-            return 2
-        return 1
+        return phase_selection_count(selection)
 
     @classmethod
     def _phase_selection_is_upshift(
@@ -33,16 +61,11 @@ class _RelayPhaseDecisionMixin:
 
     @classmethod
     def _ordered_auto_phase_selections(cls, svc: Any) -> tuple[PhaseSelection, ...]:
-        raw_supported = tuple(getattr(svc, "supported_phase_selections", ("P1",)))
-        ordered = cast(
-            tuple[PhaseSelection, ...],
-            tuple(
-                sorted(
-                    {normalize_phase_selection(selection, "P1") for selection in raw_supported},
-                    key=cls._phase_selection_count,
-                )
-            ),
-        )
+        raw_supported = tuple(getattr(svc, "supported_phase_selections", ()))
+        normalized_supported: set[PhaseSelection] = {
+            normalize_phase_selection_or_none(selection) or "P1" for selection in raw_supported
+        }
+        ordered = tuple(sorted(normalized_supported))
         return ordered or ("P1",)
 
     @classmethod
@@ -52,15 +75,13 @@ class _RelayPhaseDecisionMixin:
         supported: tuple[PhaseSelection, ...],
     ) -> PhaseSelection:
         default_selection = supported[0]
-        requested = normalize_phase_selection(
-            getattr(svc, "requested_phase_selection", default_selection),
-            default_selection,
+        requested = (
+            normalize_phase_selection_or_none(getattr(svc, "requested_phase_selection", None)) or default_selection
         )
         if requested in supported:
             return requested
-        active = normalize_phase_selection(
-            getattr(svc, "active_phase_selection", default_selection),
-            default_selection,
+        active = (
+            normalize_phase_selection_or_none(getattr(svc, "active_phase_selection", None)) or default_selection
         )
         return active if active in supported else default_selection
 
@@ -107,7 +128,7 @@ class _RelayPhaseDecisionMixin:
         selection: PhaseSelection,
         voltage: float,
     ) -> float | None:
-        phase_voltage = cls._phase_voltage(voltage, selection, getattr(svc, "voltage_mode", "phase"))
+        phase_voltage = cls._phase_voltage(voltage, selection, getattr(svc, "voltage_mode", None))
         return None if phase_voltage <= 0.0 else float(phase_voltage)
 
     @classmethod
@@ -194,7 +215,7 @@ class _RelayPhaseDecisionMixin:
             voltage,
         )
         if downshift_target is not None:
-            return cast(tuple[PhaseSelection | None, str, float | None], downshift_target)
+            return downshift_target
         return None, "phase-hold", None
 
     @classmethod

@@ -4,11 +4,12 @@ import configparser
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from tests.service_mixins_cases_common import _ControlService, _configured_control_service
-from venus_evcharger.control import ControlCommand
+from tests.service_roles_cases_common import _ControlService, _configured_control_service
+from venus_evcharger.control import ControlApiAuditTrail, ControlApiIdempotencyStore, ControlApiRateLimiter, ControlCommand
+from venus_evcharger.control.events import ControlApiEventBus
 
 
-class _ServiceMixinsControlCases:
+class _ServiceRolesControlCases:
     def test_control_api_mixin_builds_commands_and_manages_http_server(self):
         service = _ControlService()
         service._write_controller = MagicMock()
@@ -34,6 +35,35 @@ class _ServiceMixinsControlCases:
         self.assertEqual(service.control_api_listen_host, "127.0.0.1")
         self.assertEqual(service.control_api_listen_port, 8765)
         service._control_api_server.stop.assert_called_once_with()
+
+    def test_control_api_mixin_rejects_non_command_controller_payload(self):
+        service = _ControlService()
+        service._write_controller = MagicMock()
+        service._write_controller.build_control_command_from_payload.return_value = {"name": "set_mode"}
+
+        with self.assertRaises(TypeError):
+            service._control_command_from_payload({"name": "set_mode", "value": 1}, source="http")
+
+    def test_control_api_runtime_components_replace_invalid_cached_instances_and_reuse_valid(self):
+        service = _ControlService()
+        service._control_api_audit_trail_instance = "bad"
+        service._control_api_idempotency_store_instance = "bad"
+        service._control_api_rate_limiter_instance = "bad"
+        service._control_api_event_bus_instance = "bad"
+
+        audit_trail = service._control_api_audit_trail()
+        idempotency_store = service._control_api_idempotency_store()
+        rate_limiter = service._control_api_rate_limiter()
+        event_bus = service._control_api_event_bus()
+
+        self.assertIsInstance(audit_trail, ControlApiAuditTrail)
+        self.assertIsInstance(idempotency_store, ControlApiIdempotencyStore)
+        self.assertIsInstance(rate_limiter, ControlApiRateLimiter)
+        self.assertIsInstance(event_bus, ControlApiEventBus)
+        self.assertIs(service._control_api_audit_trail(), audit_trail)
+        self.assertIs(service._control_api_idempotency_store(), idempotency_store)
+        self.assertIs(service._control_api_rate_limiter(), rate_limiter)
+        self.assertIs(service._control_api_event_bus(), event_bus)
 
     def test_control_api_mixin_exposes_capabilities_summary_runtime_and_recommendation_payloads(self):
         service = _configured_control_service()
@@ -103,6 +133,16 @@ class _ServiceMixinsControlCases:
             "AutoBatteryDischargeBalanceVictronBiasRampRateWattsPerSecond=55\n"
             "AutoBatteryDischargeBalanceVictronBiasActivationMode=export_and_above_reserve_band",
         )
+
+    def test_control_api_dbus_diagnostics_ignores_non_mapping_publisher_payloads(self):
+        service = _configured_control_service()
+        service._dbus_publisher._diagnostic_counter_values.return_value = "bad"
+        service._dbus_publisher._diagnostic_age_values.return_value = None
+
+        diagnostics = service._state_api_dbus_diagnostics_payload()
+
+        self.assertEqual(diagnostics["kind"], "dbus-diagnostics")
+        self.assertEqual(diagnostics["state"], {})
 
     def test_control_api_mixin_operational_payload_exposes_balance_learning_and_bias_fields(self):
         service = _configured_control_service()
@@ -235,6 +275,16 @@ class _ServiceMixinsControlCases:
         self.assertEqual(operational["state"]["combined_battery_reserve_band_ceiling_soc"], 85.0)
         self.assertEqual(operational["state"]["combined_battery_reserve_band_width_soc"], 40.0)
         self.assertEqual(operational["state"]["combined_battery_direction_change_count"], 3)
+
+    def test_control_api_operational_payload_ignores_non_mapping_worker_snapshot(self):
+        service = _configured_control_service()
+        service._get_worker_snapshot = lambda: ["not-a-mapping"]
+
+        operational = service._state_api_operational_payload()
+
+        self.assertIsNone(operational["state"]["combined_battery_soc"])
+        self.assertEqual(operational["state"]["combined_battery_source_count"], 0)
+        self.assertEqual(operational["state"]["combined_battery_learning_profile_count"], 0)
 
     def test_control_api_mixin_state_config_and_health_payloads(self):
         service = _configured_control_service()
@@ -383,6 +433,19 @@ class _ServiceMixinsControlCases:
         self.assertIs(audit_a, audit_b)
         self.assertIs(idem_a, idem_b)
         self.assertIs(rate_a, rate_b)
+
+    def test_control_api_health_payload_treats_non_callable_stale_hook_as_fresh(self):
+        service = _ControlService()
+        service._last_health_reason = "init"
+        service._is_update_stale = "not-callable"
+        service.control_api_audit_path = "/run/control-audit.jsonl"
+        service.control_api_audit_max_entries = 2
+        service.control_api_idempotency_path = "/run/control-idempotency.json"
+        service.control_api_idempotency_max_entries = 2
+
+        health = service._state_api_health_payload()
+
+        self.assertFalse(health["state"]["update_stale"])
 
     def test_control_api_state_token_changes_when_snapshot_changes(self):
         service = _ControlService()

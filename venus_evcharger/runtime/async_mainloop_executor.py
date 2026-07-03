@@ -6,10 +6,15 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
+
+from venus_evcharger.core.return_contracts import require_bool
+from venus_evcharger.runtime.async_mainloop_state import _RuntimeAsyncMainloopState
+
+ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeSupportAsyncMainloopExecutorMixin:
+class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
     def start_update_worker(self: Any) -> None:
         """Enable periodic update cycles in the serialized runtime executor."""
         svc = self.service
@@ -39,10 +44,6 @@ class _RuntimeSupportAsyncMainloopExecutorMixin:
             svc._update_worker_event.set()
             svc._runtime_executor_event.set()
         return True
-
-    def _update_worker_loop(self: Any) -> None:
-        """Compatibility entry point for older tests; use the serialized executor."""
-        self._runtime_executor_loop()
 
     def _runtime_executor_stop_requested(self: Any) -> bool:
         svc = self.service
@@ -117,7 +118,9 @@ class _RuntimeSupportAsyncMainloopExecutorMixin:
         svc = self.service
         path = str(payload.get("path") or "")
         apply_gateway_write = getattr(getattr(svc, "_dbusservice", None), "apply_gateway_write", None)
-        return bool(callable(apply_gateway_write) and cast(bool, apply_gateway_write(path, payload.get("value"))))
+        if not callable(apply_gateway_write):
+            return False
+        return require_bool(apply_gateway_write(path, payload.get("value")), "apply_gateway_write")
 
     def _dispatch_gateway_control_command(self: Any, payload: Mapping[str, Any]) -> None:
         """Dispatch a gateway command through the existing control command path."""
@@ -138,7 +141,7 @@ class _RuntimeSupportAsyncMainloopExecutorMixin:
         svc._last_update_cycle_started_at = started_at
         try:
             svc._update()
-        except Exception:  # pylint: disable=broad-except
+        except ASYNC_UPDATE_CYCLE_ERRORS:
             logging.exception("Async update worker cycle failed")
         finally:
             duration = time.monotonic() - started

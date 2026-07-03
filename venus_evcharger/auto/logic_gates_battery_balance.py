@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
-from typing import Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, Mapping
 
 from venus_evcharger.energy import derive_energy_forecast, summarize_energy_learning_profiles
+from .logic_gates_battery_learning import _AutoDecisionBatteryLearning
 from .logic_gates_battery_balance_support import (
-    _AutoDecisionBatteryBalanceSupportMixin,
     _battery_discharge_balance_allowed_feasibilities,
     _battery_discharge_balance_coordination_blocked_by_availability,
     _battery_discharge_balance_coordination_counts,
@@ -21,7 +21,31 @@ from .logic_gates_battery_balance_support import (
 )
 
 
-class _AutoDecisionBatteryBalanceMixin(_AutoDecisionBatteryBalanceSupportMixin):
+class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
+    if TYPE_CHECKING:  # pragma: no cover
+
+        def _source_activity_penalties(
+            self,
+            sources: list[dict[str, Any]],
+            profiles: dict[str, Any],
+        ) -> tuple[float, float, float | None, float | None]: ...
+
+        def _cluster_activity_penalties(
+            self,
+            cluster: dict[str, Any],
+            learning_summary: dict[str, float | int | None],
+        ) -> tuple[float, float, float | None, float | None]: ...
+
+        def _battery_penalty_multiplier(
+            self,
+            *,
+            direction: str,
+            response_delay_seconds: float | None,
+            support_bias: float | None,
+            import_support_bias: float | None,
+            export_bias: float | None,
+        ) -> float: ...
+
     def _combined_battery_activity_context(self) -> dict[str, float | int | str | None]:
         """Return a conservative battery activity picture used to de-bias surplus decisions."""
         cluster, sources, profiles = self._battery_activity_inputs()
@@ -66,19 +90,19 @@ class _AutoDecisionBatteryBalanceMixin(_AutoDecisionBatteryBalanceSupportMixin):
         )
 
     @staticmethod
-    def _combined_battery_learning_summary(profiles: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any]:
+    def _combined_battery_learning_summary(profiles: dict[str, Any]) -> dict[str, float | int | None]:
         return summarize_energy_learning_profiles(profiles)
 
     def _combined_battery_penalties(
         self,
-        cluster: Mapping[str, Any],
-        sources: Mapping[str, Mapping[str, Any]],
-        profiles: Mapping[str, Mapping[str, Any]],
-        learning_summary: Mapping[str, Any],
-    ) -> tuple[float, float, float, float]:
+        cluster: dict[str, Any],
+        sources: list[dict[str, Any]],
+        profiles: dict[str, Any],
+        learning_summary: dict[str, float | int | None],
+    ) -> tuple[float, float, float | None, float | None]:
         if sources:
-            return cast(tuple[float, float, float, float], self._source_activity_penalties(sources, profiles))
-        return cast(tuple[float, float, float, float], self._cluster_activity_penalties(cluster, learning_summary))
+            return self._source_activity_penalties(sources, profiles)
+        return self._cluster_activity_penalties(cluster, learning_summary)
 
     def _combined_battery_scaled_penalties(
         self,
@@ -96,15 +120,12 @@ class _AutoDecisionBatteryBalanceMixin(_AutoDecisionBatteryBalanceSupportMixin):
         direction: str,
         behavior: Mapping[str, float | None],
     ) -> float:
-        return cast(
-            float,
-            self._battery_penalty_multiplier(
-                direction=direction,
-                response_delay_seconds=behavior["response_delay_seconds"],
-                support_bias=behavior["support_bias"],
-                import_support_bias=behavior["import_support_bias"],
-                export_bias=behavior["export_bias"],
-            ),
+        return self._battery_penalty_multiplier(
+            direction=direction,
+            response_delay_seconds=behavior["response_delay_seconds"],
+            support_bias=behavior["support_bias"],
+            import_support_bias=behavior["import_support_bias"],
+            export_bias=behavior["export_bias"],
         )
 
     def _combined_battery_discharge_balance_context(
@@ -232,8 +253,8 @@ class _AutoDecisionBatteryBalanceMixin(_AutoDecisionBatteryBalanceSupportMixin):
         forecast: Mapping[str, Any],
         charge_penalty: float,
         discharge_penalty: float,
-        max_charge_ratio: float,
-        max_discharge_ratio: float,
+        max_charge_ratio: float | None,
+        max_discharge_ratio: float | None,
         effective_penalty_w: float,
         bias_context: Mapping[str, bool | float | str],
         coordination_context: Mapping[str, bool | str],
@@ -254,8 +275,8 @@ class _AutoDecisionBatteryBalanceMixin(_AutoDecisionBatteryBalanceSupportMixin):
         self,
         charge_penalty: float,
         discharge_penalty: float,
-        max_charge_ratio: float,
-        max_discharge_ratio: float,
+        max_charge_ratio: float | None,
+        max_discharge_ratio: float | None,
     ) -> dict[str, float | int | str | None]:
         return {
             "charge_power_w": charge_penalty if charge_penalty > 0.0 else None,

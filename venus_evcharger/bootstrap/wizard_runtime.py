@@ -8,10 +8,11 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, cast
+from typing import Any, Callable
 
 from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.probe import probe_meter_backend, probe_switch_backend, read_charger_backend
+from venus_evcharger.bootstrap.errors import WIZARD_ROLE_PROBE_ERRORS
 from venus_evcharger.bootstrap.wizard_cli import prompt_yes_no
 from venus_evcharger.bootstrap.wizard_energy import (
     build_suggested_energy_merge,
@@ -96,6 +97,16 @@ def _combined_role_payload(role: str, backend: object, main_path: Path, backend_
         "type": str(backend_type),
         "charger_state": json_ready(getattr(backend, "read_charger_state")()),
     }
+
+
+def _json_ready_dict(value: object, label: str) -> dict[str, object]:
+    """Return one JSON-ready dict or fail with a focused runtime error."""
+    ready = json_ready(value)
+    if isinstance(ready, dict):
+        return {str(key): item for key, item in ready.items()}
+    raise TypeError(f"{label} did not render to a JSON object")
+
+
 def _live_connectivity_payload(
     main_path: Path,
     selected_roles: tuple[str, ...] | None,
@@ -126,8 +137,8 @@ def _live_connectivity_payload_with_hooks(
     parser.read(main_path, encoding="utf-8")
     role_results: dict[str, dict[str, object]] = {}
     ok = True
-    resolved_backends = cast(Any, build_backends_fn(_probe_service_from_wallbox_config(parser, secret_defaults)))
-    runtime = resolved_backends.runtime
+    resolved_backends = build_backends_fn(_probe_service_from_wallbox_config(parser, secret_defaults))
+    runtime = getattr(resolved_backends, "runtime")
 
     def backend_for(role: str) -> object | None:
         return getattr(resolved_backends, role, None)
@@ -152,7 +163,7 @@ def _live_connectivity_payload_with_hooks(
                     "status": "ok",
                     "payload": _combined_role_payload(role, backend, main_path, backend_type),
                 }
-            except Exception as exc:
+            except WIZARD_ROLE_PROBE_ERRORS as exc:
                 ok = False
                 role_results[role] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
             return
@@ -172,7 +183,7 @@ def _live_connectivity_payload_with_hooks(
                 }
                 return
             role_results[role] = {"status": "ok", "payload": probe(str(resolved_path))}
-        except Exception as exc:
+        except WIZARD_ROLE_PROBE_ERRORS as exc:
             ok = False
             role_results[role] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
@@ -368,7 +379,7 @@ def configure_wallbox(
     validation = validate_rendered_setup(config_text, adapter_files, config_path.name)
     live_check_payload = live_check_runner(config_text, adapter_files, config_path.name, selected_probe_roles) if live_check else None
     topology_config = build_wizard_topology_config(answers)
-    topology_config_payload = cast(dict[str, object], json_ready(topology_config))
+    topology_config_payload = _json_ready_dict(topology_config, "topology config")
     device_inventory_payload = inventory_payload(build_wizard_inventory(answers, role_hosts, topology_config))
     inventory_sidecar_text = inventory_text(answers, role_hosts, topology_config)
     materialized_text = materialized_config_text(config_text, config_path.parent, adapter_files)

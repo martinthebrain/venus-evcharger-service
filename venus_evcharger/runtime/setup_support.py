@@ -220,53 +220,6 @@ def initialize_runtime_override_state(svc: Any) -> None:
     svc._last_auto_audit_cleanup_at = 0.0
 
 
-def initialize_software_update_runtime_state(
-    svc: Any,
-    *,
-    repo_root: str,
-    started_at: float,
-    current_version: str,
-    boot_auto_due_at: float | None,
-) -> None:
-    svc.started_at = started_at
-    svc.software_update_repo_root = repo_root
-    svc.software_update_install_script = os.path.join(repo_root, "install.sh") if repo_root else ""
-    svc.software_update_restart_script = (
-        os.path.join(repo_root, "deploy/venus/restart_venus_evcharger_service.sh") if repo_root else ""
-    )
-    svc.software_update_no_update_file = os.path.join(repo_root, "noUpdate") if repo_root else ""
-    svc.software_update_log_path = "/var/volatile/log/dbus-venus-evcharger/software-update.log"
-    svc.software_update_repo_slug = os.environ.get(
-        "VENUS_EVCHARGER_REPO_SLUG",
-        "martinthebrain/venus-evcharger-service",
-    )
-    svc.software_update_channel = os.environ.get("VENUS_EVCHARGER_CHANNEL", "main")
-    svc.software_update_manifest_source = os.environ.get(
-        "VENUS_EVCHARGER_MANIFEST_SOURCE",
-        "",
-    )
-    svc.software_update_version_source = os.environ.get(
-        "VENUS_EVCHARGER_VERSION_SOURCE",
-        f"https://raw.githubusercontent.com/{svc.software_update_repo_slug}/{svc.software_update_channel}/version.txt",
-    )
-    svc._software_update_current_version = current_version
-    svc._software_update_available_version = ""
-    svc._software_update_available = False
-    svc._software_update_state = "idle"
-    svc._software_update_detail = ""
-    svc._software_update_last_check_at = None
-    svc._software_update_last_run_at = None
-    svc._software_update_last_result = ""
-    svc._software_update_process = None
-    svc._software_update_process_log_handle = None
-    svc._software_update_run_requested_at = None
-    svc._software_update_no_update_active = int(
-        bool(svc.software_update_no_update_file and os.path.isfile(svc.software_update_no_update_file))
-    )
-    svc._software_update_next_check_at = started_at + 300.0
-    svc._software_update_boot_auto_due_at = boot_auto_due_at
-
-
 def empty_worker_snapshot() -> WorkerSnapshot:
     return {
         "captured_at": 0.0,

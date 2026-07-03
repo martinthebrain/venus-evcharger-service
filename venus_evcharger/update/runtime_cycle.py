@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Runtime cycle orchestration helpers for online update passes."""
 
 from __future__ import annotations
@@ -8,8 +6,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from venus_evcharger.update.runtime_cycle_contracts import _UpdateCycleRuntimeContracts
 
-class _UpdateCycleRuntimeMixin:
+
+class _UpdateCycleRuntime(_UpdateCycleRuntimeContracts):
+    service: Any
+
     @staticmethod
     def complete_update_cycle(
         svc: Any,

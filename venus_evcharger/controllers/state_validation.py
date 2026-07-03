@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime-config validation helpers for the state controller."""
 
 from __future__ import annotations
@@ -10,9 +8,10 @@ from typing import Any
 
 from venus_evcharger.auto.policy import validate_auto_policy
 from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normalize_hhmm_text, scheduled_enabled_days_text
+from venus_evcharger.controllers.state_summary import _StateSummary
 
 
-class _StateValidationMixin:
+class _StateValidation(_StateSummary):
     NON_NEGATIVE_INTERVAL_ATTRS = (
         "auto_pv_scan_interval_seconds",
         "auto_battery_scan_interval_seconds",
@@ -112,7 +111,7 @@ class _StateValidationMixin:
 
     @staticmethod
     def _clamp_surplus_thresholds(svc: Any) -> None:
-        _StateValidationMixin._clamp_surplus_pair(
+        _StateValidation._clamp_surplus_pair(
             svc,
             "auto_start_surplus_watts",
             "auto_stop_surplus_watts",
@@ -120,7 +119,7 @@ class _StateValidationMixin:
             "AutoStopSurplusWatts",
         )
         if hasattr(svc, "auto_high_soc_start_surplus_watts") and hasattr(svc, "auto_high_soc_stop_surplus_watts"):
-            _StateValidationMixin._clamp_surplus_pair(
+            _StateValidation._clamp_surplus_pair(
                 svc,
                 "auto_high_soc_start_surplus_watts",
                 "auto_high_soc_stop_surplus_watts",
@@ -163,7 +162,7 @@ class _StateValidationMixin:
                 "06:30",
             )
         if hasattr(svc, "auto_scheduled_night_current_amps"):
-            _StateValidationMixin._clamp_non_negative_float(svc, "auto_scheduled_night_current_amps")
+            _StateValidation._clamp_non_negative_float(svc, "auto_scheduled_night_current_amps")
 
     @staticmethod
     def _validate_startup_retry_config(svc: Any) -> None:

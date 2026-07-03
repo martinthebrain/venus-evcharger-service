@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 
-class _RuntimeSupportAsyncMainloopStateMixin:
+class _RuntimeAsyncMainloopState:
     @staticmethod
     def _float_attr(value: Any, default: float = 0.0) -> float:
         return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float(default)
@@ -23,6 +23,7 @@ class _RuntimeSupportAsyncMainloopStateMixin:
         svc._dbus_async_publish_enabled = False
         svc._dbus_publish_queue_lock = threading.Lock()
         svc._dbus_publish_pending = OrderedDict()
+        svc._dbus_publish_field_pending = OrderedDict()
         svc._dbus_publish_bump_pending = 0
         svc._dbus_publish_oldest_queued_at = None
         svc._dbus_publish_dropped_count = 0

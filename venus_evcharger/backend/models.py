@@ -6,11 +6,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import time
-from typing import Literal, cast
+from typing import Literal
 
 PhaseSelection = Literal["P1", "P1_P2", "P1_P2_P3"]
 SwitchingMode = Literal["direct", "contactor"]
 BackendMode = Literal["combined", "split"]
+
+_PHASE_SELECTION_ALIASES: dict[str, PhaseSelection] = {
+    "P1": "P1",
+    "L1": "P1",
+    "L2": "P1",
+    "L3": "P1",
+    "1P": "P1",
+    "P1_P2": "P1_P2",
+    "P1+P2": "P1_P2",
+    "2P": "P1_P2",
+    "P1_P2_P3": "P1_P2_P3",
+    "P1+P2+P3": "P1_P2_P3",
+    "3P": "P1_P2_P3",
+}
 
 
 def phase_selection_count(value: object) -> int:
@@ -25,14 +39,13 @@ def phase_selection_count(value: object) -> int:
 
 def normalize_phase_selection(value: object, default: PhaseSelection = "P1") -> PhaseSelection:
     """Return one normalized phase-selection value."""
+    return normalize_phase_selection_or_none(value) or default
+
+
+def normalize_phase_selection_or_none(value: object) -> PhaseSelection | None:
+    """Return a normalized phase selection only when the input explicitly names one."""
     selection = str(value).strip().upper() if value is not None else ""
-    if selection in {"P1", "L1", "L2", "L3", "1P"}:
-        return "P1"
-    if selection in {"P1_P2", "P1+P2", "2P"}:
-        return "P1_P2"
-    if selection in {"P1_P2_P3", "P1+P2+P3", "3P"}:
-        return "P1_P2_P3"
-    return default
+    return _PHASE_SELECTION_ALIASES.get(selection)
 
 
 def normalize_switching_mode(value: object, default: SwitchingMode = "direct") -> SwitchingMode:
@@ -57,11 +70,11 @@ def normalize_phase_selection_tuple(
 def _normalized_phase_selection_values(values: object) -> tuple[PhaseSelection, ...]:
     """Return normalized phase selections from iterable or comma-separated runtime data."""
     if isinstance(values, (tuple, list)):
-        return cast(tuple[PhaseSelection, ...], tuple(normalize_phase_selection(value, "P1") for value in values))
+        return tuple(normalize_phase_selection(value, "P1") for value in values)
     text = _phase_selection_text(values)
     if not text:
         return ()
-    return cast(tuple[PhaseSelection, ...], tuple(normalize_phase_selection(part, "P1") for part in text.split(",")))
+    return tuple(normalize_phase_selection(part, "P1") for part in text.split(","))
 
 
 def _phase_selection_text(values: object) -> str:
@@ -100,10 +113,7 @@ def effective_supported_phase_selections(
     if not phase_switch_lockout_active(lockout_selection, lockout_until, now=now):
         return normalized
     allowed_phase_count = max(1, phase_selection_count(lockout_selection) - 1)
-    filtered = cast(
-        tuple[PhaseSelection, ...],
-        tuple(selection for selection in normalized if phase_selection_count(selection) <= allowed_phase_count),
-    )
+    filtered = tuple(selection for selection in normalized if phase_selection_count(selection) <= allowed_phase_count)
     return filtered or normalized
 
 

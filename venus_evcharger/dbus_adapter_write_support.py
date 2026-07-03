@@ -3,10 +3,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+import time
 
 from venus_evcharger.dbus_adapter_components import CommandOutcome
+from venus_evcharger.dbus_gateway_command_types import CommandFile, CommandFileList, CommandMapping, CommandPayload
+from venus_evcharger.dbus_gateway_core import float_or_zero
+
+__all__ = (
+    "budget_elapsed",
+    "command_kind",
+    "deadline_pair",
+    "float_or_zero",
+    "has_startup_registration",
+    "is_local_publish_command",
+    "lifecycle_payload",
+    "local_publish_action_result",
+    "priority_rank",
+    "register_service_command",
+    "should_follow_with_local_burst",
+    "stale_coalesced_paths",
+)
 
 _PRIORITY_RANKS = {
     "safety": 0,
@@ -21,34 +37,23 @@ _PRIORITY_RANKS = {
 
 
 def priority_rank(priority: object) -> int:
-    return _PRIORITY_RANKS.get(str(priority or "diagnostic").strip().lower(), _PRIORITY_RANKS["diagnostic"])
+    normalized = str(priority).strip().lower()
+    return _PRIORITY_RANKS.get(normalized, _PRIORITY_RANKS["diagnostic"])
 
 
-def float_or_zero(value: object) -> float:
-    try:
-        return float(str(value)) if value is not None else 0.0
-    except (TypeError, ValueError):
-        return 0.0
+def deadline_pair(command: CommandMapping) -> tuple[float, float]:
+    return float_or_zero(command.get("deadline_s")), float_or_zero(command.get("created_at"))
 
 
-def deadline_pair(command: Mapping[str, Any]) -> tuple[float, float]:
-    try:
-        deadline = float(command.get("deadline_s", 0.0) or 0.0)
-        created_at = float(command.get("created_at", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return 0.0, 0.0
-    return deadline, created_at
-
-
-def has_startup_registration(*, commands: list[tuple[str, dict[str, Any]]]) -> bool:
+def has_startup_registration(*, commands: CommandFileList) -> bool:
     return any(command_kind(command) in {"register_path", "register_service"} for _path, command in commands)
 
 
-def is_local_publish_command(command: Mapping[str, Any]) -> bool:
-    return command_kind(command) in {"publish_value", "publish_desired"}
+def is_local_publish_command(command: CommandMapping) -> bool:
+    return command_kind(command) in {"publish_value", "publish_desired", "publish_fields"}
 
 
-def should_follow_with_local_burst(command: Mapping[str, Any], outcome: CommandOutcome) -> bool:
+def should_follow_with_local_burst(command: CommandMapping, outcome: CommandOutcome) -> bool:
     return outcome in ("applied", "dropped") and is_local_publish_command(command)
 
 
@@ -58,31 +63,34 @@ def local_publish_action_result(processed: int, action: str) -> tuple[int, bool]
     return processed + 1 if action == "processed" else processed, False
 
 
-def command_kind(command: Mapping[str, Any]) -> str:
+def budget_elapsed(started: float, budget_seconds: float) -> bool:
+    return time.monotonic() - started >= budget_seconds
+
+
+def command_kind(command: CommandMapping) -> str:
     return str(command.get("kind") or command.get("type") or "")
 
 
-def register_service_command(
-    commands: list[tuple[str, dict[str, Any]]],
-) -> tuple[str, dict[str, Any]] | None:
+def register_service_command(commands: CommandFileList) -> CommandFile | None:
     matches = [(path, command) for path, command in commands if command_kind(command) == "register_service"]
     return matches[-1] if matches else None
 
 
 def stale_coalesced_paths(
-    commands: list[tuple[str, dict[str, Any]]],
+    commands: CommandFileList,
     *,
     processed_path: str,
     key: str,
 ) -> list[str]:
-    return [
-        path
-        for path, command in commands
-        if path != processed_path and str(command.get("coalesce_key") or "") == key
-    ]
+    stale: list[str] = []
+    for path, command in commands:
+        coalesce_key = command.get("coalesce_key")
+        if path != processed_path and coalesce_key and str(coalesce_key) == key:
+            stale.append(path)
+    return stale
 
 
-def lifecycle_payload(command: Mapping[str, Any], state: str, queue_class: str, now: float) -> dict[str, Any]:
+def lifecycle_payload(command: CommandMapping, state: str, queue_class: str, now: float) -> CommandPayload:
     return {
         "at": now,
         "state": state,

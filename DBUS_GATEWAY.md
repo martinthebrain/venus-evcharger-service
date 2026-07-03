@@ -26,6 +26,11 @@ The adapter owns:
 
 The rest of the project reads gateway snapshots or submits gateway commands.
 
+The gateway owns DBus transport; it does not own the semantic Venus EV charger
+surface. GUI/VRM-visible path requirements live in
+[VENUS_DBUS_SURFACE.md](VENUS_DBUS_SURFACE.md) and
+`venus_evcharger/dbus_gateway_surface.py`, exported through the gateway facade.
+
 ## Runtime Files
 
 By default the gateway uses `/run/venus-evcharger`:
@@ -34,6 +39,9 @@ By default the gateway uses `/run/venus-evcharger`:
 - `dbus-cache.json`: atomic read cache snapshot
 - `dbus-cache.seq`: monotonic cache sequence
 - `dbus-health.json`: DBus health summary
+- `dbus-health-history.jsonl`: compact rolling health timeline for field diagnosis
+- `dbus-command-lifecycle.jsonl`: command lifecycle events such as queued,
+  coalesced, applied, deferred, dropped, and expired
 - `dbus-commands/`: command inbox for DBus writes, refreshes, and introspection
 - `core-commands/`: command inbox from GUI DBus writes back to the core service
 
@@ -45,6 +53,11 @@ By default the gateway uses `/run/venus-evcharger`:
 the adapter writes the RAM-backed cache and health files every tick. A positive
 value throttles unchanged snapshot writes, while cache sequence changes still
 flush immediately.
+
+`DbusGatewayHealthLogPath`, `DbusGatewayHealthLogIntervalSeconds`, and
+`DbusGatewayCommandLifecyclePath` control the JSONL diagnostics. These files are
+operational evidence, not control surfaces: readers may tail or archive them,
+but must not derive runtime decisions from them.
 
 ## Read Model
 
@@ -60,6 +73,25 @@ Consumers read `dbus-cache.json`. Every value is more than a scalar:
 
 If a value is missing or too old, consumers request a refresh from the gateway.
 They still do not read DBus directly.
+
+Standard Auto inputs do not use raw DBus service/path keys. PV power, grid
+power, and battery SOC are gateway-owned semantic read keys:
+
+- `pv_power_w`
+- `grid_power_w`
+- `battery_soc`
+
+Core and helper code must request these through `GatewayClient.request_read_key`
+or the strict `gateway_read_value` helpers. This mirrors the publish-side
+semantic field contract: backend policy consumes domain values and does not
+know whether the gateway obtained them from AC PV services, DC PV paths,
+three grid phases, or another future transport.
+
+Explicit service/path reads are still possible for deliberately raw detail
+surfaces such as relay readback or configured energy-source diagnostics, but
+they must use the visibly named `GatewayClient.request_raw_value`. Raw reads are
+not a standard Auto input path, and architecture checks reject the old
+`request_read(service, path)` shape.
 
 ## Write Model
 
@@ -112,6 +144,42 @@ tick because they do not touch Victron DBus.
 Fast read groups must not perform service discovery. For example, PV prefix
 polling may only consume the cached service list. `ListNames()` and
 introspection belong to slow discovery work or explicit requests.
+
+## Release Gate
+
+Gateway changes should be exercised on the Raspberry Pi test target before they
+are considered ready for a real GX device:
+
+```sh
+python3 scripts/dev/pi_gateway_release_gate.py \
+  --pi root@192.168.142.129 \
+  --deploy \
+  --configure-host \
+  --start-host-shelly \
+  --restart
+```
+
+The gate deploys the current workspace to the Pi test directory, starts a
+host-side Shelly simulator, configures the Pi service to use that simulated
+endpoint, runs offline gateway chaos scenarios on the Pi, restarts the Pi
+services, and then checks:
+
+- remote syntax and DBus isolation
+- bounded behavior during simulated DBus hangs, GUI publish bursts, queue
+  overproduction, adapter restart during queued work, and tick pressure
+- exactly one service, adapter, and observer instance
+- gateway health state, queue age, cache freshness, and event-loop gap
+- recent `dbus-health-history.jsonl`
+- GUI-visible EVCS values such as power, current, session energy, and time
+- GUI `/Mode` writes flowing through the gateway back to the core
+- recent `dbus-command-lifecycle.jsonl`
+
+The Pi gate is a pre-release integration check. It does not replace final
+observation on the target GX, but it should catch gateway, queue, GUI-write, and
+Shelly-integration regressions before customer hardware is touched.
+
+Use `--skip-chaos` only when the offline chaos scenarios were already run in the
+same workspace and the current task is strictly about live Pi wiring.
 
 ## Development Rule
 

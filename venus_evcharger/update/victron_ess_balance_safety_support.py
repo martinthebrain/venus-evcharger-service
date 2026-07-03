@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Support helpers for Victron ESS balance-bias safety handling."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from .victron_ess_balance_learning import _UpdateCycleVictronEssBalanceLearning
 
-class _UpdateCycleVictronEssBalanceSafetySupportMixin:
+
+class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLearning):
     def _victron_ess_balance_refresh_stable_tuning(self, svc: Any, metrics: dict[str, Any], now: float) -> None:
         confidence = self._optional_float(metrics.get("battery_discharge_balance_victron_bias_recommendation_confidence"))
         stability = self._optional_float(metrics.get("battery_discharge_balance_victron_bias_learning_profile_stability_score"))
@@ -42,8 +42,8 @@ class _UpdateCycleVictronEssBalanceSafetySupportMixin:
         overshoot_count: int,
     ) -> bool:
         return (
-            _UpdateCycleVictronEssBalanceSafetySupportMixin._victron_ess_balance_has_minimum_confidence(confidence)
-            and _UpdateCycleVictronEssBalanceSafetySupportMixin._victron_ess_balance_has_minimum_stability(stability)
+            _UpdateCycleVictronEssBalanceSafetySupport._victron_ess_balance_has_minimum_confidence(confidence)
+            and _UpdateCycleVictronEssBalanceSafetySupport._victron_ess_balance_has_minimum_stability(stability)
             and sample_count >= 2
             and overshoot_count <= 0
         )
@@ -171,7 +171,7 @@ class _UpdateCycleVictronEssBalanceSafetySupportMixin:
 
     @staticmethod
     def _victron_ess_balance_ev_power_w(svc: Any) -> float | None:
-        direct = _UpdateCycleVictronEssBalanceSafetySupportMixin._victron_ess_balance_direct_ev_power_w(svc)
+        direct = _UpdateCycleVictronEssBalanceSafetySupport._victron_ess_balance_direct_ev_power_w(svc)
         if direct is not None:
             return direct
         learned_charge_power = getattr(svc, "learned_charge_power_watts", None)

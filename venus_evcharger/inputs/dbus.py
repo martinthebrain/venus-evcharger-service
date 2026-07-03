@@ -1,17 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Shared DBus input-reading helpers for the Venus EV charger service."""
+"""Gateway-backed input helpers for the Venus EV charger service."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
-from venus_evcharger.inputs.pv import _DbusInputPvMixin
-from venus_evcharger.inputs.storage import _DbusInputStorageMixin
+from venus_evcharger.inputs.storage import _DbusInputStorage
 
 
-class DbusInputController(_DbusInputPvMixin, _DbusInputStorageMixin):
-    """Encapsulate PV, battery, and grid DBus discovery/reads for the main service."""
+class DbusInputController(_DbusInputStorage):
+    """Expose semantic PV, battery, and grid inputs from the DBus gateway."""
 
     def __init__(self, port: Any) -> None:
         self.port = port

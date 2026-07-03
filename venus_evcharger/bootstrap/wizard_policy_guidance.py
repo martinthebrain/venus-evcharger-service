@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, cast
+from typing import Callable
 
 from venus_evcharger.bootstrap.wizard_import import ImportedWizardDefaults
 from venus_evcharger.bootstrap.wizard_models import WizardPolicyMode
@@ -51,7 +51,7 @@ def policy_defaults(
 
 
 def _policy_numeric_defaults(policy_mode: WizardPolicyMode, imported: ImportedWizardDefaults, namespace: object) -> dict[str, float | None]:
-    values: dict[str, float | None] = {key: cast(float | None, getattr(namespace, key)) for key, _, _ in _POLICY_DEFAULT_KEYS}
+    values: dict[str, float | None] = {key: _optional_float_attr(namespace, key) for key, _, _ in _POLICY_DEFAULT_KEYS}
     if policy_mode not in {"auto", "scheduled"}:
         return values
     for key, imported_key, default in _POLICY_DEFAULT_KEYS:
@@ -79,23 +79,33 @@ def _scheduled_defaults(
 
 def _non_scheduled_defaults(namespace: object) -> tuple[str | None, str | None, float | None]:
     return (
-        getattr(namespace, "scheduled_enabled_days"),
-        getattr(namespace, "scheduled_latest_end_time"),
-        cast(float | None, getattr(namespace, "scheduled_night_current_amps")),
+        _optional_str_attr(namespace, "scheduled_enabled_days"),
+        _optional_str_attr(namespace, "scheduled_latest_end_time"),
+        _optional_float_attr(namespace, "scheduled_night_current_amps"),
     )
 
 
 def _scheduled_night_current(namespace: object, imported: ImportedWizardDefaults) -> float:
-    night_current = getattr(namespace, "scheduled_night_current_amps")
+    night_current = _optional_float_attr(namespace, "scheduled_night_current_amps")
     return float(night_current if night_current is not None else imported.scheduled_night_current_amps or SCHEDULED_NIGHT_CURRENT_DEFAULT)
 
 
 def _scheduled_days_default(namespace: object, imported: ImportedWizardDefaults) -> str:
-    return str(getattr(namespace, "scheduled_enabled_days") or imported.scheduled_enabled_days or SCHEDULED_DAYS_DEFAULT)
+    return str(_optional_str_attr(namespace, "scheduled_enabled_days") or imported.scheduled_enabled_days or SCHEDULED_DAYS_DEFAULT)
 
 
 def _scheduled_end_default(namespace: object, imported: ImportedWizardDefaults) -> str:
-    return str(getattr(namespace, "scheduled_latest_end_time") or imported.scheduled_latest_end_time or SCHEDULED_END_DEFAULT)
+    return str(_optional_str_attr(namespace, "scheduled_latest_end_time") or imported.scheduled_latest_end_time or SCHEDULED_END_DEFAULT)
+
+
+def _optional_float_attr(namespace: object, name: str) -> float | None:
+    raw_value = getattr(namespace, name)
+    return None if raw_value is None else float(raw_value)
+
+
+def _optional_str_attr(namespace: object, name: str) -> str | None:
+    raw_value = getattr(namespace, name)
+    return None if raw_value is None else str(raw_value)
 
 
 def prompt_policy_defaults(
@@ -137,8 +147,14 @@ def _prompted_policy_values(
         return values
     for key, label in _POLICY_PROMPTS:
         if getattr(namespace, key) is None:
-            values[key] = float(prompt_text(label, f"{cast(float, values[key]):g}"))
+            values[key] = float(prompt_text(label, _format_prompt_default(values[key])))
     return values
+
+
+def _format_prompt_default(value: float | None) -> str:
+    if value is None:
+        raise ValueError("Policy prompt default must be resolved before prompting")
+    return f"{value:g}"
 
 
 def _prompted_scheduled_values(

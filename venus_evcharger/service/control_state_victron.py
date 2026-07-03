@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Victron-bias state payload helpers for the Control API mixin."""
+"""Victron-bias state payload helpers for the Control API role."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from venus_evcharger.core.contracts import normalized_state_api_runtime_fields
+from venus_evcharger.service.control_state_operational import _ControlApiStateOperational
 
 
-class _ControlApiStateVictronMixin:
+class _ControlApiStateVictron(_ControlApiStateOperational):
     def _state_api_victron_bias_recommendation_payload(self) -> dict[str, Any]:
         return _state_api_victron_bias_recommendation_payload(self)
 

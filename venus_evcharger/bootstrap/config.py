@@ -20,26 +20,18 @@ from __future__ import annotations
 
 import configparser
 
-from venus_evcharger.bootstrap.config_auto import _ServiceBootstrapAutoConfigMixin
-from venus_evcharger.bootstrap.config_backend import _ServiceBootstrapBackendConfigMixin
-from venus_evcharger.bootstrap.config_identity import _ServiceBootstrapIdentityConfigMixin
+from venus_evcharger.bootstrap.config_auto import _ServiceBootstrapAutoConfig
 from venus_evcharger.bootstrap.config_shared import MONTH_WINDOW_DEFAULTS, _config_value, _seasonal_month_windows
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 __all__ = [
     "MONTH_WINDOW_DEFAULTS",
     "_config_value",
     "_seasonal_month_windows",
-    "_ServiceBootstrapConfigMixin",
+    "_ServiceBootstrapConfig",
 ]
 
 
-class _ServiceBootstrapConfigMixin(
-    _ServiceBootstrapIdentityConfigMixin,
-    _ServiceBootstrapBackendConfigMixin,
-    _ServiceBootstrapAutoConfigMixin,
-    _ComposableControllerMixin,
-):
+class _ServiceBootstrapConfig(_ServiceBootstrapAutoConfig):
     def load_runtime_configuration(self) -> None:
         """Load the on-disk config and map it onto service attributes.
 

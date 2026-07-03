@@ -3,14 +3,23 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Iterable
+from typing import Any
 
 from venus_evcharger.energy import EnergySourceDefinition
+from venus_evcharger.inputs.helper.sources_dbus_common import DBUS_SOURCE_READ_ERRORS
+from venus_evcharger.inputs.helper.sources_dbus_gateway import _AutoInputHelperSourceDbusGateway
 
 
-class _AutoInputHelperSourceDbusPrimaryMixin:
+def _energy_source_definitions(value: object) -> tuple[EnergySourceDefinition, ...]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, bytearray, dict)):
+        return ()
+    return tuple(source for source in value if isinstance(source, EnergySourceDefinition))
+
+
+class _AutoInputHelperSourceDbusPrimary(_AutoInputHelperSourceDbusGateway):
     def _configured_primary_energy_sources(self: Any) -> tuple[EnergySourceDefinition, ...]:
-        return tuple(getattr(self, "auto_energy_sources", ()) or ())
+        return _energy_source_definitions(getattr(self, "auto_energy_sources", ()) or ())
 
     @staticmethod
     def _primary_energy_source_id() -> str:
@@ -55,15 +64,18 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
         return max(0.0, float(getattr(self, "auto_battery_capacity_startup_recheck_seconds", 300.0) or 300.0))
 
     def _primary_energy_estimated_capacity_wh(self: Any) -> float | None:
-        return cast(float | None, self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_wh", None)))
+        return _AutoInputHelperSourceDbusPrimary._positive_float_or_none(
+            getattr(self, "auto_battery_capacity_estimated_wh", None)
+        )
 
     def _primary_energy_estimated_capacity_ah(self: Any) -> float | None:
-        return cast(float | None, self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_ah", None)))
+        return _AutoInputHelperSourceDbusPrimary._positive_float_or_none(
+            getattr(self, "auto_battery_capacity_estimated_ah", None)
+        )
 
     def _primary_energy_estimated_capacity_nominal_voltage(self: Any) -> float | None:
-        return cast(
-            float | None,
-            self._positive_float_or_none(getattr(self, "auto_battery_capacity_estimated_nominal_voltage", None)),
+        return _AutoInputHelperSourceDbusPrimary._positive_float_or_none(
+            getattr(self, "auto_battery_capacity_estimated_nominal_voltage", None)
         )
 
     def _primary_energy_estimated_capacity_cell_count(self: Any) -> int | None:
@@ -123,15 +135,15 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
         )
 
     def _primary_energy_source(self: Any) -> EnergySourceDefinition:
-        sources = cast(tuple[EnergySourceDefinition, ...], self._configured_primary_energy_sources())
+        sources = _AutoInputHelperSourceDbusPrimary._configured_primary_energy_sources(self)
         if sources:
             return sources[0]
-        return cast(EnergySourceDefinition, self._default_primary_energy_source())
+        return _AutoInputHelperSourceDbusPrimary._default_primary_energy_source(self)
 
     def _battery_service_has_soc(self: Any, service_name: str) -> bool:
         try:
             return self._get_dbus_value(service_name, self.auto_battery_soc_path) is not None
-        except Exception:
+        except DBUS_SOURCE_READ_ERRORS:
             return False
 
     def _energy_service_has_readable_field(self: Any, service_name: str, path: str) -> bool:
@@ -139,7 +151,7 @@ class _AutoInputHelperSourceDbusPrimaryMixin:
             return False
         try:
             return self._get_dbus_value(service_name, path) is not None
-        except Exception:
+        except DBUS_SOURCE_READ_ERRORS:
             return False
 
     def _energy_source_has_readable_data(self: Any, source: EnergySourceDefinition, service_name: str) -> bool:

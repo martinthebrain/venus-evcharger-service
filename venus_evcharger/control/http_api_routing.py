@@ -3,14 +3,15 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import TYPE_CHECKING, Any, Callable, Mapping, cast
+from typing import TYPE_CHECKING, Any
 
-from venus_evcharger.control.http_api_response import _LocalControlApiResponseMixin
+from venus_evcharger.control.http_api_command_contracts import ControlApiHttpService
+from venus_evcharger.control.http_api_events import _LocalControlApiEvents
 
 
-class _LocalControlApiRoutingMixin(_LocalControlApiResponseMixin):
+class _LocalControlApiRouting(_LocalControlApiEvents):
     if TYPE_CHECKING:
-        _service: Any
+        _service: ControlApiHttpService
         _STATE_GET_ENDPOINTS: frozenset[str]
 
         def capabilities_payload(self) -> dict[str, Any]: ...
@@ -39,8 +40,6 @@ class _LocalControlApiRoutingMixin(_LocalControlApiResponseMixin):
             handler: BaseHTTPRequestHandler,
         ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]] | None: ...
 
-        def _parsed_request_target(self, target: str) -> tuple[str, dict[str, list[str]]]: ...
-
         def _read_json_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any] | None: ...
 
         def _state_token_headers(self) -> dict[str, str]: ...
@@ -66,8 +65,13 @@ class _LocalControlApiRoutingMixin(_LocalControlApiResponseMixin):
             "/v1/state/version": "_state_api_version_payload",
             "/v1/state/victron-bias-recommendation": "_state_api_victron_bias_recommendation_payload",
         }
-        getter = cast(Callable[[], Any], getattr(self._service, payload_getter_names[path]))
-        return cast(dict[str, Any], getter())
+        getter = getattr(self._service, payload_getter_names[path])
+        if not callable(getter):
+            raise TypeError(f"State payload getter for {path} is not callable")
+        payload = getter()
+        if not isinstance(payload, dict):
+            raise TypeError(f"State payload getter for {path} must return dict, got {type(payload).__name__}")
+        return {str(key): value for key, value in payload.items()}
 
     def _public_get_payload(self, path: str) -> dict[str, Any] | None:
         if path == "/v1/control/health":

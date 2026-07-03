@@ -6,7 +6,7 @@ import json
 import os
 from os import PathLike
 import threading
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias
 
 
 AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION = 1
@@ -16,12 +16,12 @@ ServicePredicate: TypeAlias = Callable[[str], bool]
 _UNCOERCED = object()
 
 
-def _iter_numeric_container_items(value: Any) -> list[object] | None:
+def _iter_numeric_container_items(value: object) -> list[object] | None:
     """Return list-like DBus container items, or None for scalars and mappings."""
     if isinstance(value, (str, bytes, bytearray, dict)):
         return None
     try:
-        return list(cast(Iterable[object], value)) if isinstance(value, Iterable) else None
+        return list(value) if isinstance(value, Iterable) else None
     except TypeError:
         return None
 
@@ -104,11 +104,6 @@ def sum_dbus_numeric(value: Any) -> float | None:
     return _sum_numeric_items(items)
 
 
-def configured_grid_paths(*paths: str | None) -> list[str]:
-    """Return only configured non-empty per-phase grid paths."""
-    return [path for path in paths if path]
-
-
 def discovery_cache_valid(cached_value: object, last_scan: float | int, scan_interval: float | int, now: float | int) -> bool:
     """Return whether a cached discovery result may still be reused."""
     return bool(cached_value) and (now - float(last_scan)) < float(scan_interval)
@@ -157,30 +152,6 @@ def first_matching_prefixed_service(
     return None
 
 
-def grid_values_complete_enough(
-    seen_value: object,
-    missing_paths: Sequence[object],
-    require_all_phases: bool,
-) -> bool:
-    """Return whether available grid readings are sufficient for control logic."""
-    return bool(seen_value) and not (bool(require_all_phases) and bool(missing_paths))
-
-
-def should_assume_zero_pv(
-    explicit_service: str | None,
-    service_names: Sequence[object],
-    no_auto_ac_services_found: bool,
-    auto_use_dc_pv: bool,
-    dc_value: object,
-) -> bool:
-    """Return whether missing PV inputs should conservatively map to 0 W."""
-    return (
-        not explicit_service
-        and (bool(no_auto_ac_services_found) or bool(service_names))
-        and (not bool(auto_use_dc_pv) or dc_value is None)
-    )
-
-
 def compact_json(data: Any) -> str:
     """Serialize JSON with stable compact formatting."""
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
@@ -197,7 +168,7 @@ def write_text_atomically(path: str | PathLike[str], payload: str, encoding: str
         with open(tmp_path, "w", encoding=encoding) as handle:
             handle.write(payload)
         os.replace(tmp_path, path_str)
-    except Exception:
+    except (OSError, RuntimeError, TypeError, UnicodeEncodeError):
         try:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)

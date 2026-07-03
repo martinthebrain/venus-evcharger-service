@@ -7,12 +7,21 @@ import logging
 import time
 import xml.etree.ElementTree as xml_et
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
-from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
+from venus_evcharger.dbus_gateway import (
+    DbusCacheStore,
+    GatewayClient,
+    GatewayReadKey,
+    dbus_path_key,
+    gateway_paths,
+    gateway_read_value,
+    require_gateway_read_key,
+)
 from venus_evcharger.dbus_introspection import owner_path_children, owner_path_unusable
 from venus_evcharger.inputs.helper.sources_dbus_common import (
+    DBUS_SOURCE_READ_ERRORS,
     _ResolvedAutoBatteryServiceState,
     _is_expected_missing_dbus_error,
 )
@@ -20,7 +29,7 @@ from venus_evcharger.inputs.helper.sources_dbus_common import (
 _CACHE_VALUE_MISSING = object()
 
 
-class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
+class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
     @staticmethod
     def _dbus_module() -> Any:
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
@@ -32,13 +41,30 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         cache_key = dbus_path_key(service_name, path)
         snapshot = self._gateway_cache_snapshot()
         entry = DbusCacheStore.value_entry(snapshot, cache_key)
-        cached_value = self._cached_gateway_value(entry)
-        if cached_value is not _CACHE_VALUE_MISSING:
-            return cast(float | int | None, cached_value)
+        has_cached_value, cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_numeric_value(
+            self,
+            entry,
+        )
+        if has_cached_value:
+            return cached_value
         if self._cached_gateway_error_recent(entry):
             logging.debug("Auto helper suppressing fresh DBus cache error for %s %s", service_name, path)
             return None
         self._request_gateway_value(service_name, path, priority=90, reason="helper DBus cache miss")
+        return None
+
+    def _get_gateway_read_value(self: Any, key: object, *, reason: str) -> float | int | None:
+        read_key = require_gateway_read_key(key)
+        snapshot = self._gateway_cache_snapshot()
+        cached_value = gateway_read_value(snapshot, read_key, max_age_seconds=self._gateway_cache_max_age_seconds())
+        numeric_value = _AutoInputHelperSourceDbusGateway._gateway_numeric_or_none(coerce_dbus_numeric(cached_value))
+        if numeric_value is not None:
+            return numeric_value
+        entry = DbusCacheStore.value_entry(snapshot, read_key)
+        if self._cached_gateway_error_recent(entry):
+            logging.debug("Auto helper suppressing fresh DBus cache error for read key %s", read_key)
+            return None
+        self._request_gateway_read_key(read_key, reason=reason)
         return None
 
     def _get_dbus_child_nodes(self: Any, service_name: str, path: str) -> list[str]:
@@ -93,24 +119,50 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         except OSError:
             return
 
+    def _request_gateway_read_key(self: Any, key: GatewayReadKey, *, reason: str) -> None:
+        try:
+            self._gateway_client().request_read_key(
+                key,
+                priority="read",
+                source="auto-input-helper",
+                reason=reason,
+            )
+        except OSError:
+            return
+
     def _gateway_client(self: Any) -> GatewayClient:
         client = getattr(self, "_gateway_client_instance", None)
-        if client is None:
+        if not isinstance(client, GatewayClient):
             client = GatewayClient(gateway_paths(getattr(self, "dbus_gateway_run_dir", "")))
             self._gateway_client_instance = client
-        return cast(GatewayClient, client)
+        return client
 
     def _gateway_cache_snapshot(self: Any) -> dict[str, Any]:
         return DbusCacheStore.load_snapshot(
             str(getattr(self, "dbus_gateway_cache_path", "") or self._gateway_client().paths.cache_path),
-            max_age_seconds=max(0.0, float(getattr(self, "dbus_gateway_max_age_seconds", 10.0) or 10.0)),
+            max_age_seconds=self._gateway_cache_max_age_seconds(),
         )
+
+    def _gateway_cache_max_age_seconds(self: Any) -> float:
+        return max(0.0, float(getattr(self, "dbus_gateway_max_age_seconds", 10.0) or 10.0))
 
     @staticmethod
     def _cached_gateway_value(entry: Mapping[str, Any] | None) -> object:
         if entry is None or str(entry.get("status", "")) != "fresh":
             return _CACHE_VALUE_MISSING
         return coerce_dbus_numeric(entry.get("value"))
+
+    def _cached_gateway_numeric_value(self: Any, entry: Mapping[str, Any] | None) -> tuple[bool, float | int | None]:
+        cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_value(entry)
+        if cached_value is _CACHE_VALUE_MISSING:
+            return False, None
+        return True, _AutoInputHelperSourceDbusGateway._gateway_numeric_or_none(cached_value)
+
+    @staticmethod
+    def _gateway_numeric_or_none(value: object) -> float | int | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return value
 
     def _cached_gateway_error_recent(self: Any, entry: Mapping[str, Any] | None) -> bool:
         return bool(entry is not None and self._gateway_error_recent(entry))
@@ -126,11 +178,11 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         return max(1.0, min(300.0, configured))
 
     def _dbus_retry_read(self: Any, service_name: str, path: str, label: str, read: Any) -> Any:
-        last_error: Exception | None = None
+        last_error: BaseException | None = None
         for attempt in range(2):
             try:
                 return read()
-            except Exception as error:  # pylint: disable=broad-except
+            except DBUS_SOURCE_READ_ERRORS as error:
                 last_error = error
                 if _is_expected_missing_dbus_error(error):
                     logging.debug("DBus value missing for %s %s: %s", service_name, path, error)
@@ -145,7 +197,7 @@ class _AutoInputHelperSourceDbusGatewayMixin(_ResolvedAutoBatteryServiceState):
         label: str,
         service_name: str,
         path: str,
-        error: Exception,
+        error: BaseException,
     ) -> None:
         self._reset_system_bus()
         if attempt == 0:

@@ -24,7 +24,8 @@ from venus_evcharger.auto.policy import AutoPolicy, validate_auto_policy
 from venus_evcharger.control import ControlApiV1Service, ControlCommand, ControlResult
 from venus_evcharger.control.models import ControlCommandSource
 from venus_evcharger.core.contracts import write_failure_is_reversible
-from venus_evcharger.controllers.write_support import _DbusWriteSupportMixin
+from venus_evcharger.controllers.errors import CONTROL_COMMAND_ERRORS
+from venus_evcharger.controllers.write_support import _DbusWriteSupport
 from venus_evcharger.controllers.write_snapshot import (
     SNAPSHOT_ATTRS,
     SNAPSHOT_DBUS_PATHS,
@@ -32,9 +33,10 @@ from venus_evcharger.controllers.write_snapshot import (
     SNAPSHOT_MAPPING_ATTRS,
     SNAPSHOT_VALUE_ATTRS,
 )
+from venus_evcharger.dbus_gateway import evcs_path_to_field
 
 
-class DbusWriteController(_DbusWriteSupportMixin):
+class DbusWriteController(_DbusWriteSupport):
     """Encapsulate writable DBus path handling for the Venus EV charger service.
 
     A write handler in this project is more than a simple setter. It may need
@@ -56,6 +58,11 @@ class DbusWriteController(_DbusWriteSupportMixin):
     SNAPSHOT_VALUE_ATTRS = SNAPSHOT_VALUE_ATTRS
     SNAPSHOT_MAPPING_ATTRS = SNAPSHOT_MAPPING_ATTRS
     CURRENT_SETTING_PATHS = ("/SetCurrent", "/MaxCurrent", "/MinCurrent")
+    CURRENT_SETTING_FIELDS = {
+        "/SetCurrent": "set_current",
+        "/MaxCurrent": "max_current",
+        "/MinCurrent": "min_current",
+    }
     AUTO_RUNTIME_SETTING_SPECS: dict[str, tuple[str, Callable[[Any], Any], str]] = {
         "/Auto/StartSurplusWatts": ("auto_start_surplus_watts", float, "policy"),
         "/Auto/StopSurplusWatts": ("auto_stop_surplus_watts", float, "policy"),
@@ -91,6 +98,10 @@ class DbusWriteController(_DbusWriteSupportMixin):
         "/Auto/PhaseMismatchLockoutSeconds": ("auto_phase_mismatch_lockout_seconds", float, "policy"),
     }
     AUTO_RUNTIME_SETTING_PATHS = set(AUTO_RUNTIME_SETTING_SPECS)
+    AUTO_RUNTIME_SETTING_FIELDS = {
+        path: evcs_path_to_field(path)
+        for path in AUTO_RUNTIME_SETTING_SPECS
+    }
 
     def __init__(self, port: Any) -> None:
         self.port = port
@@ -148,7 +159,7 @@ class DbusWriteController(_DbusWriteSupportMixin):
     def _handle_autostart_write(self, value: Any) -> None:
         port = self.port
         port.virtual_autostart = int(value)
-        port.publish_dbus_path("/AutoStart", port.virtual_autostart, port.time_now(), force=True)
+        port.publish_dbus_field("auto_start", port.virtual_autostart, port.time_now(), force=True)
         logging.info(
             "DBus write /AutoStart=%s %s",
             port.virtual_autostart,
@@ -216,7 +227,7 @@ class DbusWriteController(_DbusWriteSupportMixin):
         else:
             port.min_current = float(value)
             target_value = port.min_current
-        port.publish_dbus_path(path, target_value, current_time, force=True)
+        port.publish_dbus_field(self.CURRENT_SETTING_FIELDS[path], target_value, current_time, force=True)
 
     @staticmethod
     def _sync_auto_policy_runtime(port: Any) -> None:
@@ -240,7 +251,7 @@ class DbusWriteController(_DbusWriteSupportMixin):
         port = self.port
         current_time = port.time_now()
         target_value = self._apply_auto_runtime_setting(port, path, value)
-        port.publish_dbus_path(path, target_value, current_time, force=True)
+        port.publish_dbus_field(self.AUTO_RUNTIME_SETTING_FIELDS[path], target_value, current_time, force=True)
 
     def _handle_phase_selection_write(self, value: Any) -> None:
         """Apply one phase selection when the current backend can do so safely."""
@@ -285,7 +296,7 @@ class DbusWriteController(_DbusWriteSupportMixin):
         port = self.port
         current_time = port.time_now()
         if not bool(int(value)):
-            port.publish_dbus_path("/Auto/PhaseLockoutReset", 0, current_time, force=True)
+            port.publish_dbus_field("auto_phase_lockout_reset", 0, current_time, force=True)
             return
         self._clear_phase_lockout_state(port._service)
         self._publish_phase_selection_paths(port, current_time)
@@ -297,7 +308,7 @@ class DbusWriteController(_DbusWriteSupportMixin):
         port = self.port
         current_time = port.time_now()
         if not bool(int(value)):
-            port.publish_dbus_path("/Auto/ContactorLockoutReset", 0, current_time, force=True)
+            port.publish_dbus_field("auto_contactor_lockout_reset", 0, current_time, force=True)
             return
         self._clear_contactor_lockout_state(port._service)
         self._publish_contactor_lockout_paths(port, current_time)
@@ -311,10 +322,10 @@ class DbusWriteController(_DbusWriteSupportMixin):
         port = self.port
         current_time = port.time_now()
         if not bool(int(value)):
-            port.publish_dbus_path("/Auto/SoftwareUpdateRun", 0, current_time, force=True)
+            port.publish_dbus_field("auto_software_update_run", 0, current_time, force=True)
             return
         port._software_update_run_requested_at = current_time
-        port.publish_dbus_path("/Auto/SoftwareUpdateRun", 0, current_time, force=True)
+        port.publish_dbus_field("auto_software_update_run", 0, current_time, force=True)
         logging.info("DBus write /Auto/SoftwareUpdateRun=1 queued a software update request %s", port.state_summary())
 
     @staticmethod
@@ -346,7 +357,7 @@ class DbusWriteController(_DbusWriteSupportMixin):
                 command,
                 external_side_effect_started=self._external_side_effect_started,
             )
-        except Exception as error:  # pylint: disable=broad-except
+        except CONTROL_COMMAND_ERRORS as error:
             detail = self._write_failure_detail(error)
             if write_failure_is_reversible(self._external_side_effect_started):
                 self._restore_write_state(port._service, snapshot)

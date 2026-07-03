@@ -14,7 +14,6 @@ import logging
 import os
 import socket
 import sys
-from typing import Any
 
 sys.path.insert(
     1,
@@ -35,33 +34,20 @@ from venus_evcharger.dbus_adapter_components import (
     TickHealth,
 )
 from venus_evcharger.dbus_adapter_process_config import adapter_settings, load_adapter_config
-from venus_evcharger.dbus_adapter_process_health import DbusAdapterHealthMixin
-from venus_evcharger.dbus_adapter_process_identity import DbusAdapterIdentityMixin
-from venus_evcharger.dbus_adapter_process_introspection import DbusAdapterIntrospectionMixin
-from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdapterIntrospectionSnapshotMixin
-from venus_evcharger.dbus_adapter_process_io import DbusAdapterIoMixin
-from venus_evcharger.dbus_adapter_process_loop import DbusAdapterLoopMixin
-from venus_evcharger.dbus_adapter_process_runtime import DbusAdapterRuntimeMixin
-from venus_evcharger.dbus_adapter_process_socket import DbusAdapterSocketMixin
+from venus_evcharger.dbus_adapter_process_loop import DbusAdapterLoop
+from venus_evcharger.dbus_adapter_process_protocol_runtime import MainLoopLike
 from venus_evcharger.dbus_adapter_read import DbusReadExecutor
+from venus_evcharger.dbus_adapter_service_protocol import DbusServiceLike
 from venus_evcharger.dbus_adapter_write import DbusWriteScheduler
 from venus_evcharger.dbus_gateway import (
     DbusCacheStore,
     DbusCommandInbox,
     GatewayPaths,
 )
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
-class DbusAdapter(
-    DbusAdapterLoopMixin,
-    DbusAdapterIntrospectionMixin,
-    DbusAdapterRuntimeMixin,
-    DbusAdapterSocketMixin,
-    DbusAdapterIdentityMixin,
-    DbusAdapterIoMixin,
-    DbusAdapterIntrospectionSnapshotMixin,
-    DbusAdapterHealthMixin,
-):
+class DbusAdapter(DbusAdapterLoop):
     """Single process owner for Victron DBus interaction."""
 
     def __init__(self, config_path: str, *, paths: GatewayPaths | None = None) -> None:
@@ -84,19 +70,19 @@ class DbusAdapter(
         self.commands = DbusCommandInbox(self.paths.command_dir)
         self.core_commands = DbusCommandInbox(self.paths.core_command_dir)
         self.service_name = settings.service_name
-        self._dbusservice: Any = None
+        self._dbusservice: DbusServiceLike | None = None
         self._dbusservice_registered = False
         self.write_scheduler = DbusWriteScheduler(self)
         self._stop = False
         self._server: socket.socket | None = None
-        self._main_loop: Any = None
+        self._main_loop: MainLoopLike | None = None
         self.read_scheduler = DbusReadScheduler(settings.read_specs)
         self.read_executor = DbusReadExecutor(self)
         self.min_tick_seconds = settings.timing.min_tick_seconds
         self.max_tick_seconds = settings.timing.max_tick_seconds
         self.tick_seconds = self.min_tick_seconds
         self._next_work_tick_monotonic = 0.0
-        self._last_resource_snapshot: dict[str, Any] = {}
+        self._last_resource_snapshot: CommandPayload = {}
         self.discovery = DbusDiscoveryManager(interval_seconds=settings.timing.service_list_interval_seconds)
         self.json_writer = AtomicJsonWriter()
         self.cache_publish_interval_seconds = settings.timing.cache_publish_interval_seconds

@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Victron ESS balance-bias learning-profile helpers.
 
 The helpers in this module keep profile scoring, profile keys, and learned
@@ -9,14 +7,16 @@ telemetry fields close together so adaptive decisions remain traceable.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from venus_evcharger.core.contracts import mutable_dict_attr
 
+from .victron_ess_balance_learning_telemetry import _UpdateCycleVictronEssBalanceLearningTelemetry
 from .victron_ess_balance_learning_profiles_support import (
     _clear_victron_ess_balance_active_profile_state,
     _victron_ess_balance_action_direction_site_regime,
     _victron_ess_balance_active_profile_fields,
+    _victron_ess_balance_adaptive_scalar_value,
     _victron_ess_balance_adaptive_scalar_specs,
     _victron_ess_balance_energy_ids,
     _victron_ess_balance_float_attr,
@@ -34,7 +34,14 @@ from .victron_ess_balance_learning_profiles_support import (
 )
 
 
-class _UpdateCycleVictronEssBalanceLearningProfilesMixin:
+class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanceLearningTelemetry):
+    if TYPE_CHECKING:  # pragma: no cover
+
+        @staticmethod
+        def _victron_ess_balance_ev_active(svc: Any) -> bool: ...
+
+        def _victron_ess_balance_activation_mode(self, svc: Any) -> str: ...
+
     @staticmethod
     def _victron_ess_balance_profile_scalar_fields() -> tuple[str, ...]:
         return (
@@ -457,13 +464,7 @@ class _UpdateCycleVictronEssBalanceLearningProfilesMixin:
         return payload
 
     def _victron_ess_balance_adaptive_scalar_value(self, raw_value: Any, caster: Any) -> Any:
-        scalar_casts = {
-            "int": lambda value: max(0, int(value or 0)),
-            "str": lambda value: str(value or ""),
-            "bool": bool,
-            "optional_float": self._optional_float,
-        }
-        return scalar_casts[str(caster)](raw_value)
+        return _victron_ess_balance_adaptive_scalar_value(raw_value, caster, self._optional_float)
 
     def _victron_ess_balance_current_tuning_snapshot(self, svc: Any) -> dict[str, Any]:
         return {

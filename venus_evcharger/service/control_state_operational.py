@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Operational state payload helpers for the Control API mixin."""
+"""Operational state payload helpers for the Control API role."""
 
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ from venus_evcharger.service.control_state_operational_support import (
     _worker_learning_summary,
     _worker_snapshot,
 )
+from venus_evcharger.service.control_state_core import _ControlApiStateCore
 
 
-class _ControlApiStateOperationalMixin:
+class _ControlApiStateOperational(_ControlApiStateCore):
     def _state_api_operational_payload(self) -> dict[str, Any]:
         return _state_api_operational_payload(self)
 

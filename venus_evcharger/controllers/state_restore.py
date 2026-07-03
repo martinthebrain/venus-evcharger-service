@@ -1,23 +1,28 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime-state restore helpers for the state controller."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
+from venus_evcharger.backend.models import PhaseSelection
 from venus_evcharger.core.contracts import non_negative_float_or_none, non_negative_int
 from venus_evcharger.core.shared import write_text_atomically
+from venus_evcharger.controllers.errors import RUNTIME_PERSISTENCE_WRITE_ERRORS
 from .state_restore_support import (
-    _StateRuntimeRestoreVictronEssMixin,
+    _StateRuntimeRestoreVictronEss,
     _victron_ess_balance_energy_ids,
     _victron_ess_balance_runtime_string,
 )
 
 
-class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin):
+class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
+    if TYPE_CHECKING:  # pragma: no cover
+        _normalize_mode: Callable[[object], int]
+
+        def state_summary(self) -> str: ...
 
     @staticmethod
     def _victron_ess_balance_activation_mode(payload: dict[str, object], svc: Any) -> str | None:
@@ -150,12 +155,16 @@ class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin):
             svc._phase_switch_stable_until = None
             svc._phase_switch_resume_relay = False
 
-    def _normalized_phase_switch_mismatch_counts(self, raw_counts: object, default_selection: str) -> dict[str, int]:
+    def _normalized_phase_switch_mismatch_counts(
+        self,
+        raw_counts: object,
+        default_selection: PhaseSelection,
+    ) -> dict[str, int]:
         normalized_counts: dict[str, int] = {}
         if not isinstance(raw_counts, dict):
             return normalized_counts
         for raw_selection, raw_count in raw_counts.items():
-            normalized_selection = self._normalize_runtime_phase_selection(raw_selection, cast(Any, default_selection))
+            normalized_selection = self._normalize_runtime_phase_selection(raw_selection, default_selection)
             normalized_counts[normalized_selection] = non_negative_int(raw_count, 0)
         return normalized_counts
 
@@ -243,5 +252,5 @@ class _StateRuntimeRestoreMixin(_StateRuntimeRestoreVictronEssMixin):
             write_text_atomically(path, payload)
             svc._runtime_state_serialized = payload
             logging.debug("Saved runtime state to %s: %s", path, self.state_summary())
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_PERSISTENCE_WRITE_ERRORS as error:
             logging.warning("Unable to write runtime state to %s: %s", path, error)

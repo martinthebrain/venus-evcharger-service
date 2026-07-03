@@ -232,20 +232,7 @@ class TestUpdateCycleControllerSeptenary(UpdateCycleControllerTestBase):
         self.assertEqual(service.learned_charge_power_sample_count, 1)
 
     def test_reconcile_learned_charge_power_signature_discards_after_two_mismatching_sessions(self):
-        service = SimpleNamespace(
-            charging_started_at=50.0,
-            learned_charge_power_watts=1900.0,
-            learned_charge_power_updated_at=90.0,
-            learned_charge_power_state="stable",
-            learned_charge_power_learning_since=None,
-            learned_charge_power_sample_count=3,
-            learned_charge_power_phase="L1",
-            learned_charge_power_voltage=230.0,
-            learned_charge_power_signature_mismatch_sessions=0,
-            learned_charge_power_signature_checked_session_started_at=None,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            phase="L1",
-        )
+        service = _learning_service()
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertTrue(controller.reconcile_learned_charge_power_signature(True, 2300.0, 230.0, 100.0))
@@ -261,20 +248,7 @@ class TestUpdateCycleControllerSeptenary(UpdateCycleControllerTestBase):
         self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 0)
 
     def test_reconcile_learned_charge_power_signature_tracks_voltage_sessions_and_resets_on_match(self):
-        service = SimpleNamespace(
-            charging_started_at=50.0,
-            learned_charge_power_watts=1900.0,
-            learned_charge_power_updated_at=90.0,
-            learned_charge_power_state="stable",
-            learned_charge_power_learning_since=None,
-            learned_charge_power_sample_count=3,
-            learned_charge_power_phase="L1",
-            learned_charge_power_voltage=230.0,
-            learned_charge_power_signature_mismatch_sessions=0,
-            learned_charge_power_signature_checked_session_started_at=None,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            phase="L1",
-        )
+        service = _learning_service()
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertTrue(controller.reconcile_learned_charge_power_signature(True, 1910.0, 255.0, 100.0))
@@ -288,19 +262,9 @@ class TestUpdateCycleControllerSeptenary(UpdateCycleControllerTestBase):
         self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 130.0)
 
     def test_reconcile_learned_charge_power_signature_covers_phase_mismatch_and_early_session_guards(self):
-        service = SimpleNamespace(
+        service = _learning_service(
             charging_started_at=None,
-            learned_charge_power_watts=1900.0,
-            learned_charge_power_updated_at=90.0,
-            learned_charge_power_state="stable",
-            learned_charge_power_learning_since=None,
-            learned_charge_power_sample_count=3,
             learned_charge_power_phase="3P",
-            learned_charge_power_voltage=230.0,
-            learned_charge_power_signature_mismatch_sessions=0,
-            learned_charge_power_signature_checked_session_started_at=None,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            phase="L1",
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
@@ -322,20 +286,8 @@ class TestUpdateCycleControllerSeptenary(UpdateCycleControllerTestBase):
         self.assertFalse(controller.reconcile_learned_charge_power_signature(True, 1900.0, 230.0, 100.0))
 
     def test_reconcile_learned_charge_power_signature_ignores_unconfirmed_measurements(self):
-        service = SimpleNamespace(
-            charging_started_at=50.0,
-            learned_charge_power_watts=1900.0,
-            learned_charge_power_updated_at=90.0,
-            learned_charge_power_state="stable",
-            learned_charge_power_learning_since=None,
-            learned_charge_power_sample_count=3,
-            learned_charge_power_phase="L1",
-            learned_charge_power_voltage=230.0,
+        service = _learning_service(
             learned_charge_power_signature_mismatch_sessions=1,
-            learned_charge_power_signature_checked_session_started_at=None,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            phase="L1",
-            _last_voltage=230.0,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 

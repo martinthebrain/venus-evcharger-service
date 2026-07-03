@@ -12,12 +12,17 @@ import faulthandler
 import logging
 import os
 import time
-from typing import Any
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
+from venus_evcharger.runtime.audit import _RuntimeAudit
 
+WATCHDOG_TRACEBACK_DUMP_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
-class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
+class _RuntimeHealth(_RuntimeAudit):
+    if TYPE_CHECKING:  # pragma: no cover
+        _age_seconds: Callable[[float | int | None, float | int | None], int]
+
     @staticmethod
     def _float_attr(value: Any, default: float = 0.0) -> float:
         """Return one runtime attribute as float with a safe fallback."""
@@ -42,12 +47,12 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
         last_successful_update_at = getattr(svc, "_last_successful_update_at", None)
         if isinstance(last_successful_update_at, (int, float)):
             return float(last_successful_update_at)
-        return _RuntimeSupportHealthMixin._float_attr(getattr(svc, "started_at", 0.0))
+        return _RuntimeHealth._float_attr(getattr(svc, "started_at", 0.0))
 
     @staticmethod
     def _watchdog_recovery_suppressed(svc: Any, now: float) -> bool:
         """Return whether watchdog recovery is currently rate-limited."""
-        recovery_seconds = _RuntimeSupportHealthMixin._float_attr(
+        recovery_seconds = _RuntimeHealth._float_attr(
             getattr(svc, "auto_watchdog_recovery_seconds", 0.0)
         )
         last_recovery_attempt_at = getattr(svc, "_last_recovery_attempt_at", None)
@@ -103,7 +108,7 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
         )
         try:
             faulthandler.dump_traceback(all_threads=True)
-        except Exception as error:  # pylint: disable=broad-except
+        except WATCHDOG_TRACEBACK_DUMP_ERRORS as error:
             logging.debug("Unable to dump watchdog traceback before restart: %s", error)
         self._exit_for_watchdog_restart()
 
@@ -187,4 +192,4 @@ class _RuntimeSupportHealthMixin(_ComposableControllerMixin):
         svc._source_retry_after[key] = current + delay
 
 
-__all__ = ["_RuntimeSupportHealthMixin"]
+__all__ = ["_RuntimeHealth"]

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -33,6 +34,20 @@ class CommandResult:
 
 class GateFailure(RuntimeError):
     """Raised when one release-gate assertion fails."""
+
+
+def object_dict(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
+def json_object(raw: str, *, detail: str) -> dict[str, object]:
+    payload = json.loads(raw)
+    normalized = object_dict(payload)
+    if normalized is None:
+        raise GateFailure(f"{detail} is not a JSON object")
+    return normalized
 
 
 class PiSession:

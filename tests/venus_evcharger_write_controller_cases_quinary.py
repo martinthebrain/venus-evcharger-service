@@ -7,7 +7,7 @@ class TestDbusWriteControllerQuinary(DbusWriteControllerTestBase):
         service = SimpleNamespace(
             _dbusservice={},
             _time_now=MagicMock(return_value=42.0),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _save_runtime_state=MagicMock(),
             _save_runtime_overrides=MagicMock(),
             _state_summary=self._state_summary,

@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_bootstrap_controller_path_cases_support import *  # noqa: F401,F403
+from venus_evcharger.dbus_gateway import (
+    missing_required_venus_paths,
+    mismatched_venus_writeability,
+)
 
 class _TestServiceBootstrapControllerPathsPart2:
     def test_register_paths_marks_configured_split_topology_connected_without_legacy_host(self):
@@ -75,6 +79,11 @@ class _TestServiceBootstrapControllerPathsPart2:
         controller.register_paths()
 
         self.assertEqual(service._dbusservice.paths["/Connected"]["value"], 1)
+        registered_paths = set(service._dbusservice.paths)
+        self.assertEqual(missing_required_venus_paths(registered_paths), ())
+        for path, spec in service._dbusservice.paths.items():
+            with self.subTest(path=path):
+                self.assertFalse(mismatched_venus_writeability(path, bool(spec.get("writeable", False))))
 
     def test_initialize_controllers_uses_port_wrappers_for_bound_controllers(self):
         service = SimpleNamespace(
@@ -174,4 +183,3 @@ class _TestServiceBootstrapControllerPathsPart2:
             self.assertIsNone(service._switch_backend)
             self.assertIsNotNone(service._charger_backend)
             self.assertEqual(service.supported_phase_selections, ("P1", "P1_P2"))
-

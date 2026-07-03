@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict, cast
+from typing import TypedDict
 
 from venus_evcharger.bootstrap.wizard_models import WizardAnswers
 from venus_evcharger.topology import (
@@ -224,23 +224,23 @@ def _hybrid_external_meter_options(topology_preset: str) -> _HybridExternalMeter
 
 def _native_external_meter_charger_type(topology_preset: str) -> ChargerType | None:
     """Return charger type for native-device external-meter presets."""
-    charger_type = {
+    charger_types: dict[str, ChargerType] = {
         "shelly-meter-goe": "goe_charger",
         "shelly-meter-modbus-charger": "modbus_charger",
         "tuya-meter-goe": "goe_charger",
         "tuya-meter-modbus-charger": "modbus_charger",
         "tasmota-meter-goe": "goe_charger",
         "tasmota-meter-modbus-charger": "modbus_charger",
-    }.get(topology_preset)
-    return cast(ChargerType | None, charger_type)
+    }
+    return charger_types.get(topology_preset)
 
 
 def _hybrid_charger_native_type(topology_preset: str) -> ChargerType | None:
     """Return charger type for hybrid charger-native presets."""
-    charger_type = {
+    charger_types: dict[str, ChargerType] = {
         "goe-external-switch-group": "goe_charger",
-    }.get(topology_preset)
-    return cast(ChargerType | None, charger_type)
+    }
+    return charger_types.get(topology_preset)
 
 
 def _native_external_meter_topology(
@@ -314,6 +314,6 @@ def _hybrid_external_meter_topology(
     )
 
 
-def _charger_type_or_default(value: str | None, default: ChargerType) -> ChargerType:
+def _charger_type_or_default(value: ChargerType | None, default: ChargerType) -> ChargerType:
     """Return one wizard charger type while keeping topology literals typed."""
-    return cast(ChargerType, value or default)
+    return value or default

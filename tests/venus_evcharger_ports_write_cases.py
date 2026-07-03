@@ -55,7 +55,7 @@ class TestWallboxPortsWrite(unittest.TestCase):
             manual_override_until=0.0, auto_manual_override_seconds=300.0, _auto_mode_cutover_pending=False,
             _ignore_min_offtime_once=False, _clear_auto_samples=MagicMock(), _queue_relay_command=MagicMock(),
             _publish_local_pm_status=MagicMock(), _get_worker_snapshot=MagicMock(return_value={"pm_status": None}),
-            _update_worker_snapshot=MagicMock(), _publish_dbus_path=MagicMock(), _time_now=MagicMock(return_value=100.0),
+            _update_worker_snapshot=MagicMock(), _publish_dbus_field=MagicMock(), _time_now=MagicMock(return_value=100.0),
             _normalize_mode=MagicMock(return_value=1), _mode_uses_auto_logic=MagicMock(return_value=True),
             _state_summary=MagicMock(return_value="state"), _save_runtime_state=MagicMock(),
         )
@@ -145,4 +145,4 @@ class TestWallboxPortsWrite(unittest.TestCase):
 
         self.assertTrue(port._fresh_last_output(100.0, 2.0))
         self.assertTrue(port._fresh_confirmed_relay_output({"pm_status": None, "pm_confirmed": False}) is True)
-        self.assertIsNone(port.validate_runtime_config())
+        port.validate_runtime_config()

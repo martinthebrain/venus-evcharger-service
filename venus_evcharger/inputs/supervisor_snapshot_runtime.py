@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.core.contracts import timestamp_not_future
+from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
+from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidation
 
 
-class _AutoInputSupervisorSnapshotRuntimeMixin:
+class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation):
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
         SNAPSHOT_SOURCE_KEYS: tuple[str, ...]
@@ -15,8 +18,6 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
 
         @classmethod
         def _coerce_snapshot_timestamp(cls, value: Any) -> float | None: ...
-
-        def _coerce_snapshot_int(self, value: Any) -> int | None: ...
 
         def _validate_snapshot_dict(self, path: str, snapshot: Any) -> dict[str, Any] | None: ...
 
@@ -33,7 +34,7 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         svc = self.service
         try:
             snapshot = svc._load_json_file(path)
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as error:
             svc._warning_throttled(
                 "auto-input-helper-read-failed",
                 max(1.0, svc.auto_input_helper_restart_seconds),
@@ -51,7 +52,10 @@ class _AutoInputSupervisorSnapshotRuntimeMixin:
         heartbeat_at = self._coerce_snapshot_timestamp(snapshot.get("heartbeat_at"))
         freshness_timestamp = heartbeat_at if heartbeat_at is not None else captured_at
         snapshot_age = None if freshness_timestamp is None else max(0.0, current - freshness_timestamp)
-        stale = snapshot_age is not None and snapshot_age > svc.auto_input_helper_stale_seconds
+        stale_after = service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
+            svc.auto_input_helper_stale_seconds,
+        )
+        stale = snapshot_age is not None and snapshot_age > stale_after
         return captured_at, freshness_timestamp, stale
 
     @classmethod

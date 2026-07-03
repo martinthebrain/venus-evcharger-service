@@ -77,62 +77,11 @@ def _run_service_loop(service_class: Callable[[], Any], gobject_module: Any) -> 
     )
 
 
-from venus_evcharger.bootstrap.config import _ServiceBootstrapConfigMixin
-from venus_evcharger.bootstrap.paths import _ServiceBootstrapPathMixin
-from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntimeMixin
+from venus_evcharger.bootstrap.paths import _ServiceBootstrapPath
 
-class ServiceBootstrapController(
-    _ServiceBootstrapConfigMixin,
-    _ServiceBootstrapRuntimeMixin,
-    _ServiceBootstrapPathMixin,
-):
+
+class ServiceBootstrapController(_ServiceBootstrapPath):
     """Bootstrap controller for the Shelly EV charger service."""
-
-    WRITABLE_PATHS = {
-        "/MinCurrent",
-        "/MaxCurrent",
-        "/SetCurrent",
-        "/PhaseSelection",
-        "/AutoStart",
-        "/Auto/StartSurplusWatts",
-        "/Auto/StopSurplusWatts",
-        "/Auto/MinSoc",
-        "/Auto/ResumeSoc",
-        "/Auto/StartDelaySeconds",
-        "/Auto/StopDelaySeconds",
-        "/Auto/ScheduledEnabledDays",
-        "/Auto/ScheduledFallbackDelaySeconds",
-        "/Auto/ScheduledLatestEndTime",
-        "/Auto/ScheduledNightCurrent",
-        "/Auto/DbusBackoffBaseSeconds",
-        "/Auto/DbusBackoffMaxSeconds",
-        "/Auto/GridRecoveryStartSeconds",
-        "/Auto/StopSurplusDelaySeconds",
-        "/Auto/StopSurplusVolatilityLowWatts",
-        "/Auto/StopSurplusVolatilityHighWatts",
-        "/Auto/ReferenceChargePowerWatts",
-        "/Auto/LearnChargePowerEnabled",
-        "/Auto/LearnChargePowerMinWatts",
-        "/Auto/LearnChargePowerAlpha",
-        "/Auto/LearnChargePowerStartDelaySeconds",
-        "/Auto/LearnChargePowerWindowSeconds",
-        "/Auto/LearnChargePowerMaxAgeSeconds",
-        "/Auto/PhaseSwitching",
-        "/Auto/PhasePreferLowestWhenIdle",
-        "/Auto/PhaseUpshiftDelaySeconds",
-        "/Auto/PhaseDownshiftDelaySeconds",
-        "/Auto/PhaseUpshiftHeadroomWatts",
-        "/Auto/PhaseDownshiftMarginWatts",
-        "/Auto/PhaseMismatchRetrySeconds",
-        "/Auto/PhaseMismatchLockoutCount",
-        "/Auto/PhaseMismatchLockoutSeconds",
-        "/Mode",
-        "/StartStop",
-        "/Enable",
-        "/Auto/PhaseLockoutReset",
-        "/Auto/ContactorLockoutReset",
-        "/Auto/SoftwareUpdateRun",
-    }
 
     def __init__(
         self,

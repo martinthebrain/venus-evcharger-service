@@ -8,6 +8,8 @@ from collections import deque
 import time
 from typing import Any
 
+from venus_evcharger.controllers.errors import WRITE_SNAPSHOT_DBUS_ERRORS
+
 SNAPSHOT_DBUS_PATHS = (
     "/Mode",
     "/AutoStart",
@@ -230,7 +232,7 @@ def _snapshot_direct_dbus_paths(
             continue
         try:
             direct[path] = dbus_service[path]
-        except Exception:  # pylint: disable=broad-except
+        except WRITE_SNAPSHOT_DBUS_ERRORS:
             continue
     return direct
 
@@ -304,7 +306,7 @@ def _restore_dbus_paths_direct(svc: Any, saved_paths: dict[str, Any]) -> None:
     for path, value in saved_paths.items():
         try:
             dbus_service[path] = value
-        except Exception:  # pylint: disable=broad-except
+        except WRITE_SNAPSHOT_DBUS_ERRORS:
             continue
 
 

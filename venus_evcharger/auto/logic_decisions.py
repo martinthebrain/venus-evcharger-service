@@ -12,16 +12,16 @@ into many small helper methods. The high-level behavior is:
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.auto.tracking import clear_auto_decision_tracking
+from venus_evcharger.auto.logic_types import require_relay_bool
 
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
-from venus_evcharger.auto.logic_decisions_preaverage import _AutoDecisionPreAverageMixin
+from venus_evcharger.auto.logic_decisions_preaverage import _AutoDecisionPreAverage
 
 
 
-class _AutoDecisionDecisionMixin(_AutoDecisionPreAverageMixin, _ComposableControllerMixin):
+class _AutoDecisionDecision(_AutoDecisionPreAverage):
     def _handle_relay_on(
         self,
         avg_surplus_power: float,
@@ -45,16 +45,15 @@ class _AutoDecisionDecisionMixin(_AutoDecisionPreAverageMixin, _ComposableContro
         )
 
         if stop_reason is None:
-            return cast(bool, self._running_result_with_health("running", cached_inputs))
-        stop_delay_seconds = svc.auto_stop_delay_seconds
+            return require_relay_bool(self._running_result_with_health("running", cached_inputs))
+        stop_delay_seconds = None
         reported_reason = stop_reason
         if stop_reason == "auto-stop-surplus":
             stop_delay_seconds = float(self._auto_policy().stop_surplus_delay_seconds)
             reported_reason = "auto-stop"
         elif stop_reason in ("auto-stop-grid", "auto-stop-soc"):
             reported_reason = "auto-stop"
-        return cast(
-            bool,
+        return require_relay_bool(
             self._pending_stop_or_running(
                 now,
                 reported_reason,
@@ -74,12 +73,17 @@ class _AutoDecisionDecisionMixin(_AutoDecisionPreAverageMixin, _ComposableContro
         minimum_runtime_elapsed: bool,
     ) -> str | None:
         """Return the concrete stop reason while Auto is already running."""
-        svc = self.service
-        if getattr(svc, "auto_night_lock_stop", False) and not daytime_window_open and minimum_runtime_elapsed:
-            return "night-lock"
         if not minimum_runtime_elapsed:
             return None
+        if self._night_lock_stop_requested(daytime_window_open):
+            return "night-lock"
         return self._policy_relay_on_stop_reason(avg_surplus_power, avg_grid_power, battery_soc)
+
+    def _night_lock_stop_requested(self, daytime_window_open: bool) -> bool:
+        """Return whether the configured night lock should stop the running relay."""
+        if not hasattr(self.service, "auto_night_lock_stop"):
+            return False
+        return getattr(self.service, "auto_night_lock_stop") is True and not daytime_window_open
 
     def _policy_relay_on_stop_reason(
         self,
@@ -198,7 +202,7 @@ class _AutoDecisionDecisionMixin(_AutoDecisionPreAverageMixin, _ComposableContro
         start_surplus_watts, _, _ = self._surplus_thresholds_for_soc(battery_soc)
         svc.auto_stop_condition_since = None
         if not svc.virtual_autostart:
-            return cast(bool, self._idle_result_with_health("autostart-disabled", cached_inputs))
+            return require_relay_bool(self._idle_result_with_health("autostart-disabled", cached_inputs))
 
         minimum_offtime_elapsed = self._minimum_offtime_elapsed(now)
         if self._relay_off_start_conditions_met(
@@ -237,16 +241,16 @@ class _AutoDecisionDecisionMixin(_AutoDecisionPreAverageMixin, _ComposableContro
             return decision
         if relay_on:
             self._clear_scheduled_night_stop_tracking(svc)
-            return cast(bool, self._running_result_with_health("scheduled-night-charge", cached_inputs))
+            return require_relay_bool(self._running_result_with_health("scheduled-night-charge", cached_inputs))
         return self._scheduled_night_start_result(svc, now, cached_inputs)
 
     def _scheduled_night_start_result(self, svc: Any, now: float, cached_inputs: bool) -> bool:
         """Return the off-to-on decision while scheduled night charging is active."""
         blocked_health = self._scheduled_night_blocked_health(svc, now)
         if blocked_health is not None:
-            return cast(bool, self._idle_result_with_health(blocked_health, cached_inputs))
+            return require_relay_bool(self._idle_result_with_health(blocked_health, cached_inputs))
         self._clear_scheduled_night_stop_tracking(svc)
-        return cast(bool, self._running_result_with_health("scheduled-night-charge", cached_inputs))
+        return require_relay_bool(self._running_result_with_health("scheduled-night-charge", cached_inputs))
 
     def _scheduled_night_blocked_health(self, svc: Any, now: float) -> str | None:
         """Return the blocking health reason before scheduled night charging may start."""

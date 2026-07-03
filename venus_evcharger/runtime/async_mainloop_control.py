@@ -3,17 +3,19 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 import logging
 import threading
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.control import ControlCommand
-from venus_evcharger.runtime.async_mainloop_types import QueuedControlCommand
+from venus_evcharger.runtime.async_mainloop_executor import _RuntimeAsyncMainloopExecutor
+from venus_evcharger.runtime.async_mainloop_types import require_control_command_queue
+
+ASYNC_CONTROL_COMMAND_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeSupportAsyncMainloopControlMixin:
+class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
     def enqueue_control_command(self: Any, command: ControlCommand) -> bool:
         """Coalesce DBus control commands for a background worker."""
         svc = self.service
@@ -22,7 +24,7 @@ class _RuntimeSupportAsyncMainloopControlMixin:
             return bool(result.accepted)
         queued_at = time.time()
         with svc._control_command_lock:
-            pending = cast("OrderedDict[str, QueuedControlCommand]", svc._control_command_pending)
+            pending = require_control_command_queue(svc._control_command_pending, "_control_command_pending")
             svc._control_command_sequence += 1
             if command.path in pending:
                 del pending[command.path]
@@ -41,14 +43,10 @@ class _RuntimeSupportAsyncMainloopControlMixin:
         svc._control_command_async_enabled = True
         self._start_runtime_executor()
 
-    def _control_command_worker_loop(self: Any) -> None:
-        """Compatibility entry point for older tests; use the serialized executor."""
-        self._runtime_executor_loop()
-
     def _drain_control_commands_once(self: Any) -> bool:
         svc = self.service
         with svc._control_command_lock:
-            pending = cast("OrderedDict[str, QueuedControlCommand]", svc._control_command_pending)
+            pending = require_control_command_queue(svc._control_command_pending, "_control_command_pending")
             commands = sorted(pending.values(), key=lambda item: item[0])
             pending.clear()
         if not commands:
@@ -58,7 +56,7 @@ class _RuntimeSupportAsyncMainloopControlMixin:
             svc._last_write_command_queue_lag_seconds = max(0.0, time.time() - queued_at)
             try:
                 svc._handle_control_command(command)
-            except Exception:  # pylint: disable=broad-except
+            except ASYNC_CONTROL_COMMAND_ERRORS:
                 logging.exception("Async control command failed path=%s", command.path)
             finally:
                 duration = time.monotonic() - started

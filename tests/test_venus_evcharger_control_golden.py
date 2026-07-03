@@ -8,10 +8,10 @@ from unittest.mock import MagicMock
 sys.modules["vedbus"] = MagicMock()
 
 from venus_evcharger.core.contracts import CONTROL_API_ERROR_CODES
-from venus_evcharger.service.control import ControlApiMixin
+from venus_evcharger.service.control import ControlApi
 
 
-class _GoldenControlService(ControlApiMixin):
+class _GoldenControlService(ControlApi):
     def _ensure_write_controller(self):
         return None
 

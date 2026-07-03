@@ -2,32 +2,55 @@
 from __future__ import annotations
 
 import json
-import uuid
-from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from venus_evcharger.control.http_api_command_payloads import (
+    command_response_payload,
+    http_status_for_result,
+    idempotency_conflict_response,
+    idempotency_fingerprint,
+    optimistic_concurrency_payload,
+    payload_error_code,
+    replayed_payload,
+    result_error_code,
+    throttled_response,
+    tracked_command,
+    tracked_payload,
+)
 from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
+from venus_evcharger.control.http_api_command_contracts import (
+    ControlApiIdempotencyStoreLike,
+    ControlApiHttpService,
+    ControlApiRateLimiterLike,
+    optional_error_payload,
+    require_idempotency_store,
+    require_rate_limiter,
+)
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.control.rate_limit import ControlApiRateLimiter
 from venus_evcharger.control.http_api_response import (
     error_response_payload,
-    _LocalControlApiResponseMixin,
 )
-from venus_evcharger.core.contracts import (
-    normalized_control_api_command_response_fields,
-    normalized_control_api_error_fields,
-)
+from venus_evcharger.control.http_api_auth import _LocalControlApiAuth
 
 
-class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
+class _LocalControlApiCommand(_LocalControlApiAuth):
+    _http_status_for_result = staticmethod(http_status_for_result)
+    _idempotency_conflict_response = staticmethod(idempotency_conflict_response)
+    _idempotency_fingerprint = staticmethod(idempotency_fingerprint)
+    _payload_error_code = staticmethod(payload_error_code)
+    _replayed_payload = staticmethod(replayed_payload)
+    _result_error_code = staticmethod(result_error_code)
+    _throttled_response = staticmethod(throttled_response)
+    _tracked_command = staticmethod(tracked_command)
+    _tracked_payload = staticmethod(tracked_payload)
+
     if TYPE_CHECKING:
         _fallback_idempotency_store: ControlApiIdempotencyStore
         _fallback_rate_limiter: ControlApiRateLimiter
-        _service: Any
-
-        def _client_host(self, handler: BaseHTTPRequestHandler) -> str: ...
+        _service: ControlApiHttpService
 
         def _request_state_tokens(self, handler: BaseHTTPRequestHandler) -> set[str]: ...
 
@@ -77,7 +100,7 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             self._record_command_audit(
                 command=tracked_payload,
                 result=None,
-                error=cast(dict[str, Any] | None, response_payload.get("error")),
+                error=optional_error_payload(response_payload),
                 replayed=False,
                 scope="control",
                 client_host=client_host,
@@ -91,7 +114,7 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             self._record_command_audit(
                 command=command,
                 result=None,
-                error=cast(dict[str, Any] | None, response_payload.get("error")),
+                error=optional_error_payload(response_payload),
                 replayed=False,
                 scope="control",
                 client_host=client_host,
@@ -106,32 +129,13 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
         self._record_command_audit(
             command=command,
             result=result,
-            error=cast(dict[str, Any] | None, response_payload.get("error")),
+            error=optional_error_payload(response_payload),
             replayed=False,
             scope="control",
             client_host=client_host,
             status_code=int(status),
         )
         self._write_json(handler, status, response_payload, extra_headers=self._state_token_headers())
-
-    @staticmethod
-    def _tracked_command(payload: dict[str, Any], command: ControlCommand) -> ControlCommand:
-        if not command.command_id or command.idempotency_key != str(payload.get("idempotency_key", "")).strip():
-            return replace(
-                command,
-                command_id=str(payload.get("command_id", "")).strip(),
-                idempotency_key=str(payload.get("idempotency_key", "")).strip(),
-            )
-        return command
-
-    @staticmethod
-    def _payload_error_code(message: str) -> str:
-        lowered = message.lower()
-        if "unsupported control command" in lowered or "unsupported control path" in lowered:
-            return "unsupported_command"
-        if "does not support path" in lowered or "requires one of:" in lowered:
-            return "unsupported_command"
-        return "validation_error"
 
     def _rate_limit_error(
         self,
@@ -155,40 +159,11 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             retry_after,
         )
 
-    def _rate_limiter(self) -> ControlApiRateLimiter:
+    def _rate_limiter(self) -> ControlApiRateLimiterLike:
         rate_limiter_factory = getattr(self._service, "_control_api_rate_limiter", None)
         if callable(rate_limiter_factory):
-            return cast(ControlApiRateLimiter, rate_limiter_factory())
+            return require_rate_limiter(rate_limiter_factory())
         return self._fallback_rate_limiter
-
-    @staticmethod
-    def _throttled_response(
-        code: str,
-        message: str,
-        retry_after: float,
-    ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]]:
-        retry_seconds = max(1, int(retry_after) if retry_after.is_integer() else int(retry_after) + 1)
-        payload = normalized_control_api_command_response_fields(
-            {
-                "ok": False,
-                "detail": message,
-                "error": {
-                    "code": code,
-                    "message": message,
-                    "retryable": True,
-                    "details": {"retry_after_seconds": retry_after},
-                },
-            }
-        )
-        return HTTPStatus.TOO_MANY_REQUESTS, payload, {"Retry-After": str(retry_seconds)}
-
-    def _tracked_payload(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> dict[str, Any]:
-        tracked = dict(payload)
-        command_id = str(tracked.get("command_id", "")).strip() or handler.headers.get("X-Command-Id", "").strip()
-        idempotency_key = str(tracked.get("idempotency_key", "")).strip() or handler.headers.get("Idempotency-Key", "").strip()
-        tracked["command_id"] = command_id or uuid.uuid4().hex
-        tracked["idempotency_key"] = idempotency_key
-        return tracked
 
     def _replayed_response(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]] | None:
         idempotency_key = str(payload.get("idempotency_key", "")).strip()
@@ -215,29 +190,6 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
         command = response_payload.get("command")
         result = response_payload.get("result")
         return fingerprint, status, response_payload, command if isinstance(command, dict) else None, result if isinstance(result, dict) else None
-
-    @staticmethod
-    def _idempotency_conflict_response(idempotency_key: str) -> tuple[HTTPStatus, dict[str, Any]]:
-        message = "Idempotency-Key was already used for a different payload."
-        return (
-            HTTPStatus.CONFLICT,
-            normalized_control_api_command_response_fields(
-                {
-                    "ok": False,
-                    "detail": message,
-                    "error": {
-                        "code": "idempotency_conflict",
-                        "message": message,
-                        "retryable": False,
-                        "details": {"idempotency_key": idempotency_key},
-                    },
-                }
-            ),
-        )
-
-    @staticmethod
-    def _replayed_payload(response_payload: dict[str, Any]) -> dict[str, Any]:
-        return normalized_control_api_command_response_fields({**response_payload, "replayed": True})
 
     def _publish_replayed_command_event(
         self,
@@ -270,20 +222,11 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             persisted_response,
         )
 
-    def _idempotency_store(self) -> ControlApiIdempotencyStore:
+    def _idempotency_store(self) -> ControlApiIdempotencyStoreLike:
         store_factory = getattr(self._service, "_control_api_idempotency_store", None)
         if callable(store_factory):
-            return cast(ControlApiIdempotencyStore, store_factory())
+            return require_idempotency_store(store_factory())
         return self._fallback_idempotency_store
-
-    @staticmethod
-    def _idempotency_fingerprint(payload: dict[str, Any]) -> str:
-        comparable = {
-            key: value
-            for key, value in payload.items()
-            if key not in {"command_id", "idempotency_key"}
-        }
-        return json.dumps(comparable, sort_keys=True, separators=(",", ":"), default=str)
 
     def _optimistic_concurrency_error(
         self,
@@ -295,90 +238,16 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
         current_token = self._state_token()
         if current_token in expected_tokens:
             return None
-        message = "If-Match state token does not match the current local service state."
-        payload = normalized_control_api_command_response_fields(
-            {
-                "ok": False,
-                "detail": message,
-                "error": {
-                    "code": "conflict",
-                    "message": message,
-                    "retryable": True,
-                    "details": {
-                        "expected": sorted(expected_tokens),
-                        "current": current_token,
-                    },
-                },
-            }
-        )
-        return HTTPStatus.CONFLICT, payload, self._state_token_headers()
+        return HTTPStatus.CONFLICT, optimistic_concurrency_payload(expected_tokens, current_token), self._state_token_headers()
 
     def _command_response_payload(self, command: ControlCommand, result: ControlResult, *, replayed: bool) -> dict[str, Any]:
-        error_payload = None
-        if not result.accepted:
-            error_payload = normalized_control_api_error_fields(
-                {
-                    "code": self._result_error_code(result),
-                    "message": result.detail or "Command rejected.",
-                    "retryable": result.reversible_failure,
-                    "details": {
-                        "status": result.status,
-                        "path": result.command.path,
-                        "command_id": result.command.command_id,
-                        "idempotency_key": result.command.idempotency_key,
-                    },
-                }
-            )
-        return normalized_control_api_command_response_fields(
-            {
-                "ok": bool(result.accepted),
-                "detail": result.detail,
-                "replayed": replayed,
-                "command": self._command_payload(command),
-                "result": self._result_payload(result),
-                "error": error_payload,
-            }
+        return command_response_payload(
+            command,
+            result,
+            replayed=replayed,
+            command_payload=self._command_payload(command),
+            result_payload=self._result_payload(result),
         )
-
-    @staticmethod
-    def _result_error_code(result: ControlResult) -> str:
-        detail = str(result.detail).strip().lower()
-        semantic_checks = (
-            (_LocalControlApiCommandMixin._is_topology_error, "unsupported_for_topology"),
-            (_LocalControlApiCommandMixin._is_update_progress_error, "update_in_progress"),
-            (_LocalControlApiCommandMixin._is_health_error, "blocked_by_health"),
-            (_LocalControlApiCommandMixin._is_mode_block_error, "blocked_by_mode"),
-        )
-        for predicate, error_code in semantic_checks:
-            if predicate(result, detail):
-                return error_code
-        return "command_rejected" if result.status == "rejected" else "conflict"
-
-    @staticmethod
-    def _is_topology_error(result: ControlResult, detail: str) -> bool:
-        return result.command.name == "set_phase_selection" and "unsupported" in detail
-
-    @staticmethod
-    def _is_update_progress_error(_result: ControlResult, detail: str) -> bool:
-        if "update" not in detail:
-            return False
-        for token in ("progress", "running", "busy", "already"):
-            if token in detail:
-                return True
-        return False
-
-    @staticmethod
-    def _is_health_error(_result: ControlResult, detail: str) -> bool:
-        return any(token in detail for token in ("health", "fault", "lockout", "recovery"))
-
-    @staticmethod
-    def _is_mode_block_error(_result: ControlResult, detail: str) -> bool:
-        if "mode" not in detail:
-            return False
-        for token in ("blocked", "cannot", "while", "unsupported"):
-            if token in detail:
-                return True
-        return False
 
     def _record_command_audit(
         self,
@@ -404,11 +273,3 @@ class _LocalControlApiCommandMixin(_LocalControlApiResponseMixin):
             status_code=status_code,
             transport="http",
         )
-
-    @staticmethod
-    def _http_status_for_result(result: ControlResult) -> HTTPStatus:
-        if result.status == "applied":
-            return HTTPStatus.OK
-        if result.status == "accepted_in_flight":
-            return HTTPStatus.ACCEPTED
-        return HTTPStatus.CONFLICT

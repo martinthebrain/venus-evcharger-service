@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any
 
 from venus_evcharger.core.contracts_basic import (
     finite_float_or_none,
@@ -17,8 +18,18 @@ from venus_evcharger.core.contracts_basic import (
 from venus_evcharger.core.contracts_outward import sanitized_auto_metrics
 
 
-def _snapshot_mapping(snapshot: Any) -> dict[str, Any]:
-    return dict(cast(dict[str, Any], snapshot)) if isinstance(snapshot, dict) else {}
+def _mapping_payload(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
+def _snapshot_mapping(snapshot: object) -> dict[str, Any]:
+    return _mapping_payload(snapshot) or {}
+
+
+def _normalized_clamp_future_timestamps(value: object) -> bool:
+    return value if isinstance(value, bool) else True
 
 
 def _resolved_snapshot_captured_at(
@@ -71,7 +82,7 @@ def _pm_snapshot_future_invalid(
 
 def _snapshot_pm_payload(normalized: dict[str, Any]) -> tuple[dict[str, Any] | None, float | None, bool]:
     pm_status_raw = normalized.get("pm_status")
-    pm_status = dict(cast(dict[str, Any], pm_status_raw)) if isinstance(pm_status_raw, dict) else None
+    pm_status = _mapping_payload(pm_status_raw)
     pm_captured_at = non_negative_float_or_none(normalized.get("pm_captured_at"))
     pm_confirmed = bool(normalized.get("pm_confirmed", False))
     return pm_status, pm_captured_at, pm_confirmed
@@ -123,6 +134,7 @@ def normalized_worker_snapshot(
 ) -> dict[str, Any]:
     normalized = _snapshot_mapping(snapshot)
     current = None if now is None else float(now)
+    clamp_future_timestamps = _normalized_clamp_future_timestamps(clamp_future_timestamps)
     captured_at = non_negative_float_or_none(normalized.get("captured_at"))
     pm_status, pm_captured_at, pm_confirmed = _snapshot_pm_payload(normalized)
     resolved_captured_at = _resolved_snapshot_captured_at(captured_at, pm_captured_at, current)

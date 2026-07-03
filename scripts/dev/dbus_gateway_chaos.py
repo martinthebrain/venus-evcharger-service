@@ -16,7 +16,6 @@ import tempfile
 import time
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -28,7 +27,7 @@ GUI_BURST_DRAIN_TICKS = 50
 RESOURCE_PRESSURE_MIN_TICK_SECONDS = 0.3
 
 
-class _FakeDbusService(dict[str, Any]):
+class _FakeDbusService(dict[str, object]):
     def __init__(self) -> None:
         super().__init__()
         self.registered = False
@@ -36,7 +35,7 @@ class _FakeDbusService(dict[str, Any]):
     def register(self) -> None:
         self.registered = True
 
-    def add_path(self, path: str, value: Any, **_kwargs: Any) -> None:
+    def add_path(self, path: str, value: object, **_kwargs: object) -> None:
         self[path] = value
 
 
@@ -60,8 +59,7 @@ def _adapter(temp_dir: str, extra_config: str = "") -> DbusAdapter:
         encoding="utf-8",
     )
     adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-    adapter._dbusservice = _FakeDbusService()
-    adapter._dbusservice_registered = True
+    adapter.set_dbus_service(_FakeDbusService(), registered=True)
     return adapter
 
 
@@ -72,10 +70,10 @@ def _assert(condition: bool, message: str) -> None:
 
 def scenario_dbus_hang(temp_dir: str) -> None:
     adapter = _adapter(temp_dir)
-    adapter._process_socket_once = lambda: None
-    adapter._process_one_dbus_operation_once = lambda: (_ for _ in ()).throw(TimeoutError("simulated 5s DBus hang"))
-    adapter._publish_cache = lambda: None
-    _assert(adapter._tick(), "tick should survive simulated DBus timeout")
+    adapter.process_socket_once = lambda: None
+    adapter.process_one_dbus_operation_once = lambda: (_ for _ in ()).throw(TimeoutError("simulated 5s DBus hang"))
+    adapter.publish_cache = lambda: None
+    _assert(adapter.tick(), "tick should survive simulated DBus timeout")
     _assert(adapter.circuit.last_error, "circuit should record the simulated DBus timeout")
 
 
@@ -124,7 +122,7 @@ def scenario_core_overproduction(temp_dir: str) -> None:
                 "coalesce_key": f"publish:/Optional/{index}",
             }
         )
-    health = adapter._health_snapshot()
+    health = adapter.health_snapshot()
     _assert(health["backpressure"]["state"] != "ok", "overproduction should trip backpressure")
 
 
@@ -141,8 +139,7 @@ def scenario_resource_pressure(temp_dir: str) -> None:
     now = time.monotonic()
     adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=now - 1.0)
     adapter.tick_health.record(duration_ms=250.0, expected_interval_s=0.1, now=now)
-    adapter._last_resource_snapshot = {"state": "ok"}
-    adapter._update_adaptive_tick()
+    adapter.update_adaptive_tick()
     _assert(
         adapter.tick_seconds >= RESOURCE_PRESSURE_MIN_TICK_SECONDS,
         "long tick pressure should slow adaptive tick",

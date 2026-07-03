@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
+from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.models import ChargerState, MeterReading, PhaseSelection
+from venus_evcharger.backend.shelly_io_runtime import ShellyIoRuntime
 from venus_evcharger.backend.shelly_io_types import (
     JsonObject,
     ShellyIoHost,
@@ -13,6 +15,7 @@ from venus_evcharger.backend.shelly_io_types import (
     _EnableBackendLike,
     _MeterBackendLike,
     _SwitchStateBackendLike,
+    is_switch_state_backend,
     _phase_currents_for_selection,
     _phase_powers_for_selection,
     normalize_phase_value,
@@ -20,7 +23,7 @@ from venus_evcharger.backend.shelly_io_types import (
 from venus_evcharger.core.contracts import finite_float_or_none
 
 
-class ShellyIoSplitMixin:
+class ShellyIoSplit(ShellyIoRuntime):
     """Synthesize PM status from split meter, switch, and charger backends."""
 
     if TYPE_CHECKING:
@@ -75,7 +78,7 @@ class ShellyIoSplitMixin:
 
     def _split_switch_state_backend(self) -> _SwitchStateBackendLike | None:
         backend = self._split_switch_backend()
-        return cast(_SwitchStateBackendLike, backend) if hasattr(backend, "read_switch_state") else None
+        return backend if is_switch_state_backend(backend) else None
 
     def _split_switch_state(self) -> object | None:
         backend = self._split_switch_state_backend()
@@ -100,24 +103,27 @@ class ShellyIoSplitMixin:
         if reading.current_a is not None:
             pm_status["current"] = float(reading.current_a)
         resolved_relay = reading.relay_on if relay_on is None else relay_on
-        if resolved_relay is not None:
-            pm_status["output"] = bool(resolved_relay)
-        pm_status.update(cast(ShellyPmStatus, ShellyIoSplitMixin._pm_status_phase_fields(reading)))
+        ShellyIoSplit._apply_meter_output(pm_status, resolved_relay)
+        ShellyIoSplit._apply_meter_phase_fields(pm_status, reading)
         return pm_status
 
     @staticmethod
-    def _pm_status_phase_fields(reading: MeterReading) -> dict[str, object]:
-        fields: dict[str, object] = {"_phase_selection": str(reading.phase_selection)}
+    def _apply_meter_output(pm_status: ShellyPmStatus, resolved_relay: bool | None) -> None:
+        if resolved_relay is not None:
+            pm_status["output"] = bool(resolved_relay)
+
+    @staticmethod
+    def _apply_meter_phase_fields(pm_status: ShellyPmStatus, reading: MeterReading) -> None:
         if reading.phase_powers_w is not None:
-            fields["_phase_powers_w"] = tuple(float(value) for value in reading.phase_powers_w)
+            pm_status["_phase_powers_w"] = _phase_triplet(reading.phase_powers_w)
         if reading.phase_currents_a is not None:
-            fields["_phase_currents_a"] = tuple(float(value) for value in reading.phase_currents_a)
-        return fields
+            pm_status["_phase_currents_a"] = _phase_triplet(reading.phase_currents_a)
+        pm_status["_phase_selection"] = str(reading.phase_selection)
 
     def _relay_state_from_split_switch(self, fallback: bool | None) -> bool | None:
         try:
             state = self._split_switch_state()
-        except Exception:
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return fallback
         if state is None:
             return fallback
@@ -250,7 +256,7 @@ class ShellyIoSplitMixin:
     def _safe_split_switch_state(self) -> object | None:
         try:
             return self._split_switch_state()
-        except Exception:
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             self._store_runtime_switch_snapshot(None)
             return None
 
@@ -296,13 +302,12 @@ class ShellyIoSplitMixin:
             ),
             active=active_phase_selection,
         )
-        return cast(
-            JsonObject,
+        return dict(
             self._pm_status_from_charger_state(
                 recent_charger_state,
                 relay_on=relay_on,
                 active_phase_selection=active_phase_selection,
-            ),
+            )
         )
 
     def _read_split_pm_status_with_meter(
@@ -322,7 +327,7 @@ class ShellyIoSplitMixin:
             requested=getattr(self.service, "requested_phase_selection", reading.phase_selection),
             active=active_phase_selection,
         )
-        return cast(JsonObject, self._pm_status_from_meter_reading(reading, relay_on=relay_on))
+        return dict(self._pm_status_from_meter_reading(reading, relay_on=relay_on))
 
     def _read_split_pm_status(
         self,
@@ -345,3 +350,9 @@ class ShellyIoSplitMixin:
             switch_state,
             supported_phase_selections,
         )
+
+
+def _phase_triplet(values: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Return one normalized three-phase float vector."""
+    first, second, third = values
+    return float(first), float(second), float(third)

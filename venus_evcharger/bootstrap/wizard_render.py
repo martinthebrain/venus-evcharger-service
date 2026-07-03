@@ -17,6 +17,7 @@ from venus_evcharger.backend.probe import (
     read_charger_backend,
     validate_wallbox_config,
 )
+from venus_evcharger.bootstrap.errors import WIZARD_ROLE_PROBE_ERRORS
 from venus_evcharger.bootstrap.wizard_layouts import resolve_role_hosts
 from venus_evcharger.bootstrap.wizard_models import WizardAnswers
 from venus_evcharger.bootstrap.wizard_support import host_from_input
@@ -396,7 +397,7 @@ def live_connectivity_payload(
         resolved_path = config_path if config_path.is_absolute() else main_path.parent / config_path
         try:
             role_results[role] = {"status": "ok", "payload": probe(str(resolved_path))}
-        except Exception as exc:
+        except WIZARD_ROLE_PROBE_ERRORS as exc:
             ok = False
             role_results[role] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 

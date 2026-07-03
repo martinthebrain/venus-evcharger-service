@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_update_cycle_controller_support import *
 
+from venus_evcharger.core.dbus_backpressure import CoreDbusBackpressurePolicy
+
 
 class _UpdateCycleQuaternaryRuntimeCases:
     def test_update_cycle_helpers_cover_offline_inputs_and_relay_resolution_edges(self) -> None:
@@ -118,6 +120,55 @@ class _UpdateCycleQuaternaryRuntimeCases:
             controller._software_update_housekeeping(service, 120.0)
 
         start_run.assert_called_once_with(service, 120.0, "manual")
+
+    def test_software_update_periodic_check_never_starts_installer(self):
+        service = self._software_update_service(
+            "",
+            _software_update_next_check_at=100.0,
+            _software_update_boot_auto_due_at=None,
+            _software_update_run_requested_at=None,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        with patch.object(UpdateCycleController, "_run_software_update_check") as check, patch.object(
+            UpdateCycleController,
+            "_start_software_update_run",
+        ) as start_run:
+            controller._software_update_housekeeping(service, 120.0)
+
+        check.assert_called_once_with(service, 120.0)
+        start_run.assert_not_called()
+        self.assertIsNone(service._software_update_process)
+
+    def test_software_update_housekeeping_defers_automatic_work_under_backpressure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            health_path = Path(temp_dir) / "dbus-health.json"
+            health_path.write_text(
+                '{"captured_at": 120.0, "dbus_health": {"backpressure": {"state": "protective"}}}',
+                encoding="utf-8",
+            )
+            service = self._software_update_service(
+                "",
+                _software_update_next_check_at=100.0,
+                _software_update_boot_auto_due_at=100.0,
+                _dbus_backpressure_policy=CoreDbusBackpressurePolicy(
+                    str(health_path),
+                    now=lambda: 120.0,
+                    cache_seconds=0.0,
+                ),
+            )
+            controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+            with patch.object(UpdateCycleController, "_run_software_update_check") as check, patch.object(
+                UpdateCycleController,
+                "_start_software_update_run",
+            ) as start_run:
+                controller._software_update_housekeeping(service, 120.0)
+
+            check.assert_not_called()
+            start_run.assert_not_called()
+            self.assertEqual(service._software_update_next_check_at, 840.0)
+            self.assertEqual(service._software_update_boot_auto_due_at, 840.0)
 
     def test_software_update_housekeeping_discards_manual_request_while_run_is_already_active(self):
         process = MagicMock()

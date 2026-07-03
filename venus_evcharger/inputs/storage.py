@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.energy import (
     EnergyClusterSnapshot,
-    EnergyLearningProfile,
     EnergySourceDefinition,
     EnergySourceSnapshot,
     aggregate_energy_sources,
@@ -20,10 +19,19 @@ from venus_evcharger.energy import (
     summarize_energy_learning_profiles,
     update_energy_learning_profiles,
 )
-from .storage_support import _DbusInputStorageSupportMixin
+from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS, DBUS_INPUT_SNAPSHOT_ERRORS
+from venus_evcharger.dbus_gateway import BATTERY_SOC_READ_KEY, GRID_POWER_READ_KEY
+from .energy_snapshot_contracts import (
+    energy_source_definitions,
+    learning_profile_payloads,
+    learning_profiles,
+    nested_object_mappings,
+    object_mapping,
+)
+from .storage_support import _DbusInputStorageSupport
 
 
-class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
+class _DbusInputStorage(_DbusInputStorageSupport):
 
     def _read_optional_energy_value(self, service_name: str, path: str) -> float | None:
         if not path:
@@ -50,7 +58,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             pv_input_power = self._read_optional_energy_value(service_name, source.pv_power_path)
             grid_interaction = self._read_optional_energy_value(service_name, source.grid_interaction_path)
             operating_mode = self._read_optional_energy_text(service_name, source.operating_mode_path)
-        except Exception:
+        except DBUS_INPUT_READ_ERRORS:
             if source.source_id != self._primary_energy_source().source_id:
                 raise
             self.service.invalidate_auto_battery_service()
@@ -80,7 +88,10 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         )
 
     def _battery_snapshot_sources(self) -> tuple[EnergySourceDefinition, ...]:
-        return tuple(getattr(self.service, "auto_energy_sources", ()) or (self._primary_energy_source(),))
+        configured = energy_source_definitions(getattr(self.service, "auto_energy_sources", ()))
+        if configured:
+            return configured
+        return energy_source_definitions(self._primary_energy_source())
 
     def _battery_snapshot_cluster(
         self,
@@ -109,43 +120,39 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         cluster: EnergyClusterSnapshot,
         now: float,
     ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-        learning_profiles = update_energy_learning_profiles(
-            getattr(cache_owner, "_last_energy_learning_profiles", {}),
+        existing_profiles = learning_profiles(getattr(cache_owner, "_last_energy_learning_profiles", {}))
+        updated_profiles = update_energy_learning_profiles(
+            existing_profiles,
             cluster.sources,
             now,
         )
-        cache_owner._last_energy_learning_profiles = learning_profiles
+        cache_owner._last_energy_learning_profiles = updated_profiles
         learning_summary = summarize_energy_learning_profiles(
-            learning_profiles
+            updated_profiles
         )
         discharge_balance = derive_discharge_balance_metrics(
             cluster.sources,
-            learning_profiles,
+            updated_profiles,
         )
         forecast = derive_energy_forecast(
             {
                 "battery_combined_charge_power_w": cluster.combined_charge_power_w,
                 "battery_combined_discharge_power_w": cluster.combined_discharge_power_w,
-                "battery_combined_charge_limit_power_w": cluster.combined_charge_limit_power_w,
+                "BATTERY_COMBINED_CHARGE_LIMIT_POWER_W": cluster.combined_charge_limit_power_w,
                 "battery_combined_discharge_limit_power_w": cluster.combined_discharge_limit_power_w,
                 "battery_combined_grid_interaction_w": cluster.combined_grid_interaction_w,
             },
             learning_summary,
         )
-        return (
-            cast(dict[str, object], learning_summary),
-            cast(dict[str, object], discharge_balance),
-            cast(dict[str, object], forecast),
-        )
+        return object_mapping(learning_summary), object_mapping(discharge_balance), object_mapping(forecast)
 
     @staticmethod
     def _battery_snapshot_discharge_control(
         cluster: EnergyClusterSnapshot,
         sources: tuple[EnergySourceDefinition, ...],
     ) -> dict[str, object]:
-        return cast(
-            dict[str, object],
-            derive_discharge_control_metrics(cluster.sources, {source.source_id: source for source in sources}),
+        return object_mapping(
+            derive_discharge_control_metrics(cluster.sources, {source.source_id: source for source in sources})
         )
 
     @staticmethod
@@ -154,9 +161,9 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         discharge_balance: dict[str, object],
         discharge_control: dict[str, object],
     ) -> list[dict[str, object]]:
-        source_payloads = [source.as_dict() for source in cluster.sources]
-        source_balance = cast(dict[str, dict[str, object]], discharge_balance.get("sources", {}))
-        source_control = cast(dict[str, dict[str, object]], discharge_control.get("sources", {}))
+        source_payloads = [object_mapping(source.as_dict()) for source in cluster.sources]
+        source_balance = nested_object_mappings(discharge_balance.get("sources", {}))
+        source_control = nested_object_mappings(discharge_control.get("sources", {}))
         for source_payload in source_payloads:
             source_id = str(source_payload.get("source_id", ""))
             source_payload.update(source_balance.get(source_id, {}))
@@ -212,13 +219,9 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             "battery_hybrid_inverter_source_count": cluster.hybrid_inverter_source_count,
             "battery_inverter_source_count": cluster.inverter_source_count,
             "battery_sources": source_payloads,
-            "battery_learning_profiles": {
-                source_id: profile.as_dict()
-                for source_id, profile in cast(
-                    dict[str, EnergyLearningProfile],
-                    getattr(cache_owner, "_last_energy_learning_profiles", {}),
-                ).items()
-            },
+            "battery_learning_profiles": learning_profile_payloads(
+                getattr(cache_owner, "_last_energy_learning_profiles", {})
+            ),
         }
 
     @staticmethod
@@ -259,6 +262,12 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             "battery_learning_profiles": {},
         }
 
+    @staticmethod
+    def _failure_soc_value(value: object) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
     def _successful_battery_snapshot_payload(self, now: float) -> dict[str, object]:
         cluster, sources, _ = self._battery_snapshot_cluster(now)
         effective_soc = self._battery_snapshot_effective_soc(cluster)
@@ -294,7 +303,7 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             svc.auto_battery_soc_path,
             error,
         )
-        return self._empty_battery_snapshot_payload(cast(float | None, failure))
+        return self._empty_battery_snapshot_payload(self._failure_soc_value(failure))
 
     def get_battery_snapshot(self) -> dict[str, object]:
         """Return aggregated battery and inverter source data for Auto mode."""
@@ -303,27 +312,26 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
             return {"battery_soc": None}
         try:
             return self._successful_battery_snapshot_payload(now)
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_INPUT_SNAPSHOT_ERRORS as error:
             return self._failed_battery_snapshot_payload(now, error)
 
     def get_battery_soc(self) -> float | None:
-        """Read battery SOC from the resolved battery service."""
-        snapshot = self.get_battery_snapshot()
-        battery_soc = snapshot.get("battery_soc")
-        if isinstance(battery_soc, (int, float)):
+        """Read battery SOC from the gateway read contract."""
+        now = time.time()
+        if not self._source_retry_ready("battery", now):
+            return None
+        battery_soc = self.get_gateway_read_value(BATTERY_SOC_READ_KEY, reason="main semantic battery SOC read")
+        if isinstance(battery_soc, (int, float)) and 0.0 <= float(battery_soc) <= 100.0:
+            self._mark_source_recovery("battery", "Battery SOC readings recovered")
             return float(battery_soc)
+        self._handle_source_failure(
+            "battery",
+            now,
+            "battery-missing",
+            self.service.auto_battery_scan_interval_seconds,
+            "Auto mode could not read battery SOC from the DBus gateway read contract.",
+        )
         return None
-
-    def _read_battery_soc_value(self) -> object:
-        """Read one raw battery SOC value, retrying once after invalidating cached service discovery."""
-        svc = self.service
-        service_name = svc.resolve_auto_battery_service()
-        try:
-            return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)
-        except Exception:
-            svc.invalidate_auto_battery_service()
-            service_name = svc.resolve_auto_battery_service()
-            return svc.get_dbus_value(service_name, svc.auto_battery_soc_path)
 
     def _battery_soc_numeric(self, value: object) -> float | None:
         """Return one numeric battery SOC value after DBus coercion."""
@@ -333,12 +341,12 @@ class _DbusInputStorageMixin(_DbusInputStorageSupportMixin):
         return float(coerced_value)
 
     def get_grid_power(self) -> float | None:
-        """Read and sum grid power from per-phase paths."""
+        """Read grid power from the gateway read contract."""
         now = time.time()
         if not self._source_retry_ready("grid", now):
             return None
-        configured_paths = self._configured_grid_paths()
-        if not configured_paths:
-            return None
-        total, seen_value, missing_paths = self._read_grid_phase_values(configured_paths)
-        return self._finalize_grid_power(total, seen_value, missing_paths, now)
+        grid_power = self.get_gateway_read_value(GRID_POWER_READ_KEY, reason="main semantic grid power read")
+        if isinstance(grid_power, (int, float)):
+            self._mark_source_recovery("grid", "Grid readings recovered")
+            return float(grid_power)
+        return self._handle_missing_grid_values(False, [], now)

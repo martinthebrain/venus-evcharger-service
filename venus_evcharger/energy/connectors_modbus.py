@@ -4,14 +4,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, Callable
 
 from venus_evcharger.backend.modbus_client import ModbusClient
 from venus_evcharger.backend.modbus_transport_config import load_modbus_transport_settings
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 from venus_evcharger.backend.template_support import load_template_config
 
-from .connectors_common import _cache_map
+from .connectors_common import _typed_cache_map
 from .models import EnergySourceDefinition, EnergySourceSnapshot
 
 
@@ -47,7 +47,7 @@ class ModbusEnergySourceSettings:
 
 
 def _modbus_client_cache(runtime: Any) -> dict[str, ModbusClient]:
-    return cast(dict[str, ModbusClient], _cache_map(runtime, "_energy_modbus_client_cache"))
+    return _typed_cache_map(runtime, "_energy_modbus_client_cache", ModbusClient)
 
 
 def _modbus_source_name(source: EnergySourceDefinition, transport_settings: ModbusTransportSettings) -> str:
@@ -61,7 +61,7 @@ def _modbus_source_name(source: EnergySourceDefinition, transport_settings: Modb
 
 
 def _modbus_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> ModbusEnergySourceSettings:
-    cache = cast(dict[str, ModbusEnergySourceSettings], _cache_map(runtime, "_energy_modbus_settings_cache"))
+    cache = _typed_cache_map(runtime, "_energy_modbus_settings_cache", ModbusEnergySourceSettings)
     cache_key = str(source.config_path).strip()
     cached = cache.get(cache_key)
     if isinstance(cached, ModbusEnergySourceSettings):
@@ -230,7 +230,7 @@ def _render_scope_key(
     }
     try:
         return normalized.format_map(_ScopeKeyFormatter(values))
-    except Exception:  # noqa: BLE001
+    except (KeyError, IndexError, ValueError):
         return normalized
 
 

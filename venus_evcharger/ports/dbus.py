@@ -5,8 +5,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from venus_evcharger.core.return_contracts import require_str_list, require_str_or_none
 
 from .base import _ControllerBoundPort
+
 
 class DbusInputPort(_ControllerBoundPort):
     """Expose the DBus-input surface needed by ``DbusInputController``."""
@@ -69,56 +71,56 @@ class DbusInputPort(_ControllerBoundPort):
         "_last_dbus_ok_at",
     }
 
-    def source_retry_ready(self, source_key: str, now: float) -> Any:
-        return self._service._source_retry_ready(source_key, now)
+    def source_retry_ready(self, source_key: str, now: float) -> bool:
+        return bool(self._service._source_retry_ready(source_key, now))
 
-    def mark_recovery(self, source_key: str, message: str, *args: Any) -> Any:
-        return self._service._mark_recovery(source_key, message, *args)
+    def mark_recovery(self, source_key: str, message: str, *args: object) -> None:
+        self._service._mark_recovery(source_key, message, *args)
 
-    def mark_failure(self, source_key: str) -> Any:
-        return self._service._mark_failure(source_key)
+    def mark_failure(self, source_key: str) -> None:
+        self._service._mark_failure(source_key)
 
-    def delay_source_retry(self, source_key: str, now: float) -> Any:
-        return self._service._delay_source_retry(source_key, now)
+    def delay_source_retry(self, source_key: str, now: float) -> None:
+        self._service._delay_source_retry(source_key, now)
 
     def warning_throttled(
         self,
         warning_key: str,
         interval_seconds: float,
         warning_message: str,
-        *args: Any,
-    ) -> Any:
-        return self._service._warning_throttled(warning_key, interval_seconds, warning_message, *args)
+        *args: object,
+    ) -> None:
+        self._service._warning_throttled(warning_key, interval_seconds, warning_message, *args)
 
     def get_system_bus(self) -> Any:
         return self._service._get_system_bus()
 
-    def reset_system_bus(self) -> Any:
-        return self._service._reset_system_bus()
+    def reset_system_bus(self) -> None:
+        self._service._reset_system_bus()
 
-    def get_dbus_value(self, *args: Any, **kwargs: Any) -> Any:
-        return self._controller_or_override("_get_dbus_value", "get_dbus_value")(*args, **kwargs)
+    def get_dbus_value(self, service_name: str, path: str) -> object:
+        return self._controller_or_override("_get_dbus_value", "get_dbus_value")(service_name, path)
 
-    def list_dbus_services(self, *args: Any, **kwargs: Any) -> Any:
-        return self._controller_or_override("_list_dbus_services", "list_dbus_services")(*args, **kwargs)
+    def list_dbus_services(self) -> list[str]:
+        services = self._controller_or_override("_list_dbus_services", "list_dbus_services")()
+        return require_str_list(services, "list_dbus_services")
 
-    def invalidate_auto_pv_services(self, *args: Any, **kwargs: Any) -> Any:
-        return self._controller_or_override("_invalidate_auto_pv_services", "invalidate_auto_pv_services")(
-            *args,
-            **kwargs,
-        )
+    def invalidate_auto_pv_services(self) -> None:
+        self._controller_or_override("_invalidate_auto_pv_services", "invalidate_auto_pv_services")()
 
-    def resolve_auto_pv_services(self, *args: Any, **kwargs: Any) -> Any:
-        return self._controller_or_override("_resolve_auto_pv_services", "resolve_auto_pv_services")(*args, **kwargs)
+    def resolve_auto_pv_services(self) -> list[str]:
+        services = self._controller_or_override("_resolve_auto_pv_services", "resolve_auto_pv_services")()
+        return require_str_list(services, "resolve_auto_pv_services")
 
-    def invalidate_auto_battery_service(self, *args: Any, **kwargs: Any) -> Any:
-        return self._controller_or_override(
+    def invalidate_auto_battery_service(self) -> None:
+        self._controller_or_override(
             "_invalidate_auto_battery_service",
             "invalidate_auto_battery_service",
-        )(*args, **kwargs)
+        )()
 
-    def resolve_auto_battery_service(self, *args: Any, **kwargs: Any) -> Any:
-        return self._controller_or_override(
+    def resolve_auto_battery_service(self) -> str | None:
+        service = self._controller_or_override(
             "_resolve_auto_battery_service",
             "resolve_auto_battery_service",
-        )(*args, **kwargs)
+        )()
+        return require_str_or_none(service, "resolve_auto_battery_service")

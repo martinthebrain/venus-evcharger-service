@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Runtime-override persistence helpers for the state controller."""
 
 from __future__ import annotations
@@ -12,8 +10,9 @@ import time
 from typing import Any, Callable
 
 from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normalize_hhmm_text, scheduled_enabled_days_text
-from venus_evcharger.core.shared import compact_json
-from venus_evcharger.controllers.state_runtime_normalize import _StateRuntimeNormalizeMixin
+from venus_evcharger.core.shared import compact_json, write_text_atomically
+from venus_evcharger.controllers.errors import RUNTIME_OVERRIDE_READ_ERRORS, RUNTIME_PERSISTENCE_WRITE_ERRORS
+from venus_evcharger.controllers.state_runtime_snapshot import _StateRuntimeSnapshot
 from venus_evcharger.controllers.state_specs import (
     RUNTIME_OVERRIDE_BY_CONFIG_KEY,
     RUNTIME_OVERRIDE_SPECS,
@@ -23,7 +22,17 @@ from venus_evcharger.controllers.state_specs import (
 )
 
 
-class _StateRuntimeOverridesMixin:
+class _StateRuntimeOverrides(_StateRuntimeSnapshot):
+    @staticmethod
+    def _write_text_atomically(path: str, payload: str) -> None:
+        write_text_atomically(path, payload)
+
+    @staticmethod
+    def runtime_overrides_path(defaults: configparser.SectionProxy) -> str:
+        device_instance = defaults.get("DeviceInstance", "60").strip() or "60"
+        fallback = f"/run/dbus-venus-evcharger-overrides-{device_instance}.ini"
+        return defaults.get("RuntimeOverridesPath", fallback).strip()
+
     @classmethod
     def _read_runtime_override_values(cls, path: str) -> dict[str, str]:
         if not str(path).strip():
@@ -31,7 +40,7 @@ class _StateRuntimeOverridesMixin:
         parser = _CasePreservingConfigParser()
         try:
             read_files = parser.read(path)
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_OVERRIDE_READ_ERRORS as error:
             logging.warning("Unable to read runtime overrides from %s: %s", path, error)
             return {}
         if not read_files or not parser.has_section(RUNTIME_OVERRIDE_SECTION):
@@ -72,11 +81,11 @@ class _StateRuntimeOverridesMixin:
     def _override_value_as_text(spec: RuntimeOverrideSpec, value: object) -> str:
         renderers: dict[str, Callable[[object], str]] = {
             "bool": lambda raw: str(int(bool(raw))),
-            "int": lambda raw: str(_StateRuntimeNormalizeMixin.coerce_runtime_int(raw)),
-            "phase": lambda raw: str(_StateRuntimeNormalizeMixin._normalize_runtime_phase_selection(raw)),
+            "int": lambda raw: str(_StateRuntimeOverrides.coerce_runtime_int(raw)),
+            "phase": lambda raw: str(_StateRuntimeOverrides._normalize_runtime_phase_selection(raw)),
             "weekday_set": lambda raw: scheduled_enabled_days_text(raw, DEFAULT_SCHEDULED_ENABLED_DAYS),
             "hhmm": lambda raw: normalize_hhmm_text(raw, "06:30"),
-            "float": lambda raw: str(_StateRuntimeNormalizeMixin.coerce_runtime_float(raw)),
+            "float": lambda raw: str(_StateRuntimeOverrides.coerce_runtime_float(raw)),
         }
         return renderers.get(spec.value_kind, renderers["float"])(value)
 
@@ -105,7 +114,7 @@ class _StateRuntimeOverridesMixin:
 
     @staticmethod
     def _runtime_override_write_min_interval_seconds(svc: Any) -> float:
-        configured = _StateRuntimeNormalizeMixin._coerce_optional_runtime_float(
+        configured = _StateRuntimeOverrides._coerce_optional_runtime_float(
             getattr(svc, "runtime_overrides_write_min_interval_seconds", None)
         )
         return 1.0 if configured is None else max(0.0, float(configured))
@@ -114,7 +123,7 @@ class _StateRuntimeOverridesMixin:
     def _runtime_now(svc: Any) -> float:
         time_now = getattr(svc, "_time_now", None)
         raw_current_time: object = time_now() if callable(time_now) else time.time()
-        return _StateRuntimeNormalizeMixin.coerce_runtime_float(raw_current_time, time.time())
+        return _StateRuntimeOverrides.coerce_runtime_float(raw_current_time, time.time())
 
     @staticmethod
     def _clear_pending_runtime_overrides(svc: Any) -> None:
@@ -180,7 +189,7 @@ class _StateRuntimeOverridesMixin:
                 pending_payload[2],
                 current_time,
             )
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_PERSISTENCE_WRITE_ERRORS as error:
             svc._runtime_overrides_pending_due_at = float(
                 current_time + self._runtime_override_write_min_interval_seconds(svc)
             )
@@ -236,10 +245,9 @@ class _StateRuntimeOverridesMixin:
             return
         try:
             self._write_runtime_overrides_payload(svc, path, payload, serialized, rendered, current_time)
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_PERSISTENCE_WRITE_ERRORS as error:
             self._stage_runtime_overrides_write(svc, payload, serialized, rendered, current_time + min_interval)
             logging.warning("Unable to write runtime overrides to %s: %s", path, error)
 
     def _serialized_runtime_state(self) -> str:
         return compact_json(self.current_runtime_state())
-

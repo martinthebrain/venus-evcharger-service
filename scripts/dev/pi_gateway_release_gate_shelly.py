@@ -4,15 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import socket
 import subprocess
 import sys
 import time
-from typing import Any
 from urllib.request import urlopen
 
-from pi_gateway_release_gate_common import ROOT, GateFailure
+from pi_gateway_release_gate_common import ROOT, GateFailure, json_object
 
 
 def route_local_ip(remote_host: str) -> str:
@@ -88,8 +86,7 @@ def _shelly_command(args: argparse.Namespace) -> list[str]:
     ]
 
 
-def _http_json(url: str, *, timeout: float = 5.0) -> dict[str, Any]:
+def _http_json(url: str, *, timeout: float = 5.0) -> dict[str, object]:
     with urlopen(url, timeout=timeout) as response:  # noqa: S310 - dev-only local testbed URL
         data = response.read().decode("utf-8")
-    payload = json.loads(data)
-    return payload if isinstance(payload, dict) else {}
+    return json_object(data, detail="mock Shelly response")

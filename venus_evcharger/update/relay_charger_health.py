@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Charger health, transport, and contactor heuristics for the update cycle.
 
 This module centralizes safety-oriented runtime diagnostics: charger transport
@@ -9,22 +7,86 @@ health, retry visibility, contactor suspicion, and feedback mismatch state.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 from venus_evcharger.backend.models import switch_feedback_mismatch
 from venus_evcharger.core.common import (
     _charger_transport_health_reason,
-    _charger_transport_retry_delay_seconds,
     _fresh_charger_retry_reason,
-    _fresh_charger_retry_until,
     _fresh_charger_transport_reason,
 )
 
-from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
+from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.update.relay_charger_current import _RelayChargerCurrent
+
+# Safety invariants for charger health:
+# - Direct switch feedback and interlock faults override heuristic contactor guesses.
+# - Transport retry and transport failure windows are surfaced before status text.
+# - Contactor suspicion must persist beyond the configured delay before becoming health.
+# - Repeated contactor suspicions can latch a lockout with an explicit source.
+# - Lockout reasons are normalized to a small public diagnostic vocabulary.
+# - Charger-side power/current can corroborate load when the Shelly reading is stale.
+# - Text status hints influence presentation only; they do not override safety faults.
+# - Runtime fault counters are sanitized before thresholds are evaluated.
+# - Clearing feedback mismatches also clears transient contactor suspicion timers.
+# - Backend enable state is preferred over relay state when fresh readback exists.
 
 
-class _RelayChargerHealthMixin:
+class _RelayChargerHealth(_RelayChargerCurrent):
     """Combine charger transport, contactor heuristics, and status overrides."""
+
+    if TYPE_CHECKING:
+        CHARGER_STATUS_CHARGING_HINT_TOKENS: frozenset[str]
+        CHARGER_STATUS_READY_HINT_TOKENS: frozenset[str]
+        CHARGER_STATUS_WAITING_HINT_TOKENS: frozenset[str]
+        CHARGER_STATUS_FINISHED_HINT_TOKENS: frozenset[str]
+
+        @staticmethod
+        def _contactor_heuristic_delay_seconds(svc: Any) -> float: ...
+
+        @staticmethod
+        def _contactor_lockout_threshold(svc: Any) -> int: ...
+
+        @staticmethod
+        def _contactor_lockout_persistence_seconds(svc: Any) -> float: ...
+
+        @staticmethod
+        def _contactor_power_threshold_w(svc: Any) -> float: ...
+
+        @staticmethod
+        def _contactor_current_threshold_a(svc: Any) -> float: ...
+
+        @staticmethod
+        def _charger_enable_backend(svc: Any) -> Any | None: ...
+
+        @classmethod
+        def _fresh_charger_power_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        @classmethod
+        def _fresh_charger_actual_current_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
+
+        @classmethod
+        def _fresh_charger_text_readback(
+            cls,
+            svc: Any,
+            attribute_name: str,
+            now: float | None = None,
+        ) -> str | None: ...
+
+        @classmethod
+        def _charger_text_tokens(cls, value: str | None) -> set[str]: ...
+
+        @classmethod
+        def _charger_text_indicates_fault(cls, value: str | None) -> bool: ...
+
+        @classmethod
+        def _fresh_switch_interlock_ok(cls, svc: Any, now: float | None = None) -> bool | None: ...
+
+        @classmethod
+        def _fresh_switch_feedback_closed(cls, svc: Any, now: float | None = None) -> bool | None: ...
+
+        @classmethod
+        def _fresh_charger_enabled_readback(cls, svc: Any, now: float | None = None) -> bool | None: ...
 
     @classmethod
     def _pm_load_active(
@@ -87,75 +149,10 @@ class _RelayChargerHealthMixin:
         return float(max(0.0, current - float(started_at)))
 
     @staticmethod
-    def _set_runtime_attr(svc: Any, attribute_name: str, value: Any) -> None:
-        try:
-            setattr(svc, attribute_name, value)
-        except AttributeError:
-            if hasattr(svc, "__dict__"):
-                svc.__dict__[attribute_name] = value
-                return
-            raise
-
-    @staticmethod
-    def _charger_transport_detail(error: BaseException) -> str:
-        return exception_detail(error)
-
-    @classmethod
-    def _remember_charger_transport_issue(
-        cls,
-        svc: Any,
-        reason: str,
-        source: str,
-        error: BaseException,
-        now: float | None = None,
-    ) -> None:
-        captured_at = cls._charger_readback_now(svc, now)
-        cls._set_runtime_attr(svc, "_last_charger_transport_reason", str(reason).strip() or None)
-        cls._set_runtime_attr(svc, "_last_charger_transport_source", str(source).strip() or None)
-        cls._set_runtime_attr(svc, "_last_charger_transport_detail", cls._charger_transport_detail(error))
-        cls._set_runtime_attr(svc, "_last_charger_transport_at", captured_at)
-
-    @classmethod
-    def _clear_charger_transport_issue(cls, svc: Any) -> None:
-        cls._set_runtime_attr(svc, "_last_charger_transport_reason", None)
-        cls._set_runtime_attr(svc, "_last_charger_transport_source", None)
-        cls._set_runtime_attr(svc, "_last_charger_transport_detail", None)
-        cls._set_runtime_attr(svc, "_last_charger_transport_at", None)
-
-    @classmethod
-    def _remember_charger_retry(
-        cls,
-        svc: Any,
-        reason: str,
-        source: str,
-        now: float | None = None,
-    ) -> None:
-        captured_at = cls._charger_readback_now(svc, now)
-        delay_seconds = _charger_transport_retry_delay_seconds(svc, reason)
-        delay_retry = getattr(svc, "_delay_source_retry", None)
-        if callable(delay_retry):
-            delay_retry("charger", captured_at, delay_seconds)
-        elif isinstance(getattr(svc, "_source_retry_after", None), dict):
-            svc._source_retry_after["charger"] = captured_at + delay_seconds
-        cls._set_runtime_attr(svc, "_charger_retry_reason", str(reason).strip() or None)
-        cls._set_runtime_attr(svc, "_charger_retry_source", str(source).strip() or None)
-        cls._set_runtime_attr(svc, "_charger_retry_until", captured_at + delay_seconds)
-
-    @classmethod
-    def _clear_charger_retry(cls, svc: Any) -> None:
-        cls._set_runtime_attr(svc, "_charger_retry_reason", None)
-        cls._set_runtime_attr(svc, "_charger_retry_source", None)
-        cls._set_runtime_attr(svc, "_charger_retry_until", None)
-        if isinstance(getattr(svc, "_source_retry_after", None), dict):
-            svc._source_retry_after["charger"] = 0.0
-
-    @classmethod
-    def _charger_retry_active(cls, svc: Any, now: float | None = None) -> bool:
-        return _fresh_charger_retry_until(svc, cls._charger_readback_now(svc, now)) is not None
-
-    @staticmethod
     def _base_contactor_fault_reason(reason: object) -> str | None:
-        normalized = str(reason).strip() if reason is not None else ""
+        if reason is None:
+            return None
+        normalized = str(reason).strip()
         if normalized in {"contactor-suspected-open", "contactor-suspected-welded"}:
             return normalized
         return None
@@ -173,10 +170,23 @@ class _RelayChargerHealthMixin:
     def _contactor_fault_counts(svc: Any) -> dict[str, int]:
         counts = getattr(svc, "_contactor_fault_counts", None)
         if isinstance(counts, dict):
-            return cast(dict[str, int], counts)
-        counts = {}
-        _RelayChargerHealthMixin._set_runtime_attr(svc, "_contactor_fault_counts", counts)
-        return counts
+            normalized = _RelayChargerHealth._normalized_contactor_fault_counts(counts)
+            _RelayChargerHealth._set_runtime_attr(svc, "_contactor_fault_counts", normalized)
+            return normalized
+        empty_counts: dict[str, int] = {}
+        _RelayChargerHealth._set_runtime_attr(svc, "_contactor_fault_counts", empty_counts)
+        return empty_counts
+
+    @staticmethod
+    def _normalized_contactor_fault_counts(counts: dict[Any, Any]) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for reason, count in counts.items():
+            if reason not in {"contactor-suspected-open", "contactor-suspected-welded"}:
+                continue
+            if not isinstance(count, int) or isinstance(count, bool):
+                continue
+            normalized[str(reason)] = max(0, count)
+        return normalized
 
     @classmethod
     def _contactor_fault_count(cls, svc: Any, reason: object) -> int:
@@ -223,7 +233,9 @@ class _RelayChargerHealthMixin:
 
     @classmethod
     def _active_contactor_lockout_health(cls, svc: Any) -> str | None:
-        return cls._contactor_lockout_health_reason(getattr(svc, "_contactor_lockout_reason", ""))
+        if not hasattr(svc, "_contactor_lockout_reason"):
+            return None
+        return cls._contactor_lockout_health_reason(getattr(svc, "_contactor_lockout_reason"))
 
     @classmethod
     def _remember_contactor_fault(cls, svc: Any, reason: object, now: float | None) -> str | None:
@@ -250,7 +262,7 @@ class _RelayChargerHealthMixin:
         if active_reason == normalized and active_since is not None:
             return active_since
         counts = cls._contactor_fault_counts(svc)
-        counts[normalized] = cls._contactor_fault_count(svc, normalized) + 1
+        counts[normalized] = max(0, int(counts.get(normalized, 0))) + 1
         cls._set_runtime_attr(svc, "_contactor_fault_active_reason", normalized)
         cls._set_runtime_attr(svc, "_contactor_fault_active_since", current)
         return current

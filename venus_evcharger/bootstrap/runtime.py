@@ -17,15 +17,18 @@ import logging
 import os
 import time
 from collections import deque
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any
 
+from venus_evcharger.bootstrap.config import _ServiceBootstrapConfig
+from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.shelly_io import ShellyIoController
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
 from venus_evcharger.publish.dbus import DbusPublishController
 from venus_evcharger.update.controller import UpdateCycleController
 from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_tuple
+from venus_evcharger.bootstrap.errors import BOOTSTRAP_DEVICE_INFO_ERRORS
 from venus_evcharger.controllers.auto import AutoDecisionController
 from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.controllers.write import DbusWriteController
@@ -34,12 +37,12 @@ from venus_evcharger.runtime import RuntimeSupportController
 from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy
 
 
-def _backend_capabilities_unavailable(backend: Any) -> bool:
-    """Return whether a backend object cannot expose capabilities."""
-    return backend is None or not hasattr(backend, "capabilities")
+def _device_info_payload(payload: object) -> dict[str, Any]:
+    """Return one plain device-info dict from an RPC payload."""
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 
-class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
+class _ServiceBootstrapRuntime(_ServiceBootstrapConfig):
     @staticmethod
     def _topology_configured(svc: Any) -> bool:
         """Return whether one service has a configured runtime topology."""
@@ -51,31 +54,30 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
         return bool(getattr(svc, "primary_rpc_configured", getattr(svc, "host_configured", False)))
 
     @staticmethod
-    def _switch_backend_supported_phase_selections(svc: Any) -> tuple[str, ...]:
+    def _switch_backend_supported_phase_selections(svc: Any) -> tuple[PhaseSelection, ...]:
         """Return normalized supported phase selections declared by the current switch backend."""
         backend = getattr(svc, "_switch_backend", None)
-        if _backend_capabilities_unavailable(backend):
+        capabilities_method = getattr(backend, "capabilities", None)
+        if not callable(capabilities_method):
             return ("P1",)
         try:
-            capabilities = cast(Any, backend).capabilities()
-        except Exception:  # pylint: disable=broad-except
+            capabilities = capabilities_method()
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return ("P1",)
-        normalized = normalize_phase_selection_tuple(
+        return normalize_phase_selection_tuple(
             getattr(capabilities, "supported_phase_selections", ("P1",)),
             ("P1",),
         )
-        return cast(tuple[str, ...], normalized)
 
     @staticmethod
-    def _charger_backend_supported_phase_selections(svc: Any) -> tuple[str, ...]:
+    def _charger_backend_supported_phase_selections(svc: Any) -> tuple[PhaseSelection, ...]:
         """Return normalized supported phase selections declared by the current charger backend."""
         backend = getattr(svc, "_charger_backend", None)
         settings = getattr(backend, "settings", None)
-        normalized = normalize_phase_selection_tuple(
+        return normalize_phase_selection_tuple(
             getattr(settings, "supported_phase_selections", ("P1",)),
             ("P1",),
         )
-        return cast(tuple[str, ...], normalized)
 
     def initialize_controllers(self) -> None:
         """Create the controller objects used by the service runtime."""
@@ -144,10 +146,10 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
         svc.supported_phase_selections = supported_phase_selections
         configured_phase_selection = normalize_phase_selection(
             defaults.get("PhaseSelection", supported_phase_selections[0]),
-            cast(PhaseSelection, supported_phase_selections[0]),
+            supported_phase_selections[0],
         )
         if configured_phase_selection not in supported_phase_selections:
-            configured_phase_selection = cast(PhaseSelection, supported_phase_selections[0])
+            configured_phase_selection = supported_phase_selections[0]
         svc.requested_phase_selection = configured_phase_selection
         svc.active_phase_selection = configured_phase_selection
         svc._grid_recovery_required = False
@@ -267,8 +269,8 @@ class _ServiceBootstrapRuntimeMixin(_ComposableControllerMixin):
         attempts = svc.startup_device_info_retries + 1
         for attempt in range(attempts):
             try:
-                return cast(dict[str, Any], svc.fetch_rpc("Shelly.GetDeviceInfo"))
-            except Exception as error:  # pylint: disable=broad-except
+                return _device_info_payload(svc.fetch_rpc("Shelly.GetDeviceInfo"))
+            except BOOTSTRAP_DEVICE_INFO_ERRORS as error:
                 last_error = error
                 if attempt < (attempts - 1) and svc.startup_device_info_retry_seconds > 0:
                     logging.warning(

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import cast
 
 from venus_evcharger.bootstrap.wizard_inventory_editor import (
     add_inventory_device,
@@ -29,7 +28,8 @@ from venus_evcharger.bootstrap.wizard_inventory_support import (
     parse_inventory_switching_mode,
     save_inventory,
 )
-from venus_evcharger.inventory import BindingRole, CapabilityKind, DeviceInventory, PhaseLabel, RoleBinding, SwitchingMode
+from venus_evcharger.bootstrap.wizard_inventory_types import GuidedCapabilityFlags, InventoryCapabilityChoice
+from venus_evcharger.inventory import BindingRole, CapabilityKind, DeviceInventory, PhaseLabel, RoleBinding
 
 
 def _guided_profile_kind(namespace: argparse.Namespace) -> CapabilityKind:
@@ -57,9 +57,9 @@ def _guided_capability_defaults(kind: CapabilityKind) -> tuple[str, str]:
 def _guided_capability_flags(
     namespace: argparse.Namespace,
     kind: str,
-    supported_phases: tuple[str, ...],
-) -> dict[str, object]:
-    flags: dict[str, object] = {
+    supported_phases: tuple[PhaseLabel, ...],
+) -> GuidedCapabilityFlags:
+    flags: GuidedCapabilityFlags = {
         "measures_power": False,
         "measures_energy": False,
         "switching_mode": None,
@@ -151,19 +151,18 @@ def _maybe_replace_binding(
     return remove_inventory_binding(inventory, binding_id=binding_id), None
 
 
-def _print_capability_choices(choices: tuple[dict[str, object], ...]) -> None:
+def _print_capability_choices(choices: tuple[InventoryCapabilityChoice, ...]) -> None:
     print("Eligible device capabilities:")
     for index, item in enumerate(choices, start=1):
-        phases = cast(tuple[str, ...], item["supported_phases"])
         print(
             "  "
             + f"{index}. {item['device_id']} ({item['device_label']}) -> "
             + f"{item['capability_id']}/{item['adapter_type']} "
-            + f"[{','.join(phases)}]"
+            + f"[{','.join(item['supported_phases'])}]"
         )
 
 
-def _selected_binding_choice(choices: tuple[dict[str, object], ...]) -> dict[str, object]:
+def _selected_binding_choice(choices: tuple[InventoryCapabilityChoice, ...]) -> InventoryCapabilityChoice:
     _print_capability_choices(choices)
     raw_member = input("Select member [1]: ").strip()
     member_index = int(raw_member or "1")
@@ -174,11 +173,10 @@ def _selected_binding_choice(choices: tuple[dict[str, object], ...]) -> dict[str
 
 def _binding_member_phases(
     namespace: argparse.Namespace,
-    selected: dict[str, object],
+    selected: InventoryCapabilityChoice,
     binding_scope: tuple[PhaseLabel, ...],
 ) -> tuple[PhaseLabel, ...]:
-    supported = cast(tuple[PhaseLabel, ...], selected["supported_phases"])
-    suggested_phases = tuple(phase for phase in binding_scope if phase in supported) or tuple(supported)
+    suggested_phases = tuple(phase for phase in binding_scope if phase in selected["supported_phases"]) or tuple(selected["supported_phases"])
     return parse_inventory_phases(
         inventory_field_with_default(
             namespace,
@@ -197,14 +195,14 @@ def _set_guided_binding_member(
     role: BindingRole,
     existing_binding: RoleBinding | None,
     first_member: bool,
-    selected: dict[str, object],
+    selected: InventoryCapabilityChoice,
     member_phases: tuple[PhaseLabel, ...],
 ) -> DeviceInventory:
     return set_inventory_binding_member(
         inventory,
         binding_id=binding_id,
-        device_id=cast(str, selected["device_id"]),
-        capability_id=cast(str, selected["capability_id"]),
+        device_id=selected["device_id"],
+        capability_id=selected["capability_id"],
         member_phases=member_phases,
         role=parse_inventory_binding_role(role),
         label=binding_label,
@@ -277,11 +275,11 @@ def _guided_profile_base_update(
         model=inventory_optional_field(namespace, "inventory_model", "Model"),
         description=inventory_optional_field(namespace, "inventory_description", "Description"),
         channel=inventory_optional_field(namespace, "inventory_channel", "Channel"),
-        measures_power=cast(bool, capability_flags["measures_power"]),
-        measures_energy=cast(bool, capability_flags["measures_energy"]),
-        switching_mode=cast(SwitchingMode | None, capability_flags["switching_mode"]),
-        supports_feedback=cast(bool, capability_flags["supports_feedback"]),
-        supports_phase_selection=cast(bool, capability_flags["supports_phase_selection"]),
+        measures_power=capability_flags["measures_power"],
+        measures_energy=capability_flags["measures_energy"],
+        switching_mode=capability_flags["switching_mode"],
+        supports_feedback=capability_flags["supports_feedback"],
+        supports_phase_selection=capability_flags["supports_phase_selection"],
     )
     return updated, profile_id, label, supported_phases, kind, capability_id
 
@@ -432,7 +430,7 @@ def _extend_guided_binding(
     binding_label: str,
     binding_scope: tuple[PhaseLabel, ...],
     existing_binding: RoleBinding | None,
-    choices: tuple[dict[str, object], ...],
+    choices: tuple[InventoryCapabilityChoice, ...],
 ) -> DeviceInventory:
     first_member = True
     while True:

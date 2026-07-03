@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus adapter process mixins.
+"""DBus adapter process roles.
 
 This module is part of the dedicated DBus gateway. Direct Victron DBus access
 is intentionally isolated to the gateway adapter modules only.
@@ -9,16 +9,19 @@ is intentionally isolated to the gateway adapter modules only.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from typing import Any, cast
+from collections.abc import Callable, Iterable
+from typing import TypeVar
 
 import dbus
 
-from venus_evcharger.dbus_adapter_components import DbusOperationDeferred
+from venus_evcharger.dbus_adapter_components import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter_process_introspection_snapshot import DbusAdapterIntrospectionSnapshot
 from venus_evcharger.dbus_adapter_process_protocol_io import DbusAdapterIoContext
 
+_T = TypeVar("_T")
 
-class DbusAdapterIoMixin:
+
+class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
     def poll_one_due_read_once(self: DbusAdapterIoContext) -> bool:
         now = time.time()
         due = self.read_scheduler.next_due(
@@ -50,37 +53,37 @@ class DbusAdapterIoMixin:
             return True
         except DbusOperationDeferred:
             return False
-        except Exception as error:  # pylint: disable=broad-except
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             self.commands.remove_coalesced("refresh:services")
             self.discovery.record_error(error, now=now)
             return True
 
     def list_services(self: DbusAdapterIoContext) -> list[str]:
-        def _read() -> list[str]:
-            obj = self.connection.bus().get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
+        def _read() -> object:
+            obj = self.connection.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus", introspect=False)
             iface = dbus.Interface(obj, "org.freedesktop.DBus")
-            return [str(name) for name in iface.ListNames()]
+            return iface.ListNames()
 
-        return cast(list[str], self.timed_dbus_operation("read", _read))
+        return _service_names(self.timed_dbus_operation("read", _read))
 
-    def timed_dbus_operation(self: DbusAdapterIoContext, kind: str, operation: Callable[[], Any]) -> Any:
+    def timed_dbus_operation(self: DbusAdapterIoContext, kind: str, operation: Callable[[], _T]) -> _T:
         self.rate_limiter.require_due(kind)
         started = time.monotonic()
         try:
             result = operation()
             self.circuit.record_success((time.monotonic() - started) * 1000.0, kind=kind)
             return result
-        except Exception as error:
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             self.circuit.record_error(error, kind=kind)
             raise
 
-    def timed_local_publish(self: DbusAdapterIoContext, operation: Callable[[], Any]) -> Any:
+    def timed_local_publish(self: DbusAdapterIoContext, operation: Callable[[], _T]) -> _T:
         started = time.monotonic()
         try:
             result = operation()
             self.circuit.record_success((time.monotonic() - started) * 1000.0, kind="local_publish")
             return result
-        except Exception as error:
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
             self.circuit.record_error(error, kind="local_publish")
             raise
 
@@ -98,4 +101,10 @@ class DbusAdapterIoMixin:
             self._last_cache_publish_sequence = self.cache.sequence
         self.cache.write_snapshot_files()
         self.append_health_log(health)
-        self._write_introspection_snapshot()
+        self.write_introspection_snapshot()
+
+
+def _service_names(value: object) -> list[str]:
+    if isinstance(value, str) or not isinstance(value, Iterable):
+        raise TypeError("DBus ListNames returned a non-iterable service list")
+    return [str(name) for name in value]

@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
-"""Meta and health state payload helpers for the Control API mixin."""
+"""Meta and health state payload helpers for the Control API role."""
 
 from __future__ import annotations
 
@@ -9,7 +7,7 @@ import hashlib
 import importlib
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.core.common import evse_fault_reason
@@ -26,6 +24,7 @@ from venus_evcharger.core.contracts import (
     normalized_state_api_health_fields,
     normalized_state_api_kind,
 )
+from venus_evcharger.service.control_state_config import _ControlApiStateConfig
 
 _AUTOMATION_DIAGNOSTIC_KEYS = (
     "/Status",
@@ -62,7 +61,42 @@ def _automation_diagnostics_subset(diagnostics_state: dict[str, Any]) -> dict[st
     return {key: diagnostics_state[key] for key in _AUTOMATION_DIAGNOSTIC_KEYS if key in diagnostics_state}
 
 
-class _ControlApiStateMetaMixin:
+class _ControlApiStateMeta(_ControlApiStateConfig):
+    if TYPE_CHECKING:  # pragma: no cover
+        control_api_enabled: bool
+        control_api_listen_host: str
+        control_api_listen_port: int
+        control_api_bound_unix_socket_path: str
+        control_api_localhost_only: bool
+        control_api_audit_path: str
+        control_api_idempotency_path: str
+        control_api_read_token: str
+        control_api_control_token: str
+        control_api_auth_token: str
+        supported_phase_selections: tuple[str, ...]
+        product_name: str
+        hardware_version: str
+        firmware_version: str
+        service_name: str
+        connection_name: str
+        runtime_state_path: str
+
+        def _state_api_summary_payload(self) -> dict[str, Any]: ...
+
+        def _state_api_operational_payload(self) -> dict[str, Any]: ...
+
+        def _state_api_topology_payload(self) -> dict[str, Any]: ...
+
+        def _state_api_update_payload(self) -> dict[str, Any]: ...
+
+        def _state_api_dbus_diagnostics_payload(self) -> dict[str, Any]: ...
+
+        def _control_api_audit_trail(self) -> Any: ...
+
+        def _control_api_idempotency_store(self) -> Any: ...
+
+        def _is_update_stale(self, now: float | None = None) -> bool: ...
+
     def _state_api_healthz_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
@@ -278,6 +312,6 @@ class _ControlApiStateMetaMixin:
         return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
-    def _control_api_server_factory() -> Any:
+    def _control_api_server_factory() -> Callable[..., Any]:
         control_module = importlib.import_module("venus_evcharger.service.control")
-        return getattr(control_module, "LocalControlApiHttpServer")
+        return cast(Callable[..., Any], getattr(control_module, "LocalControlApiHttpServer"))

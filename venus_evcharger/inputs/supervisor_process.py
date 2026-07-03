@@ -10,8 +10,11 @@ import sys
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
+from venus_evcharger.inputs.supervisor_snapshot import _AutoInputSupervisorSnapshot
 
-class _AutoInputSupervisorProcessMixin:
+
+class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
 
@@ -32,7 +35,7 @@ class _AutoInputSupervisorProcessMixin:
                 process.kill()
             else:
                 process.terminate()
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError) as error:
             logging.debug("Unable to stop auto input helper pid=%s: %s", getattr(process, "pid", "na"), error)
 
     def spawn_helper(self, now: float | None = None) -> None:
@@ -93,7 +96,7 @@ class _AutoInputSupervisorProcessMixin:
             svc._auto_input_snapshot_mtime_ns = None
         except FileNotFoundError:
             svc._auto_input_snapshot_mtime_ns = None
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError) as error:
             logging.debug("Unable to remove stale auto input snapshot %s: %s", path, error)
 
     @staticmethod
@@ -113,7 +116,7 @@ class _AutoInputSupervisorProcessMixin:
                 logging.info("Stopped orphaned auto input helper pid=%s", pid)
             except ProcessLookupError:
                 continue
-            except Exception as error:  # pylint: disable=broad-except
+            except (OSError, RuntimeError) as error:
                 logging.debug("Unable to stop orphaned auto input helper pid=%s: %s", pid, error)
 
     def _orphaned_helper_pids(self) -> list[int]:
@@ -179,7 +182,9 @@ class _AutoInputSupervisorProcessMixin:
 
     def _handle_stale_running_helper(self, process: Any, current: float, snapshot_age: float | None) -> bool:
         svc = self.service
-        if snapshot_age is None or snapshot_age <= svc.auto_input_helper_stale_seconds:
+        policy = service_dbus_backpressure_policy(svc)
+        stale_seconds = policy.liveness_timeout_seconds(svc.auto_input_helper_stale_seconds)
+        if snapshot_age is None or snapshot_age <= stale_seconds:
             return False
         if svc._auto_input_helper_restart_requested_at is None:
             svc._auto_input_helper_restart_requested_at = current
@@ -190,7 +195,8 @@ class _AutoInputSupervisorProcessMixin:
             )
             svc._stop_auto_input_helper(force=False)
             return True
-        if (current - svc._auto_input_helper_restart_requested_at) > max(2.0, svc.auto_input_helper_restart_seconds):
+        restart_seconds = policy.liveness_timeout_seconds(max(2.0, svc.auto_input_helper_restart_seconds))
+        if (current - svc._auto_input_helper_restart_requested_at) > restart_seconds:
             svc._stop_auto_input_helper(force=True)
         return True
 
@@ -214,19 +220,27 @@ class _AutoInputSupervisorProcessMixin:
 
     def _helper_restart_cooldown_active(self, current: float) -> bool:
         svc = self.service
+        restart_seconds = service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
+            svc.auto_input_helper_restart_seconds,
+        )
         return bool(
             svc._auto_input_helper_last_start_at > 0
-            and (current - svc._auto_input_helper_last_start_at) < svc.auto_input_helper_restart_seconds
+            and (current - svc._auto_input_helper_last_start_at) < restart_seconds
         )
 
     def _spawn_helper_with_warning(self, current: float) -> None:
         svc = self.service
         try:
             svc._spawn_auto_input_helper(current)
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError) as error:
             svc._warning_throttled(
                 "auto-input-helper-start-failed",
-                max(1.0, svc.auto_input_helper_restart_seconds),
+                max(
+                    1.0,
+                    service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
+                        svc.auto_input_helper_restart_seconds,
+                    ),
+                ),
                 "Unable to start auto input helper: %s",
                 error,
                 exc_info=error,

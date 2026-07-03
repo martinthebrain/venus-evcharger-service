@@ -9,6 +9,7 @@ import sys
 from typing import Any, Sequence
 
 from venus_evcharger.control.client import ControlApiClientResponse, LocalControlApiClient
+from venus_evcharger.control.cli_parser import build_parser
 
 EXIT_OK = 0
 EXIT_REQUEST_FAILED = 1
@@ -30,108 +31,6 @@ def _parse_cli_value(raw_value: str) -> Any:
 
 def _normalized_command_name(raw_name: str) -> str:
     return raw_name.strip().replace("-", "_")
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Small local client for the Venus EV charger Control API.")
-    parser.add_argument("--url", default="http://127.0.0.1:8765", help="Base URL for the local HTTP API.")
-    parser.add_argument("--unix-socket", default="", help="Optional unix socket path to use instead of TCP.")
-    parser.add_argument("--token", default="", help="Bearer token for read/control access.")
-    parser.add_argument("--timeout", type=float, default=5.0, help="Request timeout in seconds.")
-    parser.add_argument("--compact", action="store_true", help="Print compact JSON instead of pretty JSON.")
-
-    subparsers = parser.add_subparsers(dest="subcommand", required=True)
-
-    state_parser = subparsers.add_parser("state", help="Read one normalized state payload.")
-    state_parser.add_argument(
-        "state_name",
-        choices=(
-            "summary",
-            "automation",
-            "victron-bias-recommendation",
-            "runtime",
-            "operational",
-            "dbus-diagnostics",
-            "topology",
-            "update",
-            "health",
-            "healthz",
-            "version",
-            "build",
-            "contracts",
-            "config-effective",
-        ),
-    )
-
-    capabilities_parser = subparsers.add_parser("capabilities", help="Read the capabilities payload.")
-    capabilities_parser.set_defaults(state_name="")
-
-    subparsers.add_parser("health", help="Read the local API health payload.")
-    subparsers.add_parser("openapi", help="Read the OpenAPI 3.1 description.")
-
-    doctor_parser = subparsers.add_parser("doctor", help="Run a small local API/CLI self-test.")
-    doctor_parser.add_argument("--read-token", default="", help="Optional explicit read token for doctor checks.")
-    doctor_parser.add_argument(
-        "--control-token",
-        default="",
-        help="Optional explicit control token for the safe-write doctor step.",
-    )
-    doctor_parser.add_argument(
-        "--safe-write",
-        action="store_true",
-        help="Also perform one optimistic-concurrency safe write using the current mode value.",
-    )
-
-    command_parser = subparsers.add_parser("command", help="Send one canonical control command.")
-    command_parser.add_argument("name", help="Canonical command name, for example set-mode.")
-    command_parser.add_argument("value", help="Command value. JSON scalars such as 1, 12.5, true are accepted.")
-    command_parser.add_argument("--path", default="", help="Explicit write path when the command family requires it.")
-    command_parser.add_argument("--detail", default="", help="Optional detail string carried with the command.")
-    command_parser.add_argument("--command-id", default="", help="Optional client-supplied command id.")
-    command_parser.add_argument("--idempotency-key", default="", help="Optional replay-safe idempotency key.")
-    command_parser.add_argument("--if-match", default="", help="Optional optimistic concurrency token.")
-
-    events_parser = subparsers.add_parser("events", help="Read one NDJSON event stream snapshot.")
-    events_parser.add_argument("--limit", type=int, default=20)
-    events_parser.add_argument("--after", type=int, default=None)
-    events_parser.add_argument("--resume", type=int, default=None)
-    events_parser.add_argument("--timeout", type=float, default=2.0)
-    events_parser.add_argument("--heartbeat", type=float, default=0.5)
-    events_parser.add_argument("--kind", action="append", default=[], help="Optional event kind filter.")
-    events_parser.add_argument("--once", action="store_true")
-
-    watch_parser = subparsers.add_parser("watch", help="Follow the event stream with ergonomic defaults.")
-    watch_parser.add_argument("--limit", type=int, default=50)
-    watch_parser.add_argument("--after", type=int, default=None)
-    watch_parser.add_argument("--resume", type=int, default=None)
-    watch_parser.add_argument("--timeout", type=float, default=30.0)
-    watch_parser.add_argument("--heartbeat", type=float, default=1.0)
-    watch_parser.add_argument("--kind", action="append", default=[], help="Optional event kind filter.")
-    watch_parser.add_argument("--once", action="store_true")
-
-    safe_write_parser = subparsers.add_parser(
-        "safe-write",
-        help="Fetch the current state token and send one command with If-Match.",
-    )
-    safe_write_parser.add_argument("name", help="Canonical command name, for example set-mode.")
-    safe_write_parser.add_argument("value", help="Command value. JSON scalars such as 1, 12.5, true are accepted.")
-    safe_write_parser.add_argument("--path", default="", help="Explicit write path when the command family requires it.")
-    safe_write_parser.add_argument("--detail", default="", help="Optional detail string carried with the command.")
-    safe_write_parser.add_argument("--command-id", default="", help="Optional client-supplied command id.")
-    safe_write_parser.add_argument("--idempotency-key", default="", help="Optional replay-safe idempotency key.")
-    safe_write_parser.add_argument(
-        "--state-endpoint",
-        choices=("automation", "health", "operational"),
-        default="automation",
-        help="State endpoint used to fetch the current optimistic concurrency token.",
-    )
-    safe_write_parser.add_argument(
-        "--read-token",
-        default="",
-        help="Optional explicit read token used to fetch the state token before writing.",
-    )
-
-    return parser
 
 
 def _client(namespace: argparse.Namespace) -> LocalControlApiClient:

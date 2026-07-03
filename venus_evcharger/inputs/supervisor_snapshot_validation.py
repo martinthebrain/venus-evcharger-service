@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from venus_evcharger.core.contracts import paired_optional_values, valid_battery_soc
 
 
-class _AutoInputSupervisorSnapshotValidationMixin:
+class _AutoInputSupervisorSnapshotValidation:
     if TYPE_CHECKING:  # pragma: no cover
         service: Any
         SNAPSHOT_SOURCE_KEYS: tuple[str, ...]

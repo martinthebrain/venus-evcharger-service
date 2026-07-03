@@ -75,6 +75,10 @@ def remote_isolation(pi: PiSession, remote_dir: str) -> None:
     pi.ssh(f"cd {remote_dir!r} && python3 scripts/dev/check_dbus_isolation.py", timeout=60.0)
 
 
+def remote_gateway_chaos(pi: PiSession, remote_dir: str) -> None:
+    pi.ssh(f"cd {remote_dir!r} && python3 scripts/dev/dbus_gateway_chaos.py", timeout=120.0)
+
+
 def configure_remote(pi: PiSession, args: argparse.Namespace, host_value: str) -> None:
     if not host_value:
         return

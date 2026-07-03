@@ -7,7 +7,7 @@ import configparser
 from dataclasses import dataclass
 import json
 from string import Template
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
@@ -114,7 +114,9 @@ def json_path_value(payload: dict[str, object], path: str) -> object:
 
 def payload_object(payload: object) -> dict[str, object]:
     """Return one typed JSON object payload for dotted-path lookups."""
-    return cast(dict[str, object], payload)
+    if not isinstance(payload, dict):
+        raise ValueError("Template backend response must be a JSON object")
+    return {str(key): value for key, value in payload.items()}
 
 
 def enabled_state_from_text(text: str) -> bool | None:
@@ -133,7 +135,8 @@ def render_json_payload(template_text: str | None, context: dict[str, str]) -> o
     rendered = Template(template_text).safe_substitute(context).strip()
     if not rendered:
         return None
-    return cast(object, json.loads(rendered))
+    payload: object = json.loads(rendered)
+    return payload
 
 
 def _request_kwargs(
@@ -163,7 +166,8 @@ def _request_auth(auth_settings: TemplateAuthSettings) -> object | None:
     if not auth_settings.username:
         return None
     if auth_settings.use_digest_auth:
-        return cast(object, HTTPDigestAuth(auth_settings.username, auth_settings.password))
+        auth: object = HTTPDigestAuth(auth_settings.username, auth_settings.password)
+        return auth
     return (auth_settings.username, auth_settings.password)
 
 
@@ -193,7 +197,7 @@ def _request_method_callable(session: Any, method: str) -> Any:
 def _response_payload_dict(response: Any) -> dict[str, object]:
     """Return a dict payload from one HTTP response, or an empty dict otherwise."""
     response_payload = response.json()
-    return cast(dict[str, object], response_payload) if isinstance(response_payload, dict) else {}
+    return {str(key): value for key, value in response_payload.items()} if isinstance(response_payload, dict) else {}
 
 
 class TemplateHttpBackendBase:
@@ -216,7 +220,7 @@ class TemplateHttpBackendBase:
             auth_header_value=None,
         )
         session = getattr(service, "session", None)
-        self._session = cast(Any, session if session is not None else requests.Session())
+        self._session = session if session is not None else requests.Session()
 
     def _perform_request(
         self,

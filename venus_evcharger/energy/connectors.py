@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 import json
 import subprocess
 
@@ -11,6 +11,7 @@ from venus_evcharger.backend.modbus_client import ModbusClient
 from venus_evcharger.backend.modbus_transport import create_modbus_transport
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 from venus_evcharger.backend.template_support import TemplateAuthSettings
+from venus_evcharger.core.return_contracts import require_instance
 
 from .connectors_command import (
     CommandJsonEnergySourceSettings,
@@ -100,7 +101,11 @@ def read_energy_source_snapshot(owner: Any, source: EnergySourceDefinition, now:
         return _modbus_energy_source_snapshot(owner, source, now)
     if connector_type == "command_json":
         return _command_json_energy_source_snapshot(owner, source, now)
-    return cast(EnergySourceSnapshot, owner._dbus_energy_source_snapshot(source, now))
+    return require_instance(
+        owner._dbus_energy_source_snapshot(source, now),
+        "_dbus_energy_source_snapshot",
+        EnergySourceSnapshot,
+    )
 
 
 def _modbus_energy_source_client(

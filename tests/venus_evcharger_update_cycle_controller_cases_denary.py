@@ -88,7 +88,7 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
             _publish_energy_time_measurements=MagicMock(return_value=False),
             _publish_config_paths=MagicMock(return_value=False),
             _publish_diagnostic_paths=MagicMock(return_value=False),
-            _publish_dbus_path=MagicMock(return_value=False),
+            _publish_dbus_field=MagicMock(return_value=False),
             _save_runtime_state=MagicMock(),
             _ensure_observability_state=MagicMock(),
             _publish_companion_dbus_bridge=MagicMock(),
@@ -384,3 +384,418 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
 
         self.assertEqual(status, 0)
         self.assertEqual(service._last_status_source, "contactor-feedback-fault")
+
+    def test_relay_status_publish_fault_source_and_fallback_contracts_are_explicit(self):
+        self.assertEqual(
+            UpdateCycleController._evse_fault_status_source("contactor-feedback-mismatch"),
+            "contactor-feedback-fault",
+        )
+        self.assertEqual(
+            UpdateCycleController._evse_fault_status_source("contactor-lockout-open"),
+            "contactor-lockout-open",
+        )
+        self.assertEqual(
+            UpdateCycleController._evse_fault_status_source("contactor-lockout-welded"),
+            "contactor-lockout-welded",
+        )
+        self.assertEqual(UpdateCycleController._evse_fault_status_source("other"), "evse-fault")
+
+        service = SimpleNamespace(_last_health_reason="contactor-lockout-welded")
+        self.assertEqual(UpdateCycleController._hard_evse_fault_status_override(service), 0)
+        self.assertEqual(service._last_status_source, "contactor-lockout-welded")
+        service._last_health_reason = "running"
+        self.assertIsNone(UpdateCycleController._hard_evse_fault_status_override(service))
+
+        fallback_service = SimpleNamespace(charging_threshold_watts=1500.0, idle_status=1)
+        self.assertEqual(UpdateCycleController._enabled_fallback_status_code(fallback_service, 1499.9), 1)
+        self.assertEqual(fallback_service._last_status_source, "enabled-idle")
+        self.assertEqual(UpdateCycleController._enabled_fallback_status_code(fallback_service, 1500.0), 2)
+        self.assertEqual(fallback_service._last_status_source, "charging")
+        self.assertEqual(UpdateCycleController._disabled_fallback_status_code(fallback_service, True), 4)
+        self.assertEqual(fallback_service._last_status_source, "auto-waiting")
+        self.assertEqual(UpdateCycleController._disabled_fallback_status_code(fallback_service, False), 6)
+        self.assertEqual(fallback_service._last_status_source, "manual-off")
+
+    def test_relay_status_publish_charger_fault_override_records_active_flag(self):
+        service = SimpleNamespace()
+
+        with patch.object(UpdateCycleController, "charger_health_override", return_value=None) as health:
+            self.assertIsNone(UpdateCycleController._charger_fault_status_override(service, 100.0))
+        health.assert_called_once_with(service, 100.0)
+        self.assertEqual(service._last_charger_fault_active, 0)
+
+        with patch.object(UpdateCycleController, "charger_health_override", return_value="charger-fault") as health:
+            self.assertEqual(UpdateCycleController._charger_fault_status_override(service, 101.0), 0)
+        health.assert_called_once_with(service, 101.0)
+        self.assertEqual(service._last_status_source, "charger-fault")
+        self.assertEqual(service._last_charger_fault_active, 1)
+
+    def test_relay_status_publish_failure_contracts_distinguish_charger_and_shelly_sources(self):
+        charger_error = ModbusSlaveOfflineError("Modbus slave 1 did not respond")
+        charger_service = SimpleNamespace(
+            _charger_backend=SimpleNamespace(set_enabled=MagicMock()),
+            auto_shelly_soft_fail_seconds=10.0,
+            _mark_failure=MagicMock(),
+            _warning_throttled=MagicMock(),
+        )
+
+        with patch.object(UpdateCycleController, "_remember_charger_transport_issue") as transport, patch.object(
+            UpdateCycleController,
+            "_remember_charger_retry",
+        ) as retry:
+            UpdateCycleController._handle_relay_decision_failure(charger_service, charger_error)
+
+        transport.assert_called_once_with(charger_service, "offline", "enable", charger_error)
+        retry.assert_called_once_with(charger_service, "offline", "enable")
+        charger_service._mark_failure.assert_called_once_with("charger")
+        warning_args = charger_service._warning_throttled.call_args.args
+        warning_kwargs = charger_service._warning_throttled.call_args.kwargs
+        self.assertEqual(warning_args[:4], ("charger-switch-failed", 10.0, "%s switch request failed: %s", "charger backend"))
+        self.assertIs(warning_args[4], charger_error)
+        self.assertIs(warning_kwargs["exc_info"], charger_error)
+
+        charger_runtime_error = RuntimeError("backend failed")
+        charger_service._mark_failure.reset_mock()
+        charger_service._warning_throttled.reset_mock()
+        with patch.object(UpdateCycleController, "_remember_charger_transport_issue") as transport, patch.object(
+            UpdateCycleController,
+            "_remember_charger_retry",
+        ) as retry:
+            UpdateCycleController._handle_relay_decision_failure(charger_service, charger_runtime_error)
+        transport.assert_not_called()
+        retry.assert_not_called()
+        charger_service._mark_failure.assert_called_once_with("charger")
+        self.assertIs(charger_service._warning_throttled.call_args.args[4], charger_runtime_error)
+
+        shelly_error = RuntimeError("switch failed")
+        shelly_service = SimpleNamespace(
+            auto_shelly_soft_fail_seconds=7.0,
+            _mark_failure=MagicMock(),
+            _warning_throttled=MagicMock(),
+        )
+
+        with patch.object(UpdateCycleController, "_remember_charger_transport_issue") as transport, patch.object(
+            UpdateCycleController,
+            "_remember_charger_retry",
+        ) as retry:
+            UpdateCycleController._handle_relay_decision_failure(shelly_service, shelly_error)
+
+        transport.assert_not_called()
+        retry.assert_not_called()
+        shelly_service._mark_failure.assert_called_once_with("shelly")
+        warning_args = shelly_service._warning_throttled.call_args.args
+        warning_kwargs = shelly_service._warning_throttled.call_args.kwargs
+        self.assertEqual(warning_args[:4], ("shelly-switch-failed", 7.0, "%s switch request failed: %s", "Shelly relay"))
+        self.assertIs(warning_args[4], shelly_error)
+        self.assertIs(warning_kwargs["exc_info"], shelly_error)
+
+    def test_relay_status_publish_decision_logging_noop_and_success_contracts(self):
+        service = SimpleNamespace(
+            auto_audit_log=True,
+            _relay_sync_expected_state=None,
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        controller.log_auto_relay_change = MagicMock()
+        controller._publish_local_pm_status_best_effort = MagicMock()
+
+        self.assertTrue(controller._relay_decision_noop(service, True, True))
+        service._relay_sync_expected_state = True
+        self.assertTrue(controller._relay_decision_noop(service, True, False))
+        service._relay_sync_expected_state = None
+        self.assertFalse(controller._relay_decision_noop(service, True, False))
+
+        controller._log_auto_relay_change_if_needed(service, True, False)
+        controller.log_auto_relay_change.assert_not_called()
+        controller._log_auto_relay_change_if_needed(service, True, True)
+        controller.log_auto_relay_change.assert_called_once_with(service, True)
+
+        self.assertEqual(controller._successful_relay_decision_result(True, 123.0), (True, 0.0, 0.0, False))
+        controller._publish_local_pm_status_best_effort.assert_called_once_with(True, 123.0)
+
+    def test_relay_status_publish_apply_paths_cover_pending_success_and_type_failure(self):
+        service = SimpleNamespace(auto_shelly_soft_fail_seconds=10.0)
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        with patch.object(UpdateCycleController, "_apply_enabled_target", return_value=False) as apply_target:
+            self.assertEqual(
+                controller._unsuccessful_relay_decision_result(service, True, False, 1200.0, 5.2, True, 100.0),
+                (False, 1200.0, 5.2, True),
+            )
+        apply_target.assert_called_once_with(service, True, 100.0)
+
+        with patch.object(UpdateCycleController, "_apply_enabled_target", return_value=True) as apply_target:
+            self.assertIsNone(
+                controller._unsuccessful_relay_decision_result(service, True, False, 1200.0, 5.2, True, 101.0)
+            )
+        apply_target.assert_called_once_with(service, True, 101.0)
+
+        service._mark_failure = MagicMock()
+        service._warning_throttled = MagicMock()
+        with patch.object(UpdateCycleController, "_apply_enabled_target", return_value="bad"):
+            self.assertIsNone(controller._apply_relay_target_best_effort(service, True, 102.0))
+        service._mark_failure.assert_called_once_with("shelly")
+        service._warning_throttled.assert_called_once()
+
+        apply_error = RuntimeError("switch failed")
+        with patch.object(UpdateCycleController, "_apply_enabled_target", side_effect=apply_error), patch.object(
+            UpdateCycleController,
+            "_handle_relay_decision_failure",
+        ) as handle_failure:
+            self.assertIsNone(controller._apply_relay_target_best_effort(service, False, 103.0))
+        handle_failure.assert_called_once_with(service, apply_error)
+
+    def test_relay_status_publish_apply_relay_decision_branch_contracts(self):
+        service = SimpleNamespace()
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        with patch.object(UpdateCycleController, "_pm_status_confirmed", return_value=True) as confirmed, patch.object(
+            UpdateCycleController,
+            "_relay_decision_noop",
+            return_value=True,
+        ) as noop:
+            self.assertEqual(
+                controller.apply_relay_decision(True, True, {"output": True}, 1.0, 2.0, 100.0, True),
+                (True, 1.0, 2.0, True),
+            )
+        confirmed.assert_called_once_with({"output": True})
+        noop.assert_called_once_with(service, True, True)
+
+        pending = (False, 1.0, 2.0, True)
+        with patch.object(UpdateCycleController, "_pm_status_confirmed", return_value=True), patch.object(
+            UpdateCycleController,
+            "_relay_decision_noop",
+            return_value=False,
+        ), patch.object(UpdateCycleController, "_log_auto_relay_change_if_needed") as log_change, patch.object(
+            UpdateCycleController,
+            "_unsuccessful_relay_decision_result",
+            return_value=pending,
+        ) as pending_result, patch.object(UpdateCycleController, "_successful_relay_decision_result") as success_result:
+            self.assertEqual(controller.apply_relay_decision(True, False, {}, 1.0, 2.0, 101.0, False), pending)
+        log_change.assert_called_once_with(service, True, False)
+        pending_result.assert_called_once_with(service, True, False, 1.0, 2.0, True, 101.0)
+        success_result.assert_not_called()
+
+        success = (True, 0.0, 0.0, False)
+        with patch.object(UpdateCycleController, "_pm_status_confirmed", return_value=False), patch.object(
+            UpdateCycleController,
+            "_relay_decision_noop",
+            return_value=False,
+        ), patch.object(UpdateCycleController, "_log_auto_relay_change_if_needed"), patch.object(
+            UpdateCycleController,
+            "_unsuccessful_relay_decision_result",
+            return_value=None,
+        ) as pending_result, patch.object(
+            UpdateCycleController,
+            "_successful_relay_decision_result",
+            return_value=success,
+        ) as success_result:
+            self.assertEqual(controller.apply_relay_decision(True, False, {}, 1.0, 2.0, 102.0, True), success)
+        pending_result.assert_called_once_with(service, True, False, 1.0, 2.0, False, 102.0)
+        success_result.assert_called_once_with(True, 102.0)
+
+    def test_relay_status_publish_status_precedence_and_override_contracts(self):
+        service = SimpleNamespace(_last_health_reason="contactor-lockout-open", charging_threshold_watts=1500.0, idle_status=1)
+
+        with patch.object(UpdateCycleController, "_charger_fault_status_override") as fault_override, patch.object(
+            UpdateCycleController,
+            "_charger_status_override",
+        ) as status_override:
+            self.assertEqual(UpdateCycleController.derive_status_code(service, True, 2000.0, True, 100.0), 0)
+        fault_override.assert_not_called()
+        status_override.assert_not_called()
+
+        service._last_health_reason = "running"
+        with patch.object(UpdateCycleController, "_charger_fault_status_override", return_value=0) as fault_override, patch.object(
+            UpdateCycleController,
+            "_charger_status_override",
+        ) as status_override:
+            self.assertEqual(UpdateCycleController.derive_status_code(service, True, 2000.0, True, 101.0), 0)
+        fault_override.assert_called_once_with(service, 101.0)
+        status_override.assert_not_called()
+
+        with patch.object(UpdateCycleController, "_charger_fault_status_override", return_value=None), patch.object(
+            UpdateCycleController,
+            "_charger_status_override",
+            return_value=("3", "charger-status-finished"),
+        ) as status_override:
+            self.assertEqual(UpdateCycleController.derive_status_code(service, True, 2000.0, True, 102.0), 3)
+        status_override.assert_called_once_with(service, True, 102.0)
+        self.assertEqual(service._last_status_source, "charger-status-finished")
+
+        with patch.object(UpdateCycleController, "_hard_evse_fault_status_override", return_value=None) as hard_fault, patch.object(
+            UpdateCycleController,
+            "_charger_fault_status_override",
+            return_value=None,
+        ) as fault_override, patch.object(
+            UpdateCycleController,
+            "_charger_status_override",
+            return_value=None,
+        ) as status_override, patch.object(
+            UpdateCycleController,
+            "_fallback_status_code",
+            return_value=6,
+        ) as fallback:
+            self.assertEqual(
+                UpdateCycleController.derive_status_code(service, False, 0.0, False, now=103.0, health_reason="running"),
+                6,
+            )
+        hard_fault.assert_called_once_with(service, "running")
+        fault_override.assert_called_once_with(service, 103.0)
+        status_override.assert_called_once_with(service, False, 103.0)
+        fallback.assert_called_once_with(service, False, 0.0, False, 103.0)
+
+    def test_relay_status_publish_fallback_status_uses_effective_enabled_state_with_timestamp(self):
+        service = SimpleNamespace(charging_threshold_watts=1500.0, idle_status=1)
+
+        with patch.object(UpdateCycleController, "_effective_enabled_state", return_value=True) as enabled:
+            self.assertEqual(UpdateCycleController._fallback_status_code(service, False, 1600.0, False, 100.0), 2)
+        enabled.assert_called_once_with(service, False, 100.0)
+        self.assertEqual(service._last_status_source, "charging")
+
+        with patch.object(UpdateCycleController, "_effective_enabled_state", return_value=False) as enabled:
+            self.assertEqual(UpdateCycleController._fallback_status_code(service, True, 1600.0, True, 101.0), 4)
+        enabled.assert_called_once_with(service, True, 101.0)
+        self.assertEqual(service._last_status_source, "auto-waiting")
+
+    def test_publish_online_update_uses_fallback_measurements_and_reports_any_change(self):
+        service = SimpleNamespace(
+            phase="L1",
+            voltage_mode="phase",
+            _publish_live_measurements=MagicMock(return_value=False),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        controller.update_virtual_state = MagicMock(return_value=True)
+
+        self.assertTrue(controller.publish_online_update({}, 4, 2.5, False, 1150.0, 230.0, 100.0))
+        service._publish_live_measurements.assert_called_once()
+        live_args = service._publish_live_measurements.call_args.args
+        self.assertEqual(live_args[0], 1150.0)
+        self.assertEqual(live_args[1], 230.0)
+        self.assertEqual(live_args[2], 5.0)
+        self.assertEqual(live_args[4], 100.0)
+        controller.update_virtual_state.assert_called_once_with(4, 2.5, False)
+
+    def test_publish_online_update_prefers_positive_current_readback_over_phase_sum(self):
+        service = SimpleNamespace(
+            phase="L1",
+            voltage_mode="phase",
+            _charger_backend=SimpleNamespace(),
+            _last_charger_state_at=200.0,
+            _last_charger_state_power_w=2000.0,
+            _last_charger_state_actual_current_amps=9.5,
+            _last_charger_state_energy_kwh=4.25,
+            auto_shelly_soft_fail_seconds=10.0,
+            _publish_live_measurements=MagicMock(return_value=True),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        controller.update_virtual_state = MagicMock(return_value=False)
+
+        self.assertTrue(controller.publish_online_update({}, 2, 1.0, True, 1150.0, 230.0, 200.0))
+        live_args = service._publish_live_measurements.call_args.args
+        self.assertEqual(live_args[0], 2000.0)
+        self.assertEqual(live_args[2], 9.5)
+        controller.update_virtual_state.assert_called_once_with(2, 4.25, True)
+
+    def test_publish_online_update_prefers_small_positive_current_readback_over_phase_sum(self):
+        service = SimpleNamespace(
+            _charger_backend=SimpleNamespace(),
+            _last_charger_state_at=200.0,
+            _last_charger_state_power_w=None,
+            _last_charger_state_actual_current_amps=0.5,
+            _last_charger_state_energy_kwh=None,
+            auto_shelly_soft_fail_seconds=10.0,
+            _publish_live_measurements=MagicMock(return_value=False),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        controller.update_virtual_state = MagicMock(return_value=False)
+
+        self.assertFalse(
+            controller.publish_online_update(
+                {
+                    "_phase_selection": "P1_P2_P3",
+                    "_phase_powers_w": (100.0, 200.0, 300.0),
+                    "_phase_currents_a": (1.0, 2.0, 3.0),
+                },
+                2,
+                1.0,
+                True,
+                1150.0,
+                230.0,
+                200.0,
+            )
+        )
+        self.assertEqual(service._publish_live_measurements.call_args.args[2], 0.5)
+
+    def test_publish_online_update_uses_phase_metadata_and_keeps_zero_current_readback_as_phase_sum(self):
+        service = SimpleNamespace(
+            phase="L1",
+            voltage_mode="phase",
+            _charger_backend=SimpleNamespace(),
+            _last_charger_state_at=200.0,
+            _last_charger_state_power_w=2000.0,
+            _last_charger_state_actual_current_amps=0.0,
+            _last_charger_state_energy_kwh=4.25,
+            auto_shelly_soft_fail_seconds=10.0,
+            _publish_live_measurements=MagicMock(return_value=False),
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        controller.update_virtual_state = MagicMock(return_value=False)
+
+        self.assertFalse(
+            controller.publish_online_update(
+                {
+                    "_phase_selection": "P1_P2_P3",
+                    "_phase_powers_w": (100.0, 200.0, 300.0),
+                    "_phase_currents_a": (1.0, 2.0, 3.0),
+                },
+                2,
+                1.0,
+                True,
+                1150.0,
+                230.0,
+                200.0,
+            )
+        )
+        live_args = service._publish_live_measurements.call_args.args
+        self.assertEqual(live_args[0], 2000.0)
+        self.assertEqual(live_args[2], 6.0)
+        self.assertEqual(live_args[3]["L1"]["power"], 100.0)
+        self.assertEqual(live_args[3]["L2"]["current"], 2.0)
+        controller.update_virtual_state.assert_called_once_with(2, 4.25, True)
+
+    def test_publish_online_update_readback_and_phase_delegate_contracts(self):
+        service = SimpleNamespace(_publish_live_measurements=MagicMock(return_value=False))
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+        controller.update_virtual_state = MagicMock(return_value=False)
+        phase_data = {
+            "L1": {"power": 100.0, "voltage": 230.0, "current": 1.0},
+            "L2": {"power": 200.0, "voltage": 230.0, "current": 2.0},
+            "L3": {"power": 300.0, "voltage": 230.0, "current": 3.0},
+        }
+
+        with patch.object(UpdateCycleController, "_fresh_charger_power_readback", return_value=None) as power_read, patch.object(
+            UpdateCycleController,
+            "_fresh_charger_actual_current_readback",
+            return_value=None,
+        ) as current_read, patch.object(
+            UpdateCycleController,
+            "_fresh_charger_energy_readback",
+            return_value=None,
+        ) as energy_read, patch.object(
+            UpdateCycleController,
+            "_phase_data_for_pm_status",
+            return_value=phase_data,
+        ) as phase_data_for_pm_status, patch.object(
+            UpdateCycleController,
+            "_total_phase_current",
+            return_value=6.0,
+        ) as total_current:
+            self.assertFalse(controller.publish_online_update({"output": True}, 4, 2.5, False, 1150.0, 230.0, 300.0))
+
+        power_read.assert_called_once_with(service, 300.0)
+        current_read.assert_called_once_with(service, 300.0)
+        energy_read.assert_called_once_with(service, 300.0)
+        phase_data_for_pm_status.assert_called_once_with({"output": True}, 1150.0, 230.0)
+        total_current.assert_called_once_with(phase_data)
+        service._publish_live_measurements.assert_called_once_with(1150.0, 230.0, 6.0, phase_data, 300.0)
+        controller.update_virtual_state.assert_called_once_with(4, 2.5, False)

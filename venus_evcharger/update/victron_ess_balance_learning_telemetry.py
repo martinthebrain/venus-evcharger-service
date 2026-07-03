@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Victron ESS balance-bias telemetry-learning helpers."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .victron_ess_balance_learning_profiles_support import (
     _clear_victron_ess_balance_tracking_episode_state,
@@ -14,9 +12,52 @@ from .victron_ess_balance_learning_profiles_support import (
     _reset_victron_ess_balance_pid_state,
     _victron_ess_balance_update_service_sample,
 )
+from .victron_ess_balance_apply import _UpdateCycleVictronEssBalanceApply
 
 
-class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
+class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalanceApply):
+    if TYPE_CHECKING:  # pragma: no cover
+        @staticmethod
+        def _optional_float(value: Any) -> float | None: ...
+        @staticmethod
+        def _victron_ess_balance_profile_sample_count(profile: dict[str, Any]) -> int: ...
+        def _victron_ess_balance_update_profile_delay(
+            self,
+            svc: Any,
+            profile_key: str,
+            response_delay_seconds: float,
+        ) -> None: ...
+        def _victron_ess_balance_update_profile_gain(
+            self,
+            svc: Any,
+            profile_key: str,
+            gain_sample: float,
+        ) -> None: ...
+        def _victron_ess_balance_increment_profile_counter(
+            self,
+            svc: Any,
+            profile_key: str,
+            counter_name: str,
+        ) -> None: ...
+        def _enter_victron_ess_balance_overshoot_cooldown(self, svc: Any, now: float, reason: str) -> None: ...
+        def _victron_ess_balance_telemetry_is_clean(
+            self,
+            svc: Any,
+            cluster: dict[str, Any],
+            source_error_w: float,
+        ) -> tuple[bool, str]: ...
+        def _victron_ess_balance_ev_power_w(self, svc: Any) -> float | None: ...
+        def _victron_ess_balance_refresh_profile_stability(
+            self,
+            svc: Any,
+            profile_key: str,
+        ) -> None: ...
+        def _populate_victron_ess_balance_telemetry_metrics(
+            self,
+            svc: Any,
+            metrics: dict[str, Any],
+        ) -> None: ...
+
     @staticmethod
     def _victron_ess_balance_improvement_stats(
         source_error_w: float,
@@ -369,12 +410,12 @@ class _UpdateCycleVictronEssBalanceLearningTelemetryMixin:
         gain_mean: float | None,
         gain_mad: float | None,
     ) -> float:
-        delay_ratio = _UpdateCycleVictronEssBalanceLearningTelemetryMixin._victron_ess_balance_variance_ratio(
+        delay_ratio = _UpdateCycleVictronEssBalanceLearningTelemetry._victron_ess_balance_variance_ratio(
             delay_mean,
             delay_mad,
             1.0,
         )
-        gain_ratio = _UpdateCycleVictronEssBalanceLearningTelemetryMixin._victron_ess_balance_variance_ratio(
+        gain_ratio = _UpdateCycleVictronEssBalanceLearningTelemetry._victron_ess_balance_variance_ratio(
             gain_mean,
             gain_mad,
             0.1,

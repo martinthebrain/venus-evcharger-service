@@ -4,17 +4,17 @@ from __future__ import annotations
 import configparser
 
 from venus_evcharger.auto.policy import load_auto_policy_from_config
+from venus_evcharger.bootstrap.config_backend import _ServiceBootstrapBackendConfig
 from venus_evcharger.bootstrap.config_shared import _config_value, _seasonal_month_windows
 from venus_evcharger.core.common import (
     DEFAULT_SCHEDULED_ENABLED_DAYS,
     normalize_hhmm_text,
     scheduled_enabled_days_text,
 )
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 from venus_evcharger.energy import load_energy_source_settings
 
 
-class _ServiceBootstrapAutoConfigMixin(_ComposableControllerMixin):
+class _ServiceBootstrapAutoConfig(_ServiceBootstrapBackendConfig):
     def _load_auto_source_config(self, defaults: configparser.SectionProxy) -> None:
         """Load PV, battery, and grid source configuration for Auto mode."""
         svc = self.service

@@ -8,19 +8,19 @@ from unittest.mock import MagicMock, patch
 
 sys.modules["vedbus"] = MagicMock()
 
-from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntimeMixin
-from venus_evcharger.backend.shelly_io_split import ShellyIoSplitMixin
-from venus_evcharger.controllers.state_summary import _StateSummaryMixin
+from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntime
+from venus_evcharger.backend.shelly_io_split import ShellyIoSplit
+from venus_evcharger.controllers.state_summary import _StateSummary
 from venus_evcharger.core.common_auto import _charger_transport_now
-from venus_evcharger.publish.dbus_core import _DbusPublishCoreMixin
-from venus_evcharger.runtime.audit_fields import _RuntimeSupportAuditFieldsMixin
-from venus_evcharger.update.input_cache import _UpdateCycleInputCacheMixin
-from venus_evcharger.update.offline_publish import _UpdateCycleOfflineMixin
-from venus_evcharger.update.software_update_support import _UpdateCycleSoftwareUpdateMixin
-from venus_evcharger.update.state import _UpdateCycleStateMixin
+from venus_evcharger.publish.dbus_core import _DbusPublishCore
+from venus_evcharger.runtime.audit_fields import _RuntimeAuditFields
+from venus_evcharger.update.input_cache import _UpdateCycleInputCache
+from venus_evcharger.update.offline_publish import _UpdateCycleOffline
+from venus_evcharger.update.software_update_support import _UpdateCycleSoftwareUpdate
+from venus_evcharger.update.state import _UpdateCycleState
 
 
-class _BootstrapRuntimeHarness(_ServiceBootstrapRuntimeMixin):
+class _BootstrapRuntimeHarness(_ServiceBootstrapRuntime):
     def __init__(self, service: object) -> None:
         self.service = service
         self._age_seconds = lambda *_args, **_kwargs: 0
@@ -30,12 +30,12 @@ class _BootstrapRuntimeHarness(_ServiceBootstrapRuntimeMixin):
         self._phase_values = lambda *_args, **_kwargs: {}
 
 
-class _DbusCoreHarness(_DbusPublishCoreMixin):
+class _DbusCoreHarness(_DbusPublishCore):
     def __init__(self, service: object) -> None:
         self.service = service
 
 
-class _InputCacheHarness(_UpdateCycleInputCacheMixin):
+class _InputCacheHarness(_UpdateCycleInputCache):
     FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS = 5.0
 
 
@@ -78,11 +78,11 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _contactor_fault_counts={"contactor-suspected-open": 2},
         )
 
-        self.assertEqual(_StateSummaryMixin._summary_observed_phase(service), "P1_P2")
-        self.assertEqual(_RuntimeSupportAuditFieldsMixin._observed_phase_for_audit(service), "P1_P2")
-        self.assertEqual(_RuntimeSupportAuditFieldsMixin._contactor_fault_count_for_audit(service), 2)
+        self.assertEqual(_StateSummary._summary_observed_phase(service), "P1_P2")
+        self.assertEqual(_RuntimeAuditFields._observed_phase_for_audit(service), "P1_P2")
+        self.assertEqual(_RuntimeAuditFields._contactor_fault_count_for_audit(service), 2)
         service._contactor_lockout_reason = "contactor-suspected-open"
-        self.assertEqual(_RuntimeSupportAuditFieldsMixin._contactor_fault_count_for_audit(service), 2)
+        self.assertEqual(_RuntimeAuditFields._contactor_fault_count_for_audit(service), 2)
 
     def test_common_auto_and_update_state_helpers_cover_fallback_time_and_soft_fail_edges(self) -> None:
         service = SimpleNamespace(_time_now=lambda: "bad")
@@ -92,7 +92,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _worker_poll_interval_seconds=None,
             auto_shelly_soft_fail_seconds=0.0,
         )
-        self.assertEqual(_UpdateCycleStateMixin._charger_state_max_age_seconds(update_service), 2.0)
+        self.assertEqual(_UpdateCycleState._charger_state_max_age_seconds(update_service), 2.0)
 
     def test_dbus_core_group_failure_logs_without_mark_failure_hook(self) -> None:
         service = SimpleNamespace(
@@ -135,7 +135,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _worker_poll_interval_seconds=0.0,
             relay_sync_timeout_seconds=0.0,
         )
-        self.assertEqual(_UpdateCycleOfflineMixin._offline_confirmed_relay_max_age_seconds(service), 2.0)
+        self.assertEqual(_UpdateCycleOffline._offline_confirmed_relay_max_age_seconds(service), 2.0)
 
         service_for_cache = SimpleNamespace(
             auto_input_cache_seconds=30.0,
@@ -179,7 +179,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
         self.assertEqual(service_for_cache._service._last_energy_learning_profiles, {"old": 1})
 
         pm_status = {"apower": 1000.0}
-        ShellyIoSplitMixin._apply_optional_pm_voltage(pm_status, None)
+        ShellyIoSplit._apply_optional_pm_voltage(pm_status, None)
         self.assertEqual(pm_status, {"apower": 1000.0})
 
     def test_software_update_log_handle_skips_directory_creation_for_flat_path(self) -> None:
@@ -187,7 +187,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             old_cwd = os.getcwd()
             try:
                 os.chdir(temp_dir)
-                handle = _UpdateCycleSoftwareUpdateMixin._software_update_log_handle("software-update.log")
+                handle = _UpdateCycleSoftwareUpdate._software_update_log_handle("software-update.log")
                 handle.close()
                 self.assertTrue(os.path.exists("software-update.log"))
             finally:

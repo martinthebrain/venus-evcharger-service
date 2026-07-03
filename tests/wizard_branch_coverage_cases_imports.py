@@ -18,6 +18,7 @@ from tests.wizard_branch_coverage_cases_common import (
     tempfile,
     wizard_adapters,
 )
+from venus_evcharger.bootstrap.wizard_policy_guidance import _format_prompt_default
 
 
 class _WizardBranchCoverageImportCases:
@@ -56,6 +57,9 @@ class _WizardBranchCoverageImportCases:
             }[label],
         )
         self.assertEqual(prompted_defaults, (2100.0, 1500.0, 35.0, 39.0, "Mon,Wed", "07:45", 8.0))
+
+        with self.assertRaisesRegex(ValueError, "Policy prompt default must be resolved"):
+            _format_prompt_default(None)
 
     def test_import_helpers_cover_adapter_paths_profiles_and_timeouts(self) -> None:
         self.assertEqual(_profile_defaults(None), ("simple_relay", None, None))

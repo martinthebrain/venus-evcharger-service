@@ -6,8 +6,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Mapping
 
+from .dbus_bridge_grid import _EnergyCompanionDbusBridgeGrid
 
-class _EnergyCompanionDbusBridgeServicesMixin:
+
+class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
     _battery_service: Any
     _pvinverter_service: Any
     _grid_service: Any

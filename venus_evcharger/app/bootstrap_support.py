@@ -20,7 +20,7 @@ def enable_fault_diagnostics(faulthandler_module: Any, logging_module: Any) -> N
     """Enable crash diagnostics when available."""
     try:
         faulthandler_module.enable(all_threads=True)
-    except Exception as error:  # pylint: disable=broad-except
+    except (OSError, RuntimeError) as error:
         logging_module.debug("faulthandler.enable() unavailable: %s", error)
 
 
@@ -50,7 +50,7 @@ def install_signal_logging(
             continue
         try:
             signal_module.signal(signum, _log_signal)
-        except Exception as error:  # pylint: disable=broad-except
+        except (OSError, RuntimeError, ValueError) as error:
             logging_module.debug("Unable to install signal handler for %s: %s", signum, error)
 
 
@@ -66,7 +66,7 @@ def request_mainloop_quit(gobject_module: Any, mainloop: Any, logging_module: An
         try:
             idle_add(mainloop.quit)
             return
-        except Exception as error:  # pylint: disable=broad-except
+        except (RuntimeError, TypeError, ValueError) as error:
             logging_module.debug("Unable to schedule GLib shutdown via idle_add: %s", error)
     mainloop.quit()
 

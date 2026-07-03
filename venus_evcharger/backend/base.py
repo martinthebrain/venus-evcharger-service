@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeGuard
 
 from .models import (
     ChargerState,
@@ -48,3 +48,13 @@ class BackendConstructor(Protocol):
     """Constructor signature used by the backend registry/factory."""
 
     def __call__(self, service: Any, config_path: str = "") -> Any: ...  # pragma: no cover
+
+
+def is_switch_backend(value: object) -> TypeGuard[SwitchBackend]:
+    """Return whether one object satisfies the switch-backend runtime surface."""
+    return (
+        callable(getattr(value, "capabilities", None))
+        and callable(getattr(value, "read_switch_state", None))
+        and callable(getattr(value, "set_enabled", None))
+        and callable(getattr(value, "set_phase_selection", None))
+    )

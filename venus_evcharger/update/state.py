@@ -14,11 +14,12 @@ from typing import Any
 
 from venus_evcharger.auto.tracking import clear_auto_decision_tracking
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.update.relay import _UpdateCycleRelay
 
+STARTUP_MANUAL_TARGET_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+RUNTIME_STATE_SAVE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
-
-class _UpdateCycleStateMixin(_ComposableControllerMixin):
+class _UpdateCycleState(_UpdateCycleRelay):
     @staticmethod
     def _charger_state_max_age_seconds(svc: Any) -> float:
         """Return how fresh charger readback must be before it drives session state."""
@@ -26,7 +27,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
         worker_poll_interval = finite_float_or_none(getattr(svc, "_worker_poll_interval_seconds", None))
         if worker_poll_interval is not None and worker_poll_interval > 0.0:
             candidates.append(float(worker_poll_interval) * 2.0)
-        soft_fail_seconds = finite_float_or_none(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
+        soft_fail_seconds = finite_float_or_none(getattr(svc, "auto_shelly_soft_fail_seconds", None))
         if soft_fail_seconds is not None and soft_fail_seconds > 0.0:
             candidates.append(float(soft_fail_seconds))
         return max(1.0, min(candidates))
@@ -75,7 +76,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
                 published = publish_local_pm_status(relay_on, now)
                 if isinstance(published, dict):
                     return published
-            except Exception as error:  # pylint: disable=broad-except
+            except STARTUP_MANUAL_TARGET_ERRORS as error:
                 svc._warning_throttled(
                     "startup-manual-target-placeholder-failed",
                     svc.auto_shelly_soft_fail_seconds,
@@ -92,7 +93,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
         target_on = self._startup_manual_target(svc)
         if target_on is None or svc._mode_uses_auto_logic(svc.virtual_mode):
             return pm_status
-        relay_on = bool(pm_status.get("output", False))
+        relay_on = bool(pm_status.get("output"))
         if relay_on == target_on:
             svc._startup_manual_target = None
             return pm_status
@@ -104,7 +105,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
         """Return the pending startup manual target, initializing the field when needed."""
         if not hasattr(svc, "_startup_manual_target"):
             svc._startup_manual_target = None
-        value = getattr(svc, "_startup_manual_target", None)
+        value = getattr(svc, "_startup_manual_target")
         return None if value is None else bool(value)
 
     def _apply_startup_manual_target(
@@ -121,7 +122,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
             # unavailable, we keep the live status and let the normal update loop
             # retry on the next cycle instead of failing startup.
             applied = self._apply_enabled_target(svc, target_on, now)
-        except Exception as error:  # pylint: disable=broad-except
+        except STARTUP_MANUAL_TARGET_ERRORS as error:
             source_key = self._enable_control_source_key(svc)
             source_label = self._enable_control_label(svc)
             svc._mark_failure(source_key)
@@ -188,7 +189,7 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
             return
         try:
             save_runtime_state()
-        except Exception as error:  # pylint: disable=broad-except
+        except RUNTIME_STATE_SAVE_ERRORS as error:
             warning_throttled = getattr(svc, "_warning_throttled", None)
             if callable(warning_throttled):
                 warning_throttled(
@@ -305,7 +306,10 @@ class _UpdateCycleStateMixin(_ComposableControllerMixin):
     def prepare_update_cycle(svc: Any, now: float) -> Any:
         """Run pre-update recovery/supervision hooks and return the latest worker snapshot."""
         start_io_worker = getattr(svc, "_start_io_worker", None)
-        topology_configured = bool(getattr(svc, "topology_configured", getattr(svc, "host_configured", False)))
+        if hasattr(svc, "topology_configured"):
+            topology_configured = bool(svc.topology_configured)
+        else:
+            topology_configured = bool(svc.host_configured) if hasattr(svc, "host_configured") else False
         if topology_configured and callable(start_io_worker):
             start_io_worker()
         svc._watchdog_recover(now)

@@ -6,6 +6,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+class RelayDecisionTypeError(TypeError):
+    """Raised when an Auto decision helper returns an invalid value."""
+
+
 @dataclass(frozen=True)
 class RelayDecisionState:
     """Represent one intermediate Auto decision without relying on raw sentinels."""
@@ -38,3 +42,18 @@ class RelayDecisionState:
 
 
 NO_RELAY_DECISION = RelayDecisionState.pending()
+RelayDecision = bool | RelayDecisionState
+
+
+def require_relay_bool(value: object, label: str = "relay decision") -> bool:
+    """Return a boolean relay decision or raise for malformed helper output."""
+    if isinstance(value, bool):
+        return value
+    raise RelayDecisionTypeError(f"{label} must be bool, got {type(value).__name__}")
+
+
+def require_relay_decision(value: object, label: str = "relay decision") -> RelayDecision:
+    """Return a boolean or pending relay decision, rejecting malformed values."""
+    if isinstance(value, bool) or isinstance(value, RelayDecisionState):
+        return value
+    raise RelayDecisionTypeError(f"{label} must be bool or RelayDecisionState, got {type(value).__name__}")

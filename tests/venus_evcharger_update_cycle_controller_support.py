@@ -2,6 +2,7 @@
 import math
 import tempfile
 import unittest
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ from venus_evcharger.backend.modbus_transport import ModbusRequest, ModbusSlaveO
 from venus_evcharger.backend.shelly_io import ShellyIoController
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.update.controller import UpdateCycleController
-from venus_evcharger.update.relay import _UpdateCycleRelayMixin
+from venus_evcharger.update.relay import _UpdateCycleRelay
 
 
 def _phase_values(total_power, voltage, _phase, _voltage_mode):
@@ -65,46 +66,164 @@ class _FakeSmartEvseTransport:
         raise AssertionError(f"Unexpected Modbus function code {request.function_code}")
 
 
-def _auto_phase_service(**overrides):
-    auto_policy = AutoPolicy()
-    auto_policy.phase.upshift_delay_seconds = 10.0
-    auto_policy.phase.downshift_delay_seconds = 5.0
-    auto_policy.phase.upshift_headroom_watts = 250.0
-    auto_policy.phase.downshift_margin_watts = 150.0
-    auto_policy.phase.mismatch_retry_seconds = 60.0
-    data = {
-        "auto_policy": auto_policy,
-        "supported_phase_selections": ("P1", "P1_P2"),
-        "requested_phase_selection": "P1",
-        "active_phase_selection": "P1",
-        "_last_auto_metrics": {"surplus": 3200.0},
-        "min_current": 6.0,
-        "voltage_mode": "phase",
-        "_phase_selection_requires_pause": MagicMock(return_value=True),
-        "_peek_pending_relay_command": MagicMock(return_value=(None, None)),
-        "_apply_phase_selection": MagicMock(return_value="P1"),
-        "_save_runtime_state": MagicMock(),
-        "_publish_local_pm_status": MagicMock(),
-        "_warning_throttled": MagicMock(),
-        "_mark_failure": MagicMock(),
-        "auto_shelly_soft_fail_seconds": 10.0,
-        "_worker_poll_interval_seconds": 1.0,
-        "relay_sync_timeout_seconds": 3.0,
-        "_last_confirmed_pm_status": {"output": False},
-        "_last_confirmed_pm_status_at": 99.0,
-        "_phase_switch_pending_selection": None,
-        "_phase_switch_state": None,
-        "_phase_switch_requested_at": None,
-        "_phase_switch_stable_until": None,
-        "_phase_switch_resume_relay": False,
-        "_phase_switch_mismatch_active": False,
-        "_phase_switch_last_mismatch_selection": None,
-        "_phase_switch_last_mismatch_at": None,
-        "_auto_phase_target_candidate": None,
-        "_auto_phase_target_since": None,
-    }
-    data.update(overrides)
-    return SimpleNamespace(**data)
+class AutoPhaseServiceStub:
+    auto_policy: AutoPolicy | None
+    supported_phase_selections: tuple[str, ...]
+    requested_phase_selection: str
+    active_phase_selection: str
+    _last_auto_metrics: dict[str, float]
+    min_current: float
+    voltage_mode: str
+    _phase_selection_requires_pause: Callable[[], bool]
+    _peek_pending_relay_command: Callable[[], tuple[bool | None, float | None]]
+    auto_shelly_soft_fail_seconds: float
+    _worker_poll_interval_seconds: float
+    relay_sync_timeout_seconds: float
+    _last_confirmed_pm_status: dict[str, object] | None
+    _last_confirmed_pm_status_at: float | None
+    _phase_switch_pending_selection: str | None
+    _phase_switch_state: str | None
+    _phase_switch_requested_at: float | None
+    _phase_switch_stable_until: float | None
+    _phase_switch_resume_relay: bool
+    _phase_switch_mismatch_active: bool
+    _phase_switch_last_mismatch_selection: str | None
+    _phase_switch_last_mismatch_at: float | None
+    _auto_phase_target_candidate: str | None
+    _auto_phase_target_since: float | None
+
+    def __init__(self, **overrides: object) -> None:
+        auto_policy = AutoPolicy()
+        auto_policy.phase.upshift_delay_seconds = 10.0
+        auto_policy.phase.downshift_delay_seconds = 5.0
+        auto_policy.phase.upshift_headroom_watts = 250.0
+        auto_policy.phase.downshift_margin_watts = 150.0
+        auto_policy.phase.mismatch_retry_seconds = 60.0
+        self.auto_policy = auto_policy
+        self.supported_phase_selections = ("P1", "P1_P2")
+        self.requested_phase_selection = "P1"
+        self.active_phase_selection = "P1"
+        self._last_auto_metrics = {"surplus": 3200.0}
+        self.min_current = 6.0
+        self.voltage_mode = "phase"
+        self._phase_selection_requires_pause = MagicMock(return_value=True)
+        self._peek_pending_relay_command = MagicMock(return_value=(None, None))
+        self._apply_phase_selection = MagicMock(return_value="P1")
+        self._save_runtime_state = MagicMock()
+        self._publish_local_pm_status = MagicMock()
+        self._warning_throttled = MagicMock()
+        self._mark_failure = MagicMock()
+        self.auto_shelly_soft_fail_seconds = 10.0
+        self._worker_poll_interval_seconds = 1.0
+        self.relay_sync_timeout_seconds = 3.0
+        self._last_confirmed_pm_status = {"output": False}
+        self._last_confirmed_pm_status_at = 99.0
+        self._phase_switch_pending_selection = None
+        self._phase_switch_state = None
+        self._phase_switch_requested_at = None
+        self._phase_switch_stable_until = None
+        self._phase_switch_resume_relay = False
+        self._phase_switch_mismatch_active = False
+        self._phase_switch_last_mismatch_selection = None
+        self._phase_switch_last_mismatch_at = None
+        self._auto_phase_target_candidate = None
+        self._auto_phase_target_since = None
+        for name, value in overrides.items():
+            setattr(self, name, value)
+
+
+def _auto_phase_service(**overrides: object) -> AutoPhaseServiceStub:
+    return AutoPhaseServiceStub(**overrides)
+
+
+class LearningServiceStub:
+    charging_started_at: float | None
+    learned_charge_power_watts: float | None
+    learned_charge_power_updated_at: float | None
+    learned_charge_power_state: str
+    learned_charge_power_learning_since: float | None
+    learned_charge_power_sample_count: int
+    learned_charge_power_phase: str | None
+    learned_charge_power_voltage: float | None
+    learned_charge_power_signature_mismatch_sessions: int
+    learned_charge_power_signature_checked_session_started_at: float | None
+    learned_charge_power_confidence: float
+    learned_charge_power_stability_score: float
+    learned_charge_power_reason: str
+    learned_charge_power_detail: str
+    auto_learn_charge_power_enabled: bool
+    auto_learn_charge_power_start_delay_seconds: float
+    auto_learn_charge_power_window_seconds: float
+    auto_learn_charge_power_max_age_seconds: float
+    auto_learn_charge_power_min_watts: float
+    auto_learn_charge_power_alpha: float
+    phase: str
+    max_current: float
+    _last_voltage: float
+
+    def __init__(self, **overrides: object) -> None:
+        self.charging_started_at = 50.0
+        self.learned_charge_power_watts = 1900.0
+        self.learned_charge_power_updated_at = 90.0
+        self.learned_charge_power_state = "stable"
+        self.learned_charge_power_learning_since = None
+        self.learned_charge_power_sample_count = 3
+        self.learned_charge_power_phase = "L1"
+        self.learned_charge_power_voltage = 230.0
+        self.learned_charge_power_signature_mismatch_sessions = 0
+        self.learned_charge_power_signature_checked_session_started_at = None
+        self.learned_charge_power_confidence = 1.0
+        self.learned_charge_power_stability_score = 1.0
+        self.learned_charge_power_reason = "stable"
+        self.learned_charge_power_detail = ""
+        self.auto_learn_charge_power_enabled = True
+        self.auto_learn_charge_power_start_delay_seconds = 30.0
+        self.auto_learn_charge_power_window_seconds = 180.0
+        self.auto_learn_charge_power_max_age_seconds = 21600.0
+        self.auto_learn_charge_power_min_watts = 500.0
+        self.auto_learn_charge_power_alpha = 0.2
+        self.phase = "L1"
+        self.max_current = 16.0
+        self._last_voltage = 230.0
+        for name, value in overrides.items():
+            setattr(self, name, value)
+
+
+def _learning_service(**overrides: object) -> LearningServiceStub:
+    return LearningServiceStub(**overrides)
+
+
+class PhaseSwitchMismatchServiceStub:
+    auto_policy: object | None
+    active_phase_selection: str
+    requested_phase_selection: str
+    _phase_switch_mismatch_active: bool
+    _phase_switch_mismatch_counts: dict[str, int]
+    _phase_switch_last_mismatch_selection: str | None
+    _phase_switch_last_mismatch_at: float | None
+    _phase_switch_lockout_selection: str | None
+    _phase_switch_lockout_reason: str
+    _phase_switch_lockout_at: float | None
+    _phase_switch_lockout_until: float | None
+
+    def __init__(self, **overrides: object) -> None:
+        self.auto_policy = None
+        self.active_phase_selection = "P1"
+        self.requested_phase_selection = "P1"
+        self._phase_switch_mismatch_active = False
+        self._phase_switch_mismatch_counts = {}
+        self._phase_switch_last_mismatch_selection = None
+        self._phase_switch_last_mismatch_at = None
+        self._phase_switch_lockout_selection = None
+        self._phase_switch_lockout_reason = ""
+        self._phase_switch_lockout_at = None
+        self._phase_switch_lockout_until = None
+        for name, value in overrides.items():
+            setattr(self, name, value)
+
+
+def _phase_switch_mismatch_service(**overrides: object) -> PhaseSwitchMismatchServiceStub:
+    return PhaseSwitchMismatchServiceStub(**overrides)
 
 
 

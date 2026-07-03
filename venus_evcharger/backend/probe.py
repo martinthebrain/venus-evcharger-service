@@ -18,10 +18,11 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
-from dataclasses import asdict, is_dataclass
+from collections.abc import Callable
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import requests
 
@@ -88,8 +89,18 @@ def _probe_service_from_wallbox_config(config: configparser.ConfigParser) -> Any
 
 def _json_ready(value: Any) -> Any:
     """Convert dataclasses recursively to JSON-friendly structures."""
-    if is_dataclass(value):
-        return _json_ready(asdict(cast(Any, value)))
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_ready_dataclass(value)
+    return _json_ready_container(value)
+
+
+def _json_ready_dataclass(value: Any) -> dict[str, Any]:
+    """Convert one dataclass instance to a JSON-friendly dict."""
+    return _json_ready_mapping({field.name: getattr(value, field.name) for field in fields(value)})
+
+
+def _json_ready_container(value: Any) -> Any:
+    """Convert non-dataclass containers to JSON-friendly values."""
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, dict):
@@ -317,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _probe_command_payload(command: str, config_path: str) -> dict[str, object]:
     """Return the payload for one probe CLI subcommand."""
-    handlers: dict[str, Any] = {
+    handlers: dict[str, Callable[[str], object]] = {
         "validate": validate_backend_config,
         "validate-wallbox": validate_wallbox_config,
         "probe-meter": probe_meter_backend,
@@ -325,7 +336,10 @@ def _probe_command_payload(command: str, config_path: str) -> dict[str, object]:
         "probe-charger": probe_charger_backend,
         "read-charger": read_charger_backend,
     }
-    return cast(dict[str, object], handlers[command](config_path))
+    payload = handlers[command](config_path)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Probe command {command!r} must return dict, got {type(payload).__name__}")
+    return {str(key): value for key, value in payload.items()}
 
 
 if __name__ == "__main__":  # pragma: no cover

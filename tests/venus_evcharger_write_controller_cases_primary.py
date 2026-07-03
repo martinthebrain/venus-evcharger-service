@@ -41,12 +41,12 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _last_pm_status={"output": True},
             _get_worker_snapshot=MagicMock(return_value={"pv_power": 10, "battery_soc": 50, "grid_power": -10}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
         result = controller.handle_write("/Mode", 1)
@@ -89,12 +89,12 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _last_pm_status_confirmed=True,
             _get_worker_snapshot=MagicMock(return_value={"pm_status": {"output": True}, "pm_confirmed": True}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -127,12 +127,12 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _last_pm_status={"output": False},
             _get_worker_snapshot=MagicMock(return_value={"pm_status": {"output": False}}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -167,12 +167,12 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _last_pm_status_at=None,
             _get_worker_snapshot=MagicMock(return_value={"pm_status": None, "pm_confirmed": False}),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -218,12 +218,12 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
                 }
             ),
             _update_worker_snapshot=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -239,13 +239,13 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service = SimpleNamespace(
             _dbusservice={"/Auto/SoftwareUpdateRun": 0},
             _time_now=MagicMock(return_value=200.0),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
             _save_runtime_overrides=MagicMock(),
             _software_update_run_requested_at=None,
         )
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 
@@ -280,11 +280,11 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _queue_relay_command=MagicMock(),
             _publish_local_pm_status=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
         result = controller.handle_write("/Enable", 1)
@@ -313,11 +313,11 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _queue_relay_command=MagicMock(),
             _publish_local_pm_status=MagicMock(),
-            _publish_dbus_path=MagicMock(),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
         )
-        service._publish_dbus_path.side_effect = self._publish_side_effect(service)
+        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = DbusWriteController(WriteControllerPort(service))
 

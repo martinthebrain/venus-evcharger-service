@@ -5,18 +5,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import shlex
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.backend.template_support import config_section, load_template_config
 from venus_evcharger.core.contracts import finite_float_or_none
 
 from .connectors_common import (
-    _cache_map,
     _optional_bool_path,
     _optional_confidence_path,
     _optional_float_path,
     _optional_path,
     _optional_text_path,
+    _typed_cache_map,
 )
 from .models import EnergySourceDefinition, EnergySourceSnapshot
 
@@ -121,7 +121,7 @@ def _command_timeout_seconds(runtime: Any, adapter: Any, command: Any) -> float:
 
 
 def _command_json_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> CommandJsonEnergySourceSettings:
-    cache = cast(dict[str, CommandJsonEnergySourceSettings], _cache_map(runtime, "_energy_command_settings_cache"))
+    cache = _typed_cache_map(runtime, "_energy_command_settings_cache", CommandJsonEnergySourceSettings)
     cache_key = str(source.config_path).strip()
     cached = cache.get(cache_key)
     if isinstance(cached, CommandJsonEnergySourceSettings):

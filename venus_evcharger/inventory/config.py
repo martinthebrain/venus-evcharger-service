@@ -10,7 +10,7 @@ for the wizard and for hand-edited inventory files.
 from __future__ import annotations
 
 import configparser
-from typing import cast
+from typing import NoReturn, Protocol
 
 from venus_evcharger.core.contracts import optional_text
 
@@ -31,6 +31,22 @@ from .render import _render_switch_capability_fields, render_validated_device_in
 
 class DeviceInventoryConfigError(ValueError):
     """Raised when one device inventory config is invalid."""
+
+
+_PHASE_LABELS = {"L1", "L2", "L3"}
+_CAPABILITY_KINDS = {"switch", "meter", "charger"}
+_SWITCHING_MODES = {"direct", "contactor"}
+_BINDING_ROLES = {"actuation", "measurement", "charger"}
+
+
+class _InventoryConfigSections(Protocol):
+    """Minimal ConfigParser surface needed by section parsers."""
+
+    def sections(self) -> list[str]:
+        """Return available section names."""
+
+    def __getitem__(self, key: str) -> configparser.SectionProxy:
+        """Return one parsed config section."""
 
 
 def parse_device_inventory_config(config: configparser.ConfigParser) -> DeviceInventory:
@@ -71,7 +87,7 @@ def validate_device_inventory(inventory: DeviceInventory) -> DeviceInventory:
     return inventory
 
 
-def _profiles(config: configparser.ConfigParser) -> dict[str, DeviceProfile]:
+def _profiles(config: _InventoryConfigSections) -> dict[str, DeviceProfile]:
     profiles: dict[str, DeviceProfile] = {}
     profile_sections = sorted(
         section for section in config.sections() if section.startswith("Profile:")
@@ -92,7 +108,7 @@ def _profiles(config: configparser.ConfigParser) -> dict[str, DeviceProfile]:
 
 
 def _capabilities(
-    config: configparser.ConfigParser,
+    config: _InventoryConfigSections,
 ) -> dict[str, dict[str, DeviceCapability]]:
     capabilities_by_profile: dict[str, dict[str, DeviceCapability]] = {}
     capability_sections = sorted(
@@ -127,7 +143,7 @@ def _capabilities(
     return capabilities_by_profile
 
 
-def _devices(config: configparser.ConfigParser) -> dict[str, DeviceInstance]:
+def _devices(config: _InventoryConfigSections) -> dict[str, DeviceInstance]:
     devices: dict[str, DeviceInstance] = {}
     device_sections = sorted(
         section for section in config.sections() if section.startswith("Device:")
@@ -148,7 +164,7 @@ def _devices(config: configparser.ConfigParser) -> dict[str, DeviceInstance]:
     return devices
 
 
-def _bindings(config: configparser.ConfigParser) -> dict[str, RoleBinding]:
+def _bindings(config: _InventoryConfigSections) -> dict[str, RoleBinding]:
     members_by_binding = _binding_members(config)
     bindings: dict[str, RoleBinding] = {}
     binding_sections = sorted(
@@ -170,7 +186,7 @@ def _bindings(config: configparser.ConfigParser) -> dict[str, RoleBinding]:
 
 
 def _binding_members(
-    config: configparser.ConfigParser,
+    config: _InventoryConfigSections,
 ) -> dict[str, dict[str, RoleBindingMember]]:
     members_by_binding: dict[str, dict[str, RoleBindingMember]] = {}
     member_sections = sorted(
@@ -381,14 +397,7 @@ def _phase_labels(value: str) -> tuple[PhaseLabel, ...]:
     for raw in _phase_tokens(value):
         if not raw:
             continue
-        phase = cast(
-            PhaseLabel,
-            _literal_choice(
-                value=raw,
-                allowed={"L1", "L2", "L3"},
-                label="phase list",
-            ),
-        )
+        phase = _phase_label(raw)
         if phase not in normalized:
             normalized.append(phase)
     if not normalized:
@@ -401,50 +410,56 @@ def _phase_tokens(value: str) -> list[str]:
     return [part.strip().upper() for part in value.split(",")]
 
 
+def _phase_label(value: str) -> PhaseLabel:
+    normalized = value.strip().upper()
+    if normalized == "L1":
+        return "L1"
+    if normalized == "L2":
+        return "L2"
+    if normalized == "L3":
+        return "L3"
+    _raise_literal_choice_error(value, _PHASE_LABELS, "phase list")
+
+
 def _capability_kind(value: str) -> CapabilityKind:
-    return cast(
-        CapabilityKind,
-        _literal_choice(
-            value=value,
-            allowed={"switch", "meter", "charger"},
-            label="Capability.Kind",
-        ),
-    )
+    normalized = value.strip()
+    if normalized == "switch":
+        return "switch"
+    if normalized == "meter":
+        return "meter"
+    if normalized == "charger":
+        return "charger"
+    _raise_literal_choice_error(value, _CAPABILITY_KINDS, "Capability.Kind")
 
 
 def _optional_switching_mode(value: object) -> SwitchingMode | None:
     text = _optional_text(value)
     if text is None:
         return None
-    return cast(
-        SwitchingMode,
-        _literal_choice(
-            value=text,
-            allowed={"direct", "contactor"},
-            label="Capability.SwitchingMode",
-        ),
-    )
+    normalized = text.strip()
+    if normalized == "direct":
+        return "direct"
+    if normalized == "contactor":
+        return "contactor"
+    _raise_literal_choice_error(text, _SWITCHING_MODES, "Capability.SwitchingMode")
 
 
 def _binding_role(value: str) -> BindingRole:
-    return cast(
-        BindingRole,
-        _literal_choice(
-            value=value,
-            allowed={"actuation", "measurement", "charger"},
-            label="Binding.Role",
-        ),
-    )
-
-
-def _literal_choice(value: str, allowed: set[str], label: str) -> str:
     normalized = value.strip()
-    if normalized not in allowed:
-        allowed_values = ", ".join(sorted(allowed))
-        raise DeviceInventoryConfigError(
-            f"{label} must be one of: {allowed_values} (got '{value}')"
-        )
-    return normalized
+    if normalized == "actuation":
+        return "actuation"
+    if normalized == "measurement":
+        return "measurement"
+    if normalized == "charger":
+        return "charger"
+    _raise_literal_choice_error(value, _BINDING_ROLES, "Binding.Role")
+
+
+def _raise_literal_choice_error(value: str, allowed: set[str], label: str) -> NoReturn:
+    allowed_values = ", ".join(sorted(allowed))
+    raise DeviceInventoryConfigError(
+        f"{label} must be one of: {allowed_values} (got '{value}')"
+    )
 
 
 def _required_text(section: configparser.SectionProxy, key: str) -> str:

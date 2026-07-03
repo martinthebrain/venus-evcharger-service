@@ -7,7 +7,8 @@ import os
 import time
 from collections import deque
 from collections.abc import Mapping
-from typing import Any
+
+from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 CPU_IDLE_INDEX = 3
 CPU_IOWAIT_INDEX = 4
@@ -36,7 +37,7 @@ class TickHealth:
         self._ticks.append((current, max(0.0, float(duration_ms)), late, gap_ms, late_gap))
         self._prune(current)
 
-    def snapshot(self, *, now: float | None = None) -> dict[str, Any]:
+    def snapshot(self, *, now: float | None = None) -> CommandPayload:
         current = time.monotonic() if now is None else float(now)
         self._prune(current)
         durations = self._durations()
@@ -76,7 +77,7 @@ class ResourceMonitor:
         self.pid = os.getpid() if pid is None else int(pid)
         self._last_sample: tuple[float, int, int, float] | None = None
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self) -> CommandPayload:
         now = time.monotonic()
         total, idle = self._read_system_cpu()
         proc_cpu = self._read_process_cpu_seconds()
@@ -100,7 +101,7 @@ class ResourceMonitor:
         process_cpu_pct: float,
         status: Mapping[str, float],
         system_cpu_pct: float,
-    ) -> dict[str, Any]:
+    ) -> CommandPayload:
         load1, load5, load15 = load
         cpu_count = max(1, os.cpu_count() or 1)
         mem_total = float(meminfo.get("MemTotal", 0.0) or 0.0)
@@ -118,7 +119,7 @@ class ResourceMonitor:
             "process": self._process_snapshot(status, process_cpu_pct),
         }
 
-    def _process_snapshot(self, status: Mapping[str, float], process_cpu_pct: float) -> dict[str, Any]:
+    def _process_snapshot(self, status: Mapping[str, float], process_cpu_pct: float) -> CommandPayload:
         return {
             "pid": self.pid,
             "rss_kb": float(status.get("VmRSS", 0.0) or 0.0),

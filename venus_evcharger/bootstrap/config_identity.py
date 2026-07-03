@@ -4,7 +4,7 @@ from __future__ import annotations
 import configparser
 
 from venus_evcharger.bootstrap.config_shared import _config_value
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
 
 
 def _host_is_configured(value: object) -> bool:
@@ -12,7 +12,7 @@ def _host_is_configured(value: object) -> bool:
     return bool(str(value).strip() if value is not None else "")
 
 
-class _ServiceBootstrapIdentityConfigMixin(_ComposableControllerMixin):
+class _ServiceBootstrapIdentityConfig(ControllerAssemblyContract):
     def _load_identity_config(self, defaults: configparser.SectionProxy) -> None:
         """Load generic device, HTTP, and EV charger presentation settings."""
         svc = self.service

@@ -3,12 +3,8 @@
 
 from __future__ import annotations
 
-from venus_evcharger.inputs.supervisor_snapshot_runtime import _AutoInputSupervisorSnapshotRuntimeMixin
-from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidationMixin
+from venus_evcharger.inputs.supervisor_snapshot_runtime import _AutoInputSupervisorSnapshotRuntime
 
 
-class _AutoInputSupervisorSnapshotMixin(
-    _AutoInputSupervisorSnapshotValidationMixin,
-    _AutoInputSupervisorSnapshotRuntimeMixin,
-):
+class _AutoInputSupervisorSnapshot(_AutoInputSupervisorSnapshotRuntime):
     pass

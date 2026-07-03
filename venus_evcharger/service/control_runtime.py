@@ -1,27 +1,76 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
-"""Audit, event, and server helpers for the Control API mixin."""
+"""Audit, event, and server helpers for the Control API role."""
 
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from venus_evcharger.control import ControlApiAuditTrail, ControlApiIdempotencyStore, ControlApiRateLimiter
 from venus_evcharger.control.events import ControlApiEventBus
+from venus_evcharger.service.control_state_meta import _ControlApiStateMeta
 
 
-class _ControlApiRuntimeMixin:
+_RuntimeComponent = TypeVar("_RuntimeComponent")
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from typing import Protocol
+
+    class _ControlApiServerLike(Protocol):
+        bound_host: str
+        bound_port: int
+        bound_unix_socket_path: str
+
+        def start(self) -> None: ...
+
+        def stop(self) -> None: ...
+
+
+def _runtime_component(
+    owner: object,
+    attribute_name: str,
+    component_type: type[_RuntimeComponent],
+    factory: Callable[[], _RuntimeComponent],
+) -> _RuntimeComponent:
+    component = getattr(owner, attribute_name, None)
+    if isinstance(component, component_type):
+        return component
+    component = factory()
+    setattr(owner, attribute_name, component)
+    return component
+
+
+class _ControlApiRuntime(_ControlApiStateMeta):
+    if TYPE_CHECKING:  # pragma: no cover
+        control_api_enabled: bool
+        control_api_host: str
+        control_api_port: int
+        control_api_auth_token: str
+        control_api_read_token: str
+        control_api_control_token: str
+        control_api_admin_token: str
+        control_api_update_token: str
+        control_api_localhost_only: bool
+        control_api_unix_socket_path: str
+        control_api_listen_host: str
+        control_api_listen_port: int
+        control_api_bound_unix_socket_path: str
+        _control_api_server: _ControlApiServerLike | None
+
+        def _state_api_event_snapshot_payload(self) -> dict[str, Any]: ...
+
     def _control_api_audit_trail(self) -> ControlApiAuditTrail:
-        audit_trail = getattr(self, "_control_api_audit_trail_instance", None)
-        if audit_trail is None:
-            audit_trail = ControlApiAuditTrail(
+        return _runtime_component(
+            self,
+            "_control_api_audit_trail_instance",
+            ControlApiAuditTrail,
+            lambda: ControlApiAuditTrail(
                 history_limit=int(getattr(self, "control_api_audit_max_entries", 200)),
                 path=str(getattr(self, "control_api_audit_path", "")).strip(),
-            )
-            self._control_api_audit_trail_instance = audit_trail
-        return cast(ControlApiAuditTrail, audit_trail)
+            ),
+        )
 
     def _record_control_api_command_audit(
         self,
@@ -82,32 +131,35 @@ class _ControlApiRuntimeMixin:
         }
 
     def _control_api_idempotency_store(self) -> ControlApiIdempotencyStore:
-        idempotency_store = getattr(self, "_control_api_idempotency_store_instance", None)
-        if idempotency_store is None:
-            idempotency_store = ControlApiIdempotencyStore(
+        return _runtime_component(
+            self,
+            "_control_api_idempotency_store_instance",
+            ControlApiIdempotencyStore,
+            lambda: ControlApiIdempotencyStore(
                 history_limit=int(getattr(self, "control_api_idempotency_max_entries", 200)),
                 path=str(getattr(self, "control_api_idempotency_path", "")).strip(),
-            )
-            self._control_api_idempotency_store_instance = idempotency_store
-        return cast(ControlApiIdempotencyStore, idempotency_store)
+            ),
+        )
 
     def _control_api_rate_limiter(self) -> ControlApiRateLimiter:
-        rate_limiter = getattr(self, "_control_api_rate_limiter_instance", None)
-        if rate_limiter is None:
-            rate_limiter = ControlApiRateLimiter(
+        return _runtime_component(
+            self,
+            "_control_api_rate_limiter_instance",
+            ControlApiRateLimiter,
+            lambda: ControlApiRateLimiter(
                 max_requests=int(getattr(self, "control_api_rate_limit_max_requests", 30)),
                 window_seconds=float(getattr(self, "control_api_rate_limit_window_seconds", 5.0)),
                 critical_cooldown_seconds=float(getattr(self, "control_api_critical_cooldown_seconds", 2.0)),
-            )
-            self._control_api_rate_limiter_instance = rate_limiter
-        return cast(ControlApiRateLimiter, rate_limiter)
+            ),
+        )
 
     def _control_api_event_bus(self) -> ControlApiEventBus:
-        event_bus = getattr(self, "_control_api_event_bus_instance", None)
-        if event_bus is None:
-            event_bus = ControlApiEventBus()
-            self._control_api_event_bus_instance = event_bus
-        return cast(ControlApiEventBus, event_bus)
+        return _runtime_component(
+            self,
+            "_control_api_event_bus_instance",
+            ControlApiEventBus,
+            ControlApiEventBus,
+        )
 
     def _publish_control_api_command_event(self, command: Any, result: Any, *, replayed: bool = False) -> None:
         self._control_api_event_bus().publish(

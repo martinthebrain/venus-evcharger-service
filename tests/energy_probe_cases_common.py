@@ -8,7 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from venus_evcharger.backend.modbus_transport import ModbusRequest
-from venus_evcharger.energy.probe import detect_modbus_energy_source, main, validate_huawei_energy_source
+from venus_evcharger.energy.probe import (
+    _probe_float_field,
+    _probe_text_field,
+    detect_modbus_energy_source,
+    main,
+    validate_huawei_energy_source,
+)
 
 
 class _ProbeTransport:
@@ -49,6 +55,12 @@ class _EnergyProbeBase(unittest.TestCase):
         path = Path(directory) / filename
         path.write_text(content, encoding="utf-8")
         return str(path)
+
+    def test_probe_field_contracts_reject_wrong_scalar_types(self) -> None:
+        with self.assertRaisesRegex(TypeError, "probe field value must be float"):
+            _probe_float_field({"value": True}, "value")
+        with self.assertRaisesRegex(TypeError, "probe field label must be str"):
+            _probe_text_field({"label": 123}, "label")
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

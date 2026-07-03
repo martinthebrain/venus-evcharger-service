@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from venus_evcharger.ports import WriteControllerPort
 from venus_evcharger.controllers.write_snapshot import _snapshot_dbus_paths
 from venus_evcharger.controllers.write import DbusWriteController
+from venus_evcharger.dbus_gateway import EVCS_FIELD_TO_PATH
 
 __all__ = [
     "Any",
@@ -63,6 +64,20 @@ class DbusWriteControllerTestBase(unittest.TestCase):
             **_kwargs: object,
         ) -> bool:
             service._dbusservice[path] = value
+            return force
+
+        return _publish
+
+    @staticmethod
+    def _publish_field_side_effect(service: Any) -> Callable[..., bool]:
+        def _publish(
+            field: str,
+            value: object,
+            _now: float | None = None,
+            force: bool = False,
+            **_kwargs: object,
+        ) -> bool:
+            service._dbusservice[EVCS_FIELD_TO_PATH[str(field)]] = value
             return force
 
         return _publish

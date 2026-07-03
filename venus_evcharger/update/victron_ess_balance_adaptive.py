@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined,no-any-return"
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
 """Victron ESS balance-bias adaptive tuning helpers."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from .victron_ess_balance_recommendation import _UpdateCycleVictronEssBalanceRecommendation
 
-class _UpdateCycleVictronEssBalanceAdaptiveMixin:
+
+class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecommendation):
     @staticmethod
     def _victron_ess_balance_profile_keys(metrics: dict[str, Any]) -> tuple[str, str]:
         recommendation_profile_key = str(

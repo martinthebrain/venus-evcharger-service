@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -66,6 +68,39 @@ class TestAutoInputSupervisorRuntime(unittest.TestCase):
         service._stop_auto_input_helper.assert_called_once_with(force=False)
         self.assertEqual(service._auto_input_helper_restart_requested_at, 100.0)
         service._spawn_auto_input_helper.assert_not_called()
+
+    def test_ensure_helper_process_uses_gateway_backpressure_liveness_grace(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            health_path = Path(temp_dir) / "dbus-health.json"
+            health_path.write_text(
+                '{"captured_at": 100.0, "dbus_health": {"backpressure": {"state": "protective"}}}',
+                encoding="utf-8",
+            )
+            process = MagicMock()
+            process.poll.return_value = None
+            process.pid = 4321
+            service = SimpleNamespace(
+                _ensure_worker_state=MagicMock(),
+                _auto_input_helper_process=process,
+                _auto_input_helper_last_start_at=10.0,
+                _auto_input_helper_restart_requested_at=None,
+                _auto_input_snapshot_last_seen=70.0,
+                auto_input_snapshot_path="",
+                auto_input_helper_stale_seconds=15.0,
+                auto_input_helper_restart_seconds=5.0,
+                dbus_gateway_health_path=str(health_path),
+                _time_now=MagicMock(return_value=100.0),
+                _stop_auto_input_helper=MagicMock(),
+                _spawn_auto_input_helper=MagicMock(),
+                _warning_throttled=MagicMock(),
+            )
+            controller = AutoInputSupervisor(service)
+
+            controller.ensure_helper_process()
+
+            service._stop_auto_input_helper.assert_not_called()
+            self.assertIsNone(service._auto_input_helper_restart_requested_at)
+            service._spawn_auto_input_helper.assert_not_called()
 
     def test_ensure_helper_process_refreshes_snapshot_before_stale_decision(self):
         process = MagicMock()

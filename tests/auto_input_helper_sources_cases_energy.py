@@ -1,21 +1,53 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import tempfile
+from types import SimpleNamespace
 
 from tests.auto_input_helper_sources_cases_common import *
 from venus_evcharger.inputs.helper.sources_dbus_common import (
     _dbus_error_name,
     _is_expected_missing_dbus_error,
 )
-from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbusMixin
-from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscriptionMixin
+from venus_evcharger.inputs.energy_snapshot_contracts import (
+    energy_source_definitions,
+    is_source_definition_iterable,
+    learning_profile_payloads,
+    learning_profiles,
+    nested_object_mappings,
+    object_mapping,
+)
+from venus_evcharger.inputs.helper.sources_dbus import _AutoInputHelperSourceDbus
+from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscription
 
 
 class _AutoInputHelperSourcesEnergyCases:
+    def test_battery_snapshot_normalizers_reject_dirty_payloads(self):
+        source = EnergySourceDefinition(source_id="battery", role="battery", connector_type="dbus")
+        profile = EnergyLearningProfile(source_id="battery", sample_count=3)
+
+        self.assertEqual(energy_source_definitions(source), (source,))
+        self.assertEqual(energy_source_definitions([source, "bad", object()]), (source,))
+        self.assertEqual(energy_source_definitions("bad"), ())
+        self.assertEqual(energy_source_definitions(object()), ())
+        self.assertFalse(is_source_definition_iterable({"source": source}))
+
+        self.assertEqual(object_mapping("bad"), {})
+        self.assertEqual(object_mapping({1: "one"}), {"1": "one"})
+        self.assertEqual(nested_object_mappings("bad"), {})
+        self.assertEqual(nested_object_mappings({"battery": {"ready": True}, "skip": "bad"}), {"battery": {"ready": True}})
+
+        self.assertEqual(learning_profiles("bad"), {})
+        self.assertEqual(
+            set(learning_profiles({"battery": profile, "legacy": {"sample_count": 1}, "skip": object()})),
+            {"battery", "legacy"},
+        )
+        self.assertEqual(learning_profile_payloads("bad"), {})
+        self.assertEqual(learning_profile_payloads({"battery": profile, "skip": object()})["battery"]["source_id"], "battery")
+
     def test_mixin_default_dbus_module_fallbacks_are_disabled(self):
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            _AutoInputHelperSourceDbusMixin._dbus_module()
+            _AutoInputHelperSourceDbus._dbus_module()
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            _AutoInputHelperSubscriptionMixin._dbus_module()
+            _AutoInputHelperSubscription._dbus_module()
 
     def test_dbus_gateway_common_error_helpers_cover_name_and_text_matching(self):
         class NamedDbusError(Exception):
@@ -125,7 +157,7 @@ class _AutoInputHelperSourcesEnergyCases:
                 captured_at=100.0,
             ),
         ), patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
-            snapshot = helper._get_battery_snapshot()
+            snapshot = helper._get_energy_source_battery_snapshot()
 
         self.assertEqual(snapshot["battery_soc"], 55.0)
         self.assertEqual(snapshot["battery_combined_soc"], 55.0)
@@ -173,7 +205,7 @@ class _AutoInputHelperSourcesEnergyCases:
                 ),
             ],
         ), patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
-            snapshot = helper._get_battery_snapshot()
+            snapshot = helper._get_energy_source_battery_snapshot()
 
         battery_sources = cast(list[dict[str, Any]], snapshot["battery_sources"])
         self.assertEqual(snapshot["battery_discharge_balance_mode"], "capacity_reserve_weighted")
@@ -188,6 +220,33 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertEqual(battery_sources[1]["discharge_balance_control_support"], "experimental")
 
     def test_helper_source_helpers_cover_invalidations_dict_init_and_non_primary_errors(self):
+        helper = self._make_helper()
+        helper.auto_energy_sources = ()
+        default_sources = helper._battery_snapshot_sources()
+        self.assertEqual(len(default_sources), 1)
+        self.assertEqual(default_sources[0].source_id, "primary_battery")
+        self.assertIsNone(
+            helper._battery_snapshot_effective_soc(SimpleNamespace(sources=[SimpleNamespace(soc="bad")], effective_soc="bad"))
+        )
+
+        helper = self._make_helper()
+        helper._source_retry_after["battery"] = 200.0
+        with patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            self.assertEqual(helper._get_energy_source_battery_snapshot(), {"battery_soc": None})
+
+        helper = self._make_helper()
+        helper.auto_energy_sources = (EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus"),)
+        helper._invalidate_auto_battery_service = MagicMock()
+        helper._delay_source_retry = MagicMock()
+        with patch(
+            "venus_evcharger.inputs.helper.sources.read_energy_source_snapshot",
+            side_effect=RuntimeError("primary offline"),
+        ), patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            snapshot = helper._get_energy_source_battery_snapshot()
+        self.assertIsNone(snapshot["battery_soc"])
+        helper._invalidate_auto_battery_service.assert_called_once_with()
+        helper._delay_source_retry.assert_called_once_with("battery")
+
         helper = self._make_helper()
         helper._resolved_auto_energy_services = {"primary_battery": "svc"}
         helper._auto_energy_last_scan = {"primary_battery": 10.0}
@@ -264,6 +323,13 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertIsNone(helper._read_optional_energy_value("svc", ""))
         self.assertEqual(helper._read_optional_energy_text("svc", ""), "")
 
+        helper._get_dbus_value = MagicMock(side_effect=[True, "bad", 12.5])
+        self.assertIsNone(helper._read_optional_energy_value("svc", "/Soc"))
+        self.assertIsNone(helper._read_optional_energy_value("svc", "/Soc"))
+        self.assertEqual(helper._read_optional_energy_value("svc", "/Soc"), 12.5)
+        self.assertIsNone(helper._battery_soc_numeric("bad"))
+        self.assertEqual(helper._battery_soc_numeric("12.5"), 12.5)
+
         helper._get_dbus_value = MagicMock(side_effect=[None, "support"])
         self.assertEqual(helper._read_optional_energy_text("svc", "/Mode"), "")
         self.assertEqual(helper._read_optional_energy_text("svc", "/Mode"), "support")
@@ -292,6 +358,15 @@ class _AutoInputHelperSourcesEnergyCases:
 
         with patch("venus_evcharger_auto_input_helper.time.time", return_value=42.0):
             self.assertIsNone(helper._cached_energy_service("missing", 42.0))
+        helper._resolved_auto_energy_services = {"numeric": 123}
+        helper._auto_energy_last_scan = {"numeric": 40.0}
+        self.assertEqual(helper._cached_energy_service("numeric", 42.0), "123")
+
+        helper = self._make_helper()
+        helper._resolve_auto_battery_service = MagicMock(return_value="")
+        primary_source = EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus")
+        with self.assertRaisesRegex(ValueError, "primary energy source"):
+            helper._resolve_energy_source_service(primary_source)
 
         helper = self._make_helper()
         helper.auto_battery_service = "configured-battery"
@@ -589,6 +664,36 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertEqual(helper._cached_dbus_capacity_payload(active_source, "svc"), {"usable_capacity_wh": 1.0})
         self.assertEqual(helper._resolved_dbus_capacity_payload(None, {"usable_capacity_wh": 2.0}), {"usable_capacity_wh": 2.0})
 
+        cache_key = helper._dbus_capacity_cache_key(active_source, "svc")
+        helper._auto_battery_capacity_estimates = {
+            cache_key: {
+                "usable_capacity_wh": "bad",
+                "installed_capacity_ah": True,
+                "capacity_voltage_v": 54.0,
+                "capacity_cell_count": "16",
+                7: "numeric-key",
+            }
+        }
+        cached_payload = helper._cached_dbus_capacity_payload(active_source, "svc")
+        self.assertEqual(cached_payload["7"], "numeric-key")
+
+        helper._dbus_energy_source_capacity_payload = MagicMock(return_value=cached_payload)
+        snapshot = helper._dbus_energy_source_snapshot_payload(
+            active_source,
+            "svc",
+            95.0,
+            None,
+            None,
+            None,
+            None,
+            "",
+            123.0,
+        )
+        self.assertIsNone(snapshot.usable_capacity_wh)
+        self.assertIsNone(snapshot.installed_capacity_ah)
+        self.assertEqual(snapshot.capacity_voltage_v, 54.0)
+        self.assertEqual(snapshot.capacity_cell_count, 16)
+
     def test_dbus_capacity_persistence_handles_disabled_and_failed_writes(self):
         helper = self._make_helper()
         source = EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus")
@@ -629,3 +734,11 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertIsNone(helper._primary_energy_estimated_capacity_ah())
         self.assertIsNone(helper._primary_energy_estimated_capacity_nominal_voltage())
         self.assertIsNone(helper._primary_energy_estimated_capacity_cell_count())
+
+        source = EnergySourceDefinition(source_id="primary_battery", role="battery", connector_type="dbus")
+        helper.auto_energy_sources = [source, "not-a-source"]
+        self.assertEqual(helper._configured_primary_energy_sources(), (source,))
+        helper.auto_energy_sources = {"source": source}
+        self.assertEqual(helper._configured_primary_energy_sources(), ())
+        helper.auto_energy_sources = "not-a-sequence"
+        self.assertEqual(helper._configured_primary_energy_sources(), ())

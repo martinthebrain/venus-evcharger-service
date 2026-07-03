@@ -4,14 +4,16 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
+from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.models import ChargerState, PhaseSelection, phase_selection_count
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.backend.shelly_io_mixin_contracts import ShellyIoRuntimeMixinContract
-from venus_evcharger.backend.shelly_io_runtime_cache import ShellyIoRuntimeCacheMixin
+from venus_evcharger.backend.shelly_io_runtime_cache import ShellyIoRuntimeCache
 from venus_evcharger.backend.shelly_io_types import (
     ShellyIoHost,
     _ChargerStateBackendLike,
+    _PhaseSelectionBackendLike,
 )
 from venus_evcharger.core.common import (
     _charger_transport_retry_delay_seconds,
@@ -20,8 +22,26 @@ from venus_evcharger.core.common import (
 from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
 
 
-class ShellyIoRuntimeMixin(ShellyIoRuntimeCacheMixin, ShellyIoRuntimeMixinContract):
+class ShellyIoRuntime(ShellyIoRuntimeCache):
     """Mirror charger readback into runtime state and synthesize retry behavior."""
+
+    if TYPE_CHECKING:
+
+        def _runtime_now(self) -> float: ...
+
+        def _phase_selection_switch_backend(self) -> _PhaseSelectionBackendLike | None: ...
+
+        def _charger_supported_phase_selections(self) -> tuple[PhaseSelection, ...]: ...
+
+        def _remember_phase_selection_state(
+            self,
+            *,
+            active: object | None = None,
+            requested: object | None = None,
+            supported: object | None = None,
+        ) -> None: ...
+
+        def _charger_state_backend(self) -> _ChargerStateBackendLike | None: ...
 
     def _sync_charger_runtime_state(self, state: ChargerState, now: float | None = None) -> None:
         svc = self.service
@@ -81,13 +101,18 @@ class ShellyIoRuntimeMixin(ShellyIoRuntimeCacheMixin, ShellyIoRuntimeMixinContra
 
     def _phase_voltage_for_selection(self, selection: PhaseSelection, cached_voltage: float) -> float:
         phase_voltage = float(cached_voltage)
-        if selection != "P1" and str(getattr(self.service, "voltage_mode", "phase")).strip().lower() != "phase":
+        voltage_mode = getattr(self.service, "voltage_mode", None)
+        uses_phase_voltage = voltage_mode is None or str(voltage_mode).strip().lower() == "phase"
+        if selection != "P1" and not uses_phase_voltage:
             phase_voltage = phase_voltage / math.sqrt(3.0)
         return 230.0 if phase_voltage <= 0.0 else float(phase_voltage)
 
     @staticmethod
     def _charging_like_status(state: ChargerState) -> bool:
-        status = str(getattr(state, "status_text", "") or "").strip().lower()
+        raw_status = getattr(state, "status_text", None)
+        if raw_status is None:
+            return False
+        status = str(raw_status).strip().lower()
         return status.startswith("charging")
 
     @classmethod
@@ -133,8 +158,9 @@ class ShellyIoRuntimeMixin(ShellyIoRuntimeCacheMixin, ShellyIoRuntimeMixinContra
         energy_kwh = finite_float_or_none(getattr(svc, "_charger_estimated_energy_kwh", None)) or 0.0
         last_at = finite_float_or_none(getattr(svc, "_charger_estimated_energy_at", None))
         last_power = finite_float_or_none(getattr(svc, "_charger_estimated_power_w", None))
-        if last_at is not None and last_power is not None and float(now) > last_at:
-            energy_kwh += (max(0.0, float(last_power)) * ((float(now) - last_at) / 3600.0)) / 1000.0
+        if last_at is not None and last_power is not None:
+            elapsed_seconds = max(0.0, float(now) - last_at)
+            energy_kwh += (max(0.0, float(last_power)) * (elapsed_seconds / 3600.0)) / 1000.0
         self._sync_estimated_charger_energy_cache(energy_kwh, power_w, now)
         return energy_kwh
 
@@ -227,7 +253,7 @@ class ShellyIoRuntimeMixin(ShellyIoRuntimeCacheMixin, ShellyIoRuntimeMixinContra
         svc, backend, current = read_context
         try:
             state = backend.read_charger_state()
-        except Exception as error:
+        except BACKEND_IO_ERRORS as error:
             self._handle_charger_state_read_error(svc, error, current)
             return None
         self._sync_charger_runtime_state(state, now=current)

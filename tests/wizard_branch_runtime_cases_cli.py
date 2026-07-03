@@ -170,6 +170,12 @@ class _WizardBranchRuntimeCliCases:
 
         with self.assertRaisesRegex(ValueError, "--profile is required"):
             wizard_cli._non_interactive_profile(_namespace(), _imported_defaults())
+        with self.assertRaisesRegex(ValueError, "Unsupported profile"):
+            wizard_cli._non_interactive_profile(_namespace(profile="bad"), _imported_defaults())
+        with self.assertRaisesRegex(ValueError, "Unsupported policy mode"):
+            wizard_cli._non_interactive_policy_mode(_namespace(policy_mode="bad"), _imported_defaults())
+        with self.assertRaisesRegex(ValueError, "Unsupported charger backend"):
+            wizard_cli._non_interactive_backend(_namespace(charger_backend="bad"), _imported_defaults(), "native_device", None)
         self.assertTrue(wizard_cli._non_interactive_digest_auth(_namespace(digest_auth=True), _imported_defaults()))
         self.assertEqual(non_interactive_cerbo_relay_inputs(_namespace(), None), (0, "NO"))
         self.assertEqual(

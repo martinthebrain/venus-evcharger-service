@@ -24,7 +24,7 @@ from venus_evcharger.inventory.config import (
 )
 
 
-class _DeviceInventoryConfigTestsHelperMixin:
+class _DeviceInventoryConfigTestsHelperRole:
     class _FakeConfig:
         def __init__(self, sections: list[str], mapping: dict[str, configparser.SectionProxy]) -> None:
             self._sections = sections

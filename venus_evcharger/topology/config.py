@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import configparser
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping, cast
+from typing import TypeVar
 
 from venus_evcharger.core.contracts import optional_text
 
@@ -26,6 +27,53 @@ from .schema import (
 
 class TopologyConfigError(ValueError):
     """Raised when one normalized topology configuration is invalid."""
+
+
+_ChoiceT = TypeVar("_ChoiceT", bound=str)
+
+_TOPOLOGY_CHOICES: Mapping[str, TopologyType] = {
+    "simple_relay": "simple_relay",
+    "native_device": "native_device",
+    "hybrid_topology": "hybrid_topology",
+    "custom_topology": "custom_topology",
+}
+
+_POLICY_CHOICES: Mapping[str, PolicyMode] = {
+    "manual": "manual",
+    "auto": "auto",
+    "scheduled": "scheduled",
+}
+
+_ACTUATOR_CHOICES: Mapping[str, ActuatorType] = {
+    "cerbo_gx_relay_switch": "cerbo_gx_relay_switch",
+    "shelly_switch": "shelly_switch",
+    "shelly_contactor_switch": "shelly_contactor_switch",
+    "template_switch": "template_switch",
+    "tasmota_switch": "tasmota_switch",
+    "tasmota_contactor_switch": "tasmota_contactor_switch",
+    "tuya_switch": "tuya_switch",
+    "tuya_contactor_switch": "tuya_contactor_switch",
+    "switch_group": "switch_group",
+    "custom": "custom",
+}
+
+_MEASUREMENT_CHOICES: Mapping[str, MeasurementType] = {
+    "actuator_native": "actuator_native",
+    "charger_native": "charger_native",
+    "external_meter": "external_meter",
+    "fixed_reference": "fixed_reference",
+    "learned_reference": "learned_reference",
+    "none": "none",
+}
+
+_CHARGER_CHOICES: Mapping[str, ChargerType] = {
+    "goe_charger": "goe_charger",
+    "simpleevse_charger": "simpleevse_charger",
+    "smartevse_charger": "smartevse_charger",
+    "modbus_charger": "modbus_charger",
+    "template_charger": "template_charger",
+    "custom": "custom",
+}
 
 
 @dataclass(frozen=True)
@@ -219,17 +267,9 @@ def _legacy_policy_mode(value: object) -> PolicyMode:
 
 def _legacy_runtime_values(config: configparser.ConfigParser) -> _LegacyTopologyRuntime:
     """Return normalized legacy config fields used to build one topology."""
-    defaults: Mapping[str, object]
-    if "DEFAULT" in config:
-        defaults = cast(Mapping[str, object], config["DEFAULT"])
-    else:
-        defaults = {}
+    defaults = _default_mapping(config)
 
-    backends: Mapping[str, object]
-    if config.has_section("Backends"):
-        backends = cast(Mapping[str, object], config["Backends"])
-    else:
-        backends = defaults
+    backends: Mapping[str, object] = config["Backends"] if config.has_section("Backends") else defaults
 
     return _LegacyTopologyRuntime(
         defaults=defaults,
@@ -241,6 +281,13 @@ def _legacy_runtime_values(config: configparser.ConfigParser) -> _LegacyTopology
         switch_path=_optional_text(backends.get("SwitchConfigPath")),
         charger_path=_optional_text(backends.get("ChargerConfigPath")),
     )
+
+
+def _default_mapping(config: configparser.ConfigParser) -> Mapping[str, object]:
+    """Return the legacy DEFAULT section with ConfigParser lookup semantics."""
+    if "DEFAULT" not in config:
+        return {}
+    return config["DEFAULT"]
 
 
 def _legacy_charger(charger_type_raw: str, charger_path: str | None) -> ChargerConfig | None:
@@ -309,17 +356,7 @@ def _legacy_switch_alias(normalized: str, host: str) -> ActuatorType | None:
 
 def _known_legacy_switch_type(normalized: str) -> bool:
     """Return whether one legacy switch label maps directly to a known actuator type."""
-    return normalized in {
-        "cerbo_gx_relay_switch",
-        "shelly_switch",
-        "shelly_contactor_switch",
-        "template_switch",
-        "tasmota_switch",
-        "tasmota_contactor_switch",
-        "tuya_switch",
-        "tuya_contactor_switch",
-        "switch_group",
-    }
+    return normalized in _ACTUATOR_CHOICES and normalized != "custom"
 
 
 def _legacy_actuator_config(switch_type: str, switch_path: str | None, host: str) -> ActuatorConfig | None:
@@ -355,88 +392,29 @@ def _legacy_hybrid_measurement_config(meter_type: str, meter_path: str | None, c
 
 
 def _topology_type(value: str) -> TopologyType:
-    return cast(
-        TopologyType,
-        _literal_choice(
-            value=value,
-            allowed={"simple_relay", "native_device", "hybrid_topology", "custom_topology"},
-            label="Topology.Type",
-        ),
-    )
+    return _literal_choice(value=value, allowed=_TOPOLOGY_CHOICES, label="Topology.Type")
 
 
 def _policy_mode(value: str) -> PolicyMode:
-    return cast(
-        PolicyMode,
-        _literal_choice(
-            value=value,
-            allowed={"manual", "auto", "scheduled"},
-            label="Policy.Mode",
-        ),
-    )
+    return _literal_choice(value=value, allowed=_POLICY_CHOICES, label="Policy.Mode")
 
 
 def _actuator_type(value: str) -> ActuatorType:
-    return cast(
-        ActuatorType,
-        _literal_choice(
-            value=value,
-            allowed={
-                "cerbo_gx_relay_switch",
-                "shelly_switch",
-                "shelly_contactor_switch",
-                "template_switch",
-                "tasmota_switch",
-                "tasmota_contactor_switch",
-                "tuya_switch",
-                "tuya_contactor_switch",
-                "switch_group",
-                "custom",
-            },
-            label="Actuator.Type",
-        ),
-    )
+    return _literal_choice(value=value, allowed=_ACTUATOR_CHOICES, label="Actuator.Type")
 
 
 def _measurement_type(value: str) -> MeasurementType:
-    return cast(
-        MeasurementType,
-        _literal_choice(
-            value=value,
-            allowed={
-                "actuator_native",
-                "charger_native",
-                "external_meter",
-                "fixed_reference",
-                "learned_reference",
-                "none",
-            },
-            label="Measurement.Type",
-        ),
-    )
+    return _literal_choice(value=value, allowed=_MEASUREMENT_CHOICES, label="Measurement.Type")
 
 
 def _charger_type(value: str) -> ChargerType:
-    return cast(
-        ChargerType,
-        _literal_choice(
-            value=value,
-            allowed={
-                "goe_charger",
-                "simpleevse_charger",
-                "smartevse_charger",
-                "modbus_charger",
-                "template_charger",
-                "custom",
-            },
-            label="Charger.Type",
-        ),
-    )
+    return _literal_choice(value=value, allowed=_CHARGER_CHOICES, label="Charger.Type")
 
 
-def _literal_choice(value: str, allowed: set[str], label: str) -> str:
+def _literal_choice(value: str, allowed: Mapping[str, _ChoiceT], label: str) -> _ChoiceT:
     normalized = value.strip().lower()
-    if normalized not in allowed:
+    selected = allowed.get(normalized)
+    if selected is None:
         choices = ", ".join(sorted(allowed))
         raise TopologyConfigError(f"invalid {label}: {value!r} (expected one of: {choices})")
-    return normalized
+    return selected

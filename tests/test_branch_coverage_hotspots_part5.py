@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.test_branch_coverage_hotspots_support import *  # noqa: F401,F403
 
-class _BranchCoverageVictronTelemetryMixinCasesPart1:
-    def test_telemetry_mixin_runtime_branches(self) -> None:
+class _BranchCoverageVictronTelemetryCasesPart1:
+    def test_telemetry_role_runtime_branches(self) -> None:
         harness = _TelemetryHarness()
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_deadband_watts=20.0,
@@ -68,6 +68,5 @@ class _BranchCoverageVictronTelemetryMixinCasesPart1:
 
         command_state = harness._victron_ess_balance_telemetry_command_state(service, "fallback")
         self.assertEqual(command_state["command_profile_key"], "fallback")
-
 
 

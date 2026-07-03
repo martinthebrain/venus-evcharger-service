@@ -31,11 +31,17 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
         for name in (
             "_a",
             "_age_seconds",
+            "_fresh_charger_retry_reason",
+            "_fresh_charger_retry_source",
+            "_fresh_charger_transport_reason",
+            "_fresh_charger_transport_source",
+            "_fresh_confirmed_relay_output",
             "_health_code",
             "_kwh",
             "_status_label",
             "_v",
             "_w",
+            "evse_fault_reason",
             "mode_uses_auto_logic",
             "month_in_ranges",
             "month_window",
@@ -49,28 +55,32 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
 
         bindings_module = ModuleType("venus_evcharger.service.bindings")
 
-        class StatePublishMixin:
+        class StatePublish:
             @staticmethod
             def _config_path():
                 return "/tmp/config.venus_evcharger.ini"
 
-        class ControlApiMixin:
+        class RuntimeHelper:
             pass
 
-        class RuntimeHelperMixin:
+        class DbusAutoLogic:
             pass
 
-        class DbusAutoLogicMixin:
+        class UpdateCycle:
             pass
 
-        class UpdateCycleMixin:
+        class ServiceControllerFactory:
             pass
 
-        bindings_module.ControlApiMixin = ControlApiMixin
-        bindings_module.StatePublishMixin = StatePublishMixin
-        bindings_module.RuntimeHelperMixin = RuntimeHelperMixin
-        bindings_module.DbusAutoLogicMixin = DbusAutoLogicMixin
-        bindings_module.UpdateCycleMixin = UpdateCycleMixin
+        class ControlApi(StatePublish):
+            pass
+
+        bindings_module.ControlApi = ControlApi
+        bindings_module.StatePublish = StatePublish
+        bindings_module.RuntimeHelper = RuntimeHelper
+        bindings_module.DbusAutoLogic = DbusAutoLogic
+        bindings_module.UpdateCycle = UpdateCycle
+        bindings_module.ServiceControllerFactory = ServiceControllerFactory
 
         state_module = ModuleType("venus_evcharger.controllers.state")
         state_module.ServiceStateController = type(

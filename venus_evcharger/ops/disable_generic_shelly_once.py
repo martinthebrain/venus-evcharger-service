@@ -14,11 +14,12 @@ import os
 import sys
 import time
 import xml.etree.ElementTree as xml_et
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 
 
+_CONFIG_SCALAR_TYPES = (str, bytes, bytearray, int, float)
 DEFAULT_CONFIG_PATH = os.path.join(
     os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")),
     "deploy",
@@ -26,6 +27,16 @@ DEFAULT_CONFIG_PATH = os.path.join(
     "config.venus_evcharger.ini",
 )
 DEFAULT_GENERIC_SHELLY_SERVICE = "com.victronenergy.shelly"
+
+GENERIC_SHELLY_HELPER_ERRORS = (
+    KeyError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    configparser.Error,
+    xml_et.ParseError,
+)
 
 
 def _as_bool(value: object, default: bool = False) -> bool:
@@ -38,7 +49,9 @@ def _as_bool(value: object, default: bool = False) -> bool:
 def _as_int(value: object, default: int) -> int:
     """Convert a config value to int, falling back for invalid input."""
     try:
-        return int(cast(Any, value))
+        if isinstance(value, _CONFIG_SCALAR_TYPES):
+            return int(value)
+        return int(str(value))
     except (TypeError, ValueError):
         return int(default)
 
@@ -46,7 +59,9 @@ def _as_int(value: object, default: int) -> int:
 def _as_float(value: object, default: float) -> float:
     """Convert a config value to float, falling back for invalid input."""
     try:
-        return float(cast(Any, value))
+        if isinstance(value, _CONFIG_SCALAR_TYPES):
+            return float(value)
+        return float(str(value))
     except (TypeError, ValueError):
         return float(default)
 
@@ -312,7 +327,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
         result = run_once(config_path)
-    except Exception as error:  # pylint: disable=broad-except
+    except GENERIC_SHELLY_HELPER_ERRORS as error:
         logging.exception("Generic Shelly one-shot helper failed: %s", error)
         return 1
     logging.info("Generic Shelly one-shot helper finished: %s", result)

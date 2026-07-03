@@ -17,6 +17,22 @@ class TestWallboxPortsAutoUpdate(unittest.TestCase):
         port.bind_controller(DummyController())
         self.assertEqual(port.get_dbus_value("svc", "/Path"), 42.0)
 
+    def test_dbus_input_port_validates_override_return_contracts(self) -> None:
+        service = SimpleNamespace(
+            _get_dbus_value=MagicMock(return_value=["raw", 1]),
+            _list_dbus_services=MagicMock(return_value=["svc", 1]),
+            _resolve_auto_pv_services=MagicMock(return_value="svc"),
+            _resolve_auto_battery_service=MagicMock(return_value=None),
+        )
+        port = DbusInputPort(service)
+
+        self.assertEqual(port.get_dbus_value("svc", "/Path"), ["raw", 1])
+        with self.assertRaisesRegex(TypeError, "list_dbus_services must return list\\[str\\]"):
+            port.list_dbus_services()
+        with self.assertRaisesRegex(TypeError, "resolve_auto_pv_services must return list, got str"):
+            port.resolve_auto_pv_services()
+        self.assertIsNone(port.resolve_auto_battery_service())
+
     def test_auto_decision_port_falls_back_to_bound_controller(self) -> None:
         service = SimpleNamespace(auto_samples=[], auto_average_window_seconds=60.0, relay_last_changed_at=None, relay_last_off_at=None, auto_start_condition_since=None, auto_stop_condition_since=None, _last_health_reason="init", _last_health_code=0, auto_min_runtime_seconds=0.0, auto_min_offtime_seconds=0.0, _last_grid_at=None, auto_grid_missing_stop_seconds=60.0, virtual_mode=1, _auto_mode_cutover_pending=False, _ignore_min_offtime_once=False, _last_battery_allow_warning=None, auto_allow_without_battery_soc=False, auto_battery_scan_interval_seconds=60.0, auto_resume_soc=50.0, auto_min_soc=30.0, auto_stop_delay_seconds=30.0, auto_stop_grid_import_watts=200.0, auto_night_lock_stop=False, _last_auto_metrics={}, started_at=0.0, auto_startup_warmup_seconds=0.0, manual_override_until=0.0, virtual_autostart=1, auto_start_delay_seconds=30.0, auto_start_max_grid_import_watts=50.0, auto_start_surplus_watts=2000.0, auto_stop_surplus_watts=1500.0, _auto_cached_inputs_used=False, virtual_enable=1, auto_daytime_only=False, auto_month_windows={}, _save_runtime_state=MagicMock(), _peek_pending_relay_command=MagicMock(return_value=(None, None)))
         port = AutoDecisionPort(service)
@@ -89,6 +105,23 @@ class TestWallboxPortsAutoUpdate(unittest.TestCase):
         self.assertEqual(port.save_runtime_state(), "saved")
         self.assertEqual(port.write_auto_audit_event("running", False), "audited")
         self.assertEqual(port.peek_pending_relay_command(), (True, 123.0))
+
+    def test_auto_decision_port_validates_pending_relay_command_contract(self) -> None:
+        service = SimpleNamespace(_peek_pending_relay_command=MagicMock(return_value=[True, 1.0]))
+        port = AutoDecisionPort(service)
+        with self.assertRaisesRegex(TypeError, "peek_pending_relay_command must return tuple"):
+            port.peek_pending_relay_command()
+        service._peek_pending_relay_command.return_value = (True,)
+        with self.assertRaisesRegex(TypeError, "tuple length 2"):
+            port.peek_pending_relay_command()
+        service._peek_pending_relay_command.return_value = (1, 1.0)
+        with self.assertRaisesRegex(TypeError, "state must be bool\\|None"):
+            port.peek_pending_relay_command()
+        service._peek_pending_relay_command.return_value = (True, True)
+        with self.assertRaisesRegex(TypeError, "timestamp must be int\\|float\\|None"):
+            port.peek_pending_relay_command()
+        service._peek_pending_relay_command.return_value = (False, 2)
+        self.assertEqual(port.peek_pending_relay_command(), (False, 2.0))
 
     def test_auto_decision_port_exposes_confirmed_pm_state_and_service_time_source(self) -> None:
         service = SimpleNamespace(auto_samples=[], auto_average_window_seconds=60.0, relay_last_changed_at=None, relay_last_off_at=None, auto_start_condition_since=None, auto_stop_condition_since=None, _last_health_reason="init", _last_health_code=0, _last_auto_state="weird", _last_auto_state_code=99, _last_pm_status_confirmed=True, _last_confirmed_pm_status={"output": True}, _last_confirmed_pm_status_at=123.0, auto_min_runtime_seconds=0.0, auto_min_offtime_seconds=0.0, _last_grid_at=None, _grid_recovery_required=False, _grid_recovery_since=None, auto_grid_missing_stop_seconds=60.0, auto_grid_recovery_start_seconds=30.0, virtual_mode=1, _auto_mode_cutover_pending=False, _ignore_min_offtime_once=False, _last_battery_allow_warning=None, auto_allow_without_battery_soc=False, auto_battery_scan_interval_seconds=60.0, auto_resume_soc=50.0, auto_min_soc=30.0, auto_high_soc_threshold=55.0, auto_high_soc_release_threshold=50.0, auto_high_soc_start_surplus_watts=1800.0, auto_high_soc_stop_surplus_watts=1200.0, auto_stop_delay_seconds=30.0, auto_stop_grid_import_watts=200.0, auto_stop_surplus_delay_seconds=30.0, auto_stop_ewma_alpha=0.35, auto_stop_ewma_alpha_stable=0.55, auto_stop_ewma_alpha_volatile=0.15, auto_stop_surplus_volatility_low_watts=150.0, auto_stop_surplus_volatility_high_watts=400.0, auto_policy=None, auto_night_lock_stop=False, _last_auto_metrics={}, _auto_high_soc_profile_active=False, _stop_smoothed_surplus_power=None, _stop_smoothed_grid_power=None, started_at=0.0, auto_startup_warmup_seconds=0.0, manual_override_until=0.0, virtual_autostart=1, auto_start_delay_seconds=30.0, auto_start_max_grid_import_watts=50.0, auto_start_surplus_watts=2000.0, auto_stop_surplus_watts=1500.0, _auto_cached_inputs_used=False, virtual_enable=1, virtual_startstop=0, auto_daytime_only=False, auto_month_windows={}, auto_audit_log=False, _save_runtime_state=MagicMock(), _set_health=MagicMock(return_value="health-set"), _peek_pending_relay_command=MagicMock(return_value=(None, None)), _time_now=MagicMock(return_value=456.0), _normalize_mode=MagicMock(return_value=2))

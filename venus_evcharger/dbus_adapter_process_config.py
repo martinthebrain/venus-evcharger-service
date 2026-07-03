@@ -7,10 +7,10 @@ from __future__ import annotations
 import configparser
 import os
 from dataclasses import dataclass
-from typing import Any
 
 from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_gateway import GatewayPaths, gateway_paths
+from venus_evcharger.dbus_adapter_read_types import ReadSpec, ReadSpecs
 
 
 class CasePreservingConfigParser(configparser.ConfigParser):
@@ -62,7 +62,7 @@ class GatewayAdapterSettings:
     paths: GatewayPaths
     service_name: str
     device_instance: int
-    read_specs: dict[str, dict[str, Any]]
+    read_specs: ReadSpecs
     rates: GatewayRateSettings
     timing: GatewayTimingSettings
     slo: GatewaySloSettings
@@ -112,7 +112,7 @@ def configured_device_instance(defaults: configparser.SectionProxy) -> int:
         return 60
 
 
-def configured_read_specs(defaults: configparser.SectionProxy) -> dict[str, dict[str, Any]]:
+def configured_read_specs(defaults: configparser.SectionProxy) -> ReadSpecs:
     battery_service = _battery_service(defaults)
     return {
         "grid_power_w": _grid_read_spec(defaults),
@@ -191,7 +191,7 @@ def introspection_settings(
     )
 
 
-def _grid_read_spec(defaults: configparser.SectionProxy) -> dict[str, Any]:
+def _grid_read_spec(defaults: configparser.SectionProxy) -> ReadSpec:
     grid_paths = [
         str(defaults.get("AutoGridL1Path", "/Ac/Grid/L1/Power")).strip(),
         str(defaults.get("AutoGridL2Path", "/Ac/Grid/L2/Power")).strip(),
@@ -206,7 +206,7 @@ def _grid_read_spec(defaults: configparser.SectionProxy) -> dict[str, Any]:
     }
 
 
-def _pv_read_spec(defaults: configparser.SectionProxy) -> dict[str, Any]:
+def _pv_read_spec(defaults: configparser.SectionProxy) -> ReadSpec:
     return {
         "service": str(defaults.get("AutoPvService", "")).strip(),
         "prefix": str(defaults.get("AutoPvServicePrefix", "com.victronenergy.pvinverter")).strip(),
@@ -222,7 +222,7 @@ def _pv_read_spec(defaults: configparser.SectionProxy) -> dict[str, Any]:
     }
 
 
-def _battery_read_spec(defaults: configparser.SectionProxy, battery_service: str) -> dict[str, Any]:
+def _battery_read_spec(defaults: configparser.SectionProxy, battery_service: str) -> ReadSpec:
     return {
         "service": battery_service,
         "prefix": str(defaults.get("AutoBatteryServicePrefix", "com.victronenergy.battery")).strip(),
@@ -238,5 +238,5 @@ def _battery_service(defaults: configparser.SectionProxy) -> str:
     return "" if service.endswith(".example") else service
 
 
-def _truthy(value: Any) -> bool:
+def _truthy(value: object) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")

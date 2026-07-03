@@ -14,6 +14,8 @@ from tests.venus_evcharger_update_cycle_controller_cases_duodenary import TestUp
 from tests.venus_evcharger_update_cycle_controller_cases_trecenary import TestUpdateCycleControllerTrecenary
 from tests.venus_evcharger_update_cycle_controller_cases_quattuordenary import TestUpdateCycleControllerQuattuordenary
 from tests.venus_evcharger_update_cycle_controller_cases_quindenary import TestUpdateCycleControllerQuindenary
+from tests.venus_evcharger_update_cycle_controller_cases_sexdecenary import TestUpdateCycleControllerSexdecenary
+from tests.venus_evcharger_update_cycle_controller_cases_septendecenary import TestUpdateCycleControllerSeptendecenary
 
 __all__ = [
     "TestUpdateCycleControllerPrimary",
@@ -31,4 +33,6 @@ __all__ = [
     "TestUpdateCycleControllerTrecenary",
     "TestUpdateCycleControllerQuattuordenary",
     "TestUpdateCycleControllerQuindenary",
+    "TestUpdateCycleControllerSexdecenary",
+    "TestUpdateCycleControllerSeptendecenary",
 ]

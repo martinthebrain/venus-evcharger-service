@@ -4,16 +4,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
 
+from venus_evcharger.dbus_adapter_read_types import ReadSpec, read_spec_from_mapping
 from venus_evcharger.dbus_gateway import write_json_file
+from venus_evcharger.dbus_gateway_command_types import CommandMapping
 
 
 class DbusReadScheduler:
     """Track due times for fixed DBus read groups."""
 
-    def __init__(self, specs: Mapping[str, Mapping[str, Any]]) -> None:
-        self.specs: dict[str, dict[str, Any]] = {str(key): dict(value) for key, value in specs.items()}
+    def __init__(self, specs: Mapping[str, Mapping[str, object]]) -> None:
+        self.specs: dict[str, ReadSpec] = {str(key): read_spec_from_mapping(value) for key, value in specs.items()}
         self.next_read_at: dict[str, float] = dict.fromkeys(self.specs, 0.0)
         self.failure_counts: dict[str, int] = dict.fromkeys(self.specs, 0)
         self._order: dict[str, int] = {key: index for index, key in enumerate(self.specs)}
@@ -24,7 +25,7 @@ class DbusReadScheduler:
         now: float,
         circuit_state: str,
         priority_allowed: Callable[[str], bool],
-    ) -> tuple[str, Mapping[str, Any], float] | None:
+    ) -> tuple[str, ReadSpec, float] | None:
         due_keys = [
             key
             for key in self.specs
@@ -59,8 +60,8 @@ class DbusReadScheduler:
                 self.next_read_at[normalized] = 0.0
 
     @staticmethod
-    def effective_interval(spec: Mapping[str, Any], circuit_state: str) -> float:
-        interval = float(spec.get("interval", 2.0))
+    def effective_interval(spec: Mapping[str, object], circuit_state: str) -> float:
+        interval = _interval_seconds(spec.get("interval", 2.0))
         if circuit_state == "protective":
             return interval * 5.0
         if circuit_state == "degraded":
@@ -93,5 +94,16 @@ class DbusDiscoveryManager:
 class AtomicJsonWriter:
     """Small explicit adapter-side wrapper for atomic JSON writes."""
 
-    def write(self, path: str, payload: Mapping[str, Any]) -> None:
+    def write(self, path: str, payload: CommandMapping) -> None:
         write_json_file(path, payload)
+
+
+def _interval_seconds(raw_value: object) -> float:
+    if isinstance(raw_value, bool):
+        return 2.0
+    if isinstance(raw_value, (float, int, str)):
+        try:
+            return float(raw_value)
+        except ValueError:
+            return 2.0
+    return 2.0

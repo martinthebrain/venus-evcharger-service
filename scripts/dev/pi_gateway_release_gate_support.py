@@ -7,16 +7,20 @@ import argparse
 import json
 import subprocess
 import time
-from typing import Any
 
 from pi_gateway_release_gate_assertions import assert_gui_values, exercise_gui_write
 from pi_gateway_release_gate_common import GateFailure, PiSession
-from pi_gateway_release_gate_health import wait_for_healthy_gateway
+from pi_gateway_release_gate_health import (
+    assert_recent_command_lifecycle,
+    assert_recent_health_history,
+    wait_for_healthy_gateway,
+)
 from pi_gateway_release_gate_remote import (
     assert_single_remote_instance,
     configure_remote,
     deploy_repo,
     remote_compile,
+    remote_gateway_chaos,
     remote_isolation,
     restart_remote_services,
 )
@@ -51,9 +55,11 @@ def prepare_gateway_release_test(args: argparse.Namespace, pi: PiSession) -> tup
     return simulator, host_value
 
 
-def run_gateway_release_checks(args: argparse.Namespace, pi: PiSession, service: str) -> tuple[dict[str, Any], dict[str, float]]:
+def run_gateway_release_checks(args: argparse.Namespace, pi: PiSession, service: str) -> tuple[dict[str, object], dict[str, float]]:
     remote_compile(pi, str(args.remote_dir))
     remote_isolation(pi, str(args.remote_dir))
+    if not args.skip_chaos:
+        remote_gateway_chaos(pi, str(args.remote_dir))
     if args.restart:
         restart_remote_services(pi)
     assert_single_remote_instance(pi)
@@ -64,13 +70,15 @@ def run_gateway_release_checks(args: argparse.Namespace, pi: PiSession, service:
         timeout=float(args.health_wait_seconds),
         poll_seconds=float(args.health_poll_seconds),
     )
+    assert_recent_health_history(pi, str(args.gateway_run_dir))
     values = assert_gui_values(pi, service, expect_power=True)
     if not args.skip_gui_write:
         exercise_gui_write(pi, service)
+        assert_recent_command_lifecycle(pi, str(args.gateway_run_dir))
     return health, values
 
 
-def print_release_gate_result(service: str, health: dict[str, Any], values: dict[str, float]) -> None:
+def print_release_gate_result(service: str, health: dict[str, object], values: dict[str, float]) -> None:
     print(
         json.dumps(
             {

@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Literal, SupportsFloat, SupportsIndex
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 
@@ -75,7 +75,32 @@ GUI_CRITICAL_PUBLISH_PATHS = {
     "/Session/Energy",
 }
 
-FAST_READ_KEYS = {"grid_power_w", "pv_power_w", "battery_soc"}
+GatewayReadKey = Literal["grid_power_w", "pv_power_w", "battery_soc"]
+
+GRID_POWER_READ_KEY: GatewayReadKey = "grid_power_w"
+PV_POWER_READ_KEY: GatewayReadKey = "pv_power_w"
+BATTERY_SOC_READ_KEY: GatewayReadKey = "battery_soc"
+FAST_READ_KEYS: frozenset[GatewayReadKey] = frozenset(
+    {
+        GRID_POWER_READ_KEY,
+        PV_POWER_READ_KEY,
+        BATTERY_SOC_READ_KEY,
+    }
+)
+
+
+def require_gateway_read_key(value: object) -> GatewayReadKey:
+    """Return one supported semantic read key, or raise for raw DBus details."""
+    if value is None:
+        raise ValueError(f"Unsupported gateway read key: {value!r}")
+    key = str(value).strip()
+    if key == GRID_POWER_READ_KEY:
+        return GRID_POWER_READ_KEY
+    if key == PV_POWER_READ_KEY:
+        return PV_POWER_READ_KEY
+    if key == BATTERY_SOC_READ_KEY:
+        return BATTERY_SOC_READ_KEY
+    raise ValueError(f"Unsupported gateway read key: {value!r}")
 
 @dataclass(frozen=True)
 class GatewayPaths:
@@ -90,7 +115,7 @@ class GatewayPaths:
     core_command_dir: str
 
 
-def gateway_paths(run_dir: str | None = None) -> GatewayPaths:  # pragma: no mutate block
+def gateway_paths(run_dir: str | None = None) -> GatewayPaths:
     base = str(run_dir or os.environ.get("VENUS_EVCHARGER_GATEWAY_RUN_DIR") or DEFAULT_GATEWAY_RUN_DIR).strip()
     return GatewayPaths(
         run_dir=base,
@@ -103,15 +128,17 @@ def gateway_paths(run_dir: str | None = None) -> GatewayPaths:  # pragma: no mut
     )
 
 
-def _now() -> float:  # pragma: no mutate block
+def _now() -> float:
     return time.time()
 
 
-def priority_rank(priority: object) -> int:  # pragma: no mutate block
-    return PRIORITY_VALUES.get(str(priority or "diagnostic").strip().lower(), PRIORITY_VALUES["diagnostic"])
+def priority_rank(priority: object) -> int:
+    if not priority:
+        return PRIORITY_VALUES["diagnostic"]
+    return PRIORITY_VALUES.get(str(priority).strip().lower(), PRIORITY_VALUES["diagnostic"])
 
 
-def _json_ready(value: Any) -> Any:  # pragma: no mutate block
+def _json_ready(value: object) -> object:
     if _is_json_scalar(value):
         return value
     if isinstance(value, Mapping):
@@ -121,42 +148,40 @@ def _json_ready(value: Any) -> Any:  # pragma: no mutate block
     return str(value)
 
 
-def _is_json_scalar(value: Any) -> bool:  # pragma: no mutate block
+def _is_json_scalar(value: object) -> bool:
     return isinstance(value, (str, int, float, bool)) or value is None
 
 
-def _json_ready_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:  # pragma: no mutate block
+def _json_ready_mapping(value: Mapping[object, object]) -> dict[str, object]:
     return {str(key): _json_ready(item) for key, item in value.items()}
 
 
-def dbus_path_key(service_name: str, path: str) -> str:  # pragma: no mutate block
+def dbus_path_key(service_name: str, path: str) -> str:
     """Return the canonical cache key for one raw Victron DBus path."""
     return f"path:{service_name!s}{path!s}"
 
 
-def read_json_file(path: str, default: Any = None) -> Any:  # pragma: no mutate block
+def read_json_file(path: str, default: object = None) -> object:
     try:
         with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
+            payload: object = json.load(handle)
+            return payload
     except (OSError, json.JSONDecodeError):
         return default
 
 
-def write_json_file(path: str, payload: Mapping[str, Any]) -> None:  # pragma: no mutate block
+def write_json_file(path: str, payload: Mapping[str, object]) -> None:
     write_text_atomically(path, compact_json(_json_ready(payload)) + "\n")
 
 
-def float_or_zero(value: object) -> float:  # pragma: no mutate block
-    if isinstance(value, (str, bytes, int, float)):
-        try:
-            return float(value)
-        except ValueError:
-            return 0.0
+def float_or_default(value: object, default: float) -> float:
+    if not isinstance(value, (str, bytes, SupportsFloat, SupportsIndex)):
+        return default
     try:
-        method = getattr(value, "__float__")  # noqa: B009 - object protocol probe accepted by mypy
-    except AttributeError:
-        return 0.0
-    try:
-        return float(method())
+        return float(value)
     except (TypeError, ValueError):
-        return 0.0
+        return default
+
+
+def float_or_zero(value: object) -> float:
+    return float_or_default(value, 0.0)

@@ -4,28 +4,10 @@
 from __future__ import annotations
 
 from venus_evcharger.backend.models import normalize_phase_selection
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
-from venus_evcharger.update.relay_charger_current import _RelayChargerCurrentMixin
-from venus_evcharger.update.relay_charger_health import _RelayChargerHealthMixin
-from venus_evcharger.update.relay_charger_readback import _RelayChargerReadbackMixin
-from venus_evcharger.update.relay_phase_decision import _RelayPhaseDecisionMixin
-from venus_evcharger.update.relay_phase_publish import _RelayPhasePublishMixin
-from venus_evcharger.update.relay_phase_switch_policy import _RelayPhaseSwitchPolicyMixin
-from venus_evcharger.update.relay_phase_switch_runtime import _RelayPhaseSwitchRuntimeMixin
-from venus_evcharger.update.relay_status_publish import _RelayStatusPublishMixin
+from venus_evcharger.update.relay_phase_decision import _RelayPhaseDecision
 
 
-class _UpdateCycleRelayMixin(
-    _RelayPhaseDecisionMixin,
-    _RelayPhaseSwitchPolicyMixin,
-    _RelayChargerReadbackMixin,
-    _RelayChargerHealthMixin,
-    _RelayChargerCurrentMixin,
-    _RelayPhasePublishMixin,
-    _RelayPhaseSwitchRuntimeMixin,
-    _RelayStatusPublishMixin,
-    _ComposableControllerMixin,
-):
+class _UpdateCycleRelay(_RelayPhaseDecision):
     """Composed update-cycle relay helpers.
 
     The update-cycle logic is intentionally split into focused helper modules:
@@ -44,4 +26,4 @@ class _UpdateCycleRelayMixin(
     CHARGER_STATUS_FINISHED_HINT_TOKENS = frozenset({"complete", "completed", "finished", "done"})
 
 
-__all__ = ["_UpdateCycleRelayMixin", "normalize_phase_selection"]
+__all__ = ["_UpdateCycleRelay", "normalize_phase_selection"]

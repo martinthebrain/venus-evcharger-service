@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_helpers_support import *
+from venus_evcharger.dbus_gateway import EVCS_FIELD_TO_PATH
 
 
 class TestShellyWallboxHelpersQuaternary(ShellyWallboxHelpersTestBase):
@@ -127,7 +128,13 @@ class TestShellyWallboxHelpersQuaternary(ShellyWallboxHelpersTestBase):
         service = self._make_update_service()
         service.virtual_mode = 2
         service.virtual_startstop = 1
-        service._publish_dbus_path = MagicMock(side_effect=lambda path, value, *_args, **_kwargs: service._dbusservice.__setitem__(path, value) or True)
+        service._publish_dbus_field = MagicMock(
+            side_effect=lambda field, value, *_args, **_kwargs: service._dbusservice.__setitem__(
+                EVCS_FIELD_TO_PATH[field],
+                value,
+            )
+            or True,
+        )
         service._queue_relay_command = MagicMock()
         service._publish_local_pm_status = MagicMock()
         service._save_runtime_state = MagicMock()

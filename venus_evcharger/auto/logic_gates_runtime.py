@@ -8,16 +8,36 @@ charger health into small decision helpers used by the Auto workflow.
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.core.common import confirmed_relay_state_max_age_seconds as _confirmed_relay_state_max_age_seconds
 from venus_evcharger.core.contracts import cutover_confirmed_off
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
+from venus_evcharger.auto.logic_types import NO_RELAY_DECISION, RelayDecision, require_relay_bool, require_relay_decision
+from .logic_gates_metrics import _AutoDecisionMetrics
 
-AutoDecision = bool | object
+AutoDecision = RelayDecision
 
 
-class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
+def _bool_attr_is_true(owner: Any, name: str) -> bool:
+    """Return True only when an attribute exists and is exactly True."""
+    try:
+        return getattr(owner, name) is True
+    except AttributeError:
+        return False
+
+
+def _battery_scan_warning_interval_seconds(svc: Any) -> float:
+    """Return the warning throttle interval for invalid battery SOC samples."""
+    try:
+        configured = svc.auto_battery_scan_interval_seconds
+    except AttributeError:
+        return 60.0
+    if configured is None or configured == 0:
+        return 60.0
+    return max(1.0, float(configured))
+
+
+class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
     def _pending_stop_or_running(
         self,
         now: float,
@@ -36,7 +56,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
             stop_key=stop_key,
         )
         if decision is self._NO_DECISION:
-            return cast(bool, self._set_health_result(running_reason, cached_inputs, True))
+            return require_relay_bool(self._set_health_result(running_reason, cached_inputs, True))
         return False
 
     def _minimum_runtime_elapsed(self, now: float) -> bool:
@@ -47,11 +67,12 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
     def _minimum_offtime_elapsed(self, now: float) -> bool:
         """Return True when the relay may be started again."""
         svc = self.service
-        return (
-            getattr(svc, "_ignore_min_offtime_once", False)
-            or svc.relay_last_off_at is None
-            or (now - svc.relay_last_off_at) >= svc.auto_min_offtime_seconds
-        )
+        if _bool_attr_is_true(svc, "_ignore_min_offtime_once"):
+            return True
+        relay_last_off_at = svc.relay_last_off_at
+        if relay_last_off_at is None:
+            return True
+        return (now - float(relay_last_off_at)) >= float(svc.auto_min_offtime_seconds)
 
     def _grid_recently_read(self, grid_power: float | None, now: float) -> bool:
         """Return True when the grid reading is still fresh enough for Auto decisions."""
@@ -82,7 +103,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         self.save_runtime_state()
         return False
 
-    def _normalized_battery_soc(self, battery_soc: float | int | None, now: float) -> float | None:
+    def _normalized_battery_soc(self, battery_soc: float | int | None) -> float | None:
         """Return a validated battery SOC reading or None when unavailable/invalid."""
         svc = self.service
         if battery_soc is None:
@@ -95,7 +116,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         if callable(warning_throttled):
             warning_throttled(
                 "battery-soc-invalid",
-                max(1.0, float(getattr(svc, "auto_battery_scan_interval_seconds", 60.0) or 60.0)),
+                _battery_scan_warning_interval_seconds(svc),
                 "Auto mode ignored out-of-range battery SOC %s",
                 normalized_battery_soc,
             )
@@ -137,18 +158,18 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
     ) -> tuple[float | None, AutoDecision]:
         """Normalize battery SOC or return a terminal decision when it is unavailable."""
         svc = self.service
-        normalized_battery_soc = self._normalized_battery_soc(battery_soc, now)
+        normalized_battery_soc = self._normalized_battery_soc(battery_soc)
         if normalized_battery_soc is not None:
             return normalized_battery_soc, self._NO_DECISION
-        if bool(getattr(svc, "auto_allow_without_battery_soc", False)):
+        if _bool_attr_is_true(svc, "auto_allow_without_battery_soc"):
             return self._allowed_missing_battery_soc(relay_on, now, cached_inputs)
         return self._blocked_missing_battery_soc(relay_on, cached_inputs)
 
     def _handle_cutover_pending(self, relay_on: bool, cached_inputs: bool) -> AutoDecision:
         """Honor the Manual -> Auto clean-cutover until the relay is confirmed off."""
         svc = self.service
-        if not getattr(svc, "_auto_mode_cutover_pending", False):
-            return cast(AutoDecision, self._NO_DECISION)
+        if not _bool_attr_is_true(svc, "_auto_mode_cutover_pending"):
+            return NO_RELAY_DECISION
 
         now = self._learning_policy_now()
         self._reset_auto_state()
@@ -157,7 +178,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
             return False
 
         self._complete_cutover_pending()
-        return cast(AutoDecision, self._NO_DECISION)
+        return NO_RELAY_DECISION
 
     def _confirmed_cutover_pm_status(self) -> tuple[dict[str, Any] | None, float | None]:
         """Return the best confirmed Shelly PM status available for cutover checks."""
@@ -166,8 +187,11 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         confirmed_pm_status_at = getattr(svc, "_last_confirmed_pm_status_at", None)
         if confirmed_pm_status is not None:
             return confirmed_pm_status, confirmed_pm_status_at
-        if bool(getattr(svc, "_last_pm_status_confirmed", False)):
-            return getattr(svc, "_last_pm_status", None), getattr(svc, "_last_pm_status_at", None)
+        if _bool_attr_is_true(svc, "_last_pm_status_confirmed"):
+            fallback_pm_status = getattr(svc, "_last_pm_status", None)
+            if fallback_pm_status is None:
+                return None, None
+            return fallback_pm_status, getattr(svc, "_last_pm_status_at", None)
         return None, None
 
     def _cutover_confirmed_sample_fresh(self, confirmed_pm_status_at: float | None, now: float) -> bool:
@@ -191,20 +215,17 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         """Return True when the relay-off cutover has been confirmed by Shelly."""
         svc = self.service
         pending_state, _ = self.peek_pending_relay_command()
-        if pending_state is not None or relay_on:
-            return False
         confirmed_pm_status, confirmed_pm_status_at = self._confirmed_cutover_pm_status()
-        if not (isinstance(confirmed_pm_status, dict) and "output" in confirmed_pm_status):
+        if not isinstance(confirmed_pm_status, dict):
             return False
         return cutover_confirmed_off(
             relay_on=relay_on,
             pending_state=pending_state,
-            confirmed_output=confirmed_pm_status.get("output"),
+            confirmed_output=confirmed_pm_status.get("output", True),
             confirmed_at=confirmed_pm_status_at,
             requested_at=getattr(svc, "_relay_sync_requested_at", None),
             now=now,
             max_age_seconds=_confirmed_relay_state_max_age_seconds(svc),
-            future_tolerance_seconds=1.0,
         )
 
     def _complete_cutover_pending(self) -> None:
@@ -266,12 +287,12 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         svc = self.service
         active_stop_key = self._active_stop_key(reason, stop_key)
         if self._reset_stop_tracking(now, active_stop_key):
-            return cast(AutoDecision, self._NO_DECISION)
+            return NO_RELAY_DECISION
         self._ensure_stop_tracking_reason(active_stop_key)
         effective_delay = self._effective_stop_delay(svc.auto_stop_delay_seconds, delay_seconds)
         assert svc.auto_stop_condition_since is not None
         if not self._stop_delay_elapsed(svc.auto_stop_condition_since, now, effective_delay):
-            return cast(AutoDecision, self._NO_DECISION)
+            return NO_RELAY_DECISION
         self.set_health(reason, cached_inputs, relay_intent=False)
         return False
 
@@ -282,24 +303,24 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         svc._grid_recovery_required = True
         svc._grid_recovery_since = None
         if not relay_on:
-            return cast(bool, self._idle_result_with_health("grid-missing", cached_inputs))
+            return require_relay_bool(self._idle_result_with_health("grid-missing", cached_inputs))
 
         if not self._minimum_runtime_elapsed(now):
-            return cast(bool, self._running_result_with_health("grid-missing", cached_inputs))
+            return require_relay_bool(self._running_result_with_health("grid-missing", cached_inputs))
         return self._pending_stop_or_running(now, "grid-missing", cached_inputs, "grid-missing")
 
     def _handle_grid_recovery_start_gate(self, relay_on: bool, now: float, cached_inputs: bool) -> AutoDecision:
         """Require a short fresh-grid window before Auto may start after grid loss."""
         svc = self.service
         if not self._grid_recovery_gate_active(svc):
-            return cast(AutoDecision, self._NO_DECISION)
+            return NO_RELAY_DECISION
         recovery_seconds = float(self._auto_policy().grid_recovery_start_seconds)
         if self._grid_recovery_completes_immediately(now, recovery_seconds):
-            return cast(AutoDecision, self._NO_DECISION)
-        if self._grid_recovery_waiting(now, relay_on, cached_inputs, recovery_seconds):
+            return NO_RELAY_DECISION
+        if self._grid_recovery_waiting(now, recovery_seconds):
             return self._grid_recovery_wait_decision(relay_on, cached_inputs)
         svc._grid_recovery_required = False
-        return cast(AutoDecision, self._NO_DECISION)
+        return NO_RELAY_DECISION
 
     @staticmethod
     def _grid_recovery_gate_active(svc: Any) -> bool:
@@ -307,7 +328,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         return (
             hasattr(svc, "_grid_recovery_since")
             and hasattr(svc, "_grid_recovery_required")
-            and bool(getattr(svc, "_grid_recovery_required", False))
+            and _bool_attr_is_true(svc, "_grid_recovery_required")
         )
 
     def _grid_recovery_completes_immediately(self, now: float, recovery_seconds: float) -> bool:
@@ -322,8 +343,6 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
     def _grid_recovery_waiting(
         self,
         now: float,
-        relay_on: bool,
-        cached_inputs: bool,
         recovery_seconds: float,
     ) -> bool:
         """Return whether Auto must keep waiting for the fresh-grid recovery window."""
@@ -337,9 +356,9 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
     def _grid_recovery_wait_decision(self, relay_on: bool, cached_inputs: bool) -> AutoDecision:
         """Return the relay decision while the fresh-grid recovery window is still open."""
         if relay_on:
-            return cast(AutoDecision, self._NO_DECISION)
+            return NO_RELAY_DECISION
         self._clear_auto_start_tracking()
-        return cast(AutoDecision, self._set_health_result("waiting-grid-recovery", cached_inputs, False))
+        return require_relay_decision(self._set_health_result("waiting-grid-recovery", cached_inputs, False))
 
     def _policy_stop_reason(self, battery_soc: float, grid_power: float | None) -> str | None:
         """Return a stop reason caused by SOC or grid import thresholds."""
@@ -358,7 +377,7 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
     ) -> str | None:
         """Return a concrete stop reason when inputs are missing but stopping is still warranted."""
         svc = self.service
-        if getattr(svc, "auto_night_lock_stop", False) and not daytime_window_open:
+        if _bool_attr_is_true(svc, "auto_night_lock_stop") or not daytime_window_open:
             return "night-lock"
         return self._policy_stop_reason(battery_soc, grid_power)
 
@@ -371,16 +390,15 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         cached_inputs: bool,
     ) -> bool:
         """Preserve safe behavior when PV or grid inputs are incomplete."""
-        svc = self.service
         self._clear_auto_start_tracking(clear_samples=True)
 
         if not relay_on:
-            return cast(bool, self._idle_result_with_health("inputs-missing", cached_inputs))
+            return require_relay_bool(self._idle_result_with_health("inputs-missing", cached_inputs))
 
         daytime_window_open = self.is_within_auto_daytime_window()
         stop_reason = self._known_missing_input_stop_reason(battery_soc, grid_power, daytime_window_open)
         if not self._minimum_runtime_elapsed(now) or stop_reason is None:
-            return cast(bool, self._running_result_with_health("inputs-missing", cached_inputs))
+            return require_relay_bool(self._running_result_with_health("inputs-missing", cached_inputs))
         return self._pending_stop_or_running(now, stop_reason, cached_inputs, "inputs-missing")
 
     def _handle_common_runtime_gates(self, relay_on: bool, now: float, cached_inputs: bool) -> AutoDecision:
@@ -388,10 +406,10 @@ class _AutoDecisionRuntimeGatesMixin(_ComposableControllerMixin):
         svc = self.service
         if (now - svc.started_at) < svc.auto_startup_warmup_seconds:
             self._reset_auto_state()
-            return cast(AutoDecision, self._set_health_result("warmup", cached_inputs, relay_on))
+            return require_relay_decision(self._set_health_result("warmup", cached_inputs, relay_on))
 
         if now < svc.manual_override_until:
             self._reset_auto_state()
-            return cast(AutoDecision, self._set_health_result("manual-override", cached_inputs, relay_on))
+            return require_relay_decision(self._set_health_result("manual-override", cached_inputs, relay_on))
 
-        return cast(AutoDecision, self._NO_DECISION)
+        return NO_RELAY_DECISION

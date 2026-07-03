@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import getpass
 from pathlib import Path
-from typing import cast
 
 from venus_evcharger.bootstrap.wizard_charger_presets import (
     CHARGER_PRESET_LABELS,
@@ -14,6 +13,7 @@ from venus_evcharger.bootstrap.wizard_charger_presets import (
     apply_charger_preset_backend,
     relevant_charger_presets,
 )
+from venus_evcharger.bootstrap.wizard_choices import optional_choice
 from venus_evcharger.bootstrap.wizard_cli_output import result_text
 from venus_evcharger.bootstrap.wizard_cli_parser import build_parser
 from venus_evcharger.bootstrap.wizard_guidance import (
@@ -33,12 +33,15 @@ from venus_evcharger.bootstrap.wizard_cli_imports import (
     resume_import_path as _resume_import_path_impl,
 )
 from venus_evcharger.bootstrap.wizard_models import (
+    WIZARD_CHARGER_BACKENDS,
+    WIZARD_POLICY_MODES,
+    WIZARD_PROFILES,
     WizardAnswers,
     WizardChargerBackend,
     WizardPolicyMode,
     WizardProfile,
     WizardTransportKind,
-    )
+)
 from venus_evcharger.bootstrap.wizard_policy_guidance import policy_defaults, prompt_policy_defaults
 from venus_evcharger.bootstrap.wizard_cli_non_interactive import (
     non_interactive_answers as _non_interactive_answers_impl,
@@ -74,6 +77,8 @@ from venus_evcharger.bootstrap.wizard_transport_guidance import (
 )
 
 __all__ = ["build_answers", "build_parser", "prompt_yes_no", "result_text"]
+
+_BackendPromptSpec = tuple[tuple[str, ...], WizardChargerBackend]
 
 
 def _empty_imported_defaults() -> ImportedWizardDefaults:
@@ -143,10 +148,8 @@ def _resolve_import_path(namespace: argparse.Namespace) -> Path | None:
 
 def _interactive_profile(namespace: argparse.Namespace, imported: ImportedWizardDefaults) -> WizardProfile:
     labels: dict[str, str] = {key: value for key, value in PROFILE_LABELS}
-    return cast(
-        WizardProfile,
-        namespace.profile or imported.profile or _prompt_choice("Choose the setup topology:", PROFILE_VALUES, labels, "simple_relay"),
-    )
+    raw_profile = namespace.profile or imported.profile or _prompt_choice("Choose the setup topology:", PROFILE_VALUES, labels, "simple_relay")
+    return optional_choice(raw_profile, WIZARD_PROFILES, "profile") or "simple_relay"
 
 
 def _interactive_backend(
@@ -155,21 +158,28 @@ def _interactive_backend(
     imported: ImportedWizardDefaults,
     topology_preset: str | None,
 ) -> WizardChargerBackend | None:
-    backend = cast(WizardChargerBackend | None, namespace.charger_backend or default_backend(profile, imported))
+    backend = optional_choice(namespace.charger_backend or default_backend(profile, imported), WIZARD_CHARGER_BACKENDS, "charger backend")
     if namespace.charger_backend is None:
         backend = _interactive_backend_choice(profile, backend)
     return backend
 
 
 def _interactive_backend_choice(profile: WizardProfile, backend: WizardChargerBackend | None) -> WizardChargerBackend | None:
+    prompt_spec = _backend_prompt_spec(profile)
+    if prompt_spec is None:
+        return backend
+    choices, default_backend_value = prompt_spec
+    default = backend if backend is not None else default_backend_value
+    raw_backend = _prompt_choice("Choose the charger backend:", choices, default=default)
+    return optional_choice(raw_backend, WIZARD_CHARGER_BACKENDS, "charger backend") or default_backend_value
+
+
+def _backend_prompt_spec(profile: WizardProfile) -> _BackendPromptSpec | None:
     if profile == "native_device":
-        return cast(WizardChargerBackend, _prompt_choice("Choose the charger backend:", NATIVE_CHARGER_VALUES, default=backend or "goe_charger"))
+        return NATIVE_CHARGER_VALUES, "goe_charger"
     if profile == "hybrid_topology":
-        return cast(
-            WizardChargerBackend,
-            _prompt_choice("Choose the charger backend:", PHASE_SWITCH_CHARGER_VALUES, default=backend or "simpleevse_charger"),
-        )
-    return backend
+        return PHASE_SWITCH_CHARGER_VALUES, "simpleevse_charger"
+    return None
 
 
 def _interactive_auth_inputs(namespace: argparse.Namespace, imported: ImportedWizardDefaults) -> tuple[bool, str, str]:
@@ -204,10 +214,8 @@ def _should_prompt_username(namespace: argparse.Namespace, digest_auth: bool) ->
 
 
 def _interactive_policy_mode(namespace: argparse.Namespace, imported: ImportedWizardDefaults) -> WizardPolicyMode:
-    return cast(
-        WizardPolicyMode,
-        namespace.policy_mode or _prompt_choice("Choose the initial policy mode:", POLICY_VALUES, default=imported.policy_mode or "manual"),
-    )
+    raw_policy = namespace.policy_mode or _prompt_choice("Choose the initial policy mode:", POLICY_VALUES, default=imported.policy_mode or "manual")
+    return optional_choice(raw_policy, WIZARD_POLICY_MODES, "policy mode") or "manual"
 
 
 def _interactive_device_instance(namespace: argparse.Namespace, imported: ImportedWizardDefaults) -> int:

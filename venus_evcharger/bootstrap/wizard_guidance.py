@@ -3,11 +3,11 @@
 
 from __future__ import annotations
 
-from typing import Callable, cast
+from typing import Callable
 
 from venus_evcharger.bootstrap.wizard_charger_presets import apply_charger_preset_backend
 from venus_evcharger.bootstrap.wizard_import import ImportedWizardDefaults
-from venus_evcharger.bootstrap.wizard_models import WizardChargerBackend
+from venus_evcharger.bootstrap.wizard_models import WIZARD_CHARGER_BACKENDS, WizardChargerBackend
 from venus_evcharger.bootstrap.wizard_support import (
     PROFILE_ROLE_HOSTS,
     TOPOLOGY_PRESET_LABELS,
@@ -175,7 +175,17 @@ def _resolved_topology_preset_backend(
     """Return the backend implied by one topology preset, falling back to the explicit backend."""
     if topology_preset is None:
         return backend
-    return cast(WizardChargerBackend | None, TOPOLOGY_PRESET_BACKENDS.get(topology_preset) or backend)
+    topology_backend = TOPOLOGY_PRESET_BACKENDS.get(topology_preset)
+    if topology_backend is None:
+        return backend
+    return _known_charger_backend(topology_backend)
+
+
+def _known_charger_backend(raw_backend: str) -> WizardChargerBackend:
+    for backend in WIZARD_CHARGER_BACKENDS:
+        if raw_backend == backend:
+            return backend
+    raise ValueError(f"Unsupported topology backend: {raw_backend}")
 
 
 def compatibility_warnings(

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import pathlib
 import unittest
+from unittest.mock import patch
 
 import venus_evcharger.control.reference as control_reference
 from venus_evcharger.control import (
@@ -64,6 +65,16 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
         )
 
     def test_private_reference_helpers_cover_remaining_contract_branches(self) -> None:
+        with patch("venus_evcharger.control.openapi.build_control_api_openapi_spec", return_value={}):
+            with self.assertRaisesRegex(TypeError, "must contain components mapping"):
+                control_reference._control_api_component_schemas()
+        with patch(
+            "venus_evcharger.control.openapi.build_control_api_openapi_spec",
+            return_value={"components": {"schemas": []}},
+        ):
+            with self.assertRaisesRegex(TypeError, "components must contain schemas mapping"):
+                control_reference._control_api_component_schemas()
+
         self.assertIsNone(control_reference._named_schema_command_name(object()))
         self.assertIsNone(control_reference._named_schema_command_name({"properties": []}))
         self.assertIsNone(control_reference._named_schema_command_name({"properties": {"name": []}}))

@@ -5,18 +5,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from venus_evcharger.publish.dbus_config import _DbusPublishConfigMixin
-from venus_evcharger.publish.dbus_core import _DbusPublishCoreMixin
-from venus_evcharger.publish.dbus_diagnostics import _DbusPublishDiagnosticsMixin
-from venus_evcharger.publish.dbus_learned import _DbusPublishLearnedMixin
+from venus_evcharger.publish.dbus_diagnostics import _DbusPublishDiagnostics
 
 
-class DbusPublishController(
-    _DbusPublishDiagnosticsMixin,
-    _DbusPublishConfigMixin,
-    _DbusPublishLearnedMixin,
-    _DbusPublishCoreMixin,
-):
+class DbusPublishController(_DbusPublishDiagnostics):
     """Publish Venus EV charger DBus paths with simple change and interval throttling."""
 
     PHASE_NAMES: tuple[str, str, str] = ("L1", "L2", "L3")

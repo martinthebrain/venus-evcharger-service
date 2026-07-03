@@ -385,7 +385,7 @@ class UpdateCyclePort(_BaseServicePort):
         return normalize_optional_binary_state(getattr(self._service, "_startup_manual_target", None))
 
     @_startup_manual_target.setter
-    def _startup_manual_target(self, value: Any) -> None:
+    def _startup_manual_target(self, value: object) -> None:
         self._service._startup_manual_target = normalize_optional_binary_state(value)
 
     @property
@@ -393,7 +393,7 @@ class UpdateCyclePort(_BaseServicePort):
         return non_negative_int(getattr(self._service, "virtual_mode", 0))
 
     @virtual_mode.setter
-    def virtual_mode(self, value: Any) -> None:
+    def virtual_mode(self, value: object) -> None:
         normalize_mode = getattr(self._service, "_normalize_mode", None)
         self._service.virtual_mode = (
             normalize_mode(value) if callable(normalize_mode) else non_negative_int(value)
@@ -404,7 +404,7 @@ class UpdateCyclePort(_BaseServicePort):
         return normalize_binary_flag(getattr(self._service, "virtual_startstop", 1), default=1)
 
     @virtual_startstop.setter
-    def virtual_startstop(self, value: Any) -> None:
+    def virtual_startstop(self, value: object) -> None:
         self._service.virtual_startstop = normalize_binary_flag(value)
 
     @property
@@ -412,7 +412,7 @@ class UpdateCyclePort(_BaseServicePort):
         return normalize_binary_flag(getattr(self._service, "virtual_enable", 1), default=1)
 
     @virtual_enable.setter
-    def virtual_enable(self, value: Any) -> None:
+    def virtual_enable(self, value: object) -> None:
         self._service.virtual_enable = normalize_binary_flag(value)
 
     @property
@@ -424,7 +424,7 @@ class UpdateCyclePort(_BaseServicePort):
         return state
 
     @_last_auto_state.setter
-    def _last_auto_state(self, value: Any) -> None:
+    def _last_auto_state(self, value: object) -> None:
         state, code = normalized_auto_state_pair(value, getattr(self._service, "_last_auto_state_code", 0))
         self._service._last_auto_state = state
         self._service._last_auto_state_code = code
@@ -438,7 +438,7 @@ class UpdateCyclePort(_BaseServicePort):
         return code
 
     @_last_auto_state_code.setter
-    def _last_auto_state_code(self, value: Any) -> None:
+    def _last_auto_state_code(self, value: object) -> None:
         state, code = normalized_auto_state_pair(getattr(self._service, "_last_auto_state", "idle"), value)
         self._service._last_auto_state = state
         self._service._last_auto_state_code = code
@@ -448,7 +448,7 @@ class UpdateCyclePort(_BaseServicePort):
         return bool(getattr(self._service, "_last_pm_status_confirmed", False))
 
     @_last_pm_status_confirmed.setter
-    def _last_pm_status_confirmed(self, value: Any) -> None:
+    def _last_pm_status_confirmed(self, value: object) -> None:
         self._service._last_pm_status_confirmed = bool(value)
 
     @property
@@ -456,5 +456,5 @@ class UpdateCyclePort(_BaseServicePort):
         return normalize_learning_state(getattr(self._service, "learned_charge_power_state", "unknown"))
 
     @learned_charge_power_state.setter
-    def learned_charge_power_state(self, value: Any) -> None:
+    def learned_charge_power_state(self, value: object) -> None:
         self._service.learned_charge_power_state = normalize_learning_state(value)

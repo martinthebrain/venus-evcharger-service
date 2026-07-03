@@ -45,6 +45,9 @@ class _WizardBranchRuntimeCoreCases:
     def _assert_wizard_live_connectivity_paths(self, temp_path: Path, main_path: Path) -> None:
         from venus_evcharger.bootstrap import wizard_runtime
 
+        with self.assertRaisesRegex(TypeError, "did not render to a JSON object"):
+            wizard_runtime._json_ready_dict(["not", "an", "object"], "test payload")
+
         runtime = SimpleNamespace(
             meter_config_path=Path("meter.ini"),
             switch_config_path=None,

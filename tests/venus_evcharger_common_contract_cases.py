@@ -3,6 +3,7 @@ import configparser
 from datetime import datetime
 from pathlib import Path
 import tempfile
+from typing import Any
 import unittest
 from unittest.mock import mock_open, patch
 
@@ -202,11 +203,36 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
         )
         self.assertIsNone(worker_snapshot["pm_status"])
         self.assertFalse(worker_snapshot["pm_confirmed"])
+        invalid_clamp_flag: Any = None
+        worker_snapshot = normalized_worker_snapshot(
+            {
+                "captured_at": 110.0,
+                "pm_status": {"output": True},
+                "pm_captured_at": 115.0,
+                "pm_confirmed": True,
+            },
+            now=100.0,
+            clamp_future_timestamps=invalid_clamp_flag,
+        )
+        self.assertEqual(worker_snapshot["captured_at"], 100.0)
+        self.assertIsNone(worker_snapshot["pm_status"])
+        self.assertFalse(worker_snapshot["pm_confirmed"])
         worker_snapshot = normalized_worker_snapshot(
             {"pm_status": {"output": True}, "pm_confirmed": True},
             now=None,
         )
         self.assertEqual(worker_snapshot["captured_at"], 0.0)
+        worker_snapshot = normalized_worker_snapshot(
+            configparser.ConfigParser({"captured_at": "5.0"})["DEFAULT"],
+            now=6.0,
+        )
+        self.assertEqual(worker_snapshot["captured_at"], 5.0)
+        worker_snapshot = normalized_worker_snapshot(
+            {"captured_at": 5.0, "pm_status": "bad", "pm_confirmed": True},
+            now=6.0,
+        )
+        self.assertIsNone(worker_snapshot["pm_status"])
+        self.assertFalse(worker_snapshot["pm_confirmed"])
         self.assertFalse(cutover_confirmed_off(
             relay_on=False,
             pending_state=None,

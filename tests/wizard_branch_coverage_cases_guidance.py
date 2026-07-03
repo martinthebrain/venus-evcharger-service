@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from unittest.mock import patch
+
 from tests.wizard_branch_coverage_cases_common import (
     _imported_defaults,
     _namespace,
@@ -68,6 +70,9 @@ class _WizardBranchCoverageGuidanceCases:
         self.assertEqual(default_backend("native_device", imported), "template_charger")
         self.assertEqual(apply_topology_preset_backend("shelly-meter-goe", "template_charger"), "goe_charger")
         self.assertEqual(apply_topology_preset_backend("shelly-meter-modbus-charger", "template_charger", "abb-terra-ac-modbus"), "modbus_charger")
+        with patch.dict("venus_evcharger.bootstrap.wizard_guidance.TOPOLOGY_PRESET_BACKENDS", {"bad-backend": "mystery"}):
+            with self.assertRaisesRegex(ValueError, "Unsupported topology backend"):
+                apply_topology_preset_backend("bad-backend", None)
         self.assertEqual(charger_preset_backend("abb-terra-ac-modbus"), "modbus_charger")
         self.assertEqual(apply_charger_preset_backend("cfos-power-brain-modbus", "template_charger"), "modbus_charger")
         self.assertEqual(relevant_charger_presets("modbus_charger"), ("abb-terra-ac-modbus", "cfos-power-brain-modbus", "openwb-modbus-secondary"))

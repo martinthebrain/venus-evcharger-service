@@ -66,44 +66,44 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
         values = controller._config_values(1, now=100.0)
 
-        self.assertEqual(values["/Connected"], 1)
-        self.assertEqual(values["/Status"], 6)
-        self.assertEqual(values["/SetCurrent"], 13.0)
-        self.assertEqual(values["/PhaseSelection"], "P1_P2")
-        self.assertEqual(values["/PhaseSelectionActive"], "P1")
-        self.assertEqual(values["/SupportedPhaseSelections"], "P1,P1_P2")
-        self.assertEqual(values["/Auto/StartSurplusWatts"], 1850.0)
-        self.assertEqual(values["/Auto/StopSurplusWatts"], 1350.0)
-        self.assertEqual(values["/Auto/MinSoc"], 40.0)
-        self.assertEqual(values["/Auto/ResumeSoc"], 50.0)
-        self.assertEqual(values["/Auto/StartDelaySeconds"], 10.0)
-        self.assertEqual(values["/Auto/StopDelaySeconds"], 30.0)
-        self.assertEqual(values["/Auto/ScheduledEnabledDays"], "Mon,Tue,Wed,Thu,Fri")
-        self.assertEqual(values["/Auto/ScheduledFallbackDelaySeconds"], 3600.0)
-        self.assertEqual(values["/Auto/ScheduledLatestEndTime"], "06:30")
-        self.assertEqual(values["/Auto/ScheduledNightCurrent"], 13.0)
-        self.assertEqual(values["/Auto/DbusBackoffBaseSeconds"], 5.0)
-        self.assertEqual(values["/Auto/DbusBackoffMaxSeconds"], 60.0)
-        self.assertEqual(values["/Auto/GridRecoveryStartSeconds"], 14.0)
-        self.assertEqual(values["/Auto/StopSurplusDelaySeconds"], 45.0)
-        self.assertEqual(values["/Auto/StopSurplusVolatilityLowWatts"], 80.0)
-        self.assertEqual(values["/Auto/StopSurplusVolatilityHighWatts"], 240.0)
-        self.assertEqual(values["/Auto/ReferenceChargePowerWatts"], 2100.0)
-        self.assertEqual(values["/Auto/LearnChargePowerEnabled"], 1)
-        self.assertEqual(values["/Auto/LearnChargePowerMinWatts"], 1400.0)
-        self.assertEqual(values["/Auto/LearnChargePowerAlpha"], 0.25)
-        self.assertEqual(values["/Auto/LearnChargePowerStartDelaySeconds"], 12.0)
-        self.assertEqual(values["/Auto/LearnChargePowerWindowSeconds"], 180.0)
-        self.assertEqual(values["/Auto/LearnChargePowerMaxAgeSeconds"], 21600.0)
-        self.assertEqual(values["/Auto/PhaseSwitching"], 1)
-        self.assertEqual(values["/Auto/PhasePreferLowestWhenIdle"], 0)
-        self.assertEqual(values["/Auto/PhaseUpshiftDelaySeconds"], 120.0)
-        self.assertEqual(values["/Auto/PhaseDownshiftDelaySeconds"], 30.0)
-        self.assertEqual(values["/Auto/PhaseUpshiftHeadroomWatts"], 250.0)
-        self.assertEqual(values["/Auto/PhaseDownshiftMarginWatts"], 150.0)
-        self.assertEqual(values["/Auto/PhaseMismatchRetrySeconds"], 300.0)
-        self.assertEqual(values["/Auto/PhaseMismatchLockoutCount"], 3)
-        self.assertEqual(values["/Auto/PhaseMismatchLockoutSeconds"], 1800.0)
+        self.assertEqual(values["connected"], 1)
+        self.assertEqual(values["status"], 6)
+        self.assertEqual(values["set_current"], 13.0)
+        self.assertEqual(values["phase_selection"], "P1_P2")
+        self.assertEqual(values["phase_selection_active"], "P1")
+        self.assertEqual(values["supported_phase_selections"], "P1,P1_P2")
+        self.assertEqual(values["auto_start_surplus_watts"], 1850.0)
+        self.assertEqual(values["auto_stop_surplus_watts"], 1350.0)
+        self.assertEqual(values["auto_min_soc"], 40.0)
+        self.assertEqual(values["auto_resume_soc"], 50.0)
+        self.assertEqual(values["auto_start_delay_seconds"], 10.0)
+        self.assertEqual(values["auto_stop_delay_seconds"], 30.0)
+        self.assertEqual(values["auto_scheduled_enabled_days"], "Mon,Tue,Wed,Thu,Fri")
+        self.assertEqual(values["auto_scheduled_fallback_delay_seconds"], 3600.0)
+        self.assertEqual(values["auto_scheduled_latest_end_time"], "06:30")
+        self.assertEqual(values["auto_scheduled_night_current"], 13.0)
+        self.assertEqual(values["auto_dbus_backoff_base_seconds"], 5.0)
+        self.assertEqual(values["auto_dbus_backoff_max_seconds"], 60.0)
+        self.assertEqual(values["auto_grid_recovery_start_seconds"], 14.0)
+        self.assertEqual(values["auto_stop_surplus_delay_seconds"], 45.0)
+        self.assertEqual(values["auto_stop_surplus_volatility_low_watts"], 80.0)
+        self.assertEqual(values["auto_stop_surplus_volatility_high_watts"], 240.0)
+        self.assertEqual(values["auto_reference_charge_power_watts"], 2100.0)
+        self.assertEqual(values["auto_learn_charge_power_enabled"], 1)
+        self.assertEqual(values["auto_learn_charge_power_min_watts"], 1400.0)
+        self.assertEqual(values["auto_learn_charge_power_alpha"], 0.25)
+        self.assertEqual(values["auto_learn_charge_power_start_delay_seconds"], 12.0)
+        self.assertEqual(values["auto_learn_charge_power_window_seconds"], 180.0)
+        self.assertEqual(values["auto_learn_charge_power_max_age_seconds"], 21600.0)
+        self.assertEqual(values["auto_phase_switching"], 1)
+        self.assertEqual(values["auto_phase_prefer_lowest_when_idle"], 0)
+        self.assertEqual(values["auto_phase_upshift_delay_seconds"], 120.0)
+        self.assertEqual(values["auto_phase_downshift_delay_seconds"], 30.0)
+        self.assertEqual(values["auto_phase_upshift_headroom_watts"], 250.0)
+        self.assertEqual(values["auto_phase_downshift_margin_watts"], 150.0)
+        self.assertEqual(values["auto_phase_mismatch_retry_seconds"], 300.0)
+        self.assertEqual(values["auto_phase_mismatch_lockout_count"], 3)
+        self.assertEqual(values["auto_phase_mismatch_lockout_seconds"], 1800.0)
 
     def test_config_values_can_disable_learned_current_display(self) -> None:
         service = SimpleNamespace(
@@ -130,7 +130,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
         values = controller._config_values(1, now=100.0)
 
-        self.assertEqual(values["/SetCurrent"], 16.0)
+        self.assertEqual(values["set_current"], 16.0)
 
     def test_config_values_keep_actual_set_current_when_native_charger_backend_is_present(self) -> None:
         service = SimpleNamespace(
@@ -157,7 +157,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
         values = controller._config_values(1, now=100.0)
 
-        self.assertEqual(values["/SetCurrent"], 11.0)
+        self.assertEqual(values["set_current"], 11.0)
 
     def test_config_values_degrade_supported_phase_selections_while_lockout_is_active(self) -> None:
         service = SimpleNamespace(
@@ -177,7 +177,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
         values = controller._config_values(1, now=100.0)
 
-        self.assertEqual(values["/SupportedPhaseSelections"], "P1,P1_P2")
+        self.assertEqual(values["supported_phase_selections"], "P1,P1_P2")
 
     def test_config_values_prefer_fresh_native_charger_readback_for_gui_state(self) -> None:
         service = SimpleNamespace(
@@ -210,9 +210,9 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
         values = controller._config_values(1, now=100.0)
 
-        self.assertEqual(values["/Enable"], 0)
-        self.assertEqual(values["/StartStop"], 0)
-        self.assertEqual(values["/SetCurrent"], 12.5)
+        self.assertEqual(values["enable"], 0)
+        self.assertEqual(values["start_stop"], 0)
+        self.assertEqual(values["set_current"], 12.5)
 
     def test_config_values_publish_live_connected_display(self) -> None:
         service = SimpleNamespace(
@@ -230,14 +230,14 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 1)
+        self.assertEqual(controller._config_values(1, now=100.0)["connected"], 1)
         service._shelly_state = "offline"
-        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 0)
+        self.assertEqual(controller._config_values(1, now=100.0)["connected"], 0)
         service._shelly_state = ""
-        self.assertEqual(controller._config_values(1, now=109.0)["/Connected"], 1)
-        self.assertEqual(controller._config_values(1, now=120.1)["/Connected"], 0)
+        self.assertEqual(controller._config_values(1, now=109.0)["connected"], 1)
+        self.assertEqual(controller._config_values(1, now=120.1)["connected"], 0)
         service.topology_configured = False
-        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 0)
+        self.assertEqual(controller._config_values(1, now=100.0)["connected"], 0)
 
     def test_config_values_publish_connected_from_native_readback_and_transport_errors(self) -> None:
         service = SimpleNamespace(
@@ -258,13 +258,13 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 1)
+        self.assertEqual(controller._config_values(1, now=100.0)["connected"], 1)
         service._last_charger_state_at = 70.0
         service._last_charger_transport_reason = "offline"
         service._last_charger_transport_at = 99.0
-        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 0)
+        self.assertEqual(controller._config_values(1, now=100.0)["connected"], 0)
         service._last_charger_transport_at = 70.0
-        self.assertEqual(controller._config_values(1, now=100.0)["/Connected"], 1)
+        self.assertEqual(controller._config_values(1, now=100.0)["connected"], 1)
 
     def test_config_helpers_cover_fault_and_contactor_count_fallbacks(self) -> None:
         service = SimpleNamespace(
@@ -328,4 +328,4 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
         values = controller._config_values(1, now=100.0)
 
-        self.assertEqual(values["/SetCurrent"], 15.0)
+        self.assertEqual(values["set_current"], 15.0)

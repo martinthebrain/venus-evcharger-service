@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.backend.template_support import (
     TemplateAuthSettings,
@@ -16,7 +16,7 @@ from venus_evcharger.backend.template_support import (
 )
 from venus_evcharger.core.contracts import finite_float_or_none
 
-from .connectors_common import _cache_map, _csv_filter, _runtime_owner, _sum_optional
+from .connectors_common import _csv_filter, _runtime_owner, _sum_optional, _typed_cache_map
 from .models import EnergySourceDefinition, EnergySourceSnapshot
 from .profiles import resolve_energy_source_profile
 
@@ -121,10 +121,7 @@ def _opendtu_max_data_age_seconds(opendtu: Any) -> float:
 
 
 def _opendtu_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> OpenDtuEnergySourceSettings:
-    cache = cast(
-        dict[str, OpenDtuEnergySourceSettings],
-        _cache_map(runtime, "_energy_opendtu_settings_cache"),
-    )
+    cache = _typed_cache_map(runtime, "_energy_opendtu_settings_cache", OpenDtuEnergySourceSettings)
     cache_key = str(source.config_path).strip()
     cached = cache.get(cache_key)
     if isinstance(cached, OpenDtuEnergySourceSettings):
@@ -217,7 +214,7 @@ def _opendtu_detail_inverter(payload: dict[str, object]) -> dict[str, object] | 
     if not isinstance(raw_inverters, list) or not raw_inverters:
         return None
     first = raw_inverters[0]
-    return cast(dict[str, object], first) if isinstance(first, dict) else None
+    return {str(key): value for key, value in first.items()} if isinstance(first, dict) else None
 
 
 def _opendtu_total_ac_power(

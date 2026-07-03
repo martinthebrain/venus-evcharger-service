@@ -12,6 +12,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from venus_evcharger.control.http_api_command_contracts import ControlApiHttpService
 from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.control.openapi import build_control_api_openapi_spec
@@ -19,10 +20,7 @@ from venus_evcharger.control.rate_limit import ControlApiRateLimiter
 from venus_evcharger.control.reference import CONTROL_API_COMMAND_SCOPE_REQUIREMENTS
 from venus_evcharger.core.contracts import normalized_control_api_capabilities_fields, normalized_control_api_health_fields
 
-from .http_api_auth import _LocalControlApiAuthMixin
-from .http_api_commands import _LocalControlApiCommandMixin
-from .http_api_events import _LocalControlApiEventsMixin
-from .http_api_routing import _LocalControlApiRoutingMixin
+from .http_api_routing import _LocalControlApiRouting
 
 
 class _ThreadingLocalControlHttpServer(ThreadingHTTPServer):
@@ -35,12 +33,7 @@ class _ThreadingLocalControlUnixHttpServer(socketserver.ThreadingMixIn, socketse
     allow_reuse_address = True
 
 
-class LocalControlApiHttpServer(
-    _LocalControlApiRoutingMixin,
-    _LocalControlApiAuthMixin,
-    _LocalControlApiCommandMixin,
-    _LocalControlApiEventsMixin,
-):
+class LocalControlApiHttpServer(_LocalControlApiRouting):
     """Expose one tiny local HTTP surface for Control API v1."""
 
     _STATE_GET_ENDPOINTS = frozenset(
@@ -84,7 +77,7 @@ class LocalControlApiHttpServer(
 
     def __init__(
         self,
-        service: Any,
+        service: ControlApiHttpService,
         *,
         host: str,
         port: int,

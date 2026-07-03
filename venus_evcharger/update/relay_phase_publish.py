@@ -1,27 +1,34 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Phase-metadata, relay-sync, and PM publish helpers for the update cycle."""
 
 from __future__ import annotations
 
 import logging
 import math
-from typing import Any, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-class _RelayPhasePublishMixin:
+from venus_evcharger.update.relay_phase_switch_runtime import _RelayPhaseSwitchRuntime
+
+RELAY_PLACEHOLDER_PUBLISH_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+
+class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
     """Translate PM metadata into phase displays and track relay confirmations."""
+
+    if TYPE_CHECKING:  # pragma: no cover
+        _phase_values: Callable[[float, float, Any, Any], dict[str, Any]]
 
     @staticmethod
     def _phase_tuple(raw_value: Any) -> tuple[float, float, float] | None:
         if not isinstance(raw_value, (tuple, list)) or len(raw_value) != 3:
             return None
         values: tuple[float | None, float | None, float | None] = (
-            _RelayPhasePublishMixin._phase_tuple_item(raw_value[0]),
-            _RelayPhasePublishMixin._phase_tuple_item(raw_value[1]),
-            _RelayPhasePublishMixin._phase_tuple_item(raw_value[2]),
+            _RelayPhasePublish._phase_tuple_item(raw_value[0]),
+            _RelayPhasePublish._phase_tuple_item(raw_value[1]),
+            _RelayPhasePublish._phase_tuple_item(raw_value[2]),
         )
-        return _RelayPhasePublishMixin._resolved_phase_tuple(values)
+        return _RelayPhasePublish._resolved_phase_tuple(values)
 
     @staticmethod
     def _phase_tuple_item(raw_value: Any) -> float | None:
@@ -33,18 +40,18 @@ class _RelayPhasePublishMixin:
     def _resolved_phase_tuple(
         values: tuple[float | None, float | None, float | None],
     ) -> tuple[float, float, float] | None:
-        if None in values:
-            return None
         first, second, third = values
-        return cast(float, first), cast(float, second), cast(float, third)
+        if first is None or second is None or third is None:
+            return None
+        return first, second, third
 
     @staticmethod
     def _phase_voltage(voltage: float, selection: Any, voltage_mode: Any) -> float:
-        normalized_selection = _RelayPhasePublishMixin._normalized_phase_selection(selection)
-        normalized_voltage_mode = _RelayPhasePublishMixin._normalized_voltage_mode(voltage_mode)
-        if not _RelayPhasePublishMixin._selection_uses_line_to_line_voltage(normalized_selection, normalized_voltage_mode):
+        normalized_selection = _RelayPhasePublish._normalized_phase_selection(selection)
+        normalized_voltage_mode = _RelayPhasePublish._normalized_voltage_mode(voltage_mode)
+        if not _RelayPhasePublish._selection_uses_line_to_line_voltage(normalized_selection, normalized_voltage_mode):
             return float(voltage)
-        return float(voltage) / math.sqrt(3.0) if float(voltage) > 0.0 else 0.0
+        return max(0.0, float(voltage)) / math.sqrt(3.0)
 
     @staticmethod
     def _normalized_phase_selection(selection: Any) -> str:
@@ -63,13 +70,32 @@ class _RelayPhasePublishMixin:
         pm_status: dict[str, Any] | None,
         power: float,
         voltage: float,
-        current: float,
     ) -> dict[str, dict[str, float]]:
         svc = self.service
         phase_data = self._phase_data_from_backend_metadata(pm_status, voltage, getattr(svc, "voltage_mode", "phase"))
         if phase_data is not None:
             return phase_data
-        return cast(dict[str, dict[str, float]], self._phase_values(power, voltage, svc.phase, svc.voltage_mode))
+        return self._checked_phase_data(self._phase_values(power, voltage, svc.phase, svc.voltage_mode))
+
+    @staticmethod
+    def _checked_phase_data(value: Any) -> dict[str, dict[str, float]]:
+        if not isinstance(value, dict):
+            raise TypeError(f"_phase_values must return dict, got {type(value).__name__}")
+        checked: dict[str, dict[str, float]] = {}
+        for phase_name, phase_values in value.items():
+            if not isinstance(phase_name, str) or not isinstance(phase_values, dict):
+                raise TypeError("_phase_values must return dict[str, dict[str, float]]")
+            checked[phase_name] = _RelayPhasePublish._checked_phase_values(phase_values)
+        return checked
+
+    @staticmethod
+    def _checked_phase_values(values: dict[Any, Any]) -> dict[str, float]:
+        checked: dict[str, float] = {}
+        for key, value in values.items():
+            if not isinstance(key, str) or not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise TypeError("_phase_values must return dict[str, dict[str, float]]")
+            checked[key] = float(value)
+        return checked
 
     def _phase_data_from_backend_metadata(
         self,
@@ -135,16 +161,25 @@ class _RelayPhasePublishMixin:
 
     @staticmethod
     def _pm_status_confirmed(pm_status: dict[str, Any]) -> bool:
-        return bool(pm_status.get("_pm_confirmed", False))
+        return bool(pm_status.get("_pm_confirmed"))
+
+    @staticmethod
+    def _relay_sync_timeout_warning_window_seconds(svc: Any) -> float:
+        raw_timeout = svc.relay_sync_timeout_seconds if hasattr(svc, "relay_sync_timeout_seconds") else 2.0
+        return max(1.0, float(raw_timeout or 2.0))
+
+    @staticmethod
+    def _relay_sync_failure_reported(svc: Any) -> bool:
+        return bool(svc._relay_sync_failure_reported) if hasattr(svc, "_relay_sync_failure_reported") else False
 
     def _publish_local_pm_status_best_effort(self, relay_on: bool, now: float) -> None:
         svc = self.service
         try:
             svc._publish_local_pm_status(relay_on, now)
-        except Exception as error:
+        except RELAY_PLACEHOLDER_PUBLISH_ERRORS as error:
             svc._warning_throttled(
                 "relay-placeholder-publish-failed",
-                max(1.0, float(getattr(svc, "relay_sync_timeout_seconds", 2.0) or 2.0)),
+                self._relay_sync_timeout_warning_window_seconds(svc),
                 "Local relay placeholder publish failed after queueing relay=%s: %s",
                 int(bool(relay_on)),
                 error,
@@ -175,7 +210,7 @@ class _RelayPhasePublishMixin:
     ) -> bool:
         if not pm_confirmed or bool(relay_on) != expected_relay:
             return False
-        if getattr(svc, "_relay_sync_failure_reported", False):
+        if self._relay_sync_failure_reported(svc):
             svc._mark_recovery("shelly", "Shelly relay confirmation recovered")
         self._clear_relay_sync_tracking(svc)
         return True
@@ -202,7 +237,7 @@ class _RelayPhasePublishMixin:
         expected_relay: bool,
         deadline_at: Any,
     ) -> None:
-        if getattr(svc, "_relay_sync_failure_reported", False):
+        if self._relay_sync_failure_reported(svc):
             return
         svc._relay_sync_failure_reported = True
         timeout_seconds = max(0.0, float(deadline_at) - float(getattr(svc, "_relay_sync_requested_at", deadline_at)))

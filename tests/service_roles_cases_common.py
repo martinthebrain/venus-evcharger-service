@@ -8,58 +8,90 @@ sys.modules["vedbus"] = MagicMock()
 
 from venus_evcharger.control import ControlCommand
 from venus_evcharger.energy import EnergySourceDefinition
-from venus_evcharger.service.auto import DbusAutoLogicMixin
-from venus_evcharger.service.control import ControlApiMixin
-from venus_evcharger.service.factory import ServiceControllerFactoryMixin
-from venus_evcharger.service.runtime import RuntimeHelperMixin
-from venus_evcharger.service.state_publish import StatePublishMixin
-from venus_evcharger.service.update import UpdateCycleMixin
+from venus_evcharger.service.auto import DbusAutoLogic
+from venus_evcharger.service.control import ControlApi
+from venus_evcharger.service.factory import ServiceControllerFactory
+from venus_evcharger.service.runtime import RuntimeHelper
+from venus_evcharger.service.state_publish import StatePublish
+from venus_evcharger.service.update import UpdateCycle
 
 
-class _RuntimeService(RuntimeHelperMixin):
+class _ServiceRoleDefaults:
+    _normalize_mode_func = staticmethod(lambda value: int(value))
+    _mode_uses_auto_logic_func = staticmethod(lambda mode: bool(mode))
+    _normalize_phase_func = staticmethod(lambda value: str(value))
+    _month_window_func = staticmethod(lambda *args, **kwargs: None)
+    _age_seconds_func = staticmethod(lambda _captured_at, _now: 0)
+    _health_code_func = staticmethod(lambda _reason: 0)
+    _phase_values_func = staticmethod(lambda *args, **kwargs: {})
+    _read_version_func = staticmethod(lambda _path: "")
+    _gobject_module = MagicMock()
+    _script_path_value = ""
+    _formatter_bundle = {}
+
+
+class _RuntimeService(RuntimeHelper):
+    _age_seconds_func = _ServiceRoleDefaults._age_seconds_func
+    _health_code_func = _ServiceRoleDefaults._health_code_func
+
     def _ensure_runtime_support_controller(self):
-        return None
+        return self._runtime_support_controller
 
     def _ensure_auto_input_supervisor(self):
-        return None
+        return self._auto_input_supervisor
 
     def _ensure_shelly_io_controller(self):
-        return None
+        return self._shelly_io_controller
 
 
-class _UpdateService(UpdateCycleMixin):
+class _UpdateService(UpdateCycle):
     def _ensure_update_controller(self):
-        return None
+        return self._update_controller
 
 
-class _AutoService(DbusAutoLogicMixin):
+class _AutoService(DbusAutoLogic):
+    _normalize_mode_func = _ServiceRoleDefaults._normalize_mode_func
+    _mode_uses_auto_logic_func = _ServiceRoleDefaults._mode_uses_auto_logic_func
+    _normalize_phase_func = _ServiceRoleDefaults._normalize_phase_func
+    _month_window_func = _ServiceRoleDefaults._month_window_func
+    _age_seconds_func = _ServiceRoleDefaults._age_seconds_func
+    _health_code_func = _ServiceRoleDefaults._health_code_func
+    _phase_values_func = _ServiceRoleDefaults._phase_values_func
+    _read_version_func = _ServiceRoleDefaults._read_version_func
+
     def _ensure_dbus_input_controller(self):
-        return None
+        return self._dbus_input_controller
 
     def _ensure_auto_controller(self):
-        return None
+        return self._auto_controller
 
     def _ensure_write_controller(self):
-        return None
+        return self._write_controller
 
     def _ensure_bootstrap_controller(self):
-        return None
+        return self._bootstrap_controller
 
 
-class _StateService(StatePublishMixin):
+class _StateService(StatePublish):
+    _age_seconds_func = _ServiceRoleDefaults._age_seconds_func
+    _health_code_func = _ServiceRoleDefaults._health_code_func
+
     def _ensure_state_controller(self):
-        return None
+        return self._state_controller
 
     def _ensure_dbus_publisher(self):
-        return None
+        return self._dbus_publisher
 
 
-class _ControlService(ControlApiMixin):
+class _ControlService(ControlApi):
+    _age_seconds_func = _ServiceRoleDefaults._age_seconds_func
+    _health_code_func = _ServiceRoleDefaults._health_code_func
+
     def _ensure_write_controller(self):
-        return None
+        return self._write_controller
 
     def _ensure_dbus_publisher(self):
-        return None
+        return self._dbus_publisher
 
     def _state_summary(self):
         return "mode=1 enable=1"
@@ -148,18 +180,8 @@ class _ControlService(ControlApiMixin):
         }
 
 
-class _FactoryService(ServiceControllerFactoryMixin):
-    _normalize_mode_func = staticmethod(lambda value: int(value))
-    _mode_uses_auto_logic_func = staticmethod(lambda mode: bool(mode))
-    _normalize_phase_func = staticmethod(lambda value: str(value))
-    _month_window_func = staticmethod(lambda *args, **kwargs: None)
-    _age_seconds_func = staticmethod(lambda _captured_at, _now: 0)
-    _health_code_func = staticmethod(lambda _reason: 0)
-    _phase_values_func = staticmethod(lambda *args, **kwargs: {})
-    _read_version_func = staticmethod(lambda _path: "")
-    _gobject_module = MagicMock()
-    _script_path_value = ""
-    _formatter_bundle = {}
+class _FactoryService(_ServiceRoleDefaults, ServiceControllerFactory):
+    pass
 
 
 def _configured_control_service() -> _ControlService:

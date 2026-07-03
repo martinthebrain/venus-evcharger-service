@@ -5,18 +5,34 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, cast
 
+from venus_evcharger.bootstrap.wizard_choices import optional_choice
 from venus_evcharger.bootstrap.wizard_models import WizardAnswers, WizardResult, WizardTransportKind
+from venus_evcharger.bootstrap.wizard_models import WIZARD_TRANSPORT_KINDS
 from venus_evcharger.bootstrap.wizard_persistence import persist_wizard_state
 from venus_evcharger.bootstrap.wizard_render import answer_defaults
 from venus_evcharger.bootstrap.wizard_support import transport_summary
 
+_NO_DATACLASS_PAYLOAD = object()
+
 
 def json_ready(value: object) -> object:
     """Convert wizard result fragments into JSON-serializable values."""
-    if is_dataclass(value):
-        return json_ready(asdict(cast(Any, value)))
+    dataclass_payload = _dataclass_payload(value)
+    if dataclass_payload is not _NO_DATACLASS_PAYLOAD:
+        return json_ready(dataclass_payload)
+    return _json_ready_non_dataclass(value)
+
+
+def _dataclass_payload(value: object) -> object:
+    """Return dataclass payload for instances, or a sentinel for other values."""
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
+    return _NO_DATACLASS_PAYLOAD
+
+
+def _json_ready_non_dataclass(value: object) -> object:
+    """Convert non-dataclass wizard fragments into JSON-serializable values."""
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, dict):
@@ -64,7 +80,7 @@ def preview_result(
         topology_preset=answers.topology_preset,
         charger_backend=answers.charger_backend,
         charger_preset=answers.charger_preset,
-        transport_kind=cast(WizardTransportKind | None, transport_summary(answers.charger_backend, answers.transport_kind)),
+        transport_kind=_transport_kind_summary(answers),
         role_hosts=role_hosts,
         validation=validation,
         live_check=live_check_payload,
@@ -84,6 +100,10 @@ def preview_result(
         suggested_energy_sources=suggested_energy_sources,
         suggested_energy_merge=suggested_energy_merge,
     )
+
+
+def _transport_kind_summary(answers: WizardAnswers) -> WizardTransportKind | None:
+    return optional_choice(transport_summary(answers.charger_backend, answers.transport_kind), WIZARD_TRANSPORT_KINDS, "transport")
 
 
 def persisted_result(result: WizardResult) -> WizardResult:

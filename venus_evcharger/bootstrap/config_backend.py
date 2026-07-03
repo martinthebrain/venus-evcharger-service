@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from venus_evcharger.backend.config import load_runtime_backend_summary
+from venus_evcharger.bootstrap.config_identity import _ServiceBootstrapIdentityConfig
 from venus_evcharger.topology.config import parse_topology_config
-from venus_evcharger.core.split_mixins import ComposableControllerMixin as _ComposableControllerMixin
 
 
-class _ServiceBootstrapBackendConfigMixin(_ComposableControllerMixin):
+class _ServiceBootstrapBackendConfig(_ServiceBootstrapIdentityConfig):
     def _load_backend_config(self) -> None:
         """Load normalized meter/switch/charger backend selection.
 

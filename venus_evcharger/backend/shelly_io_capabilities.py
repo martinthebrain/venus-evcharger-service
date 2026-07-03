@@ -3,24 +3,30 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from venus_evcharger.backend.config import backend_mode_for_service
+from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
 from venus_evcharger.backend.models import PhaseSelection
+from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
 from venus_evcharger.backend.shelly_io_types import (
     ShellyIoHost,
     _ChargerStateBackendLike,
     _EnableBackendLike,
     _MeterBackendLike,
     _PhaseSelectionBackendLike,
-    _SwitchCapabilitiesBackendLike,
+    is_charger_state_backend,
+    is_enable_backend,
+    is_meter_backend,
+    is_phase_selection_backend,
+    is_switch_capabilities_backend,
     normalize_phase_value,
     normalize_supported_phase_tuple,
 )
 from venus_evcharger.core.contracts import finite_float_or_none
 
 
-class ShellyIoCapabilitiesMixin:
+class ShellyIoCapabilities(ShellyIoRequests):
     """Expose split-backend discovery and direct-switch safety helpers."""
 
     if TYPE_CHECKING:
@@ -38,13 +44,13 @@ class ShellyIoCapabilitiesMixin:
         if not self._uses_split_backends():
             return None
         backend = getattr(self.service, "_meter_backend", None)
-        return cast(_MeterBackendLike, backend) if hasattr(backend, "read_meter") else None
+        return backend if is_meter_backend(backend) else None
 
     def _split_switch_backend(self) -> _EnableBackendLike | None:
         if not self._uses_split_backends():
             return None
         backend = getattr(self.service, "_switch_backend", None)
-        return cast(_EnableBackendLike, backend) if hasattr(backend, "set_enabled") else None
+        return backend if is_enable_backend(backend) else None
 
     def _split_enable_backend(self) -> _EnableBackendLike | None:
         backend = self._split_switch_backend()
@@ -53,7 +59,7 @@ class ShellyIoCapabilitiesMixin:
         if not self._uses_split_backends():
             return None
         charger_backend = getattr(self.service, "_charger_backend", None)
-        return cast(_EnableBackendLike, charger_backend) if hasattr(charger_backend, "set_enabled") else None
+        return charger_backend if is_enable_backend(charger_backend) else None
 
     def _split_enable_source_key(self) -> str:
         backend = self._split_enable_backend()
@@ -66,11 +72,11 @@ class ShellyIoCapabilitiesMixin:
 
     def _phase_selection_switch_backend(self) -> _PhaseSelectionBackendLike | None:
         backend = getattr(self.service, "_switch_backend", None)
-        return cast(_PhaseSelectionBackendLike, backend) if hasattr(backend, "set_phase_selection") else None
+        return backend if is_phase_selection_backend(backend) else None
 
     def _phase_selection_charger_backend(self) -> _PhaseSelectionBackendLike | None:
         backend = getattr(self.service, "_charger_backend", None)
-        return cast(_PhaseSelectionBackendLike, backend) if hasattr(backend, "set_phase_selection") else None
+        return backend if is_phase_selection_backend(backend) else None
 
     def _charger_supports_phase_selection(self, selection: PhaseSelection) -> bool:
         backend = self._phase_selection_charger_backend()
@@ -87,7 +93,7 @@ class ShellyIoCapabilitiesMixin:
 
     def _charger_state_backend(self) -> _ChargerStateBackendLike | None:
         backend = getattr(self.service, "_charger_backend", None)
-        return cast(_ChargerStateBackendLike, backend) if hasattr(backend, "read_charger_state") else None
+        return backend if is_charger_state_backend(backend) else None
 
     def _charger_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
         backend = getattr(self.service, "_charger_backend", None)
@@ -103,11 +109,11 @@ class ShellyIoCapabilitiesMixin:
 
     def _phase_switch_capabilities(self) -> object | None:
         backend = getattr(self.service, "_switch_backend", None)
-        if backend is None or not hasattr(backend, "capabilities"):
+        if not is_switch_capabilities_backend(backend):
             return None
         try:
-            return cast(_SwitchCapabilitiesBackendLike, backend).capabilities()
-        except Exception:
+            return backend.capabilities()
+        except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return None
 
     def _switching_mode(self) -> str:

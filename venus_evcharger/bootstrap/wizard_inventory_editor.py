@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import argparse
-from typing import cast
 
 from venus_evcharger.bootstrap.wizard_inventory_support import PHASE_ORDER
+from venus_evcharger.bootstrap.wizard_inventory_types import InventoryCapabilityChoice
 from venus_evcharger.inventory import (
     BindingRole,
     CapabilityKind,
@@ -29,6 +29,7 @@ __all__ = [
     "add_inventory_capability",
     "add_inventory_device",
     "add_inventory_profile",
+    "InventoryCapabilityChoice",
     "inventory_role_capability_choices",
     "remove_inventory_binding",
     "remove_inventory_binding_member",
@@ -55,10 +56,10 @@ def inventory_role_capability_choices(
     inventory: DeviceInventory,
     *,
     role: BindingRole,
-) -> tuple[dict[str, object], ...]:
+) -> tuple[InventoryCapabilityChoice, ...]:
     """Return one stable list of eligible device/capability choices for one role."""
     expected_kind = _binding_capability_kind_for_role(role)
-    choices: list[dict[str, object]] = []
+    choices: list[InventoryCapabilityChoice] = []
     profile_by_id = _profile_lookup(inventory)
     for device in inventory.devices:
         profile = profile_by_id.get(device.profile_id)
@@ -230,7 +231,7 @@ def _device_capability_choices(
     device: DeviceInstance,
     profile: DeviceProfile,
     expected_kind: CapabilityKind,
-) -> list[dict[str, object]]:
+) -> list[InventoryCapabilityChoice]:
     """Return eligible capability choices for one concrete device."""
     return [
         {

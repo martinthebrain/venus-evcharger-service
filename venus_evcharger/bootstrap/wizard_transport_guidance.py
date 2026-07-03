@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
-from typing import Callable, cast
+from typing import Callable
 
 from venus_evcharger.bootstrap.wizard_charger_presets import preset_transport_port, preset_transport_unit_id
+from venus_evcharger.bootstrap.wizard_choices import optional_choice
 from venus_evcharger.bootstrap.wizard_import import ImportedWizardDefaults
-from venus_evcharger.bootstrap.wizard_models import WizardChargerBackend, WizardProfile, WizardTransportKind
+from venus_evcharger.bootstrap.wizard_models import WIZARD_TRANSPORT_KINDS, WizardChargerBackend, WizardProfile, WizardTransportKind
 from venus_evcharger.bootstrap.wizard_support import TRANSPORT_VALUES, default_transport_kind, host_from_input
 
 SWITCH_GROUP_PHASE_LAYOUT_VALUES = ("P1,P1_P2,P1_P2_P3", "P1,P1_P2_P3")
@@ -28,8 +29,9 @@ def prompt_transport_inputs(
     prompt_choice: PromptChoice,
     prompt_text: PromptText,
 ) -> tuple[WizardTransportKind, str, int, str, int]:
-    default_kind = cast(WizardTransportKind, imported.transport_kind or default_transport_kind(backend))
-    transport_kind = cast(WizardTransportKind, prompt_choice("Choose the transport:", TRANSPORT_VALUES, None, default_kind))
+    default_kind = optional_choice(imported.transport_kind or default_transport_kind(backend), WIZARD_TRANSPORT_KINDS, "transport") or "tcp"
+    raw_transport_kind = prompt_choice("Choose the transport:", TRANSPORT_VALUES, None, default_kind)
+    transport_kind = optional_choice(raw_transport_kind, WIZARD_TRANSPORT_KINDS, "transport") or default_kind
     defaults = _transport_defaults(imported, host_input, charger_preset, transport_kind)
     if transport_kind == "tcp":
         return _prompt_tcp_transport(prompt_text, transport_kind, defaults)
@@ -136,7 +138,7 @@ def _non_interactive_transport_kind(
     imported: ImportedWizardDefaults,
     backend: WizardChargerBackend | None,
 ) -> WizardTransportKind:
-    return cast(WizardTransportKind, getattr(namespace, "transport") or imported.transport_kind or default_transport_kind(backend))
+    return optional_choice(getattr(namespace, "transport") or imported.transport_kind or default_transport_kind(backend), WIZARD_TRANSPORT_KINDS, "transport") or "tcp"
 
 
 def _non_interactive_transport_host(namespace: object, imported: ImportedWizardDefaults, host_input: str) -> str:

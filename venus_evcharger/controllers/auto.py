@@ -6,11 +6,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from venus_evcharger.auto.workflow import AutoDecisionWorkflowMixin
+from venus_evcharger.auto.workflow import AutoDecisionWorkflow
 from venus_evcharger.auto.logic_types import NO_RELAY_DECISION
 
 
-class AutoDecisionController(AutoDecisionWorkflowMixin):
+class AutoDecisionController(AutoDecisionWorkflow):
     """Thin public facade for the internal Auto-mode decision workflow."""
 
     _NO_DECISION = NO_RELAY_DECISION

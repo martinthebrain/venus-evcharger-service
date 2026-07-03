@@ -4,7 +4,16 @@ import json
 import os
 import tempfile
 from venus_evcharger.core.shared import compact_json
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
+from venus_evcharger.dbus_gateway import (
+    BATTERY_SOC_READ_KEY,
+    GRID_POWER_READ_KEY,
+    PV_POWER_READ_KEY,
+    DbusCacheStore,
+    DbusCommandInbox,
+    GatewayClient,
+    dbus_path_key,
+    gateway_paths,
+)
 
 
 class _AutoInputHelperSourcesDbusCases:
@@ -18,11 +27,13 @@ class _AutoInputHelperSourcesDbusCases:
         helper._gateway_client_instance = None
         return paths
 
-    def _write_gateway_cache(self, helper, *, values=None, services=None):
+    def _write_gateway_cache(self, helper, *, values=None, key_values=None, services=None):
         paths = self._prepare_gateway(helper)
         store = DbusCacheStore(paths)
         for (service_name, path), value in (values or {}).items():
             store.update_value(dbus_path_key(service_name, path), value, source=f"{service_name}{path}")
+        for key, value in (key_values or {}).items():
+            store.update_value(str(key), value, source=f"read-key:{key}")
         if services is not None:
             store.update_services(list(services))
         store.write_snapshot_files()
@@ -74,6 +85,9 @@ class _AutoInputHelperSourcesDbusCases:
     def test_get_dbus_value_reads_gateway_cache_and_child_nodes_use_introspection_snapshot(self):
         helper = self._make_helper()
         self._write_gateway_cache(helper, values={("svc", "/Path"): 42.0})
+        helper._gateway_client_instance = object()
+        self.assertIsInstance(helper._gateway_client(), GatewayClient)
+        self.assertIs(helper._gateway_client(), helper._gateway_client_instance)
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
             handle.write(
                 compact_json(
@@ -103,6 +117,13 @@ class _AutoInputHelperSourcesDbusCases:
         finally:
             os.unlink(helper.dbus_introspection_snapshot_path)
 
+    def test_get_dbus_value_ignores_fresh_non_numeric_gateway_values(self):
+        helper = self._make_helper()
+        paths = self._write_gateway_cache(helper, values={("svc", "/Path"): "not-numeric"})
+
+        self.assertIsNone(helper._get_dbus_value("svc", "/Path"))
+        self.assertEqual(self._gateway_commands(paths), [])
+
     def test_get_dbus_value_rejects_stale_gateway_cache_and_requests_refresh(self):
         helper = self._make_helper()
         paths = self._prepare_gateway(helper)
@@ -117,38 +138,90 @@ class _AutoInputHelperSourcesDbusCases:
         self.assertEqual(commands[0]["service"], "svc")
         self.assertEqual(commands[0]["path"], "/Path")
 
-    def test_ac_pv_read_skips_fresh_unresponsive_introspection_finding(self):
+    def test_semantic_pv_read_uses_gateway_key_not_raw_dbus_paths(self):
         helper = self._make_helper()
         helper._get_dbus_value = MagicMock(return_value=123.0)
-        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
-            handle.write(
-                compact_json(
-                    {
-                        "schema_version": 1,
-                        "captured_at": 100.0,
-                        "heartbeat_at": 100.0,
-                        "services": {
-                            "svc.dead": {
-                                "paths": {
-                                    "/Ac/Power": {
-                                        "status": "unresponsive-backoff",
-                                        "retry_after": 200.0,
-                                    }
-                                }
-                            }
-                        },
-                    }
-                )
-            )
-            helper.dbus_introspection_snapshot_path = handle.name
-        try:
-            with patch("venus_evcharger.inputs.helper.sources_pv_grid.time.time", return_value=120.0):
-                total, seen = helper._read_ac_pv_total(["svc.dead", "svc.live"])
-        finally:
-            os.unlink(handle.name)
-        self.assertTrue(seen)
-        self.assertEqual(total, 123.0)
-        helper._get_dbus_value.assert_called_once_with("svc.live", "/Ac/Power")
+        self._write_gateway_cache(helper, key_values={PV_POWER_READ_KEY: 123.0})
+
+        self.assertEqual(helper._get_pv_power(), 123.0)
+        helper._get_dbus_value.assert_not_called()
+
+    def test_semantic_pv_and_grid_reads_use_exact_gateway_contracts(self):
+        helper = self._make_helper()
+        helper._get_gateway_read_value = MagicMock(return_value=123)
+        helper._delay_source_retry = MagicMock()
+
+        self.assertEqual(helper._get_pv_power(), 123.0)
+        helper._get_gateway_read_value.assert_called_once_with(
+            PV_POWER_READ_KEY,
+            reason="helper semantic PV power read",
+        )
+        helper._delay_source_retry.assert_not_called()
+
+        helper = self._make_helper()
+        helper._get_gateway_read_value = MagicMock(return_value=-45)
+        helper._delay_source_retry = MagicMock()
+
+        self.assertEqual(helper._get_grid_power(), -45.0)
+        helper._get_gateway_read_value.assert_called_once_with(
+            GRID_POWER_READ_KEY,
+            reason="helper semantic grid power read",
+        )
+        helper._delay_source_retry.assert_not_called()
+
+    def test_semantic_pv_and_grid_reads_delay_only_the_missing_source(self):
+        helper = self._make_helper()
+        helper._get_gateway_read_value = MagicMock(return_value=None)
+        helper._delay_source_retry = MagicMock()
+
+        self.assertIsNone(helper._get_pv_power())
+        helper._get_gateway_read_value.assert_called_once_with(
+            PV_POWER_READ_KEY,
+            reason="helper semantic PV power read",
+        )
+        helper._delay_source_retry.assert_called_once_with("pv")
+
+        helper = self._make_helper()
+        helper._get_gateway_read_value = MagicMock(return_value=None)
+        helper._delay_source_retry = MagicMock()
+
+        self.assertIsNone(helper._get_grid_power())
+        helper._get_gateway_read_value.assert_called_once_with(
+            GRID_POWER_READ_KEY,
+            reason="helper semantic grid power read",
+        )
+        helper._delay_source_retry.assert_called_once_with("grid")
+
+    def test_semantic_gateway_read_suppresses_fresh_cached_errors(self):
+        helper = self._make_helper()
+        paths = self._prepare_gateway(helper)
+        store = DbusCacheStore(paths)
+        store.mark_error(PV_POWER_READ_KEY, source="read-key:pv", error="sleeping", now=100.0)
+        store.write_snapshot_files()
+
+        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=101.0):
+            self.assertIsNone(helper._get_gateway_read_value(PV_POWER_READ_KEY, reason="pv retry"))
+
+        self.assertEqual(self._gateway_commands(paths), [])
+
+    def test_semantic_pv_and_grid_reads_do_not_query_gateway_during_retry_cooldown(self):
+        helper = self._make_helper()
+        helper._source_retry_after["pv"] = 200.0
+        helper._get_gateway_read_value = MagicMock(side_effect=AssertionError("PV read should be skipped"))
+        helper._delay_source_retry = MagicMock()
+        with patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            self.assertIsNone(helper._get_pv_power())
+        helper._get_gateway_read_value.assert_not_called()
+        helper._delay_source_retry.assert_not_called()
+
+        helper = self._make_helper()
+        helper._source_retry_after["grid"] = 200.0
+        helper._get_gateway_read_value = MagicMock(side_effect=AssertionError("Grid read should be skipped"))
+        helper._delay_source_retry = MagicMock()
+        with patch("venus_evcharger_auto_input_helper.time.time", return_value=100.0):
+            self.assertIsNone(helper._get_grid_power())
+        helper._get_gateway_read_value.assert_not_called()
+        helper._delay_source_retry.assert_not_called()
 
     def test_get_dbus_value_skips_known_unusable_introspection_finding(self):
         helper = self._make_helper()
@@ -278,6 +351,26 @@ class _AutoInputHelperSourcesDbusCases:
         self.assertEqual(second, first)
         helper._list_dbus_services.assert_called_once_with()
 
+    def test_resolve_auto_pv_services_refreshes_stale_cache_and_preserves_order_limit(self):
+        helper = self._make_helper()
+        helper._resolved_auto_pv_services = ["stale-pv"]
+        helper._auto_pv_last_scan = 100.0
+        helper.auto_pv_max_services = 1
+        helper._list_dbus_services = MagicMock(
+            return_value=[
+                "com.victronenergy.system",
+                "com.victronenergy.pvinverter.http_2",
+                "com.victronenergy.pvinverter.http_1",
+            ]
+        )
+
+        with unittest.mock.patch("venus_evcharger_auto_input_helper.time.time", return_value=200.0):
+            self.assertEqual(helper._resolve_auto_pv_services(), ["com.victronenergy.pvinverter.http_2"])
+
+        helper._list_dbus_services.assert_called_once_with()
+        self.assertEqual(helper._resolved_auto_pv_services, ["com.victronenergy.pvinverter.http_2"])
+        self.assertEqual(helper._auto_pv_last_scan, 200.0)
+
     def test_resolve_auto_pv_services_uses_configured_service_directly(self):
         helper = self._make_helper()
         helper.auto_pv_service = "com.victronenergy.pvinverter.http_40"
@@ -301,12 +394,8 @@ class _AutoInputHelperSourcesDbusCases:
         helper = self._make_helper()
         helper.auto_use_dc_pv = True
         helper.auto_pv_service = "configured-pv"
-        helper._resolve_auto_pv_services = MagicMock(return_value=["svc"])
-        helper._get_dbus_value = MagicMock(side_effect=[RuntimeError("ac failed"), RuntimeError("dc failed")])
-        helper._invalidate_auto_pv_services = MagicMock()
         helper._delay_source_retry = MagicMock()
         self.assertIsNone(helper._get_pv_power())
-        helper._invalidate_auto_pv_services.assert_called_once_with()
         helper._delay_source_retry.assert_called_once_with("pv")
 
     def test_resolve_auto_battery_service_finds_prefixed_service_with_soc(self):
@@ -356,27 +445,26 @@ class _AutoInputHelperSourcesDbusCases:
 
         helper = self._make_helper()
         helper._resolve_auto_battery_service = MagicMock(return_value="battery")
-        helper._get_dbus_value = MagicMock(return_value=57.5)
+        self._write_gateway_cache(helper, key_values={BATTERY_SOC_READ_KEY: 57.5})
         self.assertEqual(helper._get_battery_soc(), 57.5)
 
-        helper._get_dbus_value = MagicMock(return_value="bad")
+        helper = self._make_helper()
+        self._write_gateway_cache(helper, key_values={BATTERY_SOC_READ_KEY: "bad"})
         self.assertIsNone(helper._get_battery_soc())
 
-        helper._get_dbus_value = MagicMock(return_value=True)
+        helper = self._make_helper()
+        self._write_gateway_cache(helper, key_values={BATTERY_SOC_READ_KEY: True})
         self.assertIsNone(helper._get_battery_soc())
 
-        helper._get_dbus_value = MagicMock(return_value=150.0)
-        helper._warning_throttled = MagicMock()
+        helper = self._make_helper()
+        self._write_gateway_cache(helper, key_values={BATTERY_SOC_READ_KEY: 150.0})
         helper._delay_source_retry = MagicMock()
         self.assertIsNone(helper._get_battery_soc())
-        helper._warning_throttled.assert_called_once()
         helper._delay_source_retry.assert_called_once_with("battery")
 
-        helper._resolve_auto_battery_service = MagicMock(side_effect=RuntimeError("offline"))
-        helper._invalidate_auto_battery_service = MagicMock()
+        helper = self._make_helper()
         helper._delay_source_retry = MagicMock()
         self.assertIsNone(helper._get_battery_soc())
-        helper._invalidate_auto_battery_service.assert_called_once_with()
         helper._delay_source_retry.assert_called_once_with("battery")
 
     def test_get_battery_soc_respects_source_retry_guard(self):

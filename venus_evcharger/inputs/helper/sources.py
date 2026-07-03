@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.energy import (
+    EnergyClusterSnapshot,
     EnergySourceDefinition,
     aggregate_energy_sources,
     derive_discharge_balance_metrics,
@@ -18,24 +19,34 @@ from venus_evcharger.energy import (
     summarize_energy_learning_profiles,
     update_energy_learning_profiles,
 )
+from venus_evcharger.dbus_gateway import BATTERY_SOC_READ_KEY
 
-from .sources_dbus import _AutoInputHelperSourceDbusMixin
-from .sources_pv_grid import _AutoInputHelperSourcePvGridMixin
+from ..energy_snapshot_contracts import (
+    energy_source_definitions,
+    learning_profile_payloads,
+    learning_profiles,
+    nested_object_mappings,
+    object_mapping,
+)
+from .sources_dbus_common import DBUS_SOURCE_READ_ERRORS
+from .sources_pv_grid import _AutoInputHelperSourcePvGrid
+
+BATTERY_SNAPSHOT_SOURCE_ERRORS: tuple[type[BaseException], ...] = (*DBUS_SOURCE_READ_ERRORS, ValueError)
 
 
-class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHelperSourcePvGridMixin):
+class _AutoInputHelperSource(_AutoInputHelperSourcePvGrid):
     def _battery_snapshot_sources(self: Any) -> tuple[EnergySourceDefinition, ...]:
-        return tuple(getattr(self, "auto_energy_sources", ()) or (self._primary_energy_source(),))
+        configured = energy_source_definitions(getattr(self, "auto_energy_sources", ()))
+        if configured:
+            return configured
+        return energy_source_definitions(self._primary_energy_source())
 
-    def _battery_snapshot_cluster(self: Any, now: float) -> tuple[Any, tuple[EnergySourceDefinition, ...]]:
+    def _battery_snapshot_cluster(self: Any, now: float) -> tuple[EnergyClusterSnapshot, tuple[EnergySourceDefinition, ...]]:
         sources = self._battery_snapshot_sources()
-        source_snapshots = tuple(
-            read_energy_source_snapshot(self, cast(EnergySourceDefinition, source), now)
-            for source in sources
-        )
+        source_snapshots = tuple(read_energy_source_snapshot(self, source, now) for source in sources)
         return aggregate_energy_sources(source_snapshots), sources
 
-    def _battery_snapshot_effective_soc(self: Any, cluster: Any) -> float | None:
+    def _battery_snapshot_effective_soc(self: Any, cluster: EnergyClusterSnapshot) -> float | None:
         primary_soc = cluster.sources[0].soc if cluster.sources else None
         selected_soc = cluster.effective_soc if bool(getattr(self, "auto_use_combined_battery_soc", True)) else primary_soc
         numeric_soc: object = coerce_dbus_numeric(selected_soc)
@@ -43,16 +54,21 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
             return None
         return float(numeric_soc)
 
-    def _battery_snapshot_learning_bundle(self: Any, cluster: Any, now: float) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    def _battery_snapshot_learning_bundle(
+        self: Any,
+        cluster: EnergyClusterSnapshot,
+        now: float,
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        existing_profiles = learning_profiles(getattr(self, "_energy_learning_profiles", {}))
         self._energy_learning_profiles = update_energy_learning_profiles(
-            getattr(self, "_energy_learning_profiles", {}),
+            existing_profiles,
             cluster.sources,
             now,
         )
-        learning_summary = summarize_energy_learning_profiles(getattr(self, "_energy_learning_profiles", {}))
+        learning_summary = summarize_energy_learning_profiles(self._energy_learning_profiles)
         discharge_balance = derive_discharge_balance_metrics(
             cluster.sources,
-            getattr(self, "_energy_learning_profiles", {}),
+            self._energy_learning_profiles,
         )
         forecast = derive_energy_forecast(
             {
@@ -64,21 +80,17 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
             },
             learning_summary,
         )
-        return (
-            cast(dict[str, object], learning_summary),
-            cast(dict[str, object], discharge_balance),
-            cast(dict[str, object], forecast),
-        )
+        return object_mapping(learning_summary), object_mapping(discharge_balance), object_mapping(forecast)
 
     @staticmethod
     def _battery_snapshot_source_payloads(
-        cluster: Any,
+        cluster: EnergyClusterSnapshot,
         discharge_balance: dict[str, object],
         discharge_control: dict[str, object],
     ) -> list[dict[str, object]]:
-        source_payloads = [source.as_dict() for source in cluster.sources]
-        source_balance = cast(dict[str, dict[str, object]], discharge_balance.get("sources", {}))
-        source_control = cast(dict[str, dict[str, object]], discharge_control.get("sources", {}))
+        source_payloads = [object_mapping(source.as_dict()) for source in cluster.sources]
+        source_balance = nested_object_mappings(discharge_balance.get("sources", {}))
+        source_control = nested_object_mappings(discharge_control.get("sources", {}))
         for source_payload in source_payloads:
             source_id = str(source_payload.get("source_id", ""))
             source_payload.update(source_balance.get(source_id, {}))
@@ -86,7 +98,17 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
         return source_payloads
 
     def _get_battery_snapshot(self: Any) -> dict[str, object]:
-        """Read combined battery data from one or more energy sources."""
+        """Read battery data from the gateway contract."""
+        if not self._source_retry_ready("battery"):
+            return {"battery_soc": None}
+        gateway_soc = self._get_gateway_read_value(BATTERY_SOC_READ_KEY, reason="helper semantic battery SOC read")
+        if gateway_soc is not None and 0.0 <= float(gateway_soc) <= 100.0:
+            return _AutoInputHelperSource._gateway_battery_snapshot(self, float(gateway_soc))
+        self._delay_source_retry("battery")
+        return object_mapping(self._empty_battery_snapshot())
+
+    def _get_energy_source_battery_snapshot(self: Any) -> dict[str, object]:
+        """Read combined battery data from configured energy-source definitions."""
         if not self._source_retry_ready("battery"):
             return {"battery_soc": None}
         try:
@@ -99,21 +121,34 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
                 {source.source_id: source for source in sources},
             )
             source_payloads = self._battery_snapshot_source_payloads(cluster, discharge_balance, discharge_control)
-            return cast(
-                dict[str, object],
-                self._battery_snapshot_payload(
-                    effective_soc,
-                    cluster,
-                    forecast,
-                    discharge_balance,
-                    discharge_control,
-                    source_payloads,
-                ),
+            payload = self._battery_snapshot_payload(
+                effective_soc,
+                cluster,
+                forecast,
+                discharge_balance,
+                discharge_control,
+                source_payloads,
             )
-        except Exception:
+            return object_mapping(payload)
+        except BATTERY_SNAPSHOT_SOURCE_ERRORS:
             self._invalidate_auto_battery_service()
             self._delay_source_retry("battery")
-            return cast(dict[str, object], self._empty_battery_snapshot())
+            return object_mapping(self._empty_battery_snapshot())
+
+    def _gateway_battery_snapshot(self: Any, battery_soc: float) -> dict[str, object]:
+        payload = _AutoInputHelperSource._empty_battery_snapshot()
+        payload.update(
+            {
+                "battery_soc": battery_soc,
+                "battery_combined_soc": battery_soc,
+                "battery_average_confidence": 1.0,
+                "battery_source_count": 1,
+                "battery_online_source_count": 1,
+                "battery_valid_soc_source_count": 1,
+                "battery_battery_source_count": 1,
+            }
+        )
+        return payload
 
     def _battery_snapshot_now(self: Any) -> float:
         return float(time.time())
@@ -121,7 +156,7 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
     def _battery_snapshot_payload(
         self: Any,
         effective_soc: float | None,
-        cluster: Any,
+        cluster: EnergyClusterSnapshot,
         forecast: dict[str, object],
         discharge_balance: dict[str, object],
         discharge_control: dict[str, object],
@@ -164,10 +199,7 @@ class _AutoInputHelperSourceMixin(_AutoInputHelperSourceDbusMixin, _AutoInputHel
             "battery_hybrid_inverter_source_count": cluster.hybrid_inverter_source_count,
             "battery_inverter_source_count": cluster.inverter_source_count,
             "battery_sources": source_payloads,
-            "battery_learning_profiles": {
-                source_id: profile.as_dict()
-                for source_id, profile in getattr(self, "_energy_learning_profiles", {}).items()
-            },
+            "battery_learning_profiles": learning_profile_payloads(getattr(self, "_energy_learning_profiles", {})),
         }
 
     @staticmethod

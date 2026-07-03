@@ -8,7 +8,6 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from typing import cast
 
 from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.probe import probe_meter_backend, probe_switch_backend, read_charger_backend

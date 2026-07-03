@@ -11,12 +11,13 @@ from unittest.mock import MagicMock
 sys.modules["vedbus"] = MagicMock()
 
 from venus_evcharger.companion import dbus_bridge_grid as bridge_grid_mod
+from venus_evcharger.controllers import state_json as state_json_mod
 from venus_evcharger.controllers import state_runtime_snapshot as runtime_snapshot_mod
 from venus_evcharger.energy import probe_core as probe_core_mod
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 
 
-class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin):
+class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGrid):
     def __init__(self, service: object) -> None:
         self.service = service
         self._grid_hold_state: dict[str, dict[str, object]] = {}
@@ -27,7 +28,7 @@ class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin):
         return list(sources) if isinstance(sources, list) else []
 
 
-class _DummyRuntimeSnapshot(runtime_snapshot_mod._StateRuntimeSnapshotMixin):
+class _DummyRuntimeSnapshot(runtime_snapshot_mod._StateRuntimeSnapshot):
     def __init__(self, service: object) -> None:
         self.service = service
 
@@ -86,27 +87,27 @@ class BranchCoverageNextClusterTwoDbusBridgeGridCases(unittest.TestCase):
         self.assertEqual(bridge._grid_connected(aggregate_snapshot, 101.0), 1)
         self.assertEqual(bridge._grid_power_w(aggregate_snapshot, 101.0), 120.0)
 
-        self.assertIsNone(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_numeric_value("x"))
-        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_normalized_alpha(-1.0), 0.0)
-        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_normalized_alpha(5.0), 1.0)
+        self.assertIsNone(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_numeric_value("x"))
+        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_normalized_alpha(-1.0), 0.0)
+        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_normalized_alpha(5.0), 1.0)
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(200.0, None, 0.5, 0.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, None, 0.5, 0.0),
             200.0,
         )
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(200.0, 100.0, 0.0, 0.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, 100.0, 0.0, 0.0),
             200.0,
         )
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(200.0, 100.0, 0.5, 50.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, 100.0, 0.5, 50.0),
             200.0,
         )
         self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_smoothed_value(130.0, 100.0, 0.5, 50.0),
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(130.0, 100.0, 0.5, 50.0),
             115.0,
         )
         self.assertFalse(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGridMixin._grid_within_hold_window({}, 100.0, 5.0)
+            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_within_hold_window({}, 100.0, 5.0)
         )
         self.assertEqual(
             bridge._grid_source_values(
@@ -205,12 +206,12 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
         self.assertIn("victron_ess_balance_learning_state", current_state)
         self.assertIn("victron_ess_balance_adaptive_tuning_state", current_state)
         self.assertEqual(
-            runtime_snapshot_mod._StateRuntimeSnapshotMixin._energy_runtime_state(service)["combined_battery_soc"],
+            runtime_snapshot_mod._StateRuntimeSnapshot._energy_runtime_state(service)["combined_battery_soc"],
             62.0,
         )
         non_mapping_service = SimpleNamespace(_get_worker_snapshot=lambda: "bad")
         self.assertIsNone(
-            runtime_snapshot_mod._StateRuntimeSnapshotMixin._energy_runtime_state(non_mapping_service)[
+            runtime_snapshot_mod._StateRuntimeSnapshot._energy_runtime_state(non_mapping_service)[
                 "combined_battery_soc"
             ]
         )
@@ -218,11 +219,15 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             good_path = Path(tmpdir) / "runtime.json"
             bad_path = Path(tmpdir) / "bad.json"
+            list_path = Path(tmpdir) / "list.json"
             good_path.write_text(json.dumps({"ok": True}), encoding="utf-8")
             bad_path.write_text("{broken", encoding="utf-8")
+            list_path.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
             self.assertEqual(snapshot._read_runtime_state_payload(str(good_path)), {"ok": True})
             self.assertIsNone(snapshot._read_runtime_state_payload(str(Path(tmpdir) / "missing.json")))
             self.assertIsNone(snapshot._read_runtime_state_payload(str(bad_path)))
+            self.assertIsNone(snapshot._read_runtime_state_payload(str(list_path)))
+            self.assertIsNone(state_json_mod.json_object_payload({1: "bad-key"}))
 
         self.assertEqual(runtime_snapshot_mod._victron_ess_balance_energy_ids(service), ["hybrid", "victron"])
         self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_string(service, "auto_battery_discharge_balance_victron_bias_service"), "com.victronenergy.settings")

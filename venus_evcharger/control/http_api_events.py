@@ -7,11 +7,13 @@ from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any, Mapping
 
 from venus_evcharger.core.contracts import CONTROL_API_EVENT_KINDS, normalized_control_api_event_fields
+from venus_evcharger.control.http_api_command_contracts import ControlApiEventBusLike, ControlApiHttpService
+from venus_evcharger.control.http_api_commands import _LocalControlApiCommand
 
 
-class _LocalControlApiEventsMixin:
+class _LocalControlApiEvents(_LocalControlApiCommand):
     if TYPE_CHECKING:
-        _service: Any
+        _service: ControlApiHttpService
         _RETRY_HEADER: str
 
         def _state_token(self) -> str: ...
@@ -75,7 +77,7 @@ class _LocalControlApiEventsMixin:
     def _write_recent_events(
         self,
         handler: BaseHTTPRequestHandler,
-        event_bus: Any,
+        event_bus: ControlApiEventBusLike,
         *,
         limit: int,
         after_seq: int,
@@ -93,7 +95,7 @@ class _LocalControlApiEventsMixin:
     def _write_live_events(
         self,
         handler: BaseHTTPRequestHandler,
-        event_bus: Any,
+        event_bus: ControlApiEventBusLike,
         *,
         after_seq: int,
         timeout: float,
@@ -121,12 +123,12 @@ class _LocalControlApiEventsMixin:
 
     def _wait_for_matching_event(
         self,
-        event_bus: Any,
+        event_bus: ControlApiEventBusLike,
         *,
         after_seq: int,
         timeout: float,
         event_kinds: frozenset[str],
-    ) -> tuple[dict[str, Any] | None, int]:
+    ) -> tuple[Mapping[str, Any] | None, int]:
         deadline = time.time() + max(0.0, timeout)
         current_after_seq = after_seq
         while True:

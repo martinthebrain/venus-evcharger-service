@@ -3,39 +3,64 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import SupportsFloat, SupportsIndex, TypedDict
 
 PV_TOTAL_AGGREGATE = "pv-total"
 OPTIONAL_MEMBER_FAILED = object()
 
 
-def aggregate_signature_members(signature: Any, aggregate: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
+class AggregatePayload(TypedDict):
+    value: float
+    source: str
+    confidence: float
+    last_error: str
+
+
+def aggregate_signature_members(signature: object, aggregate: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
     if not isinstance(signature, tuple):
         return None
-    try:
-        name, members = signature
-    except ValueError:
+    if len(signature) != 2:
         return None
+    name, members = signature
     if name != aggregate:
         return None
-    return [(str(service), str(path)) for service, path in members]
+    if not isinstance(members, tuple):
+        return None
+    return _member_pairs(members)
+
+
+def _member_pairs(raw_members: tuple[object, ...]) -> list[tuple[str, str]] | None:  # pragma: no mutate block
+    pairs: list[tuple[str, str]] = []
+    for item in raw_members:
+        if not isinstance(item, tuple) or len(item) != 2:
+            return None
+        service, path = item
+        pairs.append((str(service), str(path)))
+    return pairs
+
+
+def aggregate_member_float(value: object) -> float:  # pragma: no mutate block
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (str, bytes, SupportsFloat, SupportsIndex)):
+        return float(value)
+    raise TypeError(f"Aggregate member is not numeric: {value!r}")
 
 
 @dataclass
 class AggregateState:
-    signature: tuple[Any, ...]
+    signature: tuple[object, ...]
     empty_confidence: float
     index: int = 0
     total: float = 0.0
     sources: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
-    def record_member(self, service: str, path: str, value: Any) -> None:  # pragma: no mutate block
+    def record_member(self, service: str, path: str, value: object) -> None:  # pragma: no mutate block
         if value is None:
             return
-        self.total += float(value)
+        self.total += aggregate_member_float(value)
         self.sources.append(f"{service}{path}")
 
     def record_error(self, service: str, path: str, error: BaseException) -> None:  # pragma: no mutate block
@@ -44,7 +69,7 @@ class AggregateState:
     def complete(self, member_count: int) -> bool:
         return self.index >= member_count
 
-    def payload(self, key: str) -> Mapping[str, Any]:  # pragma: no mutate block
+    def payload(self, key: str) -> AggregatePayload:  # pragma: no mutate block
         return {
             "value": self.total,
             "source": ",".join(self.sources) if self.sources else key,
@@ -63,7 +88,7 @@ class AggregateStore:
     def discard(self, key: str) -> None:
         self._states.pop(key, None)
 
-    def state_for(self, key: str, signature: tuple[Any, ...], empty_confidence: float) -> AggregateState:
+    def state_for(self, key: str, signature: tuple[object, ...], empty_confidence: float) -> AggregateState:
         state = self._states.get(key)
         if state is not None and state.signature == signature:
             return state

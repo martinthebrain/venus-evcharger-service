@@ -9,8 +9,6 @@ import time
 from typing import Any, Callable
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.controllers.state_restore import _StateRuntimeRestoreMixin
-from venus_evcharger.controllers.state_runtime import _StateRuntimeMixin
 from venus_evcharger.controllers.state_specs import (
     RUNTIME_OVERRIDE_BY_CONFIG_KEY,
     RUNTIME_OVERRIDE_BY_PATH,
@@ -19,16 +17,10 @@ from venus_evcharger.controllers.state_specs import (
     RuntimeOverrideSpec,
     _CasePreservingConfigParser,
 )
-from venus_evcharger.controllers.state_summary import _StateSummaryMixin
-from venus_evcharger.controllers.state_validation import _StateValidationMixin
+from venus_evcharger.controllers.state_validation import _StateValidation
 
 
-class ServiceStateController(
-    _StateValidationMixin,
-    _StateRuntimeRestoreMixin,
-    _StateRuntimeMixin,
-    _StateSummaryMixin,
-):
+class ServiceStateController(_StateValidation):
     """Encapsulate config loading, config validation, and volatile runtime state."""
 
     def __init__(self, service: Any, normalize_mode_func: Callable[[object], int]) -> None:
@@ -44,12 +36,6 @@ class ServiceStateController(
             "config.venus_evcharger.ini",
         )
 
-    @classmethod
-    def runtime_overrides_path(cls, defaults: configparser.SectionProxy) -> str:
-        device_instance = defaults.get("DeviceInstance", "60").strip() or "60"
-        fallback = f"/run/dbus-venus-evcharger-overrides-{device_instance}.ini"
-        return defaults.get("RuntimeOverridesPath", fallback).strip()
-
     def load_config(self) -> configparser.ConfigParser:
         config = configparser.ConfigParser()
         config.read(self.config_path())
@@ -59,4 +45,3 @@ class ServiceStateController(
                 "Copy it from the documented deploy/venus/config.venus_evcharger.ini template so the required keys exist."
             )
         return self._apply_runtime_overrides_to_config(self.service, config)
-

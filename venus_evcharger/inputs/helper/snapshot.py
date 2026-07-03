@@ -11,9 +11,10 @@ import os
 import time
 from typing import Any
 
+from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscription
 
 
-class _AutoInputHelperSnapshotMixin:
+class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
     @staticmethod
     def _default_source_poll_schedule() -> dict[str, float]:
         return {

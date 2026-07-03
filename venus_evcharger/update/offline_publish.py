@@ -3,28 +3,15 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, TYPE_CHECKING, cast
+from typing import Any, ClassVar
 
 from venus_evcharger.core.contracts import timestamp_age_within
+from venus_evcharger.update.input_cache import _UpdateCycleInputCache
 
 
-class _UpdateCycleOfflineMixin:
+class _UpdateCycleOffline(_UpdateCycleInputCache):
     FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
     service: Any
-
-    if TYPE_CHECKING:  # pragma: no cover
-
-        def _phase_data_for_pm_status(
-            self,
-            pm_status: dict[str, Any] | None,
-            total_power: float,
-            voltage: float,
-            total_current: float,
-        ) -> dict[str, dict[str, float]]: ...
-
-        def _total_phase_current(self, phase_data: dict[str, dict[str, float]]) -> float: ...
-
-        def update_virtual_state(self, status: int, energy_forward: float, relay_on: bool) -> bool: ...
 
     @staticmethod
     def _offline_health_reason(svc: Any) -> str:
@@ -93,7 +80,7 @@ class _UpdateCycleOfflineMixin:
         relay_on = self._offline_confirmed_relay_state(svc, now)
         power, energy_forward, status = self._offline_power_state()
         self._mark_offline_status_state(svc)
-        phase_data = self._phase_data_for_pm_status(offline_pm_status, power, voltage, 0.0)
+        phase_data = self._phase_data_for_pm_status(offline_pm_status, power, voltage)
         svc._set_health(self._offline_health_reason(svc), cached=False)
         total_current = self._total_phase_current(phase_data)
         changed = self._publish_offline_live_state(
@@ -109,11 +96,20 @@ class _UpdateCycleOfflineMixin:
         )
         if changed:
             svc._bump_update_index(now)
-        svc.last_update = svc._time_now()
+        completed_at = self._mark_offline_update_completed(svc)
         publish_companion = getattr(svc, "_publish_companion_dbus_bridge", None)
         if callable(publish_companion):
-            publish_companion(now)
+            publish_companion(completed_at)
         return True
+
+    @staticmethod
+    def _mark_offline_update_completed(svc: Any) -> float:
+        """Mark one offline publish as a completed, watchdog-fresh update cycle."""
+        completed_at = float(svc._time_now())
+        svc._last_successful_update_at = completed_at
+        svc._last_recovery_attempt_at = None
+        svc.last_update = completed_at
+        return completed_at
 
     @staticmethod
     def _offline_voltage(svc: Any) -> float:
@@ -136,14 +132,11 @@ class _UpdateCycleOfflineMixin:
         )
         if offline_pm_status_at is None:
             return None
-        if not cls._offline_confirmed_relay_sample_present(
-            offline_pm_status,
-            offline_pm_status_at,
-        ):
+        if not isinstance(offline_pm_status, dict) or "output" not in offline_pm_status:
             return None
         if not cls._offline_confirmed_relay_sample_fresh(svc, now, offline_pm_status_at):
             return None
-        return cast(dict[str, Any], offline_pm_status)
+        return offline_pm_status
 
     @staticmethod
     def _offline_power_state() -> tuple[float, float, int]:
@@ -153,7 +146,7 @@ class _UpdateCycleOfflineMixin:
     @staticmethod
     def _mark_offline_status_state(svc: Any) -> None:
         """Mark service observability fields for one offline Shelly publish."""
-        svc._last_status_source = _UpdateCycleOfflineMixin._offline_health_reason(svc)
+        svc._last_status_source = _UpdateCycleOffline._offline_health_reason(svc)
         svc._last_charger_fault_active = 0
 
     def _publish_offline_live_state(
@@ -170,7 +163,6 @@ class _UpdateCycleOfflineMixin:
         relay_on: bool,
     ) -> bool:
         """Publish one offline measurement set and matching virtual charger state."""
-        changed = False
-        changed |= svc._publish_live_measurements(power, voltage, total_current, phase_data, now)
-        changed |= self.update_virtual_state(status, energy_forward, relay_on)
-        return bool(changed)
+        measurements_changed = bool(svc._publish_live_measurements(power, voltage, total_current, phase_data, now))
+        virtual_state_changed = bool(self.update_virtual_state(status, energy_forward, relay_on))
+        return measurements_changed or virtual_state_changed

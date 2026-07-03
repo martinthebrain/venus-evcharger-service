@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, cast
+from typing import Any
 
 from venus_evcharger.core.common_types import (
     AUTO_STATE_CODES,
@@ -244,7 +244,7 @@ def _confirmed_relay_sample(svc: Any) -> tuple[dict[str, Any] | None, Any]:
         captured_at = getattr(svc, "_last_pm_status_at", None)
     if not isinstance(pm_status, dict):
         return None, None
-    return cast(dict[str, Any], pm_status), captured_at
+    return {str(key): value for key, value in pm_status.items()}, captured_at
 
 
 def _confirmed_relay_sample_valid(pm_status: dict[str, Any] | None, captured_at: Any) -> bool:

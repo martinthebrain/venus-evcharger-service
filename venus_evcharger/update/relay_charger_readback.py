@@ -1,37 +1,60 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# mypy: disable-error-code="attr-defined"
-# pyright: reportAttributeAccessIssue=false
 """Fresh charger readback helpers for the update-cycle relay logic."""
 
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.update.relay_charger_health import _RelayChargerHealth
 
 
-class _RelayChargerReadbackMixin:
+@runtime_checkable
+class ChargerEnableBackend(Protocol):
+    """Charger backend surface required for enable/disable writes."""
+
+    def set_enabled(self, enabled: bool) -> None: ...  # pragma: no cover
+
+
+@runtime_checkable
+class ChargerCurrentBackend(Protocol):
+    """Charger backend surface required for current writes."""
+
+    def set_current(self, amps: float) -> None: ...  # pragma: no cover
+
+
+class _RelayChargerReadback(_RelayChargerHealth):
     """Normalize fresh charger and switch readback surfaces for later policy code."""
 
-    @staticmethod
-    def _charger_enable_backend(svc: Any) -> object | None:
-        backend = getattr(svc, "_charger_backend", None)
-        return backend if hasattr(backend, "set_enabled") else None
+    if TYPE_CHECKING:  # pragma: no cover
+        CHARGER_FAULT_HINT_TOKENS: frozenset[str]
 
     @staticmethod
-    def _charger_current_backend(svc: Any) -> object | None:
+    def _charger_enable_backend(svc: Any) -> ChargerEnableBackend | None:
         backend = getattr(svc, "_charger_backend", None)
-        return backend if hasattr(backend, "set_current") else None
+        return backend if isinstance(backend, ChargerEnableBackend) else None
 
     @staticmethod
-    def _charger_state_max_age_seconds(svc: Any) -> float:
+    def _charger_current_backend(svc: Any) -> ChargerCurrentBackend | None:
+        backend = getattr(svc, "_charger_backend", None)
+        return backend if isinstance(backend, ChargerCurrentBackend) else None
+
+    @staticmethod
+    def _positive_freshness_candidate(svc: Any, attribute_name: str) -> float | None:
+        value = finite_float_or_none(getattr(svc, attribute_name, None))
+        if value is None or value <= 0.0:
+            return None
+        return float(value)
+
+    @classmethod
+    def _charger_state_max_age_seconds(cls, svc: Any) -> float:
         candidates = [2.0]
-        worker_poll_interval = finite_float_or_none(getattr(svc, "_worker_poll_interval_seconds", None))
-        if worker_poll_interval is not None and worker_poll_interval > 0.0:
+        worker_poll_interval = cls._positive_freshness_candidate(svc, "_worker_poll_interval_seconds")
+        if worker_poll_interval is not None:
             candidates.append(float(worker_poll_interval) * 2.0)
-        soft_fail_seconds = finite_float_or_none(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
-        if soft_fail_seconds is not None and soft_fail_seconds > 0.0:
+        soft_fail_seconds = cls._positive_freshness_candidate(svc, "auto_shelly_soft_fail_seconds")
+        if soft_fail_seconds is not None:
             candidates.append(float(soft_fail_seconds))
         return max(1.0, min(candidates))
 
@@ -69,28 +92,28 @@ class _RelayChargerReadbackMixin:
     def _fresh_switch_feedback_closed(cls, svc: Any, now: float | None = None) -> bool | None:
         if cls._fresh_switch_feedback_timestamp(svc, now) is None:
             return None
-        raw_value = getattr(svc, "_last_switch_feedback_closed", None)
-        if raw_value is None:
-            return None
-        return bool(raw_value)
+        return cls._optional_bool_readback(svc, "_last_switch_feedback_closed")
 
     @classmethod
     def _fresh_switch_interlock_ok(cls, svc: Any, now: float | None = None) -> bool | None:
         if cls._fresh_switch_feedback_timestamp(svc, now) is None:
             return None
-        raw_value = getattr(svc, "_last_switch_interlock_ok", None)
-        if raw_value is None:
-            return None
-        return bool(raw_value)
+        return cls._optional_bool_readback(svc, "_last_switch_interlock_ok")
 
     @classmethod
     def _fresh_charger_enabled_readback(cls, svc: Any, now: float | None = None) -> bool | None:
         if cls._fresh_charger_state_timestamp(svc, now) is None:
             return None
-        raw_enabled = getattr(svc, "_last_charger_state_enabled", None)
-        if raw_enabled is None:
+        return cls._optional_bool_readback(svc, "_last_charger_state_enabled")
+
+    @staticmethod
+    def _optional_bool_readback(svc: Any, attribute_name: str) -> bool | None:
+        if not hasattr(svc, attribute_name):
             return None
-        return bool(raw_enabled)
+        raw_value = getattr(svc, attribute_name)
+        if raw_value is None:
+            return None
+        return bool(raw_value)
 
     @classmethod
     def _fresh_charger_float_readback(

@@ -1,0 +1,1 @@
+{"coalesce_key":"refresh:grid_power_w","created_at":1783040257.33583,"id":"coalesced-b0d949476a36815b3f0f4b63","key":"grid_power_w","kind":"refresh_value","lifecycle_state":"coalesced","priority":"read","queue_class":"read-fast","reason":"helper semantic grid power read","schema_version":1,"source":"auto-input-helper","updated_at":1783042667.104841}
