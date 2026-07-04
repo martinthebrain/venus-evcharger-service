@@ -25,6 +25,20 @@ from venus_evcharger.energy import EnergyClusterSnapshot, EnergyLearningProfile,
 
 class TestDbusInputController(unittest.TestCase):
     @staticmethod
+    def _energy_services_cache(service: SimpleNamespace) -> dict[str, str]:
+        cache = service._resolved_auto_energy_services
+        if not isinstance(cache, dict):
+            raise AssertionError("_resolved_auto_energy_services must be restored to a dict")
+        return cast(dict[str, str], cache)
+
+    @staticmethod
+    def _energy_scan_cache(service: SimpleNamespace) -> dict[str, float]:
+        cache = service._auto_energy_last_scan
+        if not isinstance(cache, dict):
+            raise AssertionError("_auto_energy_last_scan must be restored to a dict")
+        return cast(dict[str, float], cache)
+
+    @staticmethod
     def _make_service() -> SimpleNamespace:
         service = SimpleNamespace(
             auto_pv_service="",
@@ -760,8 +774,8 @@ class TestDbusInputController(unittest.TestCase):
         controller_any._energy_source_has_readable_data.reset_mock()
         self.assertEqual(controller._configured_energy_source_service(readable_source, 10.0), "configured-aux")
         controller_any._energy_source_has_readable_data.assert_called_once_with(readable_source, "configured-aux")
-        self.assertEqual(service._resolved_auto_energy_services["aux"], "configured-aux")
-        self.assertEqual(service._auto_energy_last_scan["aux"], 10.0)
+        self.assertEqual(self._energy_services_cache(service)["aux"], "configured-aux")
+        self.assertEqual(self._energy_scan_cache(service)["aux"], 10.0)
 
         controller_any._battery_service_has_soc = MagicMock(return_value=True)
         controller_any._energy_source_has_readable_data = MagicMock(side_effect=AssertionError("not needed after SOC"))
@@ -805,8 +819,8 @@ class TestDbusInputController(unittest.TestCase):
         service._auto_energy_last_scan = "bad"
         self.assertIsNone(controller._energy_cache_valid("aux", 30.0))
         self.assertEqual(controller._remember_energy_service("aux", "remembered", 40.0), "remembered")
-        self.assertEqual(service._resolved_auto_energy_services["aux"], "remembered")
-        self.assertEqual(service._auto_energy_last_scan["aux"], 40.0)
+        self.assertEqual(self._energy_services_cache(service)["aux"], "remembered")
+        self.assertEqual(self._energy_scan_cache(service)["aux"], 40.0)
 
         service._list_dbus_services = MagicMock(return_value=["com.example.aux.1", "com.example.other"])
         probe_calls: list[tuple[EnergySourceDefinition, str]] = []
@@ -817,8 +831,8 @@ class TestDbusInputController(unittest.TestCase):
 
         controller_any._energy_source_has_readable_data = MagicMock(side_effect=_readable_probe)
         self.assertEqual(controller._discovered_energy_source_service(readable_source, 50.0), "com.example.aux.1")
-        self.assertEqual(service._resolved_auto_energy_services["aux"], "com.example.aux.1")
-        self.assertEqual(service._auto_energy_last_scan["aux"], 50.0)
+        self.assertEqual(self._energy_services_cache(service)["aux"], "com.example.aux.1")
+        self.assertEqual(self._energy_scan_cache(service)["aux"], 50.0)
         self.assertEqual(probe_calls, [(readable_source, "com.example.aux.1")])
         with self.assertRaisesRegex(ValueError, "No readable DBus service configured"):
             controller._discovered_energy_source_service(
