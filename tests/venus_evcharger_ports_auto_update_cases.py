@@ -139,7 +139,7 @@ class TestWallboxPortsAutoUpdate(unittest.TestCase):
         self.assertEqual(service.virtual_startstop, 0)
 
     def test_update_cycle_port_forwards_mutable_runtime_fields(self) -> None:
-        service = SimpleNamespace(_startup_manual_target=None, virtual_mode=1, auto_shelly_soft_fail_seconds=10.0, _last_health_reason="init", _last_health_code=0, _last_auto_state="weird", _last_auto_state_code=99, charging_started_at=None, energy_at_start=0.0, virtual_startstop=0, virtual_enable=1, phase="L1", voltage_mode="phase", last_status=0, _last_pm_status=None, _last_pm_status_at=None, _last_voltage=None, auto_input_cache_seconds=120.0, _auto_cached_inputs_used=False, _error_state={"cache_hits": 0}, _last_pv_value=None, _last_pv_at=None, _last_grid_value=None, _last_grid_at=None, _last_battery_soc_value=None, _last_battery_soc_at=None, auto_audit_log=False, _last_auto_metrics={}, charging_threshold_watts=100.0, idle_status=6, _last_successful_update_at=None, _last_recovery_attempt_at=None, last_update=0.0, service_name="svc", _dbusservice={"/Ac/Power": 0.0}, _mode_uses_auto_logic=MagicMock(return_value=True), _normalize_mode=MagicMock(return_value=2), _last_pm_status_confirmed=False, learned_charge_power_state="mystery")
+        service = SimpleNamespace(_startup_manual_target=None, virtual_mode=1, auto_shelly_soft_fail_seconds=10.0, _last_health_reason="init", _last_health_code=0, _last_auto_state="weird", _last_auto_state_code=99, charging_started_at=None, energy_at_start=0.0, virtual_startstop=0, virtual_enable=1, phase="L1", voltage_mode="phase", last_status=0, _last_pm_status=None, _last_pm_status_at=None, _last_voltage=None, auto_input_cache_seconds=120.0, _auto_cached_inputs_used=False, _error_state={"cache_hits": 0}, _last_pv_value=None, _last_pv_at=None, _last_grid_value=None, _last_grid_at=None, _last_battery_soc_value=None, _last_battery_soc_at=None, auto_audit_log=False, _last_auto_metrics={}, charging_threshold_watts=100.0, idle_status=6, _last_successful_update_at=None, _last_recovery_attempt_at=None, last_update=0.0, service_name="svc", _dbusservice={"/Ac/Power": 0.0}, _mode_uses_auto_logic=MagicMock(return_value=True), _normalize_mode=MagicMock(return_value=2), _last_pm_status_confirmed=False, learned_charge_power_state="mystery", learned_charge_power_confidence=0.0, learned_charge_power_stability_score=0.0, learned_charge_power_reason="old", learned_charge_power_detail="old-detail")
         port = UpdateCyclePort(service)
         port.last_status = 2
         port._startup_manual_target = cast(Any, 1)
@@ -148,6 +148,10 @@ class TestWallboxPortsAutoUpdate(unittest.TestCase):
         port.virtual_enable = 7
         port._last_pm_status_confirmed = cast(Any, 1)
         port.learned_charge_power_state = "stable"
+        port.learned_charge_power_confidence = 0.81
+        port.learned_charge_power_stability_score = 0.73
+        port.learned_charge_power_reason = "signature-ok"
+        port.learned_charge_power_detail = "stable-window"
         self.assertEqual(service.last_status, 2)
         self.assertTrue(service._startup_manual_target)
         self.assertEqual(service.virtual_mode, 2)
@@ -155,6 +159,10 @@ class TestWallboxPortsAutoUpdate(unittest.TestCase):
         self.assertEqual(service.virtual_enable, 1)
         self.assertTrue(service._last_pm_status_confirmed)
         self.assertEqual(service.learned_charge_power_state, "stable")
+        self.assertEqual(service.learned_charge_power_confidence, 0.81)
+        self.assertEqual(service.learned_charge_power_stability_score, 0.73)
+        self.assertEqual(service.learned_charge_power_reason, "signature-ok")
+        self.assertEqual(service.learned_charge_power_detail, "stable-window")
 
     def test_update_cycle_port_property_normalizers_cover_remaining_paths(self) -> None:
         service = SimpleNamespace(
