@@ -76,6 +76,12 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             )
             (target_dir / "tests").mkdir(parents=True, exist_ok=True)
             (target_dir / "tests/stale.txt").write_text("stale\n", encoding="utf-8")
+            for retired_name in (
+                "DBUS_INTROSPECTION_WORKER.md",
+                "dbus_adapter_write.py",
+                "venus_evcharger_dbus_introspection_worker.py",
+            ):
+                (target_dir / retired_name).write_text("retired\n", encoding="utf-8")
 
             subprocess.run(
                 ["bash", str(UPDATER_SCRIPT), str(target_dir)],
@@ -110,6 +116,12 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             )
             self.assertFalse((target_dir / "tests").exists())
             self.assertFalse((target_dir / "docs").exists())
+            for retired_name in (
+                "DBUS_INTROSPECTION_WORKER.md",
+                "dbus_adapter_write.py",
+                "venus_evcharger_dbus_introspection_worker.py",
+            ):
+                self.assertFalse((target_dir / retired_name).exists())
             backup_candidates = sorted((target_dir / "deploy/venus").glob("config.venus_evcharger.ini.bak-*"))
             self.assertEqual(len(backup_candidates), 1)
             self.assertEqual(backup_candidates[0].read_text(encoding="utf-8"), original_config)
