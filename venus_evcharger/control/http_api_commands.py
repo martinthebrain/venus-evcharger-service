@@ -66,7 +66,7 @@ class _LocalControlApiCommand(_LocalControlApiAuth):
             return None
         try:
             raw_payload = handler.rfile.read(max(0, content_length))
-            parsed = json.loads(raw_payload.decode("utf-8") or "{}")
+            parsed = json.loads(raw_payload.decode() or "{}")
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._write_error(handler, HTTPStatus.BAD_REQUEST, "invalid_json", "Invalid JSON body.")
             return None
@@ -80,49 +80,85 @@ class _LocalControlApiCommand(_LocalControlApiAuth):
         client_host = self._client_host(handler)
         replay = self._replayed_response(tracked_payload)
         if replay is not None:
-            self._record_command_audit(
-                command=replay[1].get("command"),
-                result=replay[1].get("result"),
-                error=replay[1].get("error"),
-                replayed=True,
-                scope="control",
-                client_host=client_host,
-                status_code=int(replay[0]),
-            )
-            self._write_json(handler, replay[0], replay[1], extra_headers=self._state_token_headers())
+            self._write_replayed_command_response(handler, replay, client_host)
             return
         try:
             command = self._service._control_command_from_payload(tracked_payload, source="http")
             command = self._tracked_command(tracked_payload, command)
         except ValueError as error:
-            error_message = str(error)
-            response_payload = self._error_response_payload(self._payload_error_code(error_message), error_message)
-            self._record_command_audit(
-                command=tracked_payload,
-                result=None,
-                error=optional_error_payload(response_payload),
-                replayed=False,
-                scope="control",
-                client_host=client_host,
-                status_code=int(HTTPStatus.BAD_REQUEST),
-            )
-            self._write_json(handler, HTTPStatus.BAD_REQUEST, response_payload, extra_headers=self._state_token_headers())
+            self._write_validation_error_response(handler, tracked_payload, str(error), client_host)
             return
         rate_limit_error = self._rate_limit_error(client_host, command.name)
         if rate_limit_error is not None:
-            status, response_payload, headers = rate_limit_error
-            self._record_command_audit(
-                command=command,
-                result=None,
-                error=optional_error_payload(response_payload),
-                replayed=False,
-                scope="control",
-                client_host=client_host,
-                status_code=int(status),
-            )
-            self._write_json(handler, status, response_payload, extra_headers={**self._state_token_headers(), **headers})
+            self._write_rate_limit_error_response(handler, command, rate_limit_error, client_host)
             return
         result = self._service._handle_control_command(command)
+        self._write_new_command_response(handler, tracked_payload, command, result, client_host)
+
+    def _write_replayed_command_response(
+        self,
+        handler: BaseHTTPRequestHandler,
+        replay: tuple[HTTPStatus, dict[str, Any]],
+        client_host: str,
+    ) -> None:
+        status, response_payload = replay
+        self._record_command_audit(
+            command=response_payload.get("command"),
+            result=response_payload.get("result"),
+            error=response_payload.get("error"),
+            replayed=True,
+            scope="control",
+            client_host=client_host,
+            status_code=int(status),
+        )
+        self._write_json(handler, status, response_payload, extra_headers=self._state_token_headers())
+
+    def _write_validation_error_response(
+        self,
+        handler: BaseHTTPRequestHandler,
+        tracked_payload: dict[str, Any],
+        error_message: str,
+        client_host: str,
+    ) -> None:
+        response_payload = self._error_response_payload(self._payload_error_code(error_message), error_message)
+        self._record_command_audit(
+            command=tracked_payload,
+            result=None,
+            error=optional_error_payload(response_payload),
+            replayed=False,
+            scope="control",
+            client_host=client_host,
+            status_code=int(HTTPStatus.BAD_REQUEST),
+        )
+        self._write_json(handler, HTTPStatus.BAD_REQUEST, response_payload, extra_headers=self._state_token_headers())
+
+    def _write_rate_limit_error_response(
+        self,
+        handler: BaseHTTPRequestHandler,
+        command: ControlCommand,
+        rate_limit_error: tuple[HTTPStatus, dict[str, Any], dict[str, str]],
+        client_host: str,
+    ) -> None:
+        status, response_payload, headers = rate_limit_error
+        self._record_command_audit(
+            command=command,
+            result=None,
+            error=optional_error_payload(response_payload),
+            replayed=False,
+            scope="control",
+            client_host=client_host,
+            status_code=int(status),
+        )
+        self._write_json(handler, status, response_payload, extra_headers={**self._state_token_headers(), **headers})
+
+    def _write_new_command_response(
+        self,
+        handler: BaseHTTPRequestHandler,
+        tracked_payload: dict[str, Any],
+        command: ControlCommand,
+        result: ControlResult,
+        client_host: str,
+    ) -> None:
         status = self._http_status_for_result(result)
         response_payload = self._command_response_payload(command, result, replayed=False)
         self._cache_idempotent_response(tracked_payload, status, response_payload, command, result)
@@ -242,7 +278,6 @@ class _LocalControlApiCommand(_LocalControlApiAuth):
 
     def _command_response_payload(self, command: ControlCommand, result: ControlResult, *, replayed: bool) -> dict[str, Any]:
         return command_response_payload(
-            command,
             result,
             replayed=replayed,
             command_payload=self._command_payload(command),

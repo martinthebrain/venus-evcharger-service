@@ -9,27 +9,33 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any
 
 from venus_evcharger.control.models import ControlCommand, ControlResult
-from venus_evcharger.core.contracts import (
-    normalized_control_api_command_response_fields,
-    normalized_control_api_error_fields,
-)
 
 
 def tracked_command(payload: dict[str, Any], command: ControlCommand) -> ControlCommand:
-    if not command.command_id or command.idempotency_key != str(payload.get("idempotency_key", "")).strip():
+    command_id = _payload_text(payload, "command_id")
+    idempotency_key = _payload_text(payload, "idempotency_key")
+    if not command.command_id or command.idempotency_key != idempotency_key:
         return replace(
             command,
-            command_id=str(payload.get("command_id", "")).strip(),
-            idempotency_key=str(payload.get("idempotency_key", "")).strip(),
+            command_id=command_id,
+            idempotency_key=idempotency_key,
         )
     return command
 
 
+def _payload_text(payload: dict[str, Any], key: str) -> str:
+    return str(payload.get(key, "")).strip()
+
+
 def payload_error_code(message: str) -> str:
     lowered = message.lower()
-    if "unsupported control command" in lowered or "unsupported control path" in lowered:
-        return "unsupported_command"
-    if "does not support path" in lowered or "requires one of:" in lowered:
+    unsupported_tokens = (
+        "unsupported control command",
+        "unsupported control path",
+        "does not support path",
+        "requires one of:",
+    )
+    if any(token in lowered for token in unsupported_tokens):
         return "unsupported_command"
     return "validation_error"
 
@@ -40,25 +46,23 @@ def throttled_response(
     retry_after: float,
 ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]]:
     retry_seconds = max(1, int(retry_after) if retry_after.is_integer() else int(retry_after) + 1)
-    payload = normalized_control_api_command_response_fields(
-        {
-            "ok": False,
-            "detail": message,
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": True,
-                "details": {"retry_after_seconds": retry_after},
-            },
-        }
+    payload = command_api_response(
+        ok=False,
+        detail=message,
+        error=error_payload(
+            code=code,
+            message=message,
+            retryable=True,
+            details={"retry_after_seconds": retry_after},
+        ),
     )
     return HTTPStatus.TOO_MANY_REQUESTS, payload, {"Retry-After": str(retry_seconds)}
 
 
 def tracked_payload(handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> dict[str, Any]:
     tracked = dict(payload)
-    command_id = str(tracked.get("command_id", "")).strip() or handler.headers.get("X-Command-Id", "").strip()
-    idempotency_key = str(tracked.get("idempotency_key", "")).strip() or handler.headers.get("Idempotency-Key", "").strip()
+    command_id = _payload_text(tracked, "command_id") or handler.headers.get("X-Command-Id", "").strip()
+    idempotency_key = _payload_text(tracked, "idempotency_key") or handler.headers.get("Idempotency-Key", "").strip()
     tracked["command_id"] = command_id or uuid.uuid4().hex
     tracked["idempotency_key"] = idempotency_key
     return tracked
@@ -68,23 +72,23 @@ def idempotency_conflict_response(idempotency_key: str) -> tuple[HTTPStatus, dic
     message = "Idempotency-Key was already used for a different payload."
     return (
         HTTPStatus.CONFLICT,
-        normalized_control_api_command_response_fields(
-            {
-                "ok": False,
-                "detail": message,
-                "error": {
-                    "code": "idempotency_conflict",
-                    "message": message,
-                    "retryable": False,
-                    "details": {"idempotency_key": idempotency_key},
-                },
-            }
+        command_api_response(
+            ok=False,
+            detail=message,
+            error=error_payload(
+                code="idempotency_conflict",
+                message=message,
+                retryable=False,
+                details={"idempotency_key": idempotency_key},
+            ),
         ),
     )
 
 
 def replayed_payload(response_payload: dict[str, Any]) -> dict[str, Any]:
-    return normalized_control_api_command_response_fields({**response_payload, "replayed": True})
+    replayed = dict(response_payload)
+    replayed["replayed"] = True
+    return replayed
 
 
 def idempotency_fingerprint(payload: dict[str, Any]) -> str:
@@ -97,7 +101,6 @@ def idempotency_fingerprint(payload: dict[str, Any]) -> str:
 
 
 def command_response_payload(
-    command: ControlCommand,
     result: ControlResult,
     *,
     replayed: bool,
@@ -106,48 +109,80 @@ def command_response_payload(
 ) -> dict[str, Any]:
     error_payload = None
     if not result.accepted:
-        error_payload = normalized_control_api_error_fields(
-            {
-                "code": result_error_code(result),
-                "message": result.detail or "Command rejected.",
-                "retryable": result.reversible_failure,
-                "details": {
-                    "status": result.status,
-                    "path": result.command.path,
-                    "command_id": result.command.command_id,
-                    "idempotency_key": result.command.idempotency_key,
-                },
-            }
-        )
-    return normalized_control_api_command_response_fields(
-        {
-            "ok": bool(result.accepted),
-            "detail": result.detail,
-            "replayed": replayed,
-            "command": command_payload,
-            "result": result_payload,
-            "error": error_payload,
-        }
+        error_payload = error_payload_for_result(result)
+    return command_api_response(
+        ok=bool(result.accepted),
+        detail=result.detail,
+        command=command_payload,
+        result=result_payload,
+        replayed=replayed,
+        error=error_payload,
+    )
+
+
+def error_payload_for_result(result: ControlResult) -> dict[str, Any]:
+    return error_payload(
+        code=result_error_code(result),
+        message=result.detail or "Command rejected.",
+        retryable=result.reversible_failure,
+        details={
+            "status": result.status,
+            "path": result.command.path,
+            "command_id": result.command.command_id,
+            "idempotency_key": result.command.idempotency_key,
+        },
     )
 
 
 def optimistic_concurrency_payload(expected_tokens: set[str], current_token: str) -> dict[str, Any]:
     message = "If-Match state token does not match the current local service state."
-    return normalized_control_api_command_response_fields(
-        {
-            "ok": False,
-            "detail": message,
-            "error": {
-                "code": "conflict",
-                "message": message,
-                "retryable": True,
-                "details": {
-                    "expected": sorted(expected_tokens),
-                    "current": current_token,
-                },
+    return command_api_response(
+        ok=False,
+        detail=message,
+        error=error_payload(
+            code="conflict",
+            message=message,
+            retryable=True,
+            details={
+                "expected": sorted(expected_tokens),
+                "current": current_token,
             },
-        }
+        ),
     )
+
+
+def command_api_response(
+    *,
+    ok: bool,
+    detail: str,
+    command: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    replayed: bool = False,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": ok,
+        "detail": detail,
+        "command": command,
+        "result": result,
+        "replayed": replayed,
+        "error": error,
+    }
+
+
+def error_payload(
+    *,
+    code: str,
+    message: str,
+    retryable: bool,
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+        "details": details,
+    }
 
 
 def result_error_code(result: ControlResult) -> str:

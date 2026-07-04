@@ -1,5 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.control_api_http_cases_tail_support import *  # noqa: F401,F403
+from venus_evcharger.control.http_api_command_payloads import (
+    command_response_payload,
+    idempotency_conflict_response,
+    idempotency_fingerprint,
+    optimistic_concurrency_payload,
+    replayed_payload,
+    throttled_response,
+    tracked_command,
+    tracked_payload,
+)
 
 class __ControlApiHttpTailCasesPart2:
     def test_command_endpoint_rejects_payloads_that_fail_strict_command_schema_validation(self) -> None:
@@ -34,9 +44,494 @@ class __ControlApiHttpTailCasesPart2:
         self.assertIsNone(server._read_json_payload(invalid_length_handler))
         self.assertEqual(invalid_length_handler.status_code, 400)
         self.assertEqual(invalid_length_handler.json_payload()["error"]["code"], "invalid_content_length")
+        self.assertEqual(invalid_length_handler.json_payload()["detail"], "Invalid Content-Length.")
         self.assertIsNone(server._read_json_payload(list_handler))
         self.assertEqual(list_handler.status_code, 400)
         self.assertEqual(list_handler.json_payload()["error"]["code"], "invalid_payload")
+        self.assertEqual(list_handler.json_payload()["detail"], "JSON body must be an object.")
+
+    def test_read_json_payload_accepts_empty_and_valid_json_and_rejects_bad_utf8(self) -> None:
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        empty_handler = _FakeHandler("/v1/control/command", body=b"")
+        valid_handler = _FakeHandler("/v1/control/command", body=b'{"name":"set_mode","value":1}')
+        bad_utf8_handler = _FakeHandler("/v1/control/command", body=b"\xff")
+        negative_length_handler = _FakeHandler("/v1/control/command", body=b'{"ignored":true}')
+        negative_length_handler.headers["Content-Length"] = "-3"
+        missing_length_handler = _FakeHandler("/v1/control/command", body=b"")
+        del missing_length_handler.headers["Content-Length"]
+
+        self.assertEqual(server._read_json_payload(empty_handler), {})
+        self.assertEqual(server._read_json_payload(valid_handler), {"name": "set_mode", "value": 1})
+        self.assertEqual(server._read_json_payload(negative_length_handler), {})
+        self.assertEqual(server._read_json_payload(missing_length_handler), {})
+        self.assertIsNone(server._read_json_payload(bad_utf8_handler))
+        self.assertEqual(bad_utf8_handler.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(bad_utf8_handler.json_payload()["error"]["code"], "invalid_json")
+        self.assertEqual(bad_utf8_handler.json_payload()["detail"], "Invalid JSON body.")
+
+    def test_command_role_rate_limit_replay_cache_concurrency_and_audit_paths(self) -> None:
+        command = ControlCommand(
+            name="set_mode",
+            path="/Mode",
+            value=1,
+            source="http",
+            command_id="cmd-1",
+            idempotency_key="idem-1",
+        )
+        result = ControlResult.applied_result(command, detail="Applied.")
+        event_publish = MagicMock()
+        audit = MagicMock()
+        store = SimpleNamespace(get=MagicMock(return_value=None), put=MagicMock())
+        limiter = SimpleNamespace(
+            allow_request=MagicMock(return_value=(True, 0.0)),
+            allow_command=MagicMock(return_value=(True, 0.0)),
+        )
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(return_value=command),
+            _handle_control_command=MagicMock(return_value=result),
+            _control_api_idempotency_store=MagicMock(return_value=store),
+            _control_api_rate_limiter=MagicMock(return_value=limiter),
+            _publish_control_api_command_event=event_publish,
+            _record_control_api_command_audit=audit,
+            _control_api_state_token=MagicMock(return_value="state-1"),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+
+        self.assertIsNone(server._rate_limit_error("", "set_mode"))
+        limiter.allow_request.assert_called_with("local")
+        limiter.allow_command.assert_called_with("local", "set_mode")
+
+        limiter.allow_request.return_value = (False, 1.2)
+        request_limit = server._rate_limit_error("client-a", "set_mode")
+        self.assertIsNotNone(request_limit)
+        assert request_limit is not None
+        self.assertEqual(request_limit[0], HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(request_limit[1]["error"]["code"], "rate_limited")
+        self.assertEqual(request_limit[1]["detail"], "Too many control requests in a short time window.")
+        self.assertEqual(request_limit[1]["error"]["message"], "Too many control requests in a short time window.")
+        limiter.allow_command.assert_called_once_with("local", "set_mode")
+
+        limiter.allow_request.return_value = (True, 0.0)
+        limiter.allow_command.return_value = (False, 2.0)
+        command_limit = server._rate_limit_error("client-b", "set_mode")
+        self.assertIsNotNone(command_limit)
+        assert command_limit is not None
+        self.assertEqual(command_limit[1]["error"]["code"], "cooldown_active")
+        self.assertIn("set_mode", command_limit[1]["detail"])
+        self.assertEqual(command_limit[1]["error"]["message"], "Command 'set_mode' is temporarily cooling down.")
+
+        self.assertIsNone(server._replayed_response({}))
+        self.assertIsNone(server._replayed_response({"idempotency_key": ""}))
+        self.assertIsNone(server._replayed_response({"idempotency_key": "missing"}))
+        cached_payload = {
+            "ok": True,
+            "detail": "Applied.",
+            "command": {"name": "set_mode"},
+            "result": {"status": "applied"},
+            "replayed": False,
+            "error": None,
+        }
+        store.get.return_value = (server._idempotency_fingerprint({"idempotency_key": "idem-1", "value": 1}), 200, cached_payload)
+        replay = server._replayed_response({"idempotency_key": "idem-1", "value": 1})
+        self.assertEqual(replay, (HTTPStatus.OK, {**cached_payload, "replayed": True}))
+        event_publish.assert_called_once_with({"name": "set_mode"}, {"status": "applied"}, replayed=True)
+
+        conflict = server._replayed_response({"idempotency_key": "idem-1", "value": 2})
+        self.assertIsNotNone(conflict)
+        assert conflict is not None
+        self.assertEqual(conflict[0], HTTPStatus.CONFLICT)
+        self.assertEqual(conflict[1]["error"]["code"], "idempotency_conflict")
+        self.assertEqual(conflict[1]["error"]["details"], {"idempotency_key": "idem-1"})
+
+        server._cache_idempotent_response({}, HTTPStatus.OK, cached_payload, command, result)
+        server._cache_idempotent_response({"idempotency_key": ""}, HTTPStatus.OK, cached_payload, command, result)
+        put_calls_after_empty = store.put.call_count
+        server._cache_idempotent_response({"idempotency_key": "idem-1", "value": 1}, HTTPStatus.ACCEPTED, cached_payload, command, result)
+        self.assertEqual(store.put.call_count, put_calls_after_empty + 1)
+        put_args = store.put.call_args.args
+        self.assertEqual(put_args[0], "idem-1")
+        self.assertEqual(put_args[2], int(HTTPStatus.ACCEPTED))
+        self.assertEqual(put_args[3]["command"]["command_id"], "cmd-1")
+        self.assertEqual(put_args[3]["result"]["status"], "applied")
+
+        no_token_handler = _FakeHandler("/v1/control/command")
+        wildcard_handler = _FakeHandler("/v1/control/command", headers={"If-Match": "*"})
+        matching_handler = _FakeHandler("/v1/control/command", headers={"If-Match": '"state-1"'})
+        stale_handler = _FakeHandler("/v1/control/command", headers={"If-Match": '"stale"'})
+        self.assertIsNone(server._optimistic_concurrency_error(no_token_handler))
+        self.assertIsNone(server._optimistic_concurrency_error(wildcard_handler))
+        self.assertIsNone(server._optimistic_concurrency_error(matching_handler))
+        concurrency = server._optimistic_concurrency_error(stale_handler)
+        self.assertIsNotNone(concurrency)
+        assert concurrency is not None
+        self.assertEqual(concurrency[0], HTTPStatus.CONFLICT)
+        self.assertEqual(concurrency[1]["error"]["details"]["current"], "state-1")
+        self.assertEqual(concurrency[2], {"ETag": '"state-1"', "X-State-Token": "state-1"})
+
+        server._record_command_audit(
+            command={"name": "set_mode"},
+            result={"status": "applied"},
+            error=None,
+            replayed=False,
+            scope="control",
+            client_host="client-c",
+            status_code=200,
+        )
+        self.assertEqual(
+            audit.call_args.kwargs,
+            {
+                "command": {"name": "set_mode"},
+                "result": {"status": "applied"},
+                "error": None,
+                "replayed": False,
+                "scope": "control",
+                "client_host": "client-c",
+                "status_code": 200,
+                "transport": "http",
+            },
+        )
+
+        silent_server = LocalControlApiHttpServer(SimpleNamespace(_control_command_from_payload=MagicMock(), _handle_control_command=MagicMock()), host="127.0.0.1", port=8765)
+        silent_server._record_command_audit(command=None, result=None, error=None, replayed=False, scope="control", client_host="", status_code=204)
+        silent_server._publish_replayed_command_event(None, {"status": "applied"})
+        silent_server._publish_replayed_command_event({"name": "set_mode"}, None)
+
+    def test_write_command_result_delegates_each_branch_with_tracked_payload_and_client_host(self) -> None:
+        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        result = ControlResult.applied_result(command)
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(return_value=command),
+            _handle_control_command=MagicMock(return_value=result),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        handler = _FakeHandler("/v1/control/command", client_host="10.0.0.7")
+        tracked = {"name": "set_mode", "command_id": "cmd-1", "idempotency_key": "idem-1"}
+        replay = (HTTPStatus.OK, {"replayed": True})
+        rate_limit = (HTTPStatus.TOO_MANY_REQUESTS, {"error": {"code": "rate_limited"}}, {"Retry-After": "1"})
+
+        with (
+            patch.object(server, "_tracked_payload", return_value=tracked) as tracked_payload_mock,
+            patch.object(server, "_client_host", return_value="client-x") as client_host_mock,
+            patch.object(server, "_replayed_response", return_value=replay) as replay_mock,
+            patch.object(server, "_write_replayed_command_response") as write_replay,
+        ):
+            server._write_command_result(handler, {"raw": True})
+        tracked_payload_mock.assert_called_once_with(handler, {"raw": True})
+        client_host_mock.assert_called_once_with(handler)
+        replay_mock.assert_called_once_with(tracked)
+        write_replay.assert_called_once_with(handler, replay, "client-x")
+
+        with (
+            patch.object(server, "_tracked_payload", return_value=tracked),
+            patch.object(server, "_client_host", return_value="client-y"),
+            patch.object(server, "_replayed_response", return_value=None),
+            patch.object(service, "_control_command_from_payload", side_effect=ValueError("bad command")),
+            patch.object(server, "_write_validation_error_response") as write_validation,
+        ):
+            server._write_command_result(handler, {"raw": True})
+        write_validation.assert_called_once_with(handler, tracked, "bad command", "client-y")
+
+        service._control_command_from_payload.side_effect = None
+        service._control_command_from_payload.return_value = command
+        with (
+            patch.object(server, "_tracked_payload", return_value=tracked),
+            patch.object(server, "_client_host", return_value="client-z"),
+            patch.object(server, "_replayed_response", return_value=None),
+            patch.object(server, "_tracked_command", return_value=command) as tracked_command_mock,
+            patch.object(server, "_rate_limit_error", return_value=rate_limit) as rate_limit_mock,
+            patch.object(server, "_write_rate_limit_error_response") as write_rate_limit,
+        ):
+            server._write_command_result(handler, {"raw": True})
+        service._control_command_from_payload.assert_called_with(tracked, source="http")
+        tracked_command_mock.assert_called_once_with(tracked, command)
+        rate_limit_mock.assert_called_once_with("client-z", "set_mode")
+        write_rate_limit.assert_called_once_with(handler, command, rate_limit, "client-z")
+
+        with (
+            patch.object(server, "_tracked_payload", return_value=tracked),
+            patch.object(server, "_client_host", return_value="client-ok"),
+            patch.object(server, "_replayed_response", return_value=None),
+            patch.object(server, "_tracked_command", return_value=command),
+            patch.object(server, "_rate_limit_error", return_value=None),
+            patch.object(server, "_write_new_command_response") as write_new,
+        ):
+            server._write_command_result(handler, {"raw": True})
+        service._handle_control_command.assert_called_with(command)
+        write_new.assert_called_once_with(handler, tracked, command, result, "client-ok")
+
+    def test_command_role_response_writers_emit_exact_audit_and_json_calls(self) -> None:
+        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http", command_id="cmd-1", idempotency_key="idem-1")
+        result = ControlResult.applied_result(command)
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(return_value=command),
+            _handle_control_command=MagicMock(return_value=result),
+            _control_api_state_token=MagicMock(return_value="state-1"),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        handler = _FakeHandler("/v1/control/command")
+        replay_payload = {
+            "command": {"name": "set_mode"},
+            "result": {"status": "applied"},
+            "error": {"code": "replayed"},
+            "replayed": True,
+        }
+        limit_payload = {"error": {"code": "rate_limited"}, "detail": "Slow down."}
+
+        with patch.object(server, "_record_command_audit") as audit_mock, patch.object(server, "_write_json") as write_mock:
+            server._write_replayed_command_response(handler, (HTTPStatus.ACCEPTED, replay_payload), "client-a")
+            server._write_validation_error_response(handler, {"name": "bad"}, "Unsupported control path /bad.", "client-b")
+            server._write_rate_limit_error_response(
+                handler,
+                command,
+                (HTTPStatus.TOO_MANY_REQUESTS, limit_payload, {"Retry-After": "5"}),
+                "client-c",
+            )
+            server._write_new_command_response(handler, {"idempotency_key": ""}, command, result, "client-d")
+
+        self.assertEqual(audit_mock.call_count, 4)
+        self.assertEqual(write_mock.call_count, 4)
+        self.assertEqual(
+            audit_mock.call_args_list[0].kwargs,
+            {
+                "command": {"name": "set_mode"},
+                "result": {"status": "applied"},
+                "error": {"code": "replayed"},
+                "replayed": True,
+                "scope": "control",
+                "client_host": "client-a",
+                "status_code": int(HTTPStatus.ACCEPTED),
+            },
+        )
+        self.assertEqual(audit_mock.call_args_list[1].kwargs["command"], {"name": "bad"})
+        self.assertIsNone(audit_mock.call_args_list[1].kwargs["result"])
+        self.assertEqual(audit_mock.call_args_list[1].kwargs["error"]["code"], "unsupported_command")
+        self.assertIs(audit_mock.call_args_list[1].kwargs["replayed"], False)
+        self.assertEqual(audit_mock.call_args_list[1].kwargs["scope"], "control")
+        self.assertEqual(audit_mock.call_args_list[1].kwargs["client_host"], "client-b")
+        self.assertEqual(audit_mock.call_args_list[1].kwargs["status_code"], int(HTTPStatus.BAD_REQUEST))
+        self.assertEqual(audit_mock.call_args_list[2].kwargs["command"], command)
+        self.assertIsNone(audit_mock.call_args_list[2].kwargs["result"])
+        self.assertEqual(audit_mock.call_args_list[2].kwargs["error"], {"code": "rate_limited"})
+        self.assertIs(audit_mock.call_args_list[2].kwargs["replayed"], False)
+        self.assertEqual(audit_mock.call_args_list[2].kwargs["scope"], "control")
+        self.assertEqual(audit_mock.call_args_list[2].kwargs["client_host"], "client-c")
+        self.assertEqual(audit_mock.call_args_list[2].kwargs["status_code"], int(HTTPStatus.TOO_MANY_REQUESTS))
+        self.assertEqual(audit_mock.call_args_list[3].kwargs["command"], command)
+        self.assertEqual(audit_mock.call_args_list[3].kwargs["result"], result)
+        self.assertIsNone(audit_mock.call_args_list[3].kwargs["error"])
+        self.assertIs(audit_mock.call_args_list[3].kwargs["replayed"], False)
+        self.assertEqual(audit_mock.call_args_list[3].kwargs["scope"], "control")
+        self.assertEqual(audit_mock.call_args_list[3].kwargs["client_host"], "client-d")
+        self.assertEqual(audit_mock.call_args_list[3].kwargs["status_code"], int(HTTPStatus.OK))
+        self.assertEqual(write_mock.call_args_list[0].args, (handler, HTTPStatus.ACCEPTED, replay_payload))
+        self.assertEqual(write_mock.call_args_list[0].kwargs["extra_headers"], {"ETag": '"state-1"', "X-State-Token": "state-1"})
+        self.assertEqual(write_mock.call_args_list[1].args[0], handler)
+        self.assertEqual(write_mock.call_args_list[1].args[1], HTTPStatus.BAD_REQUEST)
+        self.assertEqual(write_mock.call_args_list[1].args[2]["error"]["code"], "unsupported_command")
+        self.assertEqual(write_mock.call_args_list[1].kwargs["extra_headers"], {"ETag": '"state-1"', "X-State-Token": "state-1"})
+        self.assertEqual(write_mock.call_args_list[2].args, (handler, HTTPStatus.TOO_MANY_REQUESTS, limit_payload))
+        self.assertEqual(write_mock.call_args_list[2].kwargs["extra_headers"], {"ETag": '"state-1"', "X-State-Token": "state-1", "Retry-After": "5"})
+        self.assertEqual(write_mock.call_args_list[3].args[0], handler)
+        self.assertEqual(write_mock.call_args_list[3].args[1], HTTPStatus.OK)
+        self.assertEqual(write_mock.call_args_list[3].args[2]["result"]["status"], "applied")
+        self.assertIs(write_mock.call_args_list[3].args[2]["replayed"], False)
+        self.assertEqual(write_mock.call_args_list[3].kwargs["extra_headers"], {"ETag": '"state-1"', "X-State-Token": "state-1"})
+
+    def test_idempotent_replay_and_cache_ignore_missing_or_blank_keys_without_store_access(self) -> None:
+        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        result = ControlResult.applied_result(command)
+        response_payload = {"ok": True, "detail": "Applied.", "command": {}, "result": {}, "replayed": False, "error": None}
+
+        for payload in ({}, {"idempotency_key": ""}, {"idempotency_key": "   "}):
+            store = SimpleNamespace(get=MagicMock(), put=MagicMock())
+            service = SimpleNamespace(
+                _control_command_from_payload=MagicMock(return_value=command),
+                _handle_control_command=MagicMock(return_value=result),
+                _control_api_idempotency_store=MagicMock(return_value=store),
+            )
+            server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+
+            self.assertIsNone(server._replayed_response(dict(payload)))
+            self.assertIsNone(server._cache_idempotent_response(dict(payload), HTTPStatus.OK, response_payload, command, result))
+            store.get.assert_not_called()
+            store.put.assert_not_called()
+
+    def test_replayed_response_uses_exact_cache_key_and_emits_exact_event_payload(self) -> None:
+        command_payload = {"name": "set_mode", "path": "/Mode", "value": 1}
+        result_payload = {"status": "applied", "accepted": True}
+        cached_payload = {
+            "ok": True,
+            "detail": "Applied.",
+            "command": command_payload,
+            "result": result_payload,
+            "replayed": False,
+            "error": None,
+        }
+        store = SimpleNamespace(
+            get=MagicMock(return_value=('{"value":1}', int(HTTPStatus.OK), cached_payload)),
+            put=MagicMock(),
+        )
+        event_publish = MagicMock()
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+            _control_api_idempotency_store=MagicMock(return_value=store),
+            _publish_control_api_command_event=event_publish,
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+
+        replay = server._replayed_response({"idempotency_key": " idem-1 ", "value": 1})
+
+        self.assertEqual(replay, (HTTPStatus.OK, {**cached_payload, "replayed": True}))
+        store.get.assert_called_once_with("idem-1")
+        event_publish.assert_called_once_with(command_payload, result_payload, replayed=True)
+
+    def test_replay_conflict_payload_preserves_the_original_idempotency_key(self) -> None:
+        cached_payload = {"ok": True, "detail": "Applied.", "command": {}, "result": {}, "replayed": False, "error": None}
+        store = SimpleNamespace(
+            get=MagicMock(return_value=('{"value":1}', int(HTTPStatus.OK), cached_payload)),
+            put=MagicMock(),
+        )
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+            _control_api_idempotency_store=MagicMock(return_value=store),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+
+        conflict = server._replayed_response({"idempotency_key": " idem-2 ", "value": 2})
+
+        self.assertIsNotNone(conflict)
+        assert conflict is not None
+        self.assertEqual(conflict[0], HTTPStatus.CONFLICT)
+        self.assertEqual(conflict[1]["error"]["details"], {"idempotency_key": "idem-2"})
+
+    def test_replayed_command_event_requires_command_and_result_payloads(self) -> None:
+        event_publish = MagicMock()
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+            _publish_control_api_command_event=event_publish,
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+
+        server._publish_replayed_command_event(None, {"status": "applied"})
+        server._publish_replayed_command_event({"name": "set_mode"}, None)
+        event_publish.assert_not_called()
+
+        server._publish_replayed_command_event({"name": "set_mode"}, {"status": "applied"})
+        event_publish.assert_called_once_with({"name": "set_mode"}, {"status": "applied"}, replayed=True)
+
+    def test_command_response_payload_method_uses_exact_replay_flag_and_rejected_error_contract(self) -> None:
+        command = ControlCommand(
+            name="set_phase_selection",
+            path="/PhaseSelection",
+            value="P1_P2_P3",
+            source="http",
+            command_id="cmd-1",
+            idempotency_key="idem-1",
+        )
+        result = ControlResult.rejected_result(command, detail="Unsupported phase selection", reversible_failure=False)
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(return_value=command),
+            _handle_control_command=MagicMock(return_value=result),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+
+        payload = server._command_response_payload(command, result, replayed=True)
+
+        self.assertIs(payload["replayed"], True)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["command"]["command_id"], "cmd-1")
+        self.assertEqual(payload["result"]["status"], "rejected")
+        self.assertEqual(
+            payload["error"],
+            {
+                "code": "unsupported_for_topology",
+                "message": "Unsupported phase selection",
+                "retryable": False,
+                "details": {
+                    "status": "rejected",
+                    "path": "/PhaseSelection",
+                    "command_id": "cmd-1",
+                    "idempotency_key": "idem-1",
+                },
+            },
+        )
+
+    def test_new_rejected_command_response_preserves_error_payload_in_audit_and_cache(self) -> None:
+        command = ControlCommand(
+            name="set_phase_selection",
+            path="/PhaseSelection",
+            value="P1_P2_P3",
+            source="http",
+            command_id="cmd-1",
+            idempotency_key="idem-1",
+        )
+        result = ControlResult.rejected_result(command, detail="Unsupported phase selection", reversible_failure=False)
+        store = SimpleNamespace(get=MagicMock(), put=MagicMock())
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(return_value=command),
+            _handle_control_command=MagicMock(return_value=result),
+            _control_api_idempotency_store=MagicMock(return_value=store),
+            _control_api_state_token=MagicMock(return_value="state-1"),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        handler = _FakeHandler("/v1/control/command")
+
+        with patch.object(server, "_record_command_audit") as audit_mock, patch.object(server, "_write_json") as write_mock:
+            server._write_new_command_response(handler, {"idempotency_key": "idem-1", "value": "P1_P2_P3"}, command, result, "client-e")
+
+        persisted = store.put.call_args.args[3]
+        self.assertEqual(store.put.call_args.args[:3], ("idem-1", '{"value":"P1_P2_P3"}', int(HTTPStatus.CONFLICT)))
+        self.assertEqual(persisted["error"]["code"], "unsupported_for_topology")
+        self.assertEqual(persisted["command"]["command_id"], "cmd-1")
+        self.assertEqual(persisted["result"]["status"], "rejected")
+        self.assertNotIn("RESULT", persisted)
+        self.assertNotIn("XXresultXX", persisted)
+        self.assertEqual(audit_mock.call_args.kwargs["error"], persisted["error"])
+        self.assertIs(audit_mock.call_args.kwargs["replayed"], False)
+        self.assertEqual(audit_mock.call_args.kwargs["status_code"], int(HTTPStatus.CONFLICT))
+        self.assertEqual(write_mock.call_args.args[1], HTTPStatus.CONFLICT)
+        self.assertEqual(write_mock.call_args.args[2]["error"], persisted["error"])
+
+    def test_record_command_audit_preserves_non_empty_error_payload_exactly(self) -> None:
+        audit = MagicMock()
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+            _record_control_api_command_audit=audit,
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        error_payload = {"code": "blocked_by_health", "message": "fault"}
+
+        server._record_command_audit(
+            command={"name": "set_enable"},
+            result={"status": "rejected"},
+            error=error_payload,
+            replayed=True,
+            scope="control",
+            client_host="client-f",
+            status_code=409,
+        )
+
+        self.assertEqual(
+            audit.call_args.kwargs,
+            {
+                "command": {"name": "set_enable"},
+                "result": {"status": "rejected"},
+                "error": error_payload,
+                "replayed": True,
+                "scope": "control",
+                "client_host": "client-f",
+                "status_code": 409,
+                "transport": "http",
+            },
+        )
 
     def test_write_command_result_rejects_value_errors_and_maps_statuses(self) -> None:
         service = SimpleNamespace(
@@ -98,6 +593,192 @@ class __ControlApiHttpTailCasesPart2:
             LocalControlApiHttpServer._payload_error_code("Control command 'set_mode' requires one of: 0, 1, 2."),
             "unsupported_command",
         )
+        self.assertEqual(LocalControlApiHttpServer._payload_error_code("Unsupported control path '/Bogus'."), "unsupported_command")
+        self.assertEqual(LocalControlApiHttpServer._payload_error_code("Command does not support path /Bogus."), "unsupported_command")
+        self.assertEqual(LocalControlApiHttpServer._payload_error_code("Plain validation failure."), "validation_error")
+
+    def test_command_payload_helpers_emit_exact_structured_contracts(self) -> None:
+        conflict_status, conflict_payload = idempotency_conflict_response("idem-1")
+        throttled_status, throttled_payload, throttled_headers = throttled_response("rate_limited", "Slow down.", 1.25)
+        integer_status, integer_payload, integer_headers = throttled_response("cooldown_active", "Cooling.", 2.0)
+        minimum_status, minimum_payload, minimum_headers = throttled_response("rate_limited", "Tiny retry.", 0.2)
+        optimistic_payload = optimistic_concurrency_payload({"z-token", "a-token"}, "current-token")
+
+        self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
+        self.assertEqual(
+            conflict_payload,
+            {
+                "ok": False,
+                "detail": "Idempotency-Key was already used for a different payload.",
+                "command": None,
+                "result": None,
+                "replayed": False,
+                "error": {
+                    "code": "idempotency_conflict",
+                    "message": "Idempotency-Key was already used for a different payload.",
+                    "retryable": False,
+                    "details": {"idempotency_key": "idem-1"},
+                },
+            },
+        )
+        self.assertEqual(throttled_status, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(throttled_headers, {"Retry-After": "2"})
+        self.assertEqual(
+            throttled_payload,
+            {
+                "ok": False,
+                "detail": "Slow down.",
+                "command": None,
+                "result": None,
+                "replayed": False,
+                "error": {
+                    "code": "rate_limited",
+                    "message": "Slow down.",
+                    "retryable": True,
+                    "details": {"retry_after_seconds": 1.25},
+                },
+            },
+        )
+        self.assertEqual(integer_status, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(integer_headers, {"Retry-After": "2"})
+        self.assertEqual(integer_payload["error"]["code"], "cooldown_active")
+        self.assertEqual(minimum_status, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(minimum_headers, {"Retry-After": "1"})
+        self.assertEqual(minimum_payload["error"]["message"], "Tiny retry.")
+        self.assertEqual(
+            optimistic_payload,
+            {
+                "ok": False,
+                "detail": "If-Match state token does not match the current local service state.",
+                "command": None,
+                "result": None,
+                "replayed": False,
+                "error": {
+                    "code": "conflict",
+                    "message": "If-Match state token does not match the current local service state.",
+                    "retryable": True,
+                    "details": {"expected": ["a-token", "z-token"], "current": "current-token"},
+                },
+            },
+        )
+
+    def test_tracking_payload_helpers_normalize_body_headers_and_missing_fields(self) -> None:
+        command = ControlCommand(
+            name="set_mode",
+            path="/Mode",
+            value=1,
+            source="http",
+            command_id="old-command",
+            idempotency_key="old-idem",
+        )
+        header_handler = _FakeHandler(
+            "/v1/control/command",
+            headers={"X-Command-Id": " header-command ", "Idempotency-Key": " header-idem "},
+        )
+        body_handler = _FakeHandler(
+            "/v1/control/command",
+            headers={"X-Command-Id": "ignored-command", "Idempotency-Key": "ignored-idem"},
+        )
+
+        with patch("venus_evcharger.control.http_api_command_payloads.uuid.uuid4", return_value=SimpleNamespace(hex="generated-command")):
+            generated = tracked_payload(_FakeHandler("/v1/control/command"), {"name": "set_mode"})
+        from_headers = tracked_payload(header_handler, {"name": "set_mode"})
+        from_body = tracked_payload(body_handler, {"command_id": " body-command ", "idempotency_key": " body-idem "})
+
+        self.assertEqual(generated["command_id"], "generated-command")
+        self.assertEqual(generated["idempotency_key"], "")
+        self.assertEqual(from_headers["command_id"], "header-command")
+        self.assertEqual(from_headers["idempotency_key"], "header-idem")
+        self.assertEqual(from_body["command_id"], "body-command")
+        self.assertEqual(from_body["idempotency_key"], "body-idem")
+        self.assertEqual(tracked_command({"idempotency_key": "old-idem"}, command), command)
+        self.assertEqual(tracked_command({}, command).command_id, "")
+        self.assertEqual(tracked_command({}, command).idempotency_key, "")
+        updated = tracked_command({"command_id": " new-command ", "idempotency_key": " new-idem "}, command)
+        self.assertEqual(updated.command_id, "new-command")
+        self.assertEqual(updated.idempotency_key, "new-idem")
+
+    def test_idempotency_fingerprint_is_stable_and_ignores_tracking_fields(self) -> None:
+        class _Opaque:
+            def __str__(self) -> str:
+                return "opaque-value"
+
+        left = {
+            "z": 2,
+            "a": _Opaque(),
+            "command_id": "cmd-1",
+            "idempotency_key": "idem-1",
+            "idempotency_note": "kept",
+        }
+        right = {
+            "idempotency_key": "different",
+            "command_id": "different",
+            "idempotency_note": "kept",
+            "a": _Opaque(),
+            "z": 2,
+        }
+
+        self.assertEqual(idempotency_fingerprint(left), '{"a":"opaque-value","idempotency_note":"kept","z":2}')
+        self.assertEqual(idempotency_fingerprint(left), idempotency_fingerprint(right))
+
+    def test_command_response_payloads_are_exact_for_accepted_replayed_and_rejected(self) -> None:
+        command = ControlCommand(
+            name="set_enable",
+            path="/Enable",
+            value=1,
+            source="http",
+            command_id="cmd-1",
+            idempotency_key="idem-1",
+        )
+        command_payload = {"name": "set_enable", "path": "/Enable", "value": 1}
+        applied_result_payload = {"status": "applied", "accepted": True}
+        applied = command_response_payload(
+            ControlResult.applied_result(command, detail="Applied."),
+            replayed=True,
+            command_payload=command_payload,
+            result_payload=applied_result_payload,
+        )
+        rejected_result_payload = {"status": "rejected", "accepted": False}
+        rejected = command_response_payload(
+            ControlResult.rejected_result(command, detail="", reversible_failure=False),
+            replayed=False,
+            command_payload=command_payload,
+            result_payload=rejected_result_payload,
+        )
+
+        self.assertEqual(
+            applied,
+            {
+                "ok": True,
+                "detail": "Applied.",
+                "command": command_payload,
+                "result": applied_result_payload,
+                "replayed": True,
+                "error": None,
+            },
+        )
+        self.assertEqual(replayed_payload({**applied, "replayed": False})["replayed"], True)
+        self.assertEqual(
+            rejected,
+            {
+                "ok": False,
+                "detail": "",
+                "command": command_payload,
+                "result": rejected_result_payload,
+                "replayed": False,
+                "error": {
+                    "code": "command_rejected",
+                    "message": "Command rejected.",
+                    "retryable": False,
+                    "details": {
+                        "status": "rejected",
+                        "path": "/Enable",
+                        "command_id": "cmd-1",
+                        "idempotency_key": "idem-1",
+                    },
+                },
+            },
+        )
 
     def test_result_error_code_maps_semantic_rejections(self) -> None:
         topology_command = ControlCommand(name="set_phase_selection", path="/PhaseSelection", value="P1_P2_P3")
@@ -117,6 +798,11 @@ class __ControlApiHttpTailCasesPart2:
             ),
             "update_in_progress",
         )
+        for detail in ("Update in progress", "Update running now", "Update busy", "Update already queued"):
+            self.assertEqual(
+                LocalControlApiHttpServer._result_error_code(ControlResult.rejected_result(update_command, detail=detail)),
+                "update_in_progress",
+            )
         self.assertEqual(
             LocalControlApiHttpServer._result_error_code(
                 ControlResult.rejected_result(update_command, detail="Update rejected by policy")
@@ -125,16 +811,38 @@ class __ControlApiHttpTailCasesPart2:
         )
         self.assertEqual(
             LocalControlApiHttpServer._result_error_code(
+                ControlResult.rejected_result(topology_command, detail="Path unsupported for this topology")
+            ),
+            "unsupported_for_topology",
+        )
+        self.assertEqual(
+            LocalControlApiHttpServer._result_error_code(
+                ControlResult.rejected_result(mode_command, detail="Unsupported mode transition")
+            ),
+            "blocked_by_mode",
+        )
+        self.assertEqual(
+            LocalControlApiHttpServer._result_error_code(
                 ControlResult.rejected_result(health_command, detail="Health fault lockout active")
             ),
             "blocked_by_health",
         )
+        for detail in ("Health degraded", "Fault active", "Lockout active", "Recovery running"):
+            self.assertEqual(
+                LocalControlApiHttpServer._result_error_code(ControlResult.rejected_result(health_command, detail=detail)),
+                "blocked_by_health",
+            )
         self.assertEqual(
             LocalControlApiHttpServer._result_error_code(
                 ControlResult.rejected_result(mode_command, detail="Mode blocked while charging")
             ),
             "blocked_by_mode",
         )
+        for detail in ("Mode blocked", "Mode cannot change", "Mode while update runs"):
+            self.assertEqual(
+                LocalControlApiHttpServer._result_error_code(ControlResult.rejected_result(mode_command, detail=detail)),
+                "blocked_by_mode",
+            )
         self.assertEqual(
             LocalControlApiHttpServer._result_error_code(
                 ControlResult.rejected_result(mode_command, detail="Mode changed externally")
