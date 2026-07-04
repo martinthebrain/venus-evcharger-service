@@ -24,6 +24,66 @@ class _TestVenusEvchargerStateContractsPart3:
         self.assertEqual(decision["profile"], "")
         self.assertEqual(normalized_state_api_operational_decision_fields({"relay_intent": True})["relay_intent"], 1)
 
+    def test_operational_decision_contract_preserves_state_and_relay_boundaries(self) -> None:
+        decision = normalized_state_api_operational_decision_fields(
+            {
+                "state": "charging",
+                "state_code": 0,
+                "relay_intent": -1,
+                "soc_percent": "77.5",
+                "threshold_mode": " fixed ",
+            }
+        )
+
+        self.assertEqual(decision["state"], "charging")
+        self.assertEqual(decision["state_code"], 3)
+        self.assertEqual(decision["relay_intent"], -1)
+        self.assertEqual(decision["soc_percent"], 77.5)
+        self.assertEqual(decision["threshold_mode"], "fixed")
+        for raw, expected in ((-1, -1), (0, 0), (1, 1), ("-1", -1), ("0", 0), ("1", 1)):
+            self.assertEqual(normalized_state_api_operational_decision_fields({"relay_intent": raw})["relay_intent"], expected)
+        for raw in (-2, 2, None):
+            self.assertEqual(normalized_state_api_operational_decision_fields({"relay_intent": raw})["relay_intent"], -1)
+
+    def test_operational_special_contract_keeps_software_update_keys_exact(self) -> None:
+        state = normalized_state_api_operational_state_fields(
+            {
+                "auto_state": "charging",
+                "auto_state_code": 0,
+                "software_update_state": "available",
+                "software_update_available": 1,
+                "software_update_no_update_active": 1,
+            }
+        )
+
+        self.assertEqual(state["auto_state"], "charging")
+        self.assertEqual(state["auto_state_code"], 3)
+        self.assertEqual(state["software_update_state"], "available-blocked")
+        self.assertEqual(state["software_update_state_code"], 4)
+        self.assertEqual(state["software_update_available"], 1)
+        self.assertEqual(state["software_update_no_update_active"], 1)
+        self.assertNotIn("SOFTWARE_UPDATE_AVAILABLE", state)
+        self.assertNotIn("SOFTWARE_UPDATE_NO_UPDATE_ACTIVE", state)
+
+    def test_operational_envelope_contract_keeps_status_kind_and_defaults_exact(self) -> None:
+        explicit = normalized_state_api_operational_fields(
+            {
+                "ok": 0,
+                "api_version": "future",
+                "kind": "health",
+                "state": "not-a-mapping",
+            }
+        )
+        defaulted = normalized_state_api_operational_fields({})
+
+        self.assertFalse(explicit["ok"])
+        self.assertEqual(explicit["api_version"], "v1")
+        self.assertEqual(explicit["kind"], "health")
+        self.assertEqual(explicit["state"]["mode"], 0)
+        self.assertTrue(defaulted["ok"])
+        self.assertEqual(defaulted["api_version"], "v1")
+        self.assertEqual(defaulted["kind"], "operational")
+
     def test_dbus_diagnostics_envelope_normalizes_mapping_keys(self) -> None:
         from venus_evcharger.core.contracts import normalized_state_api_dbus_diagnostics_fields
 
@@ -133,4 +193,3 @@ class _TestVenusEvchargerStateContractsPart3:
 
         self.assertEqual(update["state"], {})
         self.assertEqual(health["state"], {})
-

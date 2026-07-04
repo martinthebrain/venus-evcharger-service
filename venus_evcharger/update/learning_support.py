@@ -217,7 +217,8 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
         learning_since = getattr(self.service, "learned_charge_power_learning_since", None)
         if learning_since is None:
             learning_since = now
-        sample_count = max(1, int(getattr(self.service, "learned_charge_power_sample_count", 0)))
+        sample_count_value = getattr(self.service, "learned_charge_power_sample_count", None)
+        sample_count = 1 if sample_count_value is None else max(1, int(sample_count_value))
         sample_stability_score = self._learning_sample_stability_score(measured_power, previous_value)
         if sample_stability_score <= 0:
             return self._restart_learning_sample(

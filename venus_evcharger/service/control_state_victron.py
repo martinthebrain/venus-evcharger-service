@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from venus_evcharger.core.contracts import normalized_state_api_runtime_fields
 from venus_evcharger.service.control_state_operational import _ControlApiStateOperational
 
 
@@ -15,18 +15,26 @@ class _ControlApiStateVictron(_ControlApiStateOperational):
 
 
 def _state_api_victron_bias_recommendation_payload(owner: Any) -> dict[str, Any]:
-    metrics = getattr(owner, "_last_auto_metrics", {}) or {}
-    raw_learning_profiles = getattr(owner, "_victron_ess_balance_learning_profiles", {})
-    learning_profiles = raw_learning_profiles if isinstance(raw_learning_profiles, dict) else {}
-    state = _state_api_victron_bias_state(owner, metrics, learning_profiles)
-    return normalized_state_api_runtime_fields(
-        {
-            "ok": True,
-            "api_version": "v1",
-            "kind": "victron-bias-recommendation",
-            "state": state,
-        }
-    )
+    return {
+        "ok": True,
+        "api_version": "v1",
+        "kind": "victron-bias-recommendation",
+        "state": _state_api_victron_bias_state(owner, _last_auto_metrics(owner), _learning_profiles(owner)),
+    }
+
+
+def _last_auto_metrics(owner: Any) -> dict[str, Any]:
+    if not hasattr(owner, "_last_auto_metrics"):
+        return {}
+    metrics = getattr(owner, "_last_auto_metrics")
+    return metrics if isinstance(metrics, dict) else {}
+
+
+def _learning_profiles(owner: Any) -> dict[str, Any]:
+    if not hasattr(owner, "_victron_ess_balance_learning_profiles"):
+        return {}
+    profiles = getattr(owner, "_victron_ess_balance_learning_profiles")
+    return profiles if isinstance(profiles, dict) else {}
 
 
 def _state_api_victron_bias_state(
@@ -200,12 +208,19 @@ def _state_api_victron_bias_adaptive_tuning(owner: Any, metrics: dict[str, Any])
         "oscillation_lockout_reason": metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_reason"),
         "overshoot_cooldown_until": metrics.get("battery_discharge_balance_victron_bias_overshoot_cooldown_until"),
         "overshoot_cooldown_reason": metrics.get("battery_discharge_balance_victron_bias_overshoot_cooldown_reason"),
-        "last_stable_tuning": dict(getattr(owner, "_victron_ess_balance_last_stable_tuning", {}) or {}),
+        "last_stable_tuning": _owner_dict_or_empty(owner, "_victron_ess_balance_last_stable_tuning"),
         "last_stable_at": getattr(owner, "_victron_ess_balance_last_stable_at", None),
         "last_stable_profile_key": getattr(owner, "_victron_ess_balance_last_stable_profile_key", ""),
-        "conservative_tuning": dict(getattr(owner, "_victron_ess_balance_conservative_tuning", {}) or {}),
+        "conservative_tuning": _owner_dict_or_empty(owner, "_victron_ess_balance_conservative_tuning"),
         "auto_apply_suspend_until": metrics.get("battery_discharge_balance_victron_bias_auto_apply_suspend_until"),
         "auto_apply_suspend_reason": metrics.get("battery_discharge_balance_victron_bias_auto_apply_suspend_reason"),
         "safe_state_active": metrics.get("battery_discharge_balance_victron_bias_safe_state_active"),
         "safe_state_reason": metrics.get("battery_discharge_balance_victron_bias_safe_state_reason"),
     }
+
+
+def _owner_dict_or_empty(owner: Any, name: str) -> dict[str, Any]:
+    if not hasattr(owner, name):
+        return {}
+    value = getattr(owner, name)
+    return dict(value) if isinstance(value, Mapping) else {}

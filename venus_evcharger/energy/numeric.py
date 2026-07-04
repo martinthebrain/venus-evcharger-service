@@ -15,7 +15,7 @@ def optional_float(value: object) -> float | None:
 
 def optional_int(value: object) -> int | None:
     """Return one optional integer from non-boolean scalar input."""
-    if value is None or isinstance(value, bool):
+    if isinstance(value, bool):
         return None
     try:
         return int(str(value).strip())

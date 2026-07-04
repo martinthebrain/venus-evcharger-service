@@ -12,6 +12,12 @@ from venus_evcharger.publish.dbus_diagnostics_schedule import _DbusDiagnosticsSc
 
 
 class _DbusDiagnosticsRuntime(_DbusDiagnosticsSchedule):
+    @staticmethod
+    def _bool_attr_as_int(service: Any, attr_name: str) -> int:
+        if not hasattr(service, attr_name):
+            return 0
+        return int(bool(getattr(service, attr_name)))
+
     def _runtime_timing_values(self, now: float) -> dict[str, int | float]:
         """Return timing and queue diagnostics for async runtime health."""
         svc = self.service
@@ -23,7 +29,7 @@ class _DbusDiagnosticsRuntime(_DbusDiagnosticsSchedule):
         )
         return {
             "auto_update_worker_duration_seconds": float(getattr(svc, "_last_update_cycle_duration_seconds", 0.0)),
-            "auto_update_worker_pending": int(bool(getattr(svc, "_update_worker_pending", False))),
+            "auto_update_worker_pending": self._bool_attr_as_int(svc, "_update_worker_pending"),
             "auto_update_worker_skipped": int(getattr(svc, "_update_worker_skipped_count", 0)),
             "auto_publish_flush_duration_seconds": float(getattr(svc, "_last_publish_flush_duration_seconds", 0.0)),
             "auto_publish_queue_lag_seconds": float(getattr(svc, "_last_dbus_publish_queue_lag_seconds", 0.0)),

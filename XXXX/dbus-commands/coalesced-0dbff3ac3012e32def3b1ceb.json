@@ -1,1 +1,0 @@
-{"coalesce_key":"refresh:pv_power_w","created_at":1783040257.367008,"id":"coalesced-0dbff3ac3012e32def3b1ceb","key":"pv_power_w","kind":"refresh_value","lifecycle_state":"coalesced","priority":"read","queue_class":"read-fast","reason":"helper semantic PV power read","schema_version":1,"source":"auto-input-helper","updated_at":1783042667.106267}

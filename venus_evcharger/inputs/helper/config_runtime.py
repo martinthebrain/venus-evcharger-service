@@ -8,7 +8,7 @@ import configparser
 from collections.abc import Callable
 
 from venus_evcharger.core.shared import config_get_float, parse_config_bool as _as_bool
-from venus_evcharger.energy import load_energy_source_settings
+from venus_evcharger.energy import DEFAULT_BATTERY_CHEMISTRY, load_energy_source_settings
 from venus_evcharger.inputs.helper.snapshot import _AutoInputHelperSnapshot
 
 
@@ -51,6 +51,10 @@ class _AutoInputHelperConfig(_AutoInputHelperSnapshot):
             0.0,
             config_get_float(self.config, "DbusGatewayMaxAgeSeconds", 10.0),
         )
+        self.dbus_gateway_error_retry_seconds = max(
+            1.0,
+            min(300.0, config_get_float(self.config, "DbusGatewayErrorRetrySeconds", 30.0)),
+        )
         self.dbus_method_timeout_seconds = config_get_float(self.config, "DbusMethodTimeoutSeconds", 1.0)
 
     def _init_helper_polling(self) -> None:
@@ -87,7 +91,7 @@ class _AutoInputHelperConfig(_AutoInputHelperSnapshot):
         self.auto_pv_path = self.config.get("AutoPvPath", "/Ac/Power").strip()
         self.auto_pv_max_services = max(1, int(config_get_float(self.config, "AutoPvMaxServices", 10.0)))
         self.auto_pv_scan_interval_seconds = max(0.0, config_get_float(self.config, "AutoPvScanIntervalSeconds", 60.0))
-        self.auto_use_dc_pv = _as_bool(self.config.get("AutoUseDcPv", "1"), True)
+        self.auto_use_dc_pv = _as_bool(self.config.get("AutoUseDcPv", "1"))
         self.auto_dc_pv_service = self.config.get("AutoDcPvService", "com.victronenergy.system").strip()
         self.auto_dc_pv_path = self.config.get("AutoDcPvPath", "/Dc/Pv/Power").strip()
 
@@ -108,8 +112,8 @@ class _AutoInputHelperConfig(_AutoInputHelperSnapshot):
 
     def _init_helper_battery_capacity_config(self) -> None:
         self.auto_battery_capacity_wh = config_get_float(self.config, "AutoBatteryCapacityWh", 0.0)
-        self.auto_battery_chemistry = self.config.get("AutoBatteryChemistry", "lfp").strip().lower()
-        self.auto_battery_capacity_auto_estimate = _as_bool(self.config.get("AutoBatteryCapacityAutoEstimate", "1"), True)
+        self.auto_battery_chemistry = self.config.get("AutoBatteryChemistry", DEFAULT_BATTERY_CHEMISTRY).strip().lower()
+        self.auto_battery_capacity_auto_estimate = _as_bool(self.config.get("AutoBatteryCapacityAutoEstimate", "1"))
         self.auto_battery_capacity_wh_path = self.config.get("AutoBatteryCapacityWhPath", "").strip()
         self.auto_battery_capacity_ah_path = self.config.get("AutoBatteryCapacityAhPath", "/InstalledCapacity").strip()
         self.auto_battery_voltage_path = self.config.get("AutoBatteryVoltagePath", "/Dc/0/Voltage").strip()
@@ -162,7 +166,6 @@ class _AutoInputHelperConfig(_AutoInputHelperSnapshot):
         self.auto_grid_l3_path = self.config.get("AutoGridL3Path", "/Ac/Grid/L3/Power").strip()
         self.auto_grid_require_all_phases = _as_bool(
             self.config.get("AutoGridRequireAllPhases", "1"),
-            True,
         )
 
     def _init_helper_runtime_config(self) -> None:

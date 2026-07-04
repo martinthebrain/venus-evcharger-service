@@ -114,7 +114,7 @@ def _scaled_headroom_w(limit_power_w: float | None, current_power_w: float | Non
     headroom = _headroom_w(limit_power_w, current_power_w)
     if headroom is None:
         return None
-    return max(0.0, float(headroom) * max(0.0, min(1.0, float(scale))))
+    return max(0.0, float(headroom) * float(scale))
 
 
 def _expected_near_term_export_w(
@@ -132,7 +132,7 @@ def _expected_near_term_export_w(
     base_export_w = max(0.0, -float(grid_interaction_w))
     charge_power = 0.0 if charge_power_w is None else float(charge_power_w)
     saturation = _charge_saturation(charge_headroom_w, observed_max_charge_w, charge_power)
-    smoothing_weight = 1.0 - (0.5 * max(0.0, min(1.0, float(smoothing_ratio))))
+    smoothing_weight = 1.0 - (0.5 * float(smoothing_ratio))
     export_risk_w = export_bias * response_weight * charge_power * (0.5 + (0.5 * saturation)) * smoothing_weight
     battery_capture_credit_w = battery_first_export_bias * response_weight * charge_power * (0.25 + (0.75 * smoothing_ratio))
     return max(0.0, base_export_w + export_risk_w - battery_capture_credit_w)
@@ -151,7 +151,7 @@ def _expected_near_term_import_w(
     base_import_w = max(0.0, float(grid_interaction_w))
     discharge_power = 0.0 if discharge_power_w is None else float(discharge_power_w)
     support_relief_w = import_support_bias * response_weight * discharge_power * discharge_soc_scale
-    support_relief_w *= 1.0 - (0.25 * max(0.0, min(1.0, float(smoothing_ratio))))
+    support_relief_w *= 1.0 - (0.25 * float(smoothing_ratio))
     return max(0.0, base_import_w - support_relief_w)
 
 
@@ -160,11 +160,11 @@ def _charge_saturation(
     observed_max_charge_w: float | None,
     charge_power_w: float,
 ) -> float:
-    if observed_max_charge_w is not None and observed_max_charge_w > 0.0 and charge_headroom_w is not None:
-        return max(0.0, min(1.0, 1.0 - (float(charge_headroom_w) / float(observed_max_charge_w))))
     if charge_power_w <= 0.0:
         return 0.0
-    return 1.0
+    if observed_max_charge_w is None or observed_max_charge_w <= 0.0 or charge_headroom_w is None:
+        return 1.0
+    return max(0.0, 1.0 - (float(charge_headroom_w) / float(observed_max_charge_w)))
 
 
 def _response_weight(delay_seconds: object) -> float:
@@ -178,8 +178,6 @@ def _charge_soc_scale(combined_soc: float | None, reserve_ceiling_soc: object) -
     ceiling = _non_negative_optional_float(reserve_ceiling_soc)
     if combined_soc is None or ceiling is None:
         return 1.0
-    if combined_soc >= ceiling:
-        return 0.0
     return min(1.0, max(0.0, (float(ceiling) - float(combined_soc)) / 10.0))
 
 
@@ -187,8 +185,6 @@ def _discharge_soc_scale(combined_soc: float | None, reserve_floor_soc: object) 
     floor = _non_negative_optional_float(reserve_floor_soc)
     if combined_soc is None or floor is None:
         return 1.0
-    if combined_soc <= floor:
-        return 0.0
     return min(1.0, max(0.0, (float(combined_soc) - float(floor)) / 10.0))
 
 

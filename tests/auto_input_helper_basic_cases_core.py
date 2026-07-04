@@ -13,6 +13,14 @@ from tests.auto_input_helper_basic_cases_common import (
 
 
 class _AutoInputHelperBasicCoreCases:
+    def _write_helper_config(self, body):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+            handle.write("[DEFAULT]\n")
+            handle.write(body)
+            config_path = handle.name
+        self.addCleanup(lambda: os.path.exists(config_path) and os.unlink(config_path))
+        return config_path
+
     def test_as_bool_parses_truthy_and_defaults(self):
         self.assertTrue(_as_bool("yes"))
         self.assertFalse(_as_bool("0"))
@@ -44,6 +52,378 @@ class _AutoInputHelperBasicCoreCases:
         self.assertEqual(helper.auto_pv_poll_interval_seconds, 2.0)
         self.assertEqual(helper.auto_grid_poll_interval_seconds, 2.0)
         self.assertEqual(helper.auto_battery_poll_interval_seconds, 10.0)
+
+    def test_init_helper_config_applies_explicit_contract_values_and_clamps(self):
+        config_path = self._write_helper_config(
+            "AutoInputSnapshotPath=/tmp/from-config.json\n"
+            "DbusIntrospectionSnapshotPath= /tmp/intro.json \n"
+            "DbusIntrospectionRequestPath=/tmp/request.json\n"
+            "DbusIntrospectionMaxAgeSeconds=-5\n"
+            "DbusGatewayRunDir=/tmp/gateway\n"
+            "DbusGatewayCachePath=/tmp/cache.json\n"
+            "DbusGatewayMaxAgeSeconds=-2\n"
+            "DbusGatewayErrorRetrySeconds=0\n"
+            "DbusMethodTimeoutSeconds=2.5\n"
+            "PollIntervalMs=1500\n"
+            "AutoInputPollIntervalMs=100\n"
+            "AutoPvPollIntervalMs=50\n"
+            "AutoGridPollIntervalMs=800\n"
+            "AutoBatteryPollIntervalMs=4000\n"
+            "AutoPvService=custom.pv\n"
+            "AutoPvServicePrefix=custom.pv.prefix\n"
+            "AutoPvPath=/Pv/Custom\n"
+            "AutoPvMaxServices=0\n"
+            "AutoPvScanIntervalSeconds=-1\n"
+            "AutoUseDcPv=0\n"
+            "AutoDcPvService=custom.dc\n"
+            "AutoDcPvPath=/Dc/Custom\n"
+            "AutoBatteryService=custom.battery\n"
+            "AutoBatterySocPath=/SocCustom\n"
+            "AutoBatteryCapacityWh=12000\n"
+            "AutoBatteryChemistry=NMC\n"
+            "AutoBatteryCapacityAutoEstimate=0\n"
+            "AutoBatteryCapacityWhPath=/CapacityWh\n"
+            "AutoBatteryCapacityAhPath=/CapacityAh\n"
+            "AutoBatteryVoltagePath=/Voltage\n"
+            "AutoBatteryCapacityEstimateMinSoc=-4\n"
+            "AutoBatteryCapacityStartupRecheckSeconds=-7\n"
+            "AutoBatteryCapacityEstimatedWh=111\n"
+            "AutoBatteryCapacityEstimatedAh=222\n"
+            "AutoBatteryCapacityEstimatedNominalVoltage=48.5\n"
+            "AutoBatteryCapacityEstimatedCellCount=16\n"
+            "AutoBatteryPowerPath=/Power\n"
+            "AutoBatteryAcPowerPath=/AcPower\n"
+            "AutoBatteryPvPowerPath=/PvPower\n"
+            "AutoBatteryGridInteractionPath=/GridInteraction\n"
+            "AutoBatteryOperatingModePath=/OperatingMode\n"
+            "AutoBatteryServicePrefix=custom.battery.prefix\n"
+            "AutoBatteryScanIntervalSeconds=-8\n"
+            "AutoGridService=custom.system\n"
+            "AutoGridL1Path=/L1\n"
+            "AutoGridL2Path=/L2\n"
+            "AutoGridL3Path=/L3\n"
+            "AutoGridRequireAllPhases=0\n"
+            "AutoDbusBackoffBaseSeconds=-1\n"
+            "AutoDbusBackoffMaxSeconds=-2\n"
+            "AutoInputValidationPollSeconds=1\n"
+        )
+
+        helper = AutoInputHelper(
+            config_path,
+            snapshot_path="/tmp/override.json",
+            parent_pid="1234",
+            helper_generation="7",
+            runtime_instance_id=" runtime-1 ",
+        )
+
+        self.assertEqual(helper.config_path, config_path)
+        self.assertEqual(helper.parent_pid, 1234)
+        self.assertEqual(helper.helper_generation, 7)
+        self.assertEqual(helper.runtime_instance_id, "runtime-1")
+        self.assertEqual(helper.snapshot_path, "/tmp/override.json")
+        self.assertEqual(helper.dbus_introspection_snapshot_path, "/tmp/intro.json")
+        self.assertEqual(helper.dbus_introspection_request_path, "/tmp/request.json")
+        self.assertEqual(helper.dbus_introspection_max_age_seconds, 0.0)
+        self.assertEqual(helper.dbus_gateway_run_dir, "/tmp/gateway")
+        self.assertEqual(helper.dbus_gateway_cache_path, "/tmp/cache.json")
+        self.assertEqual(helper.dbus_gateway_max_age_seconds, 0.0)
+        self.assertEqual(helper.dbus_gateway_error_retry_seconds, 1.0)
+        self.assertEqual(helper.dbus_method_timeout_seconds, 2.5)
+        self.assertEqual(helper.auto_pv_poll_interval_seconds, 0.2)
+        self.assertEqual(helper.auto_grid_poll_interval_seconds, 0.8)
+        self.assertEqual(helper.auto_battery_poll_interval_seconds, 4.0)
+        self.assertEqual(helper.poll_interval_seconds, 0.2)
+        self.assertEqual(helper.auto_pv_service, "custom.pv")
+        self.assertEqual(helper.auto_pv_service_prefix, "custom.pv.prefix")
+        self.assertEqual(helper.auto_pv_path, "/Pv/Custom")
+        self.assertEqual(helper.auto_pv_max_services, 1)
+        self.assertEqual(helper.auto_pv_scan_interval_seconds, 0.0)
+        self.assertFalse(helper.auto_use_dc_pv)
+        self.assertEqual(helper.auto_dc_pv_service, "custom.dc")
+        self.assertEqual(helper.auto_dc_pv_path, "/Dc/Custom")
+        self.assertEqual(helper.auto_battery_service, "custom.battery")
+        self.assertEqual(helper.auto_battery_soc_path, "/SocCustom")
+        self.assertEqual(helper.auto_battery_capacity_wh, 12000.0)
+        self.assertEqual(helper.auto_battery_chemistry, "nmc")
+        self.assertFalse(helper.auto_battery_capacity_auto_estimate)
+        self.assertEqual(helper.auto_battery_capacity_wh_path, "/CapacityWh")
+        self.assertEqual(helper.auto_battery_capacity_ah_path, "/CapacityAh")
+        self.assertEqual(helper.auto_battery_voltage_path, "/Voltage")
+        self.assertEqual(helper.auto_battery_capacity_estimate_min_soc, 0.0)
+        self.assertEqual(helper.auto_battery_capacity_startup_recheck_seconds, 0.0)
+        self.assertEqual(helper.auto_battery_capacity_estimated_wh, 111.0)
+        self.assertEqual(helper.auto_battery_capacity_estimated_ah, 222.0)
+        self.assertEqual(helper.auto_battery_capacity_estimated_nominal_voltage, 48.5)
+        self.assertEqual(helper.auto_battery_capacity_estimated_cell_count, 16)
+        self.assertEqual(helper.auto_battery_power_path, "/Power")
+        self.assertEqual(helper.auto_battery_ac_power_path, "/AcPower")
+        self.assertEqual(helper.auto_battery_pv_power_path, "/PvPower")
+        self.assertEqual(helper.auto_battery_grid_interaction_path, "/GridInteraction")
+        self.assertEqual(helper.auto_battery_operating_mode_path, "/OperatingMode")
+        self.assertEqual(helper.auto_battery_service_prefix, "custom.battery.prefix")
+        self.assertEqual(helper.auto_battery_scan_interval_seconds, 0.0)
+        self.assertEqual(helper.auto_grid_service, "custom.system")
+        self.assertEqual(helper.auto_grid_l1_path, "/L1")
+        self.assertEqual(helper.auto_grid_l2_path, "/L2")
+        self.assertEqual(helper.auto_grid_l3_path, "/L3")
+        self.assertFalse(helper.auto_grid_require_all_phases)
+        self.assertEqual(helper.auto_dbus_backoff_base_seconds, 0.0)
+        self.assertEqual(helper.auto_dbus_backoff_max_seconds, 0.0)
+        self.assertEqual(helper.validation_poll_seconds, 5.0)
+        self.assertEqual(helper.subscription_refresh_seconds, 60.0)
+        self.assertEqual(helper.auto_energy_source_ids, ("primary_battery",))
+        self.assertTrue(helper.auto_use_combined_battery_soc)
+        self.assertEqual(helper._next_source_poll_at, {"pv": 0.0, "battery": 0.0, "grid": 0.0})
+
+    def test_config_initializers_use_exact_contract_keys_with_case_sensitive_mapping(self):
+        section = {
+            "AutoInputSnapshotPath": "/tmp/direct-snapshot.json",
+            "DbusIntrospectionSnapshotPath": " /tmp/direct-intro.json ",
+            "DbusIntrospectionRequestPath": "/tmp/direct-request.json",
+            "DbusIntrospectionMaxAgeSeconds": "-5",
+            "DbusGatewayRunDir": "/tmp/direct-gateway",
+            "DbusGatewayCachePath": "/tmp/direct-cache.json",
+            "DbusGatewayMaxAgeSeconds": "-2",
+            "DbusGatewayErrorRetrySeconds": "0",
+            "DbusMethodTimeoutSeconds": "2.5",
+            "PollIntervalMs": "1500",
+            "AutoInputPollIntervalMs": "100",
+            "AutoPvPollIntervalMs": "50",
+            "AutoGridPollIntervalMs": "800",
+            "AutoBatteryPollIntervalMs": "4000",
+            "AutoPvService": "direct.pv",
+            "AutoPvServicePrefix": "direct.pv.prefix",
+            "AutoPvPath": "/DirectPv/Power",
+            "AutoPvMaxServices": "0",
+            "AutoPvScanIntervalSeconds": "-1",
+            "AutoUseDcPv": "0",
+            "AutoDcPvService": "direct.dc",
+            "AutoDcPvPath": "/DirectDc/Pv",
+            "AutoBatteryService": "direct.battery",
+            "AutoBatterySocPath": "/DirectSoc",
+            "AutoBatteryCapacityWh": "12000",
+            "AutoBatteryChemistry": "NMC",
+            "AutoBatteryCapacityAutoEstimate": "0",
+            "AutoBatteryCapacityWhPath": "/DirectCapacityWh",
+            "AutoBatteryCapacityAhPath": "/DirectCapacityAh",
+            "AutoBatteryVoltagePath": "/DirectVoltage",
+            "AutoBatteryCapacityEstimateMinSoc": "-4",
+            "AutoBatteryCapacityStartupRecheckSeconds": "-7",
+            "AutoBatteryCapacityEstimatedWh": "111",
+            "AutoBatteryCapacityEstimatedAh": "222",
+            "AutoBatteryCapacityEstimatedNominalVoltage": "48.5",
+            "AutoBatteryCapacityEstimatedCellCount": "16",
+            "AutoBatteryPowerPath": "/DirectPower",
+            "AutoBatteryAcPowerPath": "/DirectAcPower",
+            "AutoBatteryPvPowerPath": "/DirectPvPower",
+            "AutoBatteryGridInteractionPath": "/DirectGridInteraction",
+            "AutoBatteryOperatingModePath": "/DirectOperatingMode",
+            "AutoBatteryServicePrefix": "direct.battery.prefix",
+            "AutoBatteryScanIntervalSeconds": "-8",
+            "AutoGridService": "direct.system",
+            "AutoGridL1Path": "/DirectL1",
+            "AutoGridL2Path": "/DirectL2",
+            "AutoGridL3Path": "/DirectL3",
+            "AutoGridRequireAllPhases": "0",
+            "AutoDbusBackoffBaseSeconds": "-1",
+            "AutoDbusBackoffMaxSeconds": "-2",
+            "AutoInputValidationPollSeconds": "1",
+        }
+
+        class Parser:
+            def __getitem__(self, key):
+                if key != "DEFAULT":
+                    raise KeyError(key)
+                return section
+
+        helper = AutoInputHelper.__new__(AutoInputHelper)
+        helper._init_helper_base_config(
+            "direct.ini",
+            Parser(),
+            None,
+            parent_pid="4321",
+            helper_generation="9",
+            runtime_instance_id=" direct-runtime ",
+        )
+        helper._init_helper_polling()
+        helper._init_helper_pv_config()
+        helper._init_helper_battery_config()
+        helper._init_helper_grid_config()
+        helper._init_helper_runtime_config()
+
+        expected = {
+            "config_path": "direct.ini",
+            "parent_pid": 4321,
+            "helper_generation": 9,
+            "runtime_instance_id": "direct-runtime",
+            "snapshot_path": "/tmp/direct-snapshot.json",
+            "dbus_introspection_snapshot_path": "/tmp/direct-intro.json",
+            "dbus_introspection_request_path": "/tmp/direct-request.json",
+            "dbus_introspection_max_age_seconds": 0.0,
+            "dbus_gateway_run_dir": "/tmp/direct-gateway",
+            "dbus_gateway_cache_path": "/tmp/direct-cache.json",
+            "dbus_gateway_max_age_seconds": 0.0,
+            "dbus_gateway_error_retry_seconds": 1.0,
+            "dbus_method_timeout_seconds": 2.5,
+            "auto_pv_poll_interval_seconds": 0.2,
+            "auto_grid_poll_interval_seconds": 0.8,
+            "auto_battery_poll_interval_seconds": 4.0,
+            "poll_interval_seconds": 0.2,
+            "auto_pv_service": "direct.pv",
+            "auto_pv_service_prefix": "direct.pv.prefix",
+            "auto_pv_path": "/DirectPv/Power",
+            "auto_pv_max_services": 1,
+            "auto_pv_scan_interval_seconds": 0.0,
+            "auto_dc_pv_service": "direct.dc",
+            "auto_dc_pv_path": "/DirectDc/Pv",
+            "auto_battery_service": "direct.battery",
+            "auto_battery_soc_path": "/DirectSoc",
+            "auto_battery_capacity_wh": 12000.0,
+            "auto_battery_chemistry": "nmc",
+            "auto_battery_capacity_wh_path": "/DirectCapacityWh",
+            "auto_battery_capacity_ah_path": "/DirectCapacityAh",
+            "auto_battery_voltage_path": "/DirectVoltage",
+            "auto_battery_capacity_estimate_min_soc": 0.0,
+            "auto_battery_capacity_startup_recheck_seconds": 0.0,
+            "auto_battery_capacity_estimated_wh": 111.0,
+            "auto_battery_capacity_estimated_ah": 222.0,
+            "auto_battery_capacity_estimated_nominal_voltage": 48.5,
+            "auto_battery_capacity_estimated_cell_count": 16,
+            "auto_battery_power_path": "/DirectPower",
+            "auto_battery_ac_power_path": "/DirectAcPower",
+            "auto_battery_pv_power_path": "/DirectPvPower",
+            "auto_battery_grid_interaction_path": "/DirectGridInteraction",
+            "auto_battery_operating_mode_path": "/DirectOperatingMode",
+            "auto_battery_service_prefix": "direct.battery.prefix",
+            "auto_battery_scan_interval_seconds": 0.0,
+            "auto_grid_service": "direct.system",
+            "auto_grid_l1_path": "/DirectL1",
+            "auto_grid_l2_path": "/DirectL2",
+            "auto_grid_l3_path": "/DirectL3",
+            "auto_dbus_backoff_base_seconds": 0.0,
+            "auto_dbus_backoff_max_seconds": 0.0,
+            "validation_poll_seconds": 5.0,
+            "subscription_refresh_seconds": 60.0,
+            "auto_energy_source_ids": ("primary_battery",),
+        }
+        for name, value in expected.items():
+            self.assertEqual(getattr(helper, name), value)
+        self.assertFalse(helper.auto_use_dc_pv)
+        self.assertFalse(helper.auto_battery_capacity_auto_estimate)
+        self.assertFalse(helper.auto_grid_require_all_phases)
+        self.assertTrue(helper.auto_use_combined_battery_soc)
+
+    def test_init_helper_config_uses_documented_defaults(self):
+        config_path = self._write_helper_config("")
+
+        helper = AutoInputHelper(config_path)
+
+        self.assertEqual(helper.snapshot_path, "/run/dbus-venus-evcharger-auto.json")
+        self.assertEqual(helper.dbus_introspection_snapshot_path, "")
+        self.assertEqual(helper.dbus_introspection_request_path, "")
+        self.assertEqual(helper.dbus_introspection_max_age_seconds, 900.0)
+        self.assertEqual(helper.dbus_gateway_run_dir, "/run/venus-evcharger")
+        self.assertEqual(helper.dbus_gateway_cache_path, "/run/venus-evcharger/dbus-cache.json")
+        self.assertEqual(helper.dbus_gateway_max_age_seconds, 10.0)
+        self.assertEqual(helper.dbus_gateway_error_retry_seconds, 30.0)
+        self.assertEqual(helper.dbus_method_timeout_seconds, 1.0)
+        self.assertEqual(helper.auto_pv_service, "")
+        self.assertEqual(helper.auto_pv_service_prefix, "com.victronenergy.pvinverter")
+        self.assertEqual(helper.auto_pv_path, "/Ac/Power")
+        self.assertEqual(helper.auto_pv_max_services, 10)
+        self.assertEqual(helper.auto_pv_scan_interval_seconds, 60.0)
+        self.assertTrue(helper.auto_use_dc_pv)
+        self.assertEqual(helper.auto_dc_pv_service, "com.victronenergy.system")
+        self.assertEqual(helper.auto_dc_pv_path, "/Dc/Pv/Power")
+        self.assertEqual(helper.auto_battery_service, "com.victronenergy.battery.socketcan_can1")
+        self.assertEqual(helper.auto_battery_soc_path, "/Soc")
+        self.assertEqual(helper.auto_battery_capacity_wh, 0.0)
+        self.assertEqual(helper.auto_battery_chemistry, "lfp")
+        self.assertTrue(helper.auto_battery_capacity_auto_estimate)
+        self.assertEqual(helper.auto_battery_capacity_wh_path, "")
+        self.assertEqual(helper.auto_battery_capacity_ah_path, "/InstalledCapacity")
+        self.assertEqual(helper.auto_battery_voltage_path, "/Dc/0/Voltage")
+        self.assertEqual(helper.auto_battery_capacity_estimate_min_soc, 95.0)
+        self.assertEqual(helper.auto_battery_capacity_startup_recheck_seconds, 300.0)
+        self.assertEqual(helper.auto_battery_capacity_estimated_wh, 0.0)
+        self.assertEqual(helper.auto_battery_capacity_estimated_ah, 0.0)
+        self.assertEqual(helper.auto_battery_capacity_estimated_nominal_voltage, 0.0)
+        self.assertEqual(helper.auto_battery_capacity_estimated_cell_count, 0)
+        self.assertEqual(helper.auto_battery_power_path, "")
+        self.assertEqual(helper.auto_battery_ac_power_path, "")
+        self.assertEqual(helper.auto_battery_pv_power_path, "")
+        self.assertEqual(helper.auto_battery_grid_interaction_path, "")
+        self.assertEqual(helper.auto_battery_operating_mode_path, "")
+        self.assertEqual(helper.auto_battery_service_prefix, "com.victronenergy.battery")
+        self.assertEqual(helper.auto_battery_scan_interval_seconds, 60.0)
+        self.assertEqual(helper.auto_grid_service, "com.victronenergy.system")
+        self.assertEqual(helper.auto_grid_l1_path, "/Ac/Grid/L1/Power")
+        self.assertEqual(helper.auto_grid_l2_path, "/Ac/Grid/L2/Power")
+        self.assertEqual(helper.auto_grid_l3_path, "/Ac/Grid/L3/Power")
+        self.assertTrue(helper.auto_grid_require_all_phases)
+        self.assertEqual(helper.auto_dbus_backoff_base_seconds, 5.0)
+        self.assertEqual(helper.auto_dbus_backoff_max_seconds, 60.0)
+        self.assertEqual(helper.validation_poll_seconds, 30.0)
+        self.assertEqual(helper.subscription_refresh_seconds, 60.0)
+
+    def test_base_config_clamps_gateway_retry_ceiling(self):
+        config_path = self._write_helper_config("DbusGatewayErrorRetrySeconds=999\n")
+
+        helper = AutoInputHelper(config_path)
+
+        self.assertEqual(helper.dbus_gateway_error_retry_seconds, 300.0)
+
+    def test_poll_interval_helpers_cover_fallback_and_each_minimum_source(self):
+        helper = AutoInputHelper.__new__(AutoInputHelper)
+
+        helper.config = {"PollIntervalMs": "1750"}
+        self.assertEqual(helper._auto_input_poll_interval_ms(), 1750.0)
+        helper.config = {}
+        self.assertEqual(helper._auto_input_poll_interval_ms(), 1000.0)
+
+        cases = [
+            (
+                {
+                    "AutoInputPollIntervalMs": "50",
+                    "AutoPvPollIntervalMs": "600",
+                    "AutoGridPollIntervalMs": "700",
+                    "AutoBatteryPollIntervalMs": "800",
+                },
+                0.2,
+            ),
+            (
+                {
+                    "AutoInputPollIntervalMs": "1000",
+                    "AutoPvPollIntervalMs": "300",
+                    "AutoGridPollIntervalMs": "700",
+                    "AutoBatteryPollIntervalMs": "800",
+                },
+                0.3,
+            ),
+            (
+                {
+                    "AutoInputPollIntervalMs": "1000",
+                    "AutoPvPollIntervalMs": "700",
+                    "AutoGridPollIntervalMs": "300",
+                    "AutoBatteryPollIntervalMs": "800",
+                },
+                0.3,
+            ),
+            (
+                {
+                    "AutoInputPollIntervalMs": "1000",
+                    "AutoPvPollIntervalMs": "700",
+                    "AutoGridPollIntervalMs": "800",
+                    "AutoBatteryPollIntervalMs": "300",
+                },
+                0.3,
+            ),
+        ]
+        for config, expected in cases:
+            with self.subTest(config=config):
+                helper.config = config
+                helper._init_helper_polling()
+                self.assertEqual(helper.poll_interval_seconds, expected)
 
     def test_derive_subscription_refresh_seconds_uses_smallest_positive_scan_interval(self):
         helper = AutoInputHelper.__new__(AutoInputHelper)

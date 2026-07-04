@@ -51,14 +51,14 @@ class _LocalControlApiAuth(_LocalControlApiResponse):
 
     @staticmethod
     def _client_host(handler: BaseHTTPRequestHandler) -> str:
-        client_address = getattr(handler, "client_address", ("127.0.0.1", 0))
+        client_address = getattr(handler, "client_address", None)
         if isinstance(client_address, tuple) and client_address:
             return str(client_address[0])
         return "127.0.0.1"
 
     @staticmethod
     def _is_loopback_host(host: str) -> bool:
-        if host in {"localhost", "::1"}:
+        if host == "localhost":
             return True
         try:
             return bool(ipaddress.ip_address(host).is_loopback)
@@ -74,15 +74,28 @@ class _LocalControlApiAuth(_LocalControlApiResponse):
         return self._UNAUTHORIZED_ERROR
 
     def _scope_satisfies_requirement(self, scope: str | None, required_scope: str) -> bool:
-        if scope is None:
+        if scope not in self._SCOPE_ORDER or required_scope not in self._SCOPE_ORDER:
             return False
-        return self._SCOPE_ORDER.get(scope, -1) >= self._SCOPE_ORDER.get(required_scope, 999)
+        return self._SCOPE_ORDER[scope] >= self._SCOPE_ORDER[required_scope]
 
     def _authorization_scope(self, handler: BaseHTTPRequestHandler) -> str | None:
         scope_tokens = self._scope_tokens()
-        if not any(token for _scope_name, token in scope_tokens):
+        if not self._has_configured_scope_token(scope_tokens):
             return "update_admin"
-        header = handler.headers.get("Authorization", "").strip()
+        return self._scope_from_authorization_header(handler.headers.get("Authorization"), scope_tokens)
+
+    @staticmethod
+    def _has_configured_scope_token(scope_tokens: tuple[tuple[str, str], ...]) -> bool:
+        return any(token for _scope_name, token in scope_tokens)
+
+    def _scope_from_authorization_header(
+        self,
+        header_value: str | None,
+        scope_tokens: tuple[tuple[str, str], ...],
+    ) -> str | None:
+        if not header_value:
+            return None
+        header = header_value.strip()
         for scope_name, token in scope_tokens:
             if self._matches_bearer_token(header, token):
                 return scope_name
@@ -100,17 +113,32 @@ class _LocalControlApiAuth(_LocalControlApiResponse):
     def _matches_bearer_token(header: str, token: str) -> bool:
         return bool(token) and header == f"Bearer {token}"
 
+    @staticmethod
+    def _first_configured_token(*tokens: str) -> str:
+        return next((str(token) for token in tokens if token), "")
+
     def _effective_read_token(self) -> str:
-        return str(self._read_token or self._control_token or self._admin_token or self._update_token or self._auth_token)
+        return self._first_configured_token(
+            self._read_token,
+            self._control_token,
+            self._admin_token,
+            self._update_token,
+            self._auth_token,
+        )
 
     def _effective_control_token(self) -> str:
-        return str(self._control_token or self._auth_token)
+        return self._first_configured_token(self._control_token, self._auth_token)
 
     def _effective_admin_token(self) -> str:
-        return str(self._admin_token or self._control_token or self._auth_token)
+        return self._first_configured_token(self._admin_token, self._control_token, self._auth_token)
 
     def _effective_update_token(self) -> str:
-        return str(self._update_token or self._admin_token or self._control_token or self._auth_token)
+        return self._first_configured_token(
+            self._update_token,
+            self._admin_token,
+            self._control_token,
+            self._auth_token,
+        )
 
     def _required_scope_for_command_payload(self, payload: dict[str, Any]) -> str:
         command_name = str(payload.get("name", "")).strip()

@@ -21,6 +21,10 @@ def _publish_state_entry(value: object) -> PublishStateEntry | None:
     return {str(key): item for key, item in value.items()}
 
 
+def _semantic_field_path(field: object) -> str | None:
+    return EVCS_FIELD_TO_PATH.get(str(field))
+
+
 class _DbusPublishCore:
     PHASE_NAMES: tuple[str, str, str]
     service: Any
@@ -364,8 +368,8 @@ class _DbusPublishCore:
         """Return semantic fields whose mapped DBus path should be written."""
         staged_fields: list[tuple[str, Any]] = []
         for field, value in fields.items():
-            path = EVCS_FIELD_TO_PATH.get(str(field), "")
-            if not path:
+            path = _semantic_field_path(field)
+            if path is None:
                 continue
             should_write, _entry = self._publish_decision(path, paths[path], current, interval_seconds, force)
             if should_write:
@@ -375,12 +379,12 @@ class _DbusPublishCore:
     @staticmethod
     def _field_items_to_path_items(fields: Sequence[tuple[str, Any]]) -> list[tuple[str, Any]]:
         """Map semantic field tuples to DBus path tuples for legacy direct queues."""
-        return [
-            (path, value)
-            for field, value in fields
-            for path in [EVCS_FIELD_TO_PATH.get(str(field), "")]
-            if path
-        ]
+        path_items: list[tuple[str, Any]] = []
+        for field, value in fields:
+            path = _semantic_field_path(field)
+            if path is not None:
+                path_items.append((path, value))
+        return path_items
 
     def _publish_values(
         self,

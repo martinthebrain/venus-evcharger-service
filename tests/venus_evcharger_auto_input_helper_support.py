@@ -82,6 +82,10 @@ class AutoInputHelperTestCase(unittest.TestCase):
         helper.dbus_introspection_snapshot_path = ""
         helper.dbus_introspection_request_path = ""
         helper.dbus_introspection_max_age_seconds = 900.0
+        helper.dbus_gateway_run_dir = "/run/venus-evcharger"
+        helper.dbus_gateway_cache_path = "/run/venus-evcharger/dbus-cache.json"
+        helper.dbus_gateway_max_age_seconds = 10.0
+        helper.dbus_gateway_error_retry_seconds = 30.0
         helper._dbus_introspection_snapshot_cache = {}
         helper._dbus_introspection_snapshot_loaded_at = 0.0
         return helper

@@ -71,6 +71,7 @@ from venus_evcharger.core.contracts_outward import (
     SOFTWARE_UPDATE_STATE_CODES,
     displayable_confirmed_read_timestamp,
     normalized_scheduled_state_fields,
+    normalized_scheduled_state_values,
     normalized_software_update_state_fields,
     sanitized_auto_metrics,
 )
@@ -160,6 +161,7 @@ __all__ = [
     "normalized_auto_state_pair",
     "normalized_fault_state",
     "normalized_scheduled_state_fields",
+    "normalized_scheduled_state_values",
     "normalized_software_update_state_fields",
     "normalized_state_api_config_effective_fields",
     "normalized_state_api_health_fields",

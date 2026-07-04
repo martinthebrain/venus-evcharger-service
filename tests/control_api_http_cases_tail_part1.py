@@ -27,6 +27,62 @@ class __ControlApiHttpTailCasesPart1:
             self.assertNotIn("\r", key + value)
             self.assertNotIn("\n", key + value)
 
+    def test_write_json_uses_deterministic_sorted_utf8_bytes(self) -> None:
+        handler = _FakeHandler("/v1/state/summary")
+
+        LocalControlApiHttpServer._write_json(handler, HTTPStatus.OK, {"z": 1, "a": 2})
+
+        self.assertEqual(handler.wfile.getvalue(), b'{"a": 2, "z": 1}')
+        self.assertEqual(handler.response_headers["Content-Length"], "16")
+
+    def test_response_helpers_emit_exact_json_contract(self) -> None:
+        command = ControlCommand(
+            name="set_mode",
+            path="/Mode",
+            value=1,
+            source="http",
+            command_id="cmd-1",
+            idempotency_key="idem-1",
+        )
+        result = ControlResult.applied_result(command)
+        error_payload = LocalControlApiHttpServer._error_response_payload("invalid_payload", "JSON body must be an object.")
+        command_payload = LocalControlApiHttpServer._command_payload(command)
+        result_payload = LocalControlApiHttpServer._result_payload(result)
+        handler = _FakeHandler("/v1/control/command")
+
+        LocalControlApiHttpServer._write_error(handler, HTTPStatus.BAD_REQUEST, "invalid_payload", "JSON body must be an object.")
+
+        self.assertEqual(
+            error_payload,
+            {
+                "ok": False,
+                "detail": "JSON body must be an object.",
+                "command": None,
+                "result": None,
+                "replayed": False,
+                "error": {
+                    "code": "invalid_payload",
+                    "message": "JSON body must be an object.",
+                    "retryable": False,
+                    "details": {},
+                },
+            },
+        )
+        self.assertEqual(command_payload["name"], "set_mode")
+        self.assertEqual(command_payload["path"], "/Mode")
+        self.assertEqual(command_payload["value"], 1)
+        self.assertEqual(command_payload["source"], "http")
+        self.assertEqual(command_payload["command_id"], "cmd-1")
+        self.assertEqual(command_payload["idempotency_key"], "idem-1")
+        self.assertEqual(result_payload["status"], "applied")
+        self.assertTrue(result_payload["accepted"])
+        self.assertTrue(result_payload["applied"])
+        self.assertFalse(result_payload["reversible_failure"])
+        self.assertEqual(handler.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(handler.response_headers["Content-Type"], "application/json")
+        self.assertEqual(handler.response_headers["Content-Length"], str(len(handler.wfile.getvalue())))
+        self.assertEqual(handler.json_payload(), error_payload)
+
     def test_events_endpoint_filters_recent_events_by_kind(self) -> None:
         service = SimpleNamespace(
             _control_command_from_payload=MagicMock(),
@@ -126,8 +182,19 @@ class __ControlApiHttpTailCasesPart1:
         handler = SimpleNamespace(client_address="bad-client")
 
         self.assertEqual(LocalControlApiHttpServer._client_host(handler), "127.0.0.1")
+        self.assertEqual(LocalControlApiHttpServer._client_host(SimpleNamespace()), "127.0.0.1")
+        self.assertEqual(LocalControlApiHttpServer._client_host(SimpleNamespace(client_address=("10.0.0.5", 2345))), "10.0.0.5")
         self.assertTrue(LocalControlApiHttpServer._is_loopback_host("localhost"))
+        self.assertTrue(LocalControlApiHttpServer._is_loopback_host("::1"))
+        self.assertTrue(LocalControlApiHttpServer._is_loopback_host("127.0.0.1"))
+        self.assertFalse(LocalControlApiHttpServer._is_loopback_host("192.168.1.10"))
         self.assertFalse(LocalControlApiHttpServer._is_loopback_host("not-an-ip"))
+
+    def test_request_target_parser_keeps_blank_query_values(self) -> None:
+        path, params = LocalControlApiHttpServer._parsed_request_target("/v1/events?once=&kind=command&kind=")
+
+        self.assertEqual(path, "/v1/events")
+        self.assertEqual(params, {"once": [""], "kind": ["command", ""]})
 
     def test_query_helpers_fall_back_for_invalid_values(self) -> None:
         self.assertEqual(LocalControlApiHttpServer._query_int({"limit": ["bad"]}, "limit", 3), 3)
@@ -156,6 +223,39 @@ class __ControlApiHttpTailCasesPart1:
             {"etag-1", "plain-token", "token-2"},
         )
         self.assertEqual(LocalControlApiHttpServer._normalized_token("plain-token"), "plain-token")
+        self.assertEqual(LocalControlApiHttpServer._normalized_token('""'), "")
+        self.assertEqual(LocalControlApiHttpServer._normalized_token('W/""'), "")
+
+        x_state_only = _FakeHandler(
+            "/v1/control/command",
+            headers={
+                "If-Match": "",
+                "X-State-Token": "state-only",
+            },
+        )
+        self.assertEqual(server._request_state_tokens(x_state_only), {"state-only"})
+
+    def test_scope_requirement_matrix_and_auth_errors_are_exact(self) -> None:
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, read_token="read-token")
+
+        self.assertTrue(server._scope_satisfies_requirement("read", "read"))
+        self.assertTrue(server._scope_satisfies_requirement("control_basic", "read"))
+        self.assertTrue(server._scope_satisfies_requirement("update_admin", "control_admin"))
+        self.assertFalse(server._scope_satisfies_requirement(None, "read"))
+        self.assertFalse(server._scope_satisfies_requirement("read", "control_basic"))
+        self.assertFalse(server._scope_satisfies_requirement("unknown", "read"))
+        self.assertFalse(server._scope_satisfies_requirement("update_admin", "unknown"))
+
+        with patch.object(server, "_authorization_scope", return_value="unknown"):
+            self.assertEqual(server._auth_error(_FakeHandler("/v1/state/summary"), required_scope="read"), server._UNAUTHORIZED_ERROR)
+            self.assertEqual(
+                server._auth_error(_FakeHandler("/v1/control/command"), required_scope="control_basic"),
+                server._INSUFFICIENT_SCOPE_ERROR,
+            )
 
     def test_authorization_scope_prefers_highest_matching_token(self) -> None:
         service = SimpleNamespace(
@@ -176,13 +276,75 @@ class __ControlApiHttpTailCasesPart1:
         self.assertEqual(server._authorization_scope(_FakeHandler("/v1/capabilities", authorization="Bearer admin-token")), "control_admin")
         self.assertEqual(server._authorization_scope(_FakeHandler("/v1/capabilities", authorization="Bearer control-token")), "control_basic")
         self.assertEqual(server._authorization_scope(_FakeHandler("/v1/capabilities", authorization="Bearer read-token")), "read")
+        self.assertIsNone(server._authorization_scope(_FakeHandler("/v1/capabilities")))
+        self.assertIsNone(server._authorization_scope(_FakeHandler("/v1/capabilities", headers={"Authorization": ""})))
+        self.assertIsNone(server._authorization_scope(_FakeHandler("/v1/capabilities", authorization="Bearer wrong-token")))
+
+    def test_effective_token_fallbacks_are_ordered_by_scope(self) -> None:
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+        )
+
+        self.assertEqual(LocalControlApiHttpServer._first_configured_token("", ""), "")
+        self.assertEqual(LocalControlApiHttpServer._first_configured_token("", "second"), "second")
+
+        auth_only = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, auth_token="legacy")
+        self.assertEqual(auth_only._effective_read_token(), "legacy")
+        self.assertEqual(auth_only._effective_control_token(), "legacy")
+        self.assertEqual(auth_only._effective_admin_token(), "legacy")
+        self.assertEqual(auth_only._effective_update_token(), "legacy")
+
+        scoped = LocalControlApiHttpServer(
+            service,
+            host="127.0.0.1",
+            port=8765,
+            auth_token="legacy",
+            read_token="read",
+            control_token="control",
+            admin_token="admin",
+            update_token="update",
+        )
+        self.assertEqual(scoped._effective_read_token(), "read")
+        self.assertEqual(scoped._effective_control_token(), "control")
+        self.assertEqual(scoped._effective_admin_token(), "admin")
+        self.assertEqual(scoped._effective_update_token(), "update")
+
+        fallback = LocalControlApiHttpServer(
+            service,
+            host="127.0.0.1",
+            port=8765,
+            control_token="control",
+            admin_token="admin",
+        )
+        self.assertEqual(fallback._effective_read_token(), "control")
+        self.assertEqual(fallback._effective_update_token(), "admin")
+
+        admin_only = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, admin_token="admin")
+        self.assertEqual(admin_only._effective_read_token(), "admin")
+        self.assertEqual(admin_only._effective_admin_token(), "admin")
+        self.assertEqual(admin_only._effective_update_token(), "admin")
+
+        update_only = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, update_token="update")
+        self.assertEqual(update_only._effective_read_token(), "update")
+        self.assertEqual(update_only._effective_update_token(), "update")
+
+        control_only = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, control_token="control")
+        self.assertEqual(control_only._effective_admin_token(), "control")
+        self.assertEqual(control_only._effective_update_token(), "control")
+
+        no_token = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        self.assertEqual(no_token._state_token(), "")
+        self.assertEqual(no_token._state_token_headers(), {})
 
     def test_required_scope_for_command_payload_resolves_paths_and_falls_back_for_invalid_paths(self) -> None:
+        resolved_command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        invalid_path = ValueError("bad path")
         service = SimpleNamespace(
             _control_command_from_payload=MagicMock(
                 side_effect=[
-                    ControlCommand(name="set_mode", path="/Mode", value=1, source="http"),
-                    ValueError("bad path"),
+                    resolved_command,
+                    invalid_path,
                 ]
             ),
             _handle_control_command=MagicMock(),
@@ -191,9 +353,17 @@ class __ControlApiHttpTailCasesPart1:
 
         resolved_scope = server._required_scope_for_command_payload({"path": "/Mode", "value": 1})
         fallback_scope = server._required_scope_for_command_payload({"path": "/Unknown", "value": 1})
+        explicit_scope = server._required_scope_for_command_payload({"name": "set_mode", "path": "/Mode", "value": 1})
 
         self.assertEqual(resolved_scope, "control_basic")
         self.assertEqual(fallback_scope, "control_admin")
+        self.assertEqual(explicit_scope, "control_basic")
+        self.assertEqual(service._control_command_from_payload.call_count, 2)
+        self.assertEqual(
+            service._control_command_from_payload.call_args_list[0].args[0],
+            {"path": "/Mode", "value": 1, "command_id": "", "idempotency_key": ""},
+        )
+        self.assertEqual(service._control_command_from_payload.call_args_list[0].kwargs, {"source": "http"})
 
     def test_finer_scopes_gate_admin_and_update_commands(self) -> None:
         command = ControlCommand(name="set_auto_runtime_setting", path="/Auto/StartSurplusWatts", value=1800.0, source="http")
@@ -306,10 +476,21 @@ class __ControlApiHttpTailCasesPart1:
 
         self.assertEqual(get_handler.status_code, 404)
         self.assertEqual(post_handler.status_code, 404)
-        self.assertEqual(get_handler.json_payload()["error"]["code"], "not_found")
-        self.assertEqual(post_handler.json_payload()["error"]["code"], "not_found")
-        self.assertIsNone(get_handler.json_payload()["command"])
-        self.assertIsNone(post_handler.json_payload()["result"])
+        for payload in (get_handler.json_payload(), post_handler.json_payload()):
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["detail"], "Not found.")
+            self.assertFalse(payload["replayed"])
+            self.assertEqual(payload["error"]["code"], "not_found")
+            self.assertEqual(payload["error"]["message"], "Not found.")
+            self.assertFalse(payload["error"]["retryable"])
+            self.assertEqual(payload["error"]["details"], {})
+            self.assertIsNone(payload["command"])
+            self.assertIsNone(payload["result"])
+        self.assertEqual(
+            LocalControlApiHttpServer._post_target_error("/v1/control/unknown"),
+            (HTTPStatus.NOT_FOUND, "not_found", "Not found."),
+        )
+        self.assertIsNone(LocalControlApiHttpServer._post_target_error("/v1/control/command"))
 
     def test_command_endpoint_rejects_invalid_json_payloads(self) -> None:
         service = SimpleNamespace(
@@ -324,5 +505,3 @@ class __ControlApiHttpTailCasesPart1:
         self.assertEqual(handler.status_code, 400)
         self.assertEqual(handler.json_payload()["error"]["code"], "invalid_json")
         service._control_command_from_payload.assert_not_called()
-
-

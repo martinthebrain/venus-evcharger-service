@@ -20,7 +20,7 @@ from venus_evcharger.publish.dbus_diagnostics_introspection import _DbusDiagnost
 class _DbusPublishDiagnostics(_DbusDiagnosticsIntrospection):
     @staticmethod
     def _runtime_error_state(service: Any) -> Mapping[str, Any]:
-        error_state = getattr(service, "_error_state", {})
+        error_state = getattr(service, "_error_state", None)
         return error_state if isinstance(error_state, Mapping) else {}
 
     def _diagnostic_counter_values(self, now: float) -> dict[str, DiagnosticValue]:
@@ -28,8 +28,8 @@ class _DbusPublishDiagnostics(_DbusDiagnosticsIntrospection):
         error_state = self._runtime_error_state(self.service)
         scheduled_snapshot = self._scheduled_snapshot(self.service, now)
         auto_state, auto_state_code = normalized_auto_state_pair(
-            getattr(self.service, "_last_auto_state", "idle"),
-            getattr(self.service, "_last_auto_state_code", 0),
+            getattr(self.service, "_last_auto_state", None),
+            None,
         )
         fault_reason, fault_active = normalized_fault_state(self._fault_reason(self.service))
         return {
@@ -39,7 +39,7 @@ class _DbusPublishDiagnostics(_DbusDiagnosticsIntrospection):
             "auto_state": auto_state,
             "auto_state_code": auto_state_code,
             "auto_recovery_active": self._recovery_active(self.service),
-            "auto_status_source": normalized_status_source(getattr(self.service, "_last_status_source", "unknown")),
+            "auto_status_source": normalized_status_source(getattr(self.service, "_last_status_source", None)),
             "auto_fault_active": fault_active,
             "auto_fault_reason": fault_reason,
             "auto_stale": 1 if self.service._is_update_stale(now) else 0,
@@ -68,7 +68,7 @@ class _DbusPublishDiagnostics(_DbusDiagnosticsIntrospection):
         last_shelly_read_at = displayable_confirmed_read_timestamp(
             last_confirmed_at=getattr(svc, "_last_confirmed_pm_status_at", None),
             last_pm_at=getattr(svc, "_last_pm_status_at", None),
-            last_pm_confirmed=bool(getattr(svc, "_last_pm_status_confirmed", False)),
+            last_pm_confirmed=bool(getattr(svc, "_last_pm_status_confirmed", None)),
             now=now,
         )
         return {

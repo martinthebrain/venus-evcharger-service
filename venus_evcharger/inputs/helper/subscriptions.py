@@ -57,7 +57,7 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
             "service_name": service_name,
             "path": path,
         }
-        request_gateway_value = getattr(self, "_request_gateway_value", None)
+        request_gateway_value = self._request_gateway_value
         if callable(request_gateway_value):
             request_gateway_value(service_name, path, priority=80, reason=f"{source_name} subscription refresh")
 
@@ -67,9 +67,11 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
         for key in list(self._signal_matches):
             if key in desired_keys:
                 continue
-            match = self._signal_matches.pop(key, None)
+            match = self._signal_matches[key]
+            del self._signal_matches[key]
             self._remove_signal_match(match)
-            self._monitored_specs.pop(key, None)
+            if key in self._monitored_specs:
+                del self._monitored_specs[key]
 
     def _desired_pv_subscription_specs(self: Any) -> list[tuple[str, str, str]]:
         """Return the current AC/DC PV paths that should be monitored."""
@@ -83,7 +85,7 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
     def _resolved_pv_subscription_services(self: Any) -> list[str]:
         """Return AC PV services that should currently be monitored."""
         try:
-            configured_service = str(getattr(self, "auto_pv_service", "") or "")
+            configured_service = str(self.auto_pv_service or "")
             if configured_service:
                 return [configured_service]
             return list(self._resolve_auto_pv_services())
@@ -99,7 +101,7 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
     def _desired_battery_subscription_specs(self: Any) -> list[tuple[str, str, str]]:
         """Return the battery SOC path that should be monitored."""
         desired: list[tuple[str, str, str]] = []
-        for source in tuple(getattr(self, "auto_energy_sources", ()) or (self._primary_energy_source(),)):
+        for source in tuple(self.auto_energy_sources or (self._primary_energy_source(),)):
             desired.extend(self._battery_subscription_specs_for_source(source))
         return desired
 
@@ -186,7 +188,8 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
         return bool(self._subscription_refresh_delay_seconds() > 0.0)
 
     def _subscription_refresh_delay_seconds(self: Any) -> float:
-        backoff_until = float(getattr(self, "_dbus_subscription_backoff_until", 0.0) or 0.0)
+        self._ensure_poll_state()
+        backoff_until = float(self._dbus_subscription_backoff_until or 0.0)
         return max(0.0, backoff_until - time.time())
 
     def _on_source_signal(
@@ -237,17 +240,19 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
     def _dbus_callback_generation_current(self: Any, dbus_generation: int | None) -> bool:
         if dbus_generation is None:
             return True
-        return int(dbus_generation) == int(getattr(self, "_dbus_generation", 0) or 0)
+        self._ensure_poll_state()
+        return int(dbus_generation) == int(self._dbus_generation or 0)
 
     def _handle_dbus_callback_error(self: Any, warning_key: str, message: str, *args: object) -> None:
+        base_backoff_seconds = float(self.auto_dbus_backoff_base_seconds or 5.0)
         self._warning_throttled(
             warning_key,
-            max(5.0, self.auto_dbus_backoff_base_seconds or 5.0),
+            max(5.0, base_backoff_seconds),
             message,
             *args,
         )
         self._reset_system_bus()
-        self._dbus_subscription_backoff_until = time.time() + max(1.0, self.auto_dbus_backoff_base_seconds or 5.0)
+        self._dbus_subscription_backoff_until = time.time() + max(1.0, base_backoff_seconds)
         self._schedule_refresh_subscriptions()
 
     def _is_relevant_name_owner_change(self: Any, name: str) -> bool:
@@ -276,7 +281,7 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
     def _matches_explicit_energy_source_service_name(self: Any, name: str) -> bool:
         return any(
             source.service_name and name == source.service_name
-            for source in getattr(self, "auto_energy_sources", ())
+            for source in self.auto_energy_sources
         )
 
     def _matches_discovery_prefix(self: Any, name: str) -> bool:
@@ -284,7 +289,7 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
         return bool(
             name.startswith(self.auto_pv_service_prefix)
             or name.startswith(self.auto_battery_service_prefix)
-            or any(source.service_prefix and name.startswith(source.service_prefix) for source in getattr(self, "auto_energy_sources", ()))
+            or any(source.service_prefix and name.startswith(source.service_prefix) for source in self.auto_energy_sources)
         )
 
     def _refresh_subscriptions_timer(self: Any) -> bool:
@@ -308,7 +313,7 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
         self._close_system_bus(bus)
         self._system_bus = None
         self._system_bus_generation = 0
-        self._dbus_generation = int(getattr(self, "_dbus_generation", 0) or 0) + 1
+        self._dbus_generation = int(self._dbus_generation or 0) + 1
 
     def _get_system_bus(self: Any) -> Any:
         """Direct DBus connections are forbidden outside the gateway."""
@@ -319,7 +324,7 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
         self._ensure_poll_state()
         if self._name_owner_match is not None:
             return
-        gateway_client = getattr(self, "_gateway_client", None)
+        gateway_client = self._gateway_client
         if not callable(gateway_client):
             logging.debug("Gateway service refresh request skipped; gateway client is unavailable")
             return
@@ -331,11 +336,14 @@ class _AutoInputHelperSubscription(_AutoInputHelperSource):
         self._name_owner_match = _GATEWAY_MATCH_SENTINEL
 
     def _clear_all_signal_matches(self: Any) -> None:
-        for key in list(getattr(self, "_signal_matches", {})):
-            match = self._signal_matches.pop(key, None)
+        self._ensure_poll_state()
+        for key in list(self._signal_matches):
+            match = self._signal_matches[key]
+            del self._signal_matches[key]
             self._remove_signal_match(match)
-            self._monitored_specs.pop(key, None)
-        self._remove_signal_match(getattr(self, "_name_owner_match", None))
+            if key in self._monitored_specs:
+                del self._monitored_specs[key]
+        self._remove_signal_match(self._name_owner_match)
         self._name_owner_match = None
 
     @staticmethod

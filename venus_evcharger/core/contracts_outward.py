@@ -44,13 +44,16 @@ __all__ = [
     "SCHEDULED_REASON_CODES",
     "SCHEDULED_STATE_CODES",
     "SOFTWARE_UPDATE_STATE_CODES",
+    "normalized_scheduled_state_values",
     "normalized_scheduled_state_fields",
     "normalized_software_update_state_fields",
 ]
 
 
 def _normalized_scheduled_label(value: Any, allowed_codes: dict[str, int]) -> str:
-    normalized = str(value).strip().lower() if value is not None else "disabled"
+    if value is None:
+        return "disabled"
+    normalized = str(value).strip().lower()
     return normalized if normalized in allowed_codes else "disabled"
 
 
@@ -58,14 +61,13 @@ def _normalized_scheduled_boost_active(night_boost_active: Any, normalized_state
     return int(bool(night_boost_active) and normalized_state == "night-boost")
 
 
-def normalized_scheduled_state_fields(
+def normalized_scheduled_state_values(
     scheduled_active: Any,
     state: Any,
-    state_code: Any,
     reason: Any,
-    reason_code: Any,
     night_boost_active: Any,
 ) -> tuple[str, int, str, int, int]:
+    """Return normalized scheduled-mode values from the semantic fields only."""
     if not bool(scheduled_active):
         return "disabled", 0, "disabled", 0, 0
     normalized_state = _normalized_scheduled_label(state, SCHEDULED_STATE_CODES)
@@ -79,8 +81,27 @@ def normalized_scheduled_state_fields(
     )
 
 
+def normalized_scheduled_state_fields(
+    scheduled_active: Any,
+    state: Any,
+    state_code: Any,
+    reason: Any,
+    reason_code: Any,
+    night_boost_active: Any,
+) -> tuple[str, int, str, int, int]:
+    """Return normalized scheduled-mode values.
+
+    ``state_code`` and ``reason_code`` are accepted for the historical outward
+    contract shape. Codes are derived from normalized labels so stale supplied
+    codes cannot leak to DBus.
+    """
+    return normalized_scheduled_state_values(scheduled_active, state, reason, night_boost_active)
+
+
 def _normalized_software_update_state_label(value: Any) -> str:
-    normalized = str(value).strip().lower() if value is not None else "idle"
+    if value is None:
+        return "idle"
+    normalized = str(value).strip().lower()
     return normalized if normalized in SOFTWARE_UPDATE_STATE_CODES else "idle"
 
 

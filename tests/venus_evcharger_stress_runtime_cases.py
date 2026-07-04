@@ -186,10 +186,24 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             snapshot_path = os.path.join(temp_dir, "auto-input.json")
+            mtime_lock = threading.Lock()
+            mtime_state = {"ns": 0}
 
             def load_json_file(path):
                 with open(path, "r", encoding="utf-8") as handle:
                     return json.load(handle)
+
+            def write_snapshot(payload):
+                write_text_atomically(snapshot_path, payload)
+                with mtime_lock:
+                    mtime_state["ns"] += 1
+
+            def stat_snapshot(path):
+                if not os.path.exists(path):
+                    raise FileNotFoundError(path)
+                with mtime_lock:
+                    mtime_ns = mtime_state["ns"]
+                return SimpleNamespace(st_mtime_ns=mtime_ns, st_mtime=mtime_ns / 1_000_000_000)
 
             def update_worker_snapshot(**fields):
                 with updates_lock:
@@ -201,7 +215,7 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                 auto_input_helper_stale_seconds=5.0,
                 auto_input_helper_restart_seconds=1.0,
                 _time_now=lambda: 0.0,
-                _stat_path=os.stat,
+                _stat_path=stat_snapshot,
                 _load_json_file=load_json_file,
                 _warning_throttled=MagicMock(),
                 _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
@@ -259,7 +273,7 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                                     "runtime_instance_id": "instance-1",
                                 }
                             )
-                        write_text_atomically(snapshot_path, payload)
+                        write_snapshot(payload)
                 except Exception as error:  # pylint: disable=broad-except
                     _record_error(f"writer: {error}")
 
@@ -279,14 +293,13 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
             writer_thread.join()
             reader_thread.join()
 
-            write_text_atomically(snapshot_path, "{broken-json")
+            write_snapshot("{broken-json")
             controller.refresh_snapshot(now=float(iterations + 0.25))
 
-            write_text_atomically(snapshot_path, json.dumps(["not-a-dict"]))
+            write_snapshot(json.dumps(["not-a-dict"]))
             controller.refresh_snapshot(now=float(iterations + 0.5))
 
-            write_text_atomically(
-                snapshot_path,
+            write_snapshot(
                 json.dumps(
                     {
                         "snapshot_version": 1,
@@ -306,8 +319,7 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
             )
             controller.refresh_snapshot(now=float(iterations + 10))
 
-            write_text_atomically(
-                snapshot_path,
+            write_snapshot(
                 json.dumps(
                     {
                         "snapshot_version": 1,

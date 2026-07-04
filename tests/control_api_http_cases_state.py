@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from http import HTTPStatus
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from tests.control_api_http_cases_common import _FakeHandler
 from venus_evcharger.control import ControlCommand, ControlResult, LocalControlApiHttpServer
 from venus_evcharger.control.http_api_command_contracts import (
+    optional_error_payload,
     require_idempotency_store,
     require_rate_limiter,
 )
@@ -13,10 +15,35 @@ from venus_evcharger.control.http_api_routing import _LocalControlApiRouting
 
 class _ControlApiHttpStateCases:
     def test_control_api_contract_helpers_reject_invalid_factories(self) -> None:
-        with self.assertRaisesRegex(TypeError, "_control_api_rate_limiter must return"):
+        with self.assertRaisesRegex(TypeError, "_control_api_rate_limiter must return.*got object"):
             require_rate_limiter(object())
-        with self.assertRaisesRegex(TypeError, "_control_api_idempotency_store must return"):
+        with self.assertRaisesRegex(TypeError, "_control_api_idempotency_store must return.*got object"):
             require_idempotency_store(object())
+
+    def test_control_api_contract_helpers_accept_exact_protocol_shapes(self) -> None:
+        rate_limiter = SimpleNamespace(
+            allow_request=lambda _client_key, *, now=None: (True, 0.0),
+            allow_command=lambda _client_key, _command_name, *, now=None: (True, 0.0),
+        )
+        idempotency_store = SimpleNamespace(
+            get=lambda _key: None,
+            put=lambda _key, _fingerprint, _status, _response: None,
+        )
+
+        self.assertIs(require_rate_limiter(rate_limiter), rate_limiter)
+        self.assertIs(require_idempotency_store(idempotency_store), idempotency_store)
+        with self.assertRaisesRegex(TypeError, "allow_request/allow_command"):
+            require_rate_limiter(SimpleNamespace(allow_request=lambda _client_key, *, now=None: (True, 0.0)))
+        with self.assertRaisesRegex(TypeError, "get/put"):
+            require_idempotency_store(SimpleNamespace(get=lambda _key: None))
+
+    def test_optional_error_payload_normalizes_nested_error_mapping_only(self) -> None:
+        self.assertEqual(
+            optional_error_payload({"error": {"code": "bad", 7: "numeric-key", "retryable": False}}),
+            {"code": "bad", "7": "numeric-key", "retryable": False},
+        )
+        self.assertIsNone(optional_error_payload({"error": "bad"}))
+        self.assertIsNone(optional_error_payload({}))
 
     def test_state_payload_contracts_reject_non_callable_and_non_mapping_getters(self) -> None:
         routing = _LocalControlApiRouting()
@@ -25,7 +52,7 @@ class _ControlApiHttpStateCases:
             routing._state_payload("/v1/state/health")
 
         routing._service = SimpleNamespace(_state_api_health_payload=lambda: ["not", "a", "dict"])
-        with self.assertRaisesRegex(TypeError, "must return dict"):
+        with self.assertRaisesRegex(TypeError, "must return dict, got list"):
             routing._state_payload("/v1/state/health")
 
     def test_capabilities_and_state_get_endpoints_return_payloads(self) -> None:
@@ -122,6 +149,35 @@ class _ControlApiHttpStateCases:
         self.assertEqual(runtime_handler.json_payload()["kind"], "runtime")
         self.assertEqual(operational_handler.json_payload()["kind"], "operational")
         self.assertEqual(recommendation_handler.json_payload()["kind"], "victron-bias-recommendation")
+
+    def test_public_get_routes_are_exact_and_carry_state_headers(self) -> None:
+        service = SimpleNamespace(
+            _control_command_from_payload=MagicMock(),
+            _handle_control_command=MagicMock(),
+            _control_api_state_token=MagicMock(return_value="public-state"),
+            _state_api_healthz_payload=MagicMock(return_value={"ok": True, "api_version": "v1", "kind": "healthz"}),
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        server.health_payload = MagicMock(return_value={"ok": True, "kind": "control-health"})
+        server.openapi_payload = MagicMock(return_value={"openapi": "3.1.0"})
+
+        self.assertEqual(server._public_get_payload("/v1/control/health"), {"ok": True, "kind": "control-health"})
+        self.assertEqual(server._public_get_payload("/v1/state/healthz"), {"ok": True, "api_version": "v1", "kind": "healthz"})
+        self.assertEqual(server._public_get_payload("/v1/openapi.json"), {"openapi": "3.1.0"})
+        self.assertIsNone(server._public_get_payload("/v1/capabilities"))
+
+        for path, expected_key in (
+            ("/v1/control/health", "control-health"),
+            ("/v1/state/healthz", "healthz"),
+            ("/v1/openapi.json", "3.1.0"),
+        ):
+            handler = _FakeHandler(path)
+            server._handle_get(handler)
+            payload = handler.json_payload()
+            self.assertEqual(handler.status_code, HTTPStatus.OK)
+            self.assertEqual(handler.response_headers["ETag"], '"public-state"')
+            self.assertEqual(handler.response_headers["X-State-Token"], "public-state")
+            self.assertIn(expected_key, {str(value) for value in payload.values()})
 
     def test_execute_payload_preserves_existing_tracking_when_service_returns_it(self) -> None:
         command = ControlCommand(

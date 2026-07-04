@@ -11,6 +11,7 @@ ENERGY_SOURCE_ROLES = frozenset({"battery", "hybrid-inverter", "inverter"})
 ENERGY_SOURCE_CONNECTOR_TYPES = frozenset(
     {"dbus", "template_http", "template_http_energy", "modbus", "command_json", "opendtu_http"}
 )
+DEFAULT_BATTERY_CHEMISTRY = "lfp"
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class EnergySourceDefinition:
     service_prefix: str = ""
     soc_path: str = "/Soc"
     usable_capacity_wh: float | None = None
-    battery_chemistry: str = "lfp"
+    battery_chemistry: str = DEFAULT_BATTERY_CHEMISTRY
     capacity_auto_estimate: bool = True
     capacity_wh_path: str = ""
     capacity_ah_path: str = "/InstalledCapacity"

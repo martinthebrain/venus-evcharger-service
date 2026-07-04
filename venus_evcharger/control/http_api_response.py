@@ -9,7 +9,6 @@ from typing import Any, Mapping
 
 from venus_evcharger.control.models import ControlCommand, ControlResult
 from venus_evcharger.core.contracts import (
-    normalized_control_api_command_response_fields,
     normalized_control_command_fields,
     normalized_control_result_fields,
 )
@@ -19,22 +18,23 @@ SAFE_EXTRA_RESPONSE_HEADERS: frozenset[str] = frozenset(("ETag", "Retry-After", 
 
 
 def error_response_payload(code: str, message: str) -> dict[str, Any]:
-    return normalized_control_api_command_response_fields(
-        {
-            "ok": False,
-            "detail": message,
-            "error": {
-                "code": code,
-                "message": message,
-                "retryable": False,
-                "details": {},
-            },
-        }
-    )
+    return {
+        "ok": False,
+        "detail": message,
+        "replayed": False,
+        "command": None,
+        "result": None,
+        "error": {
+            "code": code,
+            "message": message,
+            "retryable": False,
+            "details": {},
+        },
+    }
 
 
 def command_payload(command: ControlCommand) -> dict[str, Any]:
-    return normalized_control_command_fields(asdict(command), default_source="http")
+    return normalized_control_command_fields(asdict(command))
 
 
 def result_payload(result: ControlResult) -> dict[str, Any]:
@@ -68,7 +68,7 @@ def write_json(
     *,
     extra_headers: Mapping[str, str] | None = None,
 ) -> None:
-    raw = json.dumps(dict(payload), sort_keys=True).encode("utf-8")
+    raw = json.dumps(dict(payload), sort_keys=True).encode()
     handler.send_response(int(status))
     handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(raw)))

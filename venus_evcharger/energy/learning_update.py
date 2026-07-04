@@ -271,22 +271,18 @@ def _profile_activity_updates(
 
 
 def _direction(source: EnergySourceSnapshot) -> str:
-    charge_power = source.charge_power_w or 0.0
-    discharge_power = source.discharge_power_w or 0.0
-    dominant_direction = _dominant_direction(charge_power, discharge_power)
-    return dominant_direction or "idle"
-
-
-def _dominant_direction(charge_power: float, discharge_power: float) -> str | None:
-    if charge_power >= _ACTIVE_POWER_THRESHOLD_W and charge_power > discharge_power:
+    net_power = source.net_battery_power_w
+    if net_power is None:
+        return "idle"
+    if float(net_power) <= -_ACTIVE_POWER_THRESHOLD_W:
         return "charge"
-    if discharge_power >= _ACTIVE_POWER_THRESHOLD_W and discharge_power > charge_power:
+    if float(net_power) >= _ACTIVE_POWER_THRESHOLD_W:
         return "discharge"
-    return None
+    return "idle"
 
 
 def _is_active(source: EnergySourceSnapshot, direction: str) -> bool:
-    if direction != "idle":
+    if direction in {"charge", "discharge"}:
         return True
     return any(
         abs(float(value)) >= _ACTIVE_POWER_THRESHOLD_W
@@ -359,8 +355,8 @@ def _grid_sample_increments(direction: str, grid_import: float | None, grid_expo
 
 def _period_sample_increments(active: bool, direction: str, period: str) -> dict[str, int]:
     return {
-        "day_active": _period_increment(active, direction, period, expected_period="day"),
-        "night_active": _period_increment(active, direction, period, expected_period="night"),
+        "day_active": _active_period_increment(active, period, expected_period="day"),
+        "night_active": _active_period_increment(active, period, expected_period="night"),
         "day_charge": _period_increment(active, direction, period, expected_direction="charge", expected_period="day"),
         "night_charge": _period_increment(active, direction, period, expected_direction="charge", expected_period="night"),
         "day_discharge": _period_increment(
@@ -373,11 +369,24 @@ def _period_sample_increments(active: bool, direction: str, period: str) -> dict
 
 
 def _grid_increment(direction: str, grid_value: float | None, expected_direction: str) -> int:
-    return 1 if direction == expected_direction and (grid_value or 0.0) >= _GRID_ACTIVITY_THRESHOLD_W else 0
+    if grid_value is None:
+        return 0
+    return 1 if direction == expected_direction and float(grid_value) >= _GRID_ACTIVITY_THRESHOLD_W else 0
 
 
 def _grid_idle_increment(direction: str, grid_export: float | None) -> int:
-    return 1 if direction == "idle" and (grid_export or 0.0) >= _GRID_ACTIVITY_THRESHOLD_W else 0
+    if grid_export is None:
+        return 0
+    return 1 if direction == "idle" and float(grid_export) >= _GRID_ACTIVITY_THRESHOLD_W else 0
+
+
+def _active_period_increment(
+    active: bool,
+    period: str,
+    *,
+    expected_period: str,
+) -> int:
+    return 1 if active and period == expected_period else 0
 
 
 def _period_increment(
@@ -385,13 +394,11 @@ def _period_increment(
     direction: str,
     period: str,
     *,
-    expected_direction: str | None = None,
+    expected_direction: str,
     expected_period: str,
 ) -> int:
     if not active or period != expected_period:
         return 0
-    if expected_direction is None:
-        return 1
     return 1 if direction == expected_direction else 0
 
 
@@ -452,6 +459,6 @@ def _min_optional(current: float | None, candidate: float | None) -> float | Non
 def _rolling_average(current: float | None, count: int, candidate: float | None) -> float | None:
     if candidate is None:
         return current
-    if current is None or count <= 0:
+    if current is None:
         return float(candidate)
     return ((float(current) * float(count)) + float(candidate)) / float(count + 1)

@@ -15,7 +15,7 @@ select = [
 
 [tool.mutmut]
 source_paths = ["venus_evcharger"]
-only_mutate = ["venus_evcharger/inputs/helper/sources.py"]
+only_mutate = ["venus_evcharger/service/control_state_meta.py"]
 also_copy = [
     "venus_evcharger_auto_input_helper.py",
     "venus_evcharger_dbus_adapter.py",
@@ -26,8 +26,22 @@ pytest_add_cli_args_test_selection = [
     "tests/test_dbus_gateway_adapter_scheduler.py",
     "tests/test_dbus_gateway_primitives.py",
     "tests/test_core_dbus_backpressure.py",
+    "tests/test_venus_evcharger_energy_aggregate.py",
     "tests/test_venus_evcharger_shared.py",
+    "tests/test_venus_evcharger_state_contracts.py",
     "tests/test_venus_evcharger_dbus_inputs_controller.py",
+    "tests/test_publish_dbus_core_contracts.py",
+    "tests/test_publish_dbus_learned_contracts.py",
+    "tests/test_venus_evcharger_publisher_controller.py",
+    "tests/venus_evcharger_publisher_config_cases.py",
+    "tests/venus_evcharger_publisher_publish_cases.py",
+    "tests/venus_evcharger_common_contract_cases.py",
+    "tests/venus_evcharger_publisher_diagnostic_cases.py",
+    "tests/test_remaining_coverage_helpers.py",
+    "tests/test_venus_evcharger_branch_misc.py",
+    "tests/venus_evcharger_publisher_diagnostic_cases_part2.py",
+    "tests/test_venus_evcharger_service_roles.py",
+    "tests/service_roles_cases_control.py",
     "tests/venus_evcharger_helpers_cases_primary.py",
     "tests/venus_evcharger_helpers_cases_quaternary.py",
     "tests/venus_evcharger_auto_input_helper_cases_basic.py",

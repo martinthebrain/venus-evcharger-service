@@ -302,3 +302,42 @@ class TestUpdateCycleControllerSeptenary(UpdateCycleControllerTestBase):
         )
         self.assertEqual(service.learned_charge_power_watts, 1900.0)
         self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 1)
+
+    def test_apply_stable_learning_persists_all_diagnostic_contract_fields(self):
+        service = _learning_service(
+            learned_charge_power_sample_count=1,
+            learned_charge_power_confidence=0.1,
+            learned_charge_power_stability_score=0.2,
+            learned_charge_power_reason="old",
+            learned_charge_power_detail="stale",
+        )
+        controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
+
+        self.assertTrue(
+            controller._apply_stable_learning(
+                2140.44,
+                updated_at=123.0,
+                phase_signature="L1",
+                voltage_signature=229.94,
+                signature_mismatch_sessions=1,
+                checked_session_started_at=50.0,
+                confidence=0.81,
+                stability_score=0.73,
+                reason="signature-ok",
+                detail="stable-window",
+            )
+        )
+
+        self.assertEqual(service.learned_charge_power_state, "stable")
+        self.assertEqual(service.learned_charge_power_watts, 2140.4)
+        self.assertEqual(service.learned_charge_power_updated_at, 123.0)
+        self.assertIsNone(service.learned_charge_power_learning_since)
+        self.assertEqual(service.learned_charge_power_sample_count, controller.LEARNED_POWER_STABLE_MIN_SAMPLES)
+        self.assertEqual(service.learned_charge_power_phase, "L1")
+        self.assertEqual(service.learned_charge_power_voltage, 229.9)
+        self.assertEqual(service.learned_charge_power_signature_mismatch_sessions, 1)
+        self.assertEqual(service.learned_charge_power_signature_checked_session_started_at, 50.0)
+        self.assertEqual(service.learned_charge_power_confidence, 0.81)
+        self.assertEqual(service.learned_charge_power_stability_score, 0.73)
+        self.assertEqual(service.learned_charge_power_reason, "signature-ok")
+        self.assertEqual(service.learned_charge_power_detail, "stable-window")

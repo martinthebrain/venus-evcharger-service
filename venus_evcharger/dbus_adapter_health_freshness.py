@@ -45,8 +45,7 @@ def max_cached_path_age(
     now: float,
 ) -> float:
     ages = [cached_entry_age(values.get(dbus_path_key(service_name, path)), now) for path in paths]
-    ages = [age for age in ages if age > 0.0]
-    return max(ages) if ages else 0.0
+    return max(ages, default=0.0)
 
 
 def missing_cached_path_count(
