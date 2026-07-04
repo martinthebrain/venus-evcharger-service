@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import configparser
-from datetime import datetime
 from unittest.mock import patch
 
 from tests.venus_evcharger_publisher_support import (
@@ -540,7 +539,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         self.assertEqual(controller._fault_reason(service), "contactor-lockout-open")
         self.assertEqual(controller._fault_active(service), 1)
 
-        snapshot = controller._scheduled_snapshot(service, 1719810000.0)
+        snapshot = controller._scheduled_snapshot(service, 1719817200.0)
         self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot.state, "after-latest-end")
         self.assertEqual(snapshot.reason, "latest-end-reached")
@@ -549,7 +548,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         service.auto_scheduled_enabled_days = "Tue"
         service.auto_scheduled_night_start_delay_seconds = 5400.0
         service.auto_scheduled_latest_end_time = "05:15"
-        non_default_snapshot = controller._scheduled_snapshot(service, 1782925200.0)
+        non_default_snapshot = controller._scheduled_snapshot(service, 1782932400.0)
         self.assertIsNotNone(non_default_snapshot)
         self.assertEqual(non_default_snapshot.target_day_label, "Thu")
         self.assertFalse(non_default_snapshot.target_day_enabled)
@@ -560,7 +559,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
         service.virtual_mode = 1
-        self.assertIsNone(controller._scheduled_snapshot(service, 1719810000.0))
+        self.assertIsNone(controller._scheduled_snapshot(service, 1719817200.0))
         service.virtual_mode = 2
 
         self.assertEqual(controller._recovery_active(service), 1)
@@ -631,7 +630,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
     def test_config_helper_contracts_cover_missing_runtime_defaults(self) -> None:
         controller = DbusPublishController(SimpleNamespace(), self._age_seconds)
 
-        snapshot = controller._scheduled_snapshot(SimpleNamespace(virtual_mode=2), 1719810000.0)
+        snapshot = controller._scheduled_snapshot(SimpleNamespace(virtual_mode=2), 1719817200.0)
         self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot.state, "after-latest-end")
         self.assertEqual(snapshot.reason, "latest-end-reached")
@@ -642,16 +641,14 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         self.assertTrue(snapshot.target_day_enabled)
         self.assertEqual(snapshot.fallback_start_text, "2024-06-30 19:00")
         self.assertEqual(snapshot.boost_until_text, "2024-07-01 06:30")
-        with patch("venus_evcharger.publish.dbus_config.datetime") as datetime_mock:
-            datetime_mock.fromtimestamp.return_value = datetime(2024, 6, 30, 19, 0, 0)
-            boundary_snapshot = controller._scheduled_snapshot(SimpleNamespace(virtual_mode=2), 0.0)
+        boundary_snapshot = controller._scheduled_snapshot(SimpleNamespace(virtual_mode=2), 1719774000.0)
         self.assertIsNotNone(boundary_snapshot)
         self.assertEqual(boundary_snapshot.state, "night-boost")
         self.assertEqual(boundary_snapshot.reason, "night-boost-window")
         self.assertTrue(boundary_snapshot.night_boost_active)
 
         default_service = SimpleNamespace()
-        self.assertIsNone(controller._scheduled_snapshot(default_service, 1719810000.0))
+        self.assertIsNone(controller._scheduled_snapshot(default_service, 1719817200.0))
         self.assertEqual(controller._recovery_active(default_service), 0)
         self.assertEqual(controller._phase_switch_mismatch_active(default_service), 0)
         self.assertEqual(controller._phase_switch_lockout_active(default_service, 100.0), 0)

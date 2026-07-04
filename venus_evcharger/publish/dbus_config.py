@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any, TYPE_CHECKING
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
@@ -13,6 +12,7 @@ from venus_evcharger.backend.models import effective_supported_phase_selections,
 from venus_evcharger.core.common import (
     DEFAULT_SCHEDULED_ENABLED_DAYS,
     evse_fault_reason,
+    local_datetime_from_timestamp,
     mode_uses_scheduled_logic,
     scheduled_mode_snapshot,
 )
@@ -298,7 +298,7 @@ class _DbusPublishConfig(_DbusPublishCore):
         enabled_days = getattr(service, "auto_scheduled_enabled_days", None)
         latest_end_time = getattr(service, "auto_scheduled_latest_end_time", None)
         return scheduled_mode_snapshot(
-            datetime.fromtimestamp(now),
+            local_datetime_from_timestamp(now, getattr(service, "auto_schedule_timezone", "UTC")),
             getattr(service, "auto_month_windows", None),
             DEFAULT_SCHEDULED_ENABLED_DAYS if enabled_days is None else enabled_days,
             delay_seconds=float(getattr(service, "auto_scheduled_night_start_delay_seconds", 3600.0)),
