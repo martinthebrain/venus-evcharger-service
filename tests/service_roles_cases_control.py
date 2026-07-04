@@ -37,6 +37,8 @@ from venus_evcharger.service.control_state_operational_support import (
     _worker_snapshot,
 )
 from venus_evcharger.service.control_state_victron import (
+    _last_auto_metrics,
+    _learning_profiles,
     _state_api_victron_bias_recommendation_payload,
     _state_api_victron_bias_core_state,
     _state_api_victron_bias_state,
@@ -905,6 +907,10 @@ class _ServiceRolesControlCases:
         self.assertEqual(_last_health_reason(SimpleNamespace(_last_health_reason="charger-fault")), "charger-fault")
         self.assertEqual(_software_update_state(SimpleNamespace()), "idle")
         self.assertEqual(_software_update_state(SimpleNamespace(_software_update_state="available")), "available")
+        self.assertEqual(_last_auto_metrics(SimpleNamespace()), {})
+        self.assertEqual(_last_auto_metrics(SimpleNamespace(_last_auto_metrics="bad")), {})
+        self.assertEqual(_learning_profiles(SimpleNamespace()), {})
+        self.assertEqual(_learning_profiles(SimpleNamespace(_victron_ess_balance_learning_profiles="bad")), {})
 
     def test_control_api_victron_bias_profile_and_learning_state_contracts(self):
         metrics = {

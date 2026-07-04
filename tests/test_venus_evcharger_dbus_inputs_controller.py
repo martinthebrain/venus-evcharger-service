@@ -800,6 +800,10 @@ class TestDbusInputController(unittest.TestCase):
         service._resolved_auto_energy_services = {"aux": "cached-aux"}
         service._auto_energy_last_scan = {"aux": 15.0}
         service.auto_battery_scan_interval_seconds = 60.0
+        service._resolved_auto_battery_service = "cached-battery"
+        service._auto_battery_last_scan = 15.0
+        self.assertEqual(controller._cached_auto_battery_service(30.0), "cached-battery")
+        self.assertIsNone(controller._cached_auto_battery_service(100.0))
         self.assertEqual(controller._energy_cache_valid("aux", 30.0), "cached-aux")
         self.assertIsNone(controller._energy_cache_valid("aux", 100.0))
         service._resolved_auto_energy_services = {"aux": ""}

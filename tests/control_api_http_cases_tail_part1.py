@@ -278,6 +278,7 @@ class __ControlApiHttpTailCasesPart1:
         self.assertEqual(server._authorization_scope(_FakeHandler("/v1/capabilities", authorization="Bearer read-token")), "read")
         self.assertIsNone(server._authorization_scope(_FakeHandler("/v1/capabilities")))
         self.assertIsNone(server._authorization_scope(_FakeHandler("/v1/capabilities", headers={"Authorization": ""})))
+        self.assertIsNone(server._authorization_scope(_FakeHandler("/v1/capabilities", authorization="Bearer wrong-token")))
 
     def test_effective_token_fallbacks_are_ordered_by_scope(self) -> None:
         service = SimpleNamespace(
