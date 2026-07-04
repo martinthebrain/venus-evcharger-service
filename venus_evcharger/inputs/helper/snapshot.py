@@ -108,6 +108,8 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
             "validation_poll_seconds": 30.0,
             "_main_loop": None,
             "_stop_requested": False,
+            "helper_generation": 0,
+            "runtime_instance_id": "",
         }
         for attr_name, default in default_values.items():
             self._ensure_default_attr(attr_name, default)
@@ -207,9 +209,7 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
         battery_soc = value.get("battery_soc")
         snapshot["battery_soc"] = battery_soc
         snapshot[captured_key] = None if battery_soc is None else current
-        for field_name in self._battery_snapshot_field_names():
-            if field_name == "battery_soc":
-                continue
+        for field_name in self._battery_snapshot_field_names()[1:]:
             snapshot[field_name] = value.get(field_name)
 
     @staticmethod
@@ -241,9 +241,10 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
 
     def _stamp_snapshot_metadata(self: Any, snapshot: dict[str, object]) -> None:
         """Attach helper identity metadata used for supervisor liveness checks."""
+        self._ensure_poll_defaults()
         snapshot["writer_pid"] = os.getpid()
-        snapshot["helper_generation"] = int(getattr(self, "helper_generation", 0) or 0)
-        snapshot["runtime_instance_id"] = str(getattr(self, "runtime_instance_id", "") or "")
+        snapshot["helper_generation"] = int(self.helper_generation or 0)
+        snapshot["runtime_instance_id"] = str(self.runtime_instance_id or "")
 
     def _refresh_source(self: Any, source_name: str, now: float | None = None) -> None:
         """Refresh exactly one source on startup or when its DBus signal fires."""

@@ -249,7 +249,7 @@ class _AutoInputHelperSource(_AutoInputHelperSourcePvGrid):
     def _battery_soc_numeric(value: object) -> float | None:
         """Return one numeric battery SOC value from raw DBus data."""
         numeric_value = coerce_dbus_numeric(value)
-        if not isinstance(numeric_value, (int, float)):
+        if isinstance(numeric_value, bool) or not isinstance(numeric_value, (int, float)):
             return None
         return float(numeric_value)
 

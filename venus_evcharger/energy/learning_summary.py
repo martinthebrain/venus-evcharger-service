@@ -150,10 +150,11 @@ def _weighted_average(values: tuple[tuple[float | None, float], ...]) -> float |
     weighted_total = 0.0
     weight_total = 0.0
     for value, weight in values:
-        if value is None or weight <= 0.0:
+        if value is None:
             continue
-        weighted_total += float(value) * float(weight)
-        weight_total += float(weight)
+        normalized_weight = max(0.0, float(weight))
+        weighted_total += float(value) * normalized_weight
+        weight_total += normalized_weight
     if weight_total <= 0.0:
         return None
     return weighted_total / weight_total

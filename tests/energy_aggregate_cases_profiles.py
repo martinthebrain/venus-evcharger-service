@@ -53,6 +53,222 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(metrics["sources"]["victron"]["discharge_balance_error_w"], 500.0)
         self.assertEqual(metrics["sources"]["huawei"]["discharge_balance_error_w"], -500.0)
 
+    def test_discharge_balance_metrics_contract_covers_sparse_and_small_sources(self) -> None:
+        metrics = derive_discharge_balance_metrics(
+            (
+                EnergySourceSnapshot(
+                    source_id="pv",
+                    role="inverter",
+                    service_name="svc-pv",
+                    net_battery_power_w=999.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="tiny",
+                    role="battery",
+                    service_name="svc-tiny",
+                    soc=1.0,
+                    usable_capacity_wh=100.0,
+                    net_battery_power_w=0.5,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="reserve",
+                    role="hybrid-inverter",
+                    service_name="svc-reserve",
+                    soc=50.0,
+                    usable_capacity_wh=1000.0,
+                    net_battery_power_w=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="micro",
+                    role="battery",
+                    service_name="svc-micro",
+                    soc=90.0,
+                    usable_capacity_wh=0.5,
+                    net_battery_power_w=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="fractional_floor",
+                    role="battery",
+                    service_name="svc-fractional-floor",
+                    soc=1.0,
+                    usable_capacity_wh=100.0,
+                    net_battery_power_w=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="tiny_capacity_fallback",
+                    role="battery",
+                    service_name="svc-tiny-capacity-fallback",
+                    soc=0.0,
+                    usable_capacity_wh=0.5,
+                    net_battery_power_w=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="unknown_capacity",
+                    role="battery",
+                    service_name="svc-unknown",
+                    soc=80.0,
+                    net_battery_power_w=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="zero_capacity",
+                    role="battery",
+                    service_name="svc-zero",
+                    soc=80.0,
+                    usable_capacity_wh=0.0,
+                    net_battery_power_w=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="uniform",
+                    role="battery",
+                    service_name="svc-uniform",
+                    net_battery_power_w=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+            ),
+            {
+                "reserve": {"reserve_band_floor_soc": 50.0},
+                "micro": {"reserve_band_floor_soc": 89.0},
+                "fractional_floor": {"reserve_band_floor_soc": 0.5},
+            },
+        )
+
+        self.assertEqual(metrics["eligible_source_count"], 8)
+        self.assertEqual(metrics["active_source_count"], 1)
+        self.assertEqual(metrics["total_discharge_w"], 0.5)
+        self.assertEqual(
+            set(metrics["sources"]),
+            {
+                "tiny",
+                "reserve",
+                "micro",
+                "fractional_floor",
+                "tiny_capacity_fallback",
+                "unknown_capacity",
+                "zero_capacity",
+                "uniform",
+            },
+        )
+        tiny = metrics["sources"]["tiny"]
+        reserve = metrics["sources"]["reserve"]
+        micro = metrics["sources"]["micro"]
+        fractional_floor = metrics["sources"]["fractional_floor"]
+        tiny_capacity_fallback = metrics["sources"]["tiny_capacity_fallback"]
+        unknown_capacity = metrics["sources"]["unknown_capacity"]
+        zero_capacity = metrics["sources"]["zero_capacity"]
+        uniform = metrics["sources"]["uniform"]
+        expected_source_keys = {
+            "discharge_balance_eligible",
+            "discharge_balance_weight",
+            "discharge_balance_weight_basis",
+            "discharge_balance_available_energy_wh",
+            "discharge_balance_reserve_floor_soc",
+            "discharge_balance_target_distribution_mode",
+            "discharge_balance_target_share",
+            "discharge_balance_target_power_w",
+            "discharge_balance_actual_power_w",
+            "discharge_balance_error_w",
+            "discharge_balance_relative_error",
+        }
+        self.assertEqual(set(tiny), expected_source_keys)
+        self.assertTrue(tiny["discharge_balance_eligible"])
+        self.assertEqual(tiny["discharge_balance_weight"], 1.0)
+        self.assertEqual(tiny["discharge_balance_weight_basis"], "available_energy_above_reserve")
+        self.assertEqual(tiny["discharge_balance_available_energy_wh"], 1.0)
+        self.assertIsNone(tiny["discharge_balance_reserve_floor_soc"])
+        self.assertEqual(reserve["discharge_balance_weight_basis"], "usable_capacity_fallback")
+        self.assertEqual(reserve["discharge_balance_available_energy_wh"], 0.0)
+        self.assertEqual(reserve["discharge_balance_reserve_floor_soc"], 50.0)
+        self.assertEqual(micro["discharge_balance_weight"], 0.005)
+        self.assertEqual(micro["discharge_balance_weight_basis"], "available_energy_above_reserve")
+        self.assertEqual(micro["discharge_balance_available_energy_wh"], 0.005)
+        self.assertEqual(fractional_floor["discharge_balance_weight"], 0.5)
+        self.assertEqual(fractional_floor["discharge_balance_weight_basis"], "available_energy_above_reserve")
+        self.assertEqual(fractional_floor["discharge_balance_available_energy_wh"], 0.5)
+        self.assertEqual(tiny_capacity_fallback["discharge_balance_weight"], 0.5)
+        self.assertEqual(tiny_capacity_fallback["discharge_balance_weight_basis"], "usable_capacity_fallback")
+        self.assertEqual(tiny_capacity_fallback["discharge_balance_available_energy_wh"], 0.0)
+        self.assertEqual(unknown_capacity["discharge_balance_weight"], 1.0)
+        self.assertEqual(unknown_capacity["discharge_balance_weight_basis"], "uniform_fallback")
+        self.assertIsNone(unknown_capacity["discharge_balance_available_energy_wh"])
+        self.assertEqual(zero_capacity["discharge_balance_weight"], 1.0)
+        self.assertEqual(zero_capacity["discharge_balance_weight_basis"], "uniform_fallback")
+        self.assertIsNone(zero_capacity["discharge_balance_available_energy_wh"])
+        self.assertEqual(uniform["discharge_balance_weight"], 1.0)
+        self.assertEqual(uniform["discharge_balance_weight_basis"], "uniform_fallback")
+        self.assertAlmostEqual(
+            tiny["discharge_balance_relative_error"],
+            tiny["discharge_balance_error_w"] / 0.5,
+            places=9,
+        )
+        self.assertEqual(
+            metrics["max_abs_error_w"],
+            max(abs(item["discharge_balance_error_w"]) for item in metrics["sources"].values()),
+        )
+
+    def test_discharge_balance_metrics_empty_contract(self) -> None:
+        metrics = derive_discharge_balance_metrics(
+            (
+                EnergySourceSnapshot(
+                    source_id="pv",
+                    role="inverter",
+                    service_name="svc-pv",
+                    net_battery_power_w=1200.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="offline",
+                    role="battery",
+                    service_name="svc-offline",
+                    net_battery_power_w=800.0,
+                    online=False,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+            )
+        )
+
+        self.assertEqual(
+            metrics,
+            {
+                "mode": "capacity_reserve_weighted",
+                "target_distribution_mode": "capacity_reserve_weighted",
+                "eligible_source_count": 0,
+                "active_source_count": 0,
+                "total_discharge_w": None,
+                "error_w": None,
+                "max_abs_error_w": None,
+                "sources": {},
+            },
+        )
+
     def test_derive_discharge_control_metrics_exposes_profile_write_hints(self) -> None:
         metrics = derive_discharge_control_metrics(
             (
@@ -110,6 +326,118 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(metrics["sources"]["huawei"]["discharge_balance_control_reason"], "profile_write_experimental")
         self.assertEqual(metrics["sources"]["opendtu"]["discharge_balance_control_reason"], "role_not_targeted")
 
+    def test_discharge_control_metrics_contract_covers_supported_and_fallback_contexts(self) -> None:
+        def details(profile_name: object) -> dict[str, object]:
+            if profile_name == "supported-profile":
+                return {"write_support": "supported"}
+            return dict(energy_source_profile_details(profile_name))
+
+        with patch.object(energy_aggregate_mod, "energy_source_profile_details", side_effect=details):
+            metrics = derive_discharge_control_metrics(
+                (
+                    EnergySourceSnapshot(
+                        source_id="supported",
+                        role="battery",
+                        service_name="svc-supported",
+                        online=True,
+                        confidence=1.0,
+                        captured_at=100.0,
+                    ),
+                    EnergySourceSnapshot(
+                        source_id="fallback",
+                        role="battery",
+                        service_name="svc-fallback",
+                        online=True,
+                        confidence=1.0,
+                        captured_at=100.0,
+                    ),
+                    EnergySourceSnapshot(
+                        source_id="offline_exp",
+                        role="hybrid-inverter",
+                        service_name="svc-offline-exp",
+                        online=False,
+                        confidence=1.0,
+                        captured_at=100.0,
+                    ),
+                    EnergySourceSnapshot(
+                        source_id="empty_definition",
+                        role="hybrid-inverter",
+                        service_name="svc-empty-definition",
+                        online=True,
+                        confidence=1.0,
+                        captured_at=100.0,
+                    ),
+                    EnergySourceSnapshot(
+                        source_id="role_override",
+                        role="battery",
+                        service_name="svc-role-override",
+                        online=True,
+                        confidence=1.0,
+                        captured_at=100.0,
+                    ),
+                ),
+                {
+                    "supported": EnergySourceDefinition(
+                        source_id="supported",
+                        profile_name=" supported-profile ",
+                        role=" Battery ",
+                        connector_type=" Modbus ",
+                    ),
+                    "offline_exp": EnergySourceDefinition(
+                        source_id="offline_exp",
+                        profile_name="huawei_ma_native_ap",
+                        role="hybrid-inverter",
+                        connector_type="modbus",
+                    ),
+                    "empty_definition": EnergySourceDefinition(
+                        source_id="empty_definition",
+                        profile_name="",
+                        role="",
+                        connector_type="",
+                    ),
+                    "role_override": EnergySourceDefinition(
+                        source_id="role_override",
+                        profile_name="supported-profile",
+                        role="inverter",
+                        connector_type="modbus",
+                    ),
+                },
+            )
+
+        self.assertEqual(metrics["control_candidate_count"], 2)
+        self.assertEqual(metrics["control_ready_count"], 1)
+        self.assertEqual(metrics["supported_control_source_count"], 1)
+        self.assertEqual(metrics["experimental_control_source_count"], 1)
+        supported = metrics["sources"]["supported"]
+        fallback = metrics["sources"]["fallback"]
+        offline_exp = metrics["sources"]["offline_exp"]
+        empty_definition = metrics["sources"]["empty_definition"]
+        role_override = metrics["sources"]["role_override"]
+        self.assertEqual(supported["discharge_balance_control_profile_name"], "supported-profile")
+        self.assertEqual(supported["discharge_balance_control_connector_type"], "modbus")
+        self.assertEqual(supported["discharge_balance_control_support"], "supported")
+        self.assertEqual(supported["discharge_balance_control_reason"], "profile_write_supported")
+        self.assertTrue(supported["discharge_balance_control_candidate"])
+        self.assertTrue(supported["discharge_balance_control_ready"])
+        self.assertEqual(fallback["discharge_balance_control_profile_name"], "")
+        self.assertEqual(fallback["discharge_balance_control_connector_type"], "battery")
+        self.assertEqual(fallback["discharge_balance_control_support"], "unsupported")
+        self.assertEqual(fallback["discharge_balance_control_reason"], "profile_write_unsupported")
+        self.assertTrue(fallback["discharge_balance_control_role_targeted"])
+        self.assertFalse(fallback["discharge_balance_control_candidate"])
+        self.assertEqual(offline_exp["discharge_balance_control_support"], "experimental")
+        self.assertTrue(offline_exp["discharge_balance_control_candidate"])
+        self.assertFalse(offline_exp["discharge_balance_control_ready"])
+        self.assertEqual(empty_definition["discharge_balance_control_profile_name"], "")
+        self.assertEqual(empty_definition["discharge_balance_control_connector_type"], "hybrid-inverter")
+        self.assertEqual(empty_definition["discharge_balance_control_support"], "unsupported")
+        self.assertEqual(empty_definition["discharge_balance_control_reason"], "profile_write_unsupported")
+        self.assertTrue(empty_definition["discharge_balance_control_role_targeted"])
+        self.assertEqual(role_override["discharge_balance_control_support"], "supported")
+        self.assertEqual(role_override["discharge_balance_control_reason"], "role_not_targeted")
+        self.assertFalse(role_override["discharge_balance_control_candidate"])
+        self.assertFalse(role_override["discharge_balance_control_role_targeted"])
+
     def test_aggregate_energy_sources_returns_none_average_confidence_without_valid_values(self) -> None:
         cluster = aggregate_energy_sources(
             (
@@ -127,6 +455,52 @@ class _EnergyAggregateProfileCases:
         )
 
         self.assertIsNone(cluster.average_confidence)
+
+    def test_aggregate_energy_sources_includes_zero_confidence_and_skips_offline_soc_fallback(self) -> None:
+        cluster = aggregate_energy_sources(
+            (
+                EnergySourceSnapshot(
+                    source_id="offline",
+                    role="battery",
+                    service_name="svc-offline",
+                    soc=72.0,
+                    online=False,
+                    confidence=0.0,
+                    captured_at=1.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="nosoc",
+                    role="battery",
+                    service_name="svc-nosoc",
+                    soc=None,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=1.0,
+                ),
+            )
+        )
+
+        self.assertIsNone(cluster.combined_soc)
+        self.assertIsNone(cluster.effective_soc)
+        self.assertEqual(cluster.average_confidence, 0.5)
+
+    def test_aggregate_energy_sources_does_not_use_single_offline_soc_as_effective_soc(self) -> None:
+        cluster = aggregate_energy_sources(
+            (
+                EnergySourceSnapshot(
+                    source_id="offline",
+                    role="battery",
+                    service_name="svc-offline",
+                    soc=72.0,
+                    online=False,
+                    confidence=1.0,
+                    captured_at=1.0,
+                ),
+            )
+        )
+
+        self.assertIsNone(cluster.combined_soc)
+        self.assertIsNone(cluster.effective_soc)
 
     def test_aggregate_energy_sources_uses_capacity_weighted_soc_and_power_sums(self) -> None:
         cluster = aggregate_energy_sources(
@@ -178,6 +552,41 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(cluster.battery_source_count, 1)
         self.assertEqual(cluster.hybrid_inverter_source_count, 1)
         self.assertEqual(cluster.inverter_source_count, 0)
+
+    def test_aggregate_energy_sources_accepts_tiny_capacity_and_ignores_zero_capacity(self) -> None:
+        cluster = aggregate_energy_sources(
+            (
+                EnergySourceSnapshot(
+                    source_id="zero",
+                    role="battery",
+                    service_name="svc-zero",
+                    soc=99.0,
+                    usable_capacity_wh=0.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="tiny",
+                    role="battery",
+                    service_name="svc-tiny",
+                    soc=50.0,
+                    usable_capacity_wh=0.5,
+                    charge_limit_power_w=30.0,
+                    discharge_limit_power_w=40.0,
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+            )
+        )
+
+        self.assertEqual(cluster.combined_soc, 50.0)
+        self.assertEqual(cluster.effective_soc, 50.0)
+        self.assertEqual(cluster.combined_usable_capacity_wh, 0.5)
+        self.assertEqual(cluster.valid_soc_source_count, 1)
+        self.assertEqual(cluster.combined_charge_limit_power_w, 30.0)
+        self.assertEqual(cluster.combined_discharge_limit_power_w, 40.0)
 
     def test_aggregate_energy_sources_falls_back_to_single_online_soc_without_capacity(self) -> None:
         cluster = aggregate_energy_sources(
@@ -243,6 +652,52 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(cluster.combined_ac_power_w, 4200.0)
         self.assertEqual(cluster.combined_pv_input_power_w, 5100.0)
         self.assertEqual(cluster.combined_grid_interaction_w, -1200.0)
+
+    def test_aggregate_energy_sources_continues_after_duplicate_scoped_values(self) -> None:
+        cluster = aggregate_energy_sources(
+            (
+                EnergySourceSnapshot(
+                    source_id="first",
+                    role="hybrid-inverter",
+                    service_name="svc-first",
+                    ac_power_w=10.0,
+                    ac_power_scope_key="shared",
+                    pv_input_power_w=100.0,
+                    pv_input_power_scope_key="",
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="duplicate",
+                    role="hybrid-inverter",
+                    service_name="svc-duplicate",
+                    ac_power_w=999.0,
+                    ac_power_scope_key="shared",
+                    pv_input_power_w=200.0,
+                    pv_input_power_scope_key="",
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+                EnergySourceSnapshot(
+                    source_id="next",
+                    role="inverter",
+                    service_name="svc-next",
+                    ac_power_w=5.0,
+                    ac_power_scope_key="next",
+                    pv_input_power_w=300.0,
+                    pv_input_power_scope_key="",
+                    online=True,
+                    confidence=1.0,
+                    captured_at=100.0,
+                ),
+            )
+        )
+
+        self.assertEqual(cluster.combined_ac_power_w, 15.0)
+        self.assertEqual(cluster.combined_pv_input_power_w, 600.0)
+        self.assertEqual(cluster.inverter_source_count, 1)
 
     def test_load_energy_source_settings_supports_dynamic_sources_and_legacy_defaults(self) -> None:
         legacy_sources, use_combined = load_energy_source_settings(

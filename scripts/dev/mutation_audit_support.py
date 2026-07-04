@@ -6,14 +6,13 @@ from __future__ import annotations
 
 import ast
 import fcntl
+import json
 import re
 import subprocess
-import sys
-from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
 
 RESULT_WORDS = ("killed", "survived", "timeout", "suspicious", "skipped", "no_tests")
 ATTENTION_WORDS = ("survived", "timeout", "suspicious", "no_tests")
@@ -53,6 +52,22 @@ def not_applicable_mutation_target(repo: Path, target_path: str) -> str | None:
     if is_constant_only_module(path):
         return "constant-only module; mutation coverage belongs to consuming runtime modules"
     return None
+
+
+def generated_no_mutants(repo: Path, target_path: str) -> bool:
+    """Return whether mutmut produced metadata but no mutant keys for a target."""
+    meta_path = repo / "mutants" / f"{target_path}.meta"
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    mutant_maps = (
+        data.get("exit_code_by_key"),
+        data.get("type_check_error_by_key"),
+        data.get("durations_by_key"),
+        data.get("estimated_durations_by_key"),
+    )
+    return all(isinstance(item, dict) and not item for item in mutant_maps)
 
 
 def is_constant_only_module(path: Path) -> bool:
@@ -107,16 +122,14 @@ def mutmut_audit_lock(repo: Path):
 
 
 def parse_counts(text: str) -> dict[str, int]:
-    counts = dict.fromkeys(RESULT_WORDS, 0)
+    counts: dict[str, int] = {}
+    normalized_text = text.lower()
     for word in RESULT_WORDS:
         phrase = "no tests" if word == "no_tests" else word
-        counts[word] += sum(int(value) for value in re.findall(rf"\b(\d+)\s+{phrase}\b", text, flags=re.I))
-        counts[word] += len(re.findall(rf":\s+{phrase}\b", text, flags=re.I))
+        numbered = sum(int(value) for value in re.findall(rf"\b(\d+)\s+{phrase}\b", normalized_text))
+        labelled = len(re.findall(rf":\s+{phrase}\b", normalized_text))
+        counts[word] = numbered + labelled
     return counts
-
-
-def survivor_names(text: str) -> list[str]:
-    return mutant_names(text, "survived")
 
 
 def mutant_names(text: str, status: str) -> list[str]:
@@ -126,9 +139,11 @@ def mutant_names(text: str, status: str) -> list[str]:
     ]
 
 
-def target_status(run_returncode: int, results_returncode: int, counts: dict[str, int], *, log_text: str = "") -> str:
+def target_status(run_returncode: int, results_returncode: int, counts: dict[str, int], *, log_text: str) -> str:
     if run_returncode == TIMEOUT_RETURNCODE:
         return "timeout"
+    if counts["no_tests"]:
+        return "needs_attention"
     if no_mutant_test_mapping(run_returncode, results_returncode, counts, log_text):
         return "needs_attention"
     if command_failed(run_returncode, results_returncode):
@@ -176,126 +191,3 @@ def quote(part: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_./:=+-]+", part):
         return part
     return "'" + part.replace("'", "'\"'\"'") + "'"
-
-
-def verify_survivors(
-    *,
-    repo: Path,
-    mutmut: list[str],
-    target_path: str,
-    survivor_names: list[str],
-    log_path: Path,
-    test_selection: Sequence[str],
-    configure_target: Callable[[Path, str], AbstractContextManager[None]],
-) -> int:
-    """Return how many apparent survivors fail in a clean subprocess."""
-    return verify_mutants(
-        repo=repo,
-        mutmut=mutmut,
-        target_path=target_path,
-        mutant_names=survivor_names,
-        log_path=log_path,
-        test_selection=test_selection,
-        configure_target=configure_target,
-        status_label="survived",
-    )
-
-
-def verify_mutants(
-    *,
-    repo: Path,
-    mutmut: list[str],
-    target_path: str,
-    mutant_names: list[str],
-    log_path: Path,
-    test_selection: Sequence[str],
-    configure_target: Callable[[Path, str], AbstractContextManager[None]],
-    status_label: str,
-) -> int:
-    """Return how many named mutants fail selected tests in clean subprocesses."""
-    if not mutant_names:
-        return 0
-    target_file = repo / target_path
-    original = target_file.read_bytes()
-    verified = 0
-    with log_path.open("a", encoding="utf-8") as log:
-        log.write(f"\nVerifying {status_label} mutants in clean subprocesses\n")
-        with configure_target(repo, target_path):
-            for mutant in mutant_names:
-                verified += int(
-                    _mutant_fails_selected_tests(
-                        repo=repo,
-                        mutmut=mutmut,
-                        target_file=target_file,
-                        original=original,
-                        mutant=mutant,
-                        log=log,
-                        test_selection=test_selection,
-                    )
-                )
-    return verified
-
-
-def _mutant_fails_selected_tests(
-    *,
-    repo: Path,
-    mutmut: list[str],
-    target_file: Path,
-    original: bytes,
-    mutant: str,
-    log: TextIO,
-    test_selection: Sequence[str],
-) -> bool:
-    try:
-        if not _apply_mutant(repo=repo, mutmut=mutmut, mutant=mutant, log=log):
-            return False
-        failed = _run_survivor_tests(repo=repo, mutmut=mutmut, test_selection=test_selection, log=log)
-        log.write(f"verification {'killed' if failed else 'kept'} {mutant}: rc={1 if failed else 0}\n")
-        return failed
-    finally:
-        target_file.write_bytes(original)
-
-
-def _apply_mutant(*, repo: Path, mutmut: list[str], mutant: str, log: TextIO) -> bool:
-    result = subprocess.run(
-        [*mutmut, "apply", mutant],
-        cwd=repo,
-        check=False,
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    if result.returncode != 0:
-        log.write(f"verification apply failed for {mutant}: rc={result.returncode}\n")
-        return False
-    return True
-
-
-def _run_survivor_tests(
-    *,
-    repo: Path,
-    mutmut: list[str],
-    test_selection: Sequence[str],
-    log: TextIO,
-) -> bool:
-    result = subprocess.run(
-        survivor_verification_test_command(mutmut, test_selection),
-        cwd=repo,
-        check=False,
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    return result.returncode != 0
-
-
-def survivor_verification_test_command(mutmut: list[str], test_selection: Sequence[str]) -> list[str]:
-    python = python_for_mutmut_command(mutmut)
-    return [python, "-m", "pytest", "-q", "-k", "not socket", *test_selection]
-
-
-def python_for_mutmut_command(mutmut: list[str]) -> str:
-    python_module_command_min_parts = 3
-    if len(mutmut) >= python_module_command_min_parts and mutmut[1:3] == ["-m", "mutmut"]:
-        return mutmut[0]
-    return sys.executable

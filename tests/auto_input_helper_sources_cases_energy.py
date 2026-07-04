@@ -7,6 +7,7 @@ from venus_evcharger.inputs.helper.sources_dbus_common import (
     _dbus_error_name,
     _is_expected_missing_dbus_error,
 )
+from venus_evcharger.energy import EnergyClusterSnapshot
 from venus_evcharger.inputs.energy_snapshot_contracts import (
     energy_source_definitions,
     is_source_definition_iterable,
@@ -42,6 +43,479 @@ class _AutoInputHelperSourcesEnergyCases:
         )
         self.assertEqual(learning_profile_payloads("bad"), {})
         self.assertEqual(learning_profile_payloads({"battery": profile, "skip": object()})["battery"]["source_id"], "battery")
+
+    def test_empty_battery_snapshot_schema_is_explicit(self):
+        helper = self._make_helper()
+
+        self.assertEqual(
+            helper._empty_battery_snapshot(),
+            {
+                "battery_soc": None,
+                "battery_combined_soc": None,
+                "battery_combined_usable_capacity_wh": None,
+                "battery_combined_charge_power_w": None,
+                "battery_combined_discharge_power_w": None,
+                "battery_combined_net_power_w": None,
+                "battery_combined_ac_power_w": None,
+                "battery_combined_pv_input_power_w": None,
+                "battery_combined_grid_interaction_w": None,
+                "battery_headroom_charge_w": None,
+                "battery_headroom_discharge_w": None,
+                "expected_near_term_export_w": None,
+                "expected_near_term_import_w": None,
+                "battery_discharge_balance_mode": "",
+                "battery_discharge_balance_target_distribution_mode": "",
+                "battery_discharge_balance_error_w": None,
+                "battery_discharge_balance_max_abs_error_w": None,
+                "battery_discharge_balance_total_discharge_w": None,
+                "battery_discharge_balance_eligible_source_count": 0,
+                "battery_discharge_balance_active_source_count": 0,
+                "battery_discharge_balance_control_candidate_count": 0,
+                "battery_discharge_balance_control_ready_count": 0,
+                "battery_discharge_balance_supported_control_source_count": 0,
+                "battery_discharge_balance_experimental_control_source_count": 0,
+                "battery_average_confidence": None,
+                "battery_source_count": 0,
+                "battery_online_source_count": 0,
+                "battery_valid_soc_source_count": 0,
+                "battery_battery_source_count": 0,
+                "battery_hybrid_inverter_source_count": 0,
+                "battery_inverter_source_count": 0,
+                "battery_sources": [],
+                "battery_learning_profiles": {},
+            },
+        )
+
+    def test_gateway_battery_snapshot_schema_marks_single_valid_source(self):
+        helper = self._make_helper()
+
+        snapshot = helper._gateway_battery_snapshot(42.5)
+
+        self.assertEqual(snapshot["battery_soc"], 42.5)
+        self.assertEqual(snapshot["battery_combined_soc"], 42.5)
+        self.assertEqual(snapshot["battery_average_confidence"], 1.0)
+        self.assertEqual(snapshot["battery_source_count"], 1)
+        self.assertEqual(snapshot["battery_online_source_count"], 1)
+        self.assertEqual(snapshot["battery_valid_soc_source_count"], 1)
+        self.assertEqual(snapshot["battery_battery_source_count"], 1)
+        self.assertEqual(snapshot["battery_hybrid_inverter_source_count"], 0)
+        self.assertEqual(snapshot["battery_inverter_source_count"], 0)
+        self.assertEqual(snapshot["battery_sources"], [])
+        self.assertEqual(snapshot["battery_learning_profiles"], {})
+        self.assertIsNone(snapshot["battery_combined_usable_capacity_wh"])
+
+    def test_get_battery_snapshot_uses_gateway_contract_and_retry_guard(self):
+        helper = self._make_helper()
+        helper._source_retry_ready = MagicMock(return_value=False)
+        helper._get_gateway_read_value = MagicMock()
+
+        self.assertEqual(helper._get_battery_snapshot(), {"battery_soc": None})
+        helper._source_retry_ready.assert_called_once_with("battery")
+        helper._get_gateway_read_value.assert_not_called()
+
+        helper = self._make_helper()
+        helper._source_retry_ready = MagicMock(return_value=True)
+        helper._get_gateway_read_value = MagicMock(return_value=66.5)
+        with patch(
+            "venus_evcharger.inputs.helper.sources._AutoInputHelperSource._gateway_battery_snapshot",
+            return_value={"battery_soc": 66.5, "source": "gateway"},
+        ) as gateway_snapshot:
+            self.assertEqual(helper._get_battery_snapshot(), {"battery_soc": 66.5, "source": "gateway"})
+        helper._source_retry_ready.assert_called_once_with("battery")
+        helper._get_gateway_read_value.assert_called_once_with(
+            "battery_soc",
+            reason="helper semantic battery SOC read",
+        )
+        gateway_snapshot.assert_called_once_with(helper, 66.5)
+
+        helper = self._make_helper()
+        helper._source_retry_ready = MagicMock(return_value=True)
+        helper._get_gateway_read_value = MagicMock(return_value=100.1)
+        helper._delay_source_retry = MagicMock()
+
+        invalid_snapshot = helper._get_battery_snapshot()
+
+        self.assertIsNone(invalid_snapshot["battery_soc"])
+        helper._delay_source_retry.assert_called_once_with("battery")
+
+        helper = self._make_helper()
+        helper._source_retry_ready = MagicMock(return_value=True)
+        helper._get_gateway_read_value = MagicMock(return_value=0.0)
+        zero_snapshot = helper._get_battery_snapshot()
+        self.assertEqual(zero_snapshot["battery_soc"], 0.0)
+        self.assertEqual(zero_snapshot["battery_valid_soc_source_count"], 1)
+
+        helper = self._make_helper()
+        helper._source_retry_ready = MagicMock(return_value=True)
+        helper._get_gateway_read_value = MagicMock(return_value=100.0)
+        full_snapshot = helper._get_battery_snapshot()
+        self.assertEqual(full_snapshot["battery_soc"], 100.0)
+        self.assertEqual(full_snapshot["battery_valid_soc_source_count"], 1)
+
+    def test_battery_snapshot_sources_treat_missing_configuration_as_empty(self):
+        helper = self._make_helper()
+        delattr(helper, "auto_energy_sources")
+        helper._primary_energy_source = MagicMock(
+            return_value=EnergySourceDefinition(source_id="fallback", role="battery", connector_type="dbus")
+        )
+
+        with patch("venus_evcharger.inputs.helper.sources.energy_source_definitions") as normalizer:
+            normalizer.side_effect = lambda value: () if value == () else (value,)
+            sources = helper._battery_snapshot_sources()
+
+        self.assertEqual(sources[0].source_id, "fallback")
+        self.assertEqual(normalizer.call_args_list[0].args, ((),))
+        helper._primary_energy_source.assert_called_once_with()
+
+    def test_battery_snapshot_cluster_reads_each_source_with_same_helper_and_time(self):
+        helper = self._make_helper()
+        source_a = EnergySourceDefinition(source_id="a", role="battery", connector_type="dbus")
+        source_b = EnergySourceDefinition(source_id="b", role="battery", connector_type="dbus")
+        snapshot_a = EnergySourceSnapshot(source_id="a", role="battery", service_name="svc-a", soc=55.0)
+        snapshot_b = EnergySourceSnapshot(source_id="b", role="battery", service_name="svc-b", soc=65.0)
+        aggregate = EnergyClusterSnapshot(effective_soc=60.0)
+        helper._battery_snapshot_sources = MagicMock(return_value=(source_a, source_b))
+
+        with patch(
+            "venus_evcharger.inputs.helper.sources.read_energy_source_snapshot",
+            side_effect=[snapshot_a, snapshot_b],
+        ) as read_snapshot, patch(
+            "venus_evcharger.inputs.helper.sources.aggregate_energy_sources",
+            return_value=aggregate,
+        ) as aggregate_sources:
+            cluster, sources = helper._battery_snapshot_cluster(123.0)
+
+        self.assertIs(cluster, aggregate)
+        self.assertEqual(sources, (source_a, source_b))
+        self.assertEqual(read_snapshot.call_args_list[0].args, (helper, source_a, 123.0))
+        self.assertEqual(read_snapshot.call_args_list[1].args, (helper, source_b, 123.0))
+        aggregate_sources.assert_called_once_with((snapshot_a, snapshot_b))
+
+    def test_battery_snapshot_effective_soc_honors_combined_flag_and_rejects_bool(self):
+        helper = self._make_helper()
+        cluster = EnergyClusterSnapshot(
+            effective_soc=88.0,
+            sources=(EnergySourceSnapshot(source_id="a", role="battery", service_name="svc", soc=44.0),),
+        )
+
+        helper.auto_use_combined_battery_soc = True
+        self.assertEqual(helper._battery_snapshot_effective_soc(cluster), 88.0)
+
+        helper.auto_use_combined_battery_soc = False
+        self.assertEqual(helper._battery_snapshot_effective_soc(cluster), 44.0)
+        self.assertIsNone(helper._battery_snapshot_effective_soc(EnergyClusterSnapshot(effective_soc=11.0)))
+        self.assertIsNone(helper._battery_snapshot_effective_soc(EnergyClusterSnapshot(effective_soc=True)))
+
+        helper = self._make_helper()
+        delattr(helper, "auto_use_combined_battery_soc")
+        self.assertEqual(helper._battery_snapshot_effective_soc(cluster), 88.0)
+
+    def test_battery_snapshot_learning_bundle_calls_learning_and_forecast_contracts(self):
+        helper = self._make_helper()
+        helper._energy_learning_profiles = {"existing": "profile"}
+        cluster = EnergyClusterSnapshot(
+            combined_charge_power_w=10.0,
+            combined_discharge_power_w=20.0,
+            combined_charge_limit_power_w=30.0,
+            combined_discharge_limit_power_w=40.0,
+            combined_grid_interaction_w=-50.0,
+            sources=(EnergySourceSnapshot(source_id="battery", role="battery", service_name="svc"),),
+        )
+
+        with patch("venus_evcharger.inputs.helper.sources.learning_profiles", return_value={"clean": "profile"}) as profiles, patch(
+            "venus_evcharger.inputs.helper.sources.update_energy_learning_profiles",
+            return_value={"updated": "profile"},
+        ) as update_profiles, patch(
+            "venus_evcharger.inputs.helper.sources.summarize_energy_learning_profiles",
+            return_value={"learning": 1},
+        ) as summarize, patch(
+            "venus_evcharger.inputs.helper.sources.derive_discharge_balance_metrics",
+            return_value={"balance": 2},
+        ) as balance, patch(
+            "venus_evcharger.inputs.helper.sources.derive_energy_forecast",
+            return_value={"forecast": 3},
+        ) as forecast:
+            learning_summary, discharge_balance, forecast_payload = helper._battery_snapshot_learning_bundle(
+                cluster,
+                123.0,
+            )
+
+        profiles.assert_called_once_with({"existing": "profile"})
+        update_profiles.assert_called_once_with({"clean": "profile"}, cluster.sources, 123.0)
+        summarize.assert_called_once_with({"updated": "profile"})
+        balance.assert_called_once_with(cluster.sources, {"updated": "profile"})
+        forecast.assert_called_once_with(
+            {
+                "battery_combined_charge_power_w": 10.0,
+                "battery_combined_discharge_power_w": 20.0,
+                "battery_combined_charge_limit_power_w": 30.0,
+                "battery_combined_discharge_limit_power_w": 40.0,
+                "battery_combined_grid_interaction_w": -50.0,
+            },
+            {"learning": 1},
+        )
+        self.assertEqual(helper._energy_learning_profiles, {"updated": "profile"})
+        self.assertEqual(learning_summary, {"learning": 1})
+        self.assertEqual(discharge_balance, {"balance": 2})
+        self.assertEqual(forecast_payload, {"forecast": 3})
+
+    def test_battery_snapshot_learning_bundle_treats_missing_profiles_as_empty(self):
+        helper = self._make_helper()
+        delattr(helper, "_energy_learning_profiles")
+        cluster = EnergyClusterSnapshot(sources=())
+
+        with patch("venus_evcharger.inputs.helper.sources.learning_profiles", return_value={}) as profiles, patch(
+            "venus_evcharger.inputs.helper.sources.update_energy_learning_profiles",
+            return_value={},
+        ), patch(
+            "venus_evcharger.inputs.helper.sources.summarize_energy_learning_profiles",
+            return_value={},
+        ), patch(
+            "venus_evcharger.inputs.helper.sources.derive_discharge_balance_metrics",
+            return_value={},
+        ), patch(
+            "venus_evcharger.inputs.helper.sources.derive_energy_forecast",
+            return_value={},
+        ):
+            helper._battery_snapshot_learning_bundle(cluster, 1.0)
+
+        profiles.assert_called_once_with({})
+
+    def test_battery_snapshot_source_payloads_pass_empty_source_maps_to_normalizer(self):
+        cluster = EnergyClusterSnapshot(
+            sources=(EnergySourceSnapshot(source_id="battery-a", role="battery", service_name="svc-a", soc=60.0),)
+        )
+
+        with patch("venus_evcharger.inputs.helper.sources.nested_object_mappings", return_value={}) as nested:
+            payloads = self._make_helper()._battery_snapshot_source_payloads(cluster, {}, {})
+
+        self.assertEqual(payloads[0]["source_id"], "battery-a")
+        self.assertEqual(nested.call_args_list[0].args, ({},))
+        self.assertEqual(nested.call_args_list[1].args, ({},))
+
+    def test_battery_snapshot_source_payloads_merge_per_source_metrics(self):
+        cluster = EnergyClusterSnapshot(
+            sources=(
+                EnergySourceSnapshot(source_id="battery-a", role="battery", service_name="svc-a", soc=60.0),
+                EnergySourceSnapshot(source_id="battery-b", role="battery", service_name="svc-b", soc=70.0),
+            )
+        )
+        payloads = self._make_helper()._battery_snapshot_source_payloads(
+            cluster,
+            {
+                "sources": {
+                    "battery-a": {"discharge_balance_target_power_w": 100.0},
+                    "ignored": {"discharge_balance_target_power_w": 999.0},
+                }
+            },
+            {
+                "sources": {
+                    "battery-a": {"discharge_balance_control_support": "supported"},
+                    "battery-b": {"discharge_balance_control_support": "experimental"},
+                }
+            },
+        )
+
+        self.assertEqual(payloads[0]["source_id"], "battery-a")
+        self.assertEqual(payloads[0]["soc"], 60.0)
+        self.assertEqual(payloads[0]["discharge_balance_target_power_w"], 100.0)
+        self.assertEqual(payloads[0]["discharge_balance_control_support"], "supported")
+        self.assertEqual(payloads[1]["source_id"], "battery-b")
+        self.assertEqual(payloads[1]["soc"], 70.0)
+        self.assertNotIn("discharge_balance_target_power_w", payloads[1])
+        self.assertEqual(payloads[1]["discharge_balance_control_support"], "experimental")
+
+    def test_battery_snapshot_source_payloads_use_empty_string_for_missing_source_id(self):
+        payloads = self._make_helper()._battery_snapshot_source_payloads(
+            EnergyClusterSnapshot(sources=(cast(Any, SimpleNamespace(as_dict=lambda: {})),)),
+            {"sources": {"": {"balance": "empty-id"}}},
+            {"sources": {"": {"control": "empty-id"}}},
+        )
+
+        self.assertEqual(payloads, [{"balance": "empty-id", "control": "empty-id"}])
+
+    def test_battery_snapshot_payload_uses_zero_count_defaults_when_metrics_are_missing(self):
+        helper = self._make_helper()
+        payload = helper._battery_snapshot_payload(
+            None,
+            EnergyClusterSnapshot(),
+            {
+                "battery_headroom_charge_w": None,
+                "battery_headroom_discharge_w": None,
+                "expected_near_term_export_w": None,
+                "expected_near_term_import_w": None,
+            },
+            {},
+            {},
+            [],
+        )
+
+        self.assertIsNone(payload["battery_discharge_balance_mode"])
+        self.assertIsNone(payload["battery_discharge_balance_target_distribution_mode"])
+        self.assertIsNone(payload["battery_discharge_balance_error_w"])
+        self.assertEqual(payload["battery_discharge_balance_eligible_source_count"], 0)
+        self.assertEqual(payload["battery_discharge_balance_active_source_count"], 0)
+        self.assertEqual(payload["battery_discharge_balance_control_candidate_count"], 0)
+        self.assertEqual(payload["battery_discharge_balance_control_ready_count"], 0)
+        self.assertEqual(payload["battery_discharge_balance_supported_control_source_count"], 0)
+        self.assertEqual(payload["battery_discharge_balance_experimental_control_source_count"], 0)
+
+        helper = self._make_helper()
+        delattr(helper, "_energy_learning_profiles")
+        with patch("venus_evcharger.inputs.helper.sources.learning_profile_payloads", return_value={}) as profiles:
+            payload = helper._battery_snapshot_payload(
+                None,
+                EnergyClusterSnapshot(),
+                {
+                    "battery_headroom_charge_w": None,
+                    "battery_headroom_discharge_w": None,
+                    "expected_near_term_export_w": None,
+                    "expected_near_term_import_w": None,
+                },
+                {},
+                {},
+                [],
+            )
+        profiles.assert_called_once_with({})
+        self.assertEqual(payload["battery_learning_profiles"], {})
+
+    def test_battery_snapshot_payload_maps_cluster_and_derived_fields(self):
+        helper = self._make_helper()
+        helper._energy_learning_profiles = {"battery-a": EnergyLearningProfile(source_id="battery-a", sample_count=2)}
+        cluster = EnergyClusterSnapshot(
+            effective_soc=64.0,
+            combined_soc=65.0,
+            combined_usable_capacity_wh=12000.0,
+            combined_charge_power_w=101.0,
+            combined_discharge_power_w=202.0,
+            combined_charge_limit_power_w=303.0,
+            combined_discharge_limit_power_w=404.0,
+            combined_net_battery_power_w=505.0,
+            combined_ac_power_w=606.0,
+            combined_pv_input_power_w=707.0,
+            combined_grid_interaction_w=-808.0,
+            average_confidence=0.75,
+            source_count=3,
+            online_source_count=2,
+            valid_soc_source_count=1,
+            battery_source_count=1,
+            hybrid_inverter_source_count=1,
+            inverter_source_count=1,
+        )
+        payload = helper._battery_snapshot_payload(
+            64.0,
+            cluster,
+            {
+                "battery_headroom_charge_w": 11.0,
+                "battery_headroom_discharge_w": 22.0,
+                "expected_near_term_export_w": 33.0,
+                "expected_near_term_import_w": 44.0,
+            },
+            {
+                "mode": "balanced",
+                "target_distribution_mode": "reserve",
+                "error_w": 1.0,
+                "max_abs_error_w": 2.0,
+                "total_discharge_w": 3.0,
+                "eligible_source_count": 4,
+                "active_source_count": 5,
+            },
+            {
+                "control_candidate_count": 6,
+                "control_ready_count": 7,
+                "supported_control_source_count": 8,
+                "experimental_control_source_count": 9,
+            },
+            [{"source_id": "battery-a"}],
+        )
+
+        self.assertEqual(
+            payload,
+            {
+                "battery_soc": 64.0,
+                "battery_combined_soc": 65.0,
+                "battery_combined_usable_capacity_wh": 12000.0,
+                "battery_combined_charge_power_w": 101.0,
+                "battery_combined_discharge_power_w": 202.0,
+                "battery_combined_net_power_w": 505.0,
+                "battery_combined_ac_power_w": 606.0,
+                "battery_combined_pv_input_power_w": 707.0,
+                "battery_combined_grid_interaction_w": -808.0,
+                "battery_headroom_charge_w": 11.0,
+                "battery_headroom_discharge_w": 22.0,
+                "expected_near_term_export_w": 33.0,
+                "expected_near_term_import_w": 44.0,
+                "battery_discharge_balance_mode": "balanced",
+                "battery_discharge_balance_target_distribution_mode": "reserve",
+                "battery_discharge_balance_error_w": 1.0,
+                "battery_discharge_balance_max_abs_error_w": 2.0,
+                "battery_discharge_balance_total_discharge_w": 3.0,
+                "battery_discharge_balance_eligible_source_count": 4,
+                "battery_discharge_balance_active_source_count": 5,
+                "battery_discharge_balance_control_candidate_count": 6,
+                "battery_discharge_balance_control_ready_count": 7,
+                "battery_discharge_balance_supported_control_source_count": 8,
+                "battery_discharge_balance_experimental_control_source_count": 9,
+                "battery_average_confidence": 0.75,
+                "battery_source_count": 3,
+                "battery_online_source_count": 2,
+                "battery_valid_soc_source_count": 1,
+                "battery_battery_source_count": 1,
+                "battery_hybrid_inverter_source_count": 1,
+                "battery_inverter_source_count": 1,
+                "battery_sources": [{"source_id": "battery-a"}],
+                "battery_learning_profiles": {
+                    "battery-a": {
+                        "active_sample_count": 0,
+                        "average_active_charge_power_w": None,
+                        "average_active_discharge_power_w": None,
+                        "average_active_power_delta_w": None,
+                        "battery_first_export_bias": None,
+                        "charge_sample_count": 0,
+                        "day_active_sample_count": 0,
+                        "day_charge_sample_count": 0,
+                        "day_discharge_sample_count": 0,
+                        "day_support_bias": None,
+                        "direction_change_count": 0,
+                        "discharge_sample_count": 0,
+                        "export_bias": None,
+                        "export_charge_sample_count": 0,
+                        "export_discharge_sample_count": 0,
+                        "export_idle_sample_count": 0,
+                        "import_charge_sample_count": 0,
+                        "import_support_bias": None,
+                        "import_support_sample_count": 0,
+                        "last_active_at": None,
+                        "last_activity_state": "idle",
+                        "last_change_at": None,
+                        "last_direction": "idle",
+                        "last_inactive_at": None,
+                        "night_active_sample_count": 0,
+                        "night_charge_sample_count": 0,
+                        "night_discharge_sample_count": 0,
+                        "night_support_bias": None,
+                        "observed_max_ac_power_w": None,
+                        "observed_max_charge_power_w": None,
+                        "observed_max_charge_soc": None,
+                        "observed_max_discharge_power_w": None,
+                        "observed_max_grid_export_w": None,
+                        "observed_max_grid_import_w": None,
+                        "observed_max_pv_input_power_w": None,
+                        "observed_min_discharge_soc": None,
+                        "power_smoothing_ratio": None,
+                        "reserve_band_ceiling_soc": None,
+                        "reserve_band_floor_soc": None,
+                        "reserve_band_width_soc": None,
+                        "response_sample_count": 0,
+                        "sample_count": 2,
+                        "smoothing_sample_count": 0,
+                        "source_id": "battery-a",
+                        "support_bias": None,
+                        "typical_response_delay_seconds": None,
+                    }
+                },
+            },
+        )
 
     def test_mixin_default_dbus_module_fallbacks_are_disabled(self):
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
@@ -320,6 +794,8 @@ class _AutoInputHelperSourcesEnergyCases:
     def test_helper_battery_validation_and_optional_paths_cover_edge_cases(self):
         helper = self._make_helper()
         self.assertEqual(helper._validated_battery_soc(55.0, "svc"), 55.0)
+        self.assertEqual(helper._validated_battery_soc(0.0, "svc"), 0.0)
+        self.assertEqual(helper._validated_battery_soc(100.0, "svc"), 100.0)
         self.assertIsNone(helper._read_optional_energy_value("svc", ""))
         self.assertEqual(helper._read_optional_energy_text("svc", ""), "")
 
@@ -327,6 +803,8 @@ class _AutoInputHelperSourcesEnergyCases:
         self.assertIsNone(helper._read_optional_energy_value("svc", "/Soc"))
         self.assertIsNone(helper._read_optional_energy_value("svc", "/Soc"))
         self.assertEqual(helper._read_optional_energy_value("svc", "/Soc"), 12.5)
+        self.assertIsNone(helper._battery_soc_numeric(True))
+        self.assertIsNone(helper._battery_soc_numeric(False))
         self.assertIsNone(helper._battery_soc_numeric("bad"))
         self.assertEqual(helper._battery_soc_numeric("12.5"), 12.5)
 
@@ -337,8 +815,63 @@ class _AutoInputHelperSourcesEnergyCases:
         helper._warning_throttled = MagicMock()
         helper._delay_source_retry = MagicMock()
         self.assertIsNone(helper._validated_battery_soc(150.0, "svc"))
+        helper._warning_throttled.assert_called_once_with(
+            "auto-helper-battery-soc-invalid",
+            60.0,
+            "Auto input helper ignored out-of-range battery SOC %s from %s %s",
+            150.0,
+            "svc",
+            "/Soc",
+        )
+        helper._delay_source_retry.assert_called_once_with("battery")
+
+        helper = self._make_helper()
+        helper.auto_battery_scan_interval_seconds = 3.0
+        helper._warning_throttled = MagicMock()
+        helper._delay_source_retry = MagicMock()
+        self.assertIsNone(helper._validated_battery_soc(-0.1, "svc-low"))
+        helper._warning_throttled.assert_called_once_with(
+            "auto-helper-battery-soc-invalid",
+            5.0,
+            "Auto input helper ignored out-of-range battery SOC %s from %s %s",
+            -0.1,
+            "svc-low",
+            "/Soc",
+        )
+        helper._delay_source_retry.assert_called_once_with("battery")
+
+        helper = self._make_helper()
+        helper._warning_throttled = MagicMock()
+        helper._delay_source_retry = MagicMock()
+        self.assertIsNone(helper._validated_battery_soc(100.1, "svc-high"))
         helper._warning_throttled.assert_called_once()
         helper._delay_source_retry.assert_called_once_with("battery")
+
+        helper = self._make_helper()
+        helper.auto_battery_scan_interval_seconds = 0.0
+        helper._warning_throttled = MagicMock()
+        helper._delay_source_retry = MagicMock()
+        self.assertIsNone(helper._validated_battery_soc(101.0, "svc-fallback"))
+        self.assertEqual(helper._warning_throttled.call_args.args[1], 5.0)
+        helper._delay_source_retry.assert_called_once_with("battery")
+
+    def test_get_energy_source_battery_snapshot_passes_capture_time_through_pipeline(self):
+        helper = self._make_helper()
+        cluster = EnergyClusterSnapshot(effective_soc=55.0, sources=())
+        sources: tuple[EnergySourceDefinition, ...] = ()
+        helper._source_retry_ready = MagicMock(return_value=True)
+        helper._battery_snapshot_now = MagicMock(return_value=321.0)
+        helper._battery_snapshot_cluster = MagicMock(return_value=(cluster, sources))
+        helper._battery_snapshot_effective_soc = MagicMock(return_value=55.0)
+        helper._battery_snapshot_learning_bundle = MagicMock(return_value=({}, {}, {}))
+        helper._battery_snapshot_source_payloads = MagicMock(return_value=[])
+        helper._battery_snapshot_payload = MagicMock(return_value={"battery_soc": 55.0})
+
+        with patch("venus_evcharger.inputs.helper.sources.derive_discharge_control_metrics", return_value={}):
+            self.assertEqual(helper._get_energy_source_battery_snapshot(), {"battery_soc": 55.0})
+
+        helper._battery_snapshot_cluster.assert_called_once_with(321.0)
+        helper._battery_snapshot_learning_bundle.assert_called_once_with(cluster, 321.0)
 
     def test_helper_source_resolution_and_configured_battery_edges_cover_remaining_branches(self):
         helper = self._make_helper()

@@ -18,12 +18,36 @@ from venus_evcharger.core.common import (
 )
 from venus_evcharger.core.contracts import (
     finite_float_or_none,
-    normalize_binary_flag,
     normalize_learning_phase,
     normalize_learning_state,
 )
 from venus_evcharger.publish.dbus_config import _DbusPublishConfig
 from venus_evcharger.publish.dbus_shared import _LearnedDisplayCurrentInputs
+
+
+_VOLTAGE_MODE_PHASE = "phase"
+
+
+def _enabled_by_default_flag(value: object) -> bool:
+    """Return one permissive binary flag for optional display compatibility switches."""
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    parsed_value = _optional_binary_flag_int(value)
+    return True if parsed_value is None else parsed_value > 0
+
+
+def _optional_binary_flag_int(value: object) -> int | None:
+    """Return a parsed integer binary flag value when the input has supported shape."""
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not isinstance(value, (str, bytes, bytearray)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class _DbusPublishLearned(_DbusPublishConfig):
@@ -34,19 +58,15 @@ class _DbusPublishLearned(_DbusPublishConfig):
         charger_backend = getattr(self.service, "_charger_backend", None)
         if charger_backend is not None and hasattr(charger_backend, "set_current"):
             return False
-        return bool(normalize_binary_flag(getattr(self.service, "display_learned_set_current", 1), 1))
+        return _enabled_by_default_flag(getattr(self.service, "display_learned_set_current", None))
 
     def _charger_state_max_age_seconds(self) -> float:
         """Return how fresh charger readback must be before it overrides display state."""
         candidates = [2.0]
-        live_interval = finite_float_or_none(
-            getattr(self.service, "_dbus_live_publish_interval_seconds", 1.0)
-        )
+        live_interval = finite_float_or_none(getattr(self.service, "_dbus_live_publish_interval_seconds", None))
         if live_interval is not None and live_interval > 0.0:
             candidates.append(float(live_interval) * 2.0)
-        soft_fail_seconds = finite_float_or_none(
-            getattr(self.service, "auto_shelly_soft_fail_seconds", 10.0)
-        )
+        soft_fail_seconds = finite_float_or_none(getattr(self.service, "auto_shelly_soft_fail_seconds", None))
         if soft_fail_seconds is not None and soft_fail_seconds > 0.0:
             candidates.append(float(soft_fail_seconds))
         return max(1.0, min(candidates))
@@ -136,7 +156,10 @@ class _DbusPublishLearned(_DbusPublishConfig):
         """Return whether learned charging power may currently drive the GUI current display."""
         if not self._display_uses_learned_set_current():
             return False
-        if normalize_learning_state(getattr(self.service, "learned_charge_power_state", "unknown")) != "stable":
+        state = getattr(self.service, "learned_charge_power_state", None)
+        if state is None:
+            return False
+        if normalize_learning_state(state) != "stable":
             return False
         return not self._learned_charge_power_expired_for_display(now)
 
@@ -152,9 +175,11 @@ class _DbusPublishLearned(_DbusPublishConfig):
 
     def _learned_display_phase(self) -> str | None:
         """Return the normalized learned/display phase signature."""
-        return normalize_learning_phase(
-            getattr(self.service, "learned_charge_power_phase", getattr(self.service, "phase", "L1"))
-        )
+        learned_phase = getattr(self.service, "learned_charge_power_phase", None)
+        raw_phase = learned_phase if learned_phase is not None else getattr(self.service, "phase", None)
+        if raw_phase is None:
+            return "L1"
+        return normalize_learning_phase(raw_phase)
 
     def _raw_learned_display_values(self) -> tuple[float, float, str] | None:
         """Return raw learned display values before phase-voltage normalization."""
@@ -188,9 +213,16 @@ class _DbusPublishLearned(_DbusPublishConfig):
     def _phase_voltage_for_display_current(self, voltage: float, phase: str) -> float | None:
         """Return the per-phase voltage used for learned-current display derivation."""
         phase_voltage = float(voltage)
-        if phase == "3P" and str(getattr(self.service, "voltage_mode", "phase")).strip().lower() != "phase":
+        if phase == "3P" and self._normalized_voltage_mode() != _VOLTAGE_MODE_PHASE:
             phase_voltage = phase_voltage / math.sqrt(3.0)
         return None if phase_voltage <= 0 else phase_voltage
+
+    def _normalized_voltage_mode(self) -> str:
+        """Return the configured voltage mode normalized for learned-current derivation."""
+        raw_mode = getattr(self.service, "voltage_mode", None)
+        if raw_mode is None:
+            return _VOLTAGE_MODE_PHASE
+        return str(raw_mode).strip().lower()
 
     @staticmethod
     def _rounded_display_current(current_amps: float) -> float | None:

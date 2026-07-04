@@ -47,6 +47,7 @@ from venus_evcharger.core.contracts import (
     normalized_auto_state_pair,
     normalized_fault_state,
     normalized_scheduled_state_fields,
+    normalized_scheduled_state_values,
     normalized_software_update_state_fields,
     normalized_status_source,
     normalized_worker_snapshot,
@@ -82,7 +83,68 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
         self.assertEqual(normalized_status_source(" charger-status-ready "), "charger-status-ready")
         self.assertEqual(normalized_fault_state("contactor-lockout-open"), ("contactor-lockout-open", 1))
         self.assertEqual(normalized_scheduled_state_fields(True, "night-boost", 99, "night-boost-window", -1, 1), ("night-boost", 4, "night-boost-window", 4, 1))
+        self.assertEqual(
+            normalized_scheduled_state_fields(False, "night-boost", 99, "night-boost-window", -1, 1),
+            ("disabled", 0, "disabled", 0, 0),
+        )
+        self.assertEqual(
+            normalized_scheduled_state_values(True, " AUTO-WINDOW ", " daytime-auto ", True),
+            ("auto-window", 1, "daytime-auto", 1, 0),
+        )
+        self.assertEqual(
+            normalized_scheduled_state_values(True, "bad", "bad", True),
+            ("disabled", 0, "disabled", 0, 0),
+        )
+        self.assertEqual(
+            normalized_scheduled_state_values(True, None, None, True),
+            ("disabled", 0, "disabled", 0, 0),
+        )
+        self.assertEqual(
+            normalized_scheduled_state_values(True, "", "", True),
+            ("disabled", 0, "disabled", 0, 0),
+        )
         self.assertEqual(normalized_software_update_state_fields("available", 1, 1), ("available-blocked", 4, 1, 1))
+        self.assertEqual(normalized_software_update_state_fields(None, None, None), ("idle", 0, 0, 0))
+        self.assertEqual(normalized_software_update_state_fields("", 0, 0), ("idle", 0, 0, 0))
+        self.assertEqual(normalized_software_update_state_fields("available", -1, 1), ("available", 3, 0, 1))
+        self.assertEqual(normalized_software_update_state_fields("available-blocked", 1, 0), ("available", 3, 1, 0))
+        self.assertEqual(normalized_software_update_state_fields("available-blocked", 0, 1), ("available-blocked", 4, 0, 1))
+        self.assertEqual(normalized_software_update_state_fields("installed", True, False), ("installed", 6, 1, 0))
+        self.assertIsNone(
+            displayable_confirmed_read_timestamp(
+                last_confirmed_at=101.5,
+                last_pm_at=None,
+                last_pm_confirmed=True,
+                now=100.0,
+            )
+        )
+        self.assertEqual(
+            displayable_confirmed_read_timestamp(
+                last_confirmed_at=101.5,
+                last_pm_at=None,
+                last_pm_confirmed=True,
+                now=100.0,
+                future_tolerance_seconds=2.0,
+            ),
+            101.5,
+        )
+        self.assertEqual(
+            displayable_confirmed_read_timestamp(
+                last_confirmed_at=110.0,
+                last_pm_at=99.5,
+                last_pm_confirmed=True,
+                now=100.0,
+            ),
+            99.5,
+        )
+        self.assertIsNone(
+            displayable_confirmed_read_timestamp(
+                last_confirmed_at=110.0,
+                last_pm_at=99.5,
+                last_pm_confirmed=False,
+                now=100.0,
+            )
+        )
         self.assertEqual(_resolved_snapshot_captured_at(None, 91.0, None), 91.0)
         worker_snapshot = normalized_worker_snapshot({"captured_at": 100.0, "pm_status": {"output": 1}, "pm_confirmed": True}, now=100.0)
         self.assertEqual(worker_snapshot["pm_captured_at"], 100.0)
@@ -190,6 +252,29 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
         )
         self.assertIsNone(metrics["start_threshold"])
         self.assertIsNone(metrics["stop_threshold"])
+        self.assertEqual(metrics["soc"], 55.0)
+        self.assertEqual(metrics["learned_charge_power"], 2400.0)
+        self.assertEqual(metrics["learned_charge_power_state"], "stable")
+        self.assertNotIn("XXsocXX", metrics)
+        self.assertNotIn("SOC", metrics)
+        self.assertNotIn("XXlearned_charge_powerXX", metrics)
+        self.assertNotIn("LEARNED_CHARGE_POWER", metrics)
+        self.assertNotIn("XXlearned_charge_power_stateXX", metrics)
+        self.assertNotIn("LEARNED_CHARGE_POWER_STATE", metrics)
+        invalid_metrics = sanitized_auto_metrics(
+            {
+                "soc": 120.0,
+                "learned_charge_power": -1.0,
+                "learned_charge_power_state": "bad-state",
+            }
+        )
+        self.assertIsNone(invalid_metrics["soc"])
+        self.assertIsNone(invalid_metrics["learned_charge_power"])
+        self.assertEqual(invalid_metrics["learned_charge_power_state"], "unknown")
+        missing_learning = sanitized_auto_metrics({})
+        self.assertIsNone(missing_learning["learned_charge_power"])
+        self.assertIsNone(missing_learning["learned_charge_power_state"])
+        self.assertIsNone(missing_learning["soc"])
         self.assertEqual(_resolved_snapshot_captured_at(None, None, None), 0.0)
         worker_snapshot = normalized_worker_snapshot(
             {

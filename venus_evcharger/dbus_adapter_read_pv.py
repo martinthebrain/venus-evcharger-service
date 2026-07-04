@@ -55,15 +55,19 @@ def dc_pv_members(
 
 
 def dc_pv_target(spec: ReadSpec) -> tuple[str, str] | None:
-    service = str(spec.get("dc_service") or "").strip()
-    path = str(spec.get("dc_path") or "").strip()
+    if "dc_service" not in spec or "dc_path" not in spec:
+        return None
+    service = _stripped_text(spec["dc_service"])
+    path = _stripped_text(spec["dc_path"])
     if not service or not path.startswith("/"):
         return None
     return service, path
 
 
 def use_dc_pv(spec: ReadSpec) -> bool:
-    return str(spec.get("use_dc_pv", "")).strip().lower() in {"1", "true", "yes", "on"}
+    if "use_dc_pv" not in spec:
+        return False
+    return str(spec["use_dc_pv"]).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def pv_member_recently_failed(
@@ -77,7 +81,9 @@ def pv_member_recently_failed(
     entry = cached_values.get(dbus_path_key(service, path), {})
     if entry.get("status") != "error":
         return False
-    error_at = _float_or_zero(entry.get("error_at", 0.0))
+    if "error_at" not in entry:
+        return False
+    error_at = _float_or_zero(entry["error_at"])
     current_time = time.time() if now is None else now
     return error_at > 0.0 and current_time - error_at < backoff_seconds
 
@@ -91,3 +97,7 @@ def _float_or_zero(raw_value: object) -> float:
         except ValueError:
             return 0.0
     return 0.0
+
+
+def _stripped_text(raw_value: object) -> str:
+    return raw_value.strip() if isinstance(raw_value, str) else ""

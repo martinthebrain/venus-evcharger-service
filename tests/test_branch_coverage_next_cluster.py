@@ -180,11 +180,8 @@ class BranchCoverageNextAggregateCases(unittest.TestCase):
             aggregate_mod._discharge_balance_weight(fallback_source, reserve_floor_soc=50.0),
             (1.0, None, "uniform_fallback"),
         )
-        self.assertEqual(aggregate_mod._normalized_discharge_balance_weight(2.5, 2), 2.5)
-        self.assertEqual(aggregate_mod._normalized_discharge_balance_weight(0.0, 2), 1.0)
-        eligible_sources = [{"weight": 0.0}, {"weight": 0.0}]
-        self.assertEqual(aggregate_mod._discharge_balance_total_weight(eligible_sources), 1.0)
-        self.assertEqual([item["weight"] for item in eligible_sources], [0.5, 0.5])
+        eligible_sources = [{"weight": 2.5}, {"weight": 1.5}]
+        self.assertEqual(aggregate_mod._discharge_balance_total_weight(eligible_sources), 4.0)
         self.assertEqual(aggregate_mod._empty_discharge_balance_metrics()["eligible_source_count"], 0)
 
         empty_metrics = aggregate_mod.derive_discharge_balance_metrics(

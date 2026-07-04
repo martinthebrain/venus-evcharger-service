@@ -1,28 +1,10 @@
-[tool.ruff]
-line-length = 120
-target-version = "py310"
-extend-exclude = [
-    ".venv-ruff",
-]
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Curated targets for the optional mutmut audit runner."""
 
-[tool.ruff.lint]
-select = [
-    "E9",
-    "F63",
-    "F7",
-    "F82",
-]
+from __future__ import annotations
 
-[tool.mutmut]
-source_paths = ["venus_evcharger"]
-only_mutate = ["venus_evcharger/service/control_state_meta.py"]
-also_copy = [
-    "venus_evcharger_auto_input_helper.py",
-    "venus_evcharger_dbus_adapter.py",
-    "venus_evcharger_service.py",
-]
-pytest_add_cli_args = ["-k", "not socket"]
-pytest_add_cli_args_test_selection = [
+DEFAULT_TEST_SELECTION = (
     "tests/test_dbus_gateway_adapter_scheduler.py",
     "tests/test_dbus_gateway_primitives.py",
     "tests/test_core_dbus_backpressure.py",
@@ -81,4 +63,52 @@ pytest_add_cli_args_test_selection = [
     "tests/venus_evcharger_update_cycle_controller_cases_quindenary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_sexdecenary.py",
     "tests/venus_evcharger_update_cycle_controller_cases_septendecenary.py",
-]
+)
+
+DEFAULT_TARGETS = (
+    "venus_evcharger/dbus_gateway_policy.py",
+    "venus_evcharger/dbus_gateway_commands.py",
+    "venus_evcharger/dbus_gateway_cache.py",
+    "venus_evcharger/dbus_gateway_core.py",
+    "venus_evcharger/dbus_gateway_client.py",
+    "venus_evcharger/dbus_gateway_latency.py",
+    "venus_evcharger/dbus_adapter_write_health.py",
+    "venus_evcharger/dbus_adapter_write_core.py",
+    "venus_evcharger/dbus_adapter_write_publish.py",
+    "venus_evcharger/dbus_adapter_read.py",
+    "venus_evcharger/dbus_adapter_read_pv.py",
+    "venus_evcharger/dbus_adapter_process_health.py",
+    "venus_evcharger/dbus_adapter_process_loop.py",
+    "venus_evcharger/energy/models.py",
+    "venus_evcharger/inputs/helper/config_runtime.py",
+    "venus_evcharger/inputs/helper/snapshot.py",
+    "venus_evcharger/inputs/helper/subscriptions.py",
+    "venus_evcharger/inputs/helper/sources.py",
+    "venus_evcharger/inputs/helper/sources_dbus_gateway.py",
+    "venus_evcharger/inputs/storage.py",
+    "venus_evcharger/core/dbus_backpressure.py",
+    "venus_evcharger/service/control_state_config.py",
+    "venus_evcharger/service/control_state_meta.py",
+    "venus_evcharger/service/control_state_operational.py",
+    "venus_evcharger/service/control_state_operational_support.py",
+    "venus_evcharger/service/control_state_victron.py",
+    "venus_evcharger/auto/policy.py",
+    "venus_evcharger/auto/logic_learning.py",
+    "venus_evcharger/auto/logic_decisions.py",
+    "venus_evcharger/auto/logic_gates_runtime.py",
+    "venus_evcharger/backend/shelly_support.py",
+    "venus_evcharger/backend/shelly_io_runtime.py",
+    "venus_evcharger/backend/shelly_meter.py",
+    "venus_evcharger/update/offline_publish.py",
+    "venus_evcharger/update/learning_runtime.py",
+    "venus_evcharger/update/runtime_cycle.py",
+    "venus_evcharger/update/relay_charger_current_targets.py",
+    "venus_evcharger/update/relay_charger_current.py",
+    "venus_evcharger/update/relay_phase_decision.py",
+    "venus_evcharger/update/relay_phase_switch_policy.py",
+    "venus_evcharger/update/relay_phase_switch_runtime.py",
+    "venus_evcharger/update/relay_phase_switch_runtime_recovery.py",
+    "venus_evcharger/update/relay_status_publish.py",
+    "venus_evcharger/update/learning_signature.py",
+    "venus_evcharger/update/relay_phase_switch_mismatch.py",
+)

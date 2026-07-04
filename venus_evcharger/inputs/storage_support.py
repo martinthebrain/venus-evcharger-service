@@ -24,59 +24,70 @@ def _service_name_or_none(value: object) -> str | None:
     return service_name or None
 
 
+def _text_attr(owner: object, attr_name: str, default: str = "") -> str:
+    try:
+        value = getattr(owner, attr_name)
+    except AttributeError:
+        return default
+    return str(value or default)
+
+
+def _float_attr(owner: object, attr_name: str) -> float | None:
+    value = getattr(owner, attr_name, None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _dict_attr(owner: object, attr_name: str) -> dict[object, object] | None:
+    value = getattr(owner, attr_name, None)
+    return value if isinstance(value, dict) else None
+
+
+def _numeric_mapping_value(values: dict[object, object], key: object) -> float | None:
+    value = values.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _energy_cache_entry(owner: object, source_id: str) -> tuple[str, float] | None:
+    resolved = _dict_attr(owner, "_resolved_auto_energy_services")
+    last_scan = _dict_attr(owner, "_auto_energy_last_scan")
+    if resolved is None:
+        return None
+    if last_scan is None:
+        return None
+    service_name = _service_name_or_none(resolved.get(source_id))
+    if service_name is None:
+        return None
+    cached_scan_at = _numeric_mapping_value(last_scan, source_id)
+    if cached_scan_at is None:
+        return None
+    return service_name, cached_scan_at
+
+
 class _DbusInputStorageSupport(_DbusInputPv):
     def _configured_primary_energy_sources(self) -> tuple[EnergySourceDefinition, ...]:
-        return tuple(getattr(self.service, "auto_energy_sources", ()) or ())
-
-    @staticmethod
-    def _primary_energy_source_id() -> str:
-        return "primary_battery"
-
-    @staticmethod
-    def _primary_energy_source_role() -> str:
-        return "battery"
-
-    def _primary_energy_service_name(self) -> str:
-        return str(getattr(self.service, "auto_battery_service", "") or "")
-
-    def _primary_energy_service_prefix(self) -> str:
-        return str(getattr(self.service, "auto_battery_service_prefix", "") or "")
-
-    def _primary_energy_soc_path(self) -> str:
-        return str(getattr(self.service, "auto_battery_soc_path", "/Soc") or "/Soc")
-
-    def _primary_energy_capacity_wh(self) -> float | None:
-        value = getattr(self.service, "auto_battery_capacity_wh", None)
-        return float(value) if isinstance(value, (int, float)) else None
-
-    def _primary_energy_battery_power_path(self) -> str:
-        return str(getattr(self.service, "auto_battery_power_path", "") or "")
-
-    def _primary_energy_ac_power_path(self) -> str:
-        return str(getattr(self.service, "auto_battery_ac_power_path", "") or "")
-
-    def _primary_energy_pv_power_path(self) -> str:
-        return str(getattr(self.service, "auto_battery_pv_power_path", "") or "")
-
-    def _primary_energy_grid_interaction_path(self) -> str:
-        return str(getattr(self.service, "auto_battery_grid_interaction_path", "") or "")
-
-    def _primary_energy_operating_mode_path(self) -> str:
-        return str(getattr(self.service, "auto_battery_operating_mode_path", "") or "")
+        try:
+            configured = self.service.auto_energy_sources
+        except AttributeError:
+            return ()
+        return tuple(configured or ())
 
     def _default_primary_energy_source(self) -> EnergySourceDefinition:
+        svc = self.service
         return EnergySourceDefinition(
-            source_id=self._primary_energy_source_id(),
-            role=self._primary_energy_source_role(),
-            service_name=self._primary_energy_service_name(),
-            service_prefix=self._primary_energy_service_prefix(),
-            soc_path=self._primary_energy_soc_path(),
-            usable_capacity_wh=self._primary_energy_capacity_wh(),
-            battery_power_path=self._primary_energy_battery_power_path(),
-            ac_power_path=self._primary_energy_ac_power_path(),
-            pv_power_path=self._primary_energy_pv_power_path(),
-            grid_interaction_path=self._primary_energy_grid_interaction_path(),
-            operating_mode_path=self._primary_energy_operating_mode_path(),
+            source_id="primary_battery",
+            service_name=_text_attr(svc, "auto_battery_service"),
+            service_prefix=_text_attr(svc, "auto_battery_service_prefix"),
+            soc_path=_text_attr(svc, "auto_battery_soc_path", "/Soc"),
+            usable_capacity_wh=_float_attr(svc, "auto_battery_capacity_wh"),
+            battery_power_path=_text_attr(svc, "auto_battery_power_path"),
+            ac_power_path=_text_attr(svc, "auto_battery_ac_power_path"),
+            pv_power_path=_text_attr(svc, "auto_battery_pv_power_path"),
+            grid_interaction_path=_text_attr(svc, "auto_battery_grid_interaction_path"),
+            operating_mode_path=_text_attr(svc, "auto_battery_operating_mode_path"),
         )
 
     def _primary_energy_source(self) -> EnergySourceDefinition:
@@ -108,13 +119,14 @@ class _DbusInputStorageSupport(_DbusInputPv):
 
     def _energy_source_has_readable_data(self, source: EnergySourceDefinition, service_name: str) -> bool:
         return any(
-            (
-                self._energy_service_has_readable_field(service_name, source.soc_path),
-                self._energy_service_has_readable_field(service_name, source.battery_power_path),
-                self._energy_service_has_readable_field(service_name, source.ac_power_path),
-                self._energy_service_has_readable_field(service_name, source.pv_power_path),
-                self._energy_service_has_readable_field(service_name, source.grid_interaction_path),
-                self._energy_service_has_readable_field(service_name, source.operating_mode_path),
+            self._energy_service_has_readable_field(service_name, path)
+            for path in (
+                source.soc_path,
+                source.battery_power_path,
+                source.ac_power_path,
+                source.pv_power_path,
+                source.grid_interaction_path,
+                source.operating_mode_path,
             )
         )
 
@@ -133,30 +145,24 @@ class _DbusInputStorageSupport(_DbusInputPv):
     def _cached_auto_battery_service(self, now: float) -> str | None:
         svc = self.service
         cached_service = _service_name_or_none(svc._resolved_auto_battery_service)
-        if cached_service is not None and discovery_cache_valid(
-            cached_service,
-            svc._auto_battery_last_scan,
-            svc.auto_battery_scan_interval_seconds,
-            now,
-        ):
-            return cached_service
-        return None
+        if cached_service is None:
+            return None
+        cached_scan_at = getattr(svc, "_auto_battery_last_scan", None)
+        if isinstance(cached_scan_at, bool) or not isinstance(cached_scan_at, (int, float)):
+            return None
+        if not discovery_cache_valid(cached_service, cached_scan_at, svc.auto_battery_scan_interval_seconds, now):
+            return None
+        return cached_service
 
     def _energy_cache_valid(self, source_id: str, now: float) -> str | None:
         svc = self.service
-        resolved = getattr(svc, "_resolved_auto_energy_services", {})
-        last_scan = getattr(svc, "_auto_energy_last_scan", {})
-        cached_service = resolved.get(source_id) if isinstance(resolved, dict) else None
-        cached_scan_at = last_scan.get(source_id, 0.0) if isinstance(last_scan, dict) else 0.0
-        service_name = _service_name_or_none(cached_service)
-        if service_name is not None and discovery_cache_valid(
-            service_name,
-            cached_scan_at,
-            svc.auto_battery_scan_interval_seconds,
-            now,
-        ):
-            return service_name
-        return None
+        cache_entry = _energy_cache_entry(svc, source_id)
+        if cache_entry is None:
+            return None
+        service_name, cached_scan_at = cache_entry
+        if not discovery_cache_valid(service_name, cached_scan_at, svc.auto_battery_scan_interval_seconds, now):
+            return None
+        return service_name
 
     def _remember_energy_service(self, source_id: str, service_name: str, now: float) -> str:
         svc = self.service
@@ -203,10 +209,12 @@ class _DbusInputStorageSupport(_DbusInputPv):
     def _scan_auto_battery_service(self, now: float) -> str:
         svc = self.service
         source = self._primary_energy_source()
-        battery_service_prefix = str(getattr(svc, "auto_battery_service_prefix", "") or "")
+        service_prefix = source.service_prefix or _text_attr(svc, "auto_battery_service_prefix")
+        if not service_prefix:
+            raise ValueError(f"No DBus service prefix configured for energy source '{source.source_id}'")
         service_name = first_matching_prefixed_service(
             svc.list_dbus_services(),
-            source.service_prefix or battery_service_prefix,
+            service_prefix,
             lambda candidate: self._energy_source_has_readable_data(source, candidate),
         )
         if service_name is not None:
@@ -215,7 +223,7 @@ class _DbusInputStorageSupport(_DbusInputPv):
             self._remember_energy_service(source.source_id, service_name, now)
             logging.debug("Auto battery service resolved: %s", svc._resolved_auto_battery_service)
             return service_name
-        raise ValueError(f"No DBus service found with prefix '{source.service_prefix or battery_service_prefix}'")
+        raise ValueError(f"No DBus service found with prefix '{service_prefix}'")
 
     def resolve_auto_battery_service(self) -> str:
         override_service = self._resolve_battery_service_override()

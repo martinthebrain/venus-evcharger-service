@@ -9,9 +9,55 @@ from tests.venus_evcharger_bootstrap_controller_support import (
     _seasonal_month_windows,
     configparser,
 )
+from venus_evcharger.bootstrap.config_identity import (
+    _config_bool,
+    _config_float,
+    _config_int,
+    _config_lower_text,
+    _config_text,
+    _host_is_configured,
+)
 
 
 class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
+    def test_identity_config_helpers_trim_coerce_and_detect_configured_hosts(self):
+        parser = configparser.ConfigParser()
+        parser.optionxform = str
+        parser.read_dict(
+            {
+                "DEFAULT": {
+                    "Text": "  value  ",
+                    "TruthYes": "YES",
+                    "TruthOne": "1",
+                    "TruthOn": "on",
+                    "FalseText": "off",
+                    "IntValue": "42",
+                    "FloatValue": "3.5",
+                }
+            }
+        )
+        defaults = parser["DEFAULT"]
+
+        self.assertEqual(_config_text(defaults, "Text"), "value")
+        self.assertEqual(_config_text(defaults, "MissingText", " fallback "), "fallback")
+        self.assertTrue(_config_bool(defaults, "TruthYes"))
+        self.assertTrue(_config_bool(defaults, "TruthOne"))
+        self.assertTrue(_config_bool(defaults, "TruthOn"))
+        self.assertFalse(_config_bool(defaults, "FalseText", True))
+        self.assertTrue(_config_bool(defaults, "MissingBool", True))
+        self.assertFalse(_config_bool(defaults, "MissingBool"))
+        self.assertEqual(_config_lower_text(defaults, "MissingLowerText", "fallback"), "fallback")
+        self.assertEqual(_config_lower_text(defaults, "Text", "fallback"), "value")
+        self.assertEqual(_config_int(defaults, "IntValue", 7), 42)
+        self.assertEqual(_config_int(defaults, "MissingInt", 7), 7)
+        self.assertEqual(_config_float(defaults, "FloatValue", 1.25), 3.5)
+        self.assertEqual(_config_float(defaults, "MissingFloat", 1.25), 1.25)
+        self.assertTrue(_host_is_configured("  192.168.1.2  "))
+        self.assertTrue(_host_is_configured(123))
+        self.assertFalse(_host_is_configured(""))
+        self.assertFalse(_host_is_configured("   "))
+        self.assertFalse(_host_is_configured(None))
+
     def test_load_auto_policy_config_reads_thresholds_timing_and_daytime(self):
         parser = configparser.ConfigParser()
         parser.read_dict(
@@ -153,6 +199,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
 
     def test_load_runtime_configuration_populates_identity_sources_and_helper_settings(self):
         parser = configparser.ConfigParser()
+        parser.optionxform = str
         parser.read_dict(
             {
                 "DEFAULT": {
@@ -176,10 +223,50 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                     "ServiceName": "com.example.ev",
                     "Connection": "Custom RPC",
                     "RuntimeStatePath": "/tmp/runtime.json",
+                    "RuntimeOverridesPath": "/tmp/overrides.ini",
+                    "DisplayLearnedSetCurrent": "off",
                     "ControlApiEnabled": "true",
-                    "ControlApiHost": "127.0.0.1",
+                    "ControlApiHost": "0.0.0.0",
                     "ControlApiPort": "9876",
                     "ControlApiAuthToken": "token-123",
+                    "ControlApiReadToken": "read-123",
+                    "ControlApiControlToken": "control-123",
+                    "ControlApiAdminToken": "admin-123",
+                    "ControlApiUpdateToken": "update-123",
+                    "ControlApiAuditPath": "/tmp/control-audit.jsonl",
+                    "ControlApiAuditMaxEntries": "11",
+                    "ControlApiIdempotencyPath": "/tmp/idempotency.json",
+                    "ControlApiIdempotencyMaxEntries": "12",
+                    "ControlApiRateLimitMaxRequests": "13",
+                    "ControlApiRateLimitWindowSeconds": "14.5",
+                    "ControlApiCriticalCooldownSeconds": "1.25",
+                    "ControlApiLocalhostOnly": "0",
+                    "ControlApiUnixSocketPath": "/tmp/control.sock",
+                    "CompanionDbusBridgeEnabled": "1",
+                    "CompanionBatteryServiceEnabled": "0",
+                    "CompanionPvInverterServiceEnabled": "0",
+                    "CompanionGridServiceEnabled": "1",
+                    "CompanionGridAuthoritativeSource": "grid-meter",
+                    "CompanionGridHoldSeconds": "6.5",
+                    "CompanionGridSmoothingAlpha": "0.4",
+                    "CompanionGridSmoothingMaxJumpWatts": "1200",
+                    "CompanionSourceServicesEnabled": "0",
+                    "CompanionSourceGridServicesEnabled": "1",
+                    "CompanionSourceGridHoldSeconds": "7.5",
+                    "CompanionSourceGridSmoothingAlpha": "0.3",
+                    "CompanionSourceGridSmoothingMaxJumpWatts": "900",
+                    "CompanionBatteryDeviceInstance": "201",
+                    "CompanionPvInverterDeviceInstance": "202",
+                    "CompanionGridDeviceInstance": "203",
+                    "CompanionSourceBatteryDeviceInstanceBase": "301",
+                    "CompanionSourcePvInverterDeviceInstanceBase": "401",
+                    "CompanionSourceGridDeviceInstanceBase": "501",
+                    "CompanionBatteryServiceName": "com.example.battery.external",
+                    "CompanionPvInverterServiceName": "com.example.pvinverter.external",
+                    "CompanionGridServiceName": "com.example.grid.external",
+                    "CompanionSourceBatteryServicePrefix": "com.example.battery.source",
+                    "CompanionSourcePvInverterServicePrefix": "com.example.pvinverter.source",
+                    "CompanionSourceGridServicePrefix": "com.example.grid.source",
                     "AutoPvService": "com.example.pv",
                     "AutoPvServicePrefix": "com.example.pvprefix",
                     "AutoPvPath": "/Pv/Power",
@@ -229,6 +316,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
 
         self.assertEqual(service.deviceinstance, 77)
         self.assertEqual(service.host, "192.168.1.44")
+        self.assertTrue(service.host_configured)
         self.assertEqual(service.phase, "L2")
         self.assertEqual(service.position, 3)
         self.assertEqual(service.poll_interval_ms, 2500)
@@ -247,12 +335,53 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.service_name, "com.example.ev")
         self.assertEqual(service.connection_name, "Custom RPC")
         self.assertEqual(service.runtime_state_path, "/tmp/runtime.json")
+        self.assertEqual(service.runtime_overrides_path, "/tmp/overrides.ini")
+        self.assertFalse(service.display_learned_set_current)
         self.assertTrue(service.control_api_enabled)
-        self.assertEqual(service.control_api_host, "127.0.0.1")
+        self.assertEqual(service.control_api_host, "0.0.0.0")
         self.assertEqual(service.control_api_port, 9876)
         self.assertEqual(service.control_api_auth_token, "token-123")
+        self.assertEqual(service.control_api_read_token, "read-123")
+        self.assertEqual(service.control_api_control_token, "control-123")
+        self.assertEqual(service.control_api_admin_token, "admin-123")
+        self.assertEqual(service.control_api_update_token, "update-123")
+        self.assertEqual(service.control_api_audit_path, "/tmp/control-audit.jsonl")
+        self.assertEqual(service.control_api_audit_max_entries, 11)
+        self.assertEqual(service.control_api_idempotency_path, "/tmp/idempotency.json")
+        self.assertEqual(service.control_api_idempotency_max_entries, 12)
+        self.assertEqual(service.control_api_rate_limit_max_requests, 13)
+        self.assertEqual(service.control_api_rate_limit_window_seconds, 14.5)
+        self.assertEqual(service.control_api_critical_cooldown_seconds, 1.25)
+        self.assertFalse(service.control_api_localhost_only)
+        self.assertEqual(service.control_api_unix_socket_path, "/tmp/control.sock")
         self.assertEqual(service.control_api_listen_host, "")
         self.assertEqual(service.control_api_listen_port, 0)
+        self.assertEqual(service.control_api_bound_unix_socket_path, "")
+        self.assertTrue(service.companion_dbus_bridge_enabled)
+        self.assertFalse(service.companion_battery_service_enabled)
+        self.assertFalse(service.companion_pvinverter_service_enabled)
+        self.assertTrue(service.companion_grid_service_enabled)
+        self.assertEqual(service.companion_grid_authoritative_source, "grid-meter")
+        self.assertEqual(service.companion_grid_hold_seconds, 6.5)
+        self.assertEqual(service.companion_grid_smoothing_alpha, 0.4)
+        self.assertEqual(service.companion_grid_smoothing_max_jump_watts, 1200.0)
+        self.assertFalse(service.companion_source_services_enabled)
+        self.assertTrue(service.companion_source_grid_services_enabled)
+        self.assertEqual(service.companion_source_grid_hold_seconds, 7.5)
+        self.assertEqual(service.companion_source_grid_smoothing_alpha, 0.3)
+        self.assertEqual(service.companion_source_grid_smoothing_max_jump_watts, 900.0)
+        self.assertEqual(service.companion_battery_deviceinstance, 201)
+        self.assertEqual(service.companion_pvinverter_deviceinstance, 202)
+        self.assertEqual(service.companion_grid_deviceinstance, 203)
+        self.assertEqual(service.companion_source_battery_deviceinstance_base, 301)
+        self.assertEqual(service.companion_source_pvinverter_deviceinstance_base, 401)
+        self.assertEqual(service.companion_source_grid_deviceinstance_base, 501)
+        self.assertEqual(service.companion_battery_service_name, "com.example.battery.external")
+        self.assertEqual(service.companion_pvinverter_service_name, "com.example.pvinverter.external")
+        self.assertEqual(service.companion_grid_service_name, "com.example.grid.external")
+        self.assertEqual(service.companion_source_battery_service_prefix, "com.example.battery.source")
+        self.assertEqual(service.companion_source_pvinverter_service_prefix, "com.example.pvinverter.source")
+        self.assertEqual(service.companion_source_grid_service_prefix, "com.example.grid.source")
         self.assertFalse(hasattr(service, "_backend_selection"))
         self.assertFalse(hasattr(service, "backend_mode"))
         self.assertFalse(hasattr(service, "meter_backend_type"))
@@ -301,6 +430,99 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.shelly_request_timeout_seconds, 4.5)
         self.assertEqual(service.dbus_method_timeout_seconds, 2.5)
         service._validate_runtime_config.assert_called_once_with()
+
+    def test_load_runtime_configuration_applies_identity_and_companion_defaults(self):
+        parser = configparser.ConfigParser()
+        parser.read_dict({"DEFAULT": {}})
+        service = SimpleNamespace(_load_config=MagicMock(return_value=parser), _validate_runtime_config=MagicMock())
+        controller = self._controller(service)
+
+        controller.load_runtime_configuration()
+
+        self.assertEqual(service.deviceinstance, 60)
+        self.assertEqual(service.host, "")
+        self.assertFalse(service.host_configured)
+        self.assertEqual(service.phase, "L1")
+        self.assertEqual(service.position, 1)
+        self.assertEqual(service.poll_interval_ms, 1000)
+        self.assertEqual(service.sign_of_life_minutes, 10)
+        self.assertEqual(service.max_current, 16.0)
+        self.assertEqual(service.min_current, 6.0)
+        self.assertTrue(service.display_learned_set_current)
+        self.assertEqual(service.charging_threshold_watts, 100.0)
+        self.assertEqual(service.idle_status, 6)
+        self.assertEqual(service.voltage_mode, "phase")
+        self.assertEqual(service.username, "")
+        self.assertEqual(service.password, "")
+        self.assertFalse(service.use_digest_auth)
+        self.assertEqual(service.pm_component, "Switch")
+        self.assertEqual(service.pm_id, 0)
+        self.assertEqual(service.custom_name_override, "")
+        self.assertEqual(service.service_name, "com.victronenergy.evcharger")
+        self.assertEqual(service.connection_name, "Shelly 1PM Gen4 RPC")
+        self.assertEqual(service.runtime_state_path, "/run/dbus-venus-evcharger-60.json")
+        self.assertEqual(service.runtime_overrides_path, "/run/dbus-venus-evcharger-overrides-60.ini")
+        self.assertFalse(service.control_api_enabled)
+        self.assertEqual(service.control_api_host, "127.0.0.1")
+        self.assertEqual(service.control_api_port, 8765)
+        self.assertEqual(service.control_api_auth_token, "")
+        self.assertEqual(service.control_api_read_token, "")
+        self.assertEqual(service.control_api_control_token, "")
+        self.assertEqual(service.control_api_admin_token, "")
+        self.assertEqual(service.control_api_update_token, "")
+        self.assertEqual(service.control_api_audit_path, "/run/dbus-venus-evcharger-control-audit-60.jsonl")
+        self.assertEqual(service.control_api_audit_max_entries, 200)
+        self.assertEqual(service.control_api_idempotency_path, "/run/dbus-venus-evcharger-idempotency-60.json")
+        self.assertEqual(service.control_api_idempotency_max_entries, 200)
+        self.assertEqual(service.control_api_rate_limit_max_requests, 30)
+        self.assertEqual(service.control_api_rate_limit_window_seconds, 5.0)
+        self.assertEqual(service.control_api_critical_cooldown_seconds, 2.0)
+        self.assertTrue(service.control_api_localhost_only)
+        self.assertEqual(service.control_api_unix_socket_path, "")
+        self.assertEqual(service.control_api_listen_host, "")
+        self.assertEqual(service.control_api_listen_port, 0)
+        self.assertEqual(service.control_api_bound_unix_socket_path, "")
+        self.assertFalse(service.companion_dbus_bridge_enabled)
+        self.assertTrue(service.companion_battery_service_enabled)
+        self.assertTrue(service.companion_pvinverter_service_enabled)
+        self.assertFalse(service.companion_grid_service_enabled)
+        self.assertEqual(service.companion_grid_authoritative_source, "")
+        self.assertEqual(service.companion_grid_hold_seconds, 5.0)
+        self.assertEqual(service.companion_grid_smoothing_alpha, 1.0)
+        self.assertEqual(service.companion_grid_smoothing_max_jump_watts, 0.0)
+        self.assertTrue(service.companion_source_services_enabled)
+        self.assertFalse(service.companion_source_grid_services_enabled)
+        self.assertEqual(service.companion_source_grid_hold_seconds, 5.0)
+        self.assertEqual(service.companion_source_grid_smoothing_alpha, 1.0)
+        self.assertEqual(service.companion_source_grid_smoothing_max_jump_watts, 0.0)
+        self.assertEqual(service.companion_battery_deviceinstance, 100)
+        self.assertEqual(service.companion_pvinverter_deviceinstance, 101)
+        self.assertEqual(service.companion_grid_deviceinstance, 102)
+        self.assertEqual(service.companion_source_battery_deviceinstance_base, 200)
+        self.assertEqual(service.companion_source_pvinverter_deviceinstance_base, 300)
+        self.assertEqual(service.companion_source_grid_deviceinstance_base, 400)
+        self.assertEqual(service.companion_battery_service_name, "com.victronenergy.battery.external_100")
+        self.assertEqual(service.companion_pvinverter_service_name, "com.victronenergy.pvinverter.external_101")
+        self.assertEqual(service.companion_grid_service_name, "com.victronenergy.grid.external_102")
+        self.assertEqual(service.companion_source_battery_service_prefix, "com.victronenergy.battery.external")
+        self.assertEqual(service.companion_source_pvinverter_service_prefix, "com.victronenergy.pvinverter.external")
+        self.assertEqual(service.companion_source_grid_service_prefix, "com.victronenergy.grid.external")
+        service._validate_runtime_config.assert_called_once_with()
+
+    def test_identity_config_keeps_runtime_override_fallback_and_loopback_for_blank_host(self):
+        parser = configparser.ConfigParser()
+        parser.read_dict({"DEFAULT": {"ControlApiHost": "   "}})
+        service = SimpleNamespace(
+            _load_config=MagicMock(return_value=parser),
+            _validate_runtime_config=MagicMock(),
+            runtime_overrides_path="/tmp/existing-overrides.ini",
+        )
+        controller = self._controller(service)
+
+        controller.load_runtime_configuration()
+
+        self.assertEqual(service.control_api_host, "127.0.0.1")
+        self.assertEqual(service.runtime_overrides_path, "/tmp/existing-overrides.ini")
 
     def test_load_runtime_configuration_reads_backend_section_when_present(self):
         parser = configparser.ConfigParser()

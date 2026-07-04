@@ -17,7 +17,7 @@ def queue_class_health(pending: CommandFileList, now: float) -> CommandPayload:
         queue_class = str(command.get("queue_class") or command_queue_class(command))
         entry = classes.setdefault(queue_class, {"pending": 0, "oldest_age_s": 0.0})
         entry["pending"] = int(float_or_zero(entry.get("pending"))) + 1
-        entry["oldest_age_s"] = max(float_or_zero(entry.get("oldest_age_s")), 0.0, now - command_activity_at(command, now))
+        entry["oldest_age_s"] = max(float_or_zero(entry.get("oldest_age_s")), now - command_activity_at(command, now))
     return dict(sorted(classes.items()))
 
 

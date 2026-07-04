@@ -88,7 +88,7 @@ class _DbusInputStorage(_DbusInputStorageSupport):
         )
 
     def _battery_snapshot_sources(self) -> tuple[EnergySourceDefinition, ...]:
-        configured = energy_source_definitions(getattr(self.service, "auto_energy_sources", ()))
+        configured = energy_source_definitions(getattr(self.service, "auto_energy_sources", None))
         if configured:
             return configured
         return energy_source_definitions(self._primary_energy_source())
@@ -120,7 +120,7 @@ class _DbusInputStorage(_DbusInputStorageSupport):
         cluster: EnergyClusterSnapshot,
         now: float,
     ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-        existing_profiles = learning_profiles(getattr(cache_owner, "_last_energy_learning_profiles", {}))
+        existing_profiles = learning_profiles(getattr(cache_owner, "_last_energy_learning_profiles", None))
         updated_profiles = update_energy_learning_profiles(
             existing_profiles,
             cluster.sources,
@@ -162,12 +162,12 @@ class _DbusInputStorage(_DbusInputStorageSupport):
         discharge_control: dict[str, object],
     ) -> list[dict[str, object]]:
         source_payloads = [object_mapping(source.as_dict()) for source in cluster.sources]
-        source_balance = nested_object_mappings(discharge_balance.get("sources", {}))
-        source_control = nested_object_mappings(discharge_control.get("sources", {}))
+        source_balance = nested_object_mappings(discharge_balance.get("sources"))
+        source_control = nested_object_mappings(discharge_control.get("sources"))
         for source_payload in source_payloads:
-            source_id = str(source_payload.get("source_id", ""))
-            source_payload.update(source_balance.get(source_id, {}))
-            source_payload.update(source_control.get(source_id, {}))
+            source_id = str(source_payload["source_id"])
+            source_payload.update(source_balance.get(source_id) or {})
+            source_payload.update(source_control.get(source_id) or {})
         return source_payloads
 
     def _battery_snapshot_payload(
@@ -220,7 +220,7 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             "battery_inverter_source_count": cluster.inverter_source_count,
             "battery_sources": source_payloads,
             "battery_learning_profiles": learning_profile_payloads(
-                getattr(cache_owner, "_last_energy_learning_profiles", {})
+                getattr(cache_owner, "_last_energy_learning_profiles", None)
             ),
         }
 
@@ -268,6 +268,14 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             return None
         return float(value)
 
+    @staticmethod
+    def _optional_text_attr(owner: object, name: str) -> str:
+        try:
+            value = getattr(owner, name)
+        except AttributeError:
+            return ""
+        return str(value) if value else ""
+
     def _successful_battery_snapshot_payload(self, now: float) -> dict[str, object]:
         cluster, sources, _ = self._battery_snapshot_cluster(now)
         effective_soc = self._battery_snapshot_effective_soc(cluster)
@@ -291,8 +299,8 @@ class _DbusInputStorage(_DbusInputStorageSupport):
 
     def _failed_battery_snapshot_payload(self, now: float, error: Exception) -> dict[str, object]:
         svc = self.service
-        battery_service_name = str(getattr(svc, "auto_battery_service", "") or "")
-        battery_service_prefix = str(getattr(svc, "auto_battery_service_prefix", "") or "")
+        battery_service_name = self._optional_text_attr(svc, "auto_battery_service")
+        battery_service_prefix = self._optional_text_attr(svc, "auto_battery_service_prefix")
         failure = self._handle_source_failure(
             "battery",
             now,
@@ -321,9 +329,10 @@ class _DbusInputStorage(_DbusInputStorageSupport):
         if not self._source_retry_ready("battery", now):
             return None
         battery_soc = self.get_gateway_read_value(BATTERY_SOC_READ_KEY, reason="main semantic battery SOC read")
-        if isinstance(battery_soc, (int, float)) and 0.0 <= float(battery_soc) <= 100.0:
+        numeric_soc = self._gateway_numeric_value(battery_soc)
+        if numeric_soc is not None and 0.0 <= numeric_soc <= 100.0:
             self._mark_source_recovery("battery", "Battery SOC readings recovered")
-            return float(battery_soc)
+            return numeric_soc
         self._handle_source_failure(
             "battery",
             now,
@@ -335,10 +344,13 @@ class _DbusInputStorage(_DbusInputStorageSupport):
 
     def _battery_soc_numeric(self, value: object) -> float | None:
         """Return one numeric battery SOC value after DBus coercion."""
-        coerced_value = self._coerce_dbus_value(value)
-        if not isinstance(coerced_value, (int, float)):
+        return self._gateway_numeric_value(self._coerce_dbus_value(value))
+
+    @staticmethod
+    def _gateway_numeric_value(value: object) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
-        return float(coerced_value)
+        return float(value)
 
     def get_grid_power(self) -> float | None:
         """Read grid power from the gateway read contract."""
@@ -346,7 +358,8 @@ class _DbusInputStorage(_DbusInputStorageSupport):
         if not self._source_retry_ready("grid", now):
             return None
         grid_power = self.get_gateway_read_value(GRID_POWER_READ_KEY, reason="main semantic grid power read")
-        if isinstance(grid_power, (int, float)):
+        numeric_grid_power = self._gateway_numeric_value(grid_power)
+        if numeric_grid_power is not None:
             self._mark_source_recovery("grid", "Grid readings recovered")
-            return float(grid_power)
+            return numeric_grid_power
         return self._handle_missing_grid_values(False, [], now)

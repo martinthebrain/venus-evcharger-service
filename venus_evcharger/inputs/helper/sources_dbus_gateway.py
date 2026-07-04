@@ -41,10 +41,7 @@ class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
         cache_key = dbus_path_key(service_name, path)
         snapshot = self._gateway_cache_snapshot()
         entry = DbusCacheStore.value_entry(snapshot, cache_key)
-        has_cached_value, cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_numeric_value(
-            self,
-            entry,
-        )
+        has_cached_value, cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_numeric_value(entry)
         if has_cached_value:
             return cached_value
         if self._cached_gateway_error_recent(entry):
@@ -133,26 +130,31 @@ class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
     def _gateway_client(self: Any) -> GatewayClient:
         client = getattr(self, "_gateway_client_instance", None)
         if not isinstance(client, GatewayClient):
-            client = GatewayClient(gateway_paths(getattr(self, "dbus_gateway_run_dir", "")))
+            run_dir = str(self.dbus_gateway_run_dir or "")
+            client = GatewayClient(gateway_paths(run_dir))
             self._gateway_client_instance = client
         return client
 
     def _gateway_cache_snapshot(self: Any) -> dict[str, Any]:
+        cache_path = str(self.dbus_gateway_cache_path or "")
+        if not cache_path:
+            cache_path = self._gateway_client().paths.cache_path
         return DbusCacheStore.load_snapshot(
-            str(getattr(self, "dbus_gateway_cache_path", "") or self._gateway_client().paths.cache_path),
+            cache_path,
             max_age_seconds=self._gateway_cache_max_age_seconds(),
         )
 
     def _gateway_cache_max_age_seconds(self: Any) -> float:
-        return max(0.0, float(getattr(self, "dbus_gateway_max_age_seconds", 10.0) or 10.0))
+        return max(0.0, float(self.dbus_gateway_max_age_seconds or 10.0))
 
     @staticmethod
     def _cached_gateway_value(entry: Mapping[str, Any] | None) -> object:
-        if entry is None or str(entry.get("status", "")) != "fresh":
+        if entry is None or str(entry.get("status")) != "fresh":
             return _CACHE_VALUE_MISSING
         return coerce_dbus_numeric(entry.get("value"))
 
-    def _cached_gateway_numeric_value(self: Any, entry: Mapping[str, Any] | None) -> tuple[bool, float | int | None]:
+    @staticmethod
+    def _cached_gateway_numeric_value(entry: Mapping[str, Any] | None) -> tuple[bool, float | int | None]:
         cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_value(entry)
         if cached_value is _CACHE_VALUE_MISSING:
             return False, None
@@ -168,28 +170,38 @@ class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
         return bool(entry is not None and self._gateway_error_recent(entry))
 
     def _gateway_error_recent(self: Any, entry: Mapping[str, Any]) -> bool:
-        if str(entry.get("status", "")) != "error":
+        if str(entry.get("status")) != "error":
             return False
-        error_at = float(entry.get("error_at", 0.0) or 0.0)
+        error_at = float(entry.get("error_at") or 0.0)
         return error_at > 0.0 and time.time() - error_at < self._gateway_error_retry_seconds()
 
     def _gateway_error_retry_seconds(self: Any) -> float:
-        configured = float(getattr(self, "dbus_gateway_error_retry_seconds", 30.0) or 30.0)
+        configured = float(self.dbus_gateway_error_retry_seconds or 30.0)
         return max(1.0, min(300.0, configured))
 
     def _dbus_retry_read(self: Any, service_name: str, path: str, label: str, read: Any) -> Any:
-        last_error: BaseException | None = None
-        for attempt in range(2):
-            try:
-                return read()
-            except DBUS_SOURCE_READ_ERRORS as error:
-                last_error = error
-                if _is_expected_missing_dbus_error(error):
-                    logging.debug("DBus value missing for %s %s: %s", service_name, path, error)
-                    raise
-                self._reset_system_bus_after_retryable_error(attempt, label, service_name, path, error)
-        assert last_error is not None
-        raise last_error
+        try:
+            return read()
+        except DBUS_SOURCE_READ_ERRORS as error:
+            self._handle_dbus_read_error(0, label, service_name, path, error)
+        try:
+            return read()
+        except DBUS_SOURCE_READ_ERRORS as error:
+            self._handle_dbus_read_error(1, label, service_name, path, error)
+            raise
+
+    def _handle_dbus_read_error(
+        self: Any,
+        attempt: int,
+        label: str,
+        service_name: str,
+        path: str,
+        error: BaseException,
+    ) -> None:
+        if _is_expected_missing_dbus_error(error):
+            logging.debug("DBus value missing for %s %s: %s", service_name, path, error)
+            raise error
+        self._reset_system_bus_after_retryable_error(attempt, label, service_name, path, error)
 
     def _reset_system_bus_after_retryable_error(
         self: Any,

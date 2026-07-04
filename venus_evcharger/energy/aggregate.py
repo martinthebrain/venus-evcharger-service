@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from .models import EnergyClusterSnapshot, EnergySourceDefinition, EnergySourceSnapshot
-from .numeric import non_negative_optional_float, optional_float, sum_optional
+from .numeric import non_negative_optional_float, sum_optional
 from .profiles import energy_source_profile_details
 
 
@@ -24,7 +24,7 @@ def _scoped_numeric_value(
     value = getattr(source, value_attr)
     if value is None:
         return None
-    scope_key = str(getattr(source, scope_attr, "") or "").strip()
+    scope_key = str(getattr(source, scope_attr) or "").strip()
     return float(value), scope_key
 
 
@@ -106,10 +106,6 @@ def _role_count(sources: tuple[EnergySourceSnapshot, ...], role: str) -> int:
     return sum(1 for source in sources if source.role == role)
 
 
-def _optional_float(value: Any) -> float | None:
-    return optional_float(value)
-
-
 def _non_negative_optional_float(value: Any) -> float | None:
     return non_negative_optional_float(value)
 
@@ -166,21 +162,6 @@ def _discharge_balance_eligible_source(
         "reserve_floor_soc": reserve_floor_soc,
         "actual_discharge_w": actual_discharge_w,
     }
-
-
-def _normalized_discharge_balance_weight(
-    total_weight: float,
-    eligible_source_count: int,
-) -> float:
-    if total_weight > 0.0:
-        return total_weight
-    return 1.0
-
-
-def _uniform_discharge_balance_weights(eligible_sources: list[dict[str, Any]]) -> None:
-    equal_weight = 1.0 / float(len(eligible_sources))
-    for item in eligible_sources:
-        item["weight"] = equal_weight
 
 
 def _discharge_balance_source_metrics(
@@ -267,11 +248,7 @@ def _discharge_balance_metrics_payload(
 def _discharge_balance_total_weight(
     eligible_sources: list[dict[str, Any]],
 ) -> float:
-    total_weight = sum(float(item["weight"]) for item in eligible_sources)
-    if total_weight > 0.0:
-        return total_weight
-    _uniform_discharge_balance_weights(eligible_sources)
-    return _normalized_discharge_balance_weight(total_weight, len(eligible_sources))
+    return sum(float(item["weight"]) for item in eligible_sources)
 
 
 def _discharge_balance_metric_totals(
@@ -357,7 +334,8 @@ def _discharge_control_source_metrics(
 ) -> dict[str, Any]:
     profile_name, connector_type, role = _discharge_control_source_context(source, definition)
     profile_details = energy_source_profile_details(profile_name)
-    write_support = str(profile_details.get("write_support", "unsupported") or "unsupported").strip().lower()
+    raw_write_support = profile_details.get("write_support")
+    write_support = str(raw_write_support).strip().lower() if raw_write_support else "unsupported"
     controllable_role = role in {"battery", "hybrid-inverter"}
     control_candidate = controllable_role and write_support in {"supported", "experimental"}
     control_ready = control_candidate and bool(source.online)

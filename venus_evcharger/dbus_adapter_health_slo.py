@@ -113,4 +113,4 @@ def regulated_publish_burst(
         burst = min(max(burst * 3, burst + 4), 50)
     if eventloop_gap_ms > effective_mainloop_gap_max_ms(thresholds):
         burst = max(1, min(burst, max(1, base_burst // 2)))
-    return int(burst)
+    return burst
