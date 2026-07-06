@@ -166,7 +166,7 @@ def _is_binary_schema(schema: Mapping[str, Any]) -> bool:
 
 
 def _binary_variant_shape(schema: Mapping[str, Any]) -> tuple[Any, tuple[Any, ...]]:
-    raw_enum = schema.get("enum", ())
+    raw_enum = schema.get("enum")
     enum_values = tuple(raw_enum) if isinstance(raw_enum, list) else ()
     return schema.get("type"), enum_values
 
@@ -259,7 +259,7 @@ def _command_contract_summary(name: str) -> tuple[tuple[str, ...], str, str]:
 def _collected_required_fields(schemas: list[Mapping[str, Any]]) -> set[str]:
     required_fields: set[str] = set()
     for schema in schemas:
-        raw_required = schema.get("required", ())
+        raw_required = schema.get("required")
         if isinstance(raw_required, list):
             required_fields.update(str(item) for item in raw_required)
     return required_fields

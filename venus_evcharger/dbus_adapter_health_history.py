@@ -4,24 +4,20 @@
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Mapping
 
-from venus_evcharger.core.shared import compact_json
+from venus_evcharger.dbus_adapter_jsonl import DEFAULT_HEALTH_HISTORY_MAX_BYTES, append_jsonl
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
-def append_health_log(path: str, health: Mapping[str, object]) -> None:
-    ensure_parent_dir(path)
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(compact_json(health_log_payload(health)) + "\n")
-
-
-def ensure_parent_dir(path: str) -> None:
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
+def append_health_log(
+    path: str,
+    health: Mapping[str, object],
+    *,
+    max_bytes: int = DEFAULT_HEALTH_HISTORY_MAX_BYTES,
+) -> None:
+    append_jsonl(path, health_log_payload(health), max_bytes=max_bytes)
 
 
 def health_log_payload(health: Mapping[str, object]) -> CommandPayload:

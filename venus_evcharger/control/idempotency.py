@@ -41,7 +41,7 @@ class ControlApiIdempotencyStore:
             self._entries[key] = (fingerprint, int(status), dict(response))
             self._entries.move_to_end(key)
             while len(self._entries) > self._history_limit:
-                self._entries.popitem(last=False)
+                self._drop_oldest_entry()
             self._persist_runtime_entries()
 
     def count(self) -> int:
@@ -58,7 +58,11 @@ class ControlApiIdempotencyStore:
         for key, entry in self._loaded_entries(payload).items():
             self._entries[key] = entry
         while len(self._entries) > self._history_limit:
-            self._entries.popitem(last=False)
+            self._drop_oldest_entry()
+
+    def _drop_oldest_entry(self) -> None:
+        oldest_key = next(iter(self._entries))
+        self._entries.pop(oldest_key)
 
     def _should_load_path(self, path: str) -> bool:
         return bool(path) and self._is_runtime_path(path) and os.path.exists(path)
@@ -87,11 +91,16 @@ class ControlApiIdempotencyStore:
         if not isinstance(value, dict):
             return None
         fingerprint = str(value.get("fingerprint", "")).strip()
-        status = int(value.get("status", 0) or 0)
+        status = ControlApiIdempotencyStore._loaded_status(value)
         response = value.get("response")
         if not fingerprint or not isinstance(response, dict):
             return None
         return fingerprint, status, dict(response)
+
+    @staticmethod
+    def _loaded_status(value: dict[str, Any]) -> int:
+        raw_status = value.get("status")
+        return int(raw_status) if raw_status else 0
 
     def _persist_runtime_entries(self) -> None:
         path = self._path

@@ -10,10 +10,14 @@ from .logic_gates_battery_balance_support import _AutoDecisionBatteryBalanceSupp
 class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
     def _battery_activity_inputs(self) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         svc = self.service
-        cluster = self._normalized_mapping(getattr(svc, "_last_energy_cluster", {}))
-        raw_sources = cluster.get("battery_sources", [])
+        raw_cluster = svc._last_energy_cluster if hasattr(svc, "_last_energy_cluster") else None
+        cluster = self._normalized_mapping(raw_cluster)
+        raw_sources = cluster["battery_sources"] if "battery_sources" in cluster else []
         sources = self._normalized_mapping_list(raw_sources)
-        profiles = self._normalized_mapping(getattr(svc, "_last_energy_learning_profiles", {}))
+        raw_profiles = (
+            svc._last_energy_learning_profiles if hasattr(svc, "_last_energy_learning_profiles") else None
+        )
+        profiles = self._normalized_mapping(raw_profiles)
         return cluster, sources, profiles
 
     @staticmethod
@@ -49,8 +53,8 @@ class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
         source: dict[str, Any],
         profiles: dict[str, Any],
     ) -> tuple[float, float, float | None, float | None]:
-        source_id = str(source.get("source_id", "")).strip()
-        profile = profiles.get(source_id, {})
+        source_id = self._source_id(source)
+        profile = profiles[source_id] if source_id in profiles else {}
         charge_active, charge_ratio = self._active_battery_power(
             self._non_negative_optional_float(source.get("charge_power_w")),
             self._learning_observed_value(profile, "observed_max_charge_power_w"),
@@ -65,6 +69,11 @@ class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
             charge_ratio,
             discharge_ratio,
         )
+
+    @staticmethod
+    def _source_id(source: Mapping[str, Any]) -> str:
+        raw_source_id = source.get("source_id")
+        return "" if raw_source_id is None else str(raw_source_id).strip()
 
     def _cluster_activity_penalties(
         self,
@@ -128,7 +137,9 @@ class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
         return default_bias
 
     def _current_learning_period(self) -> str | None:
-        service_now = getattr(self.service, "_time_now", None)
+        if not hasattr(self.service, "_time_now"):
+            return None
+        service_now = self.service._time_now
         raw_now = service_now() if callable(service_now) else None
         if not isinstance(raw_now, (int, float)):
             return None
@@ -215,11 +226,7 @@ class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
         if not isinstance(value, (int, float)):
             return None
         numeric_value = float(value)
-        if numeric_value < -1.0:
-            return -1.0
-        if numeric_value > 1.0:
-            return 1.0
-        return numeric_value
+        return max(-1.0, min(1.0, numeric_value))
 
     def _battery_penalty_multiplier(
         self,
@@ -230,8 +237,7 @@ class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
         import_support_bias: float | None,
         export_bias: float | None,
     ) -> float:
-        multiplier = 1.0
-        multiplier *= self._response_delay_penalty_factor(response_delay_seconds)
+        multiplier = self._response_delay_penalty_factor(response_delay_seconds)
         if direction == "charge":
             multiplier *= self._charge_bias_penalty_factor(export_bias)
         elif direction == "discharge":
@@ -240,9 +246,10 @@ class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
 
     @staticmethod
     def _response_delay_penalty_factor(response_delay_seconds: float | None) -> float:
-        if response_delay_seconds is None or response_delay_seconds <= 0.0:
+        if response_delay_seconds is None:
             return 1.0
-        return 1.0 + min(float(response_delay_seconds), 60.0) / 120.0
+        bounded_delay = min(max(float(response_delay_seconds), 0.0), 60.0)
+        return 1.0 + bounded_delay / 120.0
 
     @staticmethod
     def _charge_bias_penalty_factor(export_bias: float | None) -> float:

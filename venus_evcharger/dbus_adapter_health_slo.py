@@ -6,9 +6,27 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import float_or_zero
+
+GatewayPressureState = Literal["ok", "congested", "slow", "protective"]
+_PRESSURE_RANK: dict[GatewayPressureState, int] = {
+    "ok": 0,
+    "congested": 1,
+    "slow": 2,
+    "protective": 3,
+}
+_RESOURCE_PRESSURE_STATES: dict[str, GatewayPressureState] = {
+    "busy": "congested",
+    "constrained": "slow",
+}
+_BACKPRESSURE_STATES: dict[str, GatewayPressureState] = {
+    "congested": "congested",
+    "slow": "slow",
+    "protective": "protective",
+}
 
 
 @dataclass(frozen=True)
@@ -107,10 +125,76 @@ def regulated_publish_burst(
     eventloop_gap_ms: float,
     base_burst: int,
     thresholds: SloThresholds,
+    pressure_state: GatewayPressureState = "ok",
 ) -> int:
     burst = base_burst
     if queue_age > thresholds.queue_max_age_seconds:
         burst = min(max(burst * 3, burst + 4), 50)
     if eventloop_gap_ms > effective_mainloop_gap_max_ms(thresholds):
         burst = max(1, min(burst, max(1, base_burst // 2)))
-    return burst
+    return pressure_limited_publish_burst(burst, base_burst=base_burst, pressure_state=pressure_state)
+
+
+def runtime_pressure_state(resource_state: str, backpressure_state: str) -> GatewayPressureState:
+    return higher_pressure_state(
+        _RESOURCE_PRESSURE_STATES.get(resource_state, "ok"),
+        _BACKPRESSURE_STATES.get(backpressure_state, "ok"),
+    )
+
+
+def higher_pressure_state(left: GatewayPressureState, right: GatewayPressureState) -> GatewayPressureState:
+    return left if _PRESSURE_RANK[left] >= _PRESSURE_RANK[right] else right
+
+
+def pressure_limited_publish_burst(
+    burst: int,
+    *,
+    base_burst: int,
+    pressure_state: GatewayPressureState,
+) -> int:
+    if pressure_state == "protective":
+        return 1
+    if pressure_state == "slow":
+        return max(1, min(burst, max(1, base_burst // 4)))
+    if pressure_state == "congested":
+        return max(1, min(burst, max(1, base_burst // 2)))
+    return max(1, burst)
+
+
+def pressure_limited_queue_budgets(
+    budgets: Mapping[str, int],
+    *,
+    base_local_publish_burst: int,
+    pressure_state: GatewayPressureState,
+) -> dict[str, int]:
+    adjusted = dict(budgets)
+    if pressure_state == "ok":
+        return adjusted
+    if pressure_state == "protective":
+        return _with_publish_caps(adjusted, gui_cap=1, local_cap=1, diagnostic_cap=0)
+    if pressure_state == "slow":
+        return _with_publish_caps(
+            adjusted,
+            gui_cap=max(1, base_local_publish_burst // 4),
+            local_cap=1,
+            diagnostic_cap=0,
+        )
+    return _with_publish_caps(
+        adjusted,
+        gui_cap=max(1, base_local_publish_burst // 2),
+        local_cap=max(1, base_local_publish_burst // 4),
+        diagnostic_cap=0,
+    )
+
+
+def _with_publish_caps(
+    budgets: dict[str, int],
+    *,
+    gui_cap: int,
+    local_cap: int,
+    diagnostic_cap: int,
+) -> dict[str, int]:
+    budgets["gui-critical-publish"] = min(int(budgets.get("gui-critical-publish", gui_cap)), gui_cap)
+    budgets["local-publish"] = min(int(budgets.get("local-publish", local_cap)), local_cap)
+    budgets["diagnostic"] = min(int(budgets.get("diagnostic", diagnostic_cap)), diagnostic_cap)
+    return budgets

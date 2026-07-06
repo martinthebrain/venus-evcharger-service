@@ -26,7 +26,6 @@ class ControlApiEventBus:
             event = normalized_control_api_event_fields(
                 {
                     "seq": self._next_seq,
-                    "api_version": "v1",
                     "kind": kind,
                     "timestamp": time.time(),
                     "payload": payload,
@@ -35,21 +34,32 @@ class ControlApiEventBus:
             self._next_seq += 1
             self._events.append(event)
             self._condition.notify_all()
-            return dict(event)
+            return self._event_copy(event)
+
+    @staticmethod
+    def _event_copy(event: dict[str, Any]) -> dict[str, Any]:
+        copied = dict(event)
+        payload = copied.get("payload")
+        copied["payload"] = dict(payload) if isinstance(payload, dict) else {}
+        return copied
 
     def recent(self, *, limit: int = 20, after_seq: int = 0) -> list[dict[str, Any]]:
         """Return recent events after one sequence number."""
         capped_limit = max(0, int(limit))
         with self._condition:
-            events = [dict(event) for event in self._events if int(event["seq"]) > int(after_seq)]
+            events = [self._event_copy(event) for event in self._events if int(event["seq"]) > int(after_seq)]
         return events[-capped_limit:] if capped_limit else []
 
     @staticmethod
     def _first_after_seq(events: deque[dict[str, Any]], after_seq: int) -> dict[str, Any] | None:
         for event in events:
             if int(event["seq"]) > int(after_seq):
-                return dict(event)
+                return ControlApiEventBus._event_copy(event)
         return None
+
+    @staticmethod
+    def _wait_timeout(timeout: float) -> float:
+        return max(0.0, float(timeout))
 
     def wait_for_next(self, *, after_seq: int = 0, timeout: float = 30.0) -> dict[str, Any] | None:
         """Block until one newer event arrives or the timeout elapses."""
@@ -57,7 +67,7 @@ class ControlApiEventBus:
             ready = self._first_after_seq(self._events, after_seq)
             if ready is not None:
                 return ready
-            self._condition.wait(timeout=max(0.0, float(timeout)))
+            self._condition.wait(timeout=self._wait_timeout(timeout))
             ready = self._first_after_seq(self._events, after_seq)
             if ready is not None:
                 return ready

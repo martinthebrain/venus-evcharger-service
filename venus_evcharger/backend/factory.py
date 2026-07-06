@@ -25,6 +25,10 @@ from venus_evcharger.topology.config import parse_topology_config
 from venus_evcharger.topology.schema import EvChargerTopologyConfig
 
 _BackendT = TypeVar("_BackendT")
+_ADAPTER_SECTION = "Adapter"
+_DEFAULT_SECTION = "DEFAULT"
+_TOPOLOGY_SECTION = "Topology"
+_TYPE_OPTION_LOWER = "type"
 
 
 @dataclass(frozen=True)
@@ -68,9 +72,17 @@ def _adapter_type_from_config_path(config_path: str | None) -> str:
     read_files = parser.read(path)
     if not read_files:
         raise FileNotFoundError(str(path))
-    if parser.has_section("Adapter"):
-        return parser["Adapter"].get("Type", "").strip().lower()
-    return parser["DEFAULT"].get("Type", "").strip().lower()
+    if parser.has_section(_ADAPTER_SECTION):
+        return _section_option_text(parser[_ADAPTER_SECTION], _TYPE_OPTION_LOWER)
+    return _section_option_text(parser[_DEFAULT_SECTION], _TYPE_OPTION_LOWER)
+
+
+def _section_option_text(section: configparser.SectionProxy, option_lower: str) -> str:
+    """Return one normalized option value using ConfigParser's case-insensitive key model."""
+    for key, value in section.items():
+        if key.strip().lower() == option_lower:
+            return str(value).strip().lower()
+    return ""
 
 
 def _topology_from_service(service: Any) -> EvChargerTopologyConfig | None:
@@ -79,7 +91,7 @@ def _topology_from_service(service: Any) -> EvChargerTopologyConfig | None:
     if isinstance(runtime_topology, EvChargerTopologyConfig):
         return runtime_topology
     service_config = getattr(service, "config", None)
-    if not isinstance(service_config, configparser.ConfigParser) or not service_config.has_section("Topology"):
+    if not isinstance(service_config, configparser.ConfigParser) or not service_config.has_section(_TOPOLOGY_SECTION):
         return None
     return parse_topology_config(service_config)
 

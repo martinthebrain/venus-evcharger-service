@@ -209,8 +209,8 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
             "battery-discharge-balance-warning",
             "Auto mode observed battery discharge imbalance: error=%s W active=%s eligible=%s",
             round(float(bias_context["error_w"]), 1),
-            int(cluster.get("battery_discharge_balance_active_source_count", 0) or 0),
-            int(cluster.get("battery_discharge_balance_eligible_source_count", 0) or 0),
+            int(cluster.get("battery_discharge_balance_active_source_count") or 0),
+            int(cluster.get("battery_discharge_balance_eligible_source_count") or 0),
         )
 
     def _emit_combined_battery_coordination_warning(
@@ -227,15 +227,26 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
 
     def _combined_battery_warning_throttled(self, key: str, message: str, *args: object) -> None:
         svc = self.service
-        warning_throttled = getattr(svc, "_warning_throttled", None)
+        if not hasattr(svc, "_warning_throttled"):
+            return
+        warning_throttled = svc._warning_throttled
         if not callable(warning_throttled):
             return
         warning_throttled(
             key,
-            max(30.0, float(getattr(svc, "auto_battery_scan_interval_seconds", 60.0) or 60.0)),
+            self._combined_battery_warning_interval_seconds(svc),
             message,
             *args,
         )
+
+    @staticmethod
+    def _combined_battery_warning_interval_seconds(svc: Any) -> float:
+        if not hasattr(svc, "auto_battery_scan_interval_seconds"):
+            return 60.0
+        scan_interval_seconds = svc.auto_battery_scan_interval_seconds
+        if scan_interval_seconds is None or float(scan_interval_seconds) == 0.0:
+            return 60.0
+        return max(30.0, float(scan_interval_seconds))
 
     @staticmethod
     def _combined_battery_effective_penalty_w(
@@ -291,7 +302,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         learning_summary: Mapping[str, Any],
     ) -> dict[str, float | int | str | None]:
         return {
-            "learning_profile_count": int(learning_summary.get("profile_count", 0) or 0),
+            "learning_profile_count": int(learning_summary.get("profile_count") or 0),
             "observed_max_charge_power_w": self._non_negative_optional_float(
                 learning_summary.get("observed_max_charge_power_w")
             ),

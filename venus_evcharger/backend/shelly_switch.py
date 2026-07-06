@@ -47,15 +47,17 @@ class ShellySwitchBackend(ShellyBackendBase):
 
     def _set_switch_ids(self, switch_ids: Iterable[int], enabled: bool) -> None:
         """Apply one boolean relay state to all given Shelly switch channels."""
+        if not isinstance(enabled, bool):
+            raise TypeError("Shelly switch enabled state must be bool")
         for switch_id in switch_ids:
-            self._rpc_call("Switch.Set", id=int(switch_id), on=bool(enabled))
+            self._rpc_call("Switch.Set", id=int(switch_id), on=enabled)
 
     def _switch_outputs(self) -> dict[int, bool]:
         """Return current boolean output state for all configured relay channels."""
         outputs: dict[int, bool] = {}
         for switch_id in self._all_switch_ids():
             pm_status = self._rpc_call(f"{self.settings.component}.GetStatus", id=int(switch_id))
-            outputs[int(switch_id)] = bool(pm_status.get("output", False))
+            outputs[int(switch_id)] = bool(pm_status["output"]) if "output" in pm_status else False
         return outputs
 
     def _phase_selection_from_outputs(self, active_switch_ids: frozenset[int]) -> PhaseSelection:

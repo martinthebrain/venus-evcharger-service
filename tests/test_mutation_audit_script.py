@@ -19,6 +19,7 @@ from scripts.dev import mutation_audit_execution
 from scripts.dev import mutation_audit_process
 from scripts.dev import mutation_audit_results
 from scripts.dev import mutation_audit_support
+from scripts.dev import mutation_audit_targets
 from scripts.dev import mutation_audit_verification
 from scripts.dev import run_mutation_audit as mutation_audit
 
@@ -153,12 +154,33 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "venus_evcharger_auto_input_helper.py",
                 "venus_evcharger_dbus_adapter.py",
                 "venus_evcharger_service.py",
+                "CONTROL_API.md",
             ],
         )
         self.assertEqual(mutmut_config["pytest_add_cli_args"], ["-k", "not socket"])
         self.assertEqual(
             mutmut_config["pytest_add_cli_args_test_selection"],
             list(mutation_audit_config.DEFAULT_TEST_SELECTION),
+        )
+        self.assertIn(
+            "tests/test_venus_evcharger_control_openapi.py",
+            mutmut_config["pytest_add_cli_args_test_selection"],
+        )
+        self.assertIn(
+            "tests/test_venus_evcharger_control_reference.py",
+            mutmut_config["pytest_add_cli_args_test_selection"],
+        )
+        self.assertIn(
+            "tests/test_runtime_software_update_setup.py",
+            mutmut_config["pytest_add_cli_args_test_selection"],
+        )
+        self.assertIn(
+            "tests/venus_evcharger_ports_write_cases.py",
+            mutmut_config["pytest_add_cli_args_test_selection"],
+        )
+        self.assertIn(
+            "venus_evcharger/update/input_cache.py",
+            list(mutation_audit_targets.DEFAULT_TARGETS),
         )
 
     def test_mutation_config_can_target_dev_scripts(self) -> None:
@@ -180,6 +202,51 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertEqual(
             mutation_audit_config.test_selection_for_target("venus_evcharger/bootstrap/config_identity.py"),
             ("tests/test_venus_evcharger_bootstrap_controller.py",),
+        )
+
+    def test_backend_mutation_targets_use_backend_contract_selection(self) -> None:
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/backend/config.py"),
+            (
+                "tests/test_backend_config_file.py",
+                "tests/test_venus_evcharger_backend_factory.py",
+                "tests/test_venus_evcharger_backend_probe.py",
+                "tests/test_backend_factory_probe_contracts.py",
+                "tests/test_topology_config.py",
+            ),
+        )
+
+    def test_template_backend_mutation_targets_use_template_contract_selection(self) -> None:
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/backend/template_meter.py"),
+            (
+                "tests/test_venus_evcharger_backend_template_meter.py",
+                "tests/test_venus_evcharger_backend_template_support.py",
+            ),
+        )
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/backend/template_switch.py"),
+            (
+                "tests/test_venus_evcharger_backend_template_switch.py",
+                "tests/test_venus_evcharger_backend_template_support.py",
+                "tests/test_venus_evcharger_backend_tuya.py",
+            ),
+        )
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/backend/template_charger.py"),
+            (
+                "tests/test_venus_evcharger_backend_template_charger.py",
+                "tests/test_venus_evcharger_backend_template_support.py",
+            ),
+        )
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/backend/template_support.py"),
+            (
+                "tests/test_venus_evcharger_backend_template_support.py",
+                "tests/test_venus_evcharger_backend_template_meter.py",
+                "tests/test_venus_evcharger_backend_template_switch.py",
+                "tests/test_venus_evcharger_backend_template_charger.py",
+            ),
         )
 
     def test_constant_only_modules_are_reported_as_not_applicable(self) -> None:
@@ -250,6 +317,8 @@ class MutationAuditScriptTests(unittest.TestCase):
 
         self.assertEqual(command[:4], ["/tmp/python", "-m", "pytest", "-q"])
         self.assertIn("tests/venus_evcharger_update_cycle_controller_cases_tertiary.py", command)
+        self.assertIn("tests/test_runtime_software_update_setup.py", command)
+        self.assertIn("tests/venus_evcharger_ports_write_cases.py", command)
 
     def test_cli_argument_contracts_cover_defaults_and_explicit_options(self) -> None:
         defaults = mutation_audit_cli.parse_args([], description="Mutation audit")
@@ -259,7 +328,7 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertIsNone(defaults.out_dir)
         self.assertEqual(defaults.timeout_s, 1800.0)
         self.assertFalse(defaults.reuse_cache)
-        self.assertFalse(defaults.verify_survivors)
+        self.assertTrue(defaults.verify_survivors)
         self.assertFalse(defaults.no_fail)
 
         explicit = mutation_audit_cli.parse_args(
@@ -285,6 +354,9 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertTrue(explicit.reuse_cache)
         self.assertTrue(explicit.verify_survivors)
         self.assertTrue(explicit.no_fail)
+
+        fast = mutation_audit_cli.parse_args(["--no-verify-survivors"], description="Mutation audit")
+        self.assertFalse(fast.verify_survivors)
 
         help_output = StringIO()
         with self.assertRaises(SystemExit) as help_exit:

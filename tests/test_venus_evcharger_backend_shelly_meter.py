@@ -261,6 +261,7 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
         reading = ShellyMeterBackend(service).read_meter()
 
         self.assertEqual(reading.power_w, 0.0)
+        self.assertEqual(reading.energy_kwh, 0.0)
         self.assertEqual(reading.phase_powers_w, (0.0, 0.0, 0.0))
         self.assertEqual(reading.phase_currents_a, (0.0, 0.0, 0.0))
 

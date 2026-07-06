@@ -32,6 +32,25 @@ from .factory import build_service_backends
 from .registry import CHARGER_BACKENDS, METER_BACKENDS, SWITCH_BACKENDS
 from venus_evcharger.dbus_introspection import load_introspection_snapshot
 
+_ADAPTER_SECTION = "Adapter"
+_DEFAULT_SECTION = "DEFAULT"
+_LEGACY_ADAPTER_TYPE = "shelly_combined"
+_TYPE_KEY = "type"
+_HOST_KEY = "host"
+_USERNAME_KEY = "username"
+_PASSWORD_KEY = "password"
+_DIGEST_AUTH_KEY = "digestauth"
+_SHELLY_TIMEOUT_KEY = "shellyrequesttimeoutseconds"
+_SHELLY_COMPONENT_KEY = "shellycomponent"
+_SHELLY_ID_KEY = "shellyid"
+_PHASE_KEY = "phase"
+_MAX_CURRENT_KEY = "maxcurrent"
+_DEVICE_INSTANCE_KEY = "deviceinstance"
+_DBUS_INTROSPECTION_ENABLED_KEY = "dbusintrospectionenabled"
+_DBUS_INTROSPECTION_SNAPSHOT_PATH_KEY = "dbusintrospectionsnapshotpath"
+_DBUS_INTROSPECTION_MAX_AGE_KEY = "dbusintrospectionmaxageseconds"
+_TRUTHY_TEXTS = frozenset(("1", "true", "yes", "on"))
+
 
 def _config(path: str) -> configparser.ConfigParser:
     """Load one backend config file."""
@@ -41,9 +60,40 @@ def _config(path: str) -> configparser.ConfigParser:
 def _adapter_type(path: str) -> str:
     """Return one normalized adapter type from config."""
     parser = _config(path)
-    if parser.has_section("Adapter"):
-        return parser["Adapter"].get("Type", "shelly_combined").strip().lower()
-    return parser["DEFAULT"].get("Type", "shelly_combined").strip().lower()
+    if parser.has_section(_ADAPTER_SECTION):
+        return _normalized_adapter_type(_section_option_text(parser[_ADAPTER_SECTION], _TYPE_KEY))
+    return _normalized_adapter_type(_section_option_text(parser[_DEFAULT_SECTION], _TYPE_KEY))
+
+
+def _normalized_adapter_type(raw: str) -> str:
+    """Return one normalized adapter type, preserving the legacy fallback when omitted."""
+    return raw.lower() if raw else _LEGACY_ADAPTER_TYPE
+
+
+def _section_option_text(section: configparser.SectionProxy, option_lower: str, default: str = "") -> str:
+    """Return one stripped config option using case-insensitive ConfigParser lookup semantics."""
+    for key, value in section.items():
+        if key.strip().lower() == option_lower:
+            return str(value).strip()
+    return default
+
+
+def _section_option_bool(section: configparser.SectionProxy, option_lower: str, default: bool = False) -> bool:
+    """Return one normalized boolean config option."""
+    raw = _section_option_text(section, option_lower)
+    return default if raw == "" else raw.lower() in _TRUTHY_TEXTS
+
+
+def _section_option_float(section: configparser.SectionProxy, option_lower: str, default: float) -> float:
+    """Return one normalized float config option."""
+    raw = _section_option_text(section, option_lower)
+    return default if not raw else float(raw)
+
+
+def _section_option_int(section: configparser.SectionProxy, option_lower: str, default: int) -> int:
+    """Return one normalized integer config option."""
+    raw = _section_option_text(section, option_lower)
+    return default if not raw else int(raw)
 
 
 def _probe_service() -> Any:
@@ -74,15 +124,15 @@ def _probe_service_from_wallbox_config(config: configparser.ConfigParser) -> Any
     return SimpleNamespace(
         config=config,
         session=requests.Session(),
-        host=defaults.get("Host", "").strip(),
-        username=defaults.get("Username", "").strip(),
-        password=defaults.get("Password", "").strip(),
-        use_digest_auth=defaults.get("DigestAuth", "0").strip().lower() in ("1", "true", "yes", "on"),
-        shelly_request_timeout_seconds=float(defaults.get("ShellyRequestTimeoutSeconds", "2.0") or 2.0),
-        pm_component=defaults.get("ShellyComponent", "Switch").strip(),
-        pm_id=int(defaults.get("ShellyId", "0") or 0),
-        phase=defaults.get("Phase", "L1").strip(),
-        max_current=float(defaults.get("MaxCurrent", "16.0") or 16.0),
+        host=_section_option_text(defaults, _HOST_KEY),
+        username=_section_option_text(defaults, _USERNAME_KEY),
+        password=_section_option_text(defaults, _PASSWORD_KEY),
+        use_digest_auth=_section_option_bool(defaults, _DIGEST_AUTH_KEY),
+        shelly_request_timeout_seconds=_section_option_float(defaults, _SHELLY_TIMEOUT_KEY, 2.0),
+        pm_component=_section_option_text(defaults, _SHELLY_COMPONENT_KEY, "Switch"),
+        pm_id=_section_option_int(defaults, _SHELLY_ID_KEY, 0),
+        phase=_section_option_text(defaults, _PHASE_KEY, "L1"),
+        max_current=_section_option_float(defaults, _MAX_CURRENT_KEY, 16.0),
         _last_voltage=None,
     )
 
@@ -172,10 +222,10 @@ def validate_wallbox_config(path: str) -> dict[str, object]:
 
 
 def _dbus_introspection_probe_summary(defaults: configparser.SectionProxy) -> dict[str, object]:
-    deviceinstance = int(float(defaults.get("DeviceInstance", "60") or 60))
+    deviceinstance = int(_section_option_float(defaults, _DEVICE_INSTANCE_KEY, 60.0))
     snapshot_path = _dbus_introspection_snapshot_path(defaults, deviceinstance)
     snapshot = _dbus_introspection_snapshot(defaults, snapshot_path)
-    services = snapshot.get("services", {}) if isinstance(snapshot, dict) else {}
+    services = snapshot.get("services") if isinstance(snapshot, dict) else None
     return {
         "enabled": _dbus_introspection_enabled(defaults),
         "snapshot_path": snapshot_path,
@@ -187,27 +237,29 @@ def _dbus_introspection_probe_summary(defaults: configparser.SectionProxy) -> di
 
 
 def _dbus_introspection_snapshot_path(defaults: configparser.SectionProxy, deviceinstance: int) -> str:
-    return defaults.get(
-        "DbusIntrospectionSnapshotPath",
-        f"/run/dbus-venus-evcharger-dbus-map-{deviceinstance}.json",
-    ).strip()
+    default_path = f"/run/dbus-venus-evcharger-dbus-map-{deviceinstance}.json"
+    return _section_option_text(defaults, _DBUS_INTROSPECTION_SNAPSHOT_PATH_KEY, default_path)
 
 
 def _dbus_introspection_snapshot(defaults: configparser.SectionProxy, snapshot_path: str) -> dict[str, object]:
-    max_age_seconds = float(defaults.get("DbusIntrospectionMaxAgeSeconds", "900") or 900)
+    max_age_seconds = _section_option_float(defaults, _DBUS_INTROSPECTION_MAX_AGE_KEY, 900.0)
     return load_introspection_snapshot(snapshot_path, max_age_seconds=max_age_seconds)
 
 
 def _dbus_introspection_enabled(defaults: configparser.SectionProxy) -> bool:
-    return defaults.get("DbusIntrospectionEnabled", "1").strip().lower() in ("1", "true", "yes", "on")
+    return _section_option_bool(defaults, _DBUS_INTROSPECTION_ENABLED_KEY, True)
 
 
 def _dbus_introspection_gateway_state(snapshot: object) -> str:
-    return str(snapshot.get("worker_state", "")) if isinstance(snapshot, dict) else ""
+    state = snapshot.get("worker_state") if isinstance(snapshot, dict) else None
+    return "" if state is None else str(state)
 
 
 def _dbus_introspection_queue_depth(snapshot: object) -> int:
-    return int(snapshot.get("queue_depth", 0) or 0) if isinstance(snapshot, dict) else 0
+    if not isinstance(snapshot, dict):
+        return 0
+    depth = snapshot.get("queue_depth")
+    return int(depth) if depth is not None else 0
 
 
 def _dbus_introspection_service_count(services: object) -> int:

@@ -5,6 +5,39 @@ from typing import Any, Mapping
 
 from .logic_samples import _AutoDecisionSamples
 
+_BIAS_MODES = {"always", "export_only", "above_reserve_band", "export_and_above_reserve_band"}
+_COORDINATION_SUPPORT_MODES = {"supported_only", "allow_experimental"}
+
+
+def _service_bool(service: Any, name: str) -> bool:
+    if not hasattr(service, name):
+        return False
+    return bool(getattr(service, name))
+
+
+def _service_non_negative_float(service: Any, name: str) -> float:
+    if not hasattr(service, name):
+        return 0.0
+    return max(0.0, float(getattr(service, name) or 0.0))
+
+
+def _service_mode(service: Any, name: str, valid_modes: set[str], default: str) -> str:
+    if not hasattr(service, name):
+        return default
+    raw_value = getattr(service, name)
+    if raw_value is None:
+        return default
+    raw_mode = str(raw_value).strip().lower()
+    if raw_mode in valid_modes:
+        return raw_mode
+    return default
+
+
+def _mapping_count(values: Mapping[str, Any], key: str) -> int:
+    if key not in values:
+        return 0
+    return int(values[key] or 0)
+
 
 class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
     def _battery_discharge_balance_policy_context(
@@ -51,7 +84,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
         )
 
     def _battery_discharge_balance_policy_enabled(self) -> bool:
-        return bool(getattr(self.service, "auto_battery_discharge_balance_policy_enabled", False))
+        return _service_bool(self.service, "auto_battery_discharge_balance_policy_enabled")
 
     def _battery_discharge_balance_policy_counts(
         self,
@@ -59,23 +92,20 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
     ) -> tuple[float, int, int]:
         return (
             self._non_negative_optional_float(cluster.get("battery_discharge_balance_error_w")) or 0.0,
-            int(cluster.get("battery_discharge_balance_eligible_source_count", 0) or 0),
-            int(cluster.get("battery_discharge_balance_active_source_count", 0) or 0),
+            _mapping_count(cluster, "battery_discharge_balance_eligible_source_count"),
+            _mapping_count(cluster, "battery_discharge_balance_active_source_count"),
         )
 
     def _battery_discharge_balance_policy_thresholds(self) -> tuple[float, float, float]:
         svc = self.service
         return (
-            max(0.0, float(getattr(svc, "auto_battery_discharge_balance_warn_error_watts", 0.0) or 0.0)),
-            max(0.0, float(getattr(svc, "auto_battery_discharge_balance_bias_start_error_watts", 0.0) or 0.0)),
-            max(0.0, float(getattr(svc, "auto_battery_discharge_balance_bias_max_penalty_watts", 0.0) or 0.0)),
+            _service_non_negative_float(svc, "auto_battery_discharge_balance_warn_error_watts"),
+            _service_non_negative_float(svc, "auto_battery_discharge_balance_bias_start_error_watts"),
+            _service_non_negative_float(svc, "auto_battery_discharge_balance_bias_max_penalty_watts"),
         )
 
     def _battery_discharge_balance_reserve_margin_soc(self) -> float:
-        return max(
-            0.0,
-            float(getattr(self.service, "auto_battery_discharge_balance_bias_reserve_margin_soc", 0.0) or 0.0),
-        )
+        return _service_non_negative_float(self.service, "auto_battery_discharge_balance_bias_reserve_margin_soc")
 
     @staticmethod
     def _battery_discharge_balance_warning_active(
@@ -106,10 +136,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
         return _battery_discharge_balance_penalty_value(error_w, start_error_w, max_penalty_w)
 
     def _discharge_balance_bias_mode(self) -> str:
-        raw_mode = str(getattr(self.service, "auto_battery_discharge_balance_bias_mode", "always") or "").strip().lower()
-        if raw_mode in {"always", "export_only", "above_reserve_band", "export_and_above_reserve_band"}:
-            return raw_mode
-        return "always"
+        return _service_mode(self.service, "auto_battery_discharge_balance_bias_mode", _BIAS_MODES, "always")
 
     @staticmethod
     def _battery_discharge_balance_coordination_advisory(
@@ -146,9 +173,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
             feasibility=feasibility,
             control_ready_count=control_ready_count,
         )
-        penalty_w = self._battery_discharge_balance_penalty_w(
-            eligible_source_count=2,
-            active_source_count=control_ready_count,
+        penalty_w = _battery_discharge_balance_coordination_penalty_w(
             gate_active=gate_active,
             error_w=error_w,
             start_error_w=start_error_w,
@@ -157,7 +182,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
         return True, support_mode, bool(gate_active), float(start_error_w), float(penalty_w)
 
     def _battery_discharge_balance_coordination_enabled(self) -> bool:
-        return bool(getattr(self.service, "auto_battery_discharge_balance_coordination_enabled", False))
+        return _service_bool(self.service, "auto_battery_discharge_balance_coordination_enabled")
 
     def _battery_discharge_balance_coordination_counts(
         self,
@@ -165,20 +190,14 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
     ) -> tuple[float, int]:
         return (
             self._non_negative_optional_float(cluster.get("battery_discharge_balance_error_w")) or 0.0,
-            int(cluster.get("battery_discharge_balance_control_ready_count", 0) or 0),
+            _mapping_count(cluster, "battery_discharge_balance_control_ready_count"),
         )
 
     def _battery_discharge_balance_coordination_thresholds(self) -> tuple[float, float]:
         svc = self.service
         return (
-            max(
-                0.0,
-                float(getattr(svc, "auto_battery_discharge_balance_coordination_start_error_watts", 0.0) or 0.0),
-            ),
-            max(
-                0.0,
-                float(getattr(svc, "auto_battery_discharge_balance_coordination_max_penalty_watts", 0.0) or 0.0),
-            ),
+            _service_non_negative_float(svc, "auto_battery_discharge_balance_coordination_start_error_watts"),
+            _service_non_negative_float(svc, "auto_battery_discharge_balance_coordination_max_penalty_watts"),
         )
 
     @staticmethod
@@ -191,12 +210,12 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
         return control_ready_count >= 2 and feasibility in _battery_discharge_balance_allowed_feasibilities(support_mode)
 
     def _discharge_balance_coordination_support_mode(self) -> str:
-        raw_mode = str(
-            getattr(self.service, "auto_battery_discharge_balance_coordination_support_mode", "supported_only") or ""
-        ).strip().lower()
-        if raw_mode in {"supported_only", "allow_experimental"}:
-            return raw_mode
-        return "supported_only"
+        return _service_mode(
+            self.service,
+            "auto_battery_discharge_balance_coordination_support_mode",
+            _COORDINATION_SUPPORT_MODES,
+            "supported_only",
+        )
 
     def _discharge_balance_bias_gate_active(
         self,
@@ -234,7 +253,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
 
 
 def _battery_discharge_balance_penalty_scale(error_w: float, start_error_w: float) -> float:
-    return min((error_w - start_error_w) / max(start_error_w, 1.0), 1.0)
+    return min(max((error_w - start_error_w) / max(start_error_w, 1.0), 0.0), 1.0)
 
 
 def _battery_discharge_balance_penalty_inputs_valid(
@@ -253,8 +272,6 @@ def _battery_discharge_balance_penalty_value(
 ) -> float:
     if start_error_w <= 0.0:
         return _battery_discharge_balance_zero_start_penalty(error_w, max_penalty_w)
-    if error_w <= start_error_w:
-        return 0.0
     return max_penalty_w * _battery_discharge_balance_penalty_scale(error_w, start_error_w)
 
 
@@ -262,6 +279,18 @@ def _battery_discharge_balance_zero_start_penalty(error_w: float, max_penalty_w:
     if error_w > 0.0:
         return max_penalty_w
     return 0.0
+
+
+def _battery_discharge_balance_coordination_penalty_w(
+    *,
+    gate_active: bool,
+    error_w: float,
+    start_error_w: float,
+    max_penalty_w: float,
+) -> float:
+    if not gate_active:
+        return 0.0
+    return _battery_discharge_balance_penalty_value(error_w, start_error_w, max(0.0, max_penalty_w))
 
 
 def _battery_discharge_balance_coordination_counts(cluster: Mapping[str, Any]) -> dict[str, int]:
@@ -290,7 +319,7 @@ def _battery_discharge_balance_coordination_counts(cluster: Mapping[str, Any]) -
 
 
 def _battery_discharge_balance_cluster_count(cluster: Mapping[str, Any], key: str) -> int:
-    return int(cluster.get(key, 0) or 0)
+    return _mapping_count(cluster, key)
 
 
 def _battery_discharge_balance_coordination_not_needed(
@@ -355,9 +384,10 @@ def _discharge_balance_bias_mode_active(
     export_active: bool,
     reserve_gate_active: bool,
 ) -> bool:
-    return {
-        "always": True,
-        "export_only": export_active,
-        "above_reserve_band": reserve_gate_active,
-        "export_and_above_reserve_band": export_active and reserve_gate_active,
-    }.get(bias_mode, True)
+    if bias_mode == "export_only":
+        return export_active
+    if bias_mode == "above_reserve_band":
+        return reserve_gate_active
+    if bias_mode == "export_and_above_reserve_band":
+        return export_active and reserve_gate_active
+    return True

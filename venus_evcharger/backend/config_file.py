@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import configparser
+from collections.abc import Mapping
 from pathlib import Path
 
 from venus_evcharger.core.contracts import finite_float_or_none
@@ -31,7 +32,7 @@ def load_required_backend_config(config_path: str, label: str) -> configparser.C
     parser = configparser.ConfigParser()
     read_files = parser.read(normalized_path)
     if not read_files:
-        raise FileNotFoundError(config_path)
+        raise FileNotFoundError(f"{label} config not found: {config_path}")
     return parser
 
 
@@ -42,16 +43,13 @@ def config_section(parser: configparser.ConfigParser, name: str) -> configparser
 
 def section_is_effectively_empty(section: configparser.SectionProxy) -> bool:
     """Return whether one optional config section has no effective values."""
-    if not section:
-        return True
-    return str(getattr(section, "name", "")).upper() == "DEFAULT" and not tuple(section.items())
+    return not tuple(section.items())
 
 
-def backend_request_timeout_seconds(adapter: object, service: object, default: float = 2.0) -> float:
+def backend_request_timeout_seconds(adapter: Mapping[str, object], service: object, default: float = 2.0) -> float:
     """Return one normalized backend HTTP request timeout in seconds."""
-    timeout_seconds = finite_float_or_none(
-        getattr(adapter, "get")("RequestTimeoutSeconds", getattr(service, "shelly_request_timeout_seconds", default))
-    )
+    raw_default = getattr(service, "shelly_request_timeout_seconds", None)
+    timeout_seconds = finite_float_or_none(adapter.get("RequestTimeoutSeconds", raw_default))
     if timeout_seconds is None or timeout_seconds <= 0.0:
         return float(default)
     return float(timeout_seconds)
@@ -63,7 +61,11 @@ def fixed_supported_phase_selections(
     backend_label: str,
 ) -> tuple[PhaseSelection, ...]:
     """Return exactly one fixed supported phase selection from backend capabilities."""
-    raw_value = parser["Capabilities"].get("SupportedPhaseSelections", "P1") if parser.has_section("Capabilities") else "P1"
+    raw_value: object = (
+        parser["Capabilities"].get("SupportedPhaseSelections")
+        if parser.has_section("Capabilities")
+        else default
+    )
     normalized = normalize_phase_selection_tuple(raw_value, default)
     if len(normalized) != 1:
         raise ValueError(f"{backend_label} charger backend requires exactly one fixed [Capabilities] SupportedPhaseSelections value")
@@ -71,7 +73,7 @@ def fixed_supported_phase_selections(
 
 
 def validate_fixed_phase_selection(
-    selection: PhaseSelection,
+    selection: object,
     fixed_phase_selection: PhaseSelection,
     backend_label: str,
 ) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import requests
@@ -69,7 +70,7 @@ class GoEChargerSettings:
     status_filter: str
 
 
-def _goe_timeout_seconds(adapter: object, service: object) -> float:
+def _goe_timeout_seconds(adapter: Mapping[str, object], service: object) -> float:
     """Return the normalized request timeout for the go-e HTTP API."""
     return backend_request_timeout_seconds(adapter, service)
 
