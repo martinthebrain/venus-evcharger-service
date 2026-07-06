@@ -12,6 +12,21 @@ from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import float_or_zero
 
 GatewayPressureState = Literal["ok", "congested", "slow", "protective"]
+_PRESSURE_RANK: dict[GatewayPressureState, int] = {
+    "ok": 0,
+    "congested": 1,
+    "slow": 2,
+    "protective": 3,
+}
+_RESOURCE_PRESSURE_STATES: dict[str, GatewayPressureState] = {
+    "busy": "congested",
+    "constrained": "slow",
+}
+_BACKPRESSURE_STATES: dict[str, GatewayPressureState] = {
+    "congested": "congested",
+    "slow": "slow",
+    "protective": "protective",
+}
 
 
 @dataclass(frozen=True)
@@ -121,13 +136,14 @@ def regulated_publish_burst(
 
 
 def runtime_pressure_state(resource_state: str, backpressure_state: str) -> GatewayPressureState:
-    if backpressure_state == "protective":
-        return "protective"
-    if backpressure_state == "slow" or resource_state == "constrained":
-        return "slow"
-    if backpressure_state == "congested" or resource_state == "busy":
-        return "congested"
-    return "ok"
+    return higher_pressure_state(
+        _RESOURCE_PRESSURE_STATES.get(resource_state, "ok"),
+        _BACKPRESSURE_STATES.get(backpressure_state, "ok"),
+    )
+
+
+def higher_pressure_state(left: GatewayPressureState, right: GatewayPressureState) -> GatewayPressureState:
+    return left if _PRESSURE_RANK[left] >= _PRESSURE_RANK[right] else right
 
 
 def pressure_limited_publish_burst(
