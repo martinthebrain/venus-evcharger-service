@@ -3,11 +3,33 @@
 
 from __future__ import annotations
 
+import configparser
 from dataclasses import dataclass
 
 from .shelly_support import (
     phase_currents_for_selection,
     phase_powers_for_selection,
+)
+from .template_meter_contract import (
+    ADAPTER_BASE_URL_KEY,
+    ADAPTER_TIMEOUT_KEY,
+    DEFAULT_METER_METHOD,
+    DEFAULT_METER_TIMEOUT_SECONDS,
+    DEFAULT_POWER_PATH,
+    DEFAULT_SINGLE_PHASE_LINE,
+    METER_REQUEST_METHOD_KEY,
+    METER_REQUEST_URL_KEY,
+    METER_RESPONSE_CURRENT_KEY,
+    METER_RESPONSE_ENERGY_KWH_KEY,
+    METER_RESPONSE_ENERGY_WH_KEY,
+    METER_RESPONSE_PHASE_CURRENTS_KEY,
+    METER_RESPONSE_PHASE_POWERS_KEY,
+    METER_RESPONSE_PHASE_SELECTION_KEY,
+    METER_RESPONSE_POWER_KEY,
+    METER_RESPONSE_RELAY_ENABLED_KEY,
+    METER_RESPONSE_VOLTAGE_KEY,
+    PHASE_MEASURED_PHASE_KEY,
+    PHASE_MEASURED_SELECTION_KEY,
 )
 from .template_support import (
     TemplateHttpBackendBase,
@@ -151,6 +173,40 @@ def _resolved_phase_currents(
     return phase_currents_for_selection(current_a, phase_selection, single_phase_line)
 
 
+def _service_single_phase_line(service: object) -> str:
+    """Return the normalized single-phase line used for one-phase readings."""
+    line = str(getattr(service, "phase", None)).strip().upper()
+    if line == "L2":
+        return "L2"
+    if line == "L3":
+        return line
+    return DEFAULT_SINGLE_PHASE_LINE
+
+
+def _service_timeout_default(service: object) -> float:
+    """Return the configured service timeout fallback for template-meter requests."""
+    timeout_seconds = finite_float_or_none(getattr(service, "shelly_request_timeout_seconds", None))
+    if timeout_seconds is None or timeout_seconds <= 0.0:
+        return DEFAULT_METER_TIMEOUT_SECONDS
+    return float(timeout_seconds)
+
+
+def _default_phase_selection(phase: configparser.SectionProxy, service: object) -> PhaseSelection:
+    """Return the configured measured phase selection fallback chain."""
+    raw_phase: object = phase.get(PHASE_MEASURED_SELECTION_KEY)
+    if raw_phase is None:
+        raw_phase = phase.get(PHASE_MEASURED_PHASE_KEY)
+    if raw_phase is None:
+        raw_phase = getattr(service, "phase", None)
+    return normalize_phase_selection(raw_phase)
+
+
+def _normalized_meter_method(meter_request: configparser.SectionProxy) -> str:
+    """Return the normalized meter-request HTTP method."""
+    raw_method = meter_request.get(METER_REQUEST_METHOD_KEY) or DEFAULT_METER_METHOD
+    return normalize_http_method(raw_method, DEFAULT_METER_METHOD)
+
+
 def _meter_scalar_values(payload: object, settings: TemplateMeterSettings) -> _TemplateMeterScalarValues:
     """Return normalized scalar values from one meter response payload."""
     power_w = _payload_float(payload, settings.power_path)
@@ -172,35 +228,36 @@ def load_template_meter_settings(service: object, config_path: str) -> TemplateM
     meter_request = config_section(parser, "MeterRequest")
     meter_response = config_section(parser, "MeterResponse")
 
-    base_url = str(adapter.get("BaseUrl", "")).strip()
-    default_timeout_seconds = float(getattr(service, "shelly_request_timeout_seconds", 2.0) or 2.0)
+    base_url = str(adapter.get(ADAPTER_BASE_URL_KEY, "")).strip()
+    default_timeout_seconds = _service_timeout_default(service)
     timeout_seconds = finite_float_or_none(
-        adapter.get("RequestTimeoutSeconds", str(default_timeout_seconds))
+        adapter.get(ADAPTER_TIMEOUT_KEY, str(default_timeout_seconds))
     )
-    meter_url = resolved_url(base_url, meter_request.get("Url", ""))
-    power_path = str(meter_response.get("PowerPath", "power_w")).strip()
+    meter_url = resolved_url(base_url, meter_request.get(METER_REQUEST_URL_KEY) or "")
+    power_path = str(meter_response.get(METER_RESPONSE_POWER_KEY, DEFAULT_POWER_PATH)).strip()
     _validate_template_meter_paths(meter_url, power_path)
 
-    default_phase = normalize_phase_selection(
-        phase.get("MeasuredPhaseSelection", phase.get("MeasuredPhase", getattr(service, "phase", "L1"))),
-        "P1",
-    )
+    default_phase = _default_phase_selection(phase, service)
     return TemplateMeterSettings(
         base_url=base_url,
         auth_settings=load_template_auth_settings(adapter, service),
-        timeout_seconds=2.0 if timeout_seconds is None or timeout_seconds <= 0.0 else float(timeout_seconds),
-        meter_method=normalize_http_method(meter_request.get("Method", "GET"), "GET"),
+        timeout_seconds=(
+            DEFAULT_METER_TIMEOUT_SECONDS
+            if timeout_seconds is None or timeout_seconds <= 0.0
+            else float(timeout_seconds)
+        ),
+        meter_method=_normalized_meter_method(meter_request),
         meter_url=meter_url,
-        relay_enabled_path=_optional_path(meter_response.get("RelayEnabledPath", "")),
+        relay_enabled_path=_optional_path(meter_response.get(METER_RESPONSE_RELAY_ENABLED_KEY, "")),
         power_path=power_path,
-        voltage_path=_optional_path(meter_response.get("VoltagePath", "")),
-        current_path=_optional_path(meter_response.get("CurrentPath", "")),
-        energy_kwh_path=_optional_path(meter_response.get("EnergyKwhPath", "")),
-        energy_wh_path=_optional_path(meter_response.get("EnergyWhPath", "")),
+        voltage_path=_optional_path(meter_response.get(METER_RESPONSE_VOLTAGE_KEY, "")),
+        current_path=_optional_path(meter_response.get(METER_RESPONSE_CURRENT_KEY, "")),
+        energy_kwh_path=_optional_path(meter_response.get(METER_RESPONSE_ENERGY_KWH_KEY, "")),
+        energy_wh_path=_optional_path(meter_response.get(METER_RESPONSE_ENERGY_WH_KEY, "")),
         phase_selection=default_phase,
-        phase_selection_path=_optional_path(meter_response.get("PhaseSelectionPath", "")),
-        phase_powers_path=_optional_path(meter_response.get("PhasePowersPath", "")),
-        phase_currents_path=_optional_path(meter_response.get("PhaseCurrentsPath", "")),
+        phase_selection_path=_optional_path(meter_response.get(METER_RESPONSE_PHASE_SELECTION_KEY, "")),
+        phase_powers_path=_optional_path(meter_response.get(METER_RESPONSE_PHASE_POWERS_KEY, "")),
+        phase_currents_path=_optional_path(meter_response.get(METER_RESPONSE_PHASE_CURRENTS_KEY, "")),
     )
 
 
@@ -216,9 +273,7 @@ class TemplateMeterBackend(TemplateHttpBackendBase):
     """Meter backend driven by one normalized HTTP/JSON adapter surface."""
 
     def __init__(self, service: object, config_path: str = "") -> None:
-        self.service = service
-        self.config_path = str(config_path).strip()
-        self.settings = load_template_meter_settings(service, self.config_path)
+        self.settings = load_template_meter_settings(service, str(config_path).strip())
         super().__init__(service, self.settings.timeout_seconds, auth_settings=self.settings.auth_settings)
 
     @staticmethod
@@ -245,7 +300,7 @@ class TemplateMeterBackend(TemplateHttpBackendBase):
             else self._enabled_state(json_path_value(payload, self.settings.relay_enabled_path))
         )
         phase_selection = _payload_phase_selection(payload, self.settings)
-        single_phase_line = getattr(self.service, "phase", "L1")
+        single_phase_line = _service_single_phase_line(self.service)
         phase_powers_w = _resolved_phase_powers(
             payload,
             self.settings,

@@ -35,31 +35,58 @@ class ControlApiAuditTrail:
             self._next_seq += 1
             self._entries.append(entry)
             self._append_runtime_log(entry)
-            return dict(entry)
+            return self._entry_copy(entry)
 
     def _normalized_entry(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "seq": self._next_seq,
-            "timestamp": float(payload.get("timestamp", time.time())),
-            "transport": str(payload.get("transport", "http") or "http"),
-            "scope": str(payload.get("scope", "control") or "control"),
-            "client_host": str(payload.get("client_host", "") or ""),
-            "status_code": int(payload.get("status_code", 0) or 0),
-            "replayed": bool(payload.get("replayed", False)),
+            "timestamp": self._timestamp(payload),
+            "transport": self._text_field(payload, "transport", "http"),
+            "scope": self._text_field(payload, "scope", "control"),
+            "client_host": self._text_field(payload, "client_host", ""),
+            "status_code": self._int_field(payload, "status_code"),
+            "replayed": self._bool_field(payload, "replayed"),
             "command": self._mapping_payload(payload.get("command")),
             "result": self._mapping_payload(payload.get("result")),
             "error": self._mapping_payload(payload.get("error")),
         }
 
     @staticmethod
+    def _timestamp(payload: Mapping[str, Any]) -> float:
+        raw_value = payload.get("timestamp")
+        return float(raw_value) if raw_value is not None else time.time()
+
+    @staticmethod
+    def _text_field(payload: Mapping[str, Any], key: str, default: str) -> str:
+        raw_value = payload.get(key)
+        return str(raw_value) if raw_value else default
+
+    @staticmethod
+    def _int_field(payload: Mapping[str, Any], key: str) -> int:
+        raw_value = payload.get(key)
+        return int(raw_value) if raw_value else 0
+
+    @staticmethod
+    def _bool_field(payload: Mapping[str, Any], key: str) -> bool:
+        return bool(payload.get(key))
+
+    @staticmethod
     def _mapping_payload(value: Any) -> dict[str, Any]:
         return dict(value) if isinstance(value, Mapping) else {}
+
+    @classmethod
+    def _entry_copy(cls, entry: Mapping[str, Any]) -> dict[str, Any]:
+        copied = dict(entry)
+        copied["command"] = cls._mapping_payload(copied.get("command"))
+        copied["result"] = cls._mapping_payload(copied.get("result"))
+        copied["error"] = cls._mapping_payload(copied.get("error"))
+        return copied
 
     def recent(self, *, limit: int = 20) -> list[dict[str, Any]]:
         """Return the most recent audit entries."""
         capped_limit = max(0, int(limit))
         with self._lock:
-            entries = [dict(entry) for entry in self._entries]
+            entries = [self._entry_copy(entry) for entry in self._entries]
         return entries[-capped_limit:] if capped_limit else []
 
     def count(self) -> int:

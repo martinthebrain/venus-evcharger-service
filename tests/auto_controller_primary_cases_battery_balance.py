@@ -191,6 +191,181 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             1.25,
         )
 
+    def test_battery_learning_helpers_are_explicit_contracts(self):
+        controller, service = self._make_controller()
+        service._last_energy_cluster = {
+            "battery_sources": [
+                {"source_id": "charge-a", "charge_power_w": 800.0, "discharge_power_w": 0.0},
+                {"source_id": "mixed-b", "charge_power_w": 200.0, "discharge_power_w": 300.0},
+                {"source_id": "discharge-c", "charge_power_w": 0.0, "discharge_power_w": 700.0},
+                "bad-source",
+            ],
+            "battery_combined_charge_power_w": 200.0,
+            "battery_combined_discharge_power_w": 300.0,
+        }
+        service._last_energy_learning_profiles = {
+            "charge-a": {"observed_max_charge_power_w": 1000.0, "observed_max_discharge_power_w": 1000.0},
+            "mixed-b": {"observed_max_charge_power_w": 400.0, "observed_max_discharge_power_w": 600.0},
+            "discharge-c": {"observed_max_charge_power_w": 1000.0, "observed_max_discharge_power_w": 1000.0},
+        }
+
+        cluster, sources, profiles = controller._battery_activity_inputs()
+
+        self.assertEqual(cluster, service._last_energy_cluster)
+        self.assertEqual(sources, service._last_energy_cluster["battery_sources"][:3])
+        self.assertEqual(profiles, service._last_energy_learning_profiles)
+        self.assertEqual(
+            controller._source_activity_penalty(sources[0], profiles),
+            (800.0, 0.0, 0.8, None),
+        )
+        self.assertEqual(
+            controller._source_activity_penalty(sources[1], profiles),
+            (200.0, 300.0, 0.5, 0.5),
+        )
+        self.assertEqual(
+            controller._source_activity_penalty(sources[2], profiles),
+            (0.0, 700.0, None, 0.7),
+        )
+        self.assertEqual(
+            controller._source_activity_penalty(
+                {"charge_power_w": 20.0, "discharge_power_w": 30.0},
+                {"": {"observed_max_charge_power_w": 100.0, "observed_max_discharge_power_w": 100.0}},
+            ),
+            (20.0, 30.0, 0.2, 0.3),
+        )
+        self.assertEqual(controller._source_activity_penalties(sources, profiles), (1000.0, 1000.0, 0.8, 0.7))
+        self.assertEqual(controller._source_activity_penalties([sources[2], sources[1]], profiles), (200.0, 1000.0, 0.5, 0.7))
+        self.assertEqual(
+            controller._cluster_activity_penalties(
+                cluster,
+                {"observed_max_charge_power_w": 1000.0, "observed_max_discharge_power_w": 600.0},
+            ),
+            (200.0, 300.0, 0.2, 0.5),
+        )
+
+        service._last_energy_cluster = "bad-cluster"
+        service._last_energy_learning_profiles = "bad-profiles"
+        self.assertEqual(controller._battery_activity_inputs(), ({}, [], {}))
+
+        self.assertEqual(controller._battery_activity_mode(0.0, 0.0), "idle")
+        self.assertEqual(controller._battery_activity_mode(1.0, 0.0), "charging")
+        self.assertEqual(controller._battery_activity_mode(0.0, 1.0), "discharging")
+        self.assertEqual(controller._battery_activity_mode(1.0, 1.0), "mixed")
+
+        self.assertEqual(controller._near_term_grid_adjustment({}), 0.0)
+        self.assertEqual(
+            controller._near_term_grid_adjustment(
+                {"expected_near_term_export_w": 100.0, "expected_near_term_import_w": 40.0}
+            ),
+            9.0,
+        )
+        self.assertEqual(
+            controller._near_term_grid_adjustment(
+                {"expected_near_term_export_w": -100.0, "expected_near_term_import_w": 40.0}
+            ),
+            -6.0,
+        )
+
+        self.assertEqual(controller._active_battery_power(None, 1000.0), (None, None))
+        self.assertEqual(controller._active_battery_power(0.0, 1000.0), (None, None))
+        self.assertEqual(controller._active_battery_power(49.0, 1000.0), (None, 0.049))
+        self.assertEqual(controller._active_battery_power(1.0, 1000.0), (None, 0.001))
+        self.assertEqual(controller._active_battery_power(50.0, 1000.0), (50.0, 0.05))
+        self.assertEqual(controller._active_battery_power(50.0, None), (50.0, None))
+        self.assertEqual(controller._battery_activity_ratio(50.0, 1000.0), 0.05)
+        self.assertEqual(controller._battery_activity_ratio(50.0, 1.0), 50.0)
+        self.assertIsNone(controller._battery_activity_ratio(50.0, None))
+        self.assertIsNone(controller._battery_activity_ratio(50.0, 0.0))
+
+        self.assertIsNone(controller._bounded_optional_float("bad"))
+        self.assertEqual(controller._bounded_optional_float(-2.0), -1.0)
+        self.assertEqual(controller._bounded_optional_float(-1.0), -1.0)
+        self.assertEqual(controller._bounded_optional_float(0.5), 0.5)
+        self.assertEqual(controller._bounded_optional_float(2.0), 1.0)
+
+        self.assertEqual(controller._response_delay_penalty_factor(None), 1.0)
+        self.assertEqual(controller._response_delay_penalty_factor(-1.0), 1.0)
+        self.assertEqual(controller._response_delay_penalty_factor(0.0), 1.0)
+        self.assertAlmostEqual(controller._response_delay_penalty_factor(1.0), 1.0083333333333333)
+        self.assertEqual(controller._response_delay_penalty_factor(60.0), 1.5)
+        self.assertEqual(controller._response_delay_penalty_factor(120.0), 1.5)
+        self.assertEqual(controller._charge_bias_penalty_factor(None), 1.0)
+        self.assertEqual(controller._charge_bias_penalty_factor(-1.0), 1.0)
+        self.assertEqual(controller._charge_bias_penalty_factor(1.0), 1.25)
+        self.assertEqual(controller._discharge_bias_penalty_factor(None, None), 1.0)
+        self.assertEqual(controller._discharge_bias_penalty_factor(None, 0.5), 1.125)
+        self.assertEqual(controller._discharge_bias_penalty_factor(1.0, 0.0), 1.25)
+        self.assertEqual(
+            controller._battery_penalty_multiplier(
+                direction="charge",
+                response_delay_seconds=60.0,
+                support_bias=None,
+                import_support_bias=None,
+                export_bias=1.0,
+            ),
+            1.875,
+        )
+
+    def test_battery_learning_behavior_and_period_boundaries_are_contracts(self):
+        controller, service = self._make_controller()
+        service._time_now = lambda: datetime(2026, 4, 22, 12, 0).timestamp()
+
+        behavior = controller._battery_learning_behavior(
+            {
+                "typical_response_delay_seconds": 2.0,
+                "support_bias": 0.1,
+                "day_support_bias": 0.2,
+                "night_support_bias": 0.3,
+                "import_support_bias": 0.4,
+                "export_bias": 0.5,
+                "battery_first_export_bias": 0.6,
+                "power_smoothing_ratio": 0.7,
+                "reserve_band_floor_soc": 10.0,
+                "reserve_band_ceiling_soc": 90.0,
+                "reserve_band_width_soc": 80.0,
+            }
+        )
+
+        self.assertEqual(
+            behavior,
+            {
+                "response_delay_seconds": 2.0,
+                "support_bias": 0.2,
+                "day_support_bias": 0.2,
+                "night_support_bias": 0.3,
+                "import_support_bias": 0.4,
+                "export_bias": 0.5,
+                "battery_first_export_bias": 0.6,
+                "power_smoothing_ratio": 0.7,
+                "reserve_band_floor_soc": 10.0,
+                "reserve_band_ceiling_soc": 90.0,
+                "reserve_band_width_soc": 80.0,
+            },
+        )
+
+        for hour, minute, expected in (
+            (5, 59, "night"),
+            (6, 0, "day"),
+            (21, 59, "day"),
+            (22, 0, "night"),
+        ):
+            service._time_now = lambda hour=hour, minute=minute: datetime(2026, 4, 22, hour, minute).timestamp()
+            self.assertEqual(controller._current_learning_period(), expected)
+
+        service._time_now = lambda: "bad-time"
+        self.assertIsNone(controller._current_learning_period())
+        del service._time_now
+        self.assertIsNone(controller._current_learning_period())
+
+        self.assertEqual(
+            controller._battery_learning_behavior({"support_bias": 0.75})["support_bias"],
+            0.75,
+        )
+        self.assertEqual(
+            controller._battery_learning_behavior({"support_bias": 2.0})["support_bias"],
+            1.0,
+        )
+
     def test_battery_discharge_balance_policy_warns_and_adds_soft_penalty(self):
         controller, service = self._make_controller()
         service.auto_battery_discharge_balance_policy_enabled = True

@@ -9,6 +9,7 @@ import os
 from dataclasses import dataclass
 
 from venus_evcharger.core.shared import config_get_float
+from venus_evcharger.dbus_adapter_jsonl import DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES, DEFAULT_HEALTH_HISTORY_MAX_BYTES
 from venus_evcharger.dbus_gateway import GatewayPaths, gateway_paths
 from venus_evcharger.dbus_adapter_read_types import ReadSpec, ReadSpecs
 
@@ -46,8 +47,10 @@ class GatewaySloSettings:
 @dataclass(frozen=True)
 class GatewayFileSettings:
     command_lifecycle_path: str
+    command_lifecycle_max_bytes: int
     health_log_path: str
     health_log_interval_seconds: float
+    health_log_max_bytes: int
 
 
 @dataclass(frozen=True)
@@ -160,12 +163,20 @@ def file_settings(defaults: configparser.SectionProxy, paths: GatewayPaths) -> G
                 os.path.join(paths.run_dir, "dbus-command-lifecycle.jsonl"),
             )
         ).strip(),
+        command_lifecycle_max_bytes=max(
+            0,
+            int(config_get_float(defaults, "DbusGatewayCommandLifecycleMaxBytes", DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES)),
+        ),
         health_log_path=str(
             defaults.get("DbusGatewayHealthLogPath", os.path.join(paths.run_dir, "dbus-health-history.jsonl"))
         ).strip(),
         health_log_interval_seconds=max(
             0.0,
             config_get_float(defaults, "DbusGatewayHealthLogIntervalSeconds", 10.0),
+        ),
+        health_log_max_bytes=max(
+            0,
+            int(config_get_float(defaults, "DbusGatewayHealthLogMaxBytes", DEFAULT_HEALTH_HISTORY_MAX_BYTES)),
         ),
     )
 

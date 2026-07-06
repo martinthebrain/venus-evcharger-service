@@ -27,7 +27,8 @@ def parse_args(argv: list[str] | None, *, description: str | None) -> argparse.N
     parser.add_argument("--reuse-cache", action="store_true", help="Do not clear .mutmut-cache between target modules.")
     parser.add_argument(
         "--verify-survivors",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Re-apply surviving mutants and run the selected tests in a clean subprocess.",
     )
     parser.add_argument("--no-fail", action="store_true", help="Always exit 0 after writing logs and summary.")

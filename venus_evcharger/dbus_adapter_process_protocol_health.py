@@ -38,6 +38,7 @@ class DbusAdapterHealthContext(Protocol):  # pragma: no cover
     max_tick_seconds: float
     health_log_path: str
     health_log_interval_seconds: float
+    health_log_max_bytes: int
     slo_gui_max_age_seconds: float
     slo_core_read_max_age_seconds: float
     slo_queue_max_age_seconds: float

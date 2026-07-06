@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import call
 
 from venus_evcharger.backend.shelly_contactor_switch import ShellyContactorSwitchBackend
 from venus_evcharger.backend.shelly_meter import ShellyMeterBackend
@@ -28,6 +30,112 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
                     "http://192.168.1.11/rpc/Switch.Set?id=0&on=true",
                     "http://192.168.1.11/rpc/Switch.Set?id=1&on=true",
                     "http://192.168.1.11/rpc/Switch.Set?id=2&on=false",
+                ],
+            )
+
+    def test_shelly_switch_defaults_and_capabilities_are_explicit_contracts(self) -> None:
+        backend = ShellySwitchBackend(self._service(MagicMock()))
+
+        capabilities = backend.capabilities()
+
+        self.assertEqual(capabilities.switching_mode, "direct")
+        self.assertEqual(capabilities.supported_phase_selections, ("P1",))
+        self.assertIs(capabilities.requires_charge_pause_for_phase_change, False)
+        self.assertEqual(capabilities.max_direct_switch_power_w, 3680.0)
+        self.assertEqual(backend._selected_phase_selection, "P1")
+
+    def test_shelly_switch_rejects_meter_only_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            from pathlib import Path
+
+            path = Path(temp_dir) / "meter-profile-switch.ini"
+            path.write_text(
+                "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nShellyProfile=pm1_meter_only\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "not valid for switch backends"):
+                ShellySwitchBackend(self._service(MagicMock()), config_path=str(path))
+
+    def test_shelly_switch_falls_back_to_first_supported_selection_when_configured_phase_is_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            from pathlib import Path
+
+            path = Path(temp_dir) / "switch.ini"
+            path.write_text(
+                "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nComponent=Switch\nId=0\n"
+                "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2\n"
+                "[Phase]\nMeasuredPhaseSelection=P1_P2_P3\n"
+                "[PhaseMap]\nP1=0\nP1_P2=0,1\n",
+                encoding="utf-8",
+            )
+            session = MagicMock()
+            session.get.return_value = _FakeResponse({})
+            backend = ShellySwitchBackend(self._service(session), config_path=str(path))
+
+            self.assertEqual(backend._selected_phase_selection, "P1")
+            backend.set_enabled(True)
+
+            self.assertEqual(
+                [call.kwargs["url"] for call in session.get.call_args_list],
+                [
+                    "http://192.168.1.11/rpc/Switch.Set?id=0&on=true",
+                    "http://192.168.1.11/rpc/Switch.Set?id=1&on=false",
+                ],
+            )
+
+    def test_shelly_switch_direct_rpc_helpers_are_exact_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._write_switch_config(temp_dir)
+            backend = ShellySwitchBackend(self._service(MagicMock()), config_path=config_path)
+
+            self.assertEqual(backend._all_switch_ids(), (0, 1, 2))
+            self.assertEqual(backend._switch_ids_for_selection("P1_P2"), (0, 1))
+            self.assertEqual(backend._switch_ids_for_selection(cast(Any, "P9")), (0,))
+
+            original_settings = backend.settings
+            backend.settings = replace(original_settings, phase_switch_targets={}, device_id=7)
+            self.assertEqual(backend._all_switch_ids(), (7,))
+            self.assertEqual(backend._switch_ids_for_selection("P1"), (7,))
+            backend.settings = original_settings
+
+            backend._rpc_call = MagicMock(return_value={})
+            backend._set_switch_ids((2, 4), False)
+            self.assertEqual(
+                backend._rpc_call.call_args_list,
+                [
+                    call("Switch.Set", id=2, on=False),
+                    call("Switch.Set", id=4, on=False),
+                ],
+            )
+
+            backend._rpc_call = MagicMock(return_value={})
+            backend._set_switch_ids((3,), True)
+            self.assertEqual(backend._rpc_call.call_args_list, [call("Switch.Set", id=3, on=True)])
+
+            with self.assertRaises(TypeError) as invalid_enabled:
+                backend._set_switch_ids((3,), cast(Any, None))
+            self.assertEqual(str(invalid_enabled.exception), "Shelly switch enabled state must be bool")
+
+            backend._rpc_call = MagicMock(side_effect=[{"output": True}, {}, {"output": 0}])
+            self.assertEqual(backend._switch_outputs(), {0: True, 1: False, 2: False})
+            self.assertEqual(
+                backend._rpc_call.call_args_list,
+                [
+                    call("Switch.GetStatus", id=0),
+                    call("Switch.GetStatus", id=1),
+                    call("Switch.GetStatus", id=2),
+                ],
+            )
+
+            backend._rpc_call = MagicMock(return_value={})
+            backend.set_enabled(False)
+            self.assertEqual(
+                backend._rpc_call.call_args_list,
+                [
+                    call("Switch.Set", id=0, on=False),
+                    call("Switch.Set", id=1, on=False),
+                    call("Switch.Set", id=2, on=False),
                 ],
             )
 

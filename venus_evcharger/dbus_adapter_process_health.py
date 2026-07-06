@@ -32,6 +32,7 @@ from venus_evcharger.dbus_adapter_health_slo import (
     effective_gui_max_age_seconds,
     max_core_read_age,
     regulated_publish_burst,
+    runtime_pressure_state,
     slo_checks_from_observed,
     slo_payload,
     slo_targets,
@@ -52,7 +53,7 @@ class DbusAdapterHealth:
             return
         self._last_health_log_monotonic = time.monotonic()
         try:
-            append_health_log(self.health_log_path, health)
+            append_health_log(self.health_log_path, health, max_bytes=self.health_log_max_bytes)
         except (OSError, RuntimeError, TypeError, ValueError):
             logging.debug("Unable to append DBus gateway health history", exc_info=True)
 
@@ -202,13 +203,32 @@ class DbusAdapterHealth:
         core_read_age = max_core_read_age(cache_freshness)
         eventloop_gap_ms = float_or_zero(self.tick_health.snapshot().get("max_tick_gap_ms_60s"))
         thresholds = self.slo_thresholds()
+        queue_metrics = {"oldest_command_age_s": queue_age}
+        slo = self.slo_snapshot(
+            queue_health=queue_metrics,
+            cache_freshness=cache_freshness,
+            now=now,
+            current_monotonic=time.monotonic(),
+        )
+        backpressure = backpressure_snapshot(
+            circuit_state=self.circuit.state(),
+            queue_health=queue_metrics,
+            slo=slo,
+            queue_max_age_seconds=self.slo_queue_max_age_seconds,
+        )
+        pressure_state = runtime_pressure_state(
+            str((self._last_resource_snapshot or {}).get("state", "ok")),
+            str(backpressure.get("state", "ok")),
+        )
         self.write_scheduler.set_dynamic_local_publish_burst(
             regulated_publish_burst(
                 queue_age=queue_age,
                 eventloop_gap_ms=eventloop_gap_ms,
                 base_burst=self.write_scheduler.local_publish_burst_limit,
                 thresholds=thresholds,
-            )
+                pressure_state=pressure_state,
+            ),
+            pressure_state=pressure_state,
         )
         if core_read_age > self.slo_core_read_max_age_seconds:
             self.read_scheduler.force_due(
@@ -218,7 +238,7 @@ class DbusAdapterHealth:
                     max_age_seconds=self.slo_core_read_max_age_seconds,
                 )
             )
-        if self.circuit.state() != "ok":
+        if self.circuit.state() != "ok" or pressure_state in {"slow", "protective"}:
             self.quiet_discovery_and_introspection(now)
 
     def quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:

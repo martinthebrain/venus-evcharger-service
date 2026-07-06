@@ -68,15 +68,12 @@ def _create_backend(
 
 
 def create_meter_backend(backend_type: str, service: Any, config_path: str = "") -> Any:
-    """Instantiate one configured meter backend."""
     return _create_backend(METER_BACKENDS, backend_type, service, config_path, "meter")
 
 
 def create_switch_backend(backend_type: str, service: Any, config_path: str = "") -> Any:
-    """Instantiate one configured switch backend."""
     return _create_backend(SWITCH_BACKENDS, backend_type, service, config_path, "switch")
 
 
 def create_charger_backend(backend_type: str, service: Any, config_path: str = "") -> Any:
-    """Instantiate one configured charger backend."""
     return _create_backend(CHARGER_BACKENDS, backend_type, service, config_path, "charger")

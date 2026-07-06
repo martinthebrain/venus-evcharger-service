@@ -14,6 +14,21 @@ import requests
 from requests.auth import HTTPDigestAuth
 
 from .config_file import config_section, load_required_backend_config
+from .template_support_contract import (
+    ABSOLUTE_URL_MARKER,
+    ADAPTER_AUTH_HEADER_NAME_KEY,
+    ADAPTER_AUTH_HEADER_VALUE_KEY,
+    ADAPTER_DIGEST_AUTH_KEY,
+    ADAPTER_PASSWORD_KEY,
+    ADAPTER_USERNAME_KEY,
+    AUTH_FALLBACK_FLAG,
+    SERVICE_DIGEST_AUTH_ATTR,
+    SERVICE_PASSWORD_ATTR,
+    SERVICE_USERNAME_ATTR,
+    SUPPORTED_HTTP_METHODS,
+    TEMPLATE_BACKEND_LABEL,
+    URL_SEPARATOR,
+)
 from venus_evcharger.core.contracts import normalize_binary_flag
 
 
@@ -33,13 +48,25 @@ def load_template_auth_settings(
     service: object | None = None,
 ) -> TemplateAuthSettings:
     """Return normalized auth settings shared by all template backends."""
-    auth_fallback_enabled = bool(getattr(service, "_adapter_auth_fallback_enabled", False))
-    username = str(adapter.get("Username", getattr(service, "username", "") if auth_fallback_enabled else "")).strip()
-    password = str(adapter.get("Password", getattr(service, "password", "") if auth_fallback_enabled else ""))
-    default_digest_auth = "1" if auth_fallback_enabled and bool(getattr(service, "use_digest_auth", False)) else "0"
-    use_digest_auth = bool(normalize_binary_flag(adapter.get("DigestAuth", default_digest_auth)))
-    auth_header_name = _optional_text(adapter.get("AuthHeaderName", ""))
-    auth_header_value = _optional_text(adapter.get("AuthHeaderValue", ""))
+    auth_fallback_enabled = _service_bool_attr(service, AUTH_FALLBACK_FLAG)
+    username = str(
+        adapter.get(
+            ADAPTER_USERNAME_KEY,
+            getattr(service, SERVICE_USERNAME_ATTR, "") if auth_fallback_enabled else "",
+        )
+    ).strip()
+    password = str(
+        adapter.get(
+            ADAPTER_PASSWORD_KEY,
+            getattr(service, SERVICE_PASSWORD_ATTR, "") if auth_fallback_enabled else "",
+        )
+    )
+    use_digest_auth = _template_digest_auth_enabled(
+        adapter,
+        auth_fallback_enabled and _service_bool_attr(service, SERVICE_DIGEST_AUTH_ATTR),
+    )
+    auth_header_name = _optional_text(adapter.get(ADAPTER_AUTH_HEADER_NAME_KEY, ""))
+    auth_header_value = _optional_text(adapter.get(ADAPTER_AUTH_HEADER_VALUE_KEY, ""))
     _validate_template_auth_settings(
         username=username,
         use_digest_auth=use_digest_auth,
@@ -53,6 +80,21 @@ def load_template_auth_settings(
         auth_header_name=auth_header_name,
         auth_header_value=auth_header_value,
     )
+
+
+def _service_bool_attr(service: object | None, attr: str) -> bool:
+    """Return one optional service boolean without implicit truthy defaults."""
+    if service is None or not hasattr(service, attr):
+        return False
+    return bool(getattr(service, attr))
+
+
+def _template_digest_auth_enabled(adapter: configparser.SectionProxy, fallback: bool) -> bool:
+    """Return DigestAuth from adapter config or an explicit service fallback."""
+    raw = adapter.get(ADAPTER_DIGEST_AUTH_KEY)
+    if raw is None:
+        return bool(fallback)
+    return bool(normalize_binary_flag(raw))
 
 
 def _optional_text(value: object) -> str | None:
@@ -78,13 +120,15 @@ def _validate_template_auth_settings(
 
 def load_template_config(config_path: str) -> configparser.ConfigParser:
     """Load one template backend config file."""
-    return load_required_backend_config(config_path, "template backend")
+    return load_required_backend_config(config_path, TEMPLATE_BACKEND_LABEL)
 
 
 def normalize_http_method(value: object, default: str) -> str:
     """Return one supported HTTP method."""
-    method = str(value).strip().upper() if value is not None else ""
-    return method if method in {"GET", "POST", "PUT", "PATCH"} else default
+    if value is None:
+        return default
+    method = str(value).strip().upper()
+    return method if method in SUPPORTED_HTTP_METHODS else default
 
 
 def resolved_url(base_url: str, raw_url: object) -> str:
@@ -92,11 +136,27 @@ def resolved_url(base_url: str, raw_url: object) -> str:
     url = str(raw_url).strip() if raw_url is not None else ""
     if not url:
         return ""
-    if "://" in url:
+    if ABSOLUTE_URL_MARKER in url:
         return url
     if not base_url:
         raise ValueError(f"Relative URL '{url}' requires Adapter.BaseUrl")
-    return urljoin(base_url.rstrip("/") + "/", url.lstrip("/"))
+    return urljoin(_base_url_prefix(base_url), _relative_url_path(url))
+
+
+def _base_url_prefix(base_url: str) -> str:
+    """Return one base URL ending with exactly one path separator."""
+    normalized = str(base_url)
+    while normalized.endswith(URL_SEPARATOR):
+        normalized = normalized[:-1]
+    return f"{normalized}{URL_SEPARATOR}"
+
+
+def _relative_url_path(url: str) -> str:
+    """Return one relative URL path without leading separators."""
+    normalized = str(url)
+    while normalized.startswith(URL_SEPARATOR):
+        normalized = normalized[1:]
+    return normalized
 
 
 def json_path_value(payload: dict[str, object], path: str) -> object:

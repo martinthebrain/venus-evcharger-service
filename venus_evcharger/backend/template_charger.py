@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .config_file import backend_request_timeout_seconds
@@ -18,10 +19,45 @@ from .template_support import (
     payload_object,
     resolved_url,
 )
+from .template_charger_contract import (
+    ADAPTER_BASE_URL_KEY,
+    CAPABILITIES_PHASE_SELECTIONS_KEY,
+    CHARGER_CONTEXT_AMPS,
+    CHARGER_CONTEXT_ENABLED_INT,
+    CHARGER_CONTEXT_ENABLED_JSON,
+    CHARGER_CONTEXT_ENABLED_TEXT,
+    CHARGER_CONTEXT_PHASE_SELECTION,
+    CHARGER_FALSE_INT,
+    CHARGER_FALSE_JSON,
+    CHARGER_FALSE_TEXT,
+    CHARGER_TRUE_INT,
+    CHARGER_TRUE_JSON,
+    CHARGER_TRUE_TEXT,
+    DEFAULT_CHARGER_CONFIG_PATH,
+    DEFAULT_CURRENT_JSON_TEMPLATE,
+    DEFAULT_CURRENT_METHOD,
+    DEFAULT_ENABLE_JSON_TEMPLATE,
+    DEFAULT_ENABLE_METHOD,
+    DEFAULT_PHASE_JSON_TEMPLATE,
+    DEFAULT_PHASE_METHOD,
+    DEFAULT_STATE_METHOD,
+    REQUEST_JSON_TEMPLATE_KEY,
+    REQUEST_METHOD_KEY,
+    REQUEST_URL_KEY,
+    STATE_RESPONSE_ACTUAL_CURRENT_KEY,
+    STATE_RESPONSE_CURRENT_KEY,
+    STATE_RESPONSE_ENABLED_KEY,
+    STATE_RESPONSE_ENERGY_KWH_KEY,
+    STATE_RESPONSE_FAULT_KEY,
+    STATE_RESPONSE_PHASE_SELECTION_KEY,
+    STATE_RESPONSE_POWER_WATTS_KEY,
+    STATE_RESPONSE_STATUS_KEY,
+)
 from .models import (
     ChargerState,
     PhaseSelection,
     normalize_phase_selection,
+    normalize_phase_selection_or_none,
     normalize_phase_selection_tuple,
 )
 from venus_evcharger.core.contracts import finite_float_or_none
@@ -91,20 +127,22 @@ class _TemplateChargerCachedState:
 
 def _optional_config_path(section: object, key: str) -> str | None:
     """Return one optional trimmed response path from the given config section."""
-    return str(getattr(section, "get")(key, "")).strip() or None
+    return _section_text(section, key) or None
 
 
-def _template_charger_timeout_seconds(adapter: object, service: object) -> float:
+def _section_text(section: object, key: str, default: str = "") -> str:
+    """Return one stripped config value as concrete text."""
+    return str(getattr(section, "get")(key, default)).strip()
+
+
+def _template_charger_timeout_seconds(adapter: Mapping[str, object], service: object) -> float:
     """Return the normalized timeout used by the template-charger backend."""
     return backend_request_timeout_seconds(adapter, service)
 
 
 def _template_charger_supported_phase_selections(capabilities: object) -> tuple[PhaseSelection, ...]:
     """Return normalized supported phase selections for the template charger."""
-    return normalize_phase_selection_tuple(
-        getattr(capabilities, "get")("SupportedPhaseSelections", "P1"),
-        ("P1",),
-    )
+    return normalize_phase_selection_tuple(getattr(capabilities, "get")(CAPABILITIES_PHASE_SELECTIONS_KEY))
 
 
 def _template_charger_urls(
@@ -116,37 +154,37 @@ def _template_charger_urls(
 ) -> _TemplateChargerUrls:
     """Return resolved HTTP endpoints for charger state and command calls."""
     return _TemplateChargerUrls(
-        state_url=resolved_url(base_url, getattr(state_request, "get")("Url", "")) or None,
-        enable_url=resolved_url(base_url, getattr(enable_request, "get")("Url", "")),
-        current_url=resolved_url(base_url, getattr(current_request, "get")("Url", "")),
-        phase_url=resolved_url(base_url, getattr(phase_request, "get")("Url", "")) or None,
+        state_url=resolved_url(base_url, _section_text(state_request, REQUEST_URL_KEY)) or None,
+        enable_url=resolved_url(base_url, _section_text(enable_request, REQUEST_URL_KEY)),
+        current_url=resolved_url(base_url, _section_text(current_request, REQUEST_URL_KEY)),
+        phase_url=resolved_url(base_url, _section_text(phase_request, REQUEST_URL_KEY)) or None,
     )
 
 
 def _template_charger_state_paths(state_response: object) -> _TemplateChargerStatePaths:
     """Return normalized state-response paths used by charger readback."""
     return _TemplateChargerStatePaths(
-        enabled=_optional_config_path(state_response, "EnabledPath"),
-        current=_optional_config_path(state_response, "CurrentPath"),
-        phase_selection=_optional_config_path(state_response, "PhaseSelectionPath"),
-        actual_current=_optional_config_path(state_response, "ActualCurrentPath"),
-        power_watts=_optional_config_path(state_response, "PowerWattsPath"),
-        energy_kwh=_optional_config_path(state_response, "EnergyKwhPath"),
-        status=_optional_config_path(state_response, "StatusPath"),
-        fault=_optional_config_path(state_response, "FaultPath"),
+        enabled=_optional_config_path(state_response, STATE_RESPONSE_ENABLED_KEY),
+        current=_optional_config_path(state_response, STATE_RESPONSE_CURRENT_KEY),
+        phase_selection=_optional_config_path(state_response, STATE_RESPONSE_PHASE_SELECTION_KEY),
+        actual_current=_optional_config_path(state_response, STATE_RESPONSE_ACTUAL_CURRENT_KEY),
+        power_watts=_optional_config_path(state_response, STATE_RESPONSE_POWER_WATTS_KEY),
+        energy_kwh=_optional_config_path(state_response, STATE_RESPONSE_ENERGY_KWH_KEY),
+        status=_optional_config_path(state_response, STATE_RESPONSE_STATUS_KEY),
+        fault=_optional_config_path(state_response, STATE_RESPONSE_FAULT_KEY),
     )
 
 
 def _template_json_template(section: object, default: str) -> str | None:
     """Return one optional rendered JSON template string."""
-    return str(getattr(section, "get")("JsonTemplate", default)).strip() or None
+    return _section_text(section, REQUEST_JSON_TEMPLATE_KEY, default) or None
 
 
 def _template_phase_json_template(phase_request: object, phase_url: str | None) -> str | None:
     """Return the optional phase-selection JSON template when phase control exists."""
     if not phase_url:
         return None
-    return _template_json_template(phase_request, '{"phase_selection": "$phase_selection"}')
+    return _template_json_template(phase_request, DEFAULT_PHASE_JSON_TEMPLATE)
 
 
 def _validate_template_charger_settings(
@@ -175,7 +213,7 @@ def load_template_charger_settings(service: object, config_path: str) -> Templat
     current_request = config_section(parser, "CurrentRequest")
     phase_request = config_section(parser, "PhaseRequest")
 
-    base_url = str(adapter.get("BaseUrl", "")).strip()
+    base_url = str(adapter.get(ADAPTER_BASE_URL_KEY, "")).strip()
     supported_phase_selections = _template_charger_supported_phase_selections(capabilities)
     urls = _template_charger_urls(
         base_url,
@@ -185,8 +223,8 @@ def load_template_charger_settings(service: object, config_path: str) -> Templat
         phase_request,
     )
     state_paths = _template_charger_state_paths(state_response)
-    enable_json_template = _template_json_template(enable_request, '{"enabled": $enabled_json}')
-    current_json_template = _template_json_template(current_request, '{"amps": $amps}')
+    enable_json_template = _template_json_template(enable_request, DEFAULT_ENABLE_JSON_TEMPLATE)
+    current_json_template = _template_json_template(current_request, DEFAULT_CURRENT_JSON_TEMPLATE)
     phase_json_template = _template_phase_json_template(phase_request, urls.phase_url)
 
     _validate_template_charger_settings(urls, supported_phase_selections)
@@ -196,7 +234,7 @@ def load_template_charger_settings(service: object, config_path: str) -> Templat
         auth_settings=load_template_auth_settings(adapter, service),
         timeout_seconds=_template_charger_timeout_seconds(adapter, service),
         supported_phase_selections=supported_phase_selections,
-        state_method=normalize_http_method(state_request.get("Method", "GET"), "GET"),
+        state_method=normalize_http_method(state_request.get(REQUEST_METHOD_KEY), DEFAULT_STATE_METHOD),
         state_url=urls.state_url,
         state_enabled_path=state_paths.enabled,
         state_current_path=state_paths.current,
@@ -206,13 +244,13 @@ def load_template_charger_settings(service: object, config_path: str) -> Templat
         state_energy_kwh_path=state_paths.energy_kwh,
         state_status_path=state_paths.status,
         state_fault_path=state_paths.fault,
-        enable_method=normalize_http_method(enable_request.get("Method", "POST"), "POST"),
+        enable_method=normalize_http_method(enable_request.get(REQUEST_METHOD_KEY), DEFAULT_ENABLE_METHOD),
         enable_url=urls.enable_url,
         enable_json_template=enable_json_template,
-        current_method=normalize_http_method(current_request.get("Method", "POST"), "POST"),
+        current_method=normalize_http_method(current_request.get(REQUEST_METHOD_KEY), DEFAULT_CURRENT_METHOD),
         current_url=urls.current_url,
         current_json_template=current_json_template,
-        phase_method=normalize_http_method(phase_request.get("Method", "POST"), "POST"),
+        phase_method=normalize_http_method(phase_request.get(REQUEST_METHOD_KEY), DEFAULT_PHASE_METHOD),
         phase_url=urls.phase_url,
         phase_json_template=phase_json_template,
     )
@@ -221,20 +259,21 @@ def load_template_charger_settings(service: object, config_path: str) -> Templat
 class TemplateChargerBackend(TemplateHttpBackendBase):
     """Direct charger-control backend driven by one normalized HTTP/JSON surface."""
 
-    def __init__(self, service: object, config_path: str = "") -> None:
-        self.service = service
+    def __init__(self, service: object, config_path: str = DEFAULT_CHARGER_CONFIG_PATH) -> None:
         self.config_path = str(config_path).strip()
         self.settings = load_template_charger_settings(service, self.config_path)
         super().__init__(service, self.settings.timeout_seconds, auth_settings=self.settings.auth_settings)
         default_phase_selection = self.settings.supported_phase_selections[0]
         self._enabled_state_cache: bool | None = None
         self._current_amps_cache: float | None = None
-        self._phase_selection_cache: PhaseSelection = normalize_phase_selection(
-            getattr(service, "requested_phase_selection", default_phase_selection),
-            default_phase_selection,
+        requested_phase_selection = normalize_phase_selection_or_none(
+            getattr(service, "requested_phase_selection", None)
         )
-        if self._phase_selection_cache not in self.settings.supported_phase_selections:
-            self._phase_selection_cache = default_phase_selection
+        self._phase_selection_cache: PhaseSelection = (
+            requested_phase_selection
+            if requested_phase_selection in self.settings.supported_phase_selections
+            else default_phase_selection
+        )
 
     @staticmethod
     def _context(
@@ -245,11 +284,11 @@ class TemplateChargerBackend(TemplateHttpBackendBase):
     ) -> dict[str, str]:
         """Return one stable template context for charger command rendering."""
         return {
-            "enabled_json": "true" if enabled else "false",
-            "enabled_int": "1" if enabled else "0",
-            "enabled_text": "on" if enabled else "off",
-            "amps": f"{float(amps):g}",
-            "phase_selection": str(phase_selection),
+            CHARGER_CONTEXT_ENABLED_JSON: CHARGER_TRUE_JSON if enabled else CHARGER_FALSE_JSON,
+            CHARGER_CONTEXT_ENABLED_INT: CHARGER_TRUE_INT if enabled else CHARGER_FALSE_INT,
+            CHARGER_CONTEXT_ENABLED_TEXT: CHARGER_TRUE_TEXT if enabled else CHARGER_FALSE_TEXT,
+            CHARGER_CONTEXT_AMPS: f"{float(amps):g}",
+            CHARGER_CONTEXT_PHASE_SELECTION: str(phase_selection),
         }
 
     @staticmethod
@@ -278,7 +317,7 @@ class TemplateChargerBackend(TemplateHttpBackendBase):
         supported: tuple[PhaseSelection, ...],
     ) -> PhaseSelection:
         """Return one supported charger phase selection."""
-        normalized = normalize_phase_selection(value, default)
+        normalized = normalize_phase_selection_or_none(value)
         return normalized if normalized in supported else default
 
     def _cached_state(self) -> _TemplateChargerCachedState:

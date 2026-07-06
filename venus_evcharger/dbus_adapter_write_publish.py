@@ -140,6 +140,7 @@ class DbusWriteSchedulerPublish(DbusWriteSchedulerCore):
             {
                 "kind": "user_command",
                 "source": "dbus-gui",
+                "origin": "gateway-local-write-callback",
                 "path": str(path),
                 "value": _json_ready(value),
                 "priority": "user",

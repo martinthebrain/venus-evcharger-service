@@ -65,15 +65,39 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
         )
 
     def test_private_reference_helpers_cover_remaining_contract_branches(self) -> None:
+        schemas = {"Named": {"properties": {"name": {"const": "set_mode"}}}}
+        with patch(
+            "venus_evcharger.control.openapi.build_control_api_openapi_spec",
+            return_value={"components": {"schemas": schemas}},
+        ):
+            self.assertIs(control_reference._control_api_component_schemas(), schemas)
+
         with patch("venus_evcharger.control.openapi.build_control_api_openapi_spec", return_value={}):
-            with self.assertRaisesRegex(TypeError, "must contain components mapping"):
+            with self.assertRaises(TypeError) as error:
                 control_reference._control_api_component_schemas()
+            self.assertEqual(str(error.exception), "Control API OpenAPI spec must contain components mapping")
         with patch(
             "venus_evcharger.control.openapi.build_control_api_openapi_spec",
             return_value={"components": {"schemas": []}},
         ):
-            with self.assertRaisesRegex(TypeError, "components must contain schemas mapping"):
+            with self.assertRaises(TypeError) as error:
                 control_reference._control_api_component_schemas()
+            self.assertEqual(str(error.exception), "Control API OpenAPI components must contain schemas mapping")
+
+        custom_schemas = {
+            "Bogus": object(),
+            "WithoutName": {"properties": {"value": {"type": "integer"}}},
+            "First": {"properties": {"name": {"const": "set_mode"}, "value": {"type": "integer"}}},
+            "Second": {"properties": {"name": {"const": "set_mode"}, "value": {"type": "number"}}},
+        }
+        with patch(
+            "venus_evcharger.control.reference._control_api_component_schemas",
+            return_value=custom_schemas,
+        ):
+            self.assertEqual(
+                control_reference._named_request_schemas_by_command(),
+                {"set_mode": [custom_schemas["First"], custom_schemas["Second"]]},
+            )
 
         self.assertIsNone(control_reference._named_schema_command_name(object()))
         self.assertIsNone(control_reference._named_schema_command_name({"properties": []}))
@@ -85,20 +109,54 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
         )
 
         self.assertEqual(control_reference._format_scalar(True), "`1`")
+        self.assertEqual(control_reference._format_scalar(False), "`0`")
+        self.assertEqual(control_reference._format_scalar("manual"), "`manual`")
         self.assertEqual(control_reference._format_scalar(1.5), "`1.5`")
+        self.assertEqual(control_reference._binary_variant_shape({"type": "integer", "enum": [0, 1]}), ("integer", (0, 1)))
+        self.assertEqual(control_reference._binary_variant_shape({"type": "integer", "enum": [1, 0]}), ("integer", (1, 0)))
+        self.assertEqual(control_reference._binary_variant_shape({"type": "boolean", "enum": "invalid"}), ("boolean", ()))
+        self.assertEqual(control_reference._binary_variant_shape({}), (None, ()))
+        self.assertEqual(control_reference._enum_label({"enum": ["a", "b"]}), "`a`, `b`")
+        self.assertIsNone(control_reference._enum_label({"enum": []}))
         self.assertEqual(control_reference._const_label({"const": "value"}), "`value`")
+        self.assertIsNone(control_reference._const_label({"const": ""}))
+        self.assertIsNone(control_reference._const_label({"const": None}))
         self.assertEqual(control_reference._schema_allowed_values({"const": "value"}), "`value`")
         self.assertEqual(control_reference._schema_allowed_values({"type": "string"}), "implementation-defined")
+        self.assertEqual(control_reference._joined_labels({"string"}, path_specific=True), "string")
         self.assertEqual(control_reference._joined_labels({"integer", "string"}, path_specific=False), "integer or string")
+        self.assertEqual(
+            control_reference._joined_labels({"string", "integer"}, path_specific=True),
+            "integer or string depending on `path`",
+        )
+        self.assertEqual(
+            control_reference._joined_labels({"string", "number", "integer"}, path_specific=True),
+            "integer, number, or string depending on `path`",
+        )
+        self.assertEqual(
+            control_reference._joined_labels({"custom", "number", "string"}, path_specific=False),
+            "number, string, or custom",
+        )
+        with patch.dict(control_reference._VALUE_TYPE_ORDER, {"late": 100}):
+            self.assertEqual(
+                control_reference._joined_labels({"late", "unknown"}, path_specific=False),
+                "unknown or late",
+            )
+
+        grouped = control_reference._named_request_schemas_by_command()
+        self.assertIn("set_mode", grouped)
+        self.assertTrue(all(isinstance(schema, dict) for schema in grouped["set_mode"]))
 
         self.assertEqual(
             control_reference._collected_required_fields(
                 [
                     {"required": ["name", "value"]},
+                    {"required": ["path", 7]},
+                    {"required": []},
                     {"required": "invalid"},
                 ]
             ),
-            {"name", "value"},
+            {"name", "value", "path", "7"},
         )
         self.assertEqual(
             control_reference._collected_value_contract_labels(
@@ -111,6 +169,56 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
         )
         self.assertIsNone(control_reference._schema_value_property({"properties": []}))
         self.assertIsNone(control_reference._schema_value_property({"properties": {"value": []}}))
+        self.assertEqual(control_reference._schema_value_property({"properties": {}}), {})
+        self.assertEqual(control_reference._schema_value_property({}), {})
+
+    def test_command_contract_summary_handles_single_and_path_specific_shapes(self) -> None:
+        with patch(
+            "venus_evcharger.control.reference._named_request_schemas_by_command",
+            return_value={
+                "single": [
+                    {
+                        "required": ["value", "name"],
+                        "properties": {"value": {"type": "integer", "minimum": 6}},
+                    }
+                ],
+                "multi": [
+                    {
+                        "required": ["value", "name", "path"],
+                        "properties": {"value": {"type": "number", "minimum": 0}},
+                    },
+                    {
+                        "required": ["value", "name", "path"],
+                        "properties": {"value": {"type": "string", "enum": ["auto", "manual"]}},
+                    },
+                ],
+            },
+        ):
+            self.assertEqual(
+                control_reference._command_contract_summary("single"),
+                (("name", "value"), "integer", "`>= 6`"),
+            )
+            self.assertEqual(
+                control_reference._command_contract_summary("multi"),
+                (("name", "path", "value"), "number or string depending on `path`", "path-specific schema"),
+            )
+
+        with (
+            patch(
+                "venus_evcharger.control.reference._named_request_schemas_by_command",
+                return_value={
+                    "single": [
+                        {
+                            "required": ["value"],
+                            "properties": {"value": {"type": "integer"}},
+                        }
+                    ],
+                },
+            ),
+            patch("venus_evcharger.control.reference._joined_labels", return_value="integer") as joined_labels,
+        ):
+            self.assertEqual(control_reference._command_contract_summary("single"), (("value",), "integer", "implementation-defined"))
+            joined_labels.assert_called_once_with({"integer"}, path_specific=False)
 
 
 if __name__ == "__main__":

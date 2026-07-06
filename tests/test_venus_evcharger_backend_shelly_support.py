@@ -415,6 +415,26 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         self.assertEqual(backend.settings.supported_phase_selections, ("P1",))
         self.assertEqual(backend._session, "new-session")
 
+    def test_shelly_backend_base_init_creates_session_when_service_has_no_session_attr(self) -> None:
+        service = SimpleNamespace(
+            host="192.168.1.40",
+            pm_component="Switch",
+            pm_id=0,
+            phase="P1",
+            max_current=10.0,
+            _last_voltage=230.0,
+            shelly_request_timeout_seconds=2.0,
+            username="",
+            password="",
+            use_digest_auth=False,
+        )
+
+        with patch("venus_evcharger.backend.shelly_support.requests.Session", return_value="created-session"):
+            backend = ShellyBackendBase(service)
+
+        self.assertIs(backend.service, service)
+        self.assertEqual(backend._session, "created-session")
+
     def test_shelly_backend_base_strips_config_path_before_loading(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "shelly.ini"

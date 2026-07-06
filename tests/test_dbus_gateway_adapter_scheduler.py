@@ -52,6 +52,7 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
     import venus_evcharger.dbus_adapter_health_history as health_history_module
     import venus_evcharger.dbus_adapter_health_queue as health_queue_module
     import venus_evcharger.dbus_adapter_health_slo as health_slo_module
+    import venus_evcharger.dbus_adapter_jsonl as jsonl_module
     import venus_evcharger.dbus_adapter_process_config as process_config_module
     import venus_evcharger.dbus_adapter_process_health as process_health_module
     import venus_evcharger.dbus_adapter_process_introspection as introspection_module
@@ -427,6 +428,38 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 thresholds=thresholds,
             ),
             1,
+        )
+        self.assertEqual(health_slo_module.runtime_pressure_state("ok", "protective"), "protective")
+        self.assertEqual(health_slo_module.runtime_pressure_state("constrained", "ok"), "slow")
+        self.assertEqual(health_slo_module.runtime_pressure_state("ok", "slow"), "slow")
+        self.assertEqual(health_slo_module.runtime_pressure_state("busy", "ok"), "congested")
+        self.assertEqual(health_slo_module.runtime_pressure_state("ok", "congested"), "congested")
+        self.assertEqual(health_slo_module.runtime_pressure_state("ok", "ok"), "ok")
+        self.assertEqual(
+            health_slo_module.regulated_publish_burst(
+                queue_age=70.0,
+                eventloop_gap_ms=1500.0,
+                base_burst=20,
+                thresholds=thresholds,
+                pressure_state="congested",
+            ),
+            10,
+        )
+        self.assertEqual(
+            health_slo_module.pressure_limited_publish_burst(99, base_burst=20, pressure_state="slow"),
+            5,
+        )
+        self.assertEqual(
+            health_slo_module.pressure_limited_publish_burst(99, base_burst=20, pressure_state="protective"),
+            1,
+        )
+        self.assertEqual(
+            health_slo_module.pressure_limited_queue_budgets(
+                {"gui-critical-publish": 50, "local-publish": 30, "diagnostic": 1},
+                base_local_publish_burst=20,
+                pressure_state="slow",
+            ),
+            {"gui-critical-publish": 5, "local-publish": 1, "diagnostic": 0},
         )
 
     def test_read_target_contract_requires_service_and_absolute_path(self) -> None:
@@ -1819,6 +1852,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             gui_command = adapter.core_commands.load_pending()[0][1]
             self.assertEqual(gui_command["kind"], "user_command")
             self.assertEqual(gui_command["source"], "dbus-gui")
+            self.assertEqual(gui_command["origin"], "gateway-local-write-callback")
             self.assertEqual(gui_command["path"], "/Mode")
             self.assertEqual(gui_command["value"], 2)
             self.assertEqual(gui_command["priority"], "user")
@@ -1939,6 +1973,8 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(default_scheduler.local_publish_tick_budget_seconds, 0.075)
             self.assertEqual(default_scheduler.startup_registration_batch_limit, 100)
             self.assertEqual(default_scheduler.startup_registration_tick_budget_seconds, 0.15)
+            self.assertEqual(default_adapter.command_lifecycle_max_bytes, 1_048_576)
+            self.assertEqual(default_adapter.health_log_max_bytes, 524_288)
             self.assertEqual(default_scheduler.last_processed_at, 0.0)
             self.assertEqual(default_scheduler.registered_paths, set())
             self.assertEqual(default_scheduler.last_values, {})
@@ -2168,6 +2204,21 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(scheduler.queue_class_budgets["local-publish"], 6)
             self.assertEqual(scheduler.dynamic_local_publish_burst_limit, 5)
 
+            scheduler.local_publish_burst_limit = 20
+            scheduler.set_dynamic_local_publish_burst(50, pressure_state="congested")
+            self.assertEqual(scheduler.dynamic_local_publish_burst_limit, 10)
+            self.assertEqual(scheduler.queue_class_budgets["gui-critical-publish"], 10)
+            self.assertEqual(scheduler.queue_class_budgets["local-publish"], 5)
+            self.assertEqual(scheduler.queue_class_budgets["diagnostic"], 0)
+            scheduler.set_dynamic_local_publish_burst(50, pressure_state="slow")
+            self.assertEqual(scheduler.dynamic_local_publish_burst_limit, 5)
+            self.assertEqual(scheduler.queue_class_budgets["gui-critical-publish"], 5)
+            self.assertEqual(scheduler.queue_class_budgets["local-publish"], 1)
+            scheduler.set_dynamic_local_publish_burst(50, pressure_state="protective")
+            self.assertEqual(scheduler.dynamic_local_publish_burst_limit, 1)
+            self.assertEqual(scheduler.queue_class_budgets["gui-critical-publish"], 1)
+            self.assertEqual(scheduler.queue_class_budgets["local-publish"], 1)
+
             scheduler._budget_events.clear()
             scheduler._budget_events.extend(
                 [
@@ -2245,6 +2296,16 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(json.loads(lifecycle_lines[0])["at"], 220.0)
             self.assertEqual(json.loads(lifecycle_lines[0])["queue_class"], "remote-write")
             self.assertEqual(json.loads(lifecycle_lines[1])["queue_class"], "gui-critical-publish")
+
+            retained_lifecycle_path = Path(temp_dir) / "logs" / "write-health-retained.jsonl"
+            adapter.command_lifecycle_path = str(retained_lifecycle_path)
+            adapter.command_lifecycle_max_bytes = 180
+            with patch.object(write_health_module.time, "time", return_value=221.0):
+                scheduler.record_lifecycle({"kind": "set_value", "queue_class": "remote-write", "id": "old"}, "applied")
+                scheduler.record_lifecycle({"kind": "publish_value", "path": "/Mode", "id": "new"}, "queued")
+            retained_lines = retained_lifecycle_path.read_text(encoding="utf-8").splitlines()
+            self.assertLessEqual(retained_lifecycle_path.stat().st_size, 180)
+            self.assertEqual(json.loads(retained_lines[-1])["queue_class"], "gui-critical-publish")
 
             with patch.object(builtins, "open", side_effect=OSError("full")), patch.object(
                 write_health_module.logging,
@@ -2522,7 +2583,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 empty_adapter.write_scheduler.record_lifecycle({"kind": "noop"}, "dropped")
             empty_adapter.command_lifecycle_path = "lifecycle-without-dir.jsonl"
             lifecycle_handle = unittest.mock.mock_open()
-            with patch.object(write_health_module.os.path, "dirname", return_value=""), patch.object(
+            with patch.object(jsonl_module.os.path, "dirname", return_value=""), patch.object(
                 builtins, "open", lifecycle_handle
             ):
                 empty_adapter.write_scheduler.record_lifecycle({"kind": "noop"}, "queued")
@@ -4423,7 +4484,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
             adapter.apply_slo_regulation()
 
-            self.assertGreater(adapter.write_scheduler.dynamic_local_publish_burst_limit, 2)
+            self.assertEqual(adapter.write_scheduler.dynamic_local_publish_burst_limit, 1)
             self.assertEqual(adapter.read_scheduler.next_read_at["grid_power_w"], 0.0)
             self.assertEqual(adapter.read_scheduler.next_read_at["pv_power_w"], 0.0)
             self.assertEqual(adapter.read_scheduler.next_read_at["battery_soc"], 0.0)
@@ -4610,6 +4671,31 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(lines[1]["state"], "protective")
             self.assertEqual(lines[1]["timeouts_60s"], 9)
 
+    def test_jsonl_retention_bounds_ram_backed_gateway_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / "nested" / "events.jsonl"
+            jsonl_module.append_jsonl(str(log_path), {"idx": 0, "payload": "seed"}, max_bytes=0)
+            original = log_path.read_text(encoding="utf-8")
+            jsonl_module.retain_jsonl_tail(str(log_path), max_bytes=log_path.stat().st_size + 100)
+            self.assertEqual(log_path.read_text(encoding="utf-8"), original)
+
+            jsonl_module.retain_jsonl_tail(str(Path(temp_dir) / "missing.jsonl"), max_bytes=1)
+            self.assertEqual(jsonl_module.trim_target_bytes(4), 3)
+            self.assertEqual(jsonl_module.drop_partial_first_jsonl_line(b"partial"), b"partial")
+            self.assertEqual(jsonl_module.drop_partial_first_jsonl_line(b"half\nwhole\n"), b"whole\n")
+
+            for idx in range(1, 10):
+                jsonl_module.append_jsonl(str(log_path), {"idx": idx, "payload": "x" * 20}, max_bytes=160)
+            retained_lines = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+            self.assertLessEqual(log_path.stat().st_size, 160)
+            self.assertEqual(retained_lines[-1]["idx"], 9)
+            self.assertGreater(retained_lines[0]["idx"], 0)
+
+            exact_path = Path(temp_dir) / "exact.jsonl"
+            exact_path.write_bytes(b"one\n")
+            jsonl_module.rewrite_jsonl_tail(str(exact_path), target_bytes=99, size=4)
+            self.assertEqual(exact_path.read_bytes(), b"one\n")
+
     def test_health_history_log_records_small_operational_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             health_log = Path(temp_dir) / "run" / "health-history.jsonl"
@@ -4633,7 +4719,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.health_log_path = "health-history-without-dir.jsonl"
             adapter._last_health_log_monotonic = 0.0
             log_handle = unittest.mock.mock_open()
-            with patch.object(health_history_module.os.path, "dirname", return_value=""), patch.object(
+            with patch.object(jsonl_module.os.path, "dirname", return_value=""), patch.object(
                 builtins, "open", log_handle
             ):
                 adapter.append_health_log({"state": "ok"})

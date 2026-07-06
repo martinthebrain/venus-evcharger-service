@@ -6,7 +6,7 @@ from __future__ import annotations
 import configparser
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Any, Protocol, TypeVar
 
 from venus_evcharger.core.contracts import optional_text
 
@@ -90,6 +90,30 @@ class _LegacyTopologyRuntime:
     charger_path: str | None
 
 
+class _TopologySection(Protocol):
+    """Minimal section surface used by the topology parser."""
+
+    @property
+    def name(self) -> str:
+        """Return the source section name."""
+
+    def get(self, key: str, fallback: Any = None) -> object | None:
+        """Return one section value using the parser's key lookup rules."""
+
+
+_TopologySectionLike = _TopologySection | configparser.SectionProxy
+
+
+class _TopologyConfigSections(Protocol):
+    """Minimal ConfigParser surface used by topology role parsers."""
+
+    def has_section(self, name: str) -> bool:
+        """Return whether a section exists."""
+
+    def __getitem__(self, key: str) -> _TopologySectionLike:
+        """Return one parsed config section."""
+
+
 def parse_topology_config(config: configparser.ConfigParser) -> EvChargerTopologyConfig:
     """Parse one normalized topology config from INI sections."""
     topology_section = _required_section(config, "Topology")
@@ -113,8 +137,8 @@ def legacy_topology_from_config(config: configparser.ConfigParser) -> EvChargerT
     """Translate one legacy wallbox config into the normalized topology model."""
     runtime = _legacy_runtime_values(config)
     policy = PolicyConfig(
-        mode=_legacy_policy_mode(runtime.defaults.get("Mode", "0")),
-        phase=str(runtime.defaults.get("Phase", "L1")).strip() or "L1",
+        mode=_legacy_policy_mode(runtime.defaults.get("Mode")),
+        phase=_legacy_phase(runtime.defaults.get("Phase")),
     )
     charger = _legacy_charger(runtime.charger_type_raw, runtime.charger_path)
     parsed = _legacy_topology_config(runtime, charger, policy)
@@ -193,20 +217,20 @@ def _validate_policy(config: EvChargerTopologyConfig) -> None:
         raise TopologyConfigError("auto policy requires a non-empty measurement mode")
 
 
-def _required_section(config: configparser.ConfigParser, name: str) -> configparser.SectionProxy:
+def _required_section(config: _TopologyConfigSections, name: str) -> _TopologySectionLike:
     if not config.has_section(name):
         raise TopologyConfigError(f"missing required section [{name}]")
     return config[name]
 
 
-def _required_value(section: configparser.SectionProxy, key: str) -> str:
+def _required_value(section: _TopologySectionLike, key: str) -> str:
     value = _optional_text(section.get(key))
     if value is None:
         raise TopologyConfigError(f"missing required key {section.name}.{key}")
     return value
 
 
-def _optional_actuator(config: configparser.ConfigParser) -> ActuatorConfig | None:
+def _optional_actuator(config: _TopologyConfigSections) -> ActuatorConfig | None:
     if not config.has_section("Actuator"):
         return None
     section = config["Actuator"]
@@ -216,7 +240,7 @@ def _optional_actuator(config: configparser.ConfigParser) -> ActuatorConfig | No
     )
 
 
-def _optional_measurement(config: configparser.ConfigParser) -> MeasurementConfig | None:
+def _optional_measurement(config: _TopologyConfigSections) -> MeasurementConfig | None:
     if not config.has_section("Measurement"):
         return None
     section = config["Measurement"]
@@ -225,11 +249,11 @@ def _optional_measurement(config: configparser.ConfigParser) -> MeasurementConfi
         type=_measurement_type(_required_value(section, "Type")),
         config_path=_optional_text(section.get("ConfigPath")),
         reference_watts=None if reference_text is None else float(reference_text),
-        allow_auto_estimate=_as_bool(section.get("AllowAutoEstimate", "0")),
+        allow_auto_estimate=_as_bool(section.get("AllowAutoEstimate")),
     )
 
 
-def _optional_charger(config: configparser.ConfigParser) -> ChargerConfig | None:
+def _optional_charger(config: _TopologyConfigSections) -> ChargerConfig | None:
     if not config.has_section("Charger"):
         return None
     section = config["Charger"]
@@ -239,13 +263,14 @@ def _optional_charger(config: configparser.ConfigParser) -> ChargerConfig | None
     )
 
 
-def _policy(config: configparser.ConfigParser) -> PolicyConfig:
+def _policy(config: _TopologyConfigSections) -> PolicyConfig:
     if not config.has_section("Policy"):
         return PolicyConfig()
     section = config["Policy"]
-    mode = _optional_text(section.get("Mode")) or "manual"
+    mode_text = _optional_text(section.get("Mode"))
+    mode = "manual" if mode_text is None else _policy_mode(mode_text)
     phase = _optional_text(section.get("Phase")) or "L1"
-    return PolicyConfig(mode=_policy_mode(mode), phase=phase)
+    return PolicyConfig(mode=mode, phase=phase)
 
 
 def _optional_text(value: object) -> str | None:
@@ -265,6 +290,10 @@ def _legacy_policy_mode(value: object) -> PolicyMode:
     return "manual"
 
 
+def _legacy_phase(value: object) -> str:
+    return _optional_text(value) or "L1"
+
+
 def _legacy_runtime_values(config: configparser.ConfigParser) -> _LegacyTopologyRuntime:
     """Return normalized legacy config fields used to build one topology."""
     defaults = _default_mapping(config)
@@ -274,9 +303,9 @@ def _legacy_runtime_values(config: configparser.ConfigParser) -> _LegacyTopology
     return _LegacyTopologyRuntime(
         defaults=defaults,
         host=str(defaults.get("Host", "")).strip(),
-        meter_type=str(backends.get("MeterType", "shelly_meter")).strip().lower(),
-        switch_type=str(backends.get("SwitchType", "shelly_contactor_switch")).strip().lower(),
-        charger_type_raw=str(backends.get("ChargerType", "")).strip().lower(),
+        meter_type=_legacy_text_value(backends, "MeterType", "shelly_meter"),
+        switch_type=_legacy_text_value(backends, "SwitchType", "shelly_contactor_switch"),
+        charger_type_raw=_legacy_text_value(backends, "ChargerType", ""),
         meter_path=_optional_text(backends.get("MeterConfigPath")),
         switch_path=_optional_text(backends.get("SwitchConfigPath")),
         charger_path=_optional_text(backends.get("ChargerConfigPath")),
@@ -308,14 +337,12 @@ def _legacy_topology_config(
             topology=TopologyConfig(type="simple_relay"),
             actuator=_legacy_actuator_config(runtime.switch_type, runtime.switch_path, runtime.host),
             measurement=_legacy_measurement_config(runtime.meter_type, runtime.meter_path, runtime.host),
-            charger=None,
             policy=policy,
         )
     if runtime.switch_type == "none":
         return EvChargerTopologyConfig(
             topology=TopologyConfig(type="native_device"),
-            actuator=None,
-            measurement=_legacy_native_measurement_config(runtime.meter_type, runtime.meter_path),
+            measurement=_legacy_native_measurement_config(runtime.meter_path),
             charger=charger,
             policy=policy,
         )
@@ -375,12 +402,17 @@ def _legacy_measurement_config(meter_type: str, meter_path: str | None, host: st
     return MeasurementConfig(type="none")
 
 
-def _legacy_native_measurement_config(meter_type: str, meter_path: str | None) -> MeasurementConfig:
-    if meter_type == "none":
-        return MeasurementConfig(type="charger_native")
+def _legacy_native_measurement_config(meter_path: str | None) -> MeasurementConfig:
     if meter_path is not None:
         return MeasurementConfig(type="external_meter", config_path=meter_path)
     return MeasurementConfig(type="charger_native")
+
+
+def _legacy_text_value(mapping: Mapping[str, object], key: str, fallback: str) -> str:
+    raw = mapping.get(key)
+    if raw is None:
+        return fallback
+    return str(raw).strip().lower()
 
 
 def _legacy_hybrid_measurement_config(meter_type: str, meter_path: str | None, charger_type: str) -> MeasurementConfig:

@@ -4,6 +4,7 @@ import unittest
 
 from venus_evcharger.control import build_control_api_openapi_spec
 from venus_evcharger.control import openapi
+from venus_evcharger.control import openapi_helpers
 
 
 class TestVenusEvchargerControlOpenApi(unittest.TestCase):
@@ -13,6 +14,10 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             openapi._string_schema(enum=("b", "a"), default="a"),
             {"type": "string", "enum": ["a", "b"], "default": "a"},
         )
+        self.assertEqual(
+            openapi_helpers._string_schema(enum=(str(item) for item in (2, 1)), default="1"),
+            {"type": "string", "enum": ["1", "2"], "default": "1"},
+        )
 
     def test_boolean_schema_supports_optional_default(self) -> None:
         self.assertEqual(openapi._boolean_schema(), {"type": "boolean"})
@@ -20,6 +25,7 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             openapi._boolean_schema(default=True),
             {"type": "boolean", "default": True},
         )
+        self.assertEqual(openapi._boolean_schema(default=False), {"type": "boolean", "default": False})
 
     def test_integer_schema_supports_optional_minimum(self) -> None:
         self.assertEqual(openapi._integer_schema(), {"type": "integer"})
@@ -30,6 +36,10 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
         self.assertEqual(
             openapi._integer_schema(enum=(2, 0, 1)),
             {"type": "integer", "enum": [0, 1, 2]},
+        )
+        self.assertEqual(
+            openapi._integer_schema(minimum=1, enum=(3, 1, 2)),
+            {"type": "integer", "minimum": 1, "enum": [1, 2, 3]},
         )
 
     def test_number_schema_supports_optional_minimum(self) -> None:
@@ -42,14 +52,73 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             openapi._number_schema(exclusive_minimum=0.0, maximum=1.0),
             {"type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0},
         )
+        self.assertEqual(
+            openapi._number_schema(minimum=0.0, exclusive_minimum=0.5, maximum=16.0),
+            {"type": "number", "minimum": 0.0, "exclusiveMinimum": 0.5, "maximum": 16.0},
+        )
 
     def test_object_schema_and_named_command_schema_cover_optional_branches(self) -> None:
+        item_schema = {"type": "string"}
+        array_schema = openapi_helpers._array_schema(item_schema)
+        item_schema["type"] = "integer"
+        self.assertEqual(array_schema, {"type": "array", "items": {"type": "string"}})
+
+        self.assertEqual(openapi_helpers._ref("ControlError"), {"$ref": "#/components/schemas/ControlError"})
+        self.assertEqual(
+            openapi_helpers._json_response("Problem", "ControlError"),
+            {
+                "description": "Problem",
+                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ControlError"}}},
+            },
+        )
+        self.assertEqual(
+            openapi_helpers._const_schema("set_mode"),
+            {"const": "set_mode", "type": "string"},
+        )
+        self.assertEqual(
+            openapi_helpers._boolean_or_binary_integer_schema(),
+            {"oneOf": [{"type": "boolean"}, {"type": "integer", "enum": [0, 1]}]},
+        )
         self.assertEqual(
             openapi._object_schema({"a": {"type": "string"}}, required=(), additional_properties=False),
             {
                 "type": "object",
                 "properties": {"a": {"type": "string"}},
                 "additionalProperties": False,
+            },
+        )
+        self.assertEqual(
+            openapi._object_schema(
+                {"a": {"type": "string"}},
+                required=(field for field in ("a", "b")),
+                additional_properties={"type": "string"},
+            ),
+            {
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+                "additionalProperties": {"type": "string"},
+                "required": ["a", "b"],
+            },
+        )
+        self.assertEqual(
+            openapi._object_schema({"a": {"type": "string"}}),
+            {
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+                "additionalProperties": False,
+            },
+        )
+        self.assertEqual(
+            openapi_helpers._etag_headers(),
+            {
+                "ETag": {
+                    "description": "Current local state token for optimistic concurrency.",
+                    "schema": {"type": "string"},
+                },
+                "X-State-Token": {
+                    "description": "Current local state token mirrored as a plain header value.",
+                    "schema": {"type": "string"},
+                },
             },
         )
         self.assertEqual(
@@ -71,9 +140,20 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
     def test_openapi_spec_exposes_expected_paths_security_and_schemas(self) -> None:
         spec = build_control_api_openapi_spec()
 
+        self.assertEqual(sorted(spec), ["components", "info", "openapi", "paths", "servers"])
         self.assertEqual(spec["openapi"], "3.1.0")
-        self.assertEqual(spec["info"]["version"], "v1")
-        self.assertEqual(spec["servers"][0]["url"], "http://127.0.0.1:8765")
+        self.assertEqual(
+            spec["info"],
+            {
+                "title": "Venus EV Charger Service Local API",
+                "version": "v1",
+                "description": "Local command, state, and event API for the Venus EV charger service.",
+            },
+        )
+        self.assertEqual(
+            spec["servers"],
+            [{"url": "http://127.0.0.1:8765"}, {"url": "http+unix://localhost"}],
+        )
 
         paths = spec["paths"]
         self.assertIn("/v1/openapi.json", paths)
@@ -156,8 +236,14 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
         self.assertIn("rate_limited", error_schema["properties"]["code"]["enum"])
         self.assertIn("validation_error", error_schema["properties"]["code"]["enum"])
         self.assertEqual(
-            spec["components"]["securitySchemes"]["BearerAuth"]["scheme"],
-            "bearer",
+            spec["components"]["securitySchemes"],
+            {
+                "BearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "opaque-token",
+                }
+            },
         )
 
     def test_openapi_projection_matches_golden_snapshot(self) -> None:

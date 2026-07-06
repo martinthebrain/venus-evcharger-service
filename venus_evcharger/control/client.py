@@ -180,7 +180,7 @@ class LocalControlApiClient:
         try:
             connection.request(method, request_target, body=body, headers=request_headers)
             response = connection.getresponse()
-            response_body = response.read().decode("utf-8")
+            response_body = response.read().decode()
             return ControlApiClientResponse(
                 status=int(response.status),
                 headers={key: value for key, value in response.getheaders()},
@@ -253,7 +253,7 @@ class LocalControlApiClient:
         normalized_path = path if path.startswith("/") else f"/{path}"
         if not query:
             return normalized_path
-        return f"{normalized_path}?{urlencode(self._normalized_query_items(query), doseq=True)}"
+        return f"{normalized_path}?{urlencode(self._normalized_query_items(query))}"
 
     @staticmethod
     def _normalized_query_items(query: Mapping[str, Any]) -> list[tuple[str, Any]]:
@@ -294,7 +294,7 @@ class LocalControlApiClient:
         payload = response.json()
         state = payload.get("state")
         if isinstance(state, dict):
-            token = state.get("state_token", "")
+            token = state.get("state_token")
             if isinstance(token, str):
                 return token.strip().strip('"')
         return ""

@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 sys.modules["vedbus"] = MagicMock()
 
@@ -183,12 +183,13 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
         self.assertEqual(pm_status, {"apower": 1000.0})
 
     def test_software_update_log_handle_skips_directory_creation_for_flat_path(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(temp_dir)
-                handle = _UpdateCycleSoftwareUpdate._software_update_log_handle("software-update.log")
-                handle.close()
-                self.assertTrue(os.path.exists("software-update.log"))
-            finally:
-                os.chdir(old_cwd)
+        opener = mock_open()
+        with (
+            patch("builtins.open", opener),
+            patch("venus_evcharger.update.software_update_run.os.makedirs") as makedirs,
+        ):
+            handle = _UpdateCycleSoftwareUpdate._software_update_log_handle("software-update.log")
+
+        makedirs.assert_not_called()
+        opener.assert_called_once_with("software-update.log", "ab")
+        self.assertIs(handle, opener())

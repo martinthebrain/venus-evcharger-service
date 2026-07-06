@@ -2,6 +2,8 @@
 import configparser
 from unittest.mock import patch
 
+from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS
+
 from tests.venus_evcharger_publisher_support import (
     DbusPublishController,
     DbusPublishControllerTestCase,
@@ -678,6 +680,69 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         self.assertEqual(controller._phase_switch_lockout_reason(expired_lockout, 100.0), "")
         self.assertEqual(controller._phase_supported_effective(expired_lockout, 100.0), "P1,P1_P2")
         self.assertEqual(controller._phase_degraded_active(expired_lockout, 100.0), 0)
+
+    def test_scheduled_snapshot_passes_explicit_schedule_boundary_contract(self) -> None:
+        controller = DbusPublishController(SimpleNamespace(), self._age_seconds)
+        service = SimpleNamespace(
+            virtual_mode=2,
+            auto_schedule_timezone="Europe/Berlin",
+            auto_month_windows={7: ((9, 15), (17, 45))},
+            auto_scheduled_enabled_days="Sat,Sun",
+            auto_scheduled_night_start_delay_seconds=4500.0,
+            auto_scheduled_latest_end_time="05:45",
+        )
+        scheduled_when = object()
+        expected_snapshot = object()
+
+        with (
+            patch(
+                "venus_evcharger.publish.dbus_config.local_datetime_from_timestamp",
+                return_value=scheduled_when,
+            ) as local_datetime,
+            patch(
+                "venus_evcharger.publish.dbus_config.scheduled_mode_snapshot",
+                return_value=expected_snapshot,
+            ) as scheduled_snapshot,
+        ):
+            snapshot = controller._scheduled_snapshot(service, 1782932400.0)
+
+        self.assertIs(snapshot, expected_snapshot)
+        local_datetime.assert_called_once_with(1782932400.0, "Europe/Berlin")
+        scheduled_snapshot.assert_called_once_with(
+            scheduled_when,
+            {7: ((9, 15), (17, 45))},
+            "Sat,Sun",
+            delay_seconds=4500.0,
+            latest_end_time="05:45",
+        )
+
+    def test_scheduled_snapshot_passes_default_schedule_boundary_contract(self) -> None:
+        controller = DbusPublishController(SimpleNamespace(), self._age_seconds)
+        service = SimpleNamespace(virtual_mode=2)
+        scheduled_when = object()
+        expected_snapshot = object()
+
+        with (
+            patch(
+                "venus_evcharger.publish.dbus_config.local_datetime_from_timestamp",
+                return_value=scheduled_when,
+            ) as local_datetime,
+            patch(
+                "venus_evcharger.publish.dbus_config.scheduled_mode_snapshot",
+                return_value=expected_snapshot,
+            ) as scheduled_snapshot,
+        ):
+            snapshot = controller._scheduled_snapshot(service, 1719817200.0)
+
+        self.assertIs(snapshot, expected_snapshot)
+        local_datetime.assert_called_once_with(1719817200.0, "UTC")
+        scheduled_snapshot.assert_called_once_with(
+            scheduled_when,
+            None,
+            DEFAULT_SCHEDULED_ENABLED_DAYS,
+            delay_seconds=3600.0,
+            latest_end_time=None,
+        )
 
     def test_publish_config_paths_uses_config_transaction_contract(self) -> None:
         service = SimpleNamespace(_dbus_slow_publish_interval_seconds=12.5)

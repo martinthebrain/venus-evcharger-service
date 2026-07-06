@@ -27,6 +27,7 @@ class DbusWriteSchedulerAdapter(Protocol):  # pragma: no cover
     circuit: DbusCircuitBreaker
     commands: DbusCommandInbox
     command_lifecycle_path: str
+    command_lifecycle_max_bytes: int
     config: configparser.ConfigParser
     connection: DbusConnectionManager
     core_commands: DbusCommandInbox

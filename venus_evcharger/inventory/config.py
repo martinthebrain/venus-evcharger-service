@@ -10,7 +10,7 @@ for the wizard and for hand-edited inventory files.
 from __future__ import annotations
 
 import configparser
-from typing import NoReturn, Protocol
+from typing import Any, NoReturn, Protocol
 
 from venus_evcharger.core.contracts import optional_text
 
@@ -38,16 +38,18 @@ _CAPABILITY_KINDS = {"switch", "meter", "charger"}
 _SWITCHING_MODES = {"direct", "contactor"}
 _BINDING_ROLES = {"actuation", "measurement", "charger"}
 
+class _InventorySection(Protocol):
+    @property
+    def name(self) -> str: ...
+    def get(self, key: str, fallback: Any = None) -> object | None: ...
+
+
+_InventorySectionLike = _InventorySection | configparser.SectionProxy
+
 
 class _InventoryConfigSections(Protocol):
-    """Minimal ConfigParser surface needed by section parsers."""
-
-    def sections(self) -> list[str]:
-        """Return available section names."""
-
-    def __getitem__(self, key: str) -> configparser.SectionProxy:
-        """Return one parsed config section."""
-
+    def sections(self) -> list[str]: ...
+    def __getitem__(self, key: str) -> _InventorySectionLike: ...
 
 def parse_device_inventory_config(config: configparser.ConfigParser) -> DeviceInventory:
     """Parse one normalized device inventory from config sections."""
@@ -128,11 +130,11 @@ def _capabilities(
             adapter_type=_required_text(section, "AdapterType"),
             supported_phases=_phase_labels(_required_text(section, "SupportedPhases")),
             channel=_optional_text(section.get("Channel")),
-            measures_power=_as_bool(section.get("MeasuresPower", "0")),
-            measures_energy=_as_bool(section.get("MeasuresEnergy", "0")),
+            measures_power=_section_bool(section, "MeasuresPower"),
+            measures_energy=_section_bool(section, "MeasuresEnergy"),
             switching_mode=_optional_switching_mode(section.get("SwitchingMode")),
-            supports_feedback=_as_bool(section.get("SupportsFeedback", "0")),
-            supports_phase_selection=_as_bool(section.get("SupportsPhaseSelection", "0")),
+            supports_feedback=_section_bool(section, "SupportsFeedback"),
+            supports_phase_selection=_section_bool(section, "SupportsPhaseSelection"),
         )
         profile_capabilities = capabilities_by_profile.setdefault(profile_id, {})
         if capability_id in profile_capabilities:
@@ -158,7 +160,7 @@ def _devices(config: _InventoryConfigSections) -> dict[str, DeviceInstance]:
             profile_id=_required_text(section, "Profile"),
             label=_required_text(section, "Label"),
             endpoint=_optional_text(section.get("Endpoint")),
-            enabled=_as_bool(section.get("Enabled", "1")),
+            enabled=_section_bool(section, "Enabled", default=True),
             notes=_optional_text(section.get("Notes")),
         )
     return devices
@@ -462,7 +464,7 @@ def _raise_literal_choice_error(value: str, allowed: set[str], label: str) -> No
     )
 
 
-def _required_text(section: configparser.SectionProxy, key: str) -> str:
+def _required_text(section: _InventorySectionLike, key: str) -> str:
     value = _optional_text(section.get(key))
     if value is None:
         raise DeviceInventoryConfigError(f"missing required key {section.name}.{key}")
@@ -473,11 +475,18 @@ def _optional_text(value: object) -> str | None:
     return optional_text(value)
 
 
+def _section_bool(section: _InventorySectionLike, key: str, *, default: bool = False) -> bool:
+    value = section.get(key)
+    return default if value is None else _as_bool(value)
+
+
 def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _suffix(value: str, prefix: str) -> str:
+    if not value.startswith(prefix):
+        raise DeviceInventoryConfigError(f"invalid section name '{value}'")
     remainder = value[len(prefix) :].strip()
     if not remainder:
         raise DeviceInventoryConfigError(f"invalid section name '{value}'")

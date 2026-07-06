@@ -3,17 +3,52 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from .template_support import (
     TemplateHttpBackendBase,
     TemplateAuthSettings,
     config_section,
+    enabled_state_from_text,
     json_path_value,
     load_template_config,
     load_template_auth_settings,
     normalize_http_method,
     resolved_url,
+)
+from .template_switch_contract import (
+    ADAPTER_BASE_URL_KEY,
+    CAPABILITIES_MAX_DIRECT_POWER_KEY,
+    CAPABILITIES_PHASE_SELECTIONS_KEY,
+    CAPABILITIES_REQUIRES_PAUSE_KEY,
+    CAPABILITIES_SWITCHING_MODE_KEY,
+    DEFAULT_COMMAND_METHOD,
+    DEFAULT_ENABLED_PATH,
+    DEFAULT_PHASE_JSON_TEMPLATE,
+    DEFAULT_PHASE_METHOD,
+    DEFAULT_STATE_METHOD,
+    DEFAULT_SWITCH_CONFIG_PATH,
+    DEFAULT_SWITCH_PHASE_SELECTION,
+    DEFAULT_SWITCH_PHASE_SELECTIONS,
+    DEFAULT_SWITCHING_MODE,
+    REQUEST_JSON_TEMPLATE_KEY,
+    REQUEST_METHOD_KEY,
+    REQUEST_URL_KEY,
+    STATE_RESPONSE_ENABLED_KEY,
+    STATE_RESPONSE_FEEDBACK_CLOSED_KEY,
+    STATE_RESPONSE_INTERLOCK_OK_KEY,
+    STATE_RESPONSE_PHASE_SELECTION_KEY,
+    SWITCH_CONTEXT_ENABLED_INT,
+    SWITCH_CONTEXT_ENABLED_JSON,
+    SWITCH_CONTEXT_ENABLED_TEXT,
+    SWITCH_CONTEXT_PHASE_SELECTION,
+    SWITCH_FALSE_INT,
+    SWITCH_FALSE_JSON,
+    SWITCH_FALSE_TEXT,
+    SWITCH_TRUE_INT,
+    SWITCH_TRUE_JSON,
+    SWITCH_TRUE_TEXT,
 )
 from .config_file import backend_request_timeout_seconds
 from .models import (
@@ -22,6 +57,7 @@ from .models import (
     SwitchState,
     SwitchingMode,
     normalize_phase_selection,
+    normalize_phase_selection_or_none,
     normalize_phase_selection_tuple,
     normalize_switching_mode,
 )
@@ -64,7 +100,7 @@ class _TemplateSwitchUrls:
     phase_url: str | None
 
 
-def _template_switch_timeout_seconds(adapter: object, service: object) -> float:
+def _template_switch_timeout_seconds(adapter: Mapping[str, object], service: object) -> float:
     """Return the normalized timeout used by the template-switch backend."""
     return backend_request_timeout_seconds(adapter, service)
 
@@ -77,42 +113,47 @@ def _template_switch_urls(
 ) -> _TemplateSwitchUrls:
     """Return resolved HTTP endpoints for state, command, and optional phase control."""
     return _TemplateSwitchUrls(
-        state_url=resolved_url(base_url, getattr(state_request, "get")("Url", "")),
-        command_url=resolved_url(base_url, getattr(command_request, "get")("Url", "")),
-        phase_url=resolved_url(base_url, getattr(phase_request, "get")("Url", "")) or None,
+        state_url=resolved_url(base_url, _section_text(state_request, REQUEST_URL_KEY)),
+        command_url=resolved_url(base_url, _section_text(command_request, REQUEST_URL_KEY)),
+        phase_url=resolved_url(base_url, _section_text(phase_request, REQUEST_URL_KEY)) or None,
     )
+
+
+def _section_text(section: object, key: str, default: str = "") -> str:
+    """Return one stripped config value as concrete text."""
+    return str(getattr(section, "get")(key, default)).strip()
 
 
 def _template_switch_enabled_path(state_response: object) -> str:
     """Return the required enabled-state response path."""
-    return str(getattr(state_response, "get")("EnabledPath", "enabled")).strip()
+    return _section_text(state_response, STATE_RESPONSE_ENABLED_KEY, DEFAULT_ENABLED_PATH)
 
 
 def _template_switch_phase_path(state_response: object) -> str | None:
     """Return the optional phase-selection response path."""
-    return str(getattr(state_response, "get")("PhaseSelectionPath", "")).strip() or None
+    return _section_text(state_response, STATE_RESPONSE_PHASE_SELECTION_KEY) or None
 
 
 def _template_switch_feedback_closed_path(state_response: object) -> str | None:
     """Return the optional feedback-closed response path."""
-    return str(getattr(state_response, "get")("FeedbackClosedPath", "")).strip() or None
+    return _section_text(state_response, STATE_RESPONSE_FEEDBACK_CLOSED_KEY) or None
 
 
 def _template_switch_interlock_ok_path(state_response: object) -> str | None:
     """Return the optional interlock-ok response path."""
-    return str(getattr(state_response, "get")("InterlockOkPath", "")).strip() or None
+    return _section_text(state_response, STATE_RESPONSE_INTERLOCK_OK_KEY) or None
 
 
-def _template_switch_json_template(section: object, key: str = "JsonTemplate") -> str | None:
+def _template_switch_json_template(section: object, key: str = REQUEST_JSON_TEMPLATE_KEY) -> str | None:
     """Return one optional JSON template from the given config section."""
-    return str(getattr(section, "get")(key, "")).strip() or None
+    return _section_text(section, key) or None
 
 
 def _template_switch_phase_json_template(phase_request: object, phase_url: str | None) -> str | None:
     """Return the optional phase-selection JSON template when phase control is enabled."""
     if not phase_url:
         return None
-    return str(getattr(phase_request, "get")("JsonTemplate", '{"phase_selection": "$phase_selection"}')).strip()
+    return _section_text(phase_request, REQUEST_JSON_TEMPLATE_KEY, DEFAULT_PHASE_JSON_TEMPLATE)
 
 
 def _validate_template_switch_settings(
@@ -165,16 +206,13 @@ def load_template_switch_settings(service: object, config_path: str) -> Template
     command_request = config_section(parser, "CommandRequest")
     phase_request = config_section(parser, "PhaseRequest")
 
-    base_url = str(adapter.get("BaseUrl", "")).strip()
-    supported_phase_selections = normalize_phase_selection_tuple(
-        capabilities.get("SupportedPhaseSelections", "P1"),
-        ("P1",),
-    )
-    switching_mode = normalize_switching_mode(capabilities.get("SwitchingMode", "direct"))
+    base_url = str(adapter.get(ADAPTER_BASE_URL_KEY, "")).strip()
+    supported_phase_selections = normalize_phase_selection_tuple(capabilities.get(CAPABILITIES_PHASE_SELECTIONS_KEY))
+    switching_mode = normalize_switching_mode(capabilities.get(CAPABILITIES_SWITCHING_MODE_KEY))
     max_direct_switch_power_w = (
         None
         if switching_mode == "contactor"
-        else finite_float_or_none(capabilities.get("MaxDirectSwitchPowerWatts", None))
+        else finite_float_or_none(capabilities.get(CAPABILITIES_MAX_DIRECT_POWER_KEY))
     )
     urls = _template_switch_urls(base_url, state_request, command_request, phase_request)
     state_enabled_path = _template_switch_enabled_path(state_response)
@@ -190,22 +228,28 @@ def load_template_switch_settings(service: object, config_path: str) -> Template
         base_url=base_url,
         auth_settings=load_template_auth_settings(adapter, service),
         timeout_seconds=_template_switch_timeout_seconds(adapter, service),
-        state_method=normalize_http_method(state_request.get("Method", "GET"), "GET"),
+        state_method=normalize_http_method(state_request.get(REQUEST_METHOD_KEY), DEFAULT_STATE_METHOD),
         state_url=urls.state_url,
         state_enabled_path=state_enabled_path,
         state_phase_selection_path=state_phase_selection_path,
         state_feedback_closed_path=state_feedback_closed_path,
         state_interlock_ok_path=state_interlock_ok_path,
-        command_method=normalize_http_method(command_request.get("Method", "POST"), "POST"),
+        command_method=normalize_http_method(
+            command_request.get(REQUEST_METHOD_KEY),
+            DEFAULT_COMMAND_METHOD,
+        ),
         command_url=urls.command_url,
         command_json_template=command_json_template,
-        phase_method=normalize_http_method(phase_request.get("Method", "POST"), "POST"),
+        phase_method=normalize_http_method(
+            phase_request.get(REQUEST_METHOD_KEY),
+            DEFAULT_PHASE_METHOD,
+        ),
         phase_url=urls.phase_url,
         phase_json_template=phase_json_template,
         switching_mode=switching_mode,
         supported_phase_selections=supported_phase_selections,
         requires_charge_pause_for_phase_change=bool(
-            normalize_binary_flag(capabilities.get("RequiresChargePauseForPhaseChange", "0"))
+            normalize_binary_flag(capabilities.get(CAPABILITIES_REQUIRES_PAUSE_KEY))
         ),
         max_direct_switch_power_w=max_direct_switch_power_w,
     )
@@ -214,16 +258,12 @@ def load_template_switch_settings(service: object, config_path: str) -> Template
 class TemplateSwitchBackend(TemplateHttpBackendBase):
     """Switch backend driven by one normalized HTTP/JSON adapter surface."""
 
-    def __init__(self, service: object, config_path: str = "") -> None:
-        self.service = service
+    def __init__(self, service: object, config_path: str = DEFAULT_SWITCH_CONFIG_PATH) -> None:
         self.config_path = str(config_path).strip()
         self.settings = load_template_switch_settings(service, self.config_path)
         super().__init__(service, self.settings.timeout_seconds, auth_settings=self.settings.auth_settings)
         default_selection = self.settings.supported_phase_selections[0]
-        requested_selection: PhaseSelection = normalize_phase_selection(
-            getattr(service, "requested_phase_selection", default_selection),
-            default_selection,
-        )
+        requested_selection = normalize_phase_selection_or_none(getattr(service, "requested_phase_selection", None))
         self._selected_phase_selection: PhaseSelection = (
             requested_selection
             if requested_selection in self.settings.supported_phase_selections
@@ -234,10 +274,20 @@ class TemplateSwitchBackend(TemplateHttpBackendBase):
     def _context(enabled: bool, phase_selection: PhaseSelection) -> dict[str, str]:
         """Return one stable template context for URL/body rendering."""
         return {
-            "enabled_json": "true" if enabled else "false",
-            "enabled_int": "1" if enabled else "0",
-            "enabled_text": "on" if enabled else "off",
-            "phase_selection": str(phase_selection),
+            SWITCH_CONTEXT_ENABLED_JSON: SWITCH_TRUE_JSON if enabled else SWITCH_FALSE_JSON,
+            SWITCH_CONTEXT_ENABLED_INT: SWITCH_TRUE_INT if enabled else SWITCH_FALSE_INT,
+            SWITCH_CONTEXT_ENABLED_TEXT: SWITCH_TRUE_TEXT if enabled else SWITCH_FALSE_TEXT,
+            SWITCH_CONTEXT_PHASE_SELECTION: str(phase_selection),
+        }
+
+    @staticmethod
+    def _disabled_context(phase_selection: PhaseSelection) -> dict[str, str]:
+        """Return the stable template context for non-mutating reads and phase changes."""
+        return {
+            SWITCH_CONTEXT_ENABLED_JSON: SWITCH_FALSE_JSON,
+            SWITCH_CONTEXT_ENABLED_INT: SWITCH_FALSE_INT,
+            SWITCH_CONTEXT_ENABLED_TEXT: SWITCH_FALSE_TEXT,
+            SWITCH_CONTEXT_PHASE_SELECTION: str(phase_selection),
         }
 
     @staticmethod
@@ -248,10 +298,9 @@ class TemplateSwitchBackend(TemplateHttpBackendBase):
         if isinstance(value, (int, float)):
             return bool(value)
         text = str(value).strip().lower()
-        if text in {"1", "true", "on", "yes", "enabled"}:
-            return True
-        if text in {"0", "false", "off", "no", "disabled"}:
-            return False
+        normalized = enabled_state_from_text(text)
+        if normalized is not None:
+            return normalized
         raise ValueError(f"Unsupported enabled-state value '{value}'")
 
     def capabilities(self) -> SwitchCapabilities:
@@ -275,7 +324,7 @@ class TemplateSwitchBackend(TemplateHttpBackendBase):
         payload = self._perform_request(
             self.settings.state_method,
             self.settings.state_url,
-            context=self._context(False, self._selected_phase_selection),
+            context=self._disabled_context(self._selected_phase_selection),
         )
         enabled = self._enabled_state(json_path_value(payload, self.settings.state_enabled_path))
         phase_selection = self._selected_phase_selection
@@ -309,7 +358,7 @@ class TemplateSwitchBackend(TemplateHttpBackendBase):
             self._perform_request(
                 self.settings.phase_method,
                 self.settings.phase_url,
-                context=self._context(False, selection),
+                context=self._disabled_context(selection),
                 json_template=self.settings.phase_json_template,
             )
         self._selected_phase_selection = selection

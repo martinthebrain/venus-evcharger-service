@@ -6,9 +6,49 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from venus_evcharger.ports import WriteControllerPort
+from venus_evcharger.ports.write_runtime import (
+    _finite_service_float,
+    _service_binary_flag,
+    _set_finite_service_float,
+    _set_service_binary_flag,
+)
 
 
 class TestWallboxPortsWrite(unittest.TestCase):
+    def test_write_runtime_float_helper_preserves_zero_and_defaults(self) -> None:
+        service = SimpleNamespace()
+
+        self.assertEqual(_finite_service_float(service, "missing"), 0.0)
+        self.assertEqual(_finite_service_float(service, "missing", default=3.5), 3.5)
+        service.value = 0
+        self.assertEqual(_finite_service_float(service, "value", default=3.5), 0.0)
+        service.value = "bad"
+        self.assertEqual(_finite_service_float(service, "value", default=3.5), 3.5)
+
+        _set_finite_service_float(service, "target", 0)
+        self.assertEqual(service.target, 0.0)
+        _set_finite_service_float(service, "target", "bad")
+        self.assertEqual(service.target, 0.0)
+
+    def test_write_runtime_binary_helper_preserves_default_and_storage_type(self) -> None:
+        service = SimpleNamespace()
+
+        self.assertEqual(_service_binary_flag(service, "missing"), 1)
+        service.flag = "0"
+        self.assertEqual(_service_binary_flag(service, "flag"), 0)
+        service.flag = "bad"
+        self.assertEqual(_service_binary_flag(service, "flag"), 1)
+        service.flag = None
+        self.assertEqual(_service_binary_flag(service, "flag"), 1)
+
+        _set_service_binary_flag(service, "stored", "1")
+        self.assertEqual(service.stored, 1)
+        self.assertIs(type(service.stored), int)
+        _set_service_binary_flag(service, "stored_bool", "1", as_bool=True)
+        self.assertIs(service.stored_bool, True)
+        _set_service_binary_flag(service, "stored_bool", "0", as_bool=True)
+        self.assertIs(service.stored_bool, False)
+
     @staticmethod
     def _service_source_text() -> str:
         root = Path(__file__).resolve().parents[1]

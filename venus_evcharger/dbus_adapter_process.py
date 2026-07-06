@@ -87,12 +87,14 @@ class DbusAdapter(DbusAdapterLoop):
         self.json_writer = AtomicJsonWriter()
         self.cache_publish_interval_seconds = settings.timing.cache_publish_interval_seconds
         self.command_lifecycle_path = settings.files.command_lifecycle_path
+        self.command_lifecycle_max_bytes = settings.files.command_lifecycle_max_bytes
         self.slo_gui_max_age_seconds = settings.slo.gui_max_age_seconds
         self.slo_core_read_max_age_seconds = settings.slo.core_read_max_age_seconds
         self.slo_queue_max_age_seconds = settings.slo.queue_max_age_seconds
         self.slo_mainloop_gap_max_ms = settings.slo.mainloop_gap_max_ms
         self.health_log_path = settings.files.health_log_path
         self.health_log_interval_seconds = settings.files.health_log_interval_seconds
+        self.health_log_max_bytes = settings.files.health_log_max_bytes
         self.dbus_introspection_snapshot_path = settings.introspection.snapshot_path
         self.dbus_introspection_request_path = settings.introspection.request_path
         self.dbus_introspection_enabled = settings.introspection.enabled

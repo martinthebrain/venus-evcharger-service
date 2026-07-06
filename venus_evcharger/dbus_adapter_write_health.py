@@ -4,15 +4,16 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections import deque
 from collections.abc import Mapping
 
 import dbus
 
-from venus_evcharger.core.shared import compact_json, config_get_float
+from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter_components import CommandOutcome
+from venus_evcharger.dbus_adapter_health_slo import GatewayPressureState, pressure_limited_queue_budgets
+from venus_evcharger.dbus_adapter_jsonl import append_jsonl
 from venus_evcharger.dbus_adapter_write_protocols import DbusWriteSchedulerAdapter
 from venus_evcharger.dbus_adapter_write_publish import DbusWriteSchedulerPublish
 from venus_evcharger.dbus_adapter_write_support import (
@@ -74,20 +75,30 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
             "lifecycle_counts_60s": self.lifecycle_counts_60s(),
         }
 
-    def set_dynamic_local_publish_burst(self, burst: int) -> None:
+    def set_dynamic_local_publish_burst(self, burst: int, *, pressure_state: GatewayPressureState = "ok") -> None:
         """Adjust local publish capacity while preserving conservative DBus budgets."""
         normalized = max(1, int(burst))
         self.dynamic_local_publish_burst_limit = normalized
         self.queue_class_budgets = dict(self.base_queue_class_budgets)
-        if normalized <= self.local_publish_burst_limit:
-            return
-        self.queue_class_budgets["gui-critical-publish"] = max(
-            self.queue_class_budgets["gui-critical-publish"],
-            normalized,
+        if normalized > self.local_publish_burst_limit:
+            self.queue_class_budgets["gui-critical-publish"] = max(
+                self.queue_class_budgets["gui-critical-publish"],
+                normalized,
+            )
+            self.queue_class_budgets["local-publish"] = max(
+                self.queue_class_budgets["local-publish"],
+                normalized,
+            )
+        self.queue_class_budgets = pressure_limited_queue_budgets(
+            self.queue_class_budgets,
+            base_local_publish_burst=self.local_publish_burst_limit,
+            pressure_state=pressure_state,
         )
-        self.queue_class_budgets["local-publish"] = max(
-            self.queue_class_budgets["local-publish"],
-            normalized,
+        if pressure_state == "ok":
+            return
+        self.dynamic_local_publish_burst_limit = min(
+            self.dynamic_local_publish_burst_limit,
+            max(1, int(self.queue_class_budgets["gui-critical-publish"])),
         )
 
     def prune_processed(self, now: float) -> None:
@@ -168,17 +179,13 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
         if not path:
             return
         try:
-            self._ensure_lifecycle_directory(path)
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(compact_json(lifecycle_payload(command, state, queue_class, now)) + "\n")
+            append_jsonl(
+                path,
+                lifecycle_payload(command, state, queue_class, now),
+                max_bytes=max(0, int(self.adapter.command_lifecycle_max_bytes)),
+            )
         except (OSError, TypeError, ValueError):
             logging.debug("Unable to append DBus gateway command lifecycle event", exc_info=True)
-
-    @staticmethod
-    def _ensure_lifecycle_directory(path: str) -> None:
-        directory = os.path.dirname(path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
 
     def prune_lifecycle(self, now: float) -> None:
         cutoff = now - 60.0

@@ -42,15 +42,21 @@ from venus_evcharger.ports.base import _BaseServicePort
 
 
 def _finite_service_float(service: Any, attr_name: str, default: float = 0.0) -> float:
-    return float(finite_float_or_none(getattr(service, attr_name, default)) or default)
+    coerced = finite_float_or_none(getattr(service, attr_name, None))
+    return float(default if coerced is None else coerced)
 
 
-def _set_finite_service_float(service: Any, attr_name: str, value: object, default: float = 0.0) -> None:
-    setattr(service, attr_name, float(finite_float_or_none(value) or default))
+def _set_finite_service_float(service: Any, attr_name: str, value: object) -> None:
+    coerced = finite_float_or_none(value)
+    setattr(service, attr_name, float(0.0 if coerced is None else coerced))
 
 
-def _service_binary_flag(service: Any, attr_name: str, default: int = 1) -> int:
-    return normalize_binary_flag(getattr(service, attr_name, default), default=default)
+def _service_binary_flag(service: Any, attr_name: str) -> int:
+    try:
+        normalized = int(getattr(service, attr_name))
+    except (AttributeError, TypeError, ValueError):
+        return 1
+    return 0 if normalized <= 0 else 1
 
 
 def _set_service_binary_flag(service: Any, attr_name: str, value: object, *, as_bool: bool = False) -> None:
