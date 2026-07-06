@@ -2126,6 +2126,31 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertIn('"state":"unknown"', lifecycle_log)
             self.assertEqual(scheduler.lifecycle_counts_60s(), {"applied": 1, "unknown": 1})
 
+            adapter.command_lifecycle_max_bytes = -42
+            with patch.object(write_health_module.time, "time", return_value=124.0), patch.object(
+                write_health_module,
+                "append_jsonl",
+            ) as append_jsonl:
+                scheduler.record_lifecycle(
+                    {"kind": "set_value", "id": "remote-1", "queue_class": "remote-write"},
+                    "deferred",
+                )
+            append_jsonl.assert_called_once()
+            append_path, append_payload = append_jsonl.call_args.args
+            self.assertEqual(append_path, str(lifecycle_path))
+            self.assertEqual(
+                append_payload,
+                {
+                    "at": 124.0,
+                    "state": "deferred",
+                    "queue_class": "remote-write",
+                    "kind": "set_value",
+                    "id": "remote-1",
+                    "coalesce_key": "",
+                },
+            )
+            self.assertEqual(append_jsonl.call_args.kwargs, {"max_bytes": 0})
+
             health = scheduler.health(now=123.0)
             self.assertEqual(health["last_processed_at"], scheduler.last_processed_at)
             self.assertEqual(health["local_publish_burst_limit"], scheduler.local_publish_burst_limit)
@@ -2137,7 +2162,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 scheduler.startup_registration_tick_budget_seconds * 1000.0,
             )
             self.assertEqual(health["lifecycle_counts"]["applied"], 1)
-            self.assertEqual(health["lifecycle_counts_60s"], {"applied": 1, "unknown": 1})
+            self.assertEqual(health["lifecycle_counts_60s"], {"applied": 1, "deferred": 1, "unknown": 1})
 
             self.assertEqual(scheduler.set_remote_value({"service": "", "path": "/P"}), "dropped")
             self.assertEqual(scheduler.set_remote_value({"service": "svc", "path": ""}), "dropped")
@@ -4507,6 +4532,159 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
 
             self.assertGreater(adapter.discovery.next_scan_at, time.time())
 
+    def test_slo_regulation_forwards_exact_backpressure_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                "DbusGatewayLocalPublishBurstLimit=20\n"
+                "DbusGatewaySloCoreReadMaxAgeSeconds=5\n"
+                "DbusGatewaySloQueueMaxAgeSeconds=10\n"
+                "DbusGatewaySloMainloopGapMaxMs=500\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            pending = [
+                (
+                    "stale-local.json",
+                    {
+                        "kind": "publish_value",
+                        "path": "/Mode",
+                        "queue_class": "local-publish",
+                        "created_at": 980.0,
+                    },
+                )
+            ]
+            freshness = {
+                "grid_power_w_age_s": 4.0,
+                "grid_power_w_status": "fresh",
+                "pv_power_w_age_s": 6.0,
+                "pv_power_w_status": "fresh",
+                "battery_soc_age_s": 7.0,
+                "battery_soc_status": "stale",
+            }
+            _install_mock(adapter.commands, "load_pending", MagicMock(return_value=pending))
+            _install_mock(adapter, "cache_freshness_snapshot", MagicMock(return_value=freshness))
+            _install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 3000.0}))
+            _install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            _install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
+            _install_mock(adapter, "quiet_discovery_and_introspection", MagicMock())
+            _install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
+            adapter._last_resource_snapshot = {"state": "constrained"}
+
+            with patch.object(process_health_module.time, "time", return_value=1000.0), patch.object(
+                process_health_module.time,
+                "monotonic",
+                return_value=2000.0,
+            ), patch.object(
+                process_health_module,
+                "backpressure_snapshot",
+                MagicMock(return_value={"state": "slow"}),
+            ) as backpressure_snapshot, patch.object(
+                process_health_module,
+                "runtime_pressure_state",
+                MagicMock(return_value="slow"),
+            ) as runtime_pressure_state:
+                adapter.apply_slo_regulation()
+
+            adapter.write_scheduler.set_dynamic_local_publish_burst.assert_called_once_with(5, pressure_state="slow")
+            adapter.read_scheduler.force_due.assert_called_once_with({"pv_power_w", "battery_soc"})
+            adapter.quiet_discovery_and_introspection.assert_called_once_with(1000.0)
+            adapter.cache_freshness_snapshot.assert_called_once_with(1000.0)
+            backpressure_snapshot.assert_called_once_with(
+                circuit_state="ok",
+                queue_health={"oldest_command_age_s": 20.0},
+                slo=unittest.mock.ANY,
+                queue_max_age_seconds=10.0,
+            )
+            runtime_pressure_state.assert_called_once_with("constrained", "slow")
+            self.assertEqual(
+                adapter.tick_health.snapshot.call_args_list,
+                [unittest.mock.call(), unittest.mock.call(now=2000.0)],
+            )
+
+    def test_slo_regulation_defaults_missing_pressure_states_to_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                "DbusGatewayLocalPublishBurstLimit=20\n"
+                "DbusGatewaySloCoreReadMaxAgeSeconds=5\n"
+                "DbusGatewaySloQueueMaxAgeSeconds=10\n"
+                "DbusGatewaySloMainloopGapMaxMs=500\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            _install_mock(adapter.commands, "load_pending", MagicMock(return_value=[]))
+            _install_mock(adapter, "cache_freshness_snapshot", MagicMock(return_value={}))
+            _install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
+            _install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            _install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
+            _install_mock(adapter, "quiet_discovery_and_introspection", MagicMock())
+            _install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
+            adapter._last_resource_snapshot = {}
+
+            with patch.object(process_health_module.time, "time", return_value=1000.0), patch.object(
+                process_health_module.time,
+                "monotonic",
+                return_value=2000.0,
+            ), patch.object(
+                process_health_module,
+                "backpressure_snapshot",
+                MagicMock(return_value={}),
+            ), patch.object(
+                process_health_module,
+                "runtime_pressure_state",
+                MagicMock(return_value="ok"),
+            ) as runtime_pressure_state:
+                adapter.apply_slo_regulation()
+
+            runtime_pressure_state.assert_called_once_with("ok", "ok")
+            adapter.write_scheduler.set_dynamic_local_publish_burst.assert_called_once_with(20, pressure_state="ok")
+            adapter.quiet_discovery_and_introspection.assert_not_called()
+
+    def test_slo_regulation_quiets_discovery_under_protective_pressure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                "DbusGatewayLocalPublishBurstLimit=20\n"
+                "DbusGatewaySloCoreReadMaxAgeSeconds=5\n"
+                "DbusGatewaySloQueueMaxAgeSeconds=10\n"
+                "DbusGatewaySloMainloopGapMaxMs=500\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            _install_mock(adapter.commands, "load_pending", MagicMock(return_value=[]))
+            _install_mock(adapter, "cache_freshness_snapshot", MagicMock(return_value={}))
+            _install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
+            _install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            _install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
+            _install_mock(adapter, "quiet_discovery_and_introspection", MagicMock())
+            _install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
+            adapter._last_resource_snapshot = {"state": "ok"}
+
+            with patch.object(process_health_module.time, "time", return_value=1000.0), patch.object(
+                process_health_module.time,
+                "monotonic",
+                return_value=2000.0,
+            ), patch.object(
+                process_health_module,
+                "backpressure_snapshot",
+                MagicMock(return_value={"state": "ok"}),
+            ), patch.object(
+                process_health_module,
+                "runtime_pressure_state",
+                MagicMock(return_value="protective"),
+            ):
+                adapter.apply_slo_regulation()
+
+            adapter.write_scheduler.set_dynamic_local_publish_burst.assert_called_once_with(
+                1,
+                pressure_state="protective",
+            )
+            adapter.quiet_discovery_and_introspection.assert_called_once_with(1000.0)
+
     def test_slo_snapshot_and_regulation_boundaries_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -4750,6 +4928,21 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 self.assertFalse(adapter.health_log_due())
             with patch.object(process_health_module.time, "monotonic", return_value=110.0):
                 self.assertTrue(adapter.health_log_due())
+
+            adapter.health_log_path = str(Path(temp_dir) / "health-history.jsonl")
+            adapter.health_log_max_bytes = 321
+            adapter._last_health_log_monotonic = 100.0
+            with patch.object(process_health_module.time, "monotonic", return_value=130.0), patch.object(
+                process_health_module,
+                "append_health_log",
+            ) as append_health_log:
+                adapter.append_health_log({"state": "ok"})
+            append_health_log.assert_called_once_with(
+                adapter.health_log_path,
+                {"state": "ok"},
+                max_bytes=321,
+            )
+            self.assertEqual(adapter._last_health_log_monotonic, 130.0)
 
             adapter._last_health_log_monotonic = 0.0
             with patch.object(builtins, "open", side_effect=OSError("full")), patch.object(
