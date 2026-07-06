@@ -518,6 +518,9 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
         controller.service._warning_throttled = None
         controller._combined_battery_warning_throttled("ignored", "message")
 
+        delattr(controller.service, "_warning_throttled")
+        controller._combined_battery_warning_throttled("missing-hook", "message")
+
 
 class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
     def test_policy_context_counts_thresholds_and_modes_are_explicit(self) -> None:
@@ -572,6 +575,8 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
         self.assertEqual(controller._battery_discharge_balance_reserve_margin_soc(), 0.0)
         self.assertEqual(controller._discharge_balance_bias_mode(), "always")
         controller.service.auto_battery_discharge_balance_bias_mode = ""
+        self.assertEqual(controller._discharge_balance_bias_mode(), "always")
+        controller.service.auto_battery_discharge_balance_bias_mode = None
         self.assertEqual(controller._discharge_balance_bias_mode(), "always")
 
     def test_policy_and_coordination_defaults_are_safe_when_service_config_is_absent(self) -> None:

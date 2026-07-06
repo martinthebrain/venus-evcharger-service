@@ -38,7 +38,7 @@ _CAPABILITY_KINDS = {"switch", "meter", "charger"}
 _SWITCHING_MODES = {"direct", "contactor"}
 _BINDING_ROLES = {"actuation", "measurement", "charger"}
 
-class _InventorySection(Protocol):
+class _InventorySection(Protocol):  # pragma: no cover
     @property
     def name(self) -> str: ...
     def get(self, key: str, fallback: Any = None) -> object | None: ...
@@ -47,7 +47,7 @@ class _InventorySection(Protocol):
 _InventorySectionLike = _InventorySection | configparser.SectionProxy
 
 
-class _InventoryConfigSections(Protocol):
+class _InventoryConfigSections(Protocol):  # pragma: no cover
     def sections(self) -> list[str]: ...
     def __getitem__(self, key: str) -> _InventorySectionLike: ...
 
