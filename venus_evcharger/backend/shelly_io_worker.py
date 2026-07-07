@@ -10,6 +10,7 @@ from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.backend.shelly_io_types import (
     _EnableBackendLike,
+    JsonObject,
     PendingRelayCommand,
     ShellyEnergyData,
     ShellyIoHost,
@@ -71,7 +72,8 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
             else 230.0
         )
         pm_status["output"] = bool(relay_on)
-        pm_status["voltage"] = float(pm_status.get("voltage", voltage) or voltage)
+        status_voltage = pm_status.get("voltage")
+        pm_status["voltage"] = float(status_voltage or voltage)
         pm_status["aenergy"] = self._normalized_energy_payload(pm_status.get("aenergy"))
         pm_status["apower"] = 0.0
         pm_status["current"] = 0.0
@@ -257,34 +259,19 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
         svc = self.service
         svc._ensure_worker_state()
         now = svc._time_now()
-        svc._update_worker_snapshot(
-            captured_at=now,
-            auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-        )
+        auto_mode_active = self._worker_auto_mode_active(svc)
+        self._update_worker_tick_snapshot(svc, now, auto_mode_active)
         svc._worker_apply_pending_relay_command()
 
         if self._shelly_retry_active(now):
-            svc._update_worker_snapshot(
-
-                captured_at=now,
-                auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-                pm_status=None,
-                pm_captured_at=None,
-                pm_confirmed=False,
-            )
+            self._update_worker_unconfirmed_snapshot(svc, now, auto_mode_active)
             return
 
         try:
             pm_status = svc._worker_fetch_pm_status()
             read_at = svc._time_now()
             self._remember_shelly_success(read_at, "Shelly status reads recovered")
-            svc._update_worker_snapshot(
-                captured_at=read_at,
-                pm_captured_at=read_at,
-                auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-                pm_status=pm_status,
-                pm_confirmed=True,
-            )
+            self._update_worker_confirmed_snapshot(svc, read_at, auto_mode_active, pm_status)
         except BACKEND_IO_ERRORS as error:
             reason = self._classify_shelly_error(error)
             self._remember_shelly_failure(reason, "read", error, now)
@@ -292,21 +279,51 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
             exc_info = None if self._is_shelly_common_network_error(error) else error
             svc._warning_throttled(
                 f"worker-shelly-read-failed-{reason}",
-                svc.auto_shelly_soft_fail_seconds,
-                "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
-                reason,
-                int(getattr(svc, "_shelly_consecutive_errors", 0)),
-                self._pending_relay_shelly_retry_remaining(svc, "shelly", now),
-                error,
+            svc.auto_shelly_soft_fail_seconds,
+            "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
+            reason,
+            self._pending_relay_shelly_error_count(svc, "shelly"),
+            self._pending_relay_shelly_retry_remaining(svc, "shelly", now),
+            error,
                 exc_info=exc_info,
             )
-            svc._update_worker_snapshot(
-                captured_at=now,
-                auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-                pm_status=None,
-                pm_captured_at=None,
-                pm_confirmed=False,
-            )
+            self._update_worker_unconfirmed_snapshot(svc, now, auto_mode_active)
+
+    @staticmethod
+    def _worker_auto_mode_active(svc: ShellyIoHost) -> bool:
+        return bool(svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)))
+
+    @staticmethod
+    def _update_worker_tick_snapshot(svc: ShellyIoHost, captured_at: float, auto_mode_active: bool) -> None:
+        svc._update_worker_snapshot(
+            captured_at=captured_at,
+            auto_mode_active=auto_mode_active,
+        )
+
+    @staticmethod
+    def _update_worker_unconfirmed_snapshot(svc: ShellyIoHost, captured_at: float, auto_mode_active: bool) -> None:
+        svc._update_worker_snapshot(
+            captured_at=captured_at,
+            auto_mode_active=auto_mode_active,
+            pm_status=None,
+            pm_captured_at=None,
+            pm_confirmed=False,
+        )
+
+    @staticmethod
+    def _update_worker_confirmed_snapshot(
+        svc: ShellyIoHost,
+        captured_at: float,
+        auto_mode_active: bool,
+        pm_status: JsonObject,
+    ) -> None:
+        svc._update_worker_snapshot(
+            captured_at=captured_at,
+            pm_captured_at=captured_at,
+            auto_mode_active=auto_mode_active,
+            pm_status=pm_status,
+            pm_confirmed=True,
+        )
 
     def io_worker_loop(self) -> None:
         svc = self.service
@@ -325,9 +342,14 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
                     exc_info=error,
                 )
 
-            wait_seconds = max(0.05, svc._worker_poll_interval_seconds - (svc._time_now() - cycle_started))
+            wait_seconds = self._worker_loop_wait_seconds(svc, cycle_started)
             if stop_event.wait(wait_seconds):
-                break
+                return
+
+    @staticmethod
+    def _worker_loop_wait_seconds(svc: ShellyIoHost, cycle_started: float) -> float:
+        elapsed = svc._time_now() - cycle_started
+        return max(0.05, svc._worker_poll_interval_seconds - elapsed)
 
 
 def _local_pm_status_payload(raw_status: dict[object, object]) -> ShellyPmStatus:

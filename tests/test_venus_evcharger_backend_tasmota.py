@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call, patch
 
 from venus_evcharger.backend.registry import create_meter_backend, create_switch_backend
 from venus_evcharger.backend.tasmota_meter import TasmotaMeterBackend
@@ -70,3 +70,26 @@ class TestTasmotaBackends(unittest.TestCase):
             session.get.assert_any_call(url="http://tasmota.local/cm?cmnd=Power", timeout=2.0)
             session.get.assert_any_call(url="http://tasmota.local/cm?cmnd=Power+on", timeout=2.0)
             self.assertIn("Type=tasmota_contactor_switch", tasmota_switch_config("http://tasmota.local", contactor=True))
+
+    def test_tasmota_contactor_constructor_forwards_service_and_config_path(self) -> None:
+        service = self._service(MagicMock())
+        with patch("venus_evcharger.backend.tasmota_switch.TemplateSwitchBackend.__init__", return_value=None) as base_init, patch(
+            "venus_evcharger.backend.tasmota_switch.force_contactor_switch_settings"
+        ) as force_contactor:
+            explicit = TasmotaContactorSwitchBackend(service, config_path="/tmp/tasmota-switch.ini")
+            defaulted = TasmotaContactorSwitchBackend(service)
+
+        self.assertEqual(
+            base_init.call_args_list,
+            [
+                call(service, config_path="/tmp/tasmota-switch.ini"),
+                call(service, config_path=""),
+            ],
+        )
+        self.assertEqual(
+            force_contactor.call_args_list,
+            [
+                call(explicit),
+                call(defaulted),
+            ],
+        )

@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import tempfile
 import unittest
+import configparser
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from venus_evcharger.backend.models import ChargerState
 from venus_evcharger.backend.modbus_charger import ModbusChargerBackend
+from venus_evcharger.backend.modbus_transport import ModbusTransportSettings
 from venus_evcharger.backend.native_modbus_backend import (
     _native_modbus_transport_factory,
     create_modbus_transport,
@@ -82,6 +85,33 @@ class _FakeModbusTransport:
         raise AssertionError(f"Unexpected Modbus function code {function_code}")
 
 
+class _FakeProfile:
+    def __init__(self) -> None:
+        self.profile_name = "fake-profile"
+        self.supported_phase_selections = ("P1", "P1_P2")
+        self.enable_write: object | None = object()
+        self.enable_uses_current_write = False
+        self.enable_default_current_amps = 6.0
+        self.next_state = ChargerState(enabled=True, current_amps=0.5, phase_selection="P1_P2")
+        self.read_calls: list[dict[str, object]] = []
+        self.enabled_calls: list[object] = []
+        self.current_calls: list[float] = []
+        self.phase_calls: list[str] = []
+
+    def read_state(self, client: object, **kwargs: object) -> ChargerState:
+        self.read_calls.append({"client": client, **kwargs})
+        return self.next_state
+
+    def set_enabled(self, client: object, enabled: object) -> None:
+        self.enabled_calls.append(enabled)
+
+    def set_current(self, client: object, amps: float) -> None:
+        self.current_calls.append(float(amps))
+
+    def set_phase_selection(self, client: object, selection: str) -> None:
+        self.phase_calls.append(selection)
+
+
 class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
     @staticmethod
     def _service() -> SimpleNamespace:
@@ -94,6 +124,199 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
         path = Path(directory) / "modbus-charger.ini"
         path.write_text(content, encoding="utf-8")
         return str(path)
+
+    @staticmethod
+    def _transport_settings() -> ModbusTransportSettings:
+        return ModbusTransportSettings(
+            transport_kind="tcp",
+            unit_id=7,
+            timeout_seconds=2.5,
+            host="192.168.1.40",
+            port=502,
+            device=None,
+            baudrate=9600,
+            bytesize=8,
+            parity="N",
+            stopbits=1,
+            serial_port_owner="none",
+            serial_port_owner_stop_command=None,
+            serial_port_owner_start_command=None,
+            serial_retry_count=1,
+            serial_retry_delay_seconds=0.1,
+        )
+
+    def _backend_with_profile(self, profile: _FakeProfile) -> ModbusChargerBackend:
+        backend = object.__new__(ModbusChargerBackend)
+        backend.service = self._service()
+        backend.config_path = "/tmp/fake.ini"
+        backend.transport_settings = self._transport_settings()
+        backend.profile = profile
+        backend.settings = SimpleNamespace(
+            transport_settings=backend.transport_settings,
+            profile_name=profile.profile_name,
+            supported_phase_selections=profile.supported_phase_selections,
+        )
+        backend._enabled_state_cache = False
+        backend._current_amps_cache = 7.5
+        backend._resume_current_amps_cache = None
+        backend._phase_selection_cache = "P1"
+        backend._transport = None
+        backend._client_cache = object()
+        return backend
+
+    def test_constructor_contracts_preserve_service_settings_and_initial_caches(self) -> None:
+        parser = configparser.ConfigParser()
+        parser.read_string("[Adapter]\nType=modbus_charger\n")
+        settings = self._transport_settings()
+        profile = _FakeProfile()
+        service = SimpleNamespace(requested_phase_selection="P1_P2")
+
+        with patch("venus_evcharger.backend.modbus_charger.load_required_backend_config", return_value=parser) as load_config, patch(
+            "venus_evcharger.backend.modbus_charger.load_modbus_transport_settings",
+            return_value=settings,
+        ) as load_transport, patch(
+            "venus_evcharger.backend.modbus_charger.load_modbus_charger_profile",
+            return_value=profile,
+        ) as load_profile:
+            backend = ModbusChargerBackend(service, config_path=" /tmp/modbus.ini ")
+
+        load_config.assert_called_once_with("/tmp/modbus.ini", "Modbus charger")
+        load_transport.assert_called_once_with(parser, service)
+        load_profile.assert_called_once_with(parser)
+        self.assertIs(backend.service, service)
+        self.assertEqual(backend.config_path, "/tmp/modbus.ini")
+        self.assertIs(backend.transport_settings, settings)
+        self.assertIs(backend.settings.transport_settings, settings)
+        self.assertEqual(backend.settings.profile_name, "fake-profile")
+        self.assertEqual(backend.settings.supported_phase_selections, ("P1", "P1_P2"))
+        self.assertIsNone(backend._enabled_state_cache)
+        self.assertIsNone(backend._current_amps_cache)
+        self.assertIsNone(backend._resume_current_amps_cache)
+        self.assertEqual(backend._phase_selection_cache, "P1_P2")
+        self.assertIsNone(backend._transport)
+        self.assertIsNone(backend._client_cache)
+
+    def test_default_constructor_config_path_error_names_empty_path_and_label(self) -> None:
+        with self.assertRaises(FileNotFoundError) as missing_config:
+            ModbusChargerBackend(self._service())
+
+        self.assertEqual(str(missing_config.exception), "Modbus charger config not found: ")
+
+    def test_client_creation_uses_transport_settings_contract(self) -> None:
+        profile = _FakeProfile()
+        backend = self._backend_with_profile(profile)
+        backend._client_cache = None
+        backend._transport = None
+        created_transport = _FakeModbusTransport()
+
+        with patch("venus_evcharger.backend.modbus_charger.create_modbus_transport", return_value=created_transport) as create:
+            client = backend._client()
+
+        create.assert_called_once_with(backend.transport_settings)
+        self.assertIs(backend._transport, created_transport)
+        self.assertIs(backend._client_cache, client)
+        self.assertIs(backend._client(), client)
+
+    def test_read_state_passes_and_updates_cache_contracts(self) -> None:
+        profile = _FakeProfile()
+        backend = self._backend_with_profile(profile)
+        client = object()
+
+        with patch.object(backend, "_client", return_value=client):
+            state = backend.read_charger_state()
+
+        self.assertIs(state, profile.next_state)
+        self.assertEqual(
+            profile.read_calls,
+            [{
+                "client": client,
+                "cached_enabled": False,
+                "cached_current_amps": 7.5,
+                "cached_phase_selection": "P1",
+            }],
+        )
+        self.assertIs(backend._enabled_state_cache, True)
+        self.assertEqual(backend._current_amps_cache, 0.5)
+        self.assertEqual(backend._resume_current_amps_cache, 0.5)
+        self.assertEqual(backend._phase_selection_cache, "P1_P2")
+
+        profile.next_state = ChargerState(enabled=False, current_amps=0.0, phase_selection="P1_P2_P3")
+        with patch.object(backend, "_client", return_value=client):
+            backend.read_charger_state()
+        self.assertIs(backend._enabled_state_cache, False)
+        self.assertEqual(backend._current_amps_cache, 0.0)
+        self.assertEqual(backend._resume_current_amps_cache, 0.5)
+        self.assertEqual(backend._phase_selection_cache, "P1")
+
+    def test_set_enabled_current_and_phase_update_profile_and_caches(self) -> None:
+        profile = _FakeProfile()
+        backend = self._backend_with_profile(profile)
+        client = object()
+
+        with patch.object(backend, "_client", return_value=client):
+            backend.set_enabled(True)
+        self.assertEqual(profile.enabled_calls, [True])
+        self.assertIs(backend._enabled_state_cache, True)
+
+        profile.enable_uses_current_write = True
+        with patch.object(backend, "_client", return_value=client):
+            backend.set_enabled(False)
+        self.assertEqual(profile.enabled_calls, [True, False])
+        self.assertEqual(profile.current_calls, [])
+        self.assertIs(backend._enabled_state_cache, False)
+
+        profile.enable_write = None
+        profile.enable_uses_current_write = True
+        backend._resume_current_amps_cache = 0.5
+        with patch.object(backend, "_client", return_value=client):
+            backend.set_enabled(True)
+        self.assertEqual(profile.current_calls, [0.5])
+        self.assertIs(backend._enabled_state_cache, True)
+        self.assertEqual(backend._current_amps_cache, 0.5)
+        self.assertEqual(backend._resume_current_amps_cache, 0.5)
+
+        backend._resume_current_amps_cache = None
+        backend._current_amps_cache = 0.5
+        with patch.object(backend, "_client", return_value=client):
+            backend.set_enabled(True)
+        self.assertEqual(profile.current_calls[-1], 0.5)
+        self.assertEqual(backend._resume_current_amps_cache, 0.5)
+
+        with patch.object(backend, "_client", return_value=client):
+            backend.set_current(0.0)
+        self.assertEqual(profile.current_calls[-1], 0.0)
+        self.assertEqual(backend._current_amps_cache, 0.0)
+        self.assertEqual(backend._resume_current_amps_cache, 0.5)
+
+        backend._resume_current_amps_cache = None
+        with patch.object(backend, "_client", return_value=client):
+            backend.set_current(0.5)
+        self.assertEqual(profile.current_calls[-1], 0.5)
+        self.assertEqual(backend._current_amps_cache, 0.5)
+        self.assertEqual(backend._resume_current_amps_cache, 0.5)
+
+        with patch.object(backend, "_client", return_value=client):
+            backend.set_phase_selection(None)  # type: ignore[arg-type]
+            backend.set_phase_selection("P1_P2")
+        self.assertEqual(profile.phase_calls[-2:], ["P1", "P1_P2"])
+        self.assertEqual(backend._phase_selection_cache, "P1_P2")
+
+        p2_only_profile = _FakeProfile()
+        p2_only_profile.supported_phase_selections = ("P1_P2",)
+        p2_only_backend = self._backend_with_profile(p2_only_profile)
+        with patch.object(p2_only_backend, "_client", return_value=client):
+            p2_only_backend.set_phase_selection(None)  # type: ignore[arg-type]
+        self.assertEqual(p2_only_profile.phase_calls, ["P1_P2"])
+        self.assertEqual(p2_only_backend._phase_selection_cache, "P1_P2")
+
+        with self.assertRaises(ValueError) as phase_error:
+            backend.set_phase_selection("P1_P2_P3")
+        self.assertEqual(str(phase_error.exception), "Unsupported phase selection 'P1_P2_P3' for Modbus charger backend")
+
+    def test_cached_positive_current_contract(self) -> None:
+        self.assertIsNone(ModbusChargerBackend._cached_positive_current(None))
+        self.assertIsNone(ModbusChargerBackend._cached_positive_current(0.0))
+        self.assertEqual(ModbusChargerBackend._cached_positive_current(0.5), 0.5)
 
     def test_read_charger_state_maps_generic_modbus_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

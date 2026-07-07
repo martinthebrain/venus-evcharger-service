@@ -38,7 +38,17 @@ class ShellyIoCapabilities(ShellyIoRequests):
         def _runtime_now(self) -> float: ...
 
     def _uses_split_backends(self) -> bool:
-        return backend_mode_for_service(self.service, "combined") == "split"
+        return backend_mode_for_service(self.service) == "split"
+
+    def _service_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
+        return normalize_supported_phase_tuple(getattr(self.service, "supported_phase_selections", None))
+
+    @staticmethod
+    def _settings_supported_phase_selections(backend: object) -> tuple[PhaseSelection, ...] | None:
+        settings = getattr(backend, "settings", None)
+        if settings is None or not hasattr(settings, "supported_phase_selections"):
+            return None
+        return normalize_supported_phase_tuple(getattr(settings, "supported_phase_selections"))
 
     def _split_meter_backend(self) -> _MeterBackendLike | None:
         if not self._uses_split_backends():
@@ -82,13 +92,9 @@ class ShellyIoCapabilities(ShellyIoRequests):
         backend = self._phase_selection_charger_backend()
         if backend is None:
             return False
-        settings = getattr(backend, "settings", None)
-        if settings is None or not hasattr(settings, "supported_phase_selections"):
+        supported = self._settings_supported_phase_selections(backend)
+        if supported is None:
             return True
-        supported = normalize_supported_phase_tuple(
-            getattr(settings, "supported_phase_selections", ("P1",)),
-            ("P1",),
-        )
         return selection in supported
 
     def _charger_state_backend(self) -> _ChargerStateBackendLike | None:
@@ -97,15 +103,8 @@ class ShellyIoCapabilities(ShellyIoRequests):
 
     def _charger_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
         backend = getattr(self.service, "_charger_backend", None)
-        settings = getattr(backend, "settings", None)
-        return normalize_supported_phase_tuple(
-            getattr(
-                settings,
-                "supported_phase_selections",
-                getattr(self.service, "supported_phase_selections", ("P1",)),
-            ),
-            ("P1",),
-        )
+        supported = self._settings_supported_phase_selections(backend)
+        return supported if supported is not None else self._service_supported_phase_selections()
 
     def _phase_switch_capabilities(self) -> object | None:
         backend = getattr(self.service, "_switch_backend", None)
@@ -118,7 +117,7 @@ class ShellyIoCapabilities(ShellyIoRequests):
 
     def _switching_mode(self) -> str:
         capabilities = self._phase_switch_capabilities()
-        mode = str(getattr(capabilities, "switching_mode", "direct")).strip().lower()
+        mode = str(getattr(capabilities, "switching_mode", None)).strip().lower()
         return "contactor" if mode == "contactor" else "direct"
 
     def _max_direct_switch_power_w(self) -> float | None:
@@ -130,7 +129,8 @@ class ShellyIoCapabilities(ShellyIoRequests):
 
     def _current_confirmed_switch_load_power_w(self) -> float | None:
         svc = self.service
-        if not bool(getattr(svc, "_last_pm_status_confirmed", False)):
+        confirmed = getattr(svc, "_last_pm_status_confirmed", None)
+        if not bool(confirmed):
             return None
         pm_status = getattr(svc, "_last_pm_status", None)
         if not isinstance(pm_status, dict):
@@ -150,10 +150,10 @@ class ShellyIoCapabilities(ShellyIoRequests):
         return power_w, limit_w
 
     def _direct_switch_warning_interval(self) -> float:
-        return max(
-            1.0,
-            float(getattr(self.service, "auto_shelly_soft_fail_seconds", 30.0) or 30.0),
-        )
+        seconds = finite_float_or_none(getattr(self.service, "auto_shelly_soft_fail_seconds", None))
+        if seconds is None or seconds == 0.0:
+            seconds = 30.0
+        return max(1.0, float(seconds))
 
     def _warn_if_direct_switching_under_load(self, relay_on: bool) -> None:
         warning_context = self._direct_switch_warning_context(relay_on)
@@ -180,22 +180,32 @@ class ShellyIoCapabilities(ShellyIoRequests):
         supported: object | None = None,
     ) -> None:
         svc = self.service
-        supported_default = tuple(getattr(svc, "supported_phase_selections", ("P1",)))
-        normalized_supported = normalize_supported_phase_tuple(
-            supported if supported is not None else supported_default,
-            supported_default or ("P1",),
+        supported_default = self._service_supported_phase_selections()
+        normalized_supported = (
+            normalize_supported_phase_tuple(supported, supported_default)
+            if supported is not None
+            else supported_default
         )
         svc.supported_phase_selections = normalized_supported
         default_phase_selection = normalized_supported[0]
-        normalized_requested = normalize_phase_value(
-            requested if requested is not None else getattr(svc, "requested_phase_selection", default_phase_selection),
-            default_phase_selection,
+        requested_value = self._phase_state_value(
+            explicit=requested,
+            attribute="requested_phase_selection",
         )
+        normalized_requested = normalize_phase_value(requested_value, default_phase_selection)
         svc.requested_phase_selection = normalized_requested
-        svc.active_phase_selection = normalize_phase_value(
-            active if active is not None else getattr(svc, "active_phase_selection", normalized_requested),
-            normalized_requested,
+        active_value = self._phase_state_value(
+            explicit=active,
+            attribute="active_phase_selection",
         )
+        svc.active_phase_selection = normalize_phase_value(active_value, normalized_requested)
+
+    def _phase_state_value(self, *, explicit: object | None, attribute: str) -> object | None:
+        if explicit is not None:
+            return explicit
+        if hasattr(self.service, attribute):
+            return getattr(self.service, attribute)
+        return None
 
     def _store_runtime_switch_snapshot(self, switch_state: object | None, now: float | None = None) -> None:
         svc = self.service
@@ -224,20 +234,14 @@ class ShellyIoCapabilities(ShellyIoRequests):
         if capabilities is None:
             if getattr(self.service, "_switch_backend", None) is None:
                 return tuple(self._charger_supported_phase_selections())
-            return normalize_supported_phase_tuple(getattr(self.service, "supported_phase_selections", ("P1",)), ("P1",))
-        normalized = normalize_supported_phase_tuple(
-            getattr(
-                capabilities,
-                "supported_phase_selections",
-                getattr(self.service, "supported_phase_selections", ("P1",)),
-            ),
-            ("P1",),
-        )
-        return normalized
+            return self._service_supported_phase_selections()
+        if hasattr(capabilities, "supported_phase_selections"):
+            return normalize_supported_phase_tuple(getattr(capabilities, "supported_phase_selections"))
+        return self._service_supported_phase_selections()
 
     def phase_selection_requires_pause(self) -> bool:
         capabilities = self._phase_switch_capabilities()
-        return bool(getattr(capabilities, "requires_charge_pause_for_phase_change", False))
+        return bool(getattr(capabilities, "requires_charge_pause_for_phase_change", None))
 
     def set_phase_selection(self, selection: object) -> PhaseSelection:
         supported_phase_selections = self._split_switch_supported_phase_selections()

@@ -69,7 +69,7 @@ def _resolved_member_path(group_config_path: str, raw_value: object) -> Path:
     return Path(group_config_path).resolve().parent / path
 
 
-def _member_backend_type(config_path: Path) -> str:
+def _member_backend_type(config_path: Path) -> str:  # pragma: no mutate block - ConfigParser option keys are case-insensitive.
     """Return one normalized child switch backend type from its own config file."""
     parser = _config(str(config_path))
     if parser.has_section("Adapter"):
@@ -118,15 +118,13 @@ def _available_supported_phase_selections(phase_members: Mapping[str, SwitchGrou
 
 
 def _supported_phase_selections(
-    capabilities: configparser.SectionProxy,
+    capabilities: Mapping[str, object],
     phase_members: Mapping[str, SwitchGroupMember],
 ) -> tuple[PhaseSelection, ...]:
     """Return the requested supported phase layouts constrained to configured members."""
     available = _available_supported_phase_selections(phase_members)
-    requested = normalize_phase_selection_tuple(
-        capabilities.get("SupportedPhaseSelections", ",".join(available)),
-        available,
-    )
+    raw_requested = capabilities.get("SupportedPhaseSelections")
+    requested = available if raw_requested is None else normalize_phase_selection_tuple(raw_requested, available)
     normalized: list[PhaseSelection] = []
     for selection in requested:
         _validate_requested_phase_selection(selection, available)

@@ -47,7 +47,7 @@ class ChargerBackend(Protocol):
 class BackendConstructor(Protocol):
     """Constructor signature used by the backend registry/factory."""
 
-    def __call__(self, service: Any, config_path: str = "") -> Any: ...  # pragma: no cover
+    def __call__(self, service: Any, config_path: str) -> Any: ...  # pragma: no cover
 
 
 def is_switch_backend(value: object) -> TypeGuard[SwitchBackend]:

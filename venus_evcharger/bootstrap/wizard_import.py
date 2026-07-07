@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import configparser
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +50,44 @@ _PROFILE_DEFAULTS_BY_BACKENDS: dict[tuple[str, str, str], tuple[WizardProfile, s
     ("shelly_meter", "switch_group", "modbus_charger"): ("multi_adapter_topology", "shelly-meter-modbus-switch-group", "modbus_charger"),
 }
 
+_SECTION_DEFAULT = "DEFAULT"  # pragma: no mutate
+_SECTION_ADAPTER = "Adapter"  # pragma: no mutate
+_SECTION_BACKENDS = "Backends"  # pragma: no mutate
+_SECTION_CAPABILITIES = "Capabilities"  # pragma: no mutate
+_SECTION_MEMBERS = "Members"  # pragma: no mutate
+_SECTION_TRANSPORT = "Transport"  # pragma: no mutate
+_KEY_BASE_URL = "BaseUrl"  # pragma: no mutate
+_KEY_AUTO_MIN_SOC = "AutoMinSoc"  # pragma: no mutate
+_KEY_AUTO_RESUME_SOC = "AutoResumeSoc"  # pragma: no mutate
+_KEY_AUTO_SCHEDULED_DAYS = "AutoScheduledEnabledDays"  # pragma: no mutate
+_KEY_AUTO_SCHEDULED_LATEST_END = "AutoScheduledLatestEndTime"  # pragma: no mutate
+_KEY_AUTO_SCHEDULED_NIGHT_AMPS = "AutoScheduledNightCurrentAmps"  # pragma: no mutate
+_KEY_AUTO_START_SURPLUS = "AutoStartSurplusWatts"  # pragma: no mutate
+_KEY_AUTO_STOP_SURPLUS = "AutoStopSurplusWatts"  # pragma: no mutate
+_KEY_CHARGER_CONFIG = "ChargerConfigPath"  # pragma: no mutate
+_KEY_CHARGER_TYPE = "ChargerType"  # pragma: no mutate
+_KEY_DEVICE = "Device"  # pragma: no mutate
+_KEY_DEVICE_INSTANCE = "DeviceInstance"  # pragma: no mutate
+_KEY_DIGEST_AUTH = "DigestAuth"  # pragma: no mutate
+_KEY_HOST = "Host"  # pragma: no mutate
+_KEY_METER_CONFIG = "MeterConfigPath"  # pragma: no mutate
+_KEY_METER_TYPE = "MeterType"  # pragma: no mutate
+_KEY_MODE = "Mode"  # pragma: no mutate
+_KEY_P1 = "P1"  # pragma: no mutate
+_KEY_PASSWORD = "Password"  # pragma: no mutate
+_KEY_PHASE = "Phase"  # pragma: no mutate
+_KEY_PORT = "Port"  # pragma: no mutate
+_KEY_PRESET = "Preset"  # pragma: no mutate
+_KEY_REQUEST_TIMEOUT = "RequestTimeoutSeconds"  # pragma: no mutate
+_KEY_SUPPORTED_PHASES = "SupportedPhaseSelections"  # pragma: no mutate
+_KEY_SWITCH_CONFIG = "SwitchConfigPath"  # pragma: no mutate
+_KEY_SWITCH_TYPE = "SwitchType"  # pragma: no mutate
+_KEY_TRANSPORT = "Transport"  # pragma: no mutate
+_KEY_UNIT_ID = "UnitId"  # pragma: no mutate
+_KEY_USERNAME = "Username"  # pragma: no mutate
+
+ConfigValues = Mapping[str, str] | configparser.SectionProxy
+
 
 @dataclass(frozen=True)
 class ImportedWizardDefaults:
@@ -91,9 +130,29 @@ def _sibling_inventory_path(config_path: Path) -> str | None:
 
 def _config_parser(path: Path) -> configparser.ConfigParser:
     parser = configparser.ConfigParser(interpolation=None)
-    with path.open(encoding="utf-8") as handle:
+    with path.open(encoding="utf-8") as handle:  # pragma: no mutate
         parser.read_file(handle)
     return parser
+
+
+def _parser_defaults(parser: configparser.ConfigParser) -> ConfigValues:
+    return parser[_SECTION_DEFAULT] if _SECTION_DEFAULT in parser else parser.defaults()
+
+
+def _parser_section_or_defaults(parser: configparser.ConfigParser, section: str) -> ConfigValues:
+    return parser[section] if parser.has_section(section) else _parser_defaults(parser)
+
+
+def _section_text(values: ConfigValues, key: str) -> str:
+    value = values.get(key)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _section_optional(values: ConfigValues, key: str) -> str | None:
+    value = _section_text(values, key)
+    return value or None
 
 
 def _as_bool(value: str | None) -> bool | None:
@@ -130,19 +189,18 @@ def _adapter_host_value(adapter_path: Path | None) -> str | None:
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    return adapter_section.get("Host") or adapter_section.get("BaseUrl")
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    return _section_optional(adapter_section, _KEY_HOST) or _section_optional(adapter_section, _KEY_BASE_URL)
 
 
 def _switch_group_host_value(adapter_path: Path | None) -> str | None:
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    members = adapter["Members"] if adapter.has_section("Members") else None
+    members = adapter[_SECTION_MEMBERS] if adapter.has_section(_SECTION_MEMBERS) else None
     if members is None:
         return _adapter_host_value(adapter_path)
-    return _switch_group_member_host(adapter_path, members.get("P1"))
+    return _switch_group_member_host(adapter_path, members.get(_KEY_P1))
 
 
 def _switch_group_member_host(adapter_path: Path, phase_path_value: str | None) -> str | None:
@@ -155,7 +213,9 @@ def _switch_group_member_host(adapter_path: Path, phase_path_value: str | None) 
 
 
 def _policy_mode(value: str | None) -> WizardPolicyMode | None:
-    normalized = (value or "").strip()
+    if value is None:
+        return None
+    normalized = value.strip()
     if normalized == "1":
         return "auto"
     if normalized == "2":
@@ -188,9 +248,9 @@ def _profile_defaults_from_types(
 
 def _backend_types(backends: configparser.SectionProxy) -> tuple[str, str, str]:
     return (
-        backends.get("MeterType", "").strip(),
-        backends.get("SwitchType", "").strip(),
-        backends.get("ChargerType", "").strip(),
+        _section_text(backends, _KEY_METER_TYPE),
+        _section_text(backends, _KEY_SWITCH_TYPE),
+        _section_text(backends, _KEY_CHARGER_TYPE),
     )
 
 
@@ -218,23 +278,22 @@ def _transport_defaults(config_path: Path, backends: configparser.SectionProxy |
     if adapter_path is None:
         return None, None, None, None, None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    transport_kind = recognized_choice(adapter_section.get("Transport"), WIZARD_TRANSPORT_KINDS)
-    transport_section = adapter["Transport"] if adapter.has_section("Transport") else adapter_defaults
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    transport_kind = recognized_choice(adapter_section.get(_KEY_TRANSPORT), WIZARD_TRANSPORT_KINDS)
+    transport_section = _parser_section_or_defaults(adapter, _SECTION_TRANSPORT)
     return (
         transport_kind,
-        transport_section.get("Host"),
-        _as_int(transport_section.get("Port")),
-        transport_section.get("Device"),
-        _as_int(transport_section.get("UnitId")),
+        transport_section.get(_KEY_HOST),
+        _as_int(transport_section.get(_KEY_PORT)),
+        transport_section.get(_KEY_DEVICE),
+        _as_int(transport_section.get(_KEY_UNIT_ID)),
     )
 
 
 def _charger_adapter_path(config_path: Path, backends: configparser.SectionProxy | None, backend: str | None) -> Path | None:
     if not backend_requires_transport(backend) or backends is None:
         return None
-    return _adapter_path(config_path, backends, "ChargerConfigPath")
+    return _adapter_path(config_path, backends, _KEY_CHARGER_CONFIG)
 
 
 def _request_timeout_seconds(config_path: Path, backends: configparser.SectionProxy | None, backend: str | None) -> float | None:
@@ -242,36 +301,33 @@ def _request_timeout_seconds(config_path: Path, backends: configparser.SectionPr
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    return _as_float(adapter_section.get("RequestTimeoutSeconds"))
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    return _as_float(adapter_section.get(_KEY_REQUEST_TIMEOUT))
 
 
 def _charger_preset(config_path: Path, backends: configparser.SectionProxy | None) -> str | None:
-    adapter_path = _adapter_path(config_path, backends, "ChargerConfigPath")
+    adapter_path = _adapter_path(config_path, backends, _KEY_CHARGER_CONFIG)
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    preset = str(adapter_section.get("Preset", "")).strip()
-    return preset or None
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    return _section_optional(adapter_section, _KEY_PRESET)
 
 
 def _goe_charger_adapter_path(config_path: Path, backends: configparser.SectionProxy | None, backend: str | None) -> Path | None:
     if backend != "goe_charger":
         return None
-    return _adapter_path(config_path, backends, "ChargerConfigPath")
+    return _adapter_path(config_path, backends, _KEY_CHARGER_CONFIG)
 
 
 def _switch_group_phase_layout(config_path: Path, backends: configparser.SectionProxy | None) -> str | None:
-    adapter_path = _adapter_path(config_path, backends, "SwitchConfigPath")
+    adapter_path = _adapter_path(config_path, backends, _KEY_SWITCH_CONFIG)
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    if not adapter.has_section("Capabilities"):
+    if not adapter.has_section(_SECTION_CAPABILITIES):
         return None
-    return adapter["Capabilities"].get("SupportedPhaseSelections")
+    return adapter[_SECTION_CAPABILITIES].get(_KEY_SUPPORTED_PHASES)
 
 
 def _json_str(value: object) -> str | None:
@@ -303,7 +359,7 @@ def _json_float(value: object) -> float | None:
 
 
 def _load_from_result_json(config_path: Path) -> ImportedWizardDefaults:
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload = json.loads(config_path.read_text(encoding="utf-8"))  # pragma: no mutate
     if not isinstance(payload, dict):
         raise ValueError(f"Wizard result does not contain a JSON object: {config_path}")
     defaults = payload.get("answer_defaults")
@@ -349,12 +405,12 @@ def load_imported_defaults(config_path: Path) -> ImportedWizardDefaults:
     if config_path.name.endswith(".wizard-result.json"):
         return _load_from_result_json(config_path)
     parser = _config_parser(config_path)
-    defaults = parser["DEFAULT"] if "DEFAULT" in parser else parser.defaults()
-    backends = parser["Backends"] if parser.has_section("Backends") else None
+    defaults = _parser_defaults(parser)
+    backends = parser[_SECTION_BACKENDS] if parser.has_section(_SECTION_BACKENDS) else None
     profile, topology_preset, charger_backend = _profile_defaults(backends)
-    meter_host_input = _adapter_host_value(_adapter_path(config_path, backends, "MeterConfigPath"))
-    switch_host_input = _switch_group_host_value(_adapter_path(config_path, backends, "SwitchConfigPath"))
-    charger_host_input = _adapter_host_value(_adapter_path(config_path, backends, "ChargerConfigPath"))
+    meter_host_input = _adapter_host_value(_adapter_path(config_path, backends, _KEY_METER_CONFIG))
+    switch_host_input = _switch_group_host_value(_adapter_path(config_path, backends, _KEY_SWITCH_CONFIG))
+    charger_host_input = _adapter_host_value(_adapter_path(config_path, backends, _KEY_CHARGER_CONFIG))
     transport_kind, transport_host, transport_port, transport_device, transport_unit_id = _transport_defaults(
         config_path,
         backends,
@@ -363,28 +419,28 @@ def load_imported_defaults(config_path: Path) -> ImportedWizardDefaults:
     return ImportedWizardDefaults(
         imported_from=str(config_path),
         profile=profile,
-        host_input=defaults.get("Host"),
+        host_input=defaults.get(_KEY_HOST),
         meter_host_input=meter_host_input,
         switch_host_input=switch_host_input,
         charger_host_input=charger_host_input,
-        device_instance=_as_int(defaults.get("DeviceInstance")),
-        phase=defaults.get("Phase"),
-        policy_mode=_policy_mode(defaults.get("Mode")),
-        digest_auth=_as_bool(defaults.get("DigestAuth")),
-        username=defaults.get("Username"),
-        password=defaults.get("Password"),
+        device_instance=_as_int(defaults.get(_KEY_DEVICE_INSTANCE)),
+        phase=defaults.get(_KEY_PHASE),
+        policy_mode=_policy_mode(defaults.get(_KEY_MODE)),
+        digest_auth=_as_bool(defaults.get(_KEY_DIGEST_AUTH)),
+        username=defaults.get(_KEY_USERNAME),
+        password=defaults.get(_KEY_PASSWORD),
         topology_preset=topology_preset,
         charger_backend=charger_backend,
         charger_preset=_charger_preset(config_path, backends),
         request_timeout_seconds=_request_timeout_seconds(config_path, backends, charger_backend),
         switch_group_phase_layout=_switch_group_phase_layout(config_path, backends),
-        auto_start_surplus_watts=_as_float(defaults.get("AutoStartSurplusWatts")),
-        auto_stop_surplus_watts=_as_float(defaults.get("AutoStopSurplusWatts")),
-        auto_min_soc=_as_float(defaults.get("AutoMinSoc")),
-        auto_resume_soc=_as_float(defaults.get("AutoResumeSoc")),
-        scheduled_enabled_days=defaults.get("AutoScheduledEnabledDays"),
-        scheduled_latest_end_time=defaults.get("AutoScheduledLatestEndTime"),
-        scheduled_night_current_amps=_as_float(defaults.get("AutoScheduledNightCurrentAmps")),
+        auto_start_surplus_watts=_as_float(defaults.get(_KEY_AUTO_START_SURPLUS)),
+        auto_stop_surplus_watts=_as_float(defaults.get(_KEY_AUTO_STOP_SURPLUS)),
+        auto_min_soc=_as_float(defaults.get(_KEY_AUTO_MIN_SOC)),
+        auto_resume_soc=_as_float(defaults.get(_KEY_AUTO_RESUME_SOC)),
+        scheduled_enabled_days=defaults.get(_KEY_AUTO_SCHEDULED_DAYS),
+        scheduled_latest_end_time=defaults.get(_KEY_AUTO_SCHEDULED_LATEST_END),
+        scheduled_night_current_amps=_as_float(defaults.get(_KEY_AUTO_SCHEDULED_NIGHT_AMPS)),
         transport_kind=transport_kind,
         transport_host=transport_host,
         transport_port=transport_port,

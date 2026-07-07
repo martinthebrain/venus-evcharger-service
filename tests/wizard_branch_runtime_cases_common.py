@@ -11,7 +11,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from venus_evcharger.bootstrap import wizard, wizard_cli
+from venus_evcharger.bootstrap import (
+    wizard,
+    wizard_cli,
+    wizard_cli_imports,
+    wizard_cli_interactive,
+    wizard_cli_non_interactive,
+    wizard_cli_prompts,
+    wizard_main,
+    wizard_render,
+    wizard_runtime,
+)
 from venus_evcharger.bootstrap.wizard_guidance import _topology_choice_labels, prompt_topology_preset, resolved_primary_host
 from venus_evcharger.bootstrap.wizard_import import (
     ImportedWizardDefaults,

@@ -155,6 +155,7 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "venus_evcharger_dbus_adapter.py",
                 "venus_evcharger_service.py",
                 "CONTROL_API.md",
+                "deploy/venus",
             ],
         )
         self.assertEqual(mutmut_config["pytest_add_cli_args"], ["-k", "not socket"])

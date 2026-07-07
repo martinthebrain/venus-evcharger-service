@@ -3,20 +3,35 @@ from tests.venus_evcharger_shelly_io_controller_support import *
 
 
 class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
+    def test_controller_stores_service_and_runtime_now_uses_numeric_clock_only(self):
+        service = SimpleNamespace(_time_now=lambda: 123.5)
+        controller = ShellyIoController(service)
+
+        self.assertIs(controller.service, service)
+        self.assertEqual(controller._runtime_now(), 123.5)
+        self.assertEqual(ShellyIoController(SimpleNamespace(_time_now=lambda: 12))._runtime_now(), 12.0)
+        self.assertEqual(ShellyIoController(SimpleNamespace(_time_now=lambda: True))._runtime_now(), 0.0)
+        self.assertEqual(ShellyIoController(SimpleNamespace(_time_now=lambda: "bad"))._runtime_now(), 0.0)
+        self.assertEqual(ShellyIoController(SimpleNamespace(_time_now=123.5))._runtime_now(), 0.0)
+        self.assertEqual(ShellyIoController(SimpleNamespace())._runtime_now(), 0.0)
+
     def test_request_auth_kwargs_supports_digest_basic_and_no_auth(self):
         digest_service = SimpleNamespace(use_digest_auth=True, username="user", password="pass")
         basic_service = SimpleNamespace(use_digest_auth=False, username="user", password="pass")
         none_service = SimpleNamespace(use_digest_auth=False, username="", password="")
+        username_only_service = SimpleNamespace(use_digest_auth=False, username="user", password="")
 
         digest_controller = ShellyIoController(digest_service)
         basic_controller = ShellyIoController(basic_service)
         none_controller = ShellyIoController(none_service)
+        username_only_controller = ShellyIoController(username_only_service)
 
         with patch("venus_evcharger.backend.shelly_io_requests.HTTPDigestAuth", return_value="digest-auth") as digest_auth:
             self.assertEqual(digest_controller._request_auth_kwargs(), {"auth": "digest-auth"})
         digest_auth.assert_called_once_with("user", "pass")
         self.assertEqual(basic_controller._request_auth_kwargs(), {"auth": ("user", "pass")})
         self.assertEqual(none_controller._request_auth_kwargs(), {})
+        self.assertEqual(username_only_controller._request_auth_kwargs(), {})
 
     def test_request_helpers_use_timeout_and_auth_kwargs(self):
         response = MagicMock()
@@ -38,6 +53,16 @@ class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
         session.get.assert_any_call(url="http://example.invalid", timeout=1.5)
         session.get.assert_any_call(url="http://example.invalid/worker", timeout=1.5)
         self.assertEqual(controller._request_kwargs("http://example.invalid"), {"url": "http://example.invalid", "timeout": 1.5})
+        self.assertEqual(
+            ShellyIoController(SimpleNamespace(use_digest_auth=False, username="", password=""))._request_kwargs(
+                "http://example.invalid/default"
+            ),
+            {"url": "http://example.invalid/default", "timeout": 2.0},
+        )
+        self.assertEqual(controller._json_object({1: "one"}), {"1": "one"})
+        with self.assertRaises(ValueError) as error_context:
+            controller._json_object(["not", "an", "object"])
+        self.assertEqual(str(error_context.exception), "Shelly response must be a JSON object")
 
     def test_rpc_call_encodes_bool_query_as_lowercase(self):
         service = SimpleNamespace(
@@ -82,6 +107,42 @@ class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
         service.rpc_call.assert_any_call("Switch.GetStatus", id=2)
         service.rpc_call.assert_any_call("Switch.Set", id=2, on=False)
         service._rpc_call_with_session.assert_called_once_with("worker-session", "Switch.GetStatus", id=2)
+
+    def test_request_split_paths_forward_runtime_time_and_charger_state(self):
+        service = SimpleNamespace()
+        controller = ShellyIoController(service)
+        charger_state = ChargerState(enabled=True, current_amps=6.0, phase_selection="P1")
+        controller._runtime_now = MagicMock(return_value=123.0)
+        controller._read_charger_state_best_effort = MagicMock(return_value=charger_state)
+        controller._uses_split_backends = MagicMock(return_value=True)
+        controller._read_split_pm_status = MagicMock(return_value={"split": True})
+        controller.fetch_pm_status_rpc = MagicMock(return_value={"rpc": True})
+
+        self.assertEqual(controller.fetch_pm_status(), {"split": True})
+
+        controller._read_charger_state_best_effort.assert_called_once_with(now=123.0)
+        controller._read_split_pm_status.assert_called_once_with(charger_state, now=123.0)
+        controller.fetch_pm_status_rpc.assert_not_called()
+
+        controller._runtime_now.reset_mock()
+        controller._read_charger_state_best_effort.reset_mock()
+        controller._read_split_pm_status.reset_mock()
+        controller.worker_fetch_pm_status_rpc = MagicMock(return_value={"worker-rpc": True})
+
+        self.assertEqual(controller.worker_fetch_pm_status(), {"split": True})
+
+        controller._read_charger_state_best_effort.assert_called_once_with(now=123.0)
+        controller._read_split_pm_status.assert_called_once_with(charger_state, now=123.0)
+        controller.worker_fetch_pm_status_rpc.assert_not_called()
+
+    def test_set_relay_rpc_preserves_true_state_without_split_backend(self):
+        service = SimpleNamespace(pm_id=2, rpc_call=MagicMock(return_value={"output": True}))
+        controller = ShellyIoController(service)
+        controller._split_enable_backend = MagicMock(return_value=None)
+
+        self.assertEqual(controller.set_relay(True), {"output": True})
+
+        service.rpc_call.assert_called_once_with("Switch.Set", id=2, on=True)
 
     def test_fetch_pm_status_uses_split_backends_and_prefers_switch_state(self):
         meter_backend = SimpleNamespace(

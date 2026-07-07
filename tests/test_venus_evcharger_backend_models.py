@@ -6,6 +6,7 @@ from venus_evcharger.backend.models import (
     normalize_phase_selection,
     normalize_phase_selection_or_none,
     normalize_phase_selection_tuple,
+    normalize_switching_mode,
     phase_selection_count,
     phase_switch_lockout_active,
     switch_feedback_mismatch,
@@ -18,6 +19,10 @@ class TestBackendModelHelpers(unittest.TestCase):
         self.assertEqual(phase_selection_count("P1_P2"), 2)
         self.assertEqual(phase_selection_count("P1_P2_P3"), 3)
         self.assertEqual(phase_selection_count("3P"), 3)
+        self.assertEqual(phase_selection_count(None), 1)
+        self.assertEqual(phase_selection_count("unknown"), 1)
+        self.assertEqual(normalize_phase_selection(None), "P1")
+        self.assertEqual(normalize_phase_selection("unknown"), "P1")
         self.assertEqual(normalize_phase_selection("unknown", "P1_P2"), "P1_P2")
         self.assertEqual(normalize_phase_selection_tuple("", ("P1_P2",)), ("P1_P2",))
 
@@ -29,6 +34,24 @@ class TestBackendModelHelpers(unittest.TestCase):
         self.assertIsNone(normalize_phase_selection_or_none(None))
         self.assertIsNone(normalize_phase_selection_or_none("unknown"))
 
+    def test_phase_selection_tuple_normalizes_iterables_and_comma_text(self) -> None:
+        self.assertEqual(normalize_phase_selection_tuple(["bad", "P1_P2"]), ("P1", "P1_P2"))
+        self.assertEqual(normalize_phase_selection_tuple(("L1", "3p")), ("P1", "P1_P2_P3"))
+        self.assertEqual(normalize_phase_selection_tuple("bad,P1_P2,P1+P2+P3"), ("P1", "P1_P2", "P1_P2_P3"))
+        self.assertEqual(normalize_phase_selection_tuple("P1, P1_P2"), ("P1", "P1_P2"))
+        self.assertEqual(normalize_phase_selection_tuple(None, ("P1_P2_P3",)), ("P1_P2_P3",))
+
+    def test_switching_mode_normalizes_supported_values_and_defaults(self) -> None:
+        self.assertEqual(normalize_switching_mode("direct"), "direct")
+        self.assertEqual(normalize_switching_mode(" DIRECT "), "direct")
+        self.assertEqual(normalize_switching_mode("direct", "contactor"), "direct")
+        self.assertEqual(normalize_switching_mode(" DIRECT ", "contactor"), "direct")
+        self.assertEqual(normalize_switching_mode("contactor"), "contactor")
+        self.assertEqual(normalize_switching_mode(" CONTACTOR "), "contactor")
+        self.assertEqual(normalize_switching_mode(None), "direct")
+        self.assertEqual(normalize_switching_mode("unknown"), "direct")
+        self.assertEqual(normalize_switching_mode("unknown", "contactor"), "contactor")
+
     def test_phase_switch_lockout_active_rejects_missing_or_expired_values(self) -> None:
         self.assertFalse(phase_switch_lockout_active(None, 200.0, now=100.0))
         self.assertFalse(phase_switch_lockout_active("P1_P2", None, now=100.0))
@@ -36,11 +59,14 @@ class TestBackendModelHelpers(unittest.TestCase):
         self.assertFalse(phase_switch_lockout_active("P1_P2", object(), now=100.0))
         self.assertFalse(phase_switch_lockout_active("P1_P2", "bad", now=100.0))
         self.assertFalse(phase_switch_lockout_active("P1_P2", 90.0, now=100.0))
+        self.assertFalse(phase_switch_lockout_active("P1_P2", 100.0, now=100.0))
         self.assertTrue(phase_switch_lockout_active("P1_P2", 120.0, now=100.0))
 
     def test_effective_supported_phase_selections_cap_layouts_at_active_lockout_target(self) -> None:
         supported = ("P1", "P1_P2", "P1_P2_P3")
 
+        self.assertEqual(effective_supported_phase_selections("", now=100.0), ("P1",))
+        self.assertEqual(effective_supported_phase_selections(None, now=100.0), ("P1",))
         self.assertEqual(
             effective_supported_phase_selections(
                 supported,

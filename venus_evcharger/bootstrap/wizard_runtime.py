@@ -346,7 +346,7 @@ def configure_wallbox(
     apply_suggested_energy_merge: bool = False,
     suggested_energy_capacity_wh: float | None = None,
     suggested_energy_capacity_overrides: dict[str, float] | None = None,
-    live_check_runner: Callable[[str, dict[str, str], str, tuple[str, ...] | None], dict[str, object]] = _live_check_rendered_setup,
+    live_check_runner: Callable[[str, dict[str, str], str, tuple[str, ...] | None], dict[str, object]] | None = None,
 ) -> WizardResult:
     template_text = template_path.read_text(encoding="utf-8")
     created_at = datetime.now().isoformat(timespec="seconds")
@@ -377,6 +377,8 @@ def configure_wallbox(
         suggested_energy_capacity_overrides=suggested_energy_capacity_overrides,
     )
     validation = validate_rendered_setup(config_text, adapter_files, config_path.name)
+    if live_check and live_check_runner is None:
+        live_check_runner = _live_check_rendered_setup
     live_check_payload = live_check_runner(config_text, adapter_files, config_path.name, selected_probe_roles) if live_check else None
     topology_config = build_wizard_topology_config(answers)
     topology_config_payload = _json_ready_dict(topology_config, "topology config")

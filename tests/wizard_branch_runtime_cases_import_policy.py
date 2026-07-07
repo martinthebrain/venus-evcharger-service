@@ -22,8 +22,8 @@ from tests.wizard_branch_runtime_cases_common import (
     resolved_primary_host,
     scheduled_mode_snapshot,
     tempfile,
-    wizard,
     wizard_cli,
+    wizard_main,
     WizardResult,
     _topology_summary_text,
 )
@@ -134,35 +134,35 @@ class _WizardBranchRuntimeImportPolicyCases:
         self.assertIn("AutoEnergySource.huawei.Profile=huawei_mb_sdongle", hinted_result_text)
 
     def test_resolved_energy_capacity_wh_prompts_only_for_single_energy_recommendation(self) -> None:
-        self.assertIsNone(wizard._resolved_energy_capacity_wh(_namespace(non_interactive=True), tuple()))
+        self.assertIsNone(wizard_main.resolved_energy_capacity_wh(_namespace(non_interactive=True), tuple()))
         self.assertEqual(
-            wizard._resolved_energy_capacity_wh(
+            wizard_main.resolved_energy_capacity_wh(
                 _namespace(non_interactive=True, energy_default_usable_capacity_wh=12000.0),
                 ("/tmp/huawei-rec",),
             ),
             12000.0,
         )
         with (
-            patch("venus_evcharger.bootstrap.wizard.prompt_yes_no", return_value=True),
+            patch("venus_evcharger.bootstrap.wizard_main.prompt_yes_no", return_value=True),
             patch("builtins.input", return_value="15360"),
         ):
             self.assertEqual(
-                wizard._resolved_energy_capacity_wh(
+                wizard_main.resolved_energy_capacity_wh(
                     _namespace(energy_recommendation_prefix=["/tmp/huawei-rec"]),
                     ("/tmp/huawei-rec",),
                 ),
                 15360.0,
             )
         self.assertEqual(
-            wizard._resolved_energy_capacity_overrides(
+            wizard_main.resolved_energy_capacity_overrides(
                 _namespace(energy_usable_capacity_wh=["hybrid_a=15360", "hybrid_b=7680"])
             ),
             {"hybrid_a": 15360.0, "hybrid_b": 7680.0},
         )
         with self.assertRaisesRegex(ValueError, "source_id=Wh"):
-            wizard._resolved_energy_capacity_overrides(_namespace(energy_usable_capacity_wh=["broken"]))
+            wizard_main.resolved_energy_capacity_overrides(_namespace(energy_usable_capacity_wh=["broken"]))
         with self.assertRaisesRegex(ValueError, "source_id=Wh"):
-            wizard._resolved_energy_capacity_overrides(_namespace(energy_usable_capacity_wh=["hybrid_a=0"]))
+            wizard_main.resolved_energy_capacity_overrides(_namespace(energy_usable_capacity_wh=["hybrid_a=0"]))
 
         self.assertIsNone(_as_bool(None))
         self.assertIsNone(_as_int(" "))

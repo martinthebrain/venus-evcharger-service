@@ -46,7 +46,9 @@ def native_modbus_client(backend: Any) -> ModbusClient:
 def _native_modbus_transport_factory(backend: Any) -> Callable[[Any], ModbusTransport]:
     """Return the backend module's transport factory, preserving existing test patch points."""
     module = sys.modules.get(type(backend).__module__)
-    factory = getattr(module, "create_modbus_transport", create_modbus_transport)
+    factory = getattr(module, "create_modbus_transport", None)
+    if factory is None:
+        return create_modbus_transport
     if not callable(factory):
         return create_modbus_transport
 

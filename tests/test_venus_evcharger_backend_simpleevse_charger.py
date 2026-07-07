@@ -11,8 +11,13 @@ from venus_evcharger.backend.simpleevse_charger import (
     _enabled,
     _evse_status_text,
     _fault_text,
+    _non_error_status,
     _rounded_current_setting,
     _status_text,
+    _supported_phase_selections,
+    _validate_simpleevse_current,
+    _vehicle_status_text,
+    load_simpleevse_charger_settings,
 )
 
 
@@ -64,6 +69,44 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         return str(path)
 
+    def test_simpleevse_boundary_helpers_receive_exact_context_and_service(self) -> None:
+        service = self._service()
+        with patch("venus_evcharger.backend.simpleevse_charger.initialize_native_modbus_backend") as initialize:
+            backend = SimpleEvseChargerBackend(service)
+        initialize.assert_called_once_with(backend, service, "", load_simpleevse_charger_settings)
+
+        parser = SimpleNamespace()
+        with patch(
+            "venus_evcharger.backend.simpleevse_charger.fixed_supported_phase_selections",
+            return_value=("P1",),
+        ) as fixed_phases:
+            self.assertEqual(_supported_phase_selections(parser), ("P1",))
+        fixed_phases.assert_called_once_with(parser, ("P1",), "SimpleEVSE")
+
+        transport_settings = SimpleNamespace()
+        with (
+            patch("venus_evcharger.backend.simpleevse_charger.load_required_backend_config", return_value=parser) as load_config,
+            patch(
+                "venus_evcharger.backend.simpleevse_charger.load_modbus_transport_settings",
+                return_value=transport_settings,
+            ) as load_transport,
+            patch("venus_evcharger.backend.simpleevse_charger._supported_phase_selections", return_value=("P1",)),
+        ):
+            settings = load_simpleevse_charger_settings(service, "/tmp/simpleevse.ini")
+
+        load_config.assert_called_once_with("/tmp/simpleevse.ini", "SimpleEVSE charger")
+        load_transport.assert_called_once_with(parser, service)
+        self.assertIs(settings.transport_settings, transport_settings)
+
+    def test_read_register_uses_holding_uint16_contract(self) -> None:
+        backend = object.__new__(SimpleEvseChargerBackend)
+        client = SimpleNamespace(read_scalar=unittest.mock.MagicMock(return_value=17))
+        backend._client = unittest.mock.MagicMock(return_value=client)
+
+        self.assertEqual(backend._read_register(1234), 17)
+
+        client.read_scalar.assert_called_once_with("holding", 1234, "uint16")
+
     def test_read_charger_state_maps_simpleevse_registers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = self._write_config(
@@ -84,6 +127,8 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             self.assertEqual(state.current_amps, 16.0)
             self.assertEqual(state.actual_current_amps, 13.0)
             self.assertEqual(state.phase_selection, "P1")
+            self.assertIsNone(state.power_w)
+            self.assertIsNone(state.energy_kwh)
             self.assertEqual(state.status_text, "charging")
             self.assertIsNone(state.fault_text)
 
@@ -105,7 +150,36 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
                 backend.set_phase_selection("P1_P2_P3")
 
             self.assertEqual(backend.settings.supported_phase_selections, ("P1_P2_P3",))
+            self.assertEqual(backend.settings.profile_name, "simpleevse")
+            self.assertEqual(backend.settings.current_register, 1000)
+            self.assertEqual(backend.settings.actual_current_register, 1001)
+            self.assertEqual(backend.settings.vehicle_state_register, 1002)
+            self.assertEqual(backend.settings.control_register, 1004)
+            self.assertEqual(backend.settings.firmware_register, 1005)
+            self.assertEqual(backend.settings.evse_state_register, 1006)
+            self.assertEqual(backend.settings.status_register, 1007)
             self.assertEqual(state.phase_selection, "P1_P2_P3")
+
+    def test_read_charger_state_falls_back_to_evse_state_when_vehicle_state_is_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._write_config(
+                temp_dir,
+                "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
+                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+            )
+            fake_transport = _FakeSimpleEvseTransport()
+            fake_transport.holding_registers[1002] = 99
+            fake_transport.holding_registers[1006] = 3
+            with patch(
+                "venus_evcharger.backend.simpleevse_charger.create_modbus_transport",
+                return_value=fake_transport,
+            ):
+                backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
+
+                state = backend.read_charger_state()
+
+            self.assertFalse(state.enabled)
+            self.assertEqual(state.status_text, "disabled")
 
     def test_read_charger_state_maps_simpleevse_fault_bits(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -159,8 +233,29 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             )
             backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
 
-            with self.assertRaisesRegex(ValueError, "configured fixed phase selection: P1"):
+            with self.assertRaises(ValueError) as invalid_phase:
                 backend.set_phase_selection("P1_P2_P3")
+            self.assertIn("configured fixed phase selection: P1", str(invalid_phase.exception))
+
+    def test_simpleevse_charger_forwards_phase_selection_validation_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._write_config(
+                temp_dir,
+                "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
+                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+            )
+            backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
+
+            with patch("venus_evcharger.backend.simpleevse_charger.validate_fixed_phase_selection") as validate:
+                backend.set_phase_selection("P1_P2_P3")
+
+            validate.assert_called_once_with("P1_P2_P3", "P1", "SimpleEVSE")
+
+            with self.assertRaises(ValueError) as invalid_phase:
+                backend.set_phase_selection("P1_P2_P3")
+            invalid_phase_message = str(invalid_phase.exception)
+            self.assertIn("simpleevse", invalid_phase_message.lower())
+            self.assertIn("configured fixed phase selection: P1", invalid_phase_message)
 
     def test_simpleevse_charger_rejects_multiple_supported_phase_selections(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -171,20 +266,42 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2_P3\n",
             )
 
-            with self.assertRaisesRegex(ValueError, "requires exactly one fixed"):
+            with self.assertRaises(ValueError) as invalid_supported:
                 SimpleEvseChargerBackend(self._service(), config_path=config_path)
+            self.assertIn("SimpleEVSE", str(invalid_supported.exception))
+            self.assertIn("requires exactly one fixed", str(invalid_supported.exception))
 
     def test_simpleevse_helper_edges_cover_fault_status_and_current_validation(self) -> None:
+        self.assertEqual(_vehicle_status_text(1), "ready")
+        self.assertEqual(_vehicle_status_text(2), "vehicle-present")
+        self.assertEqual(_vehicle_status_text(3), "charging")
+        self.assertEqual(_vehicle_status_text(4), "charging-ventilation")
+        self.assertEqual(_vehicle_status_text(5), "error")
+        self.assertIsNone(_vehicle_status_text(99))
         self.assertEqual(_evse_status_text(1), "idle")
+        self.assertEqual(_evse_status_text(2), "ready")
+        self.assertEqual(_evse_status_text(3), "disabled")
+        self.assertIsNone(_evse_status_text(99))
+        self.assertFalse(_non_error_status("error"))
+        self.assertTrue(_non_error_status("ERROR"))
         self.assertEqual(_fault_text(0, 0x0004), "vent-required-fail")
         self.assertEqual(_fault_text(0, 0x0008), "pilot-release-wait")
         self.assertEqual(_fault_text(5, 0), "vehicle-failure")
+        self.assertTrue(_enabled(0, 2))
         self.assertFalse(_enabled(0x0001, 3))
+        self.assertTrue(_enabled(0, 4))
         self.assertEqual(_status_text(99, 2, None), "ready")
-        with self.assertRaisesRegex(ValueError, "Unsupported charger current"):
+        self.assertEqual(_rounded_current_setting(0.0), 0)
+        self.assertEqual(_rounded_current_setting(80.0), 80)
+        _validate_simpleevse_current(0.0, 0)
+        _validate_simpleevse_current(80.0, 80)
+        with self.assertRaisesRegex(ValueError, "Unsupported charger current '-1.0'"):
+            _rounded_current_setting(-1.0)
+        with self.assertRaisesRegex(ValueError, "Unsupported charger current '81.0'"):
             _rounded_current_setting(81.0)
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(FileNotFoundError) as missing_config:
             SimpleEvseChargerBackend(self._service(), config_path="/definitely/missing.ini")
+        self.assertIn("SimpleEVSE charger", str(missing_config.exception))
 
     def test_simpleevse_reuses_preseeded_transport_when_client_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

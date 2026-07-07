@@ -5,10 +5,8 @@ from __future__ import annotations
 
 import argparse
 from venus_evcharger.bootstrap.wizard_inventory_cli_actions import run_simple_inventory_action
-from venus_evcharger.bootstrap.wizard_inventory_cli_support import (
-    guided_inventory_add_profile,
-    guided_inventory_edit_binding,
-)
+from venus_evcharger.bootstrap.wizard_inventory_cli_guided_binding import guided_inventory_edit_binding
+from venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile import guided_inventory_add_profile
 from venus_evcharger.bootstrap.wizard_inventory_support import (
     inventory_action_path,
     inventory_summary_payload,

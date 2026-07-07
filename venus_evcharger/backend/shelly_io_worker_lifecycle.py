@@ -27,10 +27,24 @@ class ShellyIoWorkerLifecycle(ShellyIoWorkerTransport):
 
     @staticmethod
     def _worker_stale_restart_seconds(svc: ShellyIoHost) -> float:
-        poll_seconds = max(0.2, float(getattr(svc, "_worker_poll_interval_seconds", 1.0) or 1.0))
-        request_timeout = max(0.0, float(getattr(svc, "shelly_request_timeout_seconds", 2.0) or 2.0))
-        relay_sync_timeout = max(0.0, float(getattr(svc, "relay_sync_timeout_seconds", 2.0) or 2.0))
+        poll_seconds = max(
+            0.2,
+            ShellyIoWorkerLifecycle._runtime_seconds_setting(svc, "_worker_poll_interval_seconds", 1.0),
+        )
+        request_timeout = ShellyIoWorkerLifecycle._runtime_seconds_setting(
+            svc, "shelly_request_timeout_seconds", 2.0
+        )
+        relay_sync_timeout = ShellyIoWorkerLifecycle._runtime_seconds_setting(
+            svc, "relay_sync_timeout_seconds", 2.0
+        )
         return max(5.0, poll_seconds * 5.0, request_timeout * 3.0, relay_sync_timeout * 2.0)
+
+    @staticmethod
+    def _runtime_seconds_setting(svc: ShellyIoHost, name: str, fallback: float) -> float:
+        value = getattr(svc, name, None)
+        if not value:
+            return fallback
+        return float(value)
 
     @staticmethod
     def _worker_snapshot_captured_at(svc: ShellyIoHost) -> float | None:

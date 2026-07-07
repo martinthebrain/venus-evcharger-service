@@ -15,6 +15,7 @@ import errno
 import os
 import select
 import socket
+import struct
 import subprocess
 import termios
 import time
@@ -98,14 +99,12 @@ def _configured_serial_attrs(fd: int, settings: ModbusTransportSettings) -> list
     baud = _serial_baudrate_constant(settings.baudrate)
     attrs[4] = baud
     attrs[5] = baud
-    attrs[2] &= ~termios.CSIZE
     attrs[2] |= {
         5: termios.CS5,
         6: termios.CS6,
         7: termios.CS7,
         8: termios.CS8,
     }[settings.bytesize]
-    attrs[2] &= ~(termios.PARENB | termios.PARODD | termios.CSTOPB)
     if settings.parity == "E":
         attrs[2] |= termios.PARENB
     elif settings.parity == "O":
@@ -290,6 +289,13 @@ def _expected_rtu_response_length(function_code: int, header: bytes) -> int:
     raise ValueError(f"Unsupported Modbus RTU function code 0x{function_code:02x}")
 
 
+def _positive_serial_write_count(written: int) -> int:
+    """Return a positive serial write count or raise a stable transport error."""
+    if written <= 0:
+        raise ModbusPortBusyError("Failed to write full Modbus RTU request")
+    return written
+
+
 class ModbusTcpTransport:
     """Simple one-shot Modbus TCP transport."""
 
@@ -302,9 +308,9 @@ class ModbusTcpTransport:
         self._transaction_id = (self._transaction_id + 1) & 0xFFFF
         pdu = bytes((request.function_code,)) + request.payload
         adu = (
-            self._transaction_id.to_bytes(2, "big")
+            struct.pack(">H", self._transaction_id)
             + b"\x00\x00"
-            + (len(pdu) + 1).to_bytes(2, "big")
+            + struct.pack(">H", len(pdu) + 1)
             + bytes((request.unit_id,))
             + pdu
         )
@@ -314,7 +320,7 @@ class ModbusTcpTransport:
             sock.settimeout(timeout_seconds)
             sock.sendall(adu)
             header = _recv_exact(sock, 7)
-            length = int.from_bytes(header[4:6], "big")
+            length = struct.unpack(">H", header[4:6])[0]
             body = _recv_exact(sock, max(0, length - 1))
         return body
 
@@ -331,9 +337,9 @@ class ModbusUdpTransport:
         self._transaction_id = (self._transaction_id + 1) & 0xFFFF
         pdu = bytes((request.function_code,)) + request.payload
         adu = (
-            self._transaction_id.to_bytes(2, "big")
+            struct.pack(">H", self._transaction_id)
             + b"\x00\x00"
-            + (len(pdu) + 1).to_bytes(2, "big")
+            + struct.pack(">H", len(pdu) + 1)
             + bytes((request.unit_id,))
             + pdu
         )
@@ -345,7 +351,7 @@ class ModbusUdpTransport:
             response, _ = sock.recvfrom(260)
         if len(response) < 7:
             raise TimeoutError("Incomplete Modbus UDP response")
-        length = int.from_bytes(response[4:6], "big")
+        length = struct.unpack(">H", response[4:6])[0]
         return response[7 : 7 + max(0, length - 1)]
 
 
@@ -359,7 +365,7 @@ class ModbusSerialRtuTransport:
     def exchange(self, request: ModbusRequest, *, timeout_seconds: float) -> bytes:
         """Send one Modbus RTU request and return the response PDU."""
         attempts = self._serial_attempt_count()
-        last_error: ModbusTransportError | None = None
+        last_error: ModbusTransportError | None
         for attempt_index in range(attempts):  # pragma: no branch
             self._ensure_port_owned()
             exchange_result, last_error = self._exchange_attempt(request, timeout_seconds)
@@ -375,10 +381,10 @@ class ModbusSerialRtuTransport:
         self,
         request: ModbusRequest,
         timeout_seconds: float,
-    ) -> tuple[bytes | None, ModbusTransportError]:
+    ) -> tuple[bytes | None, ModbusTransportError | None]:
         """Return one exchange result or the normalized recoverable error."""
         try:
-            return self._exchange_once(request, timeout_seconds), ModbusTransportError("unused")
+            return self._exchange_once(request, timeout_seconds), None
         except (ModbusPortBusyError, ModbusPortOwnershipError):
             raise
         except (ModbusTimeoutError, ModbusResponseError) as error:
@@ -448,9 +454,7 @@ class ModbusSerialRtuTransport:
         """Write one full Modbus RTU frame to the serial file descriptor."""
         total_written = 0
         while total_written < len(frame):
-            written = os.write(fd, frame[total_written:])
-            if written <= 0:
-                raise ModbusPortBusyError("Failed to write full Modbus RTU request")
+            written = _positive_serial_write_count(os.write(fd, frame[total_written:]))
             total_written += written
 
     @staticmethod

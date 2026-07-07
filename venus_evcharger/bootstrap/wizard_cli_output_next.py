@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+
 from venus_evcharger.bootstrap.wizard_models import WizardResult
 from venus_evcharger.bootstrap.wizard_support import policy_mode_note, topology_uses_cerbo_relay
 
@@ -18,7 +20,6 @@ def result_setup_note_lines(result: WizardResult) -> list[str]:
 
 
 def _topology_setup_notes(result: WizardResult) -> tuple[str, ...]:
-    topology_preset = result.topology_preset or ""
     return tuple(
         message
         for condition, message in (
@@ -31,7 +32,7 @@ def _topology_setup_notes(result: WizardResult) -> tuple[str, ...]:
                 "Meter/relay setups infer charging from power and energy deltas, not from vehicle communication.",
             ),
             (
-                "switch-group" in topology_preset,
+                result.topology_preset is not None and "switch-group" in result.topology_preset,
                 "External switch-group adapters own phase/contact switching only; the charger backend still owns charger control.",
             ),
             (
@@ -44,10 +45,11 @@ def _topology_setup_notes(result: WizardResult) -> tuple[str, ...]:
 
 
 def _is_meter_relay_setup(profile: str, topology_preset: str | None) -> bool:
-    preset = topology_preset or ""
-    return (profile == "simple_relay" and topology_preset is None) or any(
-        marker in preset for marker in _METER_RELAY_PRESET_MARKERS
-    )
+    if profile == "simple_relay" and topology_preset is None:
+        return True
+    if topology_preset is None:
+        return False
+    return any(marker in topology_preset for marker in _METER_RELAY_PRESET_MARKERS)
 
 
 def _has_native_charger_backend(charger_backend: str | None) -> bool:
@@ -107,4 +109,4 @@ def _has_adapter_files(result: WizardResult) -> bool:
 
 
 def _config_filename(config_path: str) -> str:
-    return config_path.rstrip("/").rsplit("/", 1)[-1]
+    return PurePosixPath(config_path).name

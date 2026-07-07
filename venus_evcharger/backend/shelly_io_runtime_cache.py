@@ -62,7 +62,7 @@ class ShellyIoRuntimeCache(ShellyIoCapabilities):
             enabled=None if enabled is None else bool(enabled),
             current_amps=finite_float_or_none(getattr(svc, "_last_charger_state_current_amps", None)),
             phase_selection=(
-                None if phase_selection_raw is None else normalize_phase_value(phase_selection_raw, "P1")
+                None if phase_selection_raw is None else normalize_phase_value(phase_selection_raw)
             ),
             actual_current_amps=finite_float_or_none(getattr(svc, "_last_charger_state_actual_current_amps", None)),
             power_w=finite_float_or_none(getattr(svc, "_last_charger_state_power_w", None)),

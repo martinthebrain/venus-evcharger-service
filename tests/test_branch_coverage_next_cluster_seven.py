@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from tests.companion_dbus_bridge_cases_common import _FakeVeDbusService
 from tests.venus_evcharger_test_fixtures import make_runtime_state_service
 from tests.wizard_branch_runtime_cases_common import _imported_defaults, _namespace
-from venus_evcharger.bootstrap import wizard_cli
+from venus_evcharger.bootstrap import wizard_cli_imports, wizard_cli_non_interactive
 from venus_evcharger.companion import EnergyCompanionDbusBridge
 from venus_evcharger.controllers.state_restore import _StateRuntimeRestore, _victron_ess_balance_energy_ids
 
@@ -45,16 +45,22 @@ class BranchCoverageNextClusterSevenTests(unittest.TestCase):
             result_path = Path(f"{config_path}.wizard-result.json")
             result_path.write_text("{}", encoding="utf-8")
 
-            self.assertEqual(wizard_cli._resume_import_path(_namespace(resume_last=True, config_path=str(config_path))), result_path)
-            self.assertEqual(wizard_cli._clone_import_path(_namespace(clone_current=True, config_path=str(config_path))), config_path)
+            self.assertEqual(wizard_cli_imports.resume_import_path(_namespace(resume_last=True, config_path=str(config_path))), result_path)
+            self.assertEqual(wizard_cli_imports.clone_import_path(_namespace(clone_current=True, config_path=str(config_path))), config_path)
 
-        self.assertEqual(wizard_cli._resolve_import_path(namespace), Path("/tmp/import.json"))
-        self.assertEqual(wizard_cli._non_interactive_policy_mode(namespace, imported), "manual")
-        self.assertEqual(wizard_cli._non_interactive_topology_preset(_namespace(), imported, "multi_adapter_topology"), "template-stack")
-        self.assertEqual(wizard_cli._non_interactive_backend(namespace, imported, "native_device", None), "modbus_charger")
-        self.assertEqual(wizard_cli._non_interactive_device_instance(namespace, imported), 81)
-        self.assertEqual(wizard_cli._non_interactive_phase(namespace, imported), "L2")
-        self.assertEqual(wizard_cli._non_interactive_string("cli.local", "imported.local"), "cli.local")
+        self.assertEqual(wizard_cli_imports.resolve_import_path(namespace), Path("/tmp/import.json"))
+        self.assertEqual(wizard_cli_non_interactive.non_interactive_policy_mode(namespace, imported), "manual")
+        self.assertEqual(
+            wizard_cli_non_interactive.non_interactive_topology_preset(_namespace(), imported, "multi_adapter_topology"),
+            "template-stack",
+        )
+        self.assertEqual(
+            wizard_cli_non_interactive.non_interactive_backend(namespace, imported, "native_device"),
+            "modbus_charger",
+        )
+        self.assertEqual(wizard_cli_non_interactive.non_interactive_device_instance(namespace, imported), 81)
+        self.assertEqual(wizard_cli_non_interactive.non_interactive_phase(namespace, imported), "L2")
+        self.assertEqual(wizard_cli_non_interactive.non_interactive_string("cli.local", "imported.local"), "cli.local")
 
     def test_state_restore_helpers_cover_invalid_payloads_and_empty_energy_ids(self) -> None:
         service = make_runtime_state_service(

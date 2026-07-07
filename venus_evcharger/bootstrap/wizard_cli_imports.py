@@ -40,7 +40,6 @@ def empty_imported_defaults() -> ImportedWizardDefaults:
         transport_port=None,
         transport_device=None,
         transport_unit_id=None,
-        inventory_path=None,
     )
 
 

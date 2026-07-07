@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from tests.service_roles_cases_common import _RuntimeService
 from tests.wizard_branch_runtime_cases_common import _namespace
-from venus_evcharger.bootstrap import wizard as wizard_mod
+from venus_evcharger.bootstrap import wizard_main
 from venus_evcharger.energy import connectors as connectors_mod
 from venus_evcharger.energy import connectors_command as connectors_command_mod
 from venus_evcharger.energy import connectors_template as connectors_template_mod
@@ -49,11 +49,11 @@ class BranchCoverageNextClusterSixTests(unittest.TestCase):
 
     def test_resolved_energy_capacity_wh_returns_none_when_prompt_declined(self) -> None:
         namespace = _namespace(energy_recommendation_prefix=["/tmp/huawei-rec"])
-        with patch("venus_evcharger.bootstrap.wizard.prompt_yes_no", return_value=False):
-            self.assertIsNone(wizard_mod._resolved_energy_capacity_wh(namespace, ("/tmp/huawei-rec",)))
+        with patch("venus_evcharger.bootstrap.wizard_main.prompt_yes_no", return_value=False):
+            self.assertIsNone(wizard_main.resolved_energy_capacity_wh(namespace, ("/tmp/huawei-rec",)))
 
     def test_resolved_energy_capacity_wh_returns_none_when_prompt_not_possible(self) -> None:
-        self.assertIsNone(wizard_mod._resolved_energy_capacity_wh(_namespace(), tuple()))
+        self.assertIsNone(wizard_main.resolved_energy_capacity_wh(_namespace(), tuple()))
 
 
 if __name__ == "__main__":

@@ -2,16 +2,22 @@
 import configparser
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import call, patch
 
-from venus_evcharger.backend.models import SwitchState
+from venus_evcharger.backend.models import SwitchCapabilities, SwitchState
 from venus_evcharger.backend.shelly_contactor_switch import ShellyContactorSwitchBackend
 from venus_evcharger.backend.switch_group import (
     SwitchGroupBackend,
     SwitchGroupSettings,
     SwitchGroupMember,
+    _aggregated_max_direct_switch_power_w,
+    _aggregated_requires_charge_pause,
+    _aggregated_switching_mode,
+    _available_supported_phase_selections,
     _child_switch_backend,
+    _config,
     _member_backend_type,
+    _normalized_phase_label,
     _phase_members,
     _required_phase_label,
     _resolved_member_path,
@@ -175,30 +181,37 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
         with tempfile.TemporaryDirectory() as temp_dir:
             group_path = Path(temp_dir) / "group.ini"
             child = Path(temp_dir) / "child.ini"
+            adapter_without_type = Path(temp_dir) / "adapter-without-type.ini"
+            adapter_spaced_type = Path(temp_dir) / "adapter-spaced-type.ini"
             child.write_text("[DEFAULT]\nBaseUrl=http://phase1.local\n", encoding="utf-8")
+            adapter_without_type.write_text("[Adapter]\nBaseUrl=http://phase1.local\n", encoding="utf-8")
+            adapter_spaced_type.write_text("[Adapter]\nType=  TEMPLATE_SWITCH  \nBaseUrl=http://phase1.local\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "may not be empty"):
+            with self.assertRaisesRegex(ValueError, "^Switch group member config path may not be empty$"):
                 _resolved_member_path(str(group_path), "   ")
 
             self.assertEqual(_member_backend_type(child), "shelly_combined")
+            self.assertEqual(_member_backend_type(adapter_without_type), "shelly_combined")
+            self.assertEqual(_member_backend_type(adapter_spaced_type), "template_switch")
             with self.assertRaisesRegex(ValueError, "Unsupported switch-group member key"):
                 _required_phase_label("P9")
 
             parser = configparser.ConfigParser()
             parser.read_dict({"Members": {"P1": "child.ini"}})
             phase_members = _phase_members(str(group_path), parser["Members"])
+            self.assertEqual(phase_members["P1"].phase_label, "P1")
             self.assertEqual(phase_members["P1"].backend_type, "shelly_combined")
 
-            with self.assertRaisesRegex(ValueError, "requires a member config for P1"):
+            with self.assertRaisesRegex(ValueError, "^Switch group requires a member config for P1$"):
                 _validate_phase_members({"P2": phase_members["P1"]})
-            with self.assertRaisesRegex(ValueError, "requires P2"):
+            with self.assertRaisesRegex(ValueError, "^Switch group requires P2 when P3 is configured$"):
                 _validate_phase_members(
                     {
                         "P1": phase_members["P1"],
                         "P3": SwitchGroupMember("P3", "template_switch", child),
                     }
                 )
-            with self.assertRaisesRegex(ValueError, "must include P1"):
+            with self.assertRaisesRegex(ValueError, "^Switch group SupportedPhaseSelections must include P1$"):
                 _validate_supported_phase_selection_list(["P1_P2"])
 
             capabilities = configparser.ConfigParser()
@@ -227,7 +240,7 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
             )
             self.assertIsNone(backend._aggregate_interlock_ok({}))
 
-            with self.assertRaisesRegex(ValueError, "may not themselves be switch_group"):
+            with self.assertRaisesRegex(ValueError, "^Switch group members may not themselves be switch_group backends$"):
                 _child_switch_backend(
                     self._service(MagicMock()),
                     SwitchGroupMember("P1", "switch_group", child),
@@ -251,5 +264,234 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
             with self.assertRaisesRegex(ValueError, "single-phase support only"):
                 _validated_member_capabilities(phase_members["P1"], bad_backend)
 
-            with self.assertRaisesRegex(ValueError, "requires a config path"):
+            with self.assertRaisesRegex(ValueError, "^Switch group backend requires a config path$"):
                 load_switch_group_settings(self._service(MagicMock()), "")
+            with self.assertRaisesRegex(ValueError, "^Switch group backend requires a config path$"):
+                load_switch_group_settings(self._service(MagicMock()))
+
+    def test_switch_group_helper_contracts_for_config_phase_and_capability_aggregation(self) -> None:
+        parser = configparser.ConfigParser()
+        service = self._service(MagicMock())
+        with patch("venus_evcharger.backend.switch_group.load_required_backend_config", return_value=parser) as load_config:
+            self.assertIs(_config("/tmp/switch-group.ini"), parser)
+        load_config.assert_called_once_with("/tmp/switch-group.ini", "switch group")
+
+        self.assertEqual(_normalized_phase_label(" p1 "), "P1")
+        self.assertEqual(_normalized_phase_label("P2"), "P2")
+        self.assertEqual(_normalized_phase_label("p3"), "P3")
+        self.assertIsNone(_normalized_phase_label("P4"))
+        self.assertIsNone(_normalized_phase_label(None))
+
+        member = SwitchGroupMember("P1", "template_switch", Path("/tmp/p1.ini"))
+        self.assertEqual(_available_supported_phase_selections({"P1": member}), ("P1",))
+        self.assertEqual(
+            _available_supported_phase_selections({"P1": member, "P2": member}),
+            ("P1", "P1_P2"),
+        )
+        self.assertEqual(
+            _available_supported_phase_selections({"P1": member, "P2": member, "P3": member}),
+            ("P1", "P1_P2", "P1_P2_P3"),
+        )
+
+        direct = SwitchCapabilities(
+            switching_mode="direct",
+            supported_phase_selections=("P1",),
+            requires_charge_pause_for_phase_change=False,
+            max_direct_switch_power_w=5000.0,
+        )
+        pause_direct = SwitchCapabilities(
+            switching_mode="direct",
+            supported_phase_selections=("P1",),
+            requires_charge_pause_for_phase_change=True,
+            max_direct_switch_power_w=3000.0,
+        )
+        contactor = SwitchCapabilities(
+            switching_mode="contactor",
+            supported_phase_selections=("P1",),
+            requires_charge_pause_for_phase_change=False,
+            max_direct_switch_power_w=1000.0,
+        )
+
+        self.assertEqual(_aggregated_switching_mode({"P1": direct, "P2": pause_direct}), "direct")
+        self.assertEqual(_aggregated_switching_mode({"P1": direct, "P2": contactor}), "contactor")
+        self.assertFalse(_aggregated_requires_charge_pause({"P1": direct}))
+        self.assertTrue(_aggregated_requires_charge_pause({"P1": direct, "P2": pause_direct}))
+        self.assertEqual(_aggregated_max_direct_switch_power_w({"P1": direct, "P2": pause_direct}, "direct"), 3000.0)
+        self.assertIsNone(_aggregated_max_direct_switch_power_w({"P1": direct, "P2": contactor}, "contactor"))
+        self.assertIsNone(_aggregated_max_direct_switch_power_w({}, "direct"))
+
+        capabilities = configparser.ConfigParser()
+        capabilities.read_dict({"Capabilities": {"SupportedPhaseSelections": "P1,P1_P2,P1_P2_P3"}})
+        self.assertEqual(
+            _supported_phase_selections(capabilities["Capabilities"], {"P1": member, "P2": member, "P3": member}),
+            ("P1", "P1_P2", "P1_P2_P3"),
+        )
+        capabilities = configparser.ConfigParser()
+        capabilities.read_dict({"Capabilities": {"SupportedPhaseSelections": "P1,P1_P2"}})
+        self.assertEqual(
+            _supported_phase_selections(capabilities["Capabilities"], {"P1": member, "P2": member, "P3": member}),
+            ("P1", "P1_P2"),
+        )
+        self.assertEqual(
+            _supported_phase_selections({}, {"P1": member, "P2": member, "P3": member}),
+            ("P1", "P1_P2", "P1_P2_P3"),
+        )
+        self.assertEqual(
+            _supported_phase_selections({"SupportedPhaseSelections": "P1,P1_P2"}, {"P1": member, "P2": member, "P3": member}),
+            ("P1", "P1_P2"),
+        )
+        self.assertEqual(
+            _supported_phase_selections({"SupportedPhaseSelections": ""}, {"P1": member, "P2": member, "P3": member}),
+            ("P1", "P1_P2", "P1_P2_P3"),
+        )
+
+    def test_switch_group_settings_loader_and_backend_init_contracts(self) -> None:
+        parser = configparser.ConfigParser()
+        parser.read_dict(
+            {
+                "Members": {"P1": "phase1.ini", "P2": "phase2.ini", "P3": "phase3.ini"},
+                "Capabilities": {"SupportedPhaseSelections": "P1,P1_P2"},
+            }
+        )
+        service = self._service(MagicMock())
+        member_p1 = SwitchGroupMember("P1", "template_switch", Path("/tmp/phase1.ini"))
+        member_p2 = SwitchGroupMember("P2", "template_switch", Path("/tmp/phase2.ini"))
+        member_p3 = SwitchGroupMember("P3", "template_switch", Path("/tmp/phase3.ini"))
+        child_p1 = MagicMock()
+        child_p2 = MagicMock()
+        child_p3 = MagicMock()
+        child_p1.capabilities.return_value = SwitchCapabilities(
+            switching_mode="direct",
+            supported_phase_selections=("P1",),
+            requires_charge_pause_for_phase_change=False,
+            max_direct_switch_power_w=2200.0,
+        )
+        child_p2.capabilities.return_value = SwitchCapabilities(
+            switching_mode="direct",
+            supported_phase_selections=("P1",),
+            requires_charge_pause_for_phase_change=True,
+            max_direct_switch_power_w=1500.0,
+        )
+        child_p3.capabilities.return_value = SwitchCapabilities(
+            switching_mode="direct",
+            supported_phase_selections=("P1",),
+            requires_charge_pause_for_phase_change=False,
+            max_direct_switch_power_w=1800.0,
+        )
+        with patch("venus_evcharger.backend.switch_group._config", return_value=parser) as load_config, patch(
+            "venus_evcharger.backend.switch_group._phase_members",
+            return_value={"P1": member_p1, "P2": member_p2, "P3": member_p3},
+        ) as phase_members, patch(
+            "venus_evcharger.backend.switch_group._child_switch_backend",
+            side_effect=[child_p1, child_p2, child_p3],
+        ) as child_backend:
+            settings = load_switch_group_settings(service, " /tmp/switch-group.ini ")
+
+        load_config.assert_called_once_with("/tmp/switch-group.ini")
+        phase_members.assert_called_once_with("/tmp/switch-group.ini", parser["Members"])
+        self.assertEqual(
+            child_backend.call_args_list,
+            [
+                call(service, member_p1),
+                call(service, member_p2),
+                call(service, member_p3),
+            ],
+        )
+        self.assertEqual(settings.supported_phase_selections, ("P1", "P1_P2"))
+        self.assertEqual(settings.phase_switch_targets, {"P1": ("P1",), "P1_P2": ("P1", "P2")})
+        self.assertEqual(settings.switching_mode, "direct")
+        self.assertTrue(settings.requires_charge_pause_for_phase_change)
+        self.assertEqual(settings.max_direct_switch_power_w, 1500.0)
+
+        invalid_child = MagicMock()
+        invalid_child.capabilities.return_value = SwitchCapabilities(
+            switching_mode="direct",
+            supported_phase_selections=("P1", "P1_P2"),
+            requires_charge_pause_for_phase_change=False,
+            max_direct_switch_power_w=None,
+        )
+        with patch("venus_evcharger.backend.switch_group._config", return_value=parser), patch(
+            "venus_evcharger.backend.switch_group._phase_members",
+            return_value={"P1": member_p1, "P2": member_p2},
+        ), patch(
+            "venus_evcharger.backend.switch_group._child_switch_backend",
+            side_effect=[child_p1, invalid_child],
+        ):
+            with self.assertRaisesRegex(ValueError, "^Switch group member P2 must expose single-phase support only$"):
+                load_switch_group_settings(service, "/tmp/switch-group.ini")
+
+        contactor_child = MagicMock()
+        contactor_child.capabilities.return_value = SwitchCapabilities(
+            switching_mode="contactor",
+            supported_phase_selections=("P1",),
+            requires_charge_pause_for_phase_change=False,
+            max_direct_switch_power_w=999.0,
+        )
+        with patch("venus_evcharger.backend.switch_group._config", return_value=parser), patch(
+            "venus_evcharger.backend.switch_group._phase_members",
+            return_value={"P1": member_p1, "P2": member_p2},
+        ), patch(
+            "venus_evcharger.backend.switch_group._child_switch_backend",
+            side_effect=[child_p1, contactor_child],
+        ):
+            contactor_settings = load_switch_group_settings(service, "/tmp/switch-group.ini")
+        self.assertEqual(contactor_settings.switching_mode, "contactor")
+        self.assertIsNone(contactor_settings.max_direct_switch_power_w)
+
+        backend_settings = SwitchGroupSettings(
+            phase_members={"P1": member_p1, "P2": member_p2},
+            phase_switch_targets={"P1": ("P1",), "P1_P2": ("P1", "P2")},
+            supported_phase_selections=("P1", "P1_P2"),
+            switching_mode="direct",
+            requires_charge_pause_for_phase_change=True,
+            max_direct_switch_power_w=2200.0,
+        )
+        with patch(
+            "venus_evcharger.backend.switch_group.load_switch_group_settings",
+            return_value=backend_settings,
+        ) as load_settings, patch(
+            "venus_evcharger.backend.switch_group._child_switch_backend",
+            side_effect=[child_p1, child_p2, child_p1, child_p2],
+        ) as init_child_backend:
+            backend = SwitchGroupBackend(service, config_path=" /tmp/switch-group.ini ")
+            default_backend = SwitchGroupBackend(service)
+
+        self.assertIs(backend.service, service)
+        self.assertEqual(backend.config_path, "/tmp/switch-group.ini")
+        self.assertEqual(
+            load_settings.call_args_list,
+            [
+                call(service, "/tmp/switch-group.ini"),
+                call(service, ""),
+            ],
+        )
+        self.assertEqual(
+            init_child_backend.call_args_list,
+            [
+                call(service, member_p1),
+                call(service, member_p2),
+                call(service, member_p1),
+                call(service, member_p2),
+            ],
+        )
+        self.assertEqual(backend._selected_phase_selection, "P1")
+        self.assertEqual(set(backend._members), {"P1", "P2"})
+        self.assertEqual(default_backend.config_path, "")
+
+    def test_switch_group_capabilities_returns_settings_values_exactly(self) -> None:
+        backend = SwitchGroupBackend.__new__(SwitchGroupBackend)
+        backend.settings = SwitchGroupSettings(
+            phase_members={},
+            phase_switch_targets={},
+            supported_phase_selections=("P1", "P1_P2"),
+            switching_mode="contactor",
+            requires_charge_pause_for_phase_change=True,
+            max_direct_switch_power_w=2200.0,
+        )
+
+        capabilities = backend.capabilities()
+
+        self.assertEqual(capabilities.switching_mode, "contactor")
+        self.assertEqual(capabilities.supported_phase_selections, ("P1", "P1_P2"))
+        self.assertTrue(capabilities.requires_charge_pause_for_phase_change)
+        self.assertEqual(capabilities.max_direct_switch_power_w, 2200.0)
