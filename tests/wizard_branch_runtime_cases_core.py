@@ -34,6 +34,7 @@ class _WizardBranchRuntimeCoreCases:
             temp_path = Path(temp_dir)
             main_path = self._write_main_config(temp_path)
             self._assert_wizard_live_connectivity_paths(temp_path, main_path)
+            self._assert_configure_wallbox_uses_default_live_check_runner(temp_path)
             self._assert_wizard_write_confirmation_paths(temp_path)
             self._assert_wizard_topology_render_paths()
 
@@ -61,6 +62,67 @@ class _WizardBranchRuntimeCoreCases:
         self._assert_combined_live_connectivity(main_path)
         self._assert_rendered_live_checks(main_path, wizard_runtime)
         self._assert_live_check_secret_overlay_paths(main_path, wizard_runtime)
+
+    def _assert_configure_wallbox_uses_default_live_check_runner(self, temp_path: Path) -> None:
+        config_path = temp_path / "default-live-check.ini"
+        expected_payload = {"ok": True, "roles": {"meter": {"status": "ok"}}}
+        with patch(
+            "venus_evcharger.bootstrap.wizard_runtime._live_check_rendered_setup",
+            return_value=expected_payload,
+        ) as default_runner:
+            result = wizard.configure_wallbox(
+                wizard.WizardAnswers(
+                    profile="simple_relay",
+                    host_input="192.168.1.44",
+                    meter_host_input=None,
+                    switch_host_input=None,
+                    charger_host_input=None,
+                    device_instance=60,
+                    phase="L1",
+                    policy_mode="manual",
+                    digest_auth=False,
+                    username="",
+                    password="",
+                ),
+                config_path=config_path,
+                template_path=wizard.default_template_path(),
+                dry_run=True,
+                live_check=True,
+            )
+
+        self.assertEqual(result.live_check, expected_payload)
+        default_runner.assert_called_once()
+
+        custom_payload = {"ok": False, "roles": {"meter": {"status": "error"}}}
+        runner_calls = []
+
+        def custom_runner(config_text, adapter_files, config_name, selected_roles):
+            runner_calls.append((config_text, adapter_files, config_name, selected_roles))
+            return custom_payload
+
+        custom_result = wizard.configure_wallbox(
+            wizard.WizardAnswers(
+                profile="simple_relay",
+                host_input="192.168.1.44",
+                meter_host_input=None,
+                switch_host_input=None,
+                charger_host_input=None,
+                device_instance=61,
+                phase="L1",
+                policy_mode="manual",
+                digest_auth=False,
+                username="",
+                password="",
+            ),
+            config_path=temp_path / "custom-live-check.ini",
+            template_path=wizard.default_template_path(),
+            dry_run=True,
+            live_check=True,
+            live_check_runner=custom_runner,
+        )
+
+        self.assertEqual(custom_result.live_check, custom_payload)
+        self.assertEqual(runner_calls[0][2], "custom-live-check.ini")
 
     def _assert_split_live_connectivity(
         self,

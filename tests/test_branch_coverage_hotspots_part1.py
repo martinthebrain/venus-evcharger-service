@@ -92,6 +92,8 @@ class _BranchCoverageWizardEnergyCasesPart1:
             self.assertEqual(assignments["Keep"], "yes")
 
             self.assertIsNone(_structured_energy_source_line("#comment", "AutoEnergySource.alpha."))
+            self.assertIsNone(_structured_energy_source_line("   ", "AutoEnergySource.alpha."))
+            self.assertIsNone(_structured_energy_source_line("AutoEnergySource.alpha.Port", "AutoEnergySource.alpha."))
             self.assertEqual(_structured_energy_source_value("Port", "bad"), "bad")
             self.assertEqual(bundle_source_id("ignored=true\n", "fallback"), "fallback")
             self.assertEqual(
@@ -186,5 +188,4 @@ class _BranchCoverageWizardEnergyCasesPart1:
             self.assertIn("weighted combined SOC", review_items[1])
             self.assertIn("External energy source (beta)", suggested_blocks)
             self.assertEqual(structured_sources[0]["source_id"], "beta")
-
 

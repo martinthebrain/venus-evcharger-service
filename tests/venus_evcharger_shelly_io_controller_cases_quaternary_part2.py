@@ -972,6 +972,7 @@ class _TestShellyIoControllerQuaternaryPart2:
         service._switch_backend = missing_capability_backend
         self.assertEqual(controller._switching_mode(), "direct")
         self.assertFalse(controller.phase_selection_requires_pause())
+        self.assertEqual(controller._split_switch_supported_phase_selections(), ("P1",))
 
         service._last_pm_status = {"apower": 1800.0}
         self.assertIsNone(controller._direct_switch_warning_context(False))
