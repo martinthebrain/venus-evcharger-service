@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from urllib.parse import urlparse
 
+from venus_evcharger.bootstrap.wizard_inventory_endpoints import _phase_endpoint
 from venus_evcharger.bootstrap.wizard_models import WizardAnswers
 from venus_evcharger.inventory import (
     DeviceCapability,
@@ -75,7 +75,7 @@ def _populate_actuator_inventory(
                 supported_phases=phase_scope,
                 switching_mode=_switching_mode(topology_config.actuator.type),
                 supports_feedback=_switch_supports_feedback(topology_config.actuator.type),
-                supports_phase_selection=len(phase_scope) > 1,
+                supports_phase_selection=_supports_phase_selection(phase_scope),
             ),
         ),
     )
@@ -302,7 +302,7 @@ def _charger_capabilities(
             kind="charger",
             adapter_type=topology_config.charger.type,
             supported_phases=phase_scope,
-            supports_phase_selection=len(phase_scope) > 1,
+            supports_phase_selection=_supports_phase_selection(phase_scope),
         )
     ]
     if topology_config.measurement is not None and topology_config.measurement.type == "charger_native":
@@ -425,7 +425,9 @@ def _measurement_profile_label(measurement_type: str) -> str:
 def _measurement_adapter_type(answers: WizardAnswers, measurement_type: str) -> str:
     if measurement_type in {"fixed_reference", "learned_reference"}:
         return measurement_type
-    return _adapter_type_for_topology_preset(answers.topology_preset or "")
+    if answers.topology_preset is None:
+        return "shelly_meter"
+    return _adapter_type_for_topology_preset(answers.topology_preset)
 
 
 def _adapter_type_for_topology_preset(topology_preset: str) -> str:
@@ -468,6 +470,10 @@ def _switching_mode(adapter_type: str) -> SwitchingMode:
     return "contactor" if adapter_type in contactor_types else "direct"
 
 
+def _supports_phase_selection(phase_scope: tuple[PhaseLabel, ...]) -> bool:
+    return len(phase_scope) > 1
+
+
 def _switch_supports_feedback(adapter_type: str) -> bool:
     return adapter_type != "cerbo_gx_relay_switch"
 
@@ -483,13 +489,3 @@ def _endpoint(value: str | None) -> str | None:
         return None
     text = value.strip()
     return text or None
-
-
-def _phase_endpoint(switch_host_input: str, phase_label: str) -> str:
-    parsed = urlparse(switch_host_input)
-    if parsed.scheme:
-        base = switch_host_input.rstrip("/")
-    else:
-        base = f"http://{switch_host_input.rstrip('/')}"
-    suffix = {"L1": "/wizard/phase1", "L2": "/wizard/phase2", "L3": "/wizard/phase3"}[phase_label]
-    return f"{base}{suffix}"

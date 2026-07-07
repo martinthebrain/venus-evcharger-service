@@ -127,7 +127,7 @@ class ShellyIoSplit(ShellyIoRuntime):
             return fallback
         if state is None:
             return fallback
-        enabled = getattr(state, "enabled", fallback)
+        enabled = getattr(state, "enabled", None)
         return fallback if enabled is None else bool(enabled)
 
     def _pm_status_from_charger_state(
@@ -235,15 +235,12 @@ class ShellyIoSplit(ShellyIoRuntime):
         state: ChargerState,
         active_phase_selection: object | None,
     ) -> PhaseSelection:
-        svc = self.service
-        raw_selection = (
-            active_phase_selection
-            if active_phase_selection is not None
-            else (
-                state.phase_selection if state.phase_selection is not None else getattr(svc, "active_phase_selection", "P1")
-            )
-        )
-        return normalize_phase_value(raw_selection, "P1")
+        raw_selection = active_phase_selection
+        if raw_selection is None:
+            raw_selection = state.phase_selection
+        if raw_selection is None:
+            raw_selection = getattr(self.service, "active_phase_selection", None)
+        return normalize_phase_value(raw_selection)
 
     @staticmethod
     def _resolved_charger_current(state: ChargerState) -> float | None:
@@ -261,7 +258,8 @@ class ShellyIoSplit(ShellyIoRuntime):
             return None
 
     def _runtime_cached_charger_state_for_split(self, now: float | None) -> ChargerState | None:
-        max_age_seconds = float(getattr(self.service, "auto_shelly_soft_fail_seconds", 0.0) or 0.0)
+        configured_age = finite_float_or_none(getattr(self.service, "auto_shelly_soft_fail_seconds", None))
+        max_age_seconds = 0.0 if configured_age is None else max(0.0, configured_age)
         return self._runtime_cached_charger_state(now=now, max_age_seconds=max_age_seconds)
 
     def _resolved_switch_overrides(
@@ -272,7 +270,7 @@ class ShellyIoSplit(ShellyIoRuntime):
     ) -> tuple[bool | None, object | None]:
         if switch_state is None:
             return relay_on, phase_selection
-        enabled = getattr(switch_state, "enabled", relay_on)
+        enabled = getattr(switch_state, "enabled", None)
         overridden_relay = relay_on if enabled is None else bool(enabled)
         overridden_phase = getattr(switch_state, "phase_selection", phase_selection)
         return overridden_relay, overridden_phase

@@ -28,8 +28,132 @@ class _TestShellyIoControllerQuaternaryPart1:
             controller.start_io_worker()
 
         thread_factory.assert_called_once()
+        thread_kwargs = thread_factory.call_args.kwargs
+        self.assertEqual(thread_kwargs["name"], "shelly-wallbox-shelly-io")
+        self.assertTrue(thread_kwargs["daemon"])
+        self.assertIs(thread_kwargs["target"].__self__, controller)
+        self.assertEqual(thread_kwargs["target"].__func__, controller.io_worker_loop.__func__)
         thread.start.assert_called_once_with()
         service._ensure_auto_input_helper_process.assert_called_once_with()
+
+    def test_worker_stale_restart_seconds_uses_each_threshold_source(self):
+        self.assertEqual(
+            ShellyIoController._runtime_seconds_setting(SimpleNamespace(), "missing", 3.5),
+            3.5,
+        )
+        self.assertEqual(
+            ShellyIoController._runtime_seconds_setting(SimpleNamespace(value=None), "value", 3.5),
+            3.5,
+        )
+        self.assertEqual(
+            ShellyIoController._runtime_seconds_setting(SimpleNamespace(value=0.0), "value", 3.5),
+            3.5,
+        )
+        self.assertEqual(
+            ShellyIoController._runtime_seconds_setting(SimpleNamespace(value="4.25"), "value", 3.5),
+            4.25,
+        )
+        with self.assertRaises(ValueError):
+            ShellyIoController._runtime_seconds_setting(SimpleNamespace(value="bad"), "value", 3.5)
+
+        self.assertEqual(
+            ShellyIoController._worker_stale_restart_seconds(SimpleNamespace()),
+            6.0,
+        )
+        self.assertEqual(
+            ShellyIoController._worker_stale_restart_seconds(
+                SimpleNamespace(
+                    _worker_poll_interval_seconds=0.1,
+                    shelly_request_timeout_seconds=0.1,
+                    relay_sync_timeout_seconds=0.1,
+                )
+            ),
+            5.0,
+        )
+        self.assertEqual(
+            ShellyIoController._worker_stale_restart_seconds(
+                SimpleNamespace(
+                    _worker_poll_interval_seconds=0.0,
+                    shelly_request_timeout_seconds=0.1,
+                    relay_sync_timeout_seconds=0.1,
+                )
+            ),
+            5.0,
+        )
+        self.assertEqual(
+            ShellyIoController._worker_stale_restart_seconds(
+                SimpleNamespace(
+                    _worker_poll_interval_seconds=0.2,
+                    shelly_request_timeout_seconds=0.1,
+                )
+            ),
+            5.0,
+        )
+        self.assertEqual(
+            ShellyIoController._worker_stale_restart_seconds(
+                SimpleNamespace(
+                    _worker_poll_interval_seconds=3.0,
+                    shelly_request_timeout_seconds=1.0,
+                    relay_sync_timeout_seconds=1.0,
+                )
+            ),
+            15.0,
+        )
+        self.assertEqual(
+            ShellyIoController._worker_stale_restart_seconds(
+                SimpleNamespace(
+                    _worker_poll_interval_seconds=0.2,
+                    shelly_request_timeout_seconds=4.0,
+                    relay_sync_timeout_seconds=1.0,
+                )
+            ),
+            12.0,
+        )
+        self.assertEqual(
+            ShellyIoController._worker_stale_restart_seconds(
+                SimpleNamespace(
+                    _worker_poll_interval_seconds=0.2,
+                    shelly_request_timeout_seconds=1.0,
+                    relay_sync_timeout_seconds=4.0,
+                )
+            ),
+            8.0,
+        )
+
+    def test_worker_snapshot_age_clamps_future_snapshot_and_preserves_elapsed_time(self):
+        service = SimpleNamespace(_get_worker_snapshot=MagicMock(return_value={"captured_at": 90.0}))
+        self.assertEqual(ShellyIoController._worker_snapshot_age(service, 100.0), 10.0)
+
+        service._get_worker_snapshot = MagicMock(return_value={"captured_at": 101.0})
+        self.assertEqual(ShellyIoController._worker_snapshot_age(service, 100.0), 0.0)
+
+    def test_worker_thread_stale_respects_alive_snapshot_and_strict_threshold(self):
+        self.assertFalse(ShellyIoController._worker_thread_stale(SimpleNamespace(), 100.0))
+        self.assertFalse(ShellyIoController._worker_thread_stale(SimpleNamespace(_worker_thread=None), 100.0))
+
+        dead_thread = MagicMock()
+        dead_thread.is_alive.return_value = False
+        self.assertFalse(
+            ShellyIoController._worker_thread_stale(SimpleNamespace(_worker_thread=dead_thread), 100.0)
+        )
+
+        alive_thread = MagicMock()
+        alive_thread.is_alive.return_value = True
+        base_service = SimpleNamespace(
+            _worker_thread=alive_thread,
+            _worker_poll_interval_seconds=1.0,
+            shelly_request_timeout_seconds=2.0,
+            relay_sync_timeout_seconds=2.0,
+            _get_worker_snapshot=MagicMock(return_value={"captured_at": 94.0}),
+        )
+        self.assertFalse(ShellyIoController._worker_thread_stale(base_service, 100.0))
+
+        base_service._get_worker_snapshot = MagicMock(return_value={"captured_at": 93.9})
+        self.assertTrue(ShellyIoController._worker_thread_stale(base_service, 100.0))
+
+        with patch.object(ShellyIoController, "_worker_stale_restart_seconds", return_value=6.0) as stale_after:
+            self.assertTrue(ShellyIoController._worker_thread_stale(base_service, 100.0))
+        stale_after.assert_called_once_with(base_service)
 
     def test_start_io_worker_restarts_stale_alive_worker_with_fresh_stop_event_and_session(self):
         stale_thread = MagicMock()
@@ -67,7 +191,12 @@ class _TestShellyIoControllerQuaternaryPart1:
         self.assertIs(service._worker_session, new_session)
         self.assertIs(service._worker_thread, new_thread)
         new_thread.start.assert_called_once_with()
-        service._warning_throttled.assert_called_once()
+        service._warning_throttled.assert_called_once_with(
+            "io-worker-stale-restart",
+            6.0,
+            "Background I/O worker stale for %.1fs, restarting worker session",
+            10.0,
+        )
 
     def test_start_io_worker_keeps_alive_worker_when_snapshot_read_fails(self):
         alive_thread = MagicMock()
@@ -121,6 +250,34 @@ class _TestShellyIoControllerQuaternaryPart1:
 
         service._warning_throttled.assert_called_once()
         self.assertEqual(service._warning_throttled.call_args.args[-1], -1.0)
+        self.assertIs(service._worker_stop_event, new_stop_event)
+        self.assertIs(service._worker_session, new_session)
+        self.assertIsNone(service._worker_thread)
+
+    def test_restart_stale_io_worker_handles_missing_runtime_handles(self):
+        service = SimpleNamespace(
+            _worker_poll_interval_seconds=0.2,
+            shelly_request_timeout_seconds=0.1,
+            relay_sync_timeout_seconds=0.1,
+            _get_worker_snapshot=MagicMock(return_value={"captured_at": 97.5}),
+            _warning_throttled=MagicMock(),
+        )
+        controller = ShellyIoController(service)
+        new_stop_event = MagicMock()
+        new_session = MagicMock()
+
+        with (
+            patch("venus_evcharger.backend.shelly_io_worker_lifecycle.threading.Event", return_value=new_stop_event),
+            patch("venus_evcharger.backend.shelly_io_worker_lifecycle.requests.Session", return_value=new_session),
+        ):
+            controller._restart_stale_io_worker(100.0)
+
+        service._warning_throttled.assert_called_once_with(
+            "io-worker-stale-restart",
+            5.0,
+            "Background I/O worker stale for %.1fs, restarting worker session",
+            2.5,
+        )
         self.assertIs(service._worker_stop_event, new_stop_event)
         self.assertIs(service._worker_session, new_session)
         self.assertIsNone(service._worker_thread)
@@ -310,4 +467,3 @@ ReferenceWatts=2300
         service._last_charger_state_current_amps = None
         service._last_charger_state_phase_selection = None
         self.assertIsNone(controller._runtime_cached_charger_state())
-

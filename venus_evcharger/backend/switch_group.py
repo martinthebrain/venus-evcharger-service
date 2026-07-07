@@ -118,15 +118,13 @@ def _available_supported_phase_selections(phase_members: Mapping[str, SwitchGrou
 
 
 def _supported_phase_selections(
-    capabilities: configparser.SectionProxy,
+    capabilities: Mapping[str, object],
     phase_members: Mapping[str, SwitchGroupMember],
 ) -> tuple[PhaseSelection, ...]:
     """Return the requested supported phase layouts constrained to configured members."""
     available = _available_supported_phase_selections(phase_members)
-    requested = normalize_phase_selection_tuple(
-        capabilities.get("SupportedPhaseSelections", ",".join(available)),
-        available,
-    )
+    raw_requested = capabilities.get("SupportedPhaseSelections")
+    requested = available if raw_requested is None else normalize_phase_selection_tuple(raw_requested, available)
     normalized: list[PhaseSelection] = []
     for selection in requested:
         _validate_requested_phase_selection(selection, available)

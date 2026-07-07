@@ -271,9 +271,9 @@ class _WizardSetupCliCases:
             ["--profile", "simple_relay", "--phase", "L1", "--policy-mode", "manual", "--device-instance", "60"]
         )
         with (
-            patch("venus_evcharger.bootstrap.wizard_cli._prompt_text", side_effect=["192.168.1.50", "admin"]),
-            patch("venus_evcharger.bootstrap.wizard_cli.prompt_yes_no", return_value=True),
-            patch("venus_evcharger.bootstrap.wizard_cli.getpass.getpass", return_value="very-secret") as password_prompt,
+            patch("venus_evcharger.bootstrap.wizard_cli_interactive._prompt_text", side_effect=["192.168.1.50", "admin"]),
+            patch("venus_evcharger.bootstrap.wizard_cli_interactive.prompt_yes_no", return_value=True),
+            patch("venus_evcharger.bootstrap.wizard_cli_prompts.getpass.getpass", return_value="very-secret") as password_prompt,
         ):
             answers, _ = build_answers(namespace)
 
@@ -288,7 +288,7 @@ class _WizardSetupCliCases:
             stdout = io.StringIO()
             with (
                 patch(
-                    "venus_evcharger.bootstrap.wizard._live_check_rendered_setup",
+                    "venus_evcharger.bootstrap.wizard_runtime._live_check_rendered_setup",
                     return_value={
                         "ok": True,
                         "checked_roles": ("charger",),

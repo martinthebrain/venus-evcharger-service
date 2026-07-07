@@ -19,7 +19,7 @@ def resolved_energy_capacity_wh(
 ) -> float | None:
     """Return the chosen usable capacity for one suggested energy source."""
     direct = _direct_energy_capacity_wh(namespace)
-    if direct is not None or getattr(namespace, "non_interactive", False):
+    if direct is not None or _non_interactive_enabled(namespace):
         return direct
     if len(recommendation_prefixes) != 1:
         return None
@@ -45,6 +45,14 @@ def _direct_energy_capacity_wh(namespace: argparse.Namespace) -> float | None:
     if direct is not None:
         return direct
     return optional_capacity_wh(getattr(namespace, "huawei_usable_capacity_wh", None))
+
+
+def _non_interactive_enabled(namespace: argparse.Namespace) -> bool:
+    try:
+        raw_value = namespace.non_interactive
+    except AttributeError:
+        return False
+    return bool(raw_value)
 
 
 def _parsed_energy_capacity_override(raw_value: object) -> tuple[str, float]:

@@ -47,16 +47,20 @@ from venus_evcharger.bootstrap.wizard_inventory_support import (
 )
 from venus_evcharger.bootstrap import wizard
 from venus_evcharger.bootstrap.wizard_inventory_cli_actions import run_simple_inventory_action
-from venus_evcharger.bootstrap.wizard_inventory_cli_support import (
-    _binding_label_default,
-    _binding_scope_default,
-    _guided_capability_flags,
-    _maybe_add_guided_device_and_binding,
-    _maybe_replace_binding,
-    _prompt_binding_choice,
-    _validated_guided_binding,
-    guided_inventory_add_profile,
+from venus_evcharger.bootstrap.wizard_inventory_cli_guided_binding import (
+    maybe_replace_binding as _maybe_replace_binding,
+    prompt_binding_choice as _prompt_binding_choice,
+    validated_guided_binding as _validated_guided_binding,
     guided_inventory_edit_binding,
+)
+from venus_evcharger.bootstrap.wizard_inventory_cli_guided_common import (
+    binding_label_default as _binding_label_default,
+    binding_scope_default as _binding_scope_default,
+)
+from venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile import (
+    guided_capability_flags as _guided_capability_flags,
+    guided_inventory_add_profile,
+    maybe_add_guided_device_and_binding as _maybe_add_guided_device_and_binding,
 )
 from venus_evcharger.bootstrap.wizard_topology import build_wizard_topology_config
 from venus_evcharger.bootstrap.wizard_topology_render import render_adapter_files_from_topology

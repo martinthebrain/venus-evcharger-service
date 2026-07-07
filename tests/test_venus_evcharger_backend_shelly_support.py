@@ -23,17 +23,44 @@ from venus_evcharger.backend.shelly_support import (
     _switch_channel_id,
     load_shelly_backend_settings,
     normalize_switching_mode,
+    parse_phase_selection_list,
     phase_currents_for_selection,
     phase_powers_for_selection,
     resolve_shelly_profile,
     validate_shelly_profile_role,
 )
+from venus_evcharger.backend.shelly_support_phase import _channel_id_tokens
 from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
-from venus_evcharger.backend.shelly_io_types import is_shelly_io_host, require_shelly_io_host
-from venus_evcharger.backend.shelly_io_worker import (
+from venus_evcharger.backend.shelly_io_types import (
+    ShellyPmStatus,
+    is_charger_state_backend,
+    is_closeable,
+    is_enable_backend,
+    is_meter_backend,
+    is_phase_selection_backend,
+    is_settable_event,
+    is_shelly_io_host,
+    is_switch_capabilities_backend,
+    is_switch_state_backend,
+    is_transport_session_reset_backend,
+    normalize_phase_value,
+    normalize_supported_phase_tuple,
+    require_shelly_io_host,
+)
+from venus_evcharger.backend.shelly_io_worker_status import (
+    _copy_float_field,
+    _copy_known_status_energy,
     _copy_known_status_phase_fields,
-    _numeric_phase_triplet,
+    _copy_known_status_scalars,
+    _numeric_triplet,
+    _numeric_value,
     _phase_tuple,
+    _phase_tuple_candidate,
+    _phase_tuple_items,
+    _set_apower,
+    _set_current,
+    _set_voltage,
+    local_pm_status_payload,
 )
 
 
@@ -54,7 +81,10 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
     def test_shelly_support_scalar_helpers_cover_validation_edges(self) -> None:
         self.assertEqual(normalize_switching_mode("weird", "contactor"), "contactor")
+        self.assertEqual(parse_phase_selection_list("", ("P1_P2",)), ("P1_P2",))
+        self.assertEqual(_channel_id_tokens(None), ())
         self.assertEqual(_parse_switch_channel_ids("", (5,)), (5,))
+        self.assertEqual(_parse_switch_channel_ids(None, (5,)), (5,))
         self.assertEqual(_parse_switch_channel_ids("0,0,1", (9,)), (0, 1))
         self.assertIsNone(_switch_channel_id(""))
         with self.assertRaisesRegex(ValueError, "Invalid Shelly switch channel id 'x'"):
@@ -69,15 +99,59 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         phase_map = self._section("PhaseMap", {"P1_P2": "1,2"})
         self.assertEqual(_phase_switch_targets(phase_map, 0, ("P1",))["P1"], (0,))
 
+        phase_map = self._section("PhaseMap", {"P1_P2": "2", "P1": "4"})
+        self.assertEqual(_phase_switch_targets(phase_map, 0, ("P1",)), {"P1": (4,)})
+        phase_map = self._section("PhaseMap", {"P1": ""})
+        self.assertEqual(_phase_switch_targets(phase_map, 3, ("P1",)), {"P1": (3,)})
+
         self.assertEqual(phase_powers_for_selection(2000.0, "P1_P2"), (1000.0, 1000.0, 0.0))
+        self.assertEqual(phase_powers_for_selection(900.0, "P1_P2_P3"), (300.0, 300.0, 300.0))
+        self.assertEqual(phase_powers_for_selection(900.0, "P1"), (900.0, 0.0, 0.0))
+        self.assertEqual(phase_powers_for_selection(900.0, "P1", None), (900.0, 0.0, 0.0))
+        self.assertEqual(phase_powers_for_selection(900.0, "P1", "bad-line"), (900.0, 0.0, 0.0))
+        self.assertEqual(phase_powers_for_selection(900.0, "P1", " l2 "), (0.0, 900.0, 0.0))
         self.assertEqual(phase_currents_for_selection(12.0, "P1_P2", "L3"), (6.0, 6.0, 0.0))
+        self.assertEqual(phase_currents_for_selection(12.0, "P1_P2_P3"), (4.0, 4.0, 4.0))
+        self.assertEqual(phase_currents_for_selection(9.0, "P1"), (9.0, 0.0, 0.0))
+        self.assertEqual(phase_currents_for_selection(9.0, "P1", None), (9.0, 0.0, 0.0))
+        self.assertEqual(phase_currents_for_selection(9.0, "P1", "bad-line"), (9.0, 0.0, 0.0))
+        self.assertEqual(phase_currents_for_selection(9.0, "P1", " l2 "), (0.0, 9.0, 0.0))
+        self.assertEqual(phase_currents_for_selection(9.0, "P1", " l3 "), (0.0, 0.0, 9.0))
         self.assertEqual(phase_powers_for_selection(900.0, "P1", "L3"), (0.0, 0.0, 900.0))
 
     def test_shelly_support_profile_and_path_helpers_cover_errors(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Unsupported ShellyProfile"):
+        self.assertIsNone(resolve_shelly_profile(None))
+        combined_profile = resolve_shelly_profile("switch_1ch_with_pm")
+        self.assertIsNotNone(combined_profile)
+        self.assertEqual(combined_profile.roles, ("switch", "meter"))
+        validate_shelly_profile_role(None, "switch")
+        validate_shelly_profile_role("pm1_meter", " METER ")
+
+        expected_profiles = (
+            "em1_meter,em1_meter_single_or_dual,em_3phase_profiled,em_meter,"
+            "pm1_meter,pm1_meter_only,switch_1ch,switch_1ch_with_pm,"
+            "switch_multi_or_plug,switch_or_cover_profile"
+        )
+        with self.assertRaises(ValueError) as unsupported_profile:
             resolve_shelly_profile("unknown")
-        with self.assertRaisesRegex(ValueError, "is not valid for switch backends"):
+        self.assertEqual(
+            str(unsupported_profile.exception),
+            f"Unsupported ShellyProfile 'unknown' (supported: {expected_profiles})",
+        )
+
+        with self.assertRaises(ValueError) as invalid_role:
             validate_shelly_profile_role("pm1_meter", "switch")
+        self.assertEqual(
+            str(invalid_role.exception),
+            "ShellyProfile 'pm1_meter' is not valid for switch backends (supported roles: meter)",
+        )
+        with self.assertRaises(ValueError) as invalid_multi_role:
+            validate_shelly_profile_role("switch_1ch_with_pm", "charger")
+        self.assertEqual(
+            str(invalid_multi_role.exception),
+            "ShellyProfile 'switch_1ch_with_pm' is not valid for charger backends "
+            "(supported roles: switch,meter)",
+        )
         self.assertEqual(_config("").sections(), [])
         with self.assertRaises(FileNotFoundError) as missing_config:
             _config("/definitely/missing.ini")
@@ -463,7 +537,102 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         self.assertEqual(pm_status["_phase_powers_w"], (1200.0, 800.0, 0.0))
         self.assertEqual(pm_status["_phase_currents_a"], (5.0, 3.5, 0.0))
         self.assertIsNone(_phase_tuple(("bad", 1, 2)))
-        self.assertIsNone(_numeric_phase_triplet(1, True, 3))
+        self.assertFalse(_numeric_triplet((1, True, 3)))
+
+    def test_shelly_worker_local_pm_payload_copies_only_known_valid_fields(self) -> None:
+        raw_status = {
+            "output": 0,
+            "apower": 123.5,
+            "current": 4,
+            "voltage": 229.5,
+            "aenergy": {"total": 987},
+            "_pm_confirmed": "",
+            "_phase_selection": "P1_P2",
+            "_phase_powers_w": [100.0, 200, 0],
+            "_phase_currents_a": (1, 2.5, 0.0),
+            "ignored": "value",
+        }
+
+        self.assertEqual(
+            local_pm_status_payload(raw_status),
+            {
+                "output": False,
+                "apower": 123.5,
+                "current": 4.0,
+                "voltage": 229.5,
+                "aenergy": {"total": 987.0},
+                "_pm_confirmed": False,
+                "_phase_selection": "P1_P2",
+                "_phase_powers_w": (100.0, 200.0, 0.0),
+                "_phase_currents_a": (1.0, 2.5, 0.0),
+            },
+        )
+
+        invalid_status = {
+            "output": None,
+            "apower": True,
+            "current": "5",
+            "voltage": None,
+            "aenergy": {"total": "bad"},
+            "_pm_confirmed": None,
+            "_phase_powers_w": [100.0, "bad", 0],
+            "_phase_currents_a": (1, 2),
+        }
+        self.assertEqual(local_pm_status_payload(invalid_status), {"aenergy": {"total": 0.0}})
+
+    def test_shelly_worker_payload_copy_helpers_cover_direct_edges(self) -> None:
+        pm_status: ShellyPmStatus = {}
+        _copy_known_status_scalars(
+            {
+                "output": True,
+                "apower": 1.0,
+                "current": 2.0,
+                "voltage": 3.0,
+                "_pm_confirmed": True,
+            },
+            pm_status,
+        )
+        self.assertEqual(
+            pm_status,
+            {
+                "output": True,
+                "apower": 1.0,
+                "current": 2.0,
+                "voltage": 3.0,
+                "_pm_confirmed": True,
+            },
+        )
+
+        energy_status: ShellyPmStatus = {}
+        _copy_known_status_energy({"aenergy": {"total": 12.5}}, energy_status)
+        self.assertEqual(energy_status, {"aenergy": {"total": 12.5}})
+        _copy_known_status_energy({"aenergy": "bad"}, energy_status)
+        self.assertEqual(energy_status, {"aenergy": {"total": 12.5}})
+
+        scalar_status: ShellyPmStatus = {}
+        _copy_float_field({"apower": 1.25}, scalar_status, "apower")
+        _copy_float_field({"current": 2}, scalar_status, "current")
+        _copy_float_field({"voltage": 230.0}, scalar_status, "voltage")
+        _copy_float_field({"unknown": 99.0}, scalar_status, "unknown")
+        _copy_float_field({"apower": False}, scalar_status, "apower")
+        self.assertEqual(scalar_status, {"apower": 1.25, "current": 2.0, "voltage": 230.0})
+
+        _set_apower(scalar_status, 5.0)
+        _set_current(scalar_status, 6.0)
+        _set_voltage(scalar_status, 231.0)
+        self.assertEqual(scalar_status, {"apower": 5.0, "current": 6.0, "voltage": 231.0})
+
+    def test_shelly_worker_phase_tuple_helpers_cover_shape_and_numeric_contracts(self) -> None:
+        self.assertEqual(_phase_tuple([1, 2.5, 0]), (1.0, 2.5, 0.0))
+        self.assertEqual(_phase_tuple_items((1, 2, 3)), (1, 2, 3))
+        self.assertEqual(_phase_tuple_candidate([1, 2, 3]), (1, 2, 3))
+        self.assertIsNone(_phase_tuple_candidate((1, 2)))
+        self.assertIsNone(_phase_tuple_candidate("123"))
+        self.assertIsNone(_phase_tuple_items((1, object(), 3)))
+        self.assertTrue(_numeric_triplet((1, 2.0, 3)))
+        self.assertTrue(_numeric_value(0.0))
+        self.assertFalse(_numeric_value(True))
+        self.assertFalse(_numeric_value("0"))
 
     def test_shelly_backend_base_can_reset_transport_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -519,3 +688,48 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
     def test_shelly_io_host_contract_reports_missing_members(self) -> None:
         with self.assertRaisesRegex(TypeError, "_request"):
             require_shelly_io_host(SimpleNamespace(session=MagicMock()))
+        try:
+            require_shelly_io_host(SimpleNamespace(session=MagicMock()))
+        except TypeError as error:
+            self.assertEqual(
+                str(error),
+                "ShellyIoController requires a ShellyIoHost-compatible service; "
+                "missing: _time_now, _request, rpc_call, _peek_pending_relay_command, _clear_pending_relay_command",
+            )
+
+        partial_service = SimpleNamespace(
+            _time_now=lambda: 123.0,
+            _request="not-callable",
+            rpc_call=lambda _method, **_params: {},
+            _peek_pending_relay_command=lambda: (None, None),
+            _clear_pending_relay_command=lambda _relay_on: None,
+        )
+        self.assertFalse(is_shelly_io_host(partial_service))
+        with self.assertRaisesRegex(TypeError, "missing: _request"):
+            require_shelly_io_host(partial_service)
+
+    def test_shelly_io_type_guard_contracts_are_explicit(self) -> None:
+        guard_cases = (
+            (is_meter_backend, "read_meter"),
+            (is_enable_backend, "set_enabled"),
+            (is_phase_selection_backend, "set_phase_selection"),
+            (is_switch_state_backend, "read_switch_state"),
+            (is_switch_capabilities_backend, "capabilities"),
+            (is_charger_state_backend, "read_charger_state"),
+            (is_transport_session_reset_backend, "reset_transport_session"),
+            (is_closeable, "close"),
+            (is_settable_event, "set"),
+        )
+        for guard, method_name in guard_cases:
+            with self.subTest(method_name=method_name):
+                self.assertFalse(guard(None))
+                self.assertFalse(guard(SimpleNamespace(**{method_name: None})))
+                self.assertFalse(guard(SimpleNamespace(**{method_name: "not-callable"})))
+                self.assertTrue(guard(SimpleNamespace(**{method_name: lambda *args, **kwargs: None})))
+
+    def test_shelly_io_phase_normalizers_forward_defaults_explicitly(self) -> None:
+        self.assertEqual(normalize_phase_value("p1_p2"), "P1_P2")
+        self.assertEqual(normalize_phase_value("bad"), "P1")
+        self.assertEqual(normalize_phase_value("bad", "P1_P2_P3"), "P1_P2_P3")
+        self.assertEqual(normalize_supported_phase_tuple("P1_P2,P1_P2_P3"), ("P1_P2", "P1_P2_P3"))
+        self.assertEqual(normalize_supported_phase_tuple("", ("P1_P2",)), ("P1_P2",))

@@ -33,8 +33,8 @@ class CerboGxRelaySwitchSettings:
 
 def _config(path: str) -> configparser.ConfigParser:
     parser = configparser.ConfigParser()
+    setattr(parser, "optionxform", str)
     if not str(path).strip():
-        parser.read_dict({"Adapter": {"Type": "cerbo_gx_relay_switch"}})
         return parser
     read_files = parser.read(path)
     if not read_files:
@@ -52,6 +52,12 @@ def _relay_index(value: object) -> int:
     return index
 
 
+def _relay_index_or_default(value: object) -> int:
+    if value is None or not str(value).strip():
+        return 0
+    return _relay_index(value)
+
+
 def _contact_mode(value: object) -> ContactMode:
     mode = str(value).strip().upper()
     if mode in {"NO", "NORMALLY_OPEN", "NORMALLY-OPEN"}:
@@ -59,6 +65,27 @@ def _contact_mode(value: object) -> ContactMode:
     if mode in {"NC", "NORMALLY_CLOSED", "NORMALLY-CLOSED"}:
         return "NC"
     raise ValueError("Cerbo GX relay backend requires ContactMode NO or NC")
+
+
+def _contact_mode_or_default(value: object) -> ContactMode:
+    if value is None or not str(value).strip():
+        return "NO"
+    return _contact_mode(value)
+
+
+def _binary_flag_or_default(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    return bool(normalize_binary_flag(value))
+
+
+def _manual_function_value(value: object) -> int:
+    if value is None or not str(value).strip():
+        return 2
+    try:
+        return int(str(value).strip())
+    except ValueError as exc:
+        raise ValueError("Cerbo GX relay backend requires ManualFunctionValue to be an integer") from exc
 
 
 def _positive_seconds(value: object, default: float) -> float:
@@ -74,15 +101,16 @@ def load_cerbo_gx_relay_switch_settings(config_path: str) -> CerboGxRelaySwitchS
     adapter = config_section(parser, "Adapter")
     capabilities = config_section(parser, "Capabilities")
     return CerboGxRelaySwitchSettings(
-        relay_index=_relay_index(adapter.get("RelayIndex", "0")),
-        contact_mode=_contact_mode(adapter.get("ContactMode", "NO")),
-        ensure_manual_function=bool(normalize_binary_flag(adapter.get("EnsureManualFunction", "1"))),
-        manual_function_value=int(adapter.get("ManualFunctionValue", "2") or 2),
-        verify_settle_seconds=_positive_seconds(adapter.get("VerifySettleSeconds", "0.1"), 0.1),
-        verify_retry_seconds=_positive_seconds(adapter.get("VerifyRetrySeconds", "0.2"), 0.2),
-        supported_phase_selections=normalize_phase_selection_tuple(capabilities.get("SupportedPhaseSelections", "P1"), ("P1",)),
-        requires_charge_pause_for_phase_change=bool(
-            normalize_binary_flag(capabilities.get("RequiresChargePauseForPhaseChange", "0"))
+        relay_index=_relay_index_or_default(adapter.get("RelayIndex")),
+        contact_mode=_contact_mode_or_default(adapter.get("ContactMode")),
+        ensure_manual_function=_binary_flag_or_default(adapter.get("EnsureManualFunction"), True),
+        manual_function_value=_manual_function_value(adapter.get("ManualFunctionValue")),
+        verify_settle_seconds=_positive_seconds(adapter.get("VerifySettleSeconds"), 0.1),
+        verify_retry_seconds=_positive_seconds(adapter.get("VerifyRetrySeconds"), 0.2),
+        supported_phase_selections=normalize_phase_selection_tuple(capabilities.get("SupportedPhaseSelections"), ("P1",)),
+        requires_charge_pause_for_phase_change=_binary_flag_or_default(
+            capabilities.get("RequiresChargePauseForPhaseChange"),
+            False,
         ),
     )
 
@@ -98,7 +126,7 @@ class CerboGxRelaySwitchBackend:
         self.config_path = str(config_path).strip()
         self.settings = load_cerbo_gx_relay_switch_settings(self.config_path)
         default_selection = self.settings.supported_phase_selections[0]
-        requested_selection = getattr(service, "requested_phase_selection", default_selection)
+        requested_selection = getattr(service, "requested_phase_selection", None)
         self._selected_phase_selection: PhaseSelection = (
             requested_selection if requested_selection in self.settings.supported_phase_selections else default_selection
         )
@@ -120,8 +148,6 @@ class CerboGxRelaySwitchBackend:
         return SwitchState(
             enabled=enabled,
             phase_selection=self._selected_phase_selection,
-            feedback_closed=None,
-            interlock_ok=None,
         )
 
     def set_enabled(self, enabled: bool) -> None:
@@ -253,8 +279,11 @@ class CerboGxRelaySwitchBackend:
         entry = self._dbus_value_entry(service, path)
         if entry is None:
             return True
+        updated_at = entry.get("updated_at")
+        if updated_at is None:
+            return True
         try:
-            return float(entry.get("updated_at", 0.0) or 0.0) <= written_at
+            return float(updated_at) <= written_at
         except (TypeError, ValueError):
             return True
 
@@ -280,13 +309,13 @@ class CerboGxRelaySwitchBackend:
         return GatewayClient(gateway_paths(self._gateway_run_dir()))
 
     def _gateway_cache_path(self) -> str:
-        configured = str(getattr(self.service, "dbus_gateway_cache_path", "") or "")
+        configured = str(getattr(self.service, "dbus_gateway_cache_path", None) or "")
         if configured:
             return configured
         return gateway_paths(self._gateway_run_dir()).cache_path
 
     def _gateway_run_dir(self) -> str:
-        configured = str(getattr(self.service, "dbus_gateway_run_dir", "") or "")
+        configured = str(getattr(self.service, "dbus_gateway_run_dir", None) or "")
         return configured or "/tmp/venus-evcharger"
 
     @staticmethod

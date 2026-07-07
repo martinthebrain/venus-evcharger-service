@@ -193,8 +193,6 @@ def is_settable_event(value: object) -> TypeGuard[_SettableEventLike]:
     return callable(getattr(value, "set", None))
 
 
-_SHELLY_IO_HOST_REQUIRED_ATTRIBUTES: tuple[str, ...] = ()
-
 _SHELLY_IO_HOST_REQUIRED_METHODS = (
     "_time_now",
     "_request",
@@ -205,9 +203,7 @@ _SHELLY_IO_HOST_REQUIRED_METHODS = (
 
 
 def _missing_shelly_io_host_members(value: object) -> tuple[str, ...]:
-    missing_attrs = [name for name in _SHELLY_IO_HOST_REQUIRED_ATTRIBUTES if not hasattr(value, name)]
-    missing_methods = [name for name in _SHELLY_IO_HOST_REQUIRED_METHODS if not callable(getattr(value, name, None))]
-    return tuple(missing_attrs + missing_methods)
+    return tuple(name for name in _SHELLY_IO_HOST_REQUIRED_METHODS if not callable(getattr(value, name, None)))
 
 
 def is_shelly_io_host(value: object) -> TypeGuard["ShellyIoHost"]:
@@ -219,7 +215,7 @@ def require_shelly_io_host(value: object) -> "ShellyIoHost":
     """Return a validated Shelly I/O host or fail with actionable context."""
     if is_shelly_io_host(value):
         return value
-    missing = ", ".join(_missing_shelly_io_host_members(value)) or "unknown"
+    missing = ", ".join(_missing_shelly_io_host_members(value))
     raise TypeError(f"ShellyIoController requires a ShellyIoHost-compatible service; missing: {missing}")
 
 

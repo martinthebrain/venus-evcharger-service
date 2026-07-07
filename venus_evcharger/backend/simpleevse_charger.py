@@ -195,8 +195,6 @@ class SimpleEvseChargerBackend:
             current_amps=float(current_setting),
             phase_selection=fixed_phase_selection,
             actual_current_amps=float(actual_current),
-            power_w=None,
-            energy_kwh=None,
             status_text=_status_text(vehicle_state, evse_state, fault_text),
             fault_text=fault_text,
         )

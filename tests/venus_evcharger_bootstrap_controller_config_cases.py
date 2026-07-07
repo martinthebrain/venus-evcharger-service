@@ -619,3 +619,22 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(_logging_level_from_config(parser), "DEBUG")
         self.assertEqual(len(windows), len(MONTH_WINDOW_DEFAULTS))
         self.assertEqual(windows[1], ((7, 0), (19, 0)))
+
+    def test_seasonal_windows_forward_exact_month_defaults_to_loader(self):
+        parser = configparser.ConfigParser()
+        calls = []
+
+        def month_window_func(config, month, start, end):
+            calls.append((config, month, start, end))
+            return month, start, end
+
+        windows = _seasonal_month_windows(parser, month_window_func)
+
+        self.assertEqual(windows, {month: (month, start, end) for month, (start, end) in MONTH_WINDOW_DEFAULTS.items()})
+        self.assertEqual(
+            calls,
+            [
+                (parser, month, start, end)
+                for month, (start, end) in MONTH_WINDOW_DEFAULTS.items()
+            ],
+        )

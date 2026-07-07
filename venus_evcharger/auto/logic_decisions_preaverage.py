@@ -178,7 +178,8 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
     ) -> RelayDecisionState:
         if not self._mode_uses_auto_logic(svc.virtual_mode):
             return RelayDecisionState.resolved(self._handle_non_auto_mode(relay_on))
-        if not bool(getattr(svc, "virtual_enable", 1)):
+        virtual_enable = svc.virtual_enable if hasattr(svc, "virtual_enable") else True
+        if not bool(virtual_enable):
             return RelayDecisionState.resolved(self._handle_disabled_mode(cached_inputs))
         return self._decision_state(self._handle_cutover_pending(relay_on, cached_inputs))
 
@@ -298,7 +299,7 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
         grid_power: float | None,
     ) -> bool:
         svc = self.service
-        cached_inputs = bool(getattr(svc, "_auto_cached_inputs_used", False))
+        cached_inputs = bool(svc._auto_cached_inputs_used) if hasattr(svc, "_auto_cached_inputs_used") else False
         now = self._learning_policy_now()
         pre_average_decision, battery_soc = self._pre_average_decision(
             relay_on,

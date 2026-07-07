@@ -27,6 +27,11 @@ from .modbus_profile_models import (
 )
 from .models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_tuple
 
+_DEFAULT_BIT_DATA_TYPE = "bool"
+_DEFAULT_REGISTER_DATA_TYPE = "uint16"
+_DEFAULT_WORD_ORDER = "big"
+_DEFAULT_PROFILE_NAME = "generic"
+
 
 def _optional_section(parser: configparser.ConfigParser, name: str) -> configparser.SectionProxy | None:
     """Return one optional config section."""
@@ -62,7 +67,7 @@ def _normalized_data_type(section: configparser.SectionProxy, default: str) -> s
 
 def _normalized_word_order(section: configparser.SectionProxy) -> str:
     """Return one validated Modbus word order."""
-    normalized = str(section.get("WordOrder", "big")).strip().lower()
+    normalized = str(section.get("WordOrder", _DEFAULT_WORD_ORDER)).strip().lower()
     if normalized not in {"big", "little"}:
         raise ValueError(f"Unsupported Modbus WordOrder '{normalized}' in [{section.name}]")
     return normalized
@@ -70,7 +75,7 @@ def _normalized_word_order(section: configparser.SectionProxy) -> str:
 
 def _normalized_scale(section: configparser.SectionProxy) -> float:
     """Return one validated Modbus scale factor."""
-    scale = finite_float_or_none(section.get("Scale", "1"))
+    scale = finite_float_or_none(section.get("Scale"))
     if scale is None or scale == 0.0:
         return 1.0
     return float(scale)
@@ -97,7 +102,7 @@ def _parsed_phase_selection_map(raw_value: object) -> dict[PhaseSelection, int]:
     parsed: dict[PhaseSelection, int] = {}
     for token in text.split(","):
         key_text, _, value_text = token.partition(":")
-        selection = normalize_phase_selection(key_text.strip(), "P1")
+        selection = normalize_phase_selection(key_text.strip())
         parsed[selection] = int(value_text.strip())
     return parsed
 
@@ -110,7 +115,7 @@ def _optional_read_field(parser: configparser.ConfigParser, section_name: str) -
     register_type = _normalized_register_type(section)
     data_type = _normalized_data_type(
         section,
-        "bool" if register_type in {"coil", "discrete"} else "uint16",
+        _default_read_data_type(register_type),
     )
     return ModbusReadField(
         register_type=register_type,
@@ -143,7 +148,7 @@ def _required_current_write(parser: configparser.ConfigParser) -> ModbusNumericW
     return ModbusNumericWrite(
         register_type=_normalized_register_type(section, write=True),
         address=_required_int(section, "Address"),
-        data_type=_normalized_data_type(section, "uint16"),
+        data_type=_normalized_data_type(section, _DEFAULT_REGISTER_DATA_TYPE),
         scale=_normalized_scale(section),
         word_order=_normalized_word_order(section),
     )
@@ -157,7 +162,7 @@ def _optional_phase_write(parser: configparser.ConfigParser) -> ModbusPhaseWrite
     return ModbusPhaseWrite(
         register_type=_normalized_register_type(section, write=True),
         address=_required_int(section, "Address"),
-        data_type=_normalized_data_type(section, "uint16"),
+        data_type=_normalized_data_type(section, _DEFAULT_REGISTER_DATA_TYPE),
         word_order=_normalized_word_order(section),
         selection_map=_parsed_phase_selection_map(section.get("Map", "")),
     )
@@ -166,7 +171,7 @@ def _optional_phase_write(parser: configparser.ConfigParser) -> ModbusPhaseWrite
 def _supported_phase_selections(capabilities: configparser.SectionProxy | None, phase_write: ModbusPhaseWrite | None) -> tuple[PhaseSelection, ...]:
     """Return one normalized supported-phase tuple for the generic profile."""
     configured = _configured_supported_phase_selections(capabilities)
-    normalized = normalize_phase_selection_tuple(configured, ("P1",))
+    normalized = normalize_phase_selection_tuple(configured)
     if phase_write is None:
         return normalized
     available = _mapped_supported_phase_selections(normalized, phase_write)
@@ -185,7 +190,7 @@ def _enable_uses_current_write(capabilities: configparser.SectionProxy | None) -
     """Return whether current writes should double as enable/disable control."""
     if capabilities is None:
         return False
-    raw_value = str(capabilities.get("EnableUsesCurrentWrite", "0")).strip().lower()
+    raw_value = str(capabilities.get("EnableUsesCurrentWrite")).strip().lower()
     return raw_value in {"1", "true", "yes", "on"}
 
 
@@ -193,7 +198,7 @@ def _enable_default_current_amps(capabilities: configparser.SectionProxy | None)
     """Return the fallback current used when enabling via current writes."""
     if capabilities is None:
         return 6.0
-    configured = finite_float_or_none(capabilities.get("EnableDefaultCurrentAmps", "6"))
+    configured = finite_float_or_none(capabilities.get("EnableDefaultCurrentAmps"))
     if configured is None or configured <= 0.0:
         return 6.0
     return float(configured)
@@ -257,10 +262,22 @@ def _validated_enable_section(
 def load_modbus_charger_profile(parser: configparser.ConfigParser) -> GenericModbusChargerProfile:
     """Return one Modbus charger profile selected by Adapter.Profile."""
     adapter = parser["Adapter"] if parser.has_section("Adapter") else parser["DEFAULT"]
-    profile_name = str(adapter.get("Profile", "generic")).strip().lower() or "generic"
-    if profile_name != "generic":
+    profile_name = _profile_name(adapter.get("Profile"))
+    if profile_name != _DEFAULT_PROFILE_NAME:
         raise ValueError(f"Unsupported Modbus charger profile '{profile_name}'")
     return load_generic_modbus_charger_profile(parser)
+
+
+def _default_read_data_type(register_type: str) -> str:
+    """Return the implicit data type for one read register kind."""
+    if register_type in {"coil", "discrete"}:
+        return _DEFAULT_BIT_DATA_TYPE
+    return _DEFAULT_REGISTER_DATA_TYPE
+
+
+def _profile_name(raw_value: object) -> str:
+    """Return one normalized profile name from Adapter.Profile."""
+    return str(raw_value).strip().lower() if raw_value is not None and str(raw_value).strip() else _DEFAULT_PROFILE_NAME
 
 
 __all__ = [

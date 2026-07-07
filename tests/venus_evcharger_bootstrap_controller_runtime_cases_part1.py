@@ -1,7 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_bootstrap_controller_runtime_cases_support import *  # noqa: F401,F403
+from venus_evcharger.bootstrap.runtime_virtual_state import switch_backend_supported_phase_selections
 
 class _TestServiceBootstrapControllerRuntimePart1:
+    def test_initialize_controllers_delegates_all_runtime_dependencies(self):
+        service = SimpleNamespace()
+        controller = self._controller(service)
+
+        with patch("venus_evcharger.bootstrap.runtime.initialize_runtime_controllers") as initialize:
+            controller.initialize_controllers()
+
+        initialize.assert_called_once_with(
+            service,
+            age_seconds=controller._age_seconds,
+            health_code=controller._health_code,
+            mode_uses_auto_logic=controller._mode_uses_auto_logic,
+            normalize_mode=controller._normalize_mode,
+            phase_values=controller._phase_values,
+        )
+
     def test_initialize_controllers_keeps_legacy_backend_attrs_unset_after_resolution(self):
         parser = configparser.ConfigParser()
         parser.read_dict(
@@ -43,15 +60,15 @@ class _TestServiceBootstrapControllerRuntimePart1:
         self.assertFalse(hasattr(service, "backend_mode"))
 
         with (
-            patch("venus_evcharger.bootstrap.runtime.RuntimeSupportController") as runtime_controller,
-            patch("venus_evcharger.bootstrap.runtime.AutoDecisionController"),
-            patch("venus_evcharger.bootstrap.runtime.DbusPublishController"),
-            patch("venus_evcharger.bootstrap.runtime.ShellyIoController"),
-            patch("venus_evcharger.bootstrap.runtime.build_service_backends", return_value=resolved),
-            patch("venus_evcharger.bootstrap.runtime.ServiceStateController"),
-            patch("venus_evcharger.bootstrap.runtime.DbusWriteController"),
-            patch("venus_evcharger.bootstrap.runtime.AutoInputSupervisor"),
-            patch("venus_evcharger.bootstrap.runtime.UpdateCycleController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.RuntimeSupportController") as runtime_controller,
+            patch("venus_evcharger.bootstrap.runtime_controllers.AutoDecisionController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.DbusPublishController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.ShellyIoController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.build_service_backends", return_value=resolved),
+            patch("venus_evcharger.bootstrap.runtime_controllers.ServiceStateController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.DbusWriteController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.AutoInputSupervisor"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.UpdateCycleController"),
         ):
             runtime_controller.return_value.initialize_runtime_support = MagicMock()
             controller.initialize_controllers()
@@ -132,9 +149,18 @@ class _TestServiceBootstrapControllerRuntimePart1:
         service = SimpleNamespace(
             _switch_backend=SimpleNamespace(capabilities=MagicMock(side_effect=RuntimeError("boom"))),
         )
+
+        self.assertEqual(switch_backend_supported_phase_selections(service), ("P1",))
+
+    def test_fetch_device_info_with_fallback_delegates_to_runtime_metadata(self):
+        service = SimpleNamespace()
         controller = self._controller(service)
 
-        self.assertEqual(controller._switch_backend_supported_phase_selections(service), ("P1",))
+        with patch("venus_evcharger.bootstrap.runtime.fetch_device_info_with_fallback", return_value={"mac": "ABC"}) as fetch:
+            result = controller.fetch_device_info_with_fallback()
+
+        self.assertEqual(result, {"mac": "ABC"})
+        fetch.assert_called_once_with(service)
 
     def test_restore_runtime_state_sets_manual_startup_target_only_outside_auto_mode(self):
         manual_service = SimpleNamespace(
@@ -364,4 +390,3 @@ class _TestServiceBootstrapControllerRuntimePart1:
         gobject_module.timeout_add.assert_any_call(123, service._flush_dbus_publish_queue)
         gobject_module.timeout_add.assert_any_call(1000, service._mainloop_heartbeat_tick)
         self.assertFalse(any(call.args == (1000, service._update) for call in gobject_module.timeout_add.call_args_list))
-

@@ -29,7 +29,7 @@ _PHASE_SELECTION_ALIASES: dict[str, PhaseSelection] = {
 
 def phase_selection_count(value: object) -> int:
     """Return how many energized phases one normalized phase selection represents."""
-    normalized = normalize_phase_selection(value, "P1")
+    normalized = normalize_phase_selection(value)
     if normalized == "P1_P2_P3":
         return 3
     if normalized == "P1_P2":
@@ -44,13 +44,17 @@ def normalize_phase_selection(value: object, default: PhaseSelection = "P1") -> 
 
 def normalize_phase_selection_or_none(value: object) -> PhaseSelection | None:
     """Return a normalized phase selection only when the input explicitly names one."""
-    selection = str(value).strip().upper() if value is not None else ""
+    if value is None:
+        return None
+    selection = str(value).strip().upper()
     return _PHASE_SELECTION_ALIASES.get(selection)
 
 
 def normalize_switching_mode(value: object, default: SwitchingMode = "direct") -> SwitchingMode:
     """Return one normalized switch-backend switching mode."""
-    mode = str(value).strip().lower() if value is not None else ""
+    if value is None:
+        return default
+    mode = str(value).strip().lower()
     if mode == "contactor":
         return "contactor"
     if mode == "direct":
@@ -70,11 +74,11 @@ def normalize_phase_selection_tuple(
 def _normalized_phase_selection_values(values: object) -> tuple[PhaseSelection, ...]:
     """Return normalized phase selections from iterable or comma-separated runtime data."""
     if isinstance(values, (tuple, list)):
-        return tuple(normalize_phase_selection(value, "P1") for value in values)
+        return tuple(normalize_phase_selection(value) for value in values)
     text = _phase_selection_text(values)
     if not text:
         return ()
-    return tuple(normalize_phase_selection(part, "P1") for part in text.split(","))
+    return tuple(normalize_phase_selection(part) for part in text.split(","))
 
 
 def _phase_selection_text(values: object) -> str:
@@ -109,7 +113,7 @@ def effective_supported_phase_selections(
     now: float | None = None,
 ) -> tuple[PhaseSelection, ...]:
     """Return the effective supported phase layouts after lockout degradation."""
-    normalized = normalize_phase_selection_tuple(values, ("P1",))
+    normalized = normalize_phase_selection_tuple(values)
     if not phase_switch_lockout_active(lockout_selection, lockout_until, now=now):
         return normalized
     allowed_phase_count = max(1, phase_selection_count(lockout_selection) - 1)

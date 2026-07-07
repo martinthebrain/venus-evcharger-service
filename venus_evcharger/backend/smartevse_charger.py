@@ -210,9 +210,6 @@ class SmartEvseChargerBackend:
             enabled=enabled,
             current_amps=_normalized_current_amps(current_setting),
             phase_selection=fixed_phase_selection,
-            actual_current_amps=None,
-            power_w=None,
-            energy_kwh=None,
             status_text=_status_text(state_value, error_bits, enabled, mode_value),
             fault_text=_fault_text(error_bits),
         )

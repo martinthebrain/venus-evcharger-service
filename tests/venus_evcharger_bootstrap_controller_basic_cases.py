@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_bootstrap_controller_support import (
     MagicMock,
+    ServiceBootstrapController,
     ServiceBootstrapControllerTestCase,
     SimpleNamespace,
     _install_signal_logging,
@@ -11,6 +12,47 @@ from tests.venus_evcharger_bootstrap_controller_support import (
 
 
 class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
+    def test_constructor_wires_all_runtime_dependencies(self):
+        service = SimpleNamespace()
+        normalize_phase = MagicMock(return_value="L1")
+        normalize_mode = MagicMock(return_value=2)
+        mode_uses_auto_logic = MagicMock(return_value=True)
+        month_window = MagicMock(return_value=((7, 0), (19, 0)))
+        age_seconds = MagicMock(return_value=9)
+        health_code = MagicMock(return_value=42)
+        phase_values = MagicMock(return_value={"L1": 123})
+        read_version = MagicMock(return_value="1.2.3")
+        gobject_module = MagicMock()
+        formatters = {"w": MagicMock(return_value="123 W")}
+
+        controller = ServiceBootstrapController(
+            service,
+            normalize_phase_func=normalize_phase,
+            normalize_mode_func=normalize_mode,
+            mode_uses_auto_logic_func=mode_uses_auto_logic,
+            month_window_func=month_window,
+            age_seconds_func=age_seconds,
+            health_code_func=health_code,
+            phase_values_func=phase_values,
+            read_version_func=read_version,
+            gobject_module=gobject_module,
+            script_path="/tmp/custom-service.py",
+            formatters=formatters,
+        )
+
+        self.assertIs(controller.service, service)
+        self.assertIs(controller._normalize_phase, normalize_phase)
+        self.assertIs(controller._normalize_mode, normalize_mode)
+        self.assertIs(controller._mode_uses_auto_logic, mode_uses_auto_logic)
+        self.assertIs(controller._month_window, month_window)
+        self.assertIs(controller._age_seconds, age_seconds)
+        self.assertIs(controller._health_code, health_code)
+        self.assertIs(controller._phase_values, phase_values)
+        self.assertIs(controller._read_version, read_version)
+        self.assertIs(controller._gobject, gobject_module)
+        self.assertEqual(controller._script_path, "/tmp/custom-service.py")
+        self.assertIs(controller._formatters, formatters)
+
     def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self):
         service = SimpleNamespace(
             startup_device_info_retries=2,
@@ -52,8 +94,8 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         )
         controller = self._controller(service)
 
-        with patch("venus_evcharger.bootstrap.controller.time.sleep") as sleep_mock:
-            with patch("venus_evcharger.bootstrap.controller.logging.warning") as warning_mock:
+        with patch("venus_evcharger.bootstrap.runtime_metadata.time.sleep") as sleep_mock:
+            with patch("venus_evcharger.bootstrap.runtime_metadata.logging.warning") as warning_mock:
                 result = controller.fetch_device_info_with_fallback()
 
         self.assertEqual(result, {"mac": "ABC"})

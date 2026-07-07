@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from unittest import mock
+
 from tests.venus_evcharger_bootstrap_controller_path_cases_support import *  # noqa: F401,F403
 from venus_evcharger.dbus_gateway import (
     missing_required_venus_paths,
@@ -6,6 +8,188 @@ from venus_evcharger.dbus_gateway import (
 )
 
 class _TestServiceBootstrapControllerPathsPart2:
+    def test_register_paths_wires_every_dynamic_path_with_formatter_and_write_handler(self):
+        write_handler = MagicMock()
+        service = SimpleNamespace(_dbusservice=MagicMock(), _handle_write=write_handler)
+        controller = self._controller(service)
+        controller._register_management_paths = MagicMock()
+        formatter = MagicMock()
+        controller._all_service_paths = MagicMock(
+            return_value={
+                "/Path/One": (1, formatter),
+                "/Path/Two": ("two", None),
+            }
+        )
+
+        with patch("venus_evcharger.bootstrap.paths.logging.debug") as debug:
+            controller.register_paths()
+
+        controller._register_management_paths.assert_called_once_with()
+        controller._all_service_paths.assert_called_once_with()
+        self.assertEqual(
+            service._dbusservice.add_path.call_args_list,
+            [
+                mock.call(
+                    "/Path/One",
+                    1,
+                    gettextcallback=formatter,
+                    onchangecallback=write_handler,
+                ),
+                mock.call(
+                    "/Path/Two",
+                    "two",
+                    gettextcallback=None,
+                    onchangecallback=write_handler,
+                ),
+            ],
+        )
+        self.assertEqual(
+            debug.call_args_list,
+            [
+                mock.call("Registering path: %s initial=%r formatter=%r", "/Path/One", 1, formatter),
+                mock.call("Registering path: %s initial=%r formatter=%r", "/Path/Two", "two", None),
+            ],
+        )
+
+    def test_register_paths_logs_and_reraises_dbus_registration_errors(self):
+        write_handler = MagicMock()
+        service = SimpleNamespace(_dbusservice=MagicMock(), _handle_write=write_handler)
+        controller = self._controller(service)
+        controller._register_management_paths = MagicMock()
+        controller._all_service_paths = MagicMock(return_value={"/Broken": (1, None)})
+        failure = RuntimeError("dbus rejected path")
+        service._dbusservice.add_path.side_effect = failure
+
+        with patch("venus_evcharger.bootstrap.paths.logging.error") as error, self.assertRaises(RuntimeError) as raised:
+            controller.register_paths()
+
+        self.assertIs(raised.exception, failure)
+        error.assert_called_once_with("Failed to register path %s: %s", "/Broken", failure, exc_info=failure)
+
+    def test_diagnostic_paths_are_composed_from_state_and_diagnostic_default_helpers(self):
+        service = SimpleNamespace(
+            _last_health_reason="grid-ok",
+            _last_health_code=12,
+            _last_auto_state="charging",
+            _last_auto_state_code=4,
+            _last_status_source=99,
+        )
+        controller = self._controller(service)
+        scheduled_snapshot = object()
+        controller._scheduled_snapshot = MagicMock(return_value=scheduled_snapshot)
+        helper_patches = (
+            patch("venus_evcharger.bootstrap.paths.scheduled_diagnostic_defaults", return_value={"/Scheduled": (1, None)}),
+            patch("venus_evcharger.bootstrap.paths.backend_diagnostic_defaults", return_value={"/Backend": (2, None)}),
+            patch("venus_evcharger.bootstrap.paths.decision_diagnostic_defaults", return_value={"/Decision": (3, None)}),
+            patch(
+                "venus_evcharger.bootstrap.paths.software_update_diagnostic_defaults",
+                return_value={"/Software": (4, None)},
+            ),
+            patch("venus_evcharger.bootstrap.paths.phase_diagnostic_defaults", return_value={"/Phase": (5, None)}),
+            patch("venus_evcharger.bootstrap.paths.age_counter_diagnostic_defaults", return_value={"/Age": (6, None)}),
+            patch("venus_evcharger.bootstrap.paths.runtime_timing_diagnostic_defaults", return_value={"/Timing": (7, None)}),
+        )
+
+        with helper_patches[0] as scheduled, helper_patches[1] as backend, helper_patches[2] as decision, helper_patches[
+            3
+        ] as software, helper_patches[4] as phase, helper_patches[5] as age, helper_patches[6] as timing:
+            self.assertEqual(
+                controller._diagnostic_paths(),
+                {
+                    "/Auto/Health": ("grid-ok", None),
+                    "/Auto/HealthCode": (12, None),
+                    "/Auto/State": ("charging", None),
+                    "/Auto/StateCode": (4, None),
+                    "/Auto/RecoveryActive": (0, None),
+                    "/Auto/StatusSource": ("99", None),
+                    "/Auto/FaultActive": (0, None),
+                    "/Auto/FaultReason": ("", None),
+                    "/Scheduled": (1, None),
+                    "/Backend": (2, None),
+                    "/Decision": (3, None),
+                    "/Software": (4, None),
+                    "/Phase": (5, None),
+                    "/Age": (6, None),
+                    "/Timing": (7, None),
+                },
+            )
+
+        controller._scheduled_snapshot.assert_called_once_with()
+        scheduled.assert_called_once_with(scheduled_snapshot)
+        for helper in (backend, decision, software, phase):
+            helper.assert_called_once_with(service)
+        age.assert_called_once_with()
+        timing.assert_called_once_with()
+
+    def test_diagnostic_paths_use_default_auto_state_when_state_attributes_are_missing(self):
+        service = SimpleNamespace(_last_health_reason="init", _last_health_code=0)
+        controller = self._controller(service)
+        controller._scheduled_snapshot = MagicMock(return_value=None)
+        empty_helper = MagicMock(return_value={})
+
+        with patch("venus_evcharger.bootstrap.paths.scheduled_diagnostic_defaults", empty_helper), patch(
+            "venus_evcharger.bootstrap.paths.backend_diagnostic_defaults",
+            empty_helper,
+        ), patch("venus_evcharger.bootstrap.paths.decision_diagnostic_defaults", empty_helper), patch(
+            "venus_evcharger.bootstrap.paths.software_update_diagnostic_defaults",
+            empty_helper,
+        ), patch("venus_evcharger.bootstrap.paths.phase_diagnostic_defaults", empty_helper), patch(
+            "venus_evcharger.bootstrap.paths.age_counter_diagnostic_defaults",
+            empty_helper,
+        ), patch("venus_evcharger.bootstrap.paths.runtime_timing_diagnostic_defaults", empty_helper):
+            defaults = controller._diagnostic_paths()
+
+        self.assertEqual(defaults["/Auto/State"], ("idle", None))
+        self.assertEqual(defaults["/Auto/StateCode"], (0, None))
+        self.assertEqual(defaults["/Auto/StatusSource"], ("unknown", None))
+
+    def test_scheduled_snapshot_wires_configured_values_and_missing_optional_defaults(self):
+        service = SimpleNamespace(
+            virtual_mode=2,
+            auto_month_windows={7: ((8, 15), (20, 45))},
+            auto_scheduled_enabled_days="Tue,Thu",
+            auto_scheduled_night_start_delay_seconds=5400.0,
+            auto_scheduled_latest_end_time="07:45",
+        )
+        controller = self._controller(service)
+        snapshot = object()
+
+        with patch("venus_evcharger.bootstrap.paths.time.time", return_value=1783429200.0), patch(
+            "venus_evcharger.bootstrap.paths.scheduled_mode_snapshot",
+            return_value=snapshot,
+        ) as scheduled:
+            self.assertIs(controller._scheduled_snapshot(), snapshot)
+
+        expected_now = datetime.fromtimestamp(1783429200.0)
+        scheduled.assert_called_once_with(
+            expected_now,
+            {7: ((8, 15), (20, 45))},
+            "Tue,Thu",
+            delay_seconds=5400.0,
+            latest_end_time="07:45",
+        )
+
+        default_service = SimpleNamespace(virtual_mode=2)
+        default_controller = self._controller(default_service)
+        with patch("venus_evcharger.bootstrap.paths.time.time", return_value=1783429200.0), patch(
+            "venus_evcharger.bootstrap.paths.scheduled_mode_snapshot",
+            return_value=snapshot,
+        ) as scheduled_with_defaults:
+            self.assertIs(default_controller._scheduled_snapshot(), snapshot)
+
+        scheduled_with_defaults.assert_called_once_with(
+            expected_now,
+            {},
+            (0, 1, 2, 3, 4),
+            delay_seconds=3600.0,
+            latest_end_time="06:30",
+        )
+
+        idle_controller = self._controller(SimpleNamespace(virtual_mode=0))
+        with patch("venus_evcharger.bootstrap.paths.scheduled_mode_snapshot") as scheduled_idle:
+            self.assertIsNone(idle_controller._scheduled_snapshot())
+        scheduled_idle.assert_not_called()
+
     def test_register_paths_marks_configured_split_topology_connected_without_legacy_host(self):
         service = SimpleNamespace(
             _dbusservice=_FakeDbusService(),

@@ -15,17 +15,15 @@ select = [
 
 [tool.mutmut]
 source_paths = ["venus_evcharger"]
-only_mutate = ["venus_evcharger/backend/probe.py"]
+only_mutate = ["venus_evcharger/bootstrap/wizard_inventory_cli_guided_profile.py"]
 also_copy = [
     "venus_evcharger_auto_input_helper.py",
     "venus_evcharger_dbus_adapter.py",
     "venus_evcharger_service.py",
     "CONTROL_API.md",
+    "deploy/venus",
 ]
 pytest_add_cli_args = ["-k", "not socket"]
 pytest_add_cli_args_test_selection = [
-    "tests/test_backend_config_file.py",
-    "tests/test_venus_evcharger_backend_factory.py",
-    "tests/test_venus_evcharger_backend_probe.py",
-    "tests/test_topology_config.py",
+    "tests/test_bootstrap_wizard_inventory_cli_guided_profile_contracts.py",
 ]

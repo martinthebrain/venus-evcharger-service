@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 
-from venus_evcharger.bootstrap.wizard_charger_presets import apply_charger_preset_backend, relevant_charger_presets
+from venus_evcharger.bootstrap.wizard_charger_presets import CHARGER_PRESET_VALUES
 from venus_evcharger.bootstrap.wizard_choices import optional_choice
 from venus_evcharger.bootstrap.wizard_guidance import default_backend, resolved_primary_host, role_host_defaults
 from venus_evcharger.bootstrap.wizard_import import ImportedWizardDefaults
@@ -63,9 +63,7 @@ def non_interactive_backend(
     namespace: argparse.Namespace,
     imported: ImportedWizardDefaults | None,
     profile: WizardProfile,
-    topology_preset: str | None,
 ) -> WizardChargerBackend | None:
-    _ = topology_preset
     return optional_choice(namespace.charger_backend or default_backend(profile, imported), WIZARD_CHARGER_BACKENDS, "charger backend")
 
 
@@ -82,13 +80,12 @@ def resolved_backend(
 def non_interactive_charger_preset(
     namespace: argparse.Namespace,
     imported_defaults: ImportedWizardDefaults,
-    backend: WizardChargerBackend | None,
 ) -> str | None:
     charger_preset = namespace.charger_preset or imported_defaults.charger_preset
     if charger_preset is None:
         return None
-    if charger_preset not in relevant_charger_presets(apply_charger_preset_backend(charger_preset, backend)):
-        raise ValueError(f"--charger-preset {charger_preset} is not supported for backend {backend or 'none'}")
+    if charger_preset not in CHARGER_PRESET_VALUES:
+        raise ValueError(f"Unsupported charger preset: {charger_preset}")
     return charger_preset
 
 
@@ -121,7 +118,10 @@ def _non_interactive_relay_index(namespace: argparse.Namespace) -> int:
 
 
 def _non_interactive_contact_mode(namespace: argparse.Namespace) -> str:
-    contact_mode = str(getattr(namespace, "cerbo_relay_contact_mode", None) or "NO").strip().upper()
+    raw_value = getattr(namespace, "cerbo_relay_contact_mode", None)
+    if raw_value is None:
+        return "NO"
+    contact_mode = str(raw_value).strip().upper()
     if contact_mode not in {"NO", "NC"}:
         raise ValueError("--cerbo-relay-contact-mode must be NO or NC")
     return contact_mode
@@ -225,8 +225,8 @@ def non_interactive_answers(
     profile = non_interactive_profile(namespace, imported_defaults)
     shared_host = namespace.host or imported_defaults.host_input or "192.168.1.50"
     topology_preset = non_interactive_topology_preset(namespace, imported_defaults, profile)
-    backend = non_interactive_backend(namespace, imported_defaults, profile, topology_preset)
-    charger_preset = non_interactive_charger_preset(namespace, imported_defaults, backend)
+    backend = non_interactive_backend(namespace, imported_defaults, profile)
+    charger_preset = non_interactive_charger_preset(namespace, imported_defaults)
     backend = resolved_backend(topology_preset, charger_preset, backend)
     meter_host, switch_host, charger_host = role_host_defaults(namespace, imported_defaults, profile, topology_preset, shared_host)
     host_input = resolved_primary_host(namespace, imported_defaults, meter_host, switch_host, charger_host)

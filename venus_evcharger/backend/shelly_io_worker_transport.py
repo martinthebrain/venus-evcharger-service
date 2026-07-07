@@ -65,9 +65,10 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
 
     @staticmethod
     def _shelly_retry_after_value(svc: ShellyIoHost) -> float:
-        retry_after = getattr(svc, "_shelly_retry_after", 0.0)
-        if _shelly_numeric(retry_after):
-            return float(retry_after)
+        if hasattr(svc, "_shelly_retry_after"):
+            retry_after = svc._shelly_retry_after
+            if _shelly_numeric(retry_after):
+                return float(retry_after)
         source_retry_after = getattr(svc, "_source_retry_after", None)
         return _shelly_source_retry_after_value(source_retry_after)
 
@@ -93,7 +94,7 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
             return 60.0
         if reason == "bad-json":
             return min(15.0, max(1.0, float(consecutive_errors)))
-        base = min(30.0, float(2 ** max(0, min(4, int(consecutive_errors) - 1))))
+        base = float(2 ** max(0, min(4, int(consecutive_errors) - 1)))
         return max(_SHELLY_RETRY_MINIMUMS.get(reason, 1.0), base)
 
     def _remember_shelly_failure(
@@ -104,7 +105,7 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         now: float,
     ) -> None:
         svc = self.service
-        previous_errors = getattr(svc, "_shelly_consecutive_errors", 0)
+        previous_errors = svc._shelly_consecutive_errors if hasattr(svc, "_shelly_consecutive_errors") else 0
         try:
             consecutive_errors = int(previous_errors) + 1
         except (TypeError, ValueError):
@@ -128,7 +129,9 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         retry_after: float,
     ) -> None:
         """Update in-memory Shelly failure diagnostics."""
-        soft_fail_seconds = float(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
+        soft_fail_seconds = float(
+            svc.auto_shelly_soft_fail_seconds if hasattr(svc, "auto_shelly_soft_fail_seconds") else 10.0
+        )
         svc._shelly_state = "offline" if delay_seconds >= soft_fail_seconds else "degraded"
         svc._shelly_last_error_reason = str(reason)
         svc._shelly_last_error_detail = f"{source}: {error}"
@@ -180,15 +183,16 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         svc._worker_session = requests.Session()
         self._reset_shelly_shared_session(svc)
         self._reset_shelly_backend_sessions(svc)
+        previous_reset_count = svc._shelly_session_reset_count if hasattr(svc, "_shelly_session_reset_count") else 0
         try:
-            svc._shelly_session_reset_count = int(getattr(svc, "_shelly_session_reset_count", 0)) + 1
+            svc._shelly_session_reset_count = int(previous_reset_count) + 1
         except (TypeError, ValueError):
             svc._shelly_session_reset_count = 1
 
     def _reset_shelly_shared_session(self, svc: ShellyIoHost) -> None:
         if not hasattr(svc, "session"):
             return
-        self._close_object(getattr(svc, "session", None))
+        self._close_object(svc.session)
         svc.session = requests.Session()
 
     def _reset_shelly_backend_sessions(self, svc: ShellyIoHost) -> None:
@@ -222,13 +226,15 @@ def _shelly_source_retry_after_value(source_retry_after: object) -> float:
     """Return retry-after value from the shared source-retry mapping."""
     if not isinstance(source_retry_after, dict):
         return 0.0
-    candidate = source_retry_after.get("shelly", 0.0)
+    if "shelly" not in source_retry_after:
+        return 0.0
+    candidate = source_retry_after["shelly"]
     return float(candidate) if _shelly_numeric(candidate) else 0.0
 
 
 def _classify_shelly_http_error(error: BaseException) -> str:
     """Return the Shelly reason for one HTTP error."""
-    response = getattr(error, "response", None)
+    response = error.response if isinstance(error, requests_exceptions.HTTPError) else None
     status_code = getattr(response, "status_code", None)
     return "auth-error" if status_code in (401, 403) else "http-error"
 

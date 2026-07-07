@@ -77,12 +77,12 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
         learning_profile_count = battery_activity.get("learning_profile_count")
         normalized_learning_profile_count = int(learning_profile_count) if isinstance(learning_profile_count, int) else 0
         return {
+            **battery_activity,
             "decision_surplus": float(decision_surplus_power - surplus_penalty_w + near_term_adjustment_w),
             "raw_decision_surplus": float(decision_surplus_power),
             "surplus_penalty_w": surplus_penalty_w,
             "near_term_adjustment_w": near_term_adjustment_w,
             "learning_profile_count": normalized_learning_profile_count,
-            **battery_activity,
         }
 
     def _learned_threshold_metrics(self, now: float) -> dict[str, float | str | None]:

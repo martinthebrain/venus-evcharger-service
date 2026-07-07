@@ -304,7 +304,7 @@ class GoEChargerBackend:
 
     def set_phase_selection(self, selection: PhaseSelection) -> None:
         """Reject native phase writes until go-e documents a stable public key for it."""
-        normalized = normalize_phase_selection(selection, "P1")
+        normalized = normalize_phase_selection(selection)
         if normalized == self._observed_phase_selection:
             return
         raise ValueError("go-e charger backend does not support documented native phase switching")

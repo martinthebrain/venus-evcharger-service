@@ -43,10 +43,10 @@ def _result_header_lines(result: WizardResult) -> list[str]:
     return [
         f"Config written to: {result.config_path}" if not result.dry_run else f"Config preview for: {result.config_path}",
         _optional_header_line("Imported defaults", result.imported_from, "none"),
-        _optional_header_line("Selected setup", profile_label(result.profile), ""),
+        f"Selected setup: {profile_label(result.profile)}",
         _optional_header_line("Selected topology preset", topology_preset_label(result.topology_preset), "n/a"),
-        _optional_header_line("Responsibilities", setup_responsibility_summary(result.profile, result.topology_preset), ""),
-        _optional_header_line("Initial policy mode", policy_mode_label(result.policy_mode), ""),
+        f"Responsibilities: {setup_responsibility_summary(result.profile, result.topology_preset)}",
+        f"Initial policy mode: {policy_mode_label(result.policy_mode)}",
         _optional_header_line("Selected charger backend", result.charger_backend, "none"),
         _optional_header_line("Transport", result.transport_kind, "n/a"),
         "Validation: ok",
@@ -86,10 +86,9 @@ def _hardware_flow_summary(result: WizardResult) -> str:
     meter = result.role_hosts.get("meter")
     switch = result.role_hosts.get("switch")
     charger = result.role_hosts.get("charger")
-    topology_preset = result.topology_preset or ""
     if topology_uses_cerbo_relay(result.topology_preset):
         return _cerbo_hardware_flow(meter)
-    if "switch-group" in topology_preset:
+    if result.topology_preset is not None and "switch-group" in result.topology_preset:
         return _switch_group_hardware_flow(meter, switch, charger)
     if result.profile == "simple_relay":
         return _simple_relay_hardware_flow(meter, switch)
@@ -104,7 +103,7 @@ def _cerbo_hardware_flow(meter: str | None) -> str:
 def _switch_group_hardware_flow(meter: str | None, switch: str | None, charger: str | None) -> str:
     charger_text = _endpoint_text(charger, "the charger backend")
     switch_text = _endpoint_text(switch, "the external switch group")
-    meter_prefix = f"{_endpoint_text(meter, 'the configured meter')} measures energy; " if meter else ""
+    meter_prefix = f"{meter} measures energy; " if meter else ""
     return f"{meter_prefix}{charger_text} controls charging; {switch_text} switches phases/contactors."
 
 

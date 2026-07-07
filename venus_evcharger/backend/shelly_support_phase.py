@@ -115,22 +115,22 @@ def _phase_map_selection(raw_key: object) -> PhaseSelection | None:
 def phase_powers_for_selection(
     power_w: float,
     selection: PhaseSelection,
-    single_phase_line: object = "L1",
+    single_phase_line: object = None,
 ) -> tuple[float, float, float]:
     """Split total power across the selected active phases for display."""
     total = float(power_w)
     if selection == "P1_P2_P3":
         return _distributed_phase_vector(total, 3.0)
     if selection == "P1_P2":
-        distributed = _distributed_phase_vector(total, 2.0)
-        return distributed[0], distributed[1], 0.0
+        per_phase = total / 2.0
+        return per_phase, per_phase, 0.0
     return _single_phase_vector(total, single_phase_line)
 
 
 def phase_currents_for_selection(
     current_a: float | None,
     selection: PhaseSelection,
-    single_phase_line: object = "L1",
+    single_phase_line: object = None,
 ) -> tuple[float, float, float] | None:
     """Split total current across the selected active phases for display."""
     if current_a is None:
@@ -139,8 +139,8 @@ def phase_currents_for_selection(
     if selection == "P1_P2_P3":
         return _distributed_phase_vector(total, 3.0)
     if selection == "P1_P2":
-        distributed = _distributed_phase_vector(total, 2.0)
-        return distributed[0], distributed[1], 0.0
+        per_phase = total / 2.0
+        return per_phase, per_phase, 0.0
     return _single_phase_vector(total, single_phase_line)
 
 
@@ -152,7 +152,9 @@ def _distributed_phase_vector(total: float, divisor: float) -> tuple[float, floa
 
 def _single_phase_vector(total: float, single_phase_line: object) -> tuple[float, float, float]:
     """Return one single-phase vector mapped to the configured measured line."""
-    line = str(single_phase_line).strip().upper() if single_phase_line is not None else "L1"
+    if single_phase_line is None:
+        return total, 0.0, 0.0
+    line = str(single_phase_line).strip().upper()
     if line == "L2":
         return 0.0, total, 0.0
     if line == "L3":

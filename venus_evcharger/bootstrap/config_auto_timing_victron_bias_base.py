@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Auto-mode Victron grid-bias endpoint and mode config loading."""
+
+from __future__ import annotations
+
+import configparser
+from typing import Any
+
+from venus_evcharger.bootstrap.config_shared import _config_value
+
+BIAS_ENABLED_KEY = "AutoBatteryDischargeBalanceVictronBiasEnabled"
+BIAS_SOURCE_ID_KEY = "AutoBatteryDischargeBalanceVictronBiasSourceId"
+BIAS_SERVICE_KEY = "AutoBatteryDischargeBalanceVictronBiasService"
+BIAS_PATH_KEY = "AutoBatteryDischargeBalanceVictronBiasPath"
+BIAS_BASE_SETPOINT_KEY = "AutoBatteryDischargeBalanceVictronBiasBaseSetpointWatts"
+BIAS_DEADBAND_KEY = "AutoBatteryDischargeBalanceVictronBiasDeadbandWatts"
+BIAS_ACTIVATION_MODE_KEY = "AutoBatteryDischargeBalanceVictronBiasActivationMode"
+BIAS_SUPPORT_MODE_KEY = "AutoBatteryDischargeBalanceVictronBiasSupportMode"
+DEFAULT_FALSE = "0"
+DEFAULT_ACTIVATION_MODE = "always"
+DEFAULT_SUPPORT_MODE = "allow_experimental"
+
+
+def load_victron_bias_base_config(svc: Any, defaults: configparser.SectionProxy) -> None:
+    """Load Victron grid-bias enable flag, endpoint, and mode settings."""
+    svc.auto_battery_discharge_balance_victron_bias_enabled = defaults.get(
+        BIAS_ENABLED_KEY,
+        DEFAULT_FALSE,
+    ).strip().lower() in ("1", "true", "yes", "on")
+    svc.auto_battery_discharge_balance_victron_bias_source_id = str(
+        _config_value(defaults, BIAS_SOURCE_ID_KEY, "")
+    ).strip()
+    svc.auto_battery_discharge_balance_victron_bias_service = str(
+        _config_value(defaults, BIAS_SERVICE_KEY, "com.victronenergy.settings")
+    ).strip()
+    svc.auto_battery_discharge_balance_victron_bias_path = str(
+        _config_value(defaults, BIAS_PATH_KEY, "/Settings/CGwacs/AcPowerSetPoint")
+    ).strip()
+    svc.auto_battery_discharge_balance_victron_bias_base_setpoint_watts = float(
+        _config_value(defaults, BIAS_BASE_SETPOINT_KEY, 50.0)
+    )
+    svc.auto_battery_discharge_balance_victron_bias_deadband_watts = float(
+        _config_value(defaults, BIAS_DEADBAND_KEY, 100.0)
+    )
+    svc.auto_battery_discharge_balance_victron_bias_activation_mode = str(
+        _config_value(defaults, BIAS_ACTIVATION_MODE_KEY, DEFAULT_ACTIVATION_MODE)
+    ).strip().lower()
+    svc.auto_battery_discharge_balance_victron_bias_support_mode = str(
+        _config_value(defaults, BIAS_SUPPORT_MODE_KEY, DEFAULT_SUPPORT_MODE)
+    ).strip().lower()

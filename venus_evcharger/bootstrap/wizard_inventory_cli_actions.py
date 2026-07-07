@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
@@ -29,7 +30,64 @@ from venus_evcharger.bootstrap.wizard_inventory_support import (
 )
 from venus_evcharger.inventory import DeviceInventory, SwitchingMode
 
-from venus_evcharger.bootstrap.wizard_inventory_cli_support import save_and_payload
+from venus_evcharger.bootstrap.wizard_inventory_cli_payload import save_and_payload
+
+
+@dataclass(frozen=True)
+class _InventoryFieldSpec:
+    attr: str
+    prompt: str
+
+
+_PROFILE_ID = _InventoryFieldSpec("inventory_profile_id", "Profile id")
+_PROFILE_LABEL = _InventoryFieldSpec("inventory_label", "Profile label")
+_DEVICE_LABEL = _InventoryFieldSpec("inventory_label", "Device label")
+_CAPABILITY_ID = _InventoryFieldSpec("inventory_capability_id", "Capability id")
+_CAPABILITY_KIND = _InventoryFieldSpec("inventory_kind", "Capability kind")
+_ADAPTER_TYPE = _InventoryFieldSpec("inventory_adapter_type", "Adapter type")
+_SUPPORTED_PHASES = _InventoryFieldSpec("inventory_supported_phases", "Supported phases")
+_CHANNEL = _InventoryFieldSpec("inventory_channel", "Channel")
+_MEASURES_POWER = _InventoryFieldSpec("inventory_measures_power", "Measures power")
+_MEASURES_ENERGY = _InventoryFieldSpec("inventory_measures_energy", "Measures energy")
+_SWITCHING_MODE = _InventoryFieldSpec("inventory_switching_mode", "Switching mode")
+_SUPPORTS_FEEDBACK = _InventoryFieldSpec("inventory_supports_feedback", "Supports feedback")
+_SUPPORTS_PHASE_SELECTION = _InventoryFieldSpec("inventory_supports_phase_selection", "Supports phase selection")
+_VENDOR = _InventoryFieldSpec("inventory_vendor", "Vendor")
+_MODEL = _InventoryFieldSpec("inventory_model", "Model")
+_DESCRIPTION = _InventoryFieldSpec("inventory_description", "Description")
+_DEVICE_ID = _InventoryFieldSpec("inventory_device_id", "Device id")
+_DEVICE_ENDPOINT = _InventoryFieldSpec("inventory_endpoint", "Device endpoint")
+_BINDING_ID = _InventoryFieldSpec("inventory_binding_id", "Binding id")
+_MEMBER_PHASES = _InventoryFieldSpec("inventory_member_phases", "Member phases")
+_BINDING_ROLE = _InventoryFieldSpec("inventory_binding_role", "Binding role")
+_BINDING_LABEL = _InventoryFieldSpec("inventory_binding_label", "Binding label")
+_BINDING_PHASE_SCOPE = _InventoryFieldSpec("inventory_binding_phase_scope", "Binding phase scope")
+
+_ALL_FIELD_SPECS: tuple[_InventoryFieldSpec, ...] = (
+    _PROFILE_ID,
+    _PROFILE_LABEL,
+    _DEVICE_LABEL,
+    _CAPABILITY_ID,
+    _CAPABILITY_KIND,
+    _ADAPTER_TYPE,
+    _SUPPORTED_PHASES,
+    _CHANNEL,
+    _MEASURES_POWER,
+    _MEASURES_ENERGY,
+    _SWITCHING_MODE,
+    _SUPPORTS_FEEDBACK,
+    _SUPPORTS_PHASE_SELECTION,
+    _VENDOR,
+    _MODEL,
+    _DESCRIPTION,
+    _DEVICE_ID,
+    _DEVICE_ENDPOINT,
+    _BINDING_ID,
+    _MEMBER_PHASES,
+    _BINDING_ROLE,
+    _BINDING_LABEL,
+    _BINDING_PHASE_SCOPE,
+)
 
 
 class _InventoryCapabilityFields(TypedDict):
@@ -41,20 +99,34 @@ class _InventoryCapabilityFields(TypedDict):
     supports_phase_selection: bool
 
 
+def _required_field(namespace: argparse.Namespace, spec: _InventoryFieldSpec) -> str:
+    return inventory_field(namespace, spec.attr, spec.prompt)
+
+
+def _optional_field(namespace: argparse.Namespace, spec: _InventoryFieldSpec) -> str | None:
+    return inventory_optional_field(namespace, spec.attr, spec.prompt)
+
+
+def _bool_field(namespace: argparse.Namespace, spec: _InventoryFieldSpec) -> bool:
+    return inventory_bool_field(namespace, spec.attr, spec.prompt)
+
+
+def _optional_namespace_text(namespace: argparse.Namespace, spec: _InventoryFieldSpec) -> str | None:
+    raw = getattr(namespace, spec.attr, None)
+    if not isinstance(raw, str):
+        return None
+    stripped = raw.strip()
+    return stripped or None
+
+
 def _inventory_capability_fields(namespace: argparse.Namespace) -> _InventoryCapabilityFields:
     return {
-        "channel": inventory_optional_field(namespace, "inventory_channel", "Channel"),
-        "measures_power": inventory_bool_field(namespace, "inventory_measures_power", "Measures power"),
-        "measures_energy": inventory_bool_field(namespace, "inventory_measures_energy", "Measures energy"),
-        "switching_mode": parse_inventory_switching_mode(
-            inventory_optional_field(namespace, "inventory_switching_mode", "Switching mode")
-        ),
-        "supports_feedback": inventory_bool_field(namespace, "inventory_supports_feedback", "Supports feedback"),
-        "supports_phase_selection": inventory_bool_field(
-            namespace,
-            "inventory_supports_phase_selection",
-            "Supports phase selection",
-        ),
+        "channel": _optional_field(namespace, _CHANNEL),
+        "measures_power": _bool_field(namespace, _MEASURES_POWER),
+        "measures_energy": _bool_field(namespace, _MEASURES_ENERGY),
+        "switching_mode": parse_inventory_switching_mode(_optional_field(namespace, _SWITCHING_MODE)),
+        "supports_feedback": _bool_field(namespace, _SUPPORTS_FEEDBACK),
+        "supports_phase_selection": _bool_field(namespace, _SUPPORTS_PHASE_SELECTION),
     }
 
 
@@ -63,12 +135,12 @@ def _run_add_profile_action(
     inventory_path: Path,
     inventory: DeviceInventory,
 ) -> dict[str, object]:
-    profile_id = inventory_field(namespace, "inventory_profile_id", "Profile id")
-    label = inventory_field(namespace, "inventory_label", "Profile label")
-    capability_id = inventory_field(namespace, "inventory_capability_id", "Capability id")
-    kind = parse_inventory_kind(inventory_field(namespace, "inventory_kind", "Capability kind"))
-    adapter_type = inventory_field(namespace, "inventory_adapter_type", "Adapter type")
-    supported_phases = parse_inventory_phases(inventory_field(namespace, "inventory_supported_phases", "Supported phases"))
+    profile_id = _required_field(namespace, _PROFILE_ID)
+    label = _required_field(namespace, _PROFILE_LABEL)
+    capability_id = _required_field(namespace, _CAPABILITY_ID)
+    kind = parse_inventory_kind(_required_field(namespace, _CAPABILITY_KIND))
+    adapter_type = _required_field(namespace, _ADAPTER_TYPE)
+    supported_phases = parse_inventory_phases(_required_field(namespace, _SUPPORTED_PHASES))
     capability_fields = _inventory_capability_fields(namespace)
     updated = add_inventory_profile(
         inventory,
@@ -78,9 +150,9 @@ def _run_add_profile_action(
         kind=kind,
         adapter_type=adapter_type,
         supported_phases=supported_phases,
-        vendor=inventory_optional_field(namespace, "inventory_vendor", "Vendor"),
-        model=inventory_optional_field(namespace, "inventory_model", "Model"),
-        description=inventory_optional_field(namespace, "inventory_description", "Description"),
+        vendor=_optional_field(namespace, _VENDOR),
+        model=_optional_field(namespace, _MODEL),
+        description=_optional_field(namespace, _DESCRIPTION),
         channel=capability_fields["channel"],
         measures_power=capability_fields["measures_power"],
         measures_energy=capability_fields["measures_energy"],
@@ -96,11 +168,11 @@ def _run_add_capability_action(
     inventory_path: Path,
     inventory: DeviceInventory,
 ) -> dict[str, object]:
-    profile_id = inventory_field(namespace, "inventory_profile_id", "Profile id")
-    capability_id = inventory_field(namespace, "inventory_capability_id", "Capability id")
-    kind = parse_inventory_kind(inventory_field(namespace, "inventory_kind", "Capability kind"))
-    adapter_type = inventory_field(namespace, "inventory_adapter_type", "Adapter type")
-    supported_phases = parse_inventory_phases(inventory_field(namespace, "inventory_supported_phases", "Supported phases"))
+    profile_id = _required_field(namespace, _PROFILE_ID)
+    capability_id = _required_field(namespace, _CAPABILITY_ID)
+    kind = parse_inventory_kind(_required_field(namespace, _CAPABILITY_KIND))
+    adapter_type = _required_field(namespace, _ADAPTER_TYPE)
+    supported_phases = parse_inventory_phases(_required_field(namespace, _SUPPORTED_PHASES))
     capability_fields = _inventory_capability_fields(namespace)
     updated = add_inventory_capability(
         inventory,
@@ -130,10 +202,10 @@ def _run_add_device_action(
     inventory_path: Path,
     inventory: DeviceInventory,
 ) -> dict[str, object]:
-    profile_id = inventory_field(namespace, "inventory_profile_id", "Profile id")
-    device_id = inventory_field(namespace, "inventory_device_id", "Device id")
-    label = inventory_field(namespace, "inventory_label", "Device label")
-    endpoint = inventory_optional_field(namespace, "inventory_endpoint", "Device endpoint")
+    profile_id = _required_field(namespace, _PROFILE_ID)
+    device_id = _required_field(namespace, _DEVICE_ID)
+    label = _required_field(namespace, _DEVICE_LABEL)
+    endpoint = _optional_field(namespace, _DEVICE_ENDPOINT)
     updated = add_inventory_device(inventory, profile_id=profile_id, device_id=device_id, label=label, endpoint=endpoint)
     return save_and_payload("add-device", inventory_path, updated, device_id=device_id)
 
@@ -143,7 +215,7 @@ def _run_remove_device_action(
     inventory_path: Path,
     inventory: DeviceInventory,
 ) -> dict[str, object]:
-    device_id = inventory_field(namespace, "inventory_device_id", "Device id")
+    device_id = _required_field(namespace, _DEVICE_ID)
     updated = remove_inventory_device(inventory, device_id=device_id)
     return save_and_payload("remove-device", inventory_path, updated, device_id=device_id)
 
@@ -153,8 +225,8 @@ def _run_set_endpoint_action(
     inventory_path: Path,
     inventory: DeviceInventory,
 ) -> dict[str, object]:
-    device_id = inventory_field(namespace, "inventory_device_id", "Device id")
-    endpoint = inventory_optional_field(namespace, "inventory_endpoint", "Device endpoint")
+    device_id = _required_field(namespace, _DEVICE_ID)
+    endpoint = _optional_field(namespace, _DEVICE_ENDPOINT)
     updated = set_inventory_device_endpoint(inventory, device_id=device_id, endpoint=endpoint)
     return save_and_payload("set-endpoint", inventory_path, updated, device_id=device_id, endpoint=endpoint)
 
@@ -164,22 +236,22 @@ def _run_set_binding_member_action(
     inventory_path: Path,
     inventory: DeviceInventory,
 ) -> dict[str, object]:
-    binding_id = inventory_field(namespace, "inventory_binding_id", "Binding id")
-    device_id = inventory_field(namespace, "inventory_device_id", "Device id")
-    capability_id = inventory_field(namespace, "inventory_capability_id", "Capability id")
-    member_phases = parse_inventory_phases(inventory_field(namespace, "inventory_member_phases", "Member phases"))
-    raw_role = getattr(namespace, "inventory_binding_role", None)
-    raw_label = getattr(namespace, "inventory_binding_label", None)
-    raw_scope = getattr(namespace, "inventory_binding_phase_scope", None)
+    binding_id = _required_field(namespace, _BINDING_ID)
+    device_id = _required_field(namespace, _DEVICE_ID)
+    capability_id = _required_field(namespace, _CAPABILITY_ID)
+    member_phases = parse_inventory_phases(_required_field(namespace, _MEMBER_PHASES))
+    role = _optional_namespace_text(namespace, _BINDING_ROLE)
+    label = _optional_namespace_text(namespace, _BINDING_LABEL)
+    phase_scope = _optional_namespace_text(namespace, _BINDING_PHASE_SCOPE)
     updated = set_inventory_binding_member(
         inventory,
         binding_id=binding_id,
         device_id=device_id,
         capability_id=capability_id,
         member_phases=member_phases,
-        role=parse_inventory_binding_role(str(raw_role)) if raw_role else None,
-        label=str(raw_label).strip() if isinstance(raw_label, str) and raw_label.strip() else None,
-        phase_scope=parse_inventory_phases(str(raw_scope)) if raw_scope else None,
+        role=parse_inventory_binding_role(role) if role else None,
+        label=label,
+        phase_scope=parse_inventory_phases(phase_scope) if phase_scope else None,
     )
     return save_and_payload(
         "set-binding-member",
@@ -195,8 +267,8 @@ def _run_remove_binding_member_action(
     inventory_path: Path,
     inventory: DeviceInventory,
 ) -> dict[str, object]:
-    binding_id = inventory_field(namespace, "inventory_binding_id", "Binding id")
-    device_id = inventory_field(namespace, "inventory_device_id", "Device id")
+    binding_id = _required_field(namespace, _BINDING_ID)
+    device_id = _required_field(namespace, _DEVICE_ID)
     updated = remove_inventory_binding_member(inventory, binding_id=binding_id, device_id=device_id)
     return save_and_payload(
         "remove-binding-member",

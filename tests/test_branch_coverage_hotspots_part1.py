@@ -9,17 +9,11 @@ class _BranchCoverageWizardEnergyCasesPart1:
             self.assertEqual(_config_auto_energy_sources_value(missing_config), "")
             config_path = temp_path / "existing.ini"
             config_path.write_text("[DEFAULT]\nAutoEnergySources=grid, alpha\n", encoding="utf-8")
-            self.assertEqual(_config_auto_energy_sources_value(config_path), "")
-            self.assertEqual(existing_auto_energy_source_ids(config_path), ())
+            self.assertEqual(_config_auto_energy_sources_value(config_path), "grid, alpha")
+            self.assertEqual(existing_auto_energy_source_ids(config_path), ("grid", "alpha"))
             config_path.write_text("[DEFAULT]\nautoenergysources=grid,alpha\nOther=value\n", encoding="utf-8")
             self.assertEqual(existing_auto_energy_assignments(config_path), {})
             self.assertEqual(existing_auto_energy_assignments(temp_path / "missing-assignments.ini"), {})
-            with patch("configparser.ConfigParser.defaults", return_value={"AutoEnergySources": "grid,alpha"}):
-                self.assertEqual(_config_auto_energy_sources_value(config_path), "grid,alpha")
-            with patch("configparser.ConfigParser.defaults", return_value={}), patch(
-                "configparser.ConfigParser.has_section", return_value=True
-            ), patch("configparser.ConfigParser.__getitem__", return_value={"AutoEnergySources": "fallback"}):
-                self.assertEqual(_config_auto_energy_sources_value(config_path), "fallback")
             self.assertEqual(normalized_recommendation_prefixes(None), ())
             self.assertEqual(normalized_recommendation_prefixes(" pref "), ("pref",))
             self.assertEqual(normalized_recommendation_prefixes([" a ", " ", "b "]), ("a", "b"))
@@ -98,6 +92,8 @@ class _BranchCoverageWizardEnergyCasesPart1:
             self.assertEqual(assignments["Keep"], "yes")
 
             self.assertIsNone(_structured_energy_source_line("#comment", "AutoEnergySource.alpha."))
+            self.assertIsNone(_structured_energy_source_line("   ", "AutoEnergySource.alpha."))
+            self.assertIsNone(_structured_energy_source_line("AutoEnergySource.alpha.Port", "AutoEnergySource.alpha."))
             self.assertEqual(_structured_energy_source_value("Port", "bad"), "bad")
             self.assertEqual(bundle_source_id("ignored=true\n", "fallback"), "fallback")
             self.assertEqual(
@@ -192,6 +188,4 @@ class _BranchCoverageWizardEnergyCasesPart1:
             self.assertIn("weighted combined SOC", review_items[1])
             self.assertIn("External energy source (beta)", suggested_blocks)
             self.assertEqual(structured_sources[0]["source_id"], "beta")
-
-
 

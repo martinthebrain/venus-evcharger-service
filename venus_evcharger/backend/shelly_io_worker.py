@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING
 
 from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
+from venus_evcharger.backend.shelly_io_worker_status import local_pm_status_payload, normalized_energy_payload
 from venus_evcharger.backend.shelly_io_types import (
     _EnableBackendLike,
+    JsonObject,
     PendingRelayCommand,
     ShellyEnergyData,
     ShellyIoHost,
@@ -51,19 +52,13 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
 
     @staticmethod
     def _normalized_energy_payload(value: object) -> ShellyEnergyData:
-        payload: ShellyEnergyData = {}
-        if isinstance(value, dict):
-            total = value.get("total")
-            if isinstance(total, (int, float)) and not isinstance(total, bool):
-                payload["total"] = float(total)
-        payload.setdefault("total", 0.0)
-        return payload
+        return normalized_energy_payload(value)
 
     def build_local_pm_status(self, relay_on: bool) -> ShellyPmStatus:
         svc = self.service
         source = getattr(svc, "_last_pm_status", None)
         raw_status = dict(source) if isinstance(source, dict) else {}
-        pm_status = _local_pm_status_payload(raw_status)
+        pm_status = local_pm_status_payload(raw_status)
         last_voltage = getattr(svc, "_last_voltage", None)
         voltage = (
             float(last_voltage)
@@ -71,7 +66,8 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
             else 230.0
         )
         pm_status["output"] = bool(relay_on)
-        pm_status["voltage"] = float(pm_status.get("voltage", voltage) or voltage)
+        status_voltage = pm_status.get("voltage")
+        pm_status["voltage"] = float(status_voltage or voltage)
         pm_status["aenergy"] = self._normalized_energy_payload(pm_status.get("aenergy"))
         pm_status["apower"] = 0.0
         pm_status["current"] = 0.0
@@ -257,34 +253,19 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
         svc = self.service
         svc._ensure_worker_state()
         now = svc._time_now()
-        svc._update_worker_snapshot(
-            captured_at=now,
-            auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-        )
+        auto_mode_active = self._worker_auto_mode_active(svc)
+        self._update_worker_tick_snapshot(svc, now, auto_mode_active)
         svc._worker_apply_pending_relay_command()
 
         if self._shelly_retry_active(now):
-            svc._update_worker_snapshot(
-
-                captured_at=now,
-                auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-                pm_status=None,
-                pm_captured_at=None,
-                pm_confirmed=False,
-            )
+            self._update_worker_unconfirmed_snapshot(svc, now, auto_mode_active)
             return
 
         try:
             pm_status = svc._worker_fetch_pm_status()
             read_at = svc._time_now()
             self._remember_shelly_success(read_at, "Shelly status reads recovered")
-            svc._update_worker_snapshot(
-                captured_at=read_at,
-                pm_captured_at=read_at,
-                auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-                pm_status=pm_status,
-                pm_confirmed=True,
-            )
+            self._update_worker_confirmed_snapshot(svc, read_at, auto_mode_active, pm_status)
         except BACKEND_IO_ERRORS as error:
             reason = self._classify_shelly_error(error)
             self._remember_shelly_failure(reason, "read", error, now)
@@ -292,21 +273,51 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
             exc_info = None if self._is_shelly_common_network_error(error) else error
             svc._warning_throttled(
                 f"worker-shelly-read-failed-{reason}",
-                svc.auto_shelly_soft_fail_seconds,
-                "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
-                reason,
-                int(getattr(svc, "_shelly_consecutive_errors", 0)),
-                self._pending_relay_shelly_retry_remaining(svc, "shelly", now),
-                error,
+            svc.auto_shelly_soft_fail_seconds,
+            "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
+            reason,
+            self._pending_relay_shelly_error_count(svc, "shelly"),
+            self._pending_relay_shelly_retry_remaining(svc, "shelly", now),
+            error,
                 exc_info=exc_info,
             )
-            svc._update_worker_snapshot(
-                captured_at=now,
-                auto_mode_active=svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)),
-                pm_status=None,
-                pm_captured_at=None,
-                pm_confirmed=False,
-            )
+            self._update_worker_unconfirmed_snapshot(svc, now, auto_mode_active)
+
+    @staticmethod
+    def _worker_auto_mode_active(svc: ShellyIoHost) -> bool:
+        return bool(svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)))
+
+    @staticmethod
+    def _update_worker_tick_snapshot(svc: ShellyIoHost, captured_at: float, auto_mode_active: bool) -> None:
+        svc._update_worker_snapshot(
+            captured_at=captured_at,
+            auto_mode_active=auto_mode_active,
+        )
+
+    @staticmethod
+    def _update_worker_unconfirmed_snapshot(svc: ShellyIoHost, captured_at: float, auto_mode_active: bool) -> None:
+        svc._update_worker_snapshot(
+            captured_at=captured_at,
+            auto_mode_active=auto_mode_active,
+            pm_status=None,
+            pm_captured_at=None,
+            pm_confirmed=False,
+        )
+
+    @staticmethod
+    def _update_worker_confirmed_snapshot(
+        svc: ShellyIoHost,
+        captured_at: float,
+        auto_mode_active: bool,
+        pm_status: JsonObject,
+    ) -> None:
+        svc._update_worker_snapshot(
+            captured_at=captured_at,
+            pm_captured_at=captured_at,
+            auto_mode_active=auto_mode_active,
+            pm_status=pm_status,
+            pm_confirmed=True,
+        )
 
     def io_worker_loop(self) -> None:
         svc = self.service
@@ -325,111 +336,11 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
                     exc_info=error,
                 )
 
-            wait_seconds = max(0.05, svc._worker_poll_interval_seconds - (svc._time_now() - cycle_started))
+            wait_seconds = self._worker_loop_wait_seconds(svc, cycle_started)
             if stop_event.wait(wait_seconds):
-                break
+                return
 
-
-def _local_pm_status_payload(raw_status: dict[object, object]) -> ShellyPmStatus:
-    """Return a typed local PM payload seeded from the last known status."""
-    pm_status: ShellyPmStatus = {}
-    _copy_known_status_scalars(raw_status, pm_status)
-    _copy_known_status_energy(raw_status, pm_status)
-    _copy_known_status_phase_fields(raw_status, pm_status)
-    return pm_status
-
-
-def _copy_known_status_scalars(raw_status: dict[object, object], pm_status: ShellyPmStatus) -> None:
-    """Copy known scalar status fields from one raw Shelly payload."""
-    output = raw_status.get("output")
-    if output is not None:
-        pm_status["output"] = bool(output)
-    _copy_float_field(raw_status, pm_status, "apower")
-    _copy_float_field(raw_status, pm_status, "current")
-    _copy_float_field(raw_status, pm_status, "voltage")
-    confirmed = raw_status.get("_pm_confirmed")
-    if confirmed is not None:
-        pm_status["_pm_confirmed"] = bool(confirmed)
-
-
-def _copy_known_status_energy(raw_status: dict[object, object], pm_status: ShellyPmStatus) -> None:
-    """Copy the last known Shelly energy payload when present."""
-    energy = raw_status.get("aenergy")
-    if isinstance(energy, dict):
-        pm_status["aenergy"] = ShellyIoWorker._normalized_energy_payload(energy)
-
-
-def _copy_known_status_phase_fields(raw_status: dict[object, object], pm_status: ShellyPmStatus) -> None:
-    """Copy known phase metadata from one raw Shelly payload."""
-    phase_selection = raw_status.get("_phase_selection")
-    if phase_selection is not None:
-        pm_status["_phase_selection"] = str(phase_selection)
-    phase_powers = _phase_tuple(raw_status.get("_phase_powers_w"))
-    if phase_powers is not None:
-        pm_status["_phase_powers_w"] = phase_powers
-    phase_currents = _phase_tuple(raw_status.get("_phase_currents_a"))
-    if phase_currents is not None:
-        pm_status["_phase_currents_a"] = phase_currents
-
-
-def _copy_float_field(raw_status: dict[object, object], pm_status: ShellyPmStatus, key: str) -> None:
-    value = raw_status.get(key)
-    setter = _FLOAT_FIELD_SETTERS.get(key)
-    if setter is not None and _numeric_phase_value(value):
-        setter(pm_status, float(value))
-
-
-def _set_apower(pm_status: ShellyPmStatus, value: float) -> None:
-    pm_status["apower"] = value
-
-
-def _set_current(pm_status: ShellyPmStatus, value: float) -> None:
-    pm_status["current"] = value
-
-
-def _set_voltage(pm_status: ShellyPmStatus, value: float) -> None:
-    pm_status["voltage"] = value
-
-
-def _phase_tuple(value: object) -> tuple[float, float, float] | None:
-    values = _numeric_phase_tuple_items(value)
-    if values is None:
-        return None
-    first, second, third = values
-    return float(first), float(second), float(third)
-
-
-def _numeric_phase_tuple_items(value: object) -> tuple[int | float, int | float, int | float] | None:
-    items = _phase_tuple_sequence(value)
-    if items is None:
-        return None
-    first, second, third = items
-    return _numeric_phase_triplet(first, second, third)
-
-
-def _phase_tuple_sequence(value: object) -> tuple[object, object, object] | None:
-    if not isinstance(value, (tuple, list)) or len(value) != 3:
-        return None
-    first, second, third = value
-    return first, second, third
-
-
-def _numeric_phase_triplet(
-    first: object,
-    second: object,
-    third: object,
-) -> tuple[int | float, int | float, int | float] | None:
-    if not _numeric_phase_value(first) or not _numeric_phase_value(second) or not _numeric_phase_value(third):
-        return None
-    return first, second, third
-
-
-def _numeric_phase_value(value: object) -> TypeGuard[int | float]:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-_FLOAT_FIELD_SETTERS: dict[str, Callable[[ShellyPmStatus, float], None]] = {
-    "apower": _set_apower,
-    "current": _set_current,
-    "voltage": _set_voltage,
-}
+    @staticmethod
+    def _worker_loop_wait_seconds(svc: ShellyIoHost, cycle_started: float) -> float:
+        elapsed = svc._time_now() - cycle_started
+        return max(0.05, svc._worker_poll_interval_seconds - elapsed)

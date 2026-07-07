@@ -41,14 +41,16 @@ def prompt_topology_preset(prompt_choice: PromptChoice, default: str) -> str:
 
 def _topology_choice_labels() -> dict[str, str]:
     return {
-        key: f"{value} - {TOPOLOGY_RESPONSIBILITY_SUMMARIES.get(key, key)}"
+        key: f"{value} - {TOPOLOGY_RESPONSIBILITY_SUMMARIES[key]}"
         for key, value in TOPOLOGY_PRESET_LABELS
     }
 
 
 def relevant_role_hosts(profile: str, topology_preset: str | None) -> tuple[str, ...]:
     if profile == "multi_adapter_topology":
-        return TOPOLOGY_ROLE_HOSTS.get(topology_preset or "", ())
+        if topology_preset is None:
+            return ()
+        return TOPOLOGY_ROLE_HOSTS.get(topology_preset, ())
     if profile == "simple_relay":
         return ()
     return PROFILE_ROLE_HOSTS.get(profile, ())
@@ -56,8 +58,10 @@ def relevant_role_hosts(profile: str, topology_preset: str | None) -> tuple[str,
 
 def role_prompt_intro(profile: str, topology_preset: str | None) -> str | None:
     if profile == "multi_adapter_topology":
+        if topology_preset is None:
+            return "This topology uses separate adapter roles. We will ask for each role endpoint separately."
         return TOPOLOGY_PRESET_INTROS.get(
-            topology_preset or "",
+            topology_preset,
             "This topology uses separate adapter roles. We will ask for each role endpoint separately.",
         )
     return _PROFILE_PROMPT_INTROS.get(profile)
@@ -111,35 +115,29 @@ def prompt_role_hosts(
     prompt_text: PromptText,
 ) -> tuple[str | None, str | None, str | None]:
     relevant = set(relevant_role_hosts(profile, topology_preset))
-    role_defaults = _prompted_role_defaults(namespace, imported, profile, topology_preset, shared_host, relevant, prompt_text)
+    role_defaults = _prompted_role_defaults(namespace, imported, topology_preset, shared_host, relevant, prompt_text)
     return _filtered_role_defaults(role_defaults, relevant)
 
 
 def _role_defaults_map(
     namespace: object,
     imported: ImportedWizardDefaults,
-    profile: str,
-    topology_preset: str | None,
-    shared_host: str,
 ) -> dict[str, str | None]:
-    return dict(
-        zip(
-            ("meter", "switch", "charger"),
-            role_host_defaults(namespace, imported, profile, topology_preset, shared_host),
-        )
-    )
+    return {
+        role: getattr(namespace, f"{role}_host") or getattr(imported, f"{role}_host_input")
+        for role in ("meter", "switch", "charger")
+    }
 
 
 def _prompted_role_defaults(
     namespace: object,
     imported: ImportedWizardDefaults,
-    profile: str,
     topology_preset: str | None,
     shared_host: str,
     relevant: set[str],
     prompt_text: PromptText,
 ) -> dict[str, str | None]:
-    role_defaults = _role_defaults_map(namespace, imported, profile, topology_preset, shared_host)
+    role_defaults = _role_defaults_map(namespace, imported)
     for role in sorted(relevant):
         if getattr(namespace, f"{role}_host") is None:
             role_defaults[role] = prompt_text(role_prompt_label(role, topology_preset), role_defaults[role] or shared_host)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import configparser
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,30 +25,46 @@ from venus_evcharger.bootstrap.wizard_support import (
     PHASE_SWITCH_CHARGER_VALUES,
     backend_requires_transport,
 )
+from venus_evcharger.bootstrap.wizard_import_contracts import (
+    KEY_BASE_URL as _KEY_BASE_URL,
+    KEY_AUTO_MIN_SOC as _KEY_AUTO_MIN_SOC,
+    KEY_AUTO_RESUME_SOC as _KEY_AUTO_RESUME_SOC,
+    KEY_AUTO_SCHEDULED_DAYS as _KEY_AUTO_SCHEDULED_DAYS,
+    KEY_AUTO_SCHEDULED_LATEST_END as _KEY_AUTO_SCHEDULED_LATEST_END,
+    KEY_AUTO_SCHEDULED_NIGHT_AMPS as _KEY_AUTO_SCHEDULED_NIGHT_AMPS,
+    KEY_AUTO_START_SURPLUS as _KEY_AUTO_START_SURPLUS,
+    KEY_AUTO_STOP_SURPLUS as _KEY_AUTO_STOP_SURPLUS,
+    KEY_CHARGER_CONFIG as _KEY_CHARGER_CONFIG,
+    KEY_CHARGER_TYPE as _KEY_CHARGER_TYPE,
+    KEY_DEVICE as _KEY_DEVICE,
+    KEY_DEVICE_INSTANCE as _KEY_DEVICE_INSTANCE,
+    KEY_DIGEST_AUTH as _KEY_DIGEST_AUTH,
+    KEY_HOST as _KEY_HOST,
+    KEY_METER_CONFIG as _KEY_METER_CONFIG,
+    KEY_METER_TYPE as _KEY_METER_TYPE,
+    KEY_MODE as _KEY_MODE,
+    KEY_P1 as _KEY_P1,
+    KEY_PASSWORD as _KEY_PASSWORD,
+    KEY_PHASE as _KEY_PHASE,
+    KEY_PORT as _KEY_PORT,
+    KEY_PRESET as _KEY_PRESET,
+    KEY_REQUEST_TIMEOUT as _KEY_REQUEST_TIMEOUT,
+    KEY_SUPPORTED_PHASES as _KEY_SUPPORTED_PHASES,
+    KEY_SWITCH_CONFIG as _KEY_SWITCH_CONFIG,
+    KEY_SWITCH_TYPE as _KEY_SWITCH_TYPE,
+    KEY_TRANSPORT as _KEY_TRANSPORT,
+    KEY_UNIT_ID as _KEY_UNIT_ID,
+    KEY_USERNAME as _KEY_USERNAME,
+    PROFILE_DEFAULTS_BY_BACKENDS as _PROFILE_DEFAULTS_BY_BACKENDS,
+    SECTION_ADAPTER as _SECTION_ADAPTER,
+    SECTION_BACKENDS as _SECTION_BACKENDS,
+    SECTION_CAPABILITIES as _SECTION_CAPABILITIES,
+    SECTION_DEFAULT as _SECTION_DEFAULT,
+    SECTION_MEMBERS as _SECTION_MEMBERS,
+    SECTION_TRANSPORT as _SECTION_TRANSPORT,
+)
 
-_PROFILE_DEFAULTS_BY_BACKENDS: dict[tuple[str, str, str], tuple[WizardProfile, str | None, WizardChargerBackend | None]] = {
-    ("template_meter", "template_switch", "template_charger"): ("multi_adapter_topology", "template-stack", "template_charger"),
-    ("shelly_meter", "shelly_switch", "template_charger"): ("multi_adapter_topology", "shelly-io-template-charger", "template_charger"),
-    ("tasmota_meter", "tasmota_switch", "template_charger"): ("multi_adapter_topology", "tasmota-io-template-charger", "template_charger"),
-    ("tuya_meter", "tuya_switch", "template_charger"): ("multi_adapter_topology", "tuya-io-template-charger", "template_charger"),
-    ("shelly_meter", "shelly_switch", "modbus_charger"): ("multi_adapter_topology", "shelly-io-modbus-charger", "modbus_charger"),
-    ("tasmota_meter", "tasmota_switch", "modbus_charger"): ("multi_adapter_topology", "tasmota-io-modbus-charger", "modbus_charger"),
-    ("tuya_meter", "tuya_switch", "modbus_charger"): ("multi_adapter_topology", "tuya-io-modbus-charger", "modbus_charger"),
-    ("template_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "template-meter-cerbo-relay", None),
-    ("shelly_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "shelly-meter-cerbo-relay", None),
-    ("tasmota_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "tasmota-meter-cerbo-relay", None),
-    ("tuya_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "tuya-meter-cerbo-relay", None),
-    ("shelly_meter", "none", "goe_charger"): ("multi_adapter_topology", "shelly-meter-goe", "goe_charger"),
-    ("tasmota_meter", "none", "goe_charger"): ("multi_adapter_topology", "tasmota-meter-goe", "goe_charger"),
-    ("tuya_meter", "none", "goe_charger"): ("multi_adapter_topology", "tuya-meter-goe", "goe_charger"),
-    ("shelly_meter", "none", "modbus_charger"): ("multi_adapter_topology", "shelly-meter-modbus-charger", "modbus_charger"),
-    ("tasmota_meter", "none", "modbus_charger"): ("multi_adapter_topology", "tasmota-meter-modbus-charger", "modbus_charger"),
-    ("tuya_meter", "none", "modbus_charger"): ("multi_adapter_topology", "tuya-meter-modbus-charger", "modbus_charger"),
-    ("none", "switch_group", "goe_charger"): ("multi_adapter_topology", "goe-external-switch-group", "goe_charger"),
-    ("template_meter", "switch_group", "goe_charger"): ("multi_adapter_topology", "template-meter-goe-switch-group", "goe_charger"),
-    ("shelly_meter", "switch_group", "goe_charger"): ("multi_adapter_topology", "shelly-meter-goe-switch-group", "goe_charger"),
-    ("shelly_meter", "switch_group", "modbus_charger"): ("multi_adapter_topology", "shelly-meter-modbus-switch-group", "modbus_charger"),
-}
+ConfigValues = Mapping[str, str] | configparser.SectionProxy
 
 
 @dataclass(frozen=True)
@@ -96,6 +113,26 @@ def _config_parser(path: Path) -> configparser.ConfigParser:
     return parser
 
 
+def _parser_defaults(parser: configparser.ConfigParser) -> ConfigValues:
+    return parser[_SECTION_DEFAULT] if _SECTION_DEFAULT in parser else parser.defaults()
+
+
+def _parser_section_or_defaults(parser: configparser.ConfigParser, section: str) -> ConfigValues:
+    return parser[section] if parser.has_section(section) else _parser_defaults(parser)
+
+
+def _section_text(values: ConfigValues, key: str) -> str:
+    value = values.get(key)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _section_optional(values: ConfigValues, key: str) -> str | None:
+    value = _section_text(values, key)
+    return value or None
+
+
 def _as_bool(value: str | None) -> bool | None:
     if value is None:
         return None
@@ -130,19 +167,18 @@ def _adapter_host_value(adapter_path: Path | None) -> str | None:
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    return adapter_section.get("Host") or adapter_section.get("BaseUrl")
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    return _section_optional(adapter_section, _KEY_HOST) or _section_optional(adapter_section, _KEY_BASE_URL)
 
 
 def _switch_group_host_value(adapter_path: Path | None) -> str | None:
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    members = adapter["Members"] if adapter.has_section("Members") else None
+    members = adapter[_SECTION_MEMBERS] if adapter.has_section(_SECTION_MEMBERS) else None
     if members is None:
         return _adapter_host_value(adapter_path)
-    return _switch_group_member_host(adapter_path, members.get("P1"))
+    return _switch_group_member_host(adapter_path, members.get(_KEY_P1))
 
 
 def _switch_group_member_host(adapter_path: Path, phase_path_value: str | None) -> str | None:
@@ -155,7 +191,9 @@ def _switch_group_member_host(adapter_path: Path, phase_path_value: str | None) 
 
 
 def _policy_mode(value: str | None) -> WizardPolicyMode | None:
-    normalized = (value or "").strip()
+    if value is None:
+        return None
+    normalized = value.strip()
     if normalized == "1":
         return "auto"
     if normalized == "2":
@@ -188,9 +226,9 @@ def _profile_defaults_from_types(
 
 def _backend_types(backends: configparser.SectionProxy) -> tuple[str, str, str]:
     return (
-        backends.get("MeterType", "").strip(),
-        backends.get("SwitchType", "").strip(),
-        backends.get("ChargerType", "").strip(),
+        _section_text(backends, _KEY_METER_TYPE),
+        _section_text(backends, _KEY_SWITCH_TYPE),
+        _section_text(backends, _KEY_CHARGER_TYPE),
     )
 
 
@@ -218,23 +256,22 @@ def _transport_defaults(config_path: Path, backends: configparser.SectionProxy |
     if adapter_path is None:
         return None, None, None, None, None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    transport_kind = recognized_choice(adapter_section.get("Transport"), WIZARD_TRANSPORT_KINDS)
-    transport_section = adapter["Transport"] if adapter.has_section("Transport") else adapter_defaults
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    transport_kind = recognized_choice(adapter_section.get(_KEY_TRANSPORT), WIZARD_TRANSPORT_KINDS)
+    transport_section = _parser_section_or_defaults(adapter, _SECTION_TRANSPORT)
     return (
         transport_kind,
-        transport_section.get("Host"),
-        _as_int(transport_section.get("Port")),
-        transport_section.get("Device"),
-        _as_int(transport_section.get("UnitId")),
+        transport_section.get(_KEY_HOST),
+        _as_int(transport_section.get(_KEY_PORT)),
+        transport_section.get(_KEY_DEVICE),
+        _as_int(transport_section.get(_KEY_UNIT_ID)),
     )
 
 
 def _charger_adapter_path(config_path: Path, backends: configparser.SectionProxy | None, backend: str | None) -> Path | None:
     if not backend_requires_transport(backend) or backends is None:
         return None
-    return _adapter_path(config_path, backends, "ChargerConfigPath")
+    return _adapter_path(config_path, backends, _KEY_CHARGER_CONFIG)
 
 
 def _request_timeout_seconds(config_path: Path, backends: configparser.SectionProxy | None, backend: str | None) -> float | None:
@@ -242,36 +279,33 @@ def _request_timeout_seconds(config_path: Path, backends: configparser.SectionPr
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    return _as_float(adapter_section.get("RequestTimeoutSeconds"))
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    return _as_float(adapter_section.get(_KEY_REQUEST_TIMEOUT))
 
 
 def _charger_preset(config_path: Path, backends: configparser.SectionProxy | None) -> str | None:
-    adapter_path = _adapter_path(config_path, backends, "ChargerConfigPath")
+    adapter_path = _adapter_path(config_path, backends, _KEY_CHARGER_CONFIG)
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    adapter_defaults = adapter["DEFAULT"] if "DEFAULT" in adapter else adapter.defaults()
-    adapter_section = adapter["Adapter"] if adapter.has_section("Adapter") else adapter_defaults
-    preset = str(adapter_section.get("Preset", "")).strip()
-    return preset or None
+    adapter_section = _parser_section_or_defaults(adapter, _SECTION_ADAPTER)
+    return _section_optional(adapter_section, _KEY_PRESET)
 
 
 def _goe_charger_adapter_path(config_path: Path, backends: configparser.SectionProxy | None, backend: str | None) -> Path | None:
     if backend != "goe_charger":
         return None
-    return _adapter_path(config_path, backends, "ChargerConfigPath")
+    return _adapter_path(config_path, backends, _KEY_CHARGER_CONFIG)
 
 
 def _switch_group_phase_layout(config_path: Path, backends: configparser.SectionProxy | None) -> str | None:
-    adapter_path = _adapter_path(config_path, backends, "SwitchConfigPath")
+    adapter_path = _adapter_path(config_path, backends, _KEY_SWITCH_CONFIG)
     if adapter_path is None:
         return None
     adapter = _config_parser(adapter_path)
-    if not adapter.has_section("Capabilities"):
+    if not adapter.has_section(_SECTION_CAPABILITIES):
         return None
-    return adapter["Capabilities"].get("SupportedPhaseSelections")
+    return adapter[_SECTION_CAPABILITIES].get(_KEY_SUPPORTED_PHASES)
 
 
 def _json_str(value: object) -> str | None:
@@ -349,12 +383,12 @@ def load_imported_defaults(config_path: Path) -> ImportedWizardDefaults:
     if config_path.name.endswith(".wizard-result.json"):
         return _load_from_result_json(config_path)
     parser = _config_parser(config_path)
-    defaults = parser["DEFAULT"] if "DEFAULT" in parser else parser.defaults()
-    backends = parser["Backends"] if parser.has_section("Backends") else None
+    defaults = _parser_defaults(parser)
+    backends = parser[_SECTION_BACKENDS] if parser.has_section(_SECTION_BACKENDS) else None
     profile, topology_preset, charger_backend = _profile_defaults(backends)
-    meter_host_input = _adapter_host_value(_adapter_path(config_path, backends, "MeterConfigPath"))
-    switch_host_input = _switch_group_host_value(_adapter_path(config_path, backends, "SwitchConfigPath"))
-    charger_host_input = _adapter_host_value(_adapter_path(config_path, backends, "ChargerConfigPath"))
+    meter_host_input = _adapter_host_value(_adapter_path(config_path, backends, _KEY_METER_CONFIG))
+    switch_host_input = _switch_group_host_value(_adapter_path(config_path, backends, _KEY_SWITCH_CONFIG))
+    charger_host_input = _adapter_host_value(_adapter_path(config_path, backends, _KEY_CHARGER_CONFIG))
     transport_kind, transport_host, transport_port, transport_device, transport_unit_id = _transport_defaults(
         config_path,
         backends,
@@ -363,28 +397,28 @@ def load_imported_defaults(config_path: Path) -> ImportedWizardDefaults:
     return ImportedWizardDefaults(
         imported_from=str(config_path),
         profile=profile,
-        host_input=defaults.get("Host"),
+        host_input=defaults.get(_KEY_HOST),
         meter_host_input=meter_host_input,
         switch_host_input=switch_host_input,
         charger_host_input=charger_host_input,
-        device_instance=_as_int(defaults.get("DeviceInstance")),
-        phase=defaults.get("Phase"),
-        policy_mode=_policy_mode(defaults.get("Mode")),
-        digest_auth=_as_bool(defaults.get("DigestAuth")),
-        username=defaults.get("Username"),
-        password=defaults.get("Password"),
+        device_instance=_as_int(defaults.get(_KEY_DEVICE_INSTANCE)),
+        phase=defaults.get(_KEY_PHASE),
+        policy_mode=_policy_mode(defaults.get(_KEY_MODE)),
+        digest_auth=_as_bool(defaults.get(_KEY_DIGEST_AUTH)),
+        username=defaults.get(_KEY_USERNAME),
+        password=defaults.get(_KEY_PASSWORD),
         topology_preset=topology_preset,
         charger_backend=charger_backend,
         charger_preset=_charger_preset(config_path, backends),
         request_timeout_seconds=_request_timeout_seconds(config_path, backends, charger_backend),
         switch_group_phase_layout=_switch_group_phase_layout(config_path, backends),
-        auto_start_surplus_watts=_as_float(defaults.get("AutoStartSurplusWatts")),
-        auto_stop_surplus_watts=_as_float(defaults.get("AutoStopSurplusWatts")),
-        auto_min_soc=_as_float(defaults.get("AutoMinSoc")),
-        auto_resume_soc=_as_float(defaults.get("AutoResumeSoc")),
-        scheduled_enabled_days=defaults.get("AutoScheduledEnabledDays"),
-        scheduled_latest_end_time=defaults.get("AutoScheduledLatestEndTime"),
-        scheduled_night_current_amps=_as_float(defaults.get("AutoScheduledNightCurrentAmps")),
+        auto_start_surplus_watts=_as_float(defaults.get(_KEY_AUTO_START_SURPLUS)),
+        auto_stop_surplus_watts=_as_float(defaults.get(_KEY_AUTO_STOP_SURPLUS)),
+        auto_min_soc=_as_float(defaults.get(_KEY_AUTO_MIN_SOC)),
+        auto_resume_soc=_as_float(defaults.get(_KEY_AUTO_RESUME_SOC)),
+        scheduled_enabled_days=defaults.get(_KEY_AUTO_SCHEDULED_DAYS),
+        scheduled_latest_end_time=defaults.get(_KEY_AUTO_SCHEDULED_LATEST_END),
+        scheduled_night_current_amps=_as_float(defaults.get(_KEY_AUTO_SCHEDULED_NIGHT_AMPS)),
         transport_kind=transport_kind,
         transport_host=transport_host,
         transport_port=transport_port,

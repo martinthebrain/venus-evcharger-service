@@ -45,8 +45,7 @@ class ModbusChargerBackend:
         self._current_amps_cache: float | None = None
         self._resume_current_amps_cache: float | None = None
         self._phase_selection_cache: PhaseSelection = normalize_phase_selection(
-            getattr(service, "requested_phase_selection", default_phase_selection),
-            default_phase_selection,
+            getattr(service, "requested_phase_selection", None),
         )
         if self._phase_selection_cache not in self.settings.supported_phase_selections:
             self._phase_selection_cache = default_phase_selection
