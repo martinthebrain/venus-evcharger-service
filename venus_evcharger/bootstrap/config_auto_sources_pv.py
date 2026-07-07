@@ -8,14 +8,14 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-AUTO_PV_SERVICE_KEY = "AutoPvService"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_PV_SERVICE_PREFIX_KEY = "AutoPvServicePrefix"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_PV_PATH_KEY = "AutoPvPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_PV_MAX_SERVICES_KEY = "AutoPvMaxServices"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_PV_SCAN_INTERVAL_KEY = "AutoPvScanIntervalSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_USE_DC_PV_KEY = "AutoUseDcPv"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_DC_PV_SERVICE_KEY = "AutoDcPvService"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_DC_PV_PATH_KEY = "AutoDcPvPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
+AUTO_PV_SERVICE_KEY = "AutoPvService"
+AUTO_PV_SERVICE_PREFIX_KEY = "AutoPvServicePrefix"
+AUTO_PV_PATH_KEY = "AutoPvPath"
+AUTO_PV_MAX_SERVICES_KEY = "AutoPvMaxServices"
+AUTO_PV_SCAN_INTERVAL_KEY = "AutoPvScanIntervalSeconds"
+AUTO_USE_DC_PV_KEY = "AutoUseDcPv"
+AUTO_DC_PV_SERVICE_KEY = "AutoDcPvService"
+AUTO_DC_PV_PATH_KEY = "AutoDcPvPath"
 
 
 def load_auto_pv_source_config(svc: Any, defaults: configparser.SectionProxy) -> None:

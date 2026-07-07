@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from urllib.parse import urlparse
 
+from venus_evcharger.bootstrap.wizard_inventory_endpoints import _phase_endpoint
 from venus_evcharger.bootstrap.wizard_models import WizardAnswers
 from venus_evcharger.inventory import (
     DeviceCapability,
@@ -489,13 +489,3 @@ def _endpoint(value: str | None) -> str | None:
         return None
     text = value.strip()
     return text or None
-
-
-def _phase_endpoint(switch_host_input: str, phase_label: str) -> str:
-    parsed = urlparse(switch_host_input)
-    if parsed.scheme:
-        base = switch_host_input.rstrip("/")
-    else:
-        base = f"http://{switch_host_input.rstrip('/')}"
-    suffix = {"L1": "/wizard/phase1", "L2": "/wizard/phase2", "L3": "/wizard/phase3"}[phase_label]
-    return f"{base}{suffix}"

@@ -377,9 +377,11 @@ def configure_wallbox(
         suggested_energy_capacity_overrides=suggested_energy_capacity_overrides,
     )
     validation = validate_rendered_setup(config_text, adapter_files, config_path.name)
-    if live_check and live_check_runner is None:
-        live_check_runner = _live_check_rendered_setup
-    live_check_payload = live_check_runner(config_text, adapter_files, config_path.name, selected_probe_roles) if live_check else None
+    live_check_payload = None
+    if live_check:
+        if live_check_runner is None:
+            live_check_runner = _live_check_rendered_setup
+        live_check_payload = live_check_runner(config_text, adapter_files, config_path.name, selected_probe_roles)
     topology_config = build_wizard_topology_config(answers)
     topology_config_payload = _json_ready_dict(topology_config, "topology config")
     device_inventory_payload = inventory_payload(build_wizard_inventory(answers, role_hosts, topology_config))

@@ -13,7 +13,7 @@ from venus_evcharger.backend.models import (
     normalize_phase_selection_tuple,
 )
 
-_DEFAULT_PHASE_SELECTIONS: tuple[PhaseSelection, ...] = ("P1",)  # pragma: no mutate
+_DEFAULT_PHASE_SELECTIONS: tuple[PhaseSelection, ...] = ("P1",)
 
 
 def switch_backend_supported_phase_selections(svc: Any) -> tuple[PhaseSelection, ...]:

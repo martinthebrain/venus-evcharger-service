@@ -8,13 +8,13 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-BIAS_AUTO_APPLY_ENABLED_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyEnabled"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_AUTO_APPLY_MIN_CONFIDENCE_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyMinConfidence"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_AUTO_APPLY_MIN_PROFILE_SAMPLES_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyMinProfileSamples"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_AUTO_APPLY_MIN_STABILITY_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyMinStabilityScore"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_AUTO_APPLY_BLEND_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyBlend"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_OBSERVATION_WINDOW_KEY = "AutoBatteryDischargeBalanceVictronBiasObservationWindowSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-DEFAULT_FALSE = "0"  # pragma: no mutate - any non-true token normalizes to False.
+BIAS_AUTO_APPLY_ENABLED_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyEnabled"
+BIAS_AUTO_APPLY_MIN_CONFIDENCE_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyMinConfidence"
+BIAS_AUTO_APPLY_MIN_PROFILE_SAMPLES_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyMinProfileSamples"
+BIAS_AUTO_APPLY_MIN_STABILITY_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyMinStabilityScore"
+BIAS_AUTO_APPLY_BLEND_KEY = "AutoBatteryDischargeBalanceVictronBiasAutoApplyBlend"
+BIAS_OBSERVATION_WINDOW_KEY = "AutoBatteryDischargeBalanceVictronBiasObservationWindowSeconds"
+DEFAULT_FALSE = "0"
 
 
 def load_victron_bias_auto_apply_config(svc: Any, defaults: configparser.SectionProxy) -> None:

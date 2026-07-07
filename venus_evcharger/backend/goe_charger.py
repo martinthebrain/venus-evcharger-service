@@ -79,7 +79,7 @@ def load_goe_charger_settings(service: object, config_path: str) -> GoEChargerSe
     """Return normalized go-e charger backend settings."""
     parser = load_template_config(str(config_path).strip())
     adapter = config_section(parser, "Adapter")
-    base_url = str(adapter.get("BaseUrl", "")).strip()  # pragma: no mutate - ConfigParser keys are case-insensitive.
+    base_url = str(adapter.get("BaseUrl", "")).strip()
     if not base_url:
         raise ValueError("go-e charger backend requires Adapter.BaseUrl")
     return GoEChargerSettings(

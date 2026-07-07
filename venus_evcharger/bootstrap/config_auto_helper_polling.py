@@ -4,22 +4,22 @@
 from __future__ import annotations
 
 import configparser
-from typing import Any
+from typing import Any, cast
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
 
-AUTO_INPUT_POLL_INTERVAL_KEY = "AutoInputPollIntervalMs"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-LEGACY_POLL_INTERVAL_KEY = "PollIntervalMs"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_PV_POLL_INTERVAL_KEY = "AutoPvPollIntervalMs"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_GRID_POLL_INTERVAL_KEY = "AutoGridPollIntervalMs"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_BATTERY_POLL_INTERVAL_KEY = "AutoBatteryPollIntervalMs"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_INPUT_VALIDATION_POLL_KEY = "AutoInputValidationPollSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_INPUT_SNAPSHOT_PATH_KEY = "AutoInputSnapshotPath"  # pragma: no mutate - ConfigParser keys are case-insensitive.
+AUTO_INPUT_POLL_INTERVAL_KEY = "AutoInputPollIntervalMs"
+LEGACY_POLL_INTERVAL_KEY = "PollIntervalMs"
+AUTO_PV_POLL_INTERVAL_KEY = "AutoPvPollIntervalMs"
+AUTO_GRID_POLL_INTERVAL_KEY = "AutoGridPollIntervalMs"
+AUTO_BATTERY_POLL_INTERVAL_KEY = "AutoBatteryPollIntervalMs"
+AUTO_INPUT_VALIDATION_POLL_KEY = "AutoInputValidationPollSeconds"
+AUTO_INPUT_SNAPSHOT_PATH_KEY = "AutoInputSnapshotPath"
 
 
 def _milliseconds_to_seconds_with_minimum(value: object, minimum: float) -> float:
-    return max(minimum, float(value) / 1000.0)
+    return max(minimum, float(cast(Any, value)) / 1000.0)
 
 
 def load_helper_polling_config(svc: Any, defaults: configparser.SectionProxy) -> None:

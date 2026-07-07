@@ -431,7 +431,7 @@ class TestPreAverageDecisions(unittest.TestCase):
             post_average_calls.append((relay_on, avg_surplus_power, avg_grid_power, battery_soc, now, cached_inputs))
             return NO_RELAY_DECISION, True
 
-        harness._post_average_decision = post_average_recorder  # type: ignore[method-assign]
+        setattr(harness, "_post_average_decision", post_average_recorder)
         self.assertTrue(harness._decision_from_averages(True, 153.0, -53.0, 73.0, 93.0, True))
         self.assertEqual(post_average_calls, [(True, 153.0, -53.0, 73.0, 93.0, True)])
         self.assertEqual(harness.calls, [("relay_on", 153.0, -53.0, 73.0, True, 93.0, True)])
@@ -506,8 +506,8 @@ class TestPreAverageDecisions(unittest.TestCase):
             )
             return cached_inputs
 
-        harness._pre_average_decision = pre_average_recorder  # type: ignore[method-assign]
-        harness._auto_decision_after_pre_average = after_pre_average_recorder  # type: ignore[method-assign]
+        setattr(harness, "_pre_average_decision", pre_average_recorder)
+        setattr(harness, "_auto_decision_after_pre_average", after_pre_average_recorder)
         harness.service._auto_cached_inputs_used = True
 
         self.assertTrue(harness.auto_decide_relay(relay_on=False, pv_power=901.0, battery_soc=56.0, grid_power=-201.0))
@@ -517,8 +517,8 @@ class TestPreAverageDecisions(unittest.TestCase):
         harness = PreAverageHarness()
         pre_average_calls = []
         after_pre_average_calls = []
-        harness._pre_average_decision = pre_average_recorder  # type: ignore[method-assign]
-        harness._auto_decision_after_pre_average = after_pre_average_recorder  # type: ignore[method-assign]
+        setattr(harness, "_pre_average_decision", pre_average_recorder)
+        setattr(harness, "_auto_decision_after_pre_average", after_pre_average_recorder)
         delattr(harness.service, "_auto_cached_inputs_used")
 
         self.assertFalse(harness.auto_decide_relay(relay_on=True, pv_power=902.0, battery_soc=57.0, grid_power=-202.0))
@@ -631,7 +631,7 @@ class TestPreAverageDecisions(unittest.TestCase):
             average_calls.append((relay_on, avg_surplus_power, avg_grid_power, battery_soc, now, cached_inputs))
             return True
 
-        harness._decision_from_averages = decision_from_averages_recorder  # type: ignore[method-assign]
+        setattr(harness, "_decision_from_averages", decision_from_averages_recorder)
 
         self.assertTrue(harness._decision_from_available_averages(False, 62.0, 142.0, True, (11.0, -6.0)))
         self.assertEqual(average_calls, [(False, 11.0, -6.0, 62.0, 142.0, True)])

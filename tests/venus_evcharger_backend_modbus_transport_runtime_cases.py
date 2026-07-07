@@ -64,7 +64,7 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         )
         cc = [9] * (max(termios.VMIN, termios.VTIME) + 1)
         with patch(
-            "venus_evcharger.backend.modbus_transport.termios.tcgetattr",
+            "venus_evcharger.backend.modbus_transport_serial.termios.tcgetattr",
             return_value=[111, 222, 333, 444, 555, 666, cc],
         ) as get_attrs:
             attrs = _configured_serial_attrs(17, settings)
@@ -90,7 +90,7 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
             cc = [8] * (max(termios.VMIN, termios.VTIME) + 1)
             with self.subTest(bytesize=bytesize, parity=parity):
                 with patch(
-                    "venus_evcharger.backend.modbus_transport.termios.tcgetattr",
+                    "venus_evcharger.backend.modbus_transport_serial.termios.tcgetattr",
                     return_value=[7, 6, termios.CSIZE | termios.PARENB | termios.PARODD | termios.CSTOPB, 5, 4, 3, cc],
                 ):
                     attrs = _configured_serial_attrs(19, settings)
@@ -243,7 +243,7 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
     def test_port_owner_command_helpers_use_exact_subprocess_contract(self) -> None:
         owner = _VenusSerialPortOwner("/dev/ttyS7", "/stop.sh", "/start.sh")
         completed = SimpleNamespace(returncode=0, stderr="stderr detail\n", stdout="stdout detail\n")
-        with patch("venus_evcharger.backend.modbus_transport.subprocess.run", return_value=completed) as run_mock:
+        with patch("venus_evcharger.backend.modbus_transport_serial.subprocess.run", return_value=completed) as run_mock:
             self.assertIs(owner._command_result("/stop.sh"), completed)
         run_mock.assert_called_once_with(
             ["/stop.sh", "/dev/ttyS7"],
@@ -264,7 +264,7 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         self.assertIs(owner._release_registered, False)
 
         with patch.object(owner, "_run_command") as run_command, patch(
-            "venus_evcharger.backend.modbus_transport.atexit.register"
+            "venus_evcharger.backend.modbus_transport_serial.atexit.register"
         ) as register:
             owner.ensure_owned()
             owner.ensure_owned()
@@ -276,7 +276,7 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
 
         owner_without_start = _VenusSerialPortOwner("/dev/ttyS8", "/stop.sh", None)
         with patch.object(owner_without_start, "_run_command") as run_without_start, patch(
-            "venus_evcharger.backend.modbus_transport.atexit.register"
+            "venus_evcharger.backend.modbus_transport_serial.atexit.register"
         ) as register_without_start:
             owner_without_start.ensure_owned()
         run_without_start.assert_called_once_with("/stop.sh")
@@ -398,7 +398,7 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         request = ModbusRequest(1, 0x03, b"\x00\x00\x00\x01")
         response_payload = b"\x01\x03\x02\x00\xa0"
         response_frame = _crc_frame(response_payload)
-        with patch("venus_evcharger.backend.modbus_transport.os.open", return_value=5), patch("venus_evcharger.backend.modbus_transport.os.close"), patch("venus_evcharger.backend.modbus_transport.termios.tcsetattr"), patch("venus_evcharger.backend.modbus_transport.termios.tcflush"), patch("venus_evcharger.backend.modbus_transport._configured_serial_attrs", return_value=[]), patch.object(transport, "_write_all"), patch.object(transport, "_read_exact", side_effect=[response_frame[:3], response_frame[3:]]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.os.open", return_value=5), patch("venus_evcharger.backend.modbus_transport_serial.os.close"), patch("venus_evcharger.backend.modbus_transport_serial.termios.tcsetattr"), patch("venus_evcharger.backend.modbus_transport_serial.termios.tcflush"), patch("venus_evcharger.backend.modbus_transport_serial._configured_serial_attrs", return_value=[]), patch.object(transport, "_write_all"), patch.object(transport, "_read_exact", side_effect=[response_frame[:3], response_frame[3:]]):
             response = transport._exchange_once(request, 1.0)
         self.assertEqual(response, response_payload[1:])
 
@@ -409,11 +409,11 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         expected_frame = _crc_frame(b"\x01\x03\x00\x00\x00\x01")
         attrs = [0, 0, 0, 0, 0, 0, [0, 0]]
         with (
-            patch("venus_evcharger.backend.modbus_transport.os.open", return_value=23) as open_mock,
-            patch("venus_evcharger.backend.modbus_transport.os.close") as close_mock,
-            patch("venus_evcharger.backend.modbus_transport._configured_serial_attrs", return_value=attrs) as attrs_mock,
-            patch("venus_evcharger.backend.modbus_transport.termios.tcsetattr") as set_attrs,
-            patch("venus_evcharger.backend.modbus_transport.termios.tcflush") as flush_mock,
+            patch("venus_evcharger.backend.modbus_transport_serial.os.open", return_value=23) as open_mock,
+            patch("venus_evcharger.backend.modbus_transport_serial.os.close") as close_mock,
+            patch("venus_evcharger.backend.modbus_transport_serial._configured_serial_attrs", return_value=attrs) as attrs_mock,
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcsetattr") as set_attrs,
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcflush") as flush_mock,
             patch.object(transport, "_write_all") as write_all,
             patch.object(transport, "_read_exact", side_effect=[response_frame[:3], response_frame[3:]]) as read_exact,
         ):
@@ -431,22 +431,22 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         request = ModbusRequest(1, 0x03, b"\x00\x00\x00\x01")
         exception_frame = _crc_frame(b"\x01\x83\x02")
         with (
-            patch("venus_evcharger.backend.modbus_transport.os.open", return_value=23),
-            patch("venus_evcharger.backend.modbus_transport.os.close"),
-            patch("venus_evcharger.backend.modbus_transport._configured_serial_attrs", return_value=[]),
-            patch("venus_evcharger.backend.modbus_transport.termios.tcsetattr"),
-            patch("venus_evcharger.backend.modbus_transport.termios.tcflush"),
+            patch("venus_evcharger.backend.modbus_transport_serial.os.open", return_value=23),
+            patch("venus_evcharger.backend.modbus_transport_serial.os.close"),
+            patch("venus_evcharger.backend.modbus_transport_serial._configured_serial_attrs", return_value=[]),
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcsetattr"),
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcflush"),
             patch.object(transport, "_write_all"),
             patch.object(transport, "_read_exact", side_effect=[exception_frame[:3], exception_frame[3:]]),
         ):
             self.assertEqual(transport._exchange_once(request, 1.0), b"\x83\x02")
 
         with (
-            patch("venus_evcharger.backend.modbus_transport.os.open", return_value=23),
-            patch("venus_evcharger.backend.modbus_transport.os.close"),
-            patch("venus_evcharger.backend.modbus_transport._configured_serial_attrs", return_value=[]),
-            patch("venus_evcharger.backend.modbus_transport.termios.tcsetattr"),
-            patch("venus_evcharger.backend.modbus_transport.termios.tcflush"),
+            patch("venus_evcharger.backend.modbus_transport_serial.os.open", return_value=23),
+            patch("venus_evcharger.backend.modbus_transport_serial.os.close"),
+            patch("venus_evcharger.backend.modbus_transport_serial._configured_serial_attrs", return_value=[]),
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcsetattr"),
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcflush"),
             patch.object(transport, "_write_all"),
             patch.object(transport, "_read_exact", side_effect=[b"\x01\x03\x00", b"\x00"]),
         ):
@@ -454,11 +454,11 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
                 transport._exchange_once(request, 1.0)
 
         with (
-            patch("venus_evcharger.backend.modbus_transport.os.open", return_value=23),
-            patch("venus_evcharger.backend.modbus_transport.os.close"),
-            patch("venus_evcharger.backend.modbus_transport._configured_serial_attrs", return_value=[]),
-            patch("venus_evcharger.backend.modbus_transport.termios.tcsetattr"),
-            patch("venus_evcharger.backend.modbus_transport.termios.tcflush"),
+            patch("venus_evcharger.backend.modbus_transport_serial.os.open", return_value=23),
+            patch("venus_evcharger.backend.modbus_transport_serial.os.close"),
+            patch("venus_evcharger.backend.modbus_transport_serial._configured_serial_attrs", return_value=[]),
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcsetattr"),
+            patch("venus_evcharger.backend.modbus_transport_serial.termios.tcflush"),
             patch.object(transport, "_write_all"),
             patch.object(transport, "_read_exact", side_effect=[b"\x01\x03\x02", b"\x00\xa0\x00\x00"]),
         ):
@@ -466,9 +466,9 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
                 transport._exchange_once(request, 1.0)
 
     def test_serial_rtu_write_and_read_helpers_cover_partial_io_and_timeouts(self) -> None:
-        with patch("venus_evcharger.backend.modbus_transport.os.write", side_effect=[2, 2]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.os.write", side_effect=[2, 2]):
             ModbusSerialRtuTransport._write_all(5, b"abcd")
-        with patch("venus_evcharger.backend.modbus_transport.select.select", return_value=([5], [], [])), patch("venus_evcharger.backend.modbus_transport.os.read", side_effect=[b"\x01", b"\x02"]), patch("venus_evcharger.backend.modbus_transport.time.monotonic", side_effect=[0.0, 0.0, 0.1]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.select.select", return_value=([5], [], [])), patch("venus_evcharger.backend.modbus_transport_serial.os.read", side_effect=[b"\x01", b"\x02"]), patch("venus_evcharger.backend.modbus_transport_serial.time.monotonic", side_effect=[0.0, 0.0, 0.1]):
             self.assertEqual(ModbusSerialRtuTransport._read_exact(5, 2, 1.0), b"\x01\x02")
 
     def test_serial_write_all_and_read_exact_use_precise_remaining_lengths(self) -> None:
@@ -480,34 +480,34 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         with self.assertRaisesRegex(ModbusPortBusyError, "^Failed to write full Modbus RTU request$"):
             _positive_serial_write_count(-1)
 
-        with patch("venus_evcharger.backend.modbus_transport.os.write", side_effect=[2, 3, 1]) as write_mock:
+        with patch("venus_evcharger.backend.modbus_transport_serial.os.write", side_effect=[2, 3, 1]) as write_mock:
             ModbusSerialRtuTransport._write_all(9, b"abcdef")
         self.assertEqual([call.args for call in write_mock.call_args_list], [(9, b"abcdef"), (9, b"cdef"), (9, b"f")])
 
-        with patch("venus_evcharger.backend.modbus_transport.os.write", return_value=0):
+        with patch("venus_evcharger.backend.modbus_transport_serial.os.write", return_value=0):
             with self.assertRaisesRegex(ModbusPortBusyError, "^Failed to write full Modbus RTU request$"):
                 ModbusSerialRtuTransport._write_all(9, b"ab")
 
         with (
-            patch("venus_evcharger.backend.modbus_transport.time.monotonic", side_effect=[10.0, 10.25, 10.75]),
-            patch("venus_evcharger.backend.modbus_transport.select.select", return_value=([9], [], [])) as select_mock,
-            patch("venus_evcharger.backend.modbus_transport.os.read", side_effect=[b"\x01", b"\x02\x03"]) as read_mock,
+            patch("venus_evcharger.backend.modbus_transport_serial.time.monotonic", side_effect=[10.0, 10.25, 10.75]),
+            patch("venus_evcharger.backend.modbus_transport_serial.select.select", return_value=([9], [], [])) as select_mock,
+            patch("venus_evcharger.backend.modbus_transport_serial.os.read", side_effect=[b"\x01", b"\x02\x03"]) as read_mock,
         ):
             self.assertEqual(ModbusSerialRtuTransport._read_exact(9, 3, 1.5), b"\x01\x02\x03")
         self.assertEqual([call.args for call in select_mock.call_args_list], [([9], [], [], 1.25), ([9], [], [], 0.75)])
         self.assertEqual([call.args for call in read_mock.call_args_list], [(9, 3), (9, 2)])
 
         with (
-            patch("venus_evcharger.backend.modbus_transport.time.monotonic", side_effect=[2.0, 2.2]),
-            patch("venus_evcharger.backend.modbus_transport.select.select", return_value=([], [], [])),
+            patch("venus_evcharger.backend.modbus_transport_serial.time.monotonic", side_effect=[2.0, 2.2]),
+            patch("venus_evcharger.backend.modbus_transport_serial.select.select", return_value=([], [], [])),
         ):
             with self.assertRaisesRegex(ModbusTimeoutError, "^Timed out waiting for Modbus RTU response$"):
                 ModbusSerialRtuTransport._read_exact(9, 1, 0.5)
 
         with (
-            patch("venus_evcharger.backend.modbus_transport.time.monotonic", side_effect=[2.0, 2.2]),
-            patch("venus_evcharger.backend.modbus_transport.select.select", return_value=([9], [], [])),
-            patch("venus_evcharger.backend.modbus_transport.os.read", return_value=b""),
+            patch("venus_evcharger.backend.modbus_transport_serial.time.monotonic", side_effect=[2.0, 2.2]),
+            patch("venus_evcharger.backend.modbus_transport_serial.select.select", return_value=([9], [], [])),
+            patch("venus_evcharger.backend.modbus_transport_serial.os.read", return_value=b""),
         ):
             with self.assertRaisesRegex(
                 ModbusTimeoutError,
@@ -546,14 +546,14 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         with patch.object(transport, "_exchange_once", side_effect=OSError(errno.EIO, "io")):
             with self.assertRaises(ModbusTransportError):
                 transport.exchange(request, timeout_seconds=1.0)
-        with patch("venus_evcharger.backend.modbus_transport.time.sleep") as sleep_mock:
+        with patch("venus_evcharger.backend.modbus_transport_serial.time.sleep") as sleep_mock:
             transport._recover_after_failure(ModbusTimeoutError("timeout"))
         transport._port_owner.recover.assert_called()
         sleep_mock.assert_called_once_with(0.1)
 
         no_delay_transport = ModbusSerialRtuTransport(self._serial_settings(retry_count=1, retry_delay=0.0))
         no_delay_transport._port_owner = MagicMock()
-        with patch("venus_evcharger.backend.modbus_transport.time.sleep") as no_delay_sleep:
+        with patch("venus_evcharger.backend.modbus_transport_serial.time.sleep") as no_delay_sleep:
             no_delay_transport._recover_after_failure(ModbusTimeoutError("timeout"))
         no_delay_transport._port_owner.recover.assert_called_once()
         no_delay_sleep.assert_not_called()
@@ -585,11 +585,11 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
                 udp.exchange(ModbusRequest(1, 0x03, b"\x00\x00\x00\x01"), timeout_seconds=1.0)
 
         transport = ModbusSerialRtuTransport(self._serial_settings())
-        with patch("venus_evcharger.backend.modbus_transport.os.open", return_value=5), patch("venus_evcharger.backend.modbus_transport.os.close"), patch("venus_evcharger.backend.modbus_transport.termios.tcsetattr"), patch("venus_evcharger.backend.modbus_transport.termios.tcflush"), patch("venus_evcharger.backend.modbus_transport._configured_serial_attrs", return_value=[]), patch.object(transport, "_write_all"), patch.object(transport, "_read_exact", side_effect=[b"\x01\x03\x02", b"\x00\xa0\x00\x00"]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.os.open", return_value=5), patch("venus_evcharger.backend.modbus_transport_serial.os.close"), patch("venus_evcharger.backend.modbus_transport_serial.termios.tcsetattr"), patch("venus_evcharger.backend.modbus_transport_serial.termios.tcflush"), patch("venus_evcharger.backend.modbus_transport_serial._configured_serial_attrs", return_value=[]), patch.object(transport, "_write_all"), patch.object(transport, "_read_exact", side_effect=[b"\x01\x03\x02", b"\x00\xa0\x00\x00"]):
             with self.assertRaises(ModbusResponseError):
                 transport._exchange_once(ModbusRequest(1, 0x03, b"\x00\x00\x00\x01"), 1.0)
 
-        with patch("venus_evcharger.backend.modbus_transport.select.select", return_value=([], [], [])), patch("venus_evcharger.backend.modbus_transport.time.monotonic", side_effect=[0.0, 0.0]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.select.select", return_value=([], [], [])), patch("venus_evcharger.backend.modbus_transport_serial.time.monotonic", side_effect=[0.0, 0.0]):
             with self.assertRaises(ModbusTimeoutError):
                 ModbusSerialRtuTransport._read_exact(5, 1, 1.0)
 
@@ -612,17 +612,17 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
     def test_modbus_transport_runtime_covers_parity_owner_and_short_reads(self) -> None:
         odd_settings = self._serial_settings()
         odd_settings = ModbusTransportSettings(**{**odd_settings.__dict__, "parity": "O", "stopbits": 2, "device": None})
-        with patch("venus_evcharger.backend.modbus_transport.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0]]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0]]):
             attrs = _configured_serial_attrs(5, odd_settings)
         self.assertTrue(attrs[2])
 
         even_settings = ModbusTransportSettings(**{**self._serial_settings().__dict__, "parity": "E", "stopbits": 1, "device": None})
-        with patch("venus_evcharger.backend.modbus_transport.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0]]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0]]):
             even_attrs = _configured_serial_attrs(5, even_settings)
         self.assertTrue(even_attrs[2])
 
         none_settings = ModbusTransportSettings(**{**self._serial_settings().__dict__, "parity": "N", "stopbits": 1, "device": None})
-        with patch("venus_evcharger.backend.modbus_transport.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0]]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, [0, 0, 0, 0, 0, 0, 0]]):
             none_attrs = _configured_serial_attrs(5, none_settings)
         self.assertTrue(isinstance(none_attrs, list))
 
@@ -639,10 +639,10 @@ class TestShellyWallboxBackendModbusTransportRuntime(unittest.TestCase):
         self.assertIsNone(_serial_port_owner(owner_settings))
 
         transport = ModbusSerialRtuTransport(self._serial_settings())
-        with patch("venus_evcharger.backend.modbus_transport.os.open", return_value=5), patch("venus_evcharger.backend.modbus_transport.os.close"), patch("venus_evcharger.backend.modbus_transport.termios.tcsetattr"), patch("venus_evcharger.backend.modbus_transport.termios.tcflush"), patch("venus_evcharger.backend.modbus_transport._configured_serial_attrs", return_value=[]), patch.object(transport, "_write_all"), patch.object(transport, "_read_exact", side_effect=[b"\x01\x03\x02", b"\x00"]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.os.open", return_value=5), patch("venus_evcharger.backend.modbus_transport_serial.os.close"), patch("venus_evcharger.backend.modbus_transport_serial.termios.tcsetattr"), patch("venus_evcharger.backend.modbus_transport_serial.termios.tcflush"), patch("venus_evcharger.backend.modbus_transport_serial._configured_serial_attrs", return_value=[]), patch.object(transport, "_write_all"), patch.object(transport, "_read_exact", side_effect=[b"\x01\x03\x02", b"\x00"]):
             with self.assertRaises(ModbusTimeoutError):
                 transport._exchange_once(ModbusRequest(1, 0x03, b"\x00\x00\x00\x01"), 1.0)
 
-        with patch("venus_evcharger.backend.modbus_transport.select.select", return_value=([5], [], [])), patch("venus_evcharger.backend.modbus_transport.os.read", return_value=b""), patch("venus_evcharger.backend.modbus_transport.time.monotonic", side_effect=[0.0, 0.0]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.select.select", return_value=([5], [], [])), patch("venus_evcharger.backend.modbus_transport_serial.os.read", return_value=b""), patch("venus_evcharger.backend.modbus_transport_serial.time.monotonic", side_effect=[0.0, 0.0]):
             with self.assertRaises(ModbusTimeoutError):
                 ModbusSerialRtuTransport._read_exact(5, 1, 1.0)

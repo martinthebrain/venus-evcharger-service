@@ -44,7 +44,7 @@ def fetch_device_info_with_fallback(svc: Any, sleep_func: Callable[[float], None
             return device_info_payload(svc.fetch_rpc("Shelly.GetDeviceInfo"))
         except BOOTSTRAP_DEVICE_INFO_ERRORS as error:
             last_error = error
-            if attempt < (attempts - 1) and svc.startup_device_info_retry_seconds > 0:
+            if _should_retry_device_info(attempt, attempts, svc.startup_device_info_retry_seconds):
                 logging.warning(
                     "Shelly.GetDeviceInfo failed during startup (attempt %s/%s): %s",
                     attempt + 1,
@@ -57,6 +57,10 @@ def fetch_device_info_with_fallback(svc: Any, sleep_func: Callable[[float], None
         last_error,
     )
     return {}
+
+
+def _should_retry_device_info(attempt: int, attempts: int, retry_seconds: float) -> bool:
+    return attempt < (attempts - 1) and retry_seconds > 0
 
 
 def apply_device_metadata(

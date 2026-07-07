@@ -8,14 +8,14 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-AUTO_GRID_SERVICE_KEY = "AutoGridService"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_GRID_L1_PATH_KEY = "AutoGridL1Path"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_GRID_L2_PATH_KEY = "AutoGridL2Path"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_GRID_L3_PATH_KEY = "AutoGridL3Path"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_GRID_REQUIRE_ALL_PHASES_KEY = "AutoGridRequireAllPhases"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_GRID_MISSING_STOP_KEY = "AutoGridMissingStopSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_GRID_RECOVERY_START_KEY = "AutoGridRecoveryStartSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_START_DELAY_KEY = "AutoStartDelaySeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
+AUTO_GRID_SERVICE_KEY = "AutoGridService"
+AUTO_GRID_L1_PATH_KEY = "AutoGridL1Path"
+AUTO_GRID_L2_PATH_KEY = "AutoGridL2Path"
+AUTO_GRID_L3_PATH_KEY = "AutoGridL3Path"
+AUTO_GRID_REQUIRE_ALL_PHASES_KEY = "AutoGridRequireAllPhases"
+AUTO_GRID_MISSING_STOP_KEY = "AutoGridMissingStopSeconds"
+AUTO_GRID_RECOVERY_START_KEY = "AutoGridRecoveryStartSeconds"
+AUTO_START_DELAY_KEY = "AutoStartDelaySeconds"
 
 
 def load_auto_grid_source_config(svc: Any, defaults: configparser.SectionProxy) -> None:

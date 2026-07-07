@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import struct
-from typing import Iterable
+from typing import Iterable, Literal
 
 from .modbus_transport import ModbusRequest, ModbusTransport
 
@@ -14,7 +14,7 @@ _READ_REGISTERS_FUNCTIONS = {"holding": 0x03, "input": 0x04}
 _WRITE_SINGLE_COIL = 0x05
 _WRITE_SINGLE_REGISTER = 0x06
 _WRITE_MULTIPLE_REGISTERS = 0x10
-_BYTE_ORDER = "big"
+_BYTE_ORDER: Literal["big"] = "big"
 _DEFAULT_WORD_ORDER = "big"
 _SUPPORTED_WORD_ORDERS = frozenset({_DEFAULT_WORD_ORDER, "little"})
 
@@ -114,27 +114,27 @@ def _payload_registers(payload: bytes) -> tuple[int, int]:
 
 def _uint_from_bytes(payload: bytes) -> int:
     """Return one unsigned big-endian integer from bytes."""
-    return int.from_bytes(payload, _BYTE_ORDER)  # pragma: no mutate
+    return int.from_bytes(payload, _BYTE_ORDER)
 
 
 def _int_from_bytes(payload: bytes) -> int:
     """Return one signed big-endian integer from bytes."""
-    return int.from_bytes(payload, _BYTE_ORDER, signed=True)  # pragma: no mutate
+    return int.from_bytes(payload, _BYTE_ORDER, signed=True)
 
 
 def _u16_bytes(value: int) -> bytes:
     """Return one unsigned 16-bit big-endian payload."""
-    return int(value).to_bytes(2, _BYTE_ORDER)  # pragma: no mutate
+    return int(value).to_bytes(2, _BYTE_ORDER)
 
 
 def _u32_bytes(value: int) -> bytes:
     """Return one unsigned 32-bit big-endian payload."""
-    return int(value).to_bytes(4, _BYTE_ORDER)  # pragma: no mutate
+    return int(value).to_bytes(4, _BYTE_ORDER)
 
 
 def _i32_bytes(value: int) -> bytes:
     """Return one signed 32-bit big-endian payload."""
-    return int(value).to_bytes(4, _BYTE_ORDER, signed=True)  # pragma: no mutate
+    return int(value).to_bytes(4, _BYTE_ORDER, signed=True)
 
 
 def _decode_bool_register(ordered: tuple[int, ...], _payload: bytes) -> bool:

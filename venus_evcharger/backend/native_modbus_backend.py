@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 
 from .modbus_client import ModbusClient
 from .modbus_transport import ModbusTransport, create_modbus_transport
@@ -56,7 +56,7 @@ def _native_modbus_transport_factory(backend: Any) -> Callable[[Any], ModbusTran
         transport = factory(settings)
         if not hasattr(transport, "exchange"):
             raise TypeError(f"Modbus transport factory returned {type(transport).__name__}")
-        return transport
+        return cast(ModbusTransport, transport)
 
     return _factory
 

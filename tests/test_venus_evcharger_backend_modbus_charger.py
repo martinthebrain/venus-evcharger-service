@@ -4,6 +4,7 @@ import unittest
 import configparser
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import patch
 
 from venus_evcharger.backend.models import ChargerState
@@ -296,7 +297,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
         self.assertEqual(backend._resume_current_amps_cache, 0.5)
 
         with patch.object(backend, "_client", return_value=client):
-            backend.set_phase_selection(None)  # type: ignore[arg-type]
+            backend.set_phase_selection(cast(Any, None))
             backend.set_phase_selection("P1_P2")
         self.assertEqual(profile.phase_calls[-2:], ["P1", "P1_P2"])
         self.assertEqual(backend._phase_selection_cache, "P1_P2")
@@ -305,7 +306,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
         p2_only_profile.supported_phase_selections = ("P1_P2",)
         p2_only_backend = self._backend_with_profile(p2_only_profile)
         with patch.object(p2_only_backend, "_client", return_value=client):
-            p2_only_backend.set_phase_selection(None)  # type: ignore[arg-type]
+            p2_only_backend.set_phase_selection(cast(Any, None))
         self.assertEqual(p2_only_profile.phase_calls, ["P1_P2"])
         self.assertEqual(p2_only_backend._phase_selection_cache, "P1_P2")
 

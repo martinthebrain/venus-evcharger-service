@@ -349,7 +349,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
         backend = SmartEvseChargerBackend.__new__(SmartEvseChargerBackend)
         client = MagicMock()
         client.read_scalar.return_value = 17
-        backend._client = MagicMock(return_value=client)  # type: ignore[method-assign]
+        setattr(backend, "_client", MagicMock(return_value=client))
 
         self.assertEqual(backend._read_register(0x1234), 17)
 
@@ -366,7 +366,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
     def test_smartevse_enable_writes_exact_boolean_register_values(self) -> None:
         backend = SmartEvseChargerBackend.__new__(SmartEvseChargerBackend)
         backend.settings = SimpleNamespace(access_register=0x0005)
-        backend._write_register = MagicMock()  # type: ignore[method-assign]
+        setattr(backend, "_write_register", MagicMock())
 
         backend.set_enabled(False)
         backend.set_enabled(True)

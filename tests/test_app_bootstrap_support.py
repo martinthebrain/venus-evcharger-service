@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import configparser
 import unittest
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 from venus_evcharger.app import bootstrap_support
@@ -18,11 +20,12 @@ class TestAppBootstrapSupport(unittest.TestCase):
         config["DEFAULT"]["Logging"] = "warning"
         self.assertEqual(bootstrap_support.logging_level_from_config(config), "WARNING")
 
-        self.assertEqual(bootstrap_support.logging_level_from_config({}), "INFO")  # type: ignore[arg-type]
-        self.assertEqual(bootstrap_support.logging_level_from_config({}, default="fallback"), "fallback")  # type: ignore[arg-type]
+        empty_config = cast(configparser.ConfigParser, {})
+        self.assertEqual(bootstrap_support.logging_level_from_config(empty_config), "INFO")
+        self.assertEqual(bootstrap_support.logging_level_from_config(empty_config, default="fallback"), "fallback")
         case_sensitive_config = {"DEFAULT": {"Logging": "error", "logging": "debug", "LOGGING": "critical"}}
         self.assertEqual(
-            bootstrap_support.logging_level_from_config(case_sensitive_config),  # type: ignore[arg-type]
+            bootstrap_support.logging_level_from_config(cast(configparser.ConfigParser, case_sensitive_config)),
             "ERROR",
         )
 
@@ -45,7 +48,7 @@ class TestAppBootstrapSupport(unittest.TestCase):
         self.assertEqual(str(logged_error), "disabled")
 
     def test_signal_logging_registers_available_handlers_and_quits(self) -> None:
-        handlers: dict[int, object] = {}
+        handlers: dict[int, Callable[[int, Any], None]] = {}
 
         def signal(signum: int, handler: object) -> None:
             handlers[signum] = handler
@@ -58,7 +61,7 @@ class TestAppBootstrapSupport(unittest.TestCase):
         bootstrap_support.install_signal_logging(signal_module, logging, os_module, quit_callback)
 
         self.assertEqual(set(handlers), {1, 2, 15})
-        handlers[15](15, None)  # type: ignore[operator]
+        handlers[15](15, None)
         logging.warning.assert_called_once_with("Received signal %s in pid=%s", 15, 1234)
         quit_callback.assert_called_once_with()
         logging.debug.assert_not_called()
@@ -80,7 +83,7 @@ class TestAppBootstrapSupport(unittest.TestCase):
         self.assertIsInstance(logged_error, ValueError)
         self.assertEqual(str(logged_error), "unsupported")
 
-        handlers: dict[int, object] = {}
+        handlers: dict[int, Callable[[int, Any], None]] = {}
         bootstrap_support.install_signal_logging(SimpleNamespace(signal=handlers.__setitem__), logging, os_module)
         self.assertEqual(handlers, {})
 
@@ -90,7 +93,7 @@ class TestAppBootstrapSupport(unittest.TestCase):
         logging.debug.reset_mock()
 
         bootstrap_support.install_signal_logging(signal_module, logging, os_module, quit_callback)
-        handlers[15](15, None)  # type: ignore[operator]
+        handlers[15](15, None)
 
         logging.debug.assert_called_once()
         self.assertEqual(logging.debug.call_args.args[0], "Unable to request shutdown after signal %s: %s")
@@ -154,7 +157,7 @@ class TestAppBootstrapSupport(unittest.TestCase):
         gobject.MainLoop.assert_called_once_with()
         mainloop.run.assert_called_once_with()
         self.assertEqual(len(callbacks), 1)
-        callbacks[0]()  # type: ignore[operator]
+        cast(Callable[[], None], callbacks[0])()
         request_mainloop_quit_func.assert_called_once_with(gobject, mainloop)
         self.assertEqual(
             [call.args[0] for call in logging.info.call_args_list],

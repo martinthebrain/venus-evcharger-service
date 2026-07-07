@@ -33,7 +33,7 @@ class CerboGxRelaySwitchSettings:
 
 def _config(path: str) -> configparser.ConfigParser:
     parser = configparser.ConfigParser()
-    parser.optionxform = str
+    setattr(parser, "optionxform", str)
     if not str(path).strip():
         return parser
     read_files = parser.read(path)
@@ -82,7 +82,10 @@ def _binary_flag_or_default(value: object, default: bool) -> bool:
 def _manual_function_value(value: object) -> int:
     if value is None or not str(value).strip():
         return 2
-    return int(value)
+    try:
+        return int(str(value).strip())
+    except ValueError as exc:
+        raise ValueError("Cerbo GX relay backend requires ManualFunctionValue to be an integer") from exc
 
 
 def _positive_seconds(value: object, default: float) -> float:

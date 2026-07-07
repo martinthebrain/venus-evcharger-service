@@ -8,19 +8,19 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-BALANCE_POLICY_ENABLED_KEY = "AutoBatteryDischargeBalancePolicyEnabled"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_WARN_ERROR_KEY = "AutoBatteryDischargeBalanceWarnErrorWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_BIAS_START_ERROR_KEY = "AutoBatteryDischargeBalanceBiasStartErrorWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_BIAS_MAX_PENALTY_KEY = "AutoBatteryDischargeBalanceBiasMaxPenaltyWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_BIAS_MODE_KEY = "AutoBatteryDischargeBalanceBiasMode"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_BIAS_RESERVE_MARGIN_KEY = "AutoBatteryDischargeBalanceBiasReserveMarginSoc"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_COORDINATION_ENABLED_KEY = "AutoBatteryDischargeBalanceCoordinationEnabled"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_COORDINATION_SUPPORT_MODE_KEY = "AutoBatteryDischargeBalanceCoordinationSupportMode"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_COORDINATION_START_ERROR_KEY = "AutoBatteryDischargeBalanceCoordinationStartErrorWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BALANCE_COORDINATION_MAX_PENALTY_KEY = "AutoBatteryDischargeBalanceCoordinationMaxPenaltyWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-DEFAULT_BALANCE_BIAS_MODE = "always"  # pragma: no mutate - normalized with lower() before use.
-DEFAULT_COORDINATION_SUPPORT_MODE = "supported_only"  # pragma: no mutate - normalized with lower() before use.
-DEFAULT_FALSE = "0"  # pragma: no mutate - any non-true token normalizes to False.
+BALANCE_POLICY_ENABLED_KEY = "AutoBatteryDischargeBalancePolicyEnabled"
+BALANCE_WARN_ERROR_KEY = "AutoBatteryDischargeBalanceWarnErrorWatts"
+BALANCE_BIAS_START_ERROR_KEY = "AutoBatteryDischargeBalanceBiasStartErrorWatts"
+BALANCE_BIAS_MAX_PENALTY_KEY = "AutoBatteryDischargeBalanceBiasMaxPenaltyWatts"
+BALANCE_BIAS_MODE_KEY = "AutoBatteryDischargeBalanceBiasMode"
+BALANCE_BIAS_RESERVE_MARGIN_KEY = "AutoBatteryDischargeBalanceBiasReserveMarginSoc"
+BALANCE_COORDINATION_ENABLED_KEY = "AutoBatteryDischargeBalanceCoordinationEnabled"
+BALANCE_COORDINATION_SUPPORT_MODE_KEY = "AutoBatteryDischargeBalanceCoordinationSupportMode"
+BALANCE_COORDINATION_START_ERROR_KEY = "AutoBatteryDischargeBalanceCoordinationStartErrorWatts"
+BALANCE_COORDINATION_MAX_PENALTY_KEY = "AutoBatteryDischargeBalanceCoordinationMaxPenaltyWatts"
+DEFAULT_BALANCE_BIAS_MODE = "always"
+DEFAULT_COORDINATION_SUPPORT_MODE = "supported_only"
+DEFAULT_FALSE = "0"
 
 
 def load_discharge_balance_policy(svc: Any, defaults: configparser.SectionProxy) -> None:

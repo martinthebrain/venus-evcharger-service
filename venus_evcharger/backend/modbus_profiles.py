@@ -27,10 +27,10 @@ from .modbus_profile_models import (
 )
 from .models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_tuple
 
-_DEFAULT_BIT_DATA_TYPE = "bool"  # pragma: no mutate
-_DEFAULT_REGISTER_DATA_TYPE = "uint16"  # pragma: no mutate
-_DEFAULT_WORD_ORDER = "big"  # pragma: no mutate
-_DEFAULT_PROFILE_NAME = "generic"  # pragma: no mutate
+_DEFAULT_BIT_DATA_TYPE = "bool"
+_DEFAULT_REGISTER_DATA_TYPE = "uint16"
+_DEFAULT_WORD_ORDER = "big"
+_DEFAULT_PROFILE_NAME = "generic"
 
 
 def _optional_section(parser: configparser.ConfigParser, name: str) -> configparser.SectionProxy | None:

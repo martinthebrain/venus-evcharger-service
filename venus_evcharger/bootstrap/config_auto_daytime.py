@@ -16,17 +16,17 @@ from venus_evcharger.core.common import (
 
 MonthWindowFunc = Callable[[configparser.ConfigParser, int, str, str], Any]
 
-AUTO_DAYTIME_ONLY_KEY = "AutoDaytimeOnly"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_SCHEDULE_TIMEZONE_KEY = "AutoScheduleTimezone"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_SCHEDULED_NIGHT_START_DELAY_KEY = "AutoScheduledNightStartDelaySeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_SCHEDULED_ENABLED_DAYS_KEY = "AutoScheduledEnabledDays"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_SCHEDULED_LATEST_END_KEY = "AutoScheduledLatestEndTime"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_SCHEDULED_NIGHT_CURRENT_KEY = "AutoScheduledNightCurrentAmps"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_NIGHT_LOCK_STOP_KEY = "AutoNightLockStop"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-DEFAULT_TRUE = "1"  # pragma: no mutate - common true token contract is tested separately.
-DEFAULT_FALSE = "0"  # pragma: no mutate - any non-true token normalizes to False.
-DEFAULT_SCHEDULE_TIMEZONE = "UTC"  # pragma: no mutate - blank values normalize back to UTC.
-DEFAULT_LATEST_END_TIME = "04:30"  # pragma: no mutate - normalized by normalize_hhmm_text.
+AUTO_DAYTIME_ONLY_KEY = "AutoDaytimeOnly"
+AUTO_SCHEDULE_TIMEZONE_KEY = "AutoScheduleTimezone"
+AUTO_SCHEDULED_NIGHT_START_DELAY_KEY = "AutoScheduledNightStartDelaySeconds"
+AUTO_SCHEDULED_ENABLED_DAYS_KEY = "AutoScheduledEnabledDays"
+AUTO_SCHEDULED_LATEST_END_KEY = "AutoScheduledLatestEndTime"
+AUTO_SCHEDULED_NIGHT_CURRENT_KEY = "AutoScheduledNightCurrentAmps"
+AUTO_NIGHT_LOCK_STOP_KEY = "AutoNightLockStop"
+DEFAULT_TRUE = "1"
+DEFAULT_FALSE = "0"
+DEFAULT_SCHEDULE_TIMEZONE = "UTC"
+DEFAULT_LATEST_END_TIME = "04:30"
 
 
 def load_auto_daytime_policy(

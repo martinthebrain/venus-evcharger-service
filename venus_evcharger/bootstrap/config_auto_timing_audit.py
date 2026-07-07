@@ -8,10 +8,10 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-AUTO_AUDIT_LOG_KEY = "AutoAuditLog"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_AUDIT_LOG_PATH_KEY = "AutoAuditLogPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_AUDIT_LOG_MAX_AGE_KEY = "AutoAuditLogMaxAgeHours"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_AUDIT_LOG_REPEAT_KEY = "AutoAuditLogRepeatSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
+AUTO_AUDIT_LOG_KEY = "AutoAuditLog"
+AUTO_AUDIT_LOG_PATH_KEY = "AutoAuditLogPath"
+AUTO_AUDIT_LOG_MAX_AGE_KEY = "AutoAuditLogMaxAgeHours"
+AUTO_AUDIT_LOG_REPEAT_KEY = "AutoAuditLogRepeatSeconds"
 
 
 def load_auto_audit_config(svc: Any, defaults: configparser.SectionProxy) -> None:

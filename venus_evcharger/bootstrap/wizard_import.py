@@ -25,66 +25,44 @@ from venus_evcharger.bootstrap.wizard_support import (
     PHASE_SWITCH_CHARGER_VALUES,
     backend_requires_transport,
 )
-
-_PROFILE_DEFAULTS_BY_BACKENDS: dict[tuple[str, str, str], tuple[WizardProfile, str | None, WizardChargerBackend | None]] = {
-    ("template_meter", "template_switch", "template_charger"): ("multi_adapter_topology", "template-stack", "template_charger"),
-    ("shelly_meter", "shelly_switch", "template_charger"): ("multi_adapter_topology", "shelly-io-template-charger", "template_charger"),
-    ("tasmota_meter", "tasmota_switch", "template_charger"): ("multi_adapter_topology", "tasmota-io-template-charger", "template_charger"),
-    ("tuya_meter", "tuya_switch", "template_charger"): ("multi_adapter_topology", "tuya-io-template-charger", "template_charger"),
-    ("shelly_meter", "shelly_switch", "modbus_charger"): ("multi_adapter_topology", "shelly-io-modbus-charger", "modbus_charger"),
-    ("tasmota_meter", "tasmota_switch", "modbus_charger"): ("multi_adapter_topology", "tasmota-io-modbus-charger", "modbus_charger"),
-    ("tuya_meter", "tuya_switch", "modbus_charger"): ("multi_adapter_topology", "tuya-io-modbus-charger", "modbus_charger"),
-    ("template_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "template-meter-cerbo-relay", None),
-    ("shelly_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "shelly-meter-cerbo-relay", None),
-    ("tasmota_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "tasmota-meter-cerbo-relay", None),
-    ("tuya_meter", "cerbo_gx_relay_switch", ""): ("multi_adapter_topology", "tuya-meter-cerbo-relay", None),
-    ("shelly_meter", "none", "goe_charger"): ("multi_adapter_topology", "shelly-meter-goe", "goe_charger"),
-    ("tasmota_meter", "none", "goe_charger"): ("multi_adapter_topology", "tasmota-meter-goe", "goe_charger"),
-    ("tuya_meter", "none", "goe_charger"): ("multi_adapter_topology", "tuya-meter-goe", "goe_charger"),
-    ("shelly_meter", "none", "modbus_charger"): ("multi_adapter_topology", "shelly-meter-modbus-charger", "modbus_charger"),
-    ("tasmota_meter", "none", "modbus_charger"): ("multi_adapter_topology", "tasmota-meter-modbus-charger", "modbus_charger"),
-    ("tuya_meter", "none", "modbus_charger"): ("multi_adapter_topology", "tuya-meter-modbus-charger", "modbus_charger"),
-    ("none", "switch_group", "goe_charger"): ("multi_adapter_topology", "goe-external-switch-group", "goe_charger"),
-    ("template_meter", "switch_group", "goe_charger"): ("multi_adapter_topology", "template-meter-goe-switch-group", "goe_charger"),
-    ("shelly_meter", "switch_group", "goe_charger"): ("multi_adapter_topology", "shelly-meter-goe-switch-group", "goe_charger"),
-    ("shelly_meter", "switch_group", "modbus_charger"): ("multi_adapter_topology", "shelly-meter-modbus-switch-group", "modbus_charger"),
-}
-
-_SECTION_DEFAULT = "DEFAULT"  # pragma: no mutate
-_SECTION_ADAPTER = "Adapter"  # pragma: no mutate
-_SECTION_BACKENDS = "Backends"  # pragma: no mutate
-_SECTION_CAPABILITIES = "Capabilities"  # pragma: no mutate
-_SECTION_MEMBERS = "Members"  # pragma: no mutate
-_SECTION_TRANSPORT = "Transport"  # pragma: no mutate
-_KEY_BASE_URL = "BaseUrl"  # pragma: no mutate
-_KEY_AUTO_MIN_SOC = "AutoMinSoc"  # pragma: no mutate
-_KEY_AUTO_RESUME_SOC = "AutoResumeSoc"  # pragma: no mutate
-_KEY_AUTO_SCHEDULED_DAYS = "AutoScheduledEnabledDays"  # pragma: no mutate
-_KEY_AUTO_SCHEDULED_LATEST_END = "AutoScheduledLatestEndTime"  # pragma: no mutate
-_KEY_AUTO_SCHEDULED_NIGHT_AMPS = "AutoScheduledNightCurrentAmps"  # pragma: no mutate
-_KEY_AUTO_START_SURPLUS = "AutoStartSurplusWatts"  # pragma: no mutate
-_KEY_AUTO_STOP_SURPLUS = "AutoStopSurplusWatts"  # pragma: no mutate
-_KEY_CHARGER_CONFIG = "ChargerConfigPath"  # pragma: no mutate
-_KEY_CHARGER_TYPE = "ChargerType"  # pragma: no mutate
-_KEY_DEVICE = "Device"  # pragma: no mutate
-_KEY_DEVICE_INSTANCE = "DeviceInstance"  # pragma: no mutate
-_KEY_DIGEST_AUTH = "DigestAuth"  # pragma: no mutate
-_KEY_HOST = "Host"  # pragma: no mutate
-_KEY_METER_CONFIG = "MeterConfigPath"  # pragma: no mutate
-_KEY_METER_TYPE = "MeterType"  # pragma: no mutate
-_KEY_MODE = "Mode"  # pragma: no mutate
-_KEY_P1 = "P1"  # pragma: no mutate
-_KEY_PASSWORD = "Password"  # pragma: no mutate
-_KEY_PHASE = "Phase"  # pragma: no mutate
-_KEY_PORT = "Port"  # pragma: no mutate
-_KEY_PRESET = "Preset"  # pragma: no mutate
-_KEY_REQUEST_TIMEOUT = "RequestTimeoutSeconds"  # pragma: no mutate
-_KEY_SUPPORTED_PHASES = "SupportedPhaseSelections"  # pragma: no mutate
-_KEY_SWITCH_CONFIG = "SwitchConfigPath"  # pragma: no mutate
-_KEY_SWITCH_TYPE = "SwitchType"  # pragma: no mutate
-_KEY_TRANSPORT = "Transport"  # pragma: no mutate
-_KEY_UNIT_ID = "UnitId"  # pragma: no mutate
-_KEY_USERNAME = "Username"  # pragma: no mutate
+from venus_evcharger.bootstrap.wizard_import_contracts import (
+    KEY_BASE_URL as _KEY_BASE_URL,
+    KEY_AUTO_MIN_SOC as _KEY_AUTO_MIN_SOC,
+    KEY_AUTO_RESUME_SOC as _KEY_AUTO_RESUME_SOC,
+    KEY_AUTO_SCHEDULED_DAYS as _KEY_AUTO_SCHEDULED_DAYS,
+    KEY_AUTO_SCHEDULED_LATEST_END as _KEY_AUTO_SCHEDULED_LATEST_END,
+    KEY_AUTO_SCHEDULED_NIGHT_AMPS as _KEY_AUTO_SCHEDULED_NIGHT_AMPS,
+    KEY_AUTO_START_SURPLUS as _KEY_AUTO_START_SURPLUS,
+    KEY_AUTO_STOP_SURPLUS as _KEY_AUTO_STOP_SURPLUS,
+    KEY_CHARGER_CONFIG as _KEY_CHARGER_CONFIG,
+    KEY_CHARGER_TYPE as _KEY_CHARGER_TYPE,
+    KEY_DEVICE as _KEY_DEVICE,
+    KEY_DEVICE_INSTANCE as _KEY_DEVICE_INSTANCE,
+    KEY_DIGEST_AUTH as _KEY_DIGEST_AUTH,
+    KEY_HOST as _KEY_HOST,
+    KEY_METER_CONFIG as _KEY_METER_CONFIG,
+    KEY_METER_TYPE as _KEY_METER_TYPE,
+    KEY_MODE as _KEY_MODE,
+    KEY_P1 as _KEY_P1,
+    KEY_PASSWORD as _KEY_PASSWORD,
+    KEY_PHASE as _KEY_PHASE,
+    KEY_PORT as _KEY_PORT,
+    KEY_PRESET as _KEY_PRESET,
+    KEY_REQUEST_TIMEOUT as _KEY_REQUEST_TIMEOUT,
+    KEY_SUPPORTED_PHASES as _KEY_SUPPORTED_PHASES,
+    KEY_SWITCH_CONFIG as _KEY_SWITCH_CONFIG,
+    KEY_SWITCH_TYPE as _KEY_SWITCH_TYPE,
+    KEY_TRANSPORT as _KEY_TRANSPORT,
+    KEY_UNIT_ID as _KEY_UNIT_ID,
+    KEY_USERNAME as _KEY_USERNAME,
+    PROFILE_DEFAULTS_BY_BACKENDS as _PROFILE_DEFAULTS_BY_BACKENDS,
+    SECTION_ADAPTER as _SECTION_ADAPTER,
+    SECTION_BACKENDS as _SECTION_BACKENDS,
+    SECTION_CAPABILITIES as _SECTION_CAPABILITIES,
+    SECTION_DEFAULT as _SECTION_DEFAULT,
+    SECTION_MEMBERS as _SECTION_MEMBERS,
+    SECTION_TRANSPORT as _SECTION_TRANSPORT,
+)
 
 ConfigValues = Mapping[str, str] | configparser.SectionProxy
 
@@ -130,7 +108,7 @@ def _sibling_inventory_path(config_path: Path) -> str | None:
 
 def _config_parser(path: Path) -> configparser.ConfigParser:
     parser = configparser.ConfigParser(interpolation=None)
-    with path.open(encoding="utf-8") as handle:  # pragma: no mutate
+    with path.open(encoding="utf-8") as handle:
         parser.read_file(handle)
     return parser
 
@@ -359,7 +337,7 @@ def _json_float(value: object) -> float | None:
 
 
 def _load_from_result_json(config_path: Path) -> ImportedWizardDefaults:
-    payload = json.loads(config_path.read_text(encoding="utf-8"))  # pragma: no mutate
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Wizard result does not contain a JSON object: {config_path}")
     defaults = payload.get("answer_defaults")

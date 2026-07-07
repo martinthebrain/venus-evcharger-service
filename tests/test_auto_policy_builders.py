@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import unittest
 from types import SimpleNamespace
+from typing import cast
 
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.auto.policy_builders import (
@@ -25,6 +26,10 @@ class CaseSensitiveDefaults:
 
     def get(self, key: str, fallback: object | None = None) -> object:
         return self.values.get(key, fallback)
+
+
+def case_sensitive_defaults(values: dict[str, str]) -> configparser.SectionProxy:
+    return cast(configparser.SectionProxy, CaseSensitiveDefaults(values))
 
 
 class FakePolicy:
@@ -78,7 +83,7 @@ class TestAutoPolicyBuilders(unittest.TestCase):
     def test_build_auto_policy_from_config_reads_every_config_key(self) -> None:
         policy = build_auto_policy_from_config(
             AutoPolicy,
-            CaseSensitiveDefaults(
+            case_sensitive_defaults(
                 {
                     "AutoStartSurplusWatts": "2101",
                     "AutoStopSurplusWatts": "1702",
@@ -115,7 +120,7 @@ class TestAutoPolicyBuilders(unittest.TestCase):
                     "AutoPhasePreferLowestWhenIdle": "false",
                 }
             ),
-        )  # type: ignore[arg-type]
+        )
 
         self.assert_policy_values(
             policy,
@@ -212,14 +217,14 @@ class TestAutoPolicyBuilders(unittest.TestCase):
     def test_build_auto_policy_from_config_uses_case_sensitive_nested_fallback_keys(self) -> None:
         policy = build_auto_policy_from_config(
             AutoPolicy,
-            CaseSensitiveDefaults(
+            case_sensitive_defaults(
                 {
                     "AutoHighSocThreshold": "66",
                     "AutoStartDelaySeconds": "18",
                     "AutoStopDelaySeconds": "24",
                 }
             ),
-        )  # type: ignore[arg-type]
+        )
 
         self.assertEqual(policy.high_soc_release_threshold, 66.0)
         self.assertEqual(policy.grid_recovery_start_seconds, 18.0)

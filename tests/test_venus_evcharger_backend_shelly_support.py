@@ -32,6 +32,7 @@ from venus_evcharger.backend.shelly_support import (
 from venus_evcharger.backend.shelly_support_phase import _channel_id_tokens
 from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
 from venus_evcharger.backend.shelly_io_types import (
+    ShellyPmStatus,
     is_charger_state_backend,
     is_closeable,
     is_enable_backend,
@@ -46,20 +47,20 @@ from venus_evcharger.backend.shelly_io_types import (
     normalize_supported_phase_tuple,
     require_shelly_io_host,
 )
-from venus_evcharger.backend.shelly_io_worker import (
+from venus_evcharger.backend.shelly_io_worker_status import (
     _copy_float_field,
     _copy_known_status_energy,
     _copy_known_status_phase_fields,
     _copy_known_status_scalars,
-    _local_pm_status_payload,
-    _numeric_phase_tuple_items,
-    _numeric_phase_triplet,
-    _numeric_phase_value,
+    _numeric_triplet,
+    _numeric_value,
     _phase_tuple,
-    _phase_tuple_sequence,
+    _phase_tuple_candidate,
+    _phase_tuple_items,
     _set_apower,
     _set_current,
     _set_voltage,
+    local_pm_status_payload,
 )
 
 
@@ -536,7 +537,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         self.assertEqual(pm_status["_phase_powers_w"], (1200.0, 800.0, 0.0))
         self.assertEqual(pm_status["_phase_currents_a"], (5.0, 3.5, 0.0))
         self.assertIsNone(_phase_tuple(("bad", 1, 2)))
-        self.assertIsNone(_numeric_phase_triplet(1, True, 3))
+        self.assertFalse(_numeric_triplet((1, True, 3)))
 
     def test_shelly_worker_local_pm_payload_copies_only_known_valid_fields(self) -> None:
         raw_status = {
@@ -553,7 +554,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         }
 
         self.assertEqual(
-            _local_pm_status_payload(raw_status),
+            local_pm_status_payload(raw_status),
             {
                 "output": False,
                 "apower": 123.5,
@@ -577,10 +578,10 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
             "_phase_powers_w": [100.0, "bad", 0],
             "_phase_currents_a": (1, 2),
         }
-        self.assertEqual(_local_pm_status_payload(invalid_status), {"aenergy": {"total": 0.0}})
+        self.assertEqual(local_pm_status_payload(invalid_status), {"aenergy": {"total": 0.0}})
 
     def test_shelly_worker_payload_copy_helpers_cover_direct_edges(self) -> None:
-        pm_status: dict[str, object] = {}
+        pm_status: ShellyPmStatus = {}
         _copy_known_status_scalars(
             {
                 "output": True,
@@ -602,13 +603,13 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
             },
         )
 
-        energy_status: dict[str, object] = {}
+        energy_status: ShellyPmStatus = {}
         _copy_known_status_energy({"aenergy": {"total": 12.5}}, energy_status)
         self.assertEqual(energy_status, {"aenergy": {"total": 12.5}})
         _copy_known_status_energy({"aenergy": "bad"}, energy_status)
         self.assertEqual(energy_status, {"aenergy": {"total": 12.5}})
 
-        scalar_status: dict[str, object] = {}
+        scalar_status: ShellyPmStatus = {}
         _copy_float_field({"apower": 1.25}, scalar_status, "apower")
         _copy_float_field({"current": 2}, scalar_status, "current")
         _copy_float_field({"voltage": 230.0}, scalar_status, "voltage")
@@ -623,15 +624,15 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
     def test_shelly_worker_phase_tuple_helpers_cover_shape_and_numeric_contracts(self) -> None:
         self.assertEqual(_phase_tuple([1, 2.5, 0]), (1.0, 2.5, 0.0))
-        self.assertEqual(_numeric_phase_tuple_items((1, 2, 3)), (1, 2, 3))
-        self.assertEqual(_phase_tuple_sequence([1, 2, 3]), (1, 2, 3))
-        self.assertIsNone(_phase_tuple_sequence((1, 2)))
-        self.assertIsNone(_phase_tuple_sequence("123"))
-        self.assertIsNone(_numeric_phase_tuple_items((1, object(), 3)))
-        self.assertEqual(_numeric_phase_triplet(1, 2.0, 3), (1, 2.0, 3))
-        self.assertTrue(_numeric_phase_value(0.0))
-        self.assertFalse(_numeric_phase_value(True))
-        self.assertFalse(_numeric_phase_value("0"))
+        self.assertEqual(_phase_tuple_items((1, 2, 3)), (1, 2, 3))
+        self.assertEqual(_phase_tuple_candidate([1, 2, 3]), (1, 2, 3))
+        self.assertIsNone(_phase_tuple_candidate((1, 2)))
+        self.assertIsNone(_phase_tuple_candidate("123"))
+        self.assertIsNone(_phase_tuple_items((1, object(), 3)))
+        self.assertTrue(_numeric_triplet((1, 2.0, 3)))
+        self.assertTrue(_numeric_value(0.0))
+        self.assertFalse(_numeric_value(True))
+        self.assertFalse(_numeric_value("0"))
 
     def test_shelly_backend_base_can_reset_transport_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

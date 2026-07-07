@@ -77,7 +77,7 @@ class TestShellyWallboxBackendModbusTransportConfig(unittest.TestCase):
     def test_venus_serial_port_owner_stops_once_and_releases(self) -> None:
         owner = _VenusSerialPortOwner("/dev/ttyS7", "/stop-tty.sh", "/start-tty.sh")
         completed = SimpleNamespace(returncode=0, stderr="", stdout="")
-        with patch("venus_evcharger.backend.modbus_transport.subprocess.run", return_value=completed) as run_mock, patch("venus_evcharger.backend.modbus_transport.atexit.register") as register_mock:
+        with patch("venus_evcharger.backend.modbus_transport_serial.subprocess.run", return_value=completed) as run_mock, patch("venus_evcharger.backend.modbus_transport_serial.atexit.register") as register_mock:
             owner.ensure_owned()
             owner.ensure_owned()
             owner.release()
@@ -394,14 +394,14 @@ class TestShellyWallboxBackendModbusTransportConfig(unittest.TestCase):
         self.assertIsInstance(_serial_baudrate_constant(9600), int)
         settings = ModbusTransportSettings(transport_kind="serial_rtu", unit_id=1, timeout_seconds=1.0, host=None, port=None, device="/dev/ttyS7", baudrate=9600, bytesize=7, parity="E", stopbits=2, serial_port_owner="none", serial_port_owner_stop_command=None, serial_port_owner_start_command=None, serial_retry_count=0, serial_retry_delay_seconds=0.0)
         cc = [0] * (max(termios.VMIN, termios.VTIME) + 1)
-        with patch("venus_evcharger.backend.modbus_transport.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, cc.copy()]):
+        with patch("venus_evcharger.backend.modbus_transport_serial.termios.tcgetattr", return_value=[0, 0, 0, 0, 0, 0, cc.copy()]):
             attrs = _configured_serial_attrs(3, settings)
         self.assertTrue(attrs[2] & termios.PARENB)
         self.assertTrue(attrs[2] & termios.CSTOPB)
 
     def test_venus_serial_port_owner_handles_failures_and_optional_release(self) -> None:
         owner = _VenusSerialPortOwner("/dev/ttyS7", "/stop.sh", None)
-        with patch("venus_evcharger.backend.modbus_transport.subprocess.run", side_effect=FileNotFoundError):
+        with patch("venus_evcharger.backend.modbus_transport_serial.subprocess.run", side_effect=FileNotFoundError):
             with self.assertRaises(ModbusPortOwnershipError):
                 owner.ensure_owned()
         owner = _VenusSerialPortOwner("/dev/ttyS7", "/stop.sh", None)
@@ -461,7 +461,7 @@ class TestShellyWallboxBackendModbusTransportConfig(unittest.TestCase):
 
         failing_owner = _VenusSerialPortOwner("/dev/ttyS7", "/stop.sh", "/start.sh")
         failed = SimpleNamespace(returncode=1, stderr="bad", stdout="")
-        with patch("venus_evcharger.backend.modbus_transport.subprocess.run", return_value=failed):
+        with patch("venus_evcharger.backend.modbus_transport_serial.subprocess.run", return_value=failed):
             with self.assertRaisesRegex(ModbusPortOwnershipError, "bad"):
                 failing_owner.ensure_owned()
 

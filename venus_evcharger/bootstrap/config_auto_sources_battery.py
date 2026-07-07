@@ -8,25 +8,25 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-AUTO_BATTERY_SERVICE_KEY = "AutoBatteryService"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_SOC_PATH_KEY = "AutoBatterySocPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_SERVICE_PREFIX_KEY = "AutoBatteryServicePrefix"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_SCAN_INTERVAL_KEY = "AutoBatteryScanIntervalSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_CAPACITY_WH_KEY = "AutoBatteryCapacityWh"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_CHEMISTRY_KEY = "AutoBatteryChemistry"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_CAPACITY_AUTO_ESTIMATE_KEY = "AutoBatteryCapacityAutoEstimate"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_CAPACITY_WH_PATH_KEY = "AutoBatteryCapacityWhPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_CAPACITY_AH_PATH_KEY = "AutoBatteryCapacityAhPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_VOLTAGE_PATH_KEY = "AutoBatteryVoltagePath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_CAPACITY_ESTIMATE_MIN_SOC_KEY = "AutoBatteryCapacityEstimateMinSoc"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_CAPACITY_STARTUP_RECHECK_KEY = "AutoBatteryCapacityStartupRecheckSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_POWER_PATH_KEY = "AutoBatteryPowerPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_AC_POWER_PATH_KEY = "AutoBatteryAcPowerPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_PV_POWER_PATH_KEY = "AutoBatteryPvPowerPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_GRID_INTERACTION_PATH_KEY = "AutoBatteryGridInteractionPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_BATTERY_OPERATING_MODE_PATH_KEY = "AutoBatteryOperatingModePath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_ALLOW_WITHOUT_BATTERY_SOC_KEY = "AutoAllowWithoutBatterySoc"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-DEFAULT_BATTERY_CHEMISTRY = "lfp"  # pragma: no mutate - normalized with lower() before use.
+AUTO_BATTERY_SERVICE_KEY = "AutoBatteryService"
+AUTO_BATTERY_SOC_PATH_KEY = "AutoBatterySocPath"
+AUTO_BATTERY_SERVICE_PREFIX_KEY = "AutoBatteryServicePrefix"
+AUTO_BATTERY_SCAN_INTERVAL_KEY = "AutoBatteryScanIntervalSeconds"
+AUTO_BATTERY_CAPACITY_WH_KEY = "AutoBatteryCapacityWh"
+AUTO_BATTERY_CHEMISTRY_KEY = "AutoBatteryChemistry"
+AUTO_BATTERY_CAPACITY_AUTO_ESTIMATE_KEY = "AutoBatteryCapacityAutoEstimate"
+AUTO_BATTERY_CAPACITY_WH_PATH_KEY = "AutoBatteryCapacityWhPath"
+AUTO_BATTERY_CAPACITY_AH_PATH_KEY = "AutoBatteryCapacityAhPath"
+AUTO_BATTERY_VOLTAGE_PATH_KEY = "AutoBatteryVoltagePath"
+AUTO_BATTERY_CAPACITY_ESTIMATE_MIN_SOC_KEY = "AutoBatteryCapacityEstimateMinSoc"
+AUTO_BATTERY_CAPACITY_STARTUP_RECHECK_KEY = "AutoBatteryCapacityStartupRecheckSeconds"
+AUTO_BATTERY_POWER_PATH_KEY = "AutoBatteryPowerPath"
+AUTO_BATTERY_AC_POWER_PATH_KEY = "AutoBatteryAcPowerPath"
+AUTO_BATTERY_PV_POWER_PATH_KEY = "AutoBatteryPvPowerPath"
+AUTO_BATTERY_GRID_INTERACTION_PATH_KEY = "AutoBatteryGridInteractionPath"
+AUTO_BATTERY_OPERATING_MODE_PATH_KEY = "AutoBatteryOperatingModePath"
+AUTO_ALLOW_WITHOUT_BATTERY_SOC_KEY = "AutoAllowWithoutBatterySoc"
+DEFAULT_BATTERY_CHEMISTRY = "lfp"
 
 
 def load_auto_battery_source_config(svc: Any, defaults: configparser.SectionProxy) -> None:

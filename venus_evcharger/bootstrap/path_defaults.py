@@ -11,11 +11,11 @@ from venus_evcharger.backend.config import backend_mode_for_service, backend_typ
 PathSpec = tuple[Any, Callable[[Any, Any], str] | None]
 PathMap = dict[str, PathSpec]
 
-_METER_BACKEND_ROLE = "meter"  # pragma: no mutate
-_SWITCH_BACKEND_ROLE = "switch"  # pragma: no mutate
-_CHARGER_BACKEND_ROLE = "charger"  # pragma: no mutate
-_METER_BACKEND_DEFAULT = "shelly_meter"  # pragma: no mutate
-_SWITCH_BACKEND_DEFAULT = "shelly_contactor_switch"  # pragma: no mutate
+_METER_BACKEND_ROLE = "meter"
+_SWITCH_BACKEND_ROLE = "switch"
+_CHARGER_BACKEND_ROLE = "charger"
+_METER_BACKEND_DEFAULT = "shelly_meter"
+_SWITCH_BACKEND_DEFAULT = "shelly_contactor_switch"
 
 
 def _diagnostic_flag(svc: Any, attribute_name: str) -> int:

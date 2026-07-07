@@ -204,7 +204,8 @@ class ShellyIoCapabilities(ShellyIoRequests):
         if explicit is not None:
             return explicit
         if hasattr(self.service, attribute):
-            return getattr(self.service, attribute)
+            value: object = getattr(self.service, attribute)
+            return value
         return None
 
     def _store_runtime_switch_snapshot(self, switch_state: object | None, now: float | None = None) -> None:

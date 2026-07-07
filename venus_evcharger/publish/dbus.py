@@ -13,6 +13,10 @@ class DbusPublishController(_DbusPublishDiagnostics):
 
     PHASE_NAMES: tuple[str, str, str] = ("L1", "L2", "L3")
 
-    def __init__(self, service: Any, age_seconds_func: Callable[[Any, float], float]) -> None:
+    def __init__(
+        self,
+        service: Any,
+        age_seconds_func: Callable[[float | int | None, float | int | None], int],
+    ) -> None:
         self.service: Any = service
         self._age_seconds = age_seconds_func

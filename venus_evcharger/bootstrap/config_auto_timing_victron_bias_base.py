@@ -8,17 +8,17 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-BIAS_ENABLED_KEY = "AutoBatteryDischargeBalanceVictronBiasEnabled"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_SOURCE_ID_KEY = "AutoBatteryDischargeBalanceVictronBiasSourceId"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_SERVICE_KEY = "AutoBatteryDischargeBalanceVictronBiasService"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_PATH_KEY = "AutoBatteryDischargeBalanceVictronBiasPath"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_BASE_SETPOINT_KEY = "AutoBatteryDischargeBalanceVictronBiasBaseSetpointWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_DEADBAND_KEY = "AutoBatteryDischargeBalanceVictronBiasDeadbandWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_ACTIVATION_MODE_KEY = "AutoBatteryDischargeBalanceVictronBiasActivationMode"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_SUPPORT_MODE_KEY = "AutoBatteryDischargeBalanceVictronBiasSupportMode"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-DEFAULT_FALSE = "0"  # pragma: no mutate - any non-true token normalizes to False.
-DEFAULT_ACTIVATION_MODE = "always"  # pragma: no mutate - normalized with lower() before use.
-DEFAULT_SUPPORT_MODE = "allow_experimental"  # pragma: no mutate - normalized with lower() before use.
+BIAS_ENABLED_KEY = "AutoBatteryDischargeBalanceVictronBiasEnabled"
+BIAS_SOURCE_ID_KEY = "AutoBatteryDischargeBalanceVictronBiasSourceId"
+BIAS_SERVICE_KEY = "AutoBatteryDischargeBalanceVictronBiasService"
+BIAS_PATH_KEY = "AutoBatteryDischargeBalanceVictronBiasPath"
+BIAS_BASE_SETPOINT_KEY = "AutoBatteryDischargeBalanceVictronBiasBaseSetpointWatts"
+BIAS_DEADBAND_KEY = "AutoBatteryDischargeBalanceVictronBiasDeadbandWatts"
+BIAS_ACTIVATION_MODE_KEY = "AutoBatteryDischargeBalanceVictronBiasActivationMode"
+BIAS_SUPPORT_MODE_KEY = "AutoBatteryDischargeBalanceVictronBiasSupportMode"
+DEFAULT_FALSE = "0"
+DEFAULT_ACTIVATION_MODE = "always"
+DEFAULT_SUPPORT_MODE = "allow_experimental"
 
 
 def load_victron_bias_base_config(svc: Any, defaults: configparser.SectionProxy) -> None:

@@ -57,7 +57,7 @@ class TestShellyWallboxBackendModbusProfiles(unittest.TestCase):
     @staticmethod
     def _case_sensitive_parser(text: str) -> configparser.ConfigParser:
         parser = configparser.ConfigParser()
-        parser.optionxform = str  # type: ignore[method-assign]
+        setattr(parser, "optionxform", str)
         parser.read_string(text)
         return parser
 

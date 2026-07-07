@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import struct
 import unittest
+from typing import Any, cast
 from unittest import mock
 
 from venus_evcharger.backend.modbus_client import (
@@ -107,7 +108,7 @@ class TestShellyWallboxBackendModbusClient(unittest.TestCase):
 
     def test_response_pdu_sends_exact_request_and_timeout(self) -> None:
         transport = _Transport(bytes((0x03, 0x00)))
-        client = ModbusClient(transport, unit_id="7", timeout_seconds="1.5")  # type: ignore[arg-type]
+        client = ModbusClient(transport, unit_id=cast(Any, "7"), timeout_seconds=cast(Any, "1.5"))
 
         payload = b"\x00\x10\x00\x02"
         response_data = client._response_pdu(0x03, payload)

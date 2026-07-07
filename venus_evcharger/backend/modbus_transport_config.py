@@ -5,14 +5,16 @@ from __future__ import annotations
 
 import configparser
 
-from venus_evcharger.backend.modbus_transport import (
-    ModbusParity,
+from venus_evcharger.backend.modbus_transport_errors import (
     ModbusPortBusyError,
     ModbusPortOwnershipError,
     ModbusResponseError,
     ModbusSlaveOfflineError,
     ModbusTimeoutError,
     ModbusTransportError,
+)
+from venus_evcharger.backend.modbus_transport_types import (
+    ModbusParity,
     ModbusTransportKind,
     ModbusTransportSettings,
     SerialPortOwnerKind,

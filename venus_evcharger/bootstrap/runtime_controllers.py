@@ -21,7 +21,7 @@ from venus_evcharger.update.controller import UpdateCycleController
 def initialize_runtime_controllers(
     svc: Any,
     *,
-    age_seconds: Callable[..., float],
+    age_seconds: Callable[[float | int | None, float | int | None], int],
     health_code: Callable[[str], int],
     mode_uses_auto_logic: Callable[[Any], bool],
     normalize_mode: Callable[[Any], int],

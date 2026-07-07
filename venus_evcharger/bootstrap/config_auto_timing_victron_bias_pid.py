@@ -8,13 +8,13 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-BIAS_KP_KEY = "AutoBatteryDischargeBalanceVictronBiasKp"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_KI_KEY = "AutoBatteryDischargeBalanceVictronBiasKi"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_KD_KEY = "AutoBatteryDischargeBalanceVictronBiasKd"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_INTEGRAL_LIMIT_KEY = "AutoBatteryDischargeBalanceVictronBiasIntegralLimitWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_MAX_ABS_KEY = "AutoBatteryDischargeBalanceVictronBiasMaxAbsWatts"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_RAMP_RATE_KEY = "AutoBatteryDischargeBalanceVictronBiasRampRateWattsPerSecond"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-BIAS_MIN_UPDATE_KEY = "AutoBatteryDischargeBalanceVictronBiasMinUpdateSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
+BIAS_KP_KEY = "AutoBatteryDischargeBalanceVictronBiasKp"
+BIAS_KI_KEY = "AutoBatteryDischargeBalanceVictronBiasKi"
+BIAS_KD_KEY = "AutoBatteryDischargeBalanceVictronBiasKd"
+BIAS_INTEGRAL_LIMIT_KEY = "AutoBatteryDischargeBalanceVictronBiasIntegralLimitWatts"
+BIAS_MAX_ABS_KEY = "AutoBatteryDischargeBalanceVictronBiasMaxAbsWatts"
+BIAS_RAMP_RATE_KEY = "AutoBatteryDischargeBalanceVictronBiasRampRateWattsPerSecond"
+BIAS_MIN_UPDATE_KEY = "AutoBatteryDischargeBalanceVictronBiasMinUpdateSeconds"
 
 
 def load_victron_bias_pid_config(svc: Any, defaults: configparser.SectionProxy) -> None:

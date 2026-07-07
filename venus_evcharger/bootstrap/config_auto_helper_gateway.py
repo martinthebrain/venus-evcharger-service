@@ -9,16 +9,16 @@ from typing import Any
 from venus_evcharger.bootstrap.config_shared import _config_value
 
 
-DBUS_GATEWAY_RUN_DIR_KEY = "DbusGatewayRunDir"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_GATEWAY_CACHE_PATH_KEY = "DbusGatewayCachePath"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_GATEWAY_HEALTH_PATH_KEY = "DbusGatewayHealthPath"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_GATEWAY_SOCKET_PATH_KEY = "DbusGatewaySocketPath"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_GATEWAY_COMMAND_DIR_KEY = "DbusGatewayCommandDir"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_GATEWAY_CORE_COMMAND_DIR_KEY = "DbusGatewayCoreCommandDir"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_INTROSPECTION_ENABLED_KEY = "DbusIntrospectionEnabled"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_INTROSPECTION_SNAPSHOT_PATH_KEY = "DbusIntrospectionSnapshotPath"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_INTROSPECTION_REQUEST_PATH_KEY = "DbusIntrospectionRequestPath"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_INTROSPECTION_MAX_AGE_KEY = "DbusIntrospectionMaxAgeSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
+DBUS_GATEWAY_RUN_DIR_KEY = "DbusGatewayRunDir"
+DBUS_GATEWAY_CACHE_PATH_KEY = "DbusGatewayCachePath"
+DBUS_GATEWAY_HEALTH_PATH_KEY = "DbusGatewayHealthPath"
+DBUS_GATEWAY_SOCKET_PATH_KEY = "DbusGatewaySocketPath"
+DBUS_GATEWAY_COMMAND_DIR_KEY = "DbusGatewayCommandDir"
+DBUS_GATEWAY_CORE_COMMAND_DIR_KEY = "DbusGatewayCoreCommandDir"
+DBUS_INTROSPECTION_ENABLED_KEY = "DbusIntrospectionEnabled"
+DBUS_INTROSPECTION_SNAPSHOT_PATH_KEY = "DbusIntrospectionSnapshotPath"
+DBUS_INTROSPECTION_REQUEST_PATH_KEY = "DbusIntrospectionRequestPath"
+DBUS_INTROSPECTION_MAX_AGE_KEY = "DbusIntrospectionMaxAgeSeconds"
 
 
 def _enabled(value: object) -> bool:

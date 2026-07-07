@@ -9,8 +9,8 @@ from typing import Any
 from venus_evcharger.bootstrap.config_shared import _config_value
 from venus_evcharger.energy import load_energy_source_settings
 
-AUTO_DBUS_BACKOFF_BASE_KEY = "AutoDbusBackoffBaseSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_DBUS_BACKOFF_MAX_KEY = "AutoDbusBackoffMaxSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
+AUTO_DBUS_BACKOFF_BASE_KEY = "AutoDbusBackoffBaseSeconds"
+AUTO_DBUS_BACKOFF_MAX_KEY = "AutoDbusBackoffMaxSeconds"
 
 
 def load_auto_energy_source_config(svc: Any, defaults: configparser.SectionProxy) -> None:

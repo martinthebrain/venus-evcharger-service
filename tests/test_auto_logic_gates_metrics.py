@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from venus_evcharger.auto.logic_gates_metrics import _AutoDecisionMetrics
 
@@ -113,12 +113,12 @@ class MetricsHarness(_AutoDecisionMetrics):
 
     def _required_float(self, value: object) -> float:
         self.calls.append(("required_float", value))
-        return float(value)  # type: ignore[arg-type]
+        return float(cast(Any, value))
 
     def _non_negative_optional_float(self, value: object) -> float | None:
         self.calls.append(("non_negative", value))
         try:
-            numeric = float(value)  # type: ignore[arg-type]
+            numeric = float(cast(Any, value))
         except (TypeError, ValueError):
             return None
         return numeric if numeric >= 0.0 else None

@@ -8,12 +8,12 @@ from typing import Any
 
 from venus_evcharger.bootstrap.config_shared import _config_value
 
-AUTO_AVERAGE_WINDOW_KEY = "AutoAverageWindowSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_MIN_RUNTIME_KEY = "AutoMinRuntimeSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_MIN_OFFTIME_KEY = "AutoMinOfftimeSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_START_DELAY_KEY = "AutoStartDelaySeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_STOP_DELAY_KEY = "AutoStopDelaySeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
-AUTO_INPUT_CACHE_KEY = "AutoInputCacheSeconds"  # pragma: no mutate - ConfigParser option keys are case-insensitive.
+AUTO_AVERAGE_WINDOW_KEY = "AutoAverageWindowSeconds"
+AUTO_MIN_RUNTIME_KEY = "AutoMinRuntimeSeconds"
+AUTO_MIN_OFFTIME_KEY = "AutoMinOfftimeSeconds"
+AUTO_START_DELAY_KEY = "AutoStartDelaySeconds"
+AUTO_STOP_DELAY_KEY = "AutoStopDelaySeconds"
+AUTO_INPUT_CACHE_KEY = "AutoInputCacheSeconds"
 
 
 def load_auto_timing_core_config(svc: Any, defaults: configparser.SectionProxy) -> None:

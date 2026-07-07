@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
+from typing import Any, cast
 
 from requests.auth import HTTPDigestAuth
 
@@ -305,7 +306,7 @@ class TestGoEChargerBackend(unittest.TestCase):
         for amps in (None, "bad", -1):
             with self.subTest(amps=amps):
                 with self.assertRaisesRegex(ValueError, "Unsupported charger current"):
-                    backend.set_current(amps)  # type: ignore[arg-type]
+                    backend.set_current(cast(Any, amps))
         with self.assertRaises(ValueError) as zero_current:
             backend.set_current(0)
         self.assertEqual(str(zero_current.exception), "Unsupported charger current '0'")
@@ -313,7 +314,7 @@ class TestGoEChargerBackend(unittest.TestCase):
             backend.set_current(1)
 
         backend.set_phase_selection("P1")
-        backend.set_phase_selection(None)  # type: ignore[arg-type]
+        backend.set_phase_selection(cast(Any, None))
         backend._observed_phase_selection = "P1_P2"
         backend.set_phase_selection("P1_P2")
         with self.assertRaises(ValueError) as phase_error:

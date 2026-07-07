@@ -53,15 +53,15 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
         harness = _BootstrapRuntimeHarness(service)
 
         with (
-            patch("venus_evcharger.bootstrap.runtime.RuntimeSupportController") as runtime_controller,
-            patch("venus_evcharger.bootstrap.runtime.AutoDecisionController"),
-            patch("venus_evcharger.bootstrap.runtime.DbusPublishController"),
-            patch("venus_evcharger.bootstrap.runtime.ShellyIoController"),
-            patch("venus_evcharger.bootstrap.runtime.build_service_backends", return_value=resolved),
-            patch("venus_evcharger.bootstrap.runtime.ServiceStateController") as state_controller_cls,
-            patch("venus_evcharger.bootstrap.runtime.DbusWriteController"),
-            patch("venus_evcharger.bootstrap.runtime.AutoInputSupervisor"),
-            patch("venus_evcharger.bootstrap.runtime.UpdateCycleController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.RuntimeSupportController") as runtime_controller,
+            patch("venus_evcharger.bootstrap.runtime_controllers.AutoDecisionController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.DbusPublishController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.ShellyIoController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.build_service_backends", return_value=resolved),
+            patch("venus_evcharger.bootstrap.runtime_controllers.ServiceStateController") as state_controller_cls,
+            patch("venus_evcharger.bootstrap.runtime_controllers.DbusWriteController"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.AutoInputSupervisor"),
+            patch("venus_evcharger.bootstrap.runtime_controllers.UpdateCycleController"),
         ):
             runtime_controller.return_value.initialize_runtime_support = MagicMock()
             harness.initialize_controllers()

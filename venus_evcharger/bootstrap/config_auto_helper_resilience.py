@@ -9,20 +9,20 @@ from typing import Any
 from venus_evcharger.bootstrap.config_shared import _config_value
 
 
-AUTO_INPUT_HELPER_RESTART_KEY = "AutoInputHelperRestartSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_INPUT_HELPER_STALE_KEY = "AutoInputHelperStaleSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_SHELLY_SOFT_FAIL_KEY = "AutoShellySoftFailSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_CONTACTOR_FAULT_LATCH_COUNT_KEY = "AutoContactorFaultLatchCount"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_CONTACTOR_FAULT_LATCH_SECONDS_KEY = "AutoContactorFaultLatchSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_WATCHDOG_STALE_KEY = "AutoWatchdogStaleSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_WATCHDOG_RECOVERY_KEY = "AutoWatchdogRecoverySeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_WATCHDOG_RESTART_ATTEMPTS_KEY = "AutoWatchdogRestartAttempts"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_STARTUP_WARMUP_KEY = "AutoStartupWarmupSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-AUTO_MANUAL_OVERRIDE_KEY = "AutoManualOverrideSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-STARTUP_DEVICE_INFO_RETRIES_KEY = "StartupDeviceInfoRetries"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-STARTUP_DEVICE_INFO_RETRY_SECONDS_KEY = "StartupDeviceInfoRetrySeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-SHELLY_REQUEST_TIMEOUT_KEY = "ShellyRequestTimeoutSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
-DBUS_METHOD_TIMEOUT_KEY = "DbusMethodTimeoutSeconds"  # pragma: no mutate - ConfigParser keys are case-insensitive.
+AUTO_INPUT_HELPER_RESTART_KEY = "AutoInputHelperRestartSeconds"
+AUTO_INPUT_HELPER_STALE_KEY = "AutoInputHelperStaleSeconds"
+AUTO_SHELLY_SOFT_FAIL_KEY = "AutoShellySoftFailSeconds"
+AUTO_CONTACTOR_FAULT_LATCH_COUNT_KEY = "AutoContactorFaultLatchCount"
+AUTO_CONTACTOR_FAULT_LATCH_SECONDS_KEY = "AutoContactorFaultLatchSeconds"
+AUTO_WATCHDOG_STALE_KEY = "AutoWatchdogStaleSeconds"
+AUTO_WATCHDOG_RECOVERY_KEY = "AutoWatchdogRecoverySeconds"
+AUTO_WATCHDOG_RESTART_ATTEMPTS_KEY = "AutoWatchdogRestartAttempts"
+AUTO_STARTUP_WARMUP_KEY = "AutoStartupWarmupSeconds"
+AUTO_MANUAL_OVERRIDE_KEY = "AutoManualOverrideSeconds"
+STARTUP_DEVICE_INFO_RETRIES_KEY = "StartupDeviceInfoRetries"
+STARTUP_DEVICE_INFO_RETRY_SECONDS_KEY = "StartupDeviceInfoRetrySeconds"
+SHELLY_REQUEST_TIMEOUT_KEY = "ShellyRequestTimeoutSeconds"
+DBUS_METHOD_TIMEOUT_KEY = "DbusMethodTimeoutSeconds"
 
 
 def load_helper_resilience_config(svc: Any, defaults: configparser.SectionProxy) -> None:

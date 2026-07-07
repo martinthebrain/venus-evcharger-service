@@ -19,6 +19,13 @@ from venus_evcharger.energy.recommendation_schema import (
     recommendation_bundle_manifest_path,
     validate_recommendation_bundle_manifest,
 )
+from venus_evcharger.bootstrap.wizard_render import CasePreservingConfigParser
+from venus_evcharger.bootstrap.wizard_energy_bundle import (
+    bundle_block_label,
+    bundle_labels,
+    bundle_source_id,
+    bundle_target_names,
+)
 
 
 def _source_text(source: dict[str, object], key: str) -> str:
@@ -50,16 +57,14 @@ def _config_text_value(values: Mapping[str, object], key: str) -> str:
     return str(value).strip()
 
 
-def _case_preserving_config(config_path: Path):
-    from .wizard_render import CasePreservingConfigParser
-
+def _case_preserving_config(config_path: Path) -> CasePreservingConfigParser:
     parser = CasePreservingConfigParser()
-    parser.read(config_path, encoding="utf-8")  # pragma: no mutate
+    parser.read(config_path, encoding="utf-8")
     return parser
 
 
 def _read_text_utf8(path: Path) -> str:
-    return path.read_text(encoding="utf-8")  # pragma: no mutate
+    return path.read_text(encoding="utf-8")
 
 
 def _config_auto_energy_sources_value(config_path: Path) -> str:
@@ -407,56 +412,6 @@ def structured_energy_source_from_block(
         field_name, parsed_value = parsed
         fields[field_name] = parsed_value
     return fields
-
-
-def bundle_source_id(config_snippet: str, default_source_id: str) -> str:
-    for raw_line in config_snippet.splitlines():
-        line = raw_line.strip()
-        if not line.startswith("AutoEnergySource.") or "=" not in line:
-            continue
-        remainder = line[len("AutoEnergySource.") :]
-        source_id, separator, _field = remainder.partition(".")
-        if separator != ".":
-            continue
-        source_id = source_id.strip()
-        if source_id:
-            return source_id
-    return default_source_id
-
-
-def bundle_target_names(source_id: str) -> dict[str, str]:
-    normalized_source_id = source_id.strip() or "huawei"
-    if normalized_source_id == "huawei":
-        return {
-            "ini": "wizard-huawei-energy.ini",
-            "wizard": "wizard-huawei-energy.wizard.txt",
-            "summary": "wizard-huawei-energy.summary.txt",
-        }
-    return {
-        "ini": f"wizard-energy-{normalized_source_id}.ini",
-        "wizard": f"wizard-energy-{normalized_source_id}.wizard.txt",
-        "summary": f"wizard-energy-{normalized_source_id}.summary.txt",
-    }
-
-
-def bundle_labels(source_id: str) -> tuple[str, str]:
-    normalized_source_id = source_id.strip() or "huawei"
-    if normalized_source_id == "huawei":
-        return (
-            "External energy source integration",
-            "Set usable battery capacity for weighted combined SOC",
-        )
-    return (
-        f"External energy source integration ({normalized_source_id})",
-        f"Set usable battery capacity for weighted combined SOC ({normalized_source_id})",
-    )
-
-
-def bundle_block_label(source_id: str) -> str:
-    normalized_source_id = source_id.strip() or "huawei"
-    if normalized_source_id == "huawei":
-        return "External energy source"
-    return f"External energy source ({normalized_source_id})"
 
 
 def manual_review_union(

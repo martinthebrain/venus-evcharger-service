@@ -69,7 +69,7 @@ def _resolved_member_path(group_config_path: str, raw_value: object) -> Path:
     return Path(group_config_path).resolve().parent / path
 
 
-def _member_backend_type(config_path: Path) -> str:  # pragma: no mutate block - ConfigParser option keys are case-insensitive.
+def _member_backend_type(config_path: Path) -> str:
     """Return one normalized child switch backend type from its own config file."""
     parser = _config(str(config_path))
     if parser.has_section("Adapter"):
