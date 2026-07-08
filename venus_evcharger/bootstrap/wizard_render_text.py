@@ -111,13 +111,30 @@ def _maybe_insert_default_assignments(
     inserted: bool,
     in_default_section: bool,
 ) -> tuple[list[str], bool]:
-    if not isinstance(inserted, bool) or not isinstance(in_default_section, bool):
-        raise TypeError("inserted and in_default_section must be bool")
-    if inserted or not in_default_section or not _is_section_header(line):
+    _validate_default_insert_flags(inserted, in_default_section)
+    if not _should_insert_default_assignments(line, inserted=inserted, in_default_section=in_default_section):
         return rendered, inserted
     rendered.extend(_render_remaining_default_assignments(remaining))
     remaining.clear()
     return rendered, True
+
+
+def _validate_default_insert_flags(inserted: bool, in_default_section: bool) -> None:
+    if not isinstance(inserted, bool) or not isinstance(in_default_section, bool):
+        raise TypeError("inserted and in_default_section must be bool")
+
+
+def _should_insert_default_assignments(
+    line: str,
+    *,
+    inserted: bool,
+    in_default_section: bool,
+) -> bool:
+    if inserted:
+        return False
+    if not in_default_section:
+        return False
+    return _is_section_header(line)
 
 
 def _matching_default_assignment_key(line: str, remaining: dict[str, str]) -> str | None:

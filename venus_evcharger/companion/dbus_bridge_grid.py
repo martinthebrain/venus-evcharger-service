@@ -134,16 +134,44 @@ class _EnergyCompanionDbusBridgeGrid:
         normalized_alpha: float,
         smoothing_max_jump_watts: float,
     ) -> float:
-        if not isinstance(previous_value, (int, float)):
+        previous_numeric = _EnergyCompanionDbusBridgeGrid._grid_numeric_value(previous_value)
+        if previous_numeric is None:
             return float(numeric_value)
-        if normalized_alpha == 0.0:
+        if _EnergyCompanionDbusBridgeGrid._grid_smoothing_passthrough(normalized_alpha):
             return float(numeric_value)
-        if normalized_alpha == 1.0:
+        if _EnergyCompanionDbusBridgeGrid._grid_jump_exceeds_limit(
+            numeric_value,
+            previous_numeric,
+            smoothing_max_jump_watts,
+        ):
             return float(numeric_value)
+        return _EnergyCompanionDbusBridgeGrid._grid_weighted_smoothed_value(
+            numeric_value,
+            previous_numeric,
+            normalized_alpha,
+        )
+
+    @staticmethod
+    def _grid_smoothing_passthrough(normalized_alpha: float) -> bool:
+        return normalized_alpha in (0.0, 1.0)
+
+    @staticmethod
+    def _grid_jump_exceeds_limit(
+        numeric_value: float,
+        previous_value: float,
+        smoothing_max_jump_watts: float,
+    ) -> bool:
+        max_jump_watts = float(smoothing_max_jump_watts)
         delta_watts = abs(float(numeric_value) - float(previous_value))
-        if float(smoothing_max_jump_watts) > 0.0 and delta_watts > float(smoothing_max_jump_watts):
-            return float(numeric_value)
-        return float((normalized_alpha * numeric_value) + ((1.0 - normalized_alpha) * float(previous_value)))
+        return max_jump_watts > 0.0 and delta_watts > max_jump_watts
+
+    @staticmethod
+    def _grid_weighted_smoothed_value(
+        numeric_value: float,
+        previous_value: float,
+        normalized_alpha: float,
+    ) -> float:
+        return float((normalized_alpha * numeric_value) + ((1.0 - normalized_alpha) * previous_value))
 
     @staticmethod
     def _grid_resolved_payload(value: float, connected: bool, last_good_at: float | None) -> dict[str, Any]:
