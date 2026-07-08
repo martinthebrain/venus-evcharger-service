@@ -113,8 +113,8 @@ def _add_events_parser(
 ) -> None:
     events_parser = subparsers.add_parser(name, help=help_text)
     events_parser.add_argument("--limit", type=int, default=limit)
-    events_parser.add_argument("--after", type=int, default=None)
-    events_parser.add_argument("--resume", type=int, default=None)
+    events_parser.add_argument("--after", type=int)
+    events_parser.add_argument("--resume", type=int)
     events_parser.add_argument("--timeout", type=float, default=timeout)
     events_parser.add_argument("--heartbeat", type=float, default=heartbeat)
     events_parser.add_argument("--kind", action="append", default=[], help="Optional event kind filter.")

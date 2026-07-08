@@ -24,11 +24,8 @@ from venus_evcharger.bootstrap.wizard_inventory_support import (
 )
 from venus_evcharger.bootstrap.wizard_models import WizardResult
 from venus_evcharger.bootstrap.wizard_render import default_config_path, default_template_path
-from venus_evcharger.bootstrap.wizard_runtime import (
-    _confirm_write,
-    _existing_output_paths,
-    configure_wallbox,
-)
+from venus_evcharger.bootstrap.wizard_runtime import configure_wallbox
+from venus_evcharger.bootstrap.wizard_runtime_write import confirm_write, existing_output_paths
 
 
 def resolve_live_check(namespace: argparse.Namespace) -> bool:
@@ -79,8 +76,8 @@ def run_wizard(namespace: argparse.Namespace) -> WizardResult:
         suggested_energy_capacity_wh=suggested_energy_capacity_wh,
         suggested_energy_capacity_overrides=suggested_energy_capacity_overrides,
     )
-    existing_files = _existing_output_paths(Path(namespace.config_path), preview.generated_files)
-    _confirm_write(namespace, preview, existing_files)
+    existing_files = existing_output_paths(Path(namespace.config_path), preview.generated_files)
+    confirm_write(namespace, preview, existing_files)
     if namespace.dry_run:
         return preview
     return configure_wallbox(

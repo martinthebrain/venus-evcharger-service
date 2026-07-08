@@ -54,8 +54,8 @@ class BootstrapWizardMainTests(unittest.TestCase):
             patch("venus_evcharger.bootstrap.wizard_main.resolved_energy_capacity_wh", return_value=15360.0) as capacity,
             patch("venus_evcharger.bootstrap.wizard_main.resolved_energy_capacity_overrides", return_value={"hybrid": 7680.0}) as overrides,
             patch("venus_evcharger.bootstrap.wizard_main.configure_wallbox", side_effect=[preview, persisted]) as configure,
-            patch("venus_evcharger.bootstrap.wizard_main._existing_output_paths", return_value=("existing.ini",)) as existing,
-            patch("venus_evcharger.bootstrap.wizard_main._confirm_write") as confirm,
+            patch("venus_evcharger.bootstrap.wizard_main.existing_output_paths", return_value=("existing.ini",)) as existing,
+            patch("venus_evcharger.bootstrap.wizard_main.confirm_write") as confirm,
         ):
             result = wizard_main.run_wizard(namespace)
 
@@ -111,8 +111,8 @@ class BootstrapWizardMainTests(unittest.TestCase):
             patch("venus_evcharger.bootstrap.wizard_main.resolved_energy_capacity_wh", return_value=None),
             patch("venus_evcharger.bootstrap.wizard_main.resolved_energy_capacity_overrides", return_value=None),
             patch("venus_evcharger.bootstrap.wizard_main.configure_wallbox", return_value=preview) as configure,
-            patch("venus_evcharger.bootstrap.wizard_main._existing_output_paths", return_value=tuple()),
-            patch("venus_evcharger.bootstrap.wizard_main._confirm_write"),
+            patch("venus_evcharger.bootstrap.wizard_main.existing_output_paths", return_value=tuple()),
+            patch("venus_evcharger.bootstrap.wizard_main.confirm_write"),
         ):
             self.assertIs(wizard_main.run_wizard(namespace), preview)
 
@@ -133,8 +133,8 @@ class BootstrapWizardMainTests(unittest.TestCase):
             patch("venus_evcharger.bootstrap.wizard_main.resolved_energy_capacity_wh", return_value=None),
             patch("venus_evcharger.bootstrap.wizard_main.resolved_energy_capacity_overrides", return_value=None),
             patch("venus_evcharger.bootstrap.wizard_main.configure_wallbox", side_effect=[preview, persisted]) as configure,
-            patch("venus_evcharger.bootstrap.wizard_main._existing_output_paths", return_value=tuple()),
-            patch("venus_evcharger.bootstrap.wizard_main._confirm_write"),
+            patch("venus_evcharger.bootstrap.wizard_main.existing_output_paths", return_value=tuple()),
+            patch("venus_evcharger.bootstrap.wizard_main.confirm_write"),
         ):
             self.assertIs(wizard_main.run_wizard(namespace), persisted)
 

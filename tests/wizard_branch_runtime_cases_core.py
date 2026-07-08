@@ -12,7 +12,10 @@ from tests.wizard_branch_runtime_cases_common import (
     wizard,
     wizard_main,
     wizard_render,
+    wizard_render_secrets,
     wizard_runtime,
+    wizard_runtime_live,
+    wizard_runtime_write,
 )
 
 
@@ -48,7 +51,7 @@ class _WizardBranchRuntimeCoreCases:
 
     def _assert_wizard_live_connectivity_paths(self, temp_path: Path, main_path: Path) -> None:
         with self.assertRaisesRegex(TypeError, "did not render to a JSON object"):
-            wizard_runtime._json_ready_dict(["not", "an", "object"], "test payload")
+            wizard_runtime_live.json_ready_dict(["not", "an", "object"], "test payload")
 
         runtime = SimpleNamespace(
             meter_config_path=Path("meter.ini"),
@@ -67,7 +70,7 @@ class _WizardBranchRuntimeCoreCases:
         config_path = temp_path / "default-live-check.ini"
         expected_payload = {"ok": True, "roles": {"meter": {"status": "ok"}}}
         with patch(
-            "venus_evcharger.bootstrap.wizard_runtime._live_check_rendered_setup",
+            "venus_evcharger.bootstrap.wizard_runtime.live_check_rendered_setup",
             return_value=expected_payload,
         ) as default_runner:
             result = wizard.configure_wallbox(
@@ -132,13 +135,13 @@ class _WizardBranchRuntimeCoreCases:
     ) -> None:
         with (
             patch(
-                "venus_evcharger.bootstrap.wizard_runtime.build_service_backends",
+                "venus_evcharger.bootstrap.wizard_runtime_live.build_service_backends",
                 return_value=SimpleNamespace(runtime=runtime, meter=None, switch=None, charger=None),
             ),
-            patch("venus_evcharger.bootstrap.wizard_runtime.probe_meter_backend", return_value={"type": "meter"}) as meter_probe,
-            patch("venus_evcharger.bootstrap.wizard_runtime.read_charger_backend", side_effect=RuntimeError("boom")),
+            patch("venus_evcharger.bootstrap.wizard_runtime_live.probe_meter_backend", return_value={"type": "meter"}) as meter_probe,
+            patch("venus_evcharger.bootstrap.wizard_runtime_live.read_charger_backend", side_effect=RuntimeError("boom")),
         ):
-            payload = wizard_runtime._live_connectivity_payload(main_path, ("meter", "charger"))
+            payload = wizard_runtime_live.live_connectivity_payload(main_path, ("meter", "charger"))
 
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["roles"]["switch"]["status"], "skipped")
@@ -147,14 +150,14 @@ class _WizardBranchRuntimeCoreCases:
 
         with (
             patch(
-                "venus_evcharger.bootstrap.wizard_runtime.build_service_backends",
+                "venus_evcharger.bootstrap.wizard_runtime_live.build_service_backends",
                 return_value=SimpleNamespace(runtime=runtime, meter=None, switch=None, charger=None),
             ),
-            patch("venus_evcharger.bootstrap.wizard_runtime.probe_meter_backend", return_value={"type": "meter"}),
-            patch("venus_evcharger.bootstrap.wizard_runtime.probe_switch_backend", return_value={"type": "switch"}),
-            patch("venus_evcharger.bootstrap.wizard_runtime.read_charger_backend", return_value={"type": "charger"}),
+            patch("venus_evcharger.bootstrap.wizard_runtime_live.probe_meter_backend", return_value={"type": "meter"}),
+            patch("venus_evcharger.bootstrap.wizard_runtime_live.probe_switch_backend", return_value={"type": "switch"}),
+            patch("venus_evcharger.bootstrap.wizard_runtime_live.read_charger_backend", return_value={"type": "charger"}),
         ):
-            skipped_payload = wizard_runtime._live_connectivity_payload(main_path, None)
+            skipped_payload = wizard_runtime_live.live_connectivity_payload(main_path, None)
         self.assertEqual(skipped_payload["roles"]["switch"]["status"], "skipped")
         self.assertEqual(skipped_payload["roles"]["switch"]["reason"], "not configured")
 
@@ -166,8 +169,8 @@ class _WizardBranchRuntimeCoreCases:
             charger_config_path=None,
         )
         combined_backends = self._combined_backends(combined_runtime)
-        with patch("venus_evcharger.bootstrap.wizard_runtime.build_service_backends", return_value=combined_backends):
-            combined_payload = wizard_runtime._live_connectivity_payload(main_path, None)
+        with patch("venus_evcharger.bootstrap.wizard_runtime_live.build_service_backends", return_value=combined_backends):
+            combined_payload = wizard_runtime_live.live_connectivity_payload(main_path, None)
 
         self.assertTrue(combined_payload["ok"])
         self.assertEqual(combined_payload["roles"]["meter"]["status"], "ok")
@@ -182,8 +185,8 @@ class _WizardBranchRuntimeCoreCases:
             switch=combined_backends.switch,
             charger=None,
         )
-        with patch("venus_evcharger.bootstrap.wizard_runtime.build_service_backends", return_value=combined_backends_missing_meter):
-            missing_combined_payload = wizard_runtime._live_connectivity_payload(main_path, ("meter",))
+        with patch("venus_evcharger.bootstrap.wizard_runtime_live.build_service_backends", return_value=combined_backends_missing_meter):
+            missing_combined_payload = wizard_runtime_live.live_connectivity_payload(main_path, ("meter",))
         self.assertEqual(missing_combined_payload["roles"]["meter"]["reason"], "not configured")
 
         combined_backends_charger = SimpleNamespace(
@@ -192,7 +195,7 @@ class _WizardBranchRuntimeCoreCases:
             switch=combined_backends.switch,
             charger=SimpleNamespace(read_charger_state=lambda: {"online": True}),
         )
-        combined_role = wizard_runtime._combined_role_payload(
+        combined_role = wizard_runtime_live.combined_role_payload(
             "charger",
             combined_backends_charger.charger,
             main_path,
@@ -228,17 +231,17 @@ class _WizardBranchRuntimeCoreCases:
             ),
             charger=None,
         )
-        with patch("venus_evcharger.bootstrap.wizard_runtime.build_service_backends", return_value=error_switch_backends):
-            error_payload = wizard_runtime._live_connectivity_payload(main_path, ("switch",))
+        with patch("venus_evcharger.bootstrap.wizard_runtime_live.build_service_backends", return_value=error_switch_backends):
+            error_payload = wizard_runtime_live.live_connectivity_payload(main_path, ("switch",))
         self.assertFalse(error_payload["ok"])
         self.assertEqual(error_payload["roles"]["switch"]["status"], "error")
 
     def _assert_rendered_live_checks(self, main_path: Path, wizard_runtime: object) -> None:
         with patch(
-            "venus_evcharger.bootstrap.wizard_runtime._live_connectivity_payload",
+            "venus_evcharger.bootstrap.wizard_runtime_live.live_connectivity_payload",
             side_effect=lambda path, roles, *args: self._rendered_live_result(path, roles, *args),
         ):
-            live_payload = wizard_runtime._live_check_rendered_setup(
+            live_payload = wizard_runtime_live.live_check_rendered_setup(
                 "[DEFAULT]\nPassword=main-secret\nControlApiAuthToken=token-secret\nAdapter=adapter.ini\n",
                 {"adapter.ini": "[Adapter]\nPassword=adapter-secret\n"},
                 "config.ini",
@@ -247,10 +250,10 @@ class _WizardBranchRuntimeCoreCases:
         self.assertTrue(live_payload["ok"])
 
         with patch(
-            "venus_evcharger.bootstrap.wizard_runtime._live_connectivity_payload",
+            "venus_evcharger.bootstrap.wizard_runtime_live.live_connectivity_payload",
             side_effect=lambda path, roles, *args: self._rendered_live_result(path, roles, *args),
         ):
-            runtime_live_payload = wizard_runtime._live_check_rendered_setup(
+            runtime_live_payload = wizard_runtime_live.live_check_rendered_setup(
                 "[DEFAULT]\nPassword=main-secret\nControlApiAuthToken=token-secret\nAdapter=adapter.ini\n",
                 {"adapter.ini": "[Adapter]\nPassword=adapter-secret\n"},
                 "config.ini",
@@ -259,18 +262,18 @@ class _WizardBranchRuntimeCoreCases:
         self.assertTrue(runtime_live_payload["ok"])
 
         with patch(
-            "venus_evcharger.bootstrap.wizard_runtime._live_connectivity_payload_with_hooks",
+            "venus_evcharger.bootstrap.wizard_runtime_live.live_connectivity_payload_with_hooks",
             return_value={"ok": True, "checked_roles": ("meter",), "roles": {}},
         ) as runtime_hooks:
-            direct_runtime_payload = wizard_runtime._live_connectivity_payload(main_path, ("meter",))
+            direct_runtime_payload = wizard_runtime_live.live_connectivity_payload(main_path, ("meter",))
         self.assertTrue(direct_runtime_payload["ok"])
         runtime_hooks.assert_called_once()
 
     def _assert_live_check_secret_overlay_paths(self, main_path: Path, wizard_runtime: object) -> None:
         from venus_evcharger.bootstrap import wizard_render
 
-        defaults = wizard_runtime.configparser.ConfigParser()["DEFAULT"]
-        self.assertEqual(wizard_runtime._secret_default(defaults, {"Password": "secret"}, "Password"), "secret")
+        defaults = wizard_render_secrets.configparser.ConfigParser()["DEFAULT"]
+        self.assertEqual(wizard_render_secrets.secret_default(defaults, {"Password": "secret"}, "Password"), "secret")
         self.assertEqual(wizard_render._secret_default(defaults, {"Password": "secret"}, "Password"), "secret")
 
         runtime = SimpleNamespace(
@@ -288,7 +291,7 @@ class _WizardBranchRuntimeCoreCases:
             self.assertEqual(service.password, "secret")
             return SimpleNamespace(runtime=runtime, meter=meter_backend, switch=None, charger=None)
 
-        payload = wizard_runtime._live_connectivity_payload_with_hooks(
+        payload = wizard_runtime_live.live_connectivity_payload_with_hooks(
             main_path,
             ("meter",),
             secret_defaults={"Password": "secret"},
@@ -300,7 +303,7 @@ class _WizardBranchRuntimeCoreCases:
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["roles"]["meter"]["payload"]["meter"]["power_w"], 12.0)
 
-        missing_backend_payload = wizard_runtime._live_connectivity_payload_with_hooks(
+        missing_backend_payload = wizard_runtime_live.live_connectivity_payload_with_hooks(
             main_path,
             ("meter",),
             secret_defaults={"Password": "secret"},
@@ -366,61 +369,69 @@ class _WizardBranchRuntimeCoreCases:
         return _result()
 
     def _assert_wizard_write_guard_paths(self, preview: object) -> None:
-        self.assertFalse(wizard_runtime._non_interactive_write_allowed(_namespace(), tuple()))
+        self.assertFalse(wizard_runtime_write.non_interactive_write_allowed(_namespace(), tuple()))
         with self.assertRaisesRegex(ValueError, "Refusing to overwrite existing files"):
-            wizard_runtime._non_interactive_write_allowed(_namespace(non_interactive=True), ("existing.ini",))
-        self.assertTrue(wizard_runtime._non_interactive_write_allowed(_namespace(non_interactive=True, force=True), ("existing.ini",)))
+            wizard_runtime_write.non_interactive_write_allowed(_namespace(non_interactive=True), ("existing.ini",))
+        self.assertTrue(
+            wizard_runtime_write.non_interactive_write_allowed(_namespace(non_interactive=True, force=True), ("existing.ini",))
+        )
 
-        with patch("venus_evcharger.bootstrap.wizard_runtime._interactive_write_confirmed", return_value=False):
+        with patch("venus_evcharger.bootstrap.wizard_runtime_write.interactive_write_confirmed", return_value=False):
             with self.assertRaisesRegex(ValueError, "cancelled"):
-                wizard_runtime._confirm_write(_namespace(), preview, ("existing.ini",))
-        with patch("venus_evcharger.bootstrap.wizard_runtime._interactive_write_confirmed", return_value=True):
-            wizard_runtime._confirm_write(_namespace(), preview, ("existing.ini",))
+                wizard_runtime_write.confirm_write(_namespace(), preview, ("existing.ini",))
+        with patch("venus_evcharger.bootstrap.wizard_runtime_write.interactive_write_confirmed", return_value=True):
+            wizard_runtime_write.confirm_write(_namespace(), preview, ("existing.ini",))
         with (
-            patch("venus_evcharger.bootstrap.wizard_runtime.prompt_yes_no", return_value=True),
+            patch("venus_evcharger.bootstrap.wizard_runtime_write.prompt_yes_no", return_value=True),
             redirect_stdout(io.StringIO()),
         ):
-            self.assertTrue(wizard_runtime._interactive_write_confirmed(preview, ("existing.ini",)))
+            self.assertTrue(wizard_runtime_write.interactive_write_confirmed(preview, ("existing.ini",)))
 
         with patch("venus_evcharger.bootstrap.wizard_main.prompt_yes_no", return_value=True):
             self.assertTrue(wizard_main.resolve_live_check(_namespace()))
         self.assertFalse(wizard_main.resolve_live_check(_namespace(non_interactive=True)))
-        self.assertTrue(wizard_runtime._skip_write_confirmation(_namespace(dry_run=True), ("existing.ini",)))
-        self.assertTrue(wizard_runtime._skip_write_confirmation(_namespace(non_interactive=True, force=True), ("existing.ini",)))
-        self.assertTrue(wizard_runtime._skip_write_confirmation(_namespace(yes=True), tuple()))
-        self.assertFalse(wizard_runtime._skip_write_confirmation(_namespace(), tuple()))
+        self.assertTrue(wizard_runtime_write.skip_write_confirmation(_namespace(dry_run=True), ("existing.ini",)))
+        self.assertTrue(
+            wizard_runtime_write.skip_write_confirmation(_namespace(non_interactive=True, force=True), ("existing.ini",))
+        )
+        self.assertTrue(wizard_runtime_write.skip_write_confirmation(_namespace(yes=True), tuple()))
+        self.assertFalse(wizard_runtime_write.skip_write_confirmation(_namespace(), tuple()))
         with (
-            patch("venus_evcharger.bootstrap.wizard_runtime.prompt_yes_no", return_value=True),
+            patch("venus_evcharger.bootstrap.wizard_runtime_write.prompt_yes_no", return_value=True),
             redirect_stdout(io.StringIO()),
         ):
-            self.assertTrue(wizard_runtime._interactive_write_confirmed(preview, tuple()))
-        wizard_runtime._confirm_write(_namespace(dry_run=True), preview, ("existing.ini",))
+            self.assertTrue(wizard_runtime_write.interactive_write_confirmed(preview, tuple()))
+        wizard_runtime_write.confirm_write(_namespace(dry_run=True), preview, ("existing.ini",))
 
     def _assert_runtime_write_guard_paths(self, preview: object, wizard_runtime: object) -> None:
-        self.assertFalse(wizard_runtime._non_interactive_write_allowed(_namespace(), tuple()))
+        self.assertFalse(wizard_runtime_write.non_interactive_write_allowed(_namespace(), tuple()))
         with self.assertRaisesRegex(ValueError, "Refusing to overwrite existing files"):
-            wizard_runtime._non_interactive_write_allowed(_namespace(non_interactive=True), ("existing.ini",))
-        self.assertTrue(wizard_runtime._non_interactive_write_allowed(_namespace(non_interactive=True, force=True), ("existing.ini",)))
-        self.assertTrue(wizard_runtime._skip_write_confirmation(_namespace(dry_run=True), ("existing.ini",)))
-        self.assertTrue(wizard_runtime._skip_write_confirmation(_namespace(non_interactive=True, force=True), ("existing.ini",)))
-        self.assertTrue(wizard_runtime._skip_write_confirmation(_namespace(yes=True), tuple()))
-        self.assertFalse(wizard_runtime._skip_write_confirmation(_namespace(), tuple()))
+            wizard_runtime_write.non_interactive_write_allowed(_namespace(non_interactive=True), ("existing.ini",))
+        self.assertTrue(
+            wizard_runtime_write.non_interactive_write_allowed(_namespace(non_interactive=True, force=True), ("existing.ini",))
+        )
+        self.assertTrue(wizard_runtime_write.skip_write_confirmation(_namespace(dry_run=True), ("existing.ini",)))
+        self.assertTrue(
+            wizard_runtime_write.skip_write_confirmation(_namespace(non_interactive=True, force=True), ("existing.ini",))
+        )
+        self.assertTrue(wizard_runtime_write.skip_write_confirmation(_namespace(yes=True), tuple()))
+        self.assertFalse(wizard_runtime_write.skip_write_confirmation(_namespace(), tuple()))
         with (
-            patch("venus_evcharger.bootstrap.wizard_runtime.prompt_yes_no", return_value=True),
+            patch("venus_evcharger.bootstrap.wizard_runtime_write.prompt_yes_no", return_value=True),
             redirect_stdout(io.StringIO()),
         ):
-            self.assertTrue(wizard_runtime._interactive_write_confirmed(preview, ("existing.ini",)))
+            self.assertTrue(wizard_runtime_write.interactive_write_confirmed(preview, ("existing.ini",)))
         with (
-            patch("venus_evcharger.bootstrap.wizard_runtime.prompt_yes_no", return_value=True),
+            patch("venus_evcharger.bootstrap.wizard_runtime_write.prompt_yes_no", return_value=True),
             redirect_stdout(io.StringIO()),
         ):
-            self.assertTrue(wizard_runtime._interactive_write_confirmed(preview, tuple()))
-        wizard_runtime._confirm_write(_namespace(dry_run=True), preview, ("existing.ini",))
-        with patch("venus_evcharger.bootstrap.wizard_runtime._interactive_write_confirmed", return_value=True):
-            wizard_runtime._confirm_write(_namespace(), preview, ("existing.ini",))
-        with patch("venus_evcharger.bootstrap.wizard_runtime._interactive_write_confirmed", return_value=False):
+            self.assertTrue(wizard_runtime_write.interactive_write_confirmed(preview, tuple()))
+        wizard_runtime_write.confirm_write(_namespace(dry_run=True), preview, ("existing.ini",))
+        with patch("venus_evcharger.bootstrap.wizard_runtime_write.interactive_write_confirmed", return_value=True):
+            wizard_runtime_write.confirm_write(_namespace(), preview, ("existing.ini",))
+        with patch("venus_evcharger.bootstrap.wizard_runtime_write.interactive_write_confirmed", return_value=False):
             with self.assertRaisesRegex(ValueError, "cancelled"):
-                wizard_runtime._confirm_write(_namespace(), preview, ("existing.ini",))
+                wizard_runtime_write.confirm_write(_namespace(), preview, ("existing.ini",))
 
     def _assert_wizard_topology_render_paths(self) -> None:
         topology_answers = wizard.WizardAnswers(

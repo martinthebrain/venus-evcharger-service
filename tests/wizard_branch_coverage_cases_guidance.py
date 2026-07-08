@@ -138,7 +138,7 @@ class _WizardBranchCoverageGuidanceCases:
         self.assertIsNone(preset_transport_port("cfos-power-brain-modbus", "serial_rtu"))
         self.assertEqual(preset_transport_unit_id("abb-terra-ac-modbus"), 1)
 
-        timeout, phase_layout = preset_specific_defaults(_namespace(), _imported_defaults(), backend="template_charger", topology_preset=None, charger_preset=None)
+        timeout, phase_layout = preset_specific_defaults(_namespace(), _imported_defaults(), backend="template_charger", topology_preset=None)
         self.assertIsNone(timeout)
         self.assertEqual(phase_layout, "P1,P1_P2,P1_P2_P3")
 
@@ -148,7 +148,6 @@ class _WizardBranchCoverageGuidanceCases:
             profile="multi_adapter_topology",
             backend="goe_charger",
             topology_preset="goe-external-switch-group",
-            charger_preset=None,
             prompt_choice=lambda *_args: "P1,P1_P2_P3",
             prompt_text=lambda label, default: "6.5" if "timeout" in label else default,
         )

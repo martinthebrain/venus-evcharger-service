@@ -91,7 +91,6 @@ def preview_result(
         result_path=None,
         audit_path=None,
         topology_summary_path=None,
-        inventory_path=None,
         manual_review=manual_review,
         dry_run=dry_run,
         topology_config=topology_config_payload,

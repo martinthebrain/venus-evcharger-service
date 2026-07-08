@@ -30,11 +30,11 @@ class _BranchCoverageWizardRenderCasesPart1:
                 charger_config_path=Path("charger.ini"),
             )
             resolved = SimpleNamespace(runtime=runtime)
-            with patch("venus_evcharger.bootstrap.wizard_render.build_service_backends", return_value=resolved), patch(
-                "venus_evcharger.bootstrap.wizard_render.probe_meter_backend",
+            with patch("venus_evcharger.bootstrap.wizard_render_live.build_service_backends", return_value=resolved), patch(
+                "venus_evcharger.bootstrap.wizard_render_live.probe_meter_backend",
                 return_value={"meter": "ok"},
             ), patch(
-                "venus_evcharger.bootstrap.wizard_render.read_charger_backend",
+                "venus_evcharger.bootstrap.wizard_render_live.read_charger_backend",
                 side_effect=RuntimeError("boom"),
             ):
                 payload = live_connectivity_payload(main_path, ("meter", "charger"))
@@ -49,7 +49,7 @@ class _BranchCoverageWizardRenderCasesPart1:
                 charger_config_path=None,
             )
             with patch(
-                "venus_evcharger.bootstrap.wizard_render.build_service_backends",
+                "venus_evcharger.bootstrap.wizard_render_live.build_service_backends",
                 return_value=SimpleNamespace(runtime=runtime),
             ):
                 payload = live_connectivity_payload(main_path, None)
@@ -57,7 +57,7 @@ class _BranchCoverageWizardRenderCasesPart1:
             self.assertEqual(payload["roles"]["meter"]["reason"], "not configured")
 
             with patch(
-                "venus_evcharger.bootstrap.wizard_render.live_connectivity_payload",
+                "venus_evcharger.bootstrap.wizard_render_live.live_connectivity_payload",
                 return_value={"ok": True, "checked_roles": (), "roles": {}},
             ):
                 live_payload = live_check_rendered_setup(
@@ -67,6 +67,5 @@ class _BranchCoverageWizardRenderCasesPart1:
                     ("meter",),
                 )
             self.assertTrue(live_payload["ok"])
-
 
 

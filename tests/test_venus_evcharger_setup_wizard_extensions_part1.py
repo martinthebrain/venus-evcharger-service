@@ -128,7 +128,7 @@ class _TestShellyWallboxSetupWizardExtensionsPart1:
             stdout = io.StringIO()
             with (
                 patch(
-                    "venus_evcharger.bootstrap.wizard_runtime._live_check_rendered_setup",
+                    "venus_evcharger.bootstrap.wizard_runtime.live_check_rendered_setup",
                     return_value={
                         "ok": True,
                         "checked_roles": ("charger",),
@@ -289,4 +289,3 @@ class _TestShellyWallboxSetupWizardExtensionsPart1:
             self.assertEqual(remove_rc, 0)
             self.assertEqual(remove_payload["device_id"], "charger_device")
             self.assertEqual(len(remove_payload["inventory"]["devices"]), 0)
-

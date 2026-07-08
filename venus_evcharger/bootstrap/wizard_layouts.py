@@ -33,5 +33,7 @@ def _role_defaults(
 
 def _resolved_roles(profile: str, topology_preset: str | None) -> tuple[str, ...]:
     if profile == "multi_adapter_topology":
-        return TOPOLOGY_ROLE_HOSTS.get(topology_preset or "", ())
+        if topology_preset is None:
+            return ()
+        return TOPOLOGY_ROLE_HOSTS.get(topology_preset, ())
     return PROFILE_ROLE_HOSTS.get(profile, ())

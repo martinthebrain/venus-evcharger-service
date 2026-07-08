@@ -32,17 +32,20 @@ def set_inventory_binding_member(
         capability_id=capability_id,
         phases=member_phases,
     )
-    found = False
-    bindings: list[RoleBinding] = []
-    for binding in inventory.bindings:
-        if binding.id != binding_id:
-            bindings.append(binding)
-            continue
-        found = True
-        bindings.append(_updated_binding_with_member(binding, target, role=role, label=label, phase_scope=phase_scope))
-    if not found:
-        bindings.append(_new_binding_with_member(binding_id, target, role=role, label=label, phase_scope=phase_scope))
-    return _validated_inventory(inventory, bindings=tuple(bindings))
+    if any(binding.id == binding_id for binding in inventory.bindings):
+        return _validated_inventory(
+            inventory,
+            bindings=tuple(
+                _updated_binding_with_member(binding, target, role=role, label=label, phase_scope=phase_scope)
+                if binding.id == binding_id
+                else binding
+                for binding in inventory.bindings
+            ),
+        )
+    return _validated_inventory(
+        inventory,
+        bindings=inventory.bindings + (_new_binding_with_member(binding_id, target, role=role, label=label, phase_scope=phase_scope),),
+    )
 
 
 def remove_inventory_binding_member(
@@ -108,7 +111,7 @@ def _new_binding_with_member(
     return RoleBinding(
         id=binding_id,
         role=resolved_role,
-        label=label or _default_binding_label(binding_id, resolved_role),
+        label=label or _default_binding_label(binding_id),
         phase_scope=phase_scope or target.phases,
         members=(target,),
     )
@@ -189,6 +192,5 @@ def _infer_binding_role(capability_id: str) -> BindingRole:
     return "measurement"
 
 
-def _default_binding_label(binding_id: str, role: BindingRole) -> str:
-    del role
+def _default_binding_label(binding_id: str) -> str:
     return binding_id.replace("_", " ").replace("-", " ").title()

@@ -288,7 +288,7 @@ class _WizardSetupCliCases:
             stdout = io.StringIO()
             with (
                 patch(
-                    "venus_evcharger.bootstrap.wizard_runtime._live_check_rendered_setup",
+                    "venus_evcharger.bootstrap.wizard_runtime.live_check_rendered_setup",
                     return_value={
                         "ok": True,
                         "checked_roles": ("charger",),

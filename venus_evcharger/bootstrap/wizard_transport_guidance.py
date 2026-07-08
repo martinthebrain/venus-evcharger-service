@@ -29,9 +29,9 @@ def prompt_transport_inputs(
     prompt_choice: PromptChoice,
     prompt_text: PromptText,
 ) -> tuple[WizardTransportKind, str, int, str, int]:
-    default_kind = optional_choice(imported.transport_kind or default_transport_kind(backend), WIZARD_TRANSPORT_KINDS, "transport") or "tcp"
+    default_kind = _required_transport_kind(imported.transport_kind or default_transport_kind(backend))
     raw_transport_kind = prompt_choice("Choose the transport:", TRANSPORT_VALUES, None, default_kind)
-    transport_kind = optional_choice(raw_transport_kind, WIZARD_TRANSPORT_KINDS, "transport") or default_kind
+    transport_kind = _required_transport_kind(raw_transport_kind)
     defaults = _transport_defaults(imported, host_input, charger_preset, transport_kind)
     if transport_kind == "tcp":
         return _prompt_tcp_transport(prompt_text, transport_kind, defaults)
@@ -112,6 +112,13 @@ def _namespace_int(namespace: object, key: str, default: int) -> int:
     return int(value if value is not None else default)
 
 
+def _required_transport_kind(raw_value: object) -> WizardTransportKind:
+    transport_kind = optional_choice(raw_value, WIZARD_TRANSPORT_KINDS, "transport")
+    if transport_kind is None:
+        raise ValueError("Transport must not be empty")
+    return transport_kind
+
+
 def non_interactive_transport_inputs(
     namespace: object,
     backend: WizardChargerBackend | None,
@@ -138,7 +145,7 @@ def _non_interactive_transport_kind(
     imported: ImportedWizardDefaults,
     backend: WizardChargerBackend | None,
 ) -> WizardTransportKind:
-    return optional_choice(getattr(namespace, "transport") or imported.transport_kind or default_transport_kind(backend), WIZARD_TRANSPORT_KINDS, "transport") or "tcp"
+    return _required_transport_kind(getattr(namespace, "transport") or imported.transport_kind or default_transport_kind(backend))
 
 
 def _non_interactive_transport_host(namespace: object, imported: ImportedWizardDefaults, host_input: str) -> str:
@@ -155,7 +162,7 @@ def preset_specific_defaults(
     *,
     backend: WizardChargerBackend | None,
     topology_preset: str | None,
-    charger_preset: str | None,
+    charger_preset: str | None = None,
 ) -> tuple[float | None, str]:
     timeout = _request_timeout_seconds(namespace, imported, backend)
     phase_layout = getattr(namespace, "switch_group_phase_layout") or imported.switch_group_phase_layout or SWITCH_GROUP_PHASE_LAYOUT_VALUES[0]
@@ -190,7 +197,7 @@ def prompt_preset_specific_defaults(
     profile: WizardProfile,
     backend: WizardChargerBackend | None,
     topology_preset: str | None,
-    charger_preset: str | None,
+    charger_preset: str | None = None,
     prompt_choice: PromptChoice,
     prompt_text: PromptText,
 ) -> tuple[float | None, str]:
