@@ -8,6 +8,24 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from .dbus_bridge_grid import _EnergyCompanionDbusBridgeGrid
 
+_SOURCE_BASE_ATTRS = {
+    "battery": "companion_source_battery_deviceinstance_base",
+    "pvinverter": "companion_source_pvinverter_deviceinstance_base",
+    "grid": "companion_source_grid_deviceinstance_base",
+}
+
+_SOURCE_SERVICE_PREFIX_ATTRS = {
+    "battery": "companion_source_battery_service_prefix",
+    "pvinverter": "companion_source_pvinverter_service_prefix",
+    "grid": "companion_source_grid_service_prefix",
+}
+
+_SOURCE_DEFAULT_SERVICE_PREFIXES = {
+    "battery": "com.victronenergy.battery.external",
+    "pvinverter": "com.victronenergy.pvinverter.external",
+    "grid": "com.victronenergy.grid.external",
+}
+
 
 class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
     _battery_service: Any
@@ -69,7 +87,11 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
 
     def _ensure_grid_service(self, base_device_instance: int) -> None:
         svc = self.service
-        if not bool(getattr(svc, "companion_grid_service_enabled", False)) or self._grid_service is not None:
+        if (
+            not hasattr(svc, "companion_grid_service_enabled")
+            or not bool(getattr(svc, "companion_grid_service_enabled"))
+            or self._grid_service is not None
+        ):
             return
         self._grid_service = self._register_service(
             getattr(
@@ -88,7 +110,7 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
         )
 
     def _ensure_source_battery_service(self, source: Mapping[str, Any], index: int) -> Any:
-        source_id = str(source.get("source_id", "")).strip()
+        source_id = self._source_id_value(source)
         existing = self._source_battery_services.get(source_id)
         if existing is not None:
             return existing
@@ -107,7 +129,7 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
         return service
 
     def _ensure_source_pvinverter_service(self, source: Mapping[str, Any], index: int) -> Any:
-        source_id = str(source.get("source_id", "")).strip()
+        source_id = self._source_id_value(source)
         existing = self._source_pvinverter_services.get(source_id)
         if existing is not None:
             return existing
@@ -127,7 +149,7 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
         return service
 
     def _ensure_source_grid_service(self, source: Mapping[str, Any], index: int) -> Any:
-        source_id = str(source.get("source_id", "")).strip()
+        source_id = self._source_id_value(source)
         existing = self._source_grid_services.get(source_id)
         if existing is not None:
             return existing
@@ -147,41 +169,19 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
         return service
 
     def _source_device_instance(self, service_kind: str, index: int) -> int:
-        svc = self.service
-        battery_base = int(getattr(svc, "companion_source_battery_deviceinstance_base", 0))
-        pvinverter_base = int(getattr(svc, "companion_source_pvinverter_deviceinstance_base", 0))
-        grid_base = int(getattr(svc, "companion_source_grid_deviceinstance_base", 0))
-        if service_kind == "battery":
-            return battery_base + int(index)
-        if service_kind == "grid":
-            return grid_base + int(index)
-        return pvinverter_base + int(index)
+        attr_name = self._source_kind_value(_SOURCE_BASE_ATTRS, service_kind)
+        raw_base = getattr(self.service, attr_name, None)
+        base_device_instance = 0 if raw_base is None else int(raw_base)
+        return base_device_instance + int(index)
 
     @staticmethod
     def _source_default_service_prefix(service_kind: str) -> str:
-        if service_kind == "battery":
-            return "com.victronenergy.battery.external"
-        if service_kind == "grid":
-            return "com.victronenergy.grid.external"
-        return "com.victronenergy.pvinverter.external"
+        return _EnergyCompanionDbusBridgeServices._source_kind_value(_SOURCE_DEFAULT_SERVICE_PREFIXES, service_kind)
 
     def _source_configured_service_prefix(self, service_kind: str) -> str:
-        svc = self.service
-        if service_kind == "battery":
-            return str(
-                getattr(svc, "companion_source_battery_service_prefix", self._source_default_service_prefix(service_kind))
-            ).strip()
-        if service_kind == "grid":
-            return str(
-                getattr(svc, "companion_source_grid_service_prefix", self._source_default_service_prefix(service_kind))
-            ).strip()
-        return str(
-            getattr(
-                svc,
-                "companion_source_pvinverter_service_prefix",
-                self._source_default_service_prefix(service_kind),
-            )
-        ).strip()
+        attr_name = self._source_kind_value(_SOURCE_SERVICE_PREFIX_ATTRS, service_kind)
+        raw_prefix = getattr(self.service, attr_name, None)
+        return str(raw_prefix).strip() if raw_prefix is not None else self._source_default_service_prefix(service_kind)
 
     def _source_service_name(self, service_kind: str, source_id: str, device_instance: int) -> str:
         sanitized_source_id = self._sanitize_source_id(source_id or str(device_instance))
@@ -191,7 +191,7 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
 
     @staticmethod
     def _source_product_label(source: Mapping[str, Any], suffix: str) -> str:
-        source_id = str(source.get("source_id", "")).strip() or "source"
+        source_id = _EnergyCompanionDbusBridgeServices._source_id_value(source) or "source"
         return f"External Energy {source_id} {suffix}"
 
     @staticmethod
@@ -199,8 +199,8 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
         normalized = re.sub(r"[^a-zA-Z0-9]+", "_", str(source_id).strip()).strip("_").lower()
         return normalized or "source"
 
-    @staticmethod
-    def _normalized_source_snapshots(snapshot: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    @classmethod
+    def _normalized_source_snapshots(cls, snapshot: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
         sources = snapshot.get("battery_sources")
         if not isinstance(sources, list):
             return ()
@@ -209,19 +209,30 @@ class _EnergyCompanionDbusBridgeServices(_EnergyCompanionDbusBridgeGrid):
             if not isinstance(item, Mapping):
                 continue
             normalized = dict(item)
-            if not str(normalized.get("source_id", "")).strip():
+            if not cls._source_id_value(normalized):
                 continue
             normalized_sources.append(normalized)
         return tuple(normalized_sources)
 
-    @staticmethod
-    def _source_supports_battery_service(source: Mapping[str, Any]) -> bool:
-        return str(source.get("role", "")).strip() in {"battery", "hybrid-inverter"}
+    @classmethod
+    def _source_supports_battery_service(cls, source: Mapping[str, Any]) -> bool:
+        return cls._source_role(source) in {"battery", "hybrid-inverter"}
 
-    @staticmethod
-    def _source_supports_pvinverter_service(source: Mapping[str, Any]) -> bool:
-        return str(source.get("role", "")).strip() in {"hybrid-inverter", "inverter"}
+    @classmethod
+    def _source_supports_pvinverter_service(cls, source: Mapping[str, Any]) -> bool:
+        return cls._source_role(source) in {"hybrid-inverter", "inverter"}
 
     @staticmethod
     def _source_supports_grid_service(source: Mapping[str, Any]) -> bool:
         return isinstance(source.get("grid_interaction_w"), (int, float))
+
+    @staticmethod
+    def _source_kind_value(values: Mapping[str, str], service_kind: str) -> str:
+        if service_kind not in values:
+            raise ValueError(f"Unsupported source service kind: {service_kind}")
+        return values[service_kind]
+
+    @classmethod
+    def _source_role(cls, source: Mapping[str, Any]) -> str:
+        raw_role = source["role"] if "role" in source else ""
+        return cls._string_value(raw_role)

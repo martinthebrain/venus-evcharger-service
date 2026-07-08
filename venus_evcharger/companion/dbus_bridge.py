@@ -10,6 +10,8 @@ from typing import Any, Mapping
 from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy, gateway_paths
 from .dbus_bridge_services import _EnergyCompanionDbusBridgeServices
 
+_MISSING_VALUE = object()
+
 
 class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
     """Publish optional aggregated battery, PV, and grid companion services on DBus."""
@@ -30,7 +32,7 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
         """Create and register companion services when enabled."""
         svc = self.service
         base_device_instance = int(getattr(svc, "deviceinstance", 0))
-        if not bool(getattr(svc, "companion_dbus_bridge_enabled", False)):
+        if not self._companion_bridge_enabled(svc):
             return
         self._ensure_battery_service(base_device_instance)
         self._ensure_pvinverter_service(base_device_instance)
@@ -50,13 +52,30 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
     def publish(self, now: float | None = None) -> bool:
         """Publish the latest worker snapshot to any active companion services."""
         svc = self.service
-        if not bool(getattr(svc, "companion_dbus_bridge_enabled", False)):
+        if not self._companion_bridge_enabled(svc):
             return False
         if self._companion_publish_should_enqueue(svc):
             return bool(svc._enqueue_companion_dbus_publish(now))
         current_time = self._companion_publish_time(now)
         normalized_snapshot = self._companion_worker_snapshot(svc)
         return self._publish_companion_snapshot(normalized_snapshot, current_time)
+
+    @staticmethod
+    def _companion_bridge_enabled(svc: Any) -> bool:
+        """Return whether optional companion DBus publication is enabled."""
+        return hasattr(svc, "companion_dbus_bridge_enabled") and bool(getattr(svc, "companion_dbus_bridge_enabled"))
+
+    def _source_services_enabled(self) -> bool:
+        """Return whether per-source companion publication is enabled."""
+        return not hasattr(self.service, "companion_source_services_enabled") or bool(
+            getattr(self.service, "companion_source_services_enabled")
+        )
+
+    def _source_grid_services_enabled(self) -> bool:
+        """Return whether per-source grid companion publication is enabled."""
+        return hasattr(self.service, "companion_source_grid_services_enabled") and bool(
+            getattr(self.service, "companion_source_grid_services_enabled")
+        )
 
     @staticmethod
     def _companion_publish_should_enqueue(svc: Any) -> bool:
@@ -94,7 +113,7 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
         product_label: str,
         specific_paths: Mapping[str, Any],
     ) -> Any:
-        run_dir = str(getattr(self.service, "dbus_gateway_run_dir", "") or "")
+        run_dir = str(getattr(self.service, "dbus_gateway_run_dir", None) or "")
         service = GatewayDbusServiceProxy(service_name, paths=gateway_paths(run_dir or None))
         self._register_common_paths(service, device_instance, product_label)
         for path, initial in specific_paths.items():
@@ -132,7 +151,7 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
         previous_values = self._published_values.setdefault(service_key, {})
         changed = False
         for path, value in values.items():
-            if previous_values.get(path) == value:
+            if previous_values.get(path, _MISSING_VALUE) == value:
                 continue
             dbus_service[path] = value
             previous_values[path] = value
@@ -142,7 +161,7 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
         return changed
 
     def _publish_source_snapshots(self, snapshot: Mapping[str, Any], now: float) -> bool:
-        if not bool(getattr(self.service, "companion_source_services_enabled", True)):
+        if not self._source_services_enabled():
             return False
         source_snapshots = self._normalized_source_snapshots(snapshot)
         changed = False
@@ -179,7 +198,7 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
         )
 
     def _publish_grid_source_service(self, source: Mapping[str, Any], index: int, now: float) -> bool:
-        if not bool(getattr(self.service, "companion_source_grid_services_enabled", False)):
+        if not self._source_grid_services_enabled():
             return False
         source_id = str(source.get("source_id", "")).strip()
         grid_service = self._source_grid_services.get(source_id)
@@ -241,8 +260,8 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
 
     @staticmethod
     def _battery_connected(snapshot: Mapping[str, Any]) -> int:
-        source_count = int(snapshot.get("battery_source_count", 0) or 0)
-        online_count = int(snapshot.get("battery_online_source_count", 0) or 0)
+        source_count = int(snapshot.get("battery_source_count") or 0)
+        online_count = int(snapshot.get("battery_online_source_count") or 0)
         return 1 if source_count > 0 and online_count > 0 else 0
 
     @staticmethod
@@ -268,7 +287,7 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
     @staticmethod
     def _battery_source_values(source: Mapping[str, Any]) -> dict[str, Any]:
         return {
-            "/Connected": 1 if bool(source.get("online", False)) else 0,
+            "/Connected": 1 if bool(source.get("online")) else 0,
             "/Soc": source.get("soc"),
             "/Dc/0/Power": source.get("net_battery_power_w", 0.0),
             "/Capacity": source.get("usable_capacity_wh"),
@@ -278,7 +297,7 @@ class EnergyCompanionDbusBridge(_EnergyCompanionDbusBridgeServices):
     def _pvinverter_source_values(source: Mapping[str, Any]) -> dict[str, Any]:
         pv_power = EnergyCompanionDbusBridge._source_pvinverter_power_w(source)
         return {
-            "/Connected": 1 if bool(source.get("online", False)) else 0,
+            "/Connected": 1 if bool(source.get("online")) else 0,
             "/Ac/Power": pv_power,
             "/Ac/L1/Power": pv_power,
             "/Ac/L2/Power": 0.0,

@@ -48,9 +48,8 @@ def _simple_relay_topology(answers: WizardAnswers) -> EvChargerTopologyConfig:
     return validate_topology_config(
         EvChargerTopologyConfig(
             topology=TopologyConfig(type="simple_relay"),
-            actuator=ActuatorConfig(type="shelly_contactor_switch", config_path=None),
+            actuator=ActuatorConfig(type="shelly_contactor_switch"),
             measurement=MeasurementConfig(type="actuator_native"),
-            charger=None,
             policy=_policy(answers),
         )
     )
@@ -62,7 +61,6 @@ def _native_charger_topology(
     return validate_topology_config(
         EvChargerTopologyConfig(
             topology=TopologyConfig(type="native_device"),
-            actuator=None,
             measurement=MeasurementConfig(type="charger_native"),
             charger=ChargerConfig(
                 type=_charger_type_or_default(answers.charger_backend, "goe_charger"),
@@ -105,7 +103,7 @@ def _split_topology(
 
 
 def _cerbo_relay_topology(answers: WizardAnswers, topology_preset: str) -> EvChargerTopologyConfig | None:
-    if _cerbo_relay_meter_type(topology_preset) is None:
+    if not _is_cerbo_relay_topology_preset(topology_preset):
         return None
     return _cerbo_relay_external_meter_topology(answers, meter_config_name="wizard-meter.ini")
 
@@ -138,15 +136,19 @@ _SPLIT_TOPOLOGY_RESOLVERS = (
     _hybrid_charger_topology,
 )
 
+_CERBO_RELAY_TOPOLOGY_PRESETS = frozenset(
+    {
+        "template-meter-cerbo-relay",
+        "shelly-meter-cerbo-relay",
+        "tasmota-meter-cerbo-relay",
+        "tuya-meter-cerbo-relay",
+    }
+)
 
-def _cerbo_relay_meter_type(topology_preset: str) -> str | None:
-    """Return the meter adapter type for Cerbo relay presets."""
-    return {
-        "template-meter-cerbo-relay": "template_meter",
-        "shelly-meter-cerbo-relay": "shelly_meter",
-        "tasmota-meter-cerbo-relay": "tasmota_meter",
-        "tuya-meter-cerbo-relay": "tuya_meter",
-    }.get(topology_preset)
+
+def _is_cerbo_relay_topology_preset(topology_preset: str) -> bool:
+    """Return whether the preset maps to a local Cerbo relay switch topology."""
+    return topology_preset in _CERBO_RELAY_TOPOLOGY_PRESETS
 
 
 def _cerbo_relay_external_meter_topology(
@@ -159,7 +161,6 @@ def _cerbo_relay_external_meter_topology(
             topology=TopologyConfig(type="simple_relay"),
             actuator=ActuatorConfig(type="cerbo_gx_relay_switch", config_path="wizard-switch.ini"),
             measurement=MeasurementConfig(type="external_meter", config_path=meter_config_name),
-            charger=None,
             policy=_policy(answers),
         )
     )
@@ -251,7 +252,6 @@ def _native_external_meter_topology(
     return validate_topology_config(
         EvChargerTopologyConfig(
             topology=TopologyConfig(type="native_device"),
-            actuator=None,
             measurement=MeasurementConfig(
                 type="external_meter",
                 config_path="wizard-meter.ini",

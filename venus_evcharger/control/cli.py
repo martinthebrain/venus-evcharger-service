@@ -47,6 +47,8 @@ def _client_for_token(namespace: argparse.Namespace, token: str) -> LocalControl
 
 
 def _write_json(value: Any, *, compact: bool) -> None:
+    if not isinstance(compact, bool):
+        raise TypeError("compact must be bool")
     if compact:
         sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
         return
@@ -96,12 +98,13 @@ def _state_token_from_response(response: Any) -> str:
     if header_token:
         return header_token.strip('"')
     payload = _response_payload(response)
-    state = payload.get("state", {})
-    if isinstance(state, dict):
-        state_token = state.get("state_token", "")
-        if isinstance(state_token, str):
-            return state_token.strip().strip('"')
-    return ""
+    state = payload.get("state")
+    if not isinstance(state, dict):
+        return ""
+    state_token = state.get("state_token")
+    if not isinstance(state_token, str):
+        return ""
+    return state_token.strip().strip('"')
 
 
 def _command_payload(namespace: argparse.Namespace) -> dict[str, Any]:
@@ -307,8 +310,15 @@ def _doctor_safe_write_check(
         "name": "safe-write.set-mode",
         "ok": exit_code == EXIT_OK,
         "status": 200 if exit_code == EXIT_OK else 409,
-        "kind": safe_payload.get("kind", "safe-write"),
+        "kind": _safe_payload_kind(safe_payload),
     }
+
+
+def _safe_payload_kind(payload: dict[str, Any]) -> str:
+    kind = payload.get("kind")
+    if isinstance(kind, str) and kind:
+        return kind
+    return "safe-write"
 
 
 def _doctor_safe_write_namespace(
@@ -317,7 +327,8 @@ def _doctor_safe_write_namespace(
     operational_response: Any,
 ) -> argparse.Namespace:
     operational_payload = _response_payload(operational_response)
-    mode_value = operational_payload.get("state", {}).get("mode", 0)
+    operational_state = operational_payload.get("state")
+    mode_value = operational_state.get("mode", 0) if isinstance(operational_state, dict) else 0
     safe_namespace_values = dict(vars(namespace))
     safe_namespace_values.update(
         {
@@ -353,6 +364,8 @@ def _doctor_payload(
 
 
 def _write_event_response(response: Any, *, compact: bool) -> int:
+    if not isinstance(compact, bool):
+        raise TypeError("compact must be bool")
     if compact:
         _write_stream_body(response.body)
     else:

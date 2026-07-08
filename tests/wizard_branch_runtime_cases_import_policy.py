@@ -285,7 +285,6 @@ class _WizardBranchRuntimeImportPolicyCases:
             _imported_defaults(),
             backend="goe_charger",
             topology_preset=None,
-            charger_preset=None,
         )
         self.assertEqual(timeout, 7.5)
 

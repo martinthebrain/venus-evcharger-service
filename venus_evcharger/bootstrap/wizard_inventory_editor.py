@@ -99,29 +99,14 @@ def set_inventory_device_endpoint(
     endpoint: str | None,
 ) -> DeviceInventory:
     """Return one inventory with one updated device endpoint."""
-    found = False
-    devices: list[DeviceInstance] = []
-    for device in inventory.devices:
-        if device.id != device_id:
-            devices.append(device)
-            continue
-        found = True
-        devices.append(
-            DeviceInstance(
-                id=device.id,
-                profile_id=device.profile_id,
-                label=device.label,
-                endpoint=endpoint or None,
-                enabled=device.enabled,
-                notes=device.notes,
-            )
-        )
-    if not found:
+    if not any(device.id == device_id for device in inventory.devices):
         raise ValueError(f"Unknown device id: {device_id}")
     return validate_device_inventory(
         DeviceInventory(
             profiles=inventory.profiles,
-            devices=tuple(devices),
+            devices=tuple(
+                _device_with_endpoint(device, endpoint) if device.id == device_id else device for device in inventory.devices
+            ),
             bindings=inventory.bindings,
         )
     )
@@ -298,6 +283,18 @@ def _device_instance(profile_id: str, device_id: str, label: str, endpoint: str 
         profile_id=profile_id,
         label=label,
         endpoint=endpoint or None,
+    )
+
+
+def _device_with_endpoint(device: DeviceInstance, endpoint: str | None) -> DeviceInstance:
+    """Return one device with one normalized endpoint and unchanged identity metadata."""
+    return DeviceInstance(
+        id=device.id,
+        profile_id=device.profile_id,
+        label=device.label,
+        endpoint=endpoint or None,
+        enabled=device.enabled,
+        notes=device.notes,
     )
 
 

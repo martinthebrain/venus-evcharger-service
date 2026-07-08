@@ -18,11 +18,11 @@ SCHEDULED_NIGHT_CURRENT_DEFAULT = 0.0
 
 PromptText = Callable[[str, str], str]
 
-_POLICY_DEFAULT_KEYS: tuple[tuple[str, str, float], ...] = (
-    ("auto_start_surplus_watts", "auto_start_surplus_watts", AUTO_START_DEFAULT),
-    ("auto_stop_surplus_watts", "auto_stop_surplus_watts", AUTO_STOP_DEFAULT),
-    ("auto_min_soc", "auto_min_soc", AUTO_MIN_SOC_DEFAULT),
-    ("auto_resume_soc", "auto_resume_soc", AUTO_RESUME_SOC_DEFAULT),
+_POLICY_DEFAULT_KEYS: tuple[tuple[str, float], ...] = (
+    ("auto_start_surplus_watts", AUTO_START_DEFAULT),
+    ("auto_stop_surplus_watts", AUTO_STOP_DEFAULT),
+    ("auto_min_soc", AUTO_MIN_SOC_DEFAULT),
+    ("auto_resume_soc", AUTO_RESUME_SOC_DEFAULT),
 )
 _POLICY_PROMPTS: tuple[tuple[str, str], ...] = (
     ("auto_start_surplus_watts", "Auto start surplus watts"),
@@ -51,11 +51,11 @@ def policy_defaults(
 
 
 def _policy_numeric_defaults(policy_mode: WizardPolicyMode, imported: ImportedWizardDefaults, namespace: object) -> dict[str, float | None]:
-    values: dict[str, float | None] = {key: _optional_float_attr(namespace, key) for key, _, _ in _POLICY_DEFAULT_KEYS}
+    values: dict[str, float | None] = {key: _optional_float_attr(namespace, key) for key, _ in _POLICY_DEFAULT_KEYS}
     if policy_mode not in {"auto", "scheduled"}:
         return values
-    for key, imported_key, default in _POLICY_DEFAULT_KEYS:
-        values[key] = _float_default(values[key], getattr(imported, imported_key), default)
+    for key, default in _POLICY_DEFAULT_KEYS:
+        values[key] = _float_default(values[key], getattr(imported, key), default)
     return values
 
 
@@ -116,7 +116,12 @@ def prompt_policy_defaults(
     prompt_text: PromptText,
 ) -> tuple[float | None, float | None, float | None, float | None, str | None, str | None, float | None]:
     defaults = policy_defaults(policy_mode, imported, namespace)
-    auto_values = _prompted_policy_values(policy_mode, namespace, prompt_text, defaults[:4])
+    auto_values = _prompted_policy_values(
+        policy_mode,
+        namespace,
+        prompt_text,
+        (defaults[0], defaults[1], defaults[2], defaults[3]),
+    )
     scheduled_days, scheduled_latest_end, scheduled_night_current = _prompted_scheduled_values(
         policy_mode,
         namespace,
@@ -142,7 +147,7 @@ def _prompted_policy_values(
     prompt_text: PromptText,
     defaults: tuple[float | None, float | None, float | None, float | None],
 ) -> dict[str, float | None]:
-    values = dict(zip((item[0] for item in _POLICY_DEFAULT_KEYS), defaults))
+    values = dict(zip((key for key, _ in _POLICY_DEFAULT_KEYS), defaults))
     if policy_mode not in {"auto", "scheduled"}:
         return values
     for key, label in _POLICY_PROMPTS:
