@@ -140,6 +140,15 @@ class RuntimeAsyncMainloopPublishContractTests(unittest.TestCase):
         )
         self.assertEqual(controller._field_paths(fields), ["/Ac/Power", "/Session/Time"])
 
+        with patch(
+            "venus_evcharger.runtime.async_mainloop_publish.evcs_fields_to_paths",
+            return_value={"/Ac/Power": 999.0, "/Session/Time": 30},
+        ):
+            self.assertEqual(
+                controller._path_values_from_fields(fields),
+                [("/Session/Time", (30, 11.0, 9.0))],
+            )
+
     def test_failure_reporting_marks_dbus_and_logs_exact_paths(self) -> None:
         _service, controller = _controller()
         mark_failure = MagicMock()
