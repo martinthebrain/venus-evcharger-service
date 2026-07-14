@@ -24,7 +24,7 @@ def _default_update_result(mode: str) -> str:
     return "preview" if mode == "dry-run" else "failed"
 
 
-def normalized_bootstrap_update_result(value: Any, *, mode: Any = "apply") -> str:
+def normalized_bootstrap_update_result(value: Any, *, mode: Any = None) -> str:
     normalized_mode = normalized_bootstrap_update_mode(mode)
     result = _normalized_text(value)
     if result not in BOOTSTRAP_UPDATE_RESULTS:
@@ -47,7 +47,7 @@ def normalized_bootstrap_string_list(value: Any) -> list[str]:
     return normalized_items
 
 
-def _normalized_bootstrap_flag(raw: Mapping[str, Any], key: str, default: int = 0) -> bool:
+def _normalized_bootstrap_flag(raw: Mapping[str, Any], key: str, default: Any = 0) -> bool:
     return bool(normalize_binary_flag(raw.get(key, default)))
 
 
@@ -100,7 +100,7 @@ def normalized_bootstrap_update_status_fields(payload: Mapping[str, Any] | None)
         "promotion_aborted_reason": core["promotion_aborted_reason"],
         "rollback_reason": _normalized_text(raw.get("rollback_reason")),
         "config_merge_changed": core["config_merge_changed"],
-        "config_merge_comment_preserved": _normalized_bootstrap_flag(raw, "config_merge_comment_preserved", 1),
+        "config_merge_comment_preserved": _normalized_bootstrap_flag(raw, "config_merge_comment_preserved", True),
         "config_merge_skipped_reason": _normalized_text(raw.get("config_merge_skipped_reason")),
         "config_merge_backup_path": core["config_merge_backup_path"],
         "config_merge_backup_required": core["config_merge_backup_required"],

@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
+
+_UTF8 = "utf-8"
 
 
 def json_object_payload(value: object) -> dict[str, object] | None:
@@ -22,8 +25,7 @@ def json_object_payload(value: object) -> dict[str, object] | None:
 def read_json_object_file(path: str) -> dict[str, object] | None:
     """Read a JSON object from disk, warning and returning None for invalid input."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            loaded_state: object = json.load(handle)
+        loaded_state: object = json.loads(Path(path).read_text(encoding=_UTF8))
     except FileNotFoundError:
         return None
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:

@@ -67,7 +67,7 @@ class _AutoInputHelperSourceDbusResolve(_AutoInputHelperSourceDbusPrimary):
 
     def _discovered_auto_battery_service(self: Any, now: float) -> str:
         source = self._primary_energy_source()
-        battery_service_prefix = str(getattr(self, "auto_battery_service_prefix", "") or "")
+        battery_service_prefix = self._primary_energy_service_prefix()
         service_name = first_matching_prefixed_service(
             self._list_dbus_services(),
             source.service_prefix or battery_service_prefix,
@@ -90,8 +90,8 @@ class _AutoInputHelperSourceDbusResolve(_AutoInputHelperSourceDbusPrimary):
             self._auto_battery_last_scan = now
 
     def _cached_energy_service(self: Any, source_id: str, now: float) -> str | None:
-        resolved = getattr(self, "_resolved_auto_energy_services", {})
-        scans = getattr(self, "_auto_energy_last_scan", {})
+        resolved = getattr(self, "_resolved_auto_energy_services", None)
+        scans = getattr(self, "_auto_energy_last_scan", None)
         cached_service = resolved.get(source_id) if isinstance(resolved, dict) else None
         cached_at = scans.get(source_id, 0.0) if isinstance(scans, dict) else 0.0
         if discovery_cache_valid(cached_service, cached_at, self.auto_battery_scan_interval_seconds, now):

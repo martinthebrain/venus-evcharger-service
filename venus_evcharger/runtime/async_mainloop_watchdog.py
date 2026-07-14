@@ -39,7 +39,7 @@ class _RuntimeAsyncMainloopWatchdog(_RuntimeAsyncMainloopControl):
     def start_mainloop_watchdog(self: Any) -> None:
         """Start a companion thread that proves and recovers GLib mainloop hangs."""
         svc = self.service
-        if getattr(svc, "_mainloop_watchdog_thread", None) is not None:
+        if svc._mainloop_watchdog_thread is not None:
             return
         thread = threading.Thread(target=self._mainloop_watchdog_loop, name="evcharger-mainloop-watchdog", daemon=True)
         svc._mainloop_watchdog_thread = thread
@@ -47,20 +47,23 @@ class _RuntimeAsyncMainloopWatchdog(_RuntimeAsyncMainloopControl):
 
     def _mainloop_watchdog_loop(self: Any) -> None:
         svc = self.service
-        while not svc._mainloop_watchdog_stop_event.wait(
-            self._float_attr(getattr(svc, "_mainloop_watchdog_interval_seconds", 1.0), 1.0)
-        ):
-            heartbeat_at = self._float_attr(getattr(svc, "_mainloop_heartbeat_at", 0.0), 0.0)
-            stale_seconds = self._float_attr(getattr(svc, "_mainloop_watchdog_stale_seconds", 0.0), 0.0)
-            if stale_seconds <= 0 or (time.time() - heartbeat_at) <= stale_seconds:
-                continue
-            self._dump_mainloop_watchdog_traceback(svc)
-            logging.critical("Mainloop heartbeat stale for %.1fs; exiting for supervisor restart", time.time() - heartbeat_at)
-            self._exit_for_mainloop_watchdog()
+        while not svc._mainloop_watchdog_stop_event.wait(svc._mainloop_watchdog_interval_seconds):
+            self._check_mainloop_watchdog(svc)
+
+    def _check_mainloop_watchdog(self: Any, svc: Any) -> None:
+        stale_seconds = svc._mainloop_watchdog_stale_seconds
+        if stale_seconds <= 0:
+            return
+        heartbeat_age = time.time() - svc._mainloop_heartbeat_at
+        if heartbeat_age <= stale_seconds:
+            return
+        self._dump_mainloop_watchdog_traceback(svc)
+        logging.critical("Mainloop heartbeat stale for %.1fs; exiting for supervisor restart", heartbeat_age)
+        self._exit_for_mainloop_watchdog()
 
     @staticmethod
     def _dump_mainloop_watchdog_traceback(svc: Any) -> None:
-        path = str(getattr(svc, "_mainloop_watchdog_log_path", "/run/dbus-venus-evcharger-mainloop-hang.log"))
+        path = str(svc._mainloop_watchdog_log_path)
         try:
             os.makedirs(os.path.dirname(path) or "/run", exist_ok=True)
             with open(path, "w", encoding="utf-8") as handle:

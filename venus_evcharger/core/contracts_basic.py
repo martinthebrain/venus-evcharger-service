@@ -104,12 +104,16 @@ def normalize_optional_binary_state(value: Any) -> bool | None:
 
 
 def normalize_learning_state(value: Any) -> str:
-    state = str(value).strip().lower() if value is not None else "unknown"
+    if value is None:
+        return "unknown"
+    state = str(value).strip().lower()
     return state if state in LEARNED_CHARGE_POWER_STATES else "unknown"
 
 
 def normalize_learning_phase(value: Any) -> str | None:
-    phase = str(value).strip().upper() if value is not None else ""
+    if value is None:
+        return None
+    phase = str(value).strip().upper()
     return phase if phase in LEARNED_CHARGE_POWER_PHASES else None
 
 
@@ -148,7 +152,9 @@ def thresholds_ordered(start_watts: Any, stop_watts: Any) -> bool:
 
 
 def normalize_auto_state(value: Any) -> str:
-    state = str(value).strip().lower() if value is not None else "idle"
+    if value is None:
+        return "idle"
+    state = str(value).strip().lower()
     return state if state in AUTO_STATE_CODES else "idle"
 
 

@@ -40,7 +40,7 @@ class TestRuntimeSupportControllerAudit(RuntimeSupportTestCaseBase):
     def test_warning_throttled_logs_once_per_interval(self) -> None:
         service = type("Service", (), {"_ensure_observability_state": lambda _self: None, "_warning_state": {}})()
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        with patch("venus_evcharger.runtime.support.time.time", side_effect=[100.0, 105.0, 131.0]), patch("venus_evcharger.runtime.support.logging.warning") as warning_mock:
+        with patch("venus_evcharger.runtime.health.time.time", side_effect=[100.0, 105.0, 131.0]), patch("venus_evcharger.runtime.health.logging.warning") as warning_mock:
             controller.warning_throttled("worker-failed", 30.0, "worker failed: %s", "boom")
             controller.warning_throttled("worker-failed", 30.0, "worker failed: %s", "boom")
             controller.warning_throttled("worker-failed", 30.0, "worker failed: %s", "boom")
@@ -124,7 +124,7 @@ class TestRuntimeSupportControllerAudit(RuntimeSupportTestCaseBase):
             current_time = [1000.0]
             service = make_runtime_support_service(_time_now=lambda: current_time[0], auto_audit_log_path=path, _last_auto_metrics=make_auto_metrics())
             controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-            with patch("venus_evcharger.runtime.support.os.makedirs", side_effect=PermissionError("nope")):
+            with patch("venus_evcharger.runtime.audit.os.makedirs", side_effect=PermissionError("nope")):
                 controller.write_auto_audit_event("waiting-surplus", cached=False)
             self.assertIsNone(service._last_auto_audit_key)
             current_time[0] = 1005.0

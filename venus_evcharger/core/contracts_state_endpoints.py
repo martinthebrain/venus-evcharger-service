@@ -19,7 +19,7 @@ def normalized_state_api_dbus_diagnostics_fields(payload: Mapping[str, Any] | No
     state = raw.get("state")
     normalized_state = _normalized_generic_mapping(state)
     return {
-        "ok": bool(normalize_binary_flag(raw.get("ok", 1))),
+        "ok": bool(normalize_binary_flag(raw.get("ok", True))),
         "api_version": normalized_state_api_version(raw.get("api_version")),
         "kind": normalized_state_api_kind(raw.get("kind"), default="dbus-diagnostics"),
         "state": normalized_state,

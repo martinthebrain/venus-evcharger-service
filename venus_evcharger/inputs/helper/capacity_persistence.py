@@ -171,4 +171,7 @@ def _number_text(value: Any) -> str:
         return ""
     if abs(numeric - round(numeric)) < 0.001:
         return str(int(round(numeric)))
-    return f"{numeric:.3f}".rstrip("0").rstrip(".")
+    rendered = f"{numeric:.3f}"
+    while rendered.endswith("0"):
+        rendered = rendered[:-1]
+    return rendered

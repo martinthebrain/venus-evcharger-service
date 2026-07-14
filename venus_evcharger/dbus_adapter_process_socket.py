@@ -52,12 +52,12 @@ class DbusAdapterSocket(DbusAdapterIdentity):
         with conn:
             conn.settimeout(0.1)
             try:
-                data = conn.recv(65536).decode("utf-8", errors="replace").strip()
+                data = conn.recv(65536).decode(errors="replace").strip()
             except TimeoutError:
                 logging.debug("Gateway socket client connected without sending a request")
                 return
             response = self.handle_socket_payload(data)
-            conn.sendall((compact_json(response) + "\n").encode("utf-8"))
+            conn.sendall((compact_json(response) + "\n").encode())
 
     def handle_socket_payload(self: DbusAdapterSocketContext, data: str) -> CommandPayload:
         payload, error = parsed_socket_payload(data)

@@ -41,11 +41,11 @@ class _RuntimeAuditFields(_RuntimeSetup):
         def observability_state_defaults() -> dict[str, Callable[[], Any]]: ...
 
     @staticmethod
-    def _backend_value(svc: Any, attribute_name: str, default: str = "") -> str:
+    def _backend_value(svc: Any, attribute_name: str, default: str) -> str:
         resolved = _resolved_backend_value(svc, attribute_name, default)
         if resolved is not None:
             return resolved
-        raw_value = getattr(svc, attribute_name, default)
+        raw_value = getattr(svc, attribute_name, None)
         normalized = str(raw_value).strip() if raw_value is not None else ""
         return normalized or default
 
@@ -80,8 +80,8 @@ class _RuntimeAuditFields(_RuntimeSetup):
 
     @staticmethod
     def _phase_mismatch_active_for_audit(svc: Any) -> bool:
-        return bool(getattr(svc, "_phase_switch_mismatch_active", False)) or (
-            str(getattr(svc, "_last_health_reason", "")) == "phase-switch-mismatch"
+        return bool(getattr(svc, "_phase_switch_mismatch_active", None)) or (
+            getattr(svc, "_last_health_reason", None) == "phase-switch-mismatch"
         )
 
     @staticmethod
@@ -144,13 +144,12 @@ class _RuntimeAuditFields(_RuntimeSetup):
         relay_on = _fresh_confirmed_relay_output(svc, current_time)
         feedback_closed = cls._switch_feedback_closed_for_audit(svc)
         if feedback_closed is None:
-            return str(getattr(svc, "_last_health_reason", "")) == "contactor-feedback-mismatch"
+            return getattr(svc, "_last_health_reason", None) == "contactor-feedback-mismatch"
         return switch_feedback_mismatch(relay_on, feedback_closed)
 
     @staticmethod
     def _contactor_lockout_reason_for_audit(svc: Any) -> str | None:
-        reason = str(getattr(svc, "_contactor_lockout_reason", "") or "").strip()
-        return reason or None
+        return _normalized_optional_audit_text(getattr(svc, "_contactor_lockout_reason", None))
 
     @classmethod
     def _contactor_lockout_active_for_audit(cls, svc: Any) -> bool:
@@ -163,12 +162,12 @@ class _RuntimeAuditFields(_RuntimeSetup):
             return 0
         reason = cls._contactor_lockout_reason_for_audit(svc)
         if reason is None:
-            reason = _normalized_optional_audit_text(getattr(svc, "_contactor_fault_active_reason", ""))
+            reason = _normalized_optional_audit_text(getattr(svc, "_contactor_fault_active_reason", None))
         return 0 if reason is None else int(counts.get(reason, 0))
 
     @staticmethod
     def _evse_fault_reason_for_audit(svc: Any) -> str | None:
-        return evse_fault_reason(getattr(svc, "_last_health_reason", ""))
+        return evse_fault_reason(getattr(svc, "_last_health_reason", None))
 
     @classmethod
     def _evse_fault_active_for_audit(cls, svc: Any) -> bool:

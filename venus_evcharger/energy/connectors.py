@@ -28,6 +28,7 @@ from .connectors_common import (
     _optional_float_path,
     _optional_path,
     _optional_text_path,
+    _runtime_owner,
 )
 from .connectors_modbus import (
     ModbusEnergyFieldSettings,
@@ -139,7 +140,7 @@ def _modbus_field_text(
 
 
 def _modbus_energy_source_snapshot(owner: Any, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
-    runtime = getattr(owner, "service", owner)
+    runtime = _runtime_owner(owner)
     settings = _modbus_energy_source_settings(runtime, source)
     client = _modbus_energy_source_client(runtime, source, settings)
     return _build_modbus_energy_source_snapshot(
@@ -153,7 +154,7 @@ def _modbus_energy_source_snapshot(owner: Any, source: EnergySourceDefinition, n
 
 
 def _command_json_energy_source_snapshot(owner: Any, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
-    runtime = getattr(owner, "service", owner)
+    runtime = _runtime_owner(owner)
     settings = _command_json_energy_source_settings(runtime, source)
     completed = subprocess.run(  # noqa: S603
         settings.command,

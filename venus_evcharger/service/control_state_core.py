@@ -86,7 +86,9 @@ class _ControlApiStateCore(StatePublish):
         )
 
     def _state_api_topology_payload(self) -> dict[str, Any]:
-        supported = tuple(getattr(self, "supported_phase_selections", ("P1",)) or ("P1",))
+        supported = tuple(getattr(self, "supported_phase_selections", ()))
+        if not supported:
+            supported = ("P1",)
         return normalized_state_api_topology_fields(
             {
                 "ok": True,

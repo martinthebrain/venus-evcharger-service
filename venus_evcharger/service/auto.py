@@ -13,7 +13,6 @@ from venus_evcharger.core.return_contracts import (
     require_float,
     require_float_or_none,
     require_instance,
-    require_none,
     require_str_list,
     require_str_or_none,
 )
@@ -24,6 +23,8 @@ from .update import UpdateCycle
 
 class DbusAutoLogic(UpdateCycle):
     """Static DBus-input, Auto-decision, and write-controller delegations."""
+
+    _control_command_async_enabled = False
 
     @staticmethod
     def _get_available_surplus_watts(pv_power: float, grid_power: float) -> float:
@@ -128,7 +129,7 @@ class DbusAutoLogic(UpdateCycle):
     def _handle_write(self, path: str, value: Any) -> bool:
         command = self._control_command_from_write(path, value, source="dbus")
         enqueue_command = getattr(self, "_enqueue_control_command", None)
-        if callable(enqueue_command) and bool(getattr(self, "_control_command_async_enabled", False)):
+        if callable(enqueue_command) and self._control_command_async_enabled:
             return require_bool(enqueue_command(command), "enqueue_control_command")
         result = self._handle_control_command(command)
         return bool(result.accepted)

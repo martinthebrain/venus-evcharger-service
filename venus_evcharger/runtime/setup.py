@@ -46,17 +46,18 @@ class _RuntimeSetup(_RuntimeAsyncMainloop):
     @staticmethod
     def _service_repo_root(service: Any) -> str:
         """Return the repository root inferred from the main entrypoint path."""
-        script_path = getattr(type(service), "_script_path_value", getattr(service, "_script_path_value", ""))
-        resolved = os.path.realpath(str(script_path or ""))
-        return os.path.dirname(resolved) if resolved else ""
+        script_path = getattr(service, "_script_path_value", None)
+        if not script_path:
+            return ""
+        return os.path.dirname(os.path.realpath(str(script_path)))
 
     @staticmethod
     def _system_uptime_seconds() -> float | None:
         """Return the current Linux uptime from ``/proc/uptime`` when available."""
         try:
             with open("/proc/uptime", "r", encoding="utf-8") as handle:
-                first_field = handle.readline().split(" ", 1)[0].strip()
-        except OSError:
+                first_field = handle.readline().split()[0]
+        except (IndexError, OSError):
             return None
         try:
             return max(0.0, float(first_field))

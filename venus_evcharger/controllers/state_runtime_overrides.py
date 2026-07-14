@@ -21,6 +21,12 @@ from venus_evcharger.controllers.state_specs import (
     _CasePreservingConfigParser,
 )
 
+_DEVICE_INSTANCE_KEY = "DeviceInstance"
+_RUNTIME_OVERRIDES_PATH_KEY = "RuntimeOverridesPath"
+_DEFAULT_DEVICE_INSTANCE = "60"
+_DEFAULT_SCHEDULE_END = "06:30"
+_INTEGER_OVERRIDE_KINDS = frozenset(("bool", "int"))
+
 
 class _StateRuntimeOverrides(_StateRuntimeSnapshot):
     @staticmethod
@@ -29,9 +35,9 @@ class _StateRuntimeOverrides(_StateRuntimeSnapshot):
 
     @staticmethod
     def runtime_overrides_path(defaults: configparser.SectionProxy) -> str:
-        device_instance = defaults.get("DeviceInstance", "60").strip() or "60"
+        device_instance = defaults.get(_DEVICE_INSTANCE_KEY, _DEFAULT_DEVICE_INSTANCE).strip() or _DEFAULT_DEVICE_INSTANCE
         fallback = f"/run/dbus-venus-evcharger-overrides-{device_instance}.ini"
-        return defaults.get("RuntimeOverridesPath", fallback).strip()
+        return defaults.get(_RUNTIME_OVERRIDES_PATH_KEY, fallback).strip()
 
     @classmethod
     def _read_runtime_override_values(cls, path: str) -> dict[str, str]:
@@ -83,22 +89,22 @@ class _StateRuntimeOverrides(_StateRuntimeSnapshot):
             "bool": lambda raw: str(int(bool(raw))),
             "int": lambda raw: str(_StateRuntimeOverrides.coerce_runtime_int(raw)),
             "phase": lambda raw: str(_StateRuntimeOverrides._normalize_runtime_phase_selection(raw)),
-            "weekday_set": lambda raw: scheduled_enabled_days_text(raw, DEFAULT_SCHEDULED_ENABLED_DAYS),
-            "hhmm": lambda raw: normalize_hhmm_text(raw, "06:30"),
+            "weekday_set": scheduled_enabled_days_text,
+            "hhmm": normalize_hhmm_text,
             "float": lambda raw: str(_StateRuntimeOverrides.coerce_runtime_float(raw)),
         }
         return renderers.get(spec.value_kind, renderers["float"])(value)
 
     @staticmethod
     def _runtime_override_default_value(spec: RuntimeOverrideSpec) -> object:
-        if spec.value_kind in {"bool", "int"}:
+        if spec.value_kind in _INTEGER_OVERRIDE_KINDS:
             return 0
         if spec.value_kind == "phase":
             return "P1"
         if spec.value_kind == "weekday_set":
             return DEFAULT_SCHEDULED_ENABLED_DAYS
         if spec.value_kind == "hhmm":
-            return "06:30"
+            return _DEFAULT_SCHEDULE_END
         return 0.0
 
     def current_runtime_overrides(self) -> dict[str, str]:

@@ -202,6 +202,15 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             },
         )
 
+    def test_config_values_use_virtual_enable_without_live_charger_readback(self) -> None:
+        service = SimpleNamespace(virtual_enable=0, virtual_set_current=11.0)
+        controller = DbusPublishController(service, self._age_seconds)
+
+        values = controller._config_values(1, now=100.0)
+
+        self.assertEqual(values["enable"], 0)
+        self.assertEqual(values["start_stop"], 1)
+
     def test_config_values_keep_actual_set_current_when_native_charger_backend_is_present(self) -> None:
         service = SimpleNamespace(
             virtual_mode=1,
@@ -532,6 +541,18 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         self.assertEqual(controller._backend_type_value(service, "meter_backend_type", "meter"), "custom-meter")
         self.assertEqual(controller._backend_type_value(service, "unknown_backend_type", "fallback"), "fallback")
         self.assertEqual(controller._backend_type_value(SimpleNamespace(), "unknown_backend_type"), "")
+        for raw_value, expected in (
+            (" custom-backend ", "custom-backend"),
+            ("", "fallback"),
+            ("   ", "fallback"),
+            (None, "fallback"),
+        ):
+            unknown_service = SimpleNamespace(unknown_backend_type=raw_value)
+            with self.subTest(raw_value=raw_value):
+                self.assertEqual(
+                    controller._backend_type_value(unknown_service, "unknown_backend_type", "fallback"),
+                    expected,
+                )
         self.assertEqual(controller._charger_current_target_value(service), -1.0)
         service._charger_target_current_amps = 13.5
         self.assertEqual(controller._charger_current_target_value(service), 13.5)

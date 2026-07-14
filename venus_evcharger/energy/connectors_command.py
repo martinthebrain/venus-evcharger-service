@@ -21,6 +21,26 @@ from .connectors_common import (
 from .models import EnergySourceDefinition, EnergySourceSnapshot
 
 
+_DEFAULT_TIMEOUT_SECONDS = 2.0
+_ADAPTER_SECTION = "Adapter"
+_COMMAND_SECTION = "Command"
+_RESPONSE_SECTION = "Response"
+_COMMAND_ARGS_KEY = "Args"
+_COMMAND_TIMEOUT_KEY = "TimeoutSeconds"
+_REQUEST_TIMEOUT_KEY = "RequestTimeoutSeconds"
+_RESPONSE_PATH_KEYS = (
+    "SocPath",
+    "UsableCapacityWhPath",
+    "BatteryPowerPath",
+    "AcPowerPath",
+    "PvInputPowerPath",
+    "GridInteractionPath",
+    "OperatingModePath",
+    "OnlinePath",
+    "ConfidencePath",
+)
+
+
 @dataclass(frozen=True)
 class CommandJsonEnergySourceSettings:
     """Normalized config for one local helper command returning JSON."""
@@ -59,8 +79,8 @@ def _build_command_json_energy_source_snapshot(
         pv_input_power_w=_optional_float_path(payload, settings.pv_input_power_path),
         grid_interaction_w=_optional_float_path(payload, settings.grid_interaction_path),
         operating_mode=_optional_text_path(payload, settings.operating_mode_path) or "",
-        online=True if online is None else bool(online),
-        confidence=1.0 if confidence is None else confidence,
+        online=online,
+        confidence=confidence,
         captured_at=now,
     )
 
@@ -111,10 +131,10 @@ def _command_confidence(
 
 
 def _command_timeout_seconds(runtime: Any, adapter: Any, command: Any) -> float:
-    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", 2.0) or 2.0)
-    timeout_seconds = finite_float_or_none(
-        command.get("TimeoutSeconds", adapter.get("RequestTimeoutSeconds", str(default_timeout)))
-    )
+    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", None) or _DEFAULT_TIMEOUT_SECONDS)
+    timeout_seconds = finite_float_or_none(command.get(_COMMAND_TIMEOUT_KEY))
+    if timeout_seconds is None:
+        timeout_seconds = finite_float_or_none(adapter.get(_REQUEST_TIMEOUT_KEY))
     if timeout_seconds is None or timeout_seconds <= 0.0:
         return default_timeout
     return float(timeout_seconds)
@@ -129,21 +149,22 @@ def _command_json_energy_source_settings(runtime: Any, source: EnergySourceDefin
     if not cache_key:
         raise ValueError(f"Energy source '{source.source_id}' requires ConfigPath for command_json connector")
     parser = load_template_config(cache_key)
-    adapter = config_section(parser, "Adapter")
-    command = config_section(parser, "Command")
-    response = config_section(parser, "Response")
+    adapter = config_section(parser, _ADAPTER_SECTION)
+    command = config_section(parser, _COMMAND_SECTION)
+    response = config_section(parser, _RESPONSE_SECTION)
+    response_paths = tuple(_optional_path(response.get(key)) for key in _RESPONSE_PATH_KEYS)
     settings = CommandJsonEnergySourceSettings(
         command=_command_args(command),
         timeout_seconds=_command_timeout_seconds(runtime, adapter, command),
-        soc_path=_optional_path(response.get("SocPath", "")),
-        usable_capacity_wh_path=_optional_path(response.get("UsableCapacityWhPath", "")),
-        battery_power_path=_optional_path(response.get("BatteryPowerPath", "")),
-        ac_power_path=_optional_path(response.get("AcPowerPath", "")),
-        pv_input_power_path=_optional_path(response.get("PvInputPowerPath", "")),
-        grid_interaction_path=_optional_path(response.get("GridInteractionPath", "")),
-        operating_mode_path=_optional_path(response.get("OperatingModePath", "")),
-        online_path=_optional_path(response.get("OnlinePath", "")),
-        confidence_path=_optional_path(response.get("ConfidencePath", "")),
+        soc_path=response_paths[0],
+        usable_capacity_wh_path=response_paths[1],
+        battery_power_path=response_paths[2],
+        ac_power_path=response_paths[3],
+        pv_input_power_path=response_paths[4],
+        grid_interaction_path=response_paths[5],
+        operating_mode_path=response_paths[6],
+        online_path=response_paths[7],
+        confidence_path=response_paths[8],
     )
     _validate_command_json_energy_source_settings(source, settings)
     cache[cache_key] = settings
@@ -151,7 +172,7 @@ def _command_json_energy_source_settings(runtime: Any, source: EnergySourceDefin
 
 
 def _command_args(command: Any) -> tuple[str, ...]:
-    args_text = str(command.get("Args", "")).strip()
+    args_text = str(command.get(_COMMAND_ARGS_KEY, "")).strip()
     if not args_text:
         return ()
     return tuple(shlex.split(args_text))

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from .victron_ess_balance_recommendation import _UpdateCycleVictronEssBalanceRecommendation
@@ -12,10 +13,10 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
     @staticmethod
     def _victron_ess_balance_profile_keys(metrics: dict[str, Any]) -> tuple[str, str]:
         recommendation_profile_key = str(
-            metrics.get("battery_discharge_balance_victron_bias_recommendation_profile_key", "") or ""
+            metrics.get("battery_discharge_balance_victron_bias_recommendation_profile_key") or ""
         ).strip()
         active_profile_key = str(
-            metrics.get("battery_discharge_balance_victron_bias_learning_profile_key", "") or ""
+            metrics.get("battery_discharge_balance_victron_bias_learning_profile_key") or ""
         ).strip()
         return recommendation_profile_key, active_profile_key
 
@@ -31,65 +32,64 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
         now: float,
     ) -> None:
         metrics["battery_discharge_balance_victron_bias_auto_apply_enabled"] = int(
-            bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_enabled", False))
+            bool(svc.auto_battery_discharge_balance_victron_bias_auto_apply_enabled)
         )
         metrics["battery_discharge_balance_victron_bias_auto_apply_active"] = 0
         metrics["battery_discharge_balance_victron_bias_auto_apply_reason"] = "disabled"
         metrics["battery_discharge_balance_victron_bias_auto_apply_generation"] = int(
-            getattr(svc, "_victron_ess_balance_auto_apply_generation", 0) or 0
+            svc._victron_ess_balance_auto_apply_generation
         )
         metrics["battery_discharge_balance_victron_bias_auto_apply_observation_window_active"] = 0
         metrics["battery_discharge_balance_victron_bias_auto_apply_observation_window_until"] = self._optional_float(
-            getattr(svc, "_victron_ess_balance_auto_apply_observe_until", None)
+            svc._victron_ess_balance_auto_apply_observe_until
         )
         metrics["battery_discharge_balance_victron_bias_auto_apply_last_param"] = str(
-            getattr(svc, "_victron_ess_balance_auto_apply_last_applied_param", "") or ""
+            svc._victron_ess_balance_auto_apply_last_applied_param
         )
         metrics["battery_discharge_balance_victron_bias_auto_apply_suspend_active"] = int(
             self._victron_ess_balance_auto_apply_suspended(svc, now)
         )
         metrics["battery_discharge_balance_victron_bias_auto_apply_suspend_reason"] = str(
-            getattr(svc, "_victron_ess_balance_auto_apply_suspend_reason", "") or ""
+            svc._victron_ess_balance_auto_apply_suspend_reason
         )
         metrics["battery_discharge_balance_victron_bias_auto_apply_suspend_until"] = self._optional_float(
-            getattr(svc, "_victron_ess_balance_auto_apply_suspend_until", None)
+            svc._victron_ess_balance_auto_apply_suspend_until
         )
 
     @staticmethod
     def _initialize_victron_ess_balance_rollback_metrics(svc: Any, metrics: dict[str, Any]) -> None:
         metrics["battery_discharge_balance_victron_bias_rollback_enabled"] = int(
-            bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_rollback_enabled", True))
+            bool(svc.auto_battery_discharge_balance_victron_bias_rollback_enabled)
         )
         metrics["battery_discharge_balance_victron_bias_rollback_active"] = 0
         metrics["battery_discharge_balance_victron_bias_rollback_reason"] = "disabled"
         metrics["battery_discharge_balance_victron_bias_rollback_stable_profile_key"] = str(
-            getattr(svc, "_victron_ess_balance_last_stable_profile_key", "") or ""
+            svc._victron_ess_balance_last_stable_profile_key
         )
 
     @staticmethod
     def _initialize_victron_ess_balance_safe_state_metrics(svc: Any, metrics: dict[str, Any]) -> None:
         metrics["battery_discharge_balance_victron_bias_safe_state_active"] = int(
-            bool(getattr(svc, "_victron_ess_balance_safe_state_active", False))
+            bool(svc._victron_ess_balance_safe_state_active)
         )
         metrics["battery_discharge_balance_victron_bias_safe_state_reason"] = str(
-            getattr(svc, "_victron_ess_balance_safe_state_reason", "") or ""
+            svc._victron_ess_balance_safe_state_reason
         )
 
     def _victron_ess_balance_auto_apply_thresholds(self, svc: Any) -> tuple[float, float, int]:
         min_confidence = max(
             0.0,
-            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_min_confidence", 0.85) or 0.85),
+            float(svc.auto_battery_discharge_balance_victron_bias_auto_apply_min_confidence),
         )
         min_stability = max(
             0.0,
             float(
-                getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_min_stability_score", 0.75)
-                or 0.75
+                svc.auto_battery_discharge_balance_victron_bias_auto_apply_min_stability_score
             ),
         )
         min_samples = max(
             1,
-            int(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_min_profile_samples", 3) or 3),
+            int(svc.auto_battery_discharge_balance_victron_bias_auto_apply_min_profile_samples),
         )
         return min_confidence, min_stability, min_samples
 
@@ -122,7 +122,7 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
     def _victron_ess_balance_auto_apply_sample_reason(self, svc: Any, metrics: dict[str, Any]) -> str:
         sample_count = max(
             0,
-            int(metrics.get("battery_discharge_balance_victron_bias_learning_profile_sample_count", 0) or 0),
+            int(metrics.get("battery_discharge_balance_victron_bias_learning_profile_sample_count") or 0),
         )
         _, _, min_samples = self._victron_ess_balance_auto_apply_thresholds(svc)
         if sample_count < min_samples:
@@ -159,7 +159,7 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
             0.0,
             min(
                 1.0,
-                float(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_blend", 0.25) or 0.25),
+                float(svc.auto_battery_discharge_balance_victron_bias_auto_apply_blend),
             ),
         )
 
@@ -167,7 +167,7 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
     def _victron_ess_balance_auto_apply_observation_until(svc: Any, now: float) -> float | None:
         observation_seconds = max(
             0.0,
-            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_observation_window_seconds", 30.0) or 30.0),
+            float(svc.auto_battery_discharge_balance_victron_bias_observation_window_seconds),
         )
         if observation_seconds <= 0.0:
             return None
@@ -187,7 +187,7 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
             return False
         svc._victron_ess_balance_auto_apply_generation = max(
             0,
-            int(getattr(svc, "_victron_ess_balance_auto_apply_generation", 0) or 0),
+            int(svc._victron_ess_balance_auto_apply_generation),
         ) + 1
         svc._victron_ess_balance_auto_apply_observe_until = self._victron_ess_balance_auto_apply_observation_until(
             svc,
@@ -198,21 +198,21 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
         metrics["battery_discharge_balance_victron_bias_auto_apply_active"] = 1
         metrics["battery_discharge_balance_victron_bias_auto_apply_reason"] = "applied_step"
         metrics["battery_discharge_balance_victron_bias_auto_apply_generation"] = int(
-            getattr(svc, "_victron_ess_balance_auto_apply_generation", 0) or 0
+            svc._victron_ess_balance_auto_apply_generation
         )
         metrics["battery_discharge_balance_victron_bias_auto_apply_last_param"] = str(changed_param)
         metrics["battery_discharge_balance_victron_bias_auto_apply_observation_window_until"] = self._optional_float(
-            getattr(svc, "_victron_ess_balance_auto_apply_observe_until", None)
+            svc._victron_ess_balance_auto_apply_observe_until
         )
         self._victron_ess_balance_save_runtime_state(svc)
         return True
 
     @staticmethod
     def _victron_ess_balance_auto_apply_enabled(svc: Any) -> bool:
-        return bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_enabled", False))
+        return bool(svc.auto_battery_discharge_balance_victron_bias_auto_apply_enabled)
 
     def _victron_ess_balance_auto_apply_observation_reason(self, svc: Any, metrics: dict[str, Any], now: float) -> str:
-        observe_until = self._optional_float(getattr(svc, "_victron_ess_balance_auto_apply_observe_until", None))
+        observe_until = self._optional_float(svc._victron_ess_balance_auto_apply_observe_until)
         if observe_until is None or float(now) >= float(observe_until):
             return ""
         metrics["battery_discharge_balance_victron_bias_auto_apply_observation_window_active"] = 1
@@ -241,12 +241,14 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
         metrics: dict[str, Any],
         now: float,
     ) -> str:
-        for reason in (
-            self._victron_ess_balance_auto_apply_suspend_reason(svc, now),
-            self._victron_ess_balance_auto_apply_rollback_reason(svc, metrics, now),
-            self._victron_ess_balance_auto_apply_observation_reason(svc, metrics, now),
-            self._victron_ess_balance_auto_apply_readiness(svc, metrics),
-        ):
+        checks: tuple[Callable[[], str], ...] = (
+            lambda: self._victron_ess_balance_auto_apply_suspend_reason(svc, now),
+            lambda: self._victron_ess_balance_auto_apply_rollback_reason(svc, metrics, now),
+            lambda: self._victron_ess_balance_auto_apply_observation_reason(svc, metrics, now),
+            lambda: self._victron_ess_balance_auto_apply_readiness(svc, metrics),
+        )
+        for check in checks:
+            reason = check()
             if reason:
                 return reason
         return ""
@@ -295,7 +297,7 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
 
     def _victron_ess_balance_recommended_activation_step(self, svc: Any, metrics: dict[str, Any]) -> str:
         recommended_activation_mode = str(
-            metrics.get("battery_discharge_balance_victron_bias_recommended_activation_mode", "") or ""
+            metrics.get("battery_discharge_balance_victron_bias_recommended_activation_mode") or ""
         ).strip()
         if recommended_activation_mode and recommended_activation_mode != self._victron_ess_balance_activation_mode(svc):
             svc.auto_battery_discharge_balance_victron_bias_activation_mode = recommended_activation_mode
@@ -306,7 +308,7 @@ class _UpdateCycleVictronEssBalanceAdaptive(_UpdateCycleVictronEssBalanceRecomme
     def _blend_recommended_setting(svc: Any, attr_name: str, recommendation: Any, blend: float) -> bool:
         if recommendation is None or not hasattr(svc, attr_name):
             return False
-        current_value = float(getattr(svc, attr_name, 0.0) or 0.0)
+        current_value = float(getattr(svc, attr_name))
         target_value = float(recommendation)
         if abs(current_value - target_value) < 1e-6:
             return False

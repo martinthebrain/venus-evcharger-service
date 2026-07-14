@@ -12,7 +12,7 @@ from venus_evcharger.controllers.state_runtime import _StateRuntime
 class _StateRuntimeRestoreVictronEss(_StateRuntime):
     @classmethod
     def _valid_victron_ess_balance_schema_version(cls, payload: dict[str, object]) -> bool:
-        return non_negative_int(payload.get("schema_version"), 0) in {1, 2}
+        return non_negative_int(payload.get("schema_version")) in {1, 2}
 
     @classmethod
     def _victron_ess_balance_payload_matches_topology(
@@ -20,15 +20,20 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
         svc: Any,
         payload: dict[str, object],
     ) -> bool:
-        source_id = str(
-            payload.get(
-                "source_id",
-                getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", ""),
+        if "source_id" in payload:
+            raw_source_id = payload["source_id"]
+        else:
+            raw_source_id = getattr(
+                svc,
+                "auto_battery_discharge_balance_victron_bias_source_id",
+                None,
             )
-            or ""
-        ).strip()
+        source_id = str(raw_source_id).strip() if raw_source_id else ""
         expected_topology_key = cls._victron_ess_balance_runtime_topology_key(svc, source_id)
-        payload_topology_key = str(payload.get("topology_key", "") or "").strip()
+        raw_topology_key = payload.get("topology_key")
+        if raw_topology_key is None:
+            return False
+        payload_topology_key = str(raw_topology_key).strip()
         return payload_topology_key in {expected_topology_key, expected_topology_key.replace("/v2", "/v1")}
 
     @staticmethod
@@ -37,9 +42,11 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
         key: str,
         fallback_key: str | None = None,
     ) -> str:
+        if key in raw_profile:
+            return str(raw_profile[key] or "")
         if fallback_key is None:
-            return str(raw_profile.get(key, "") or "")
-        return str(raw_profile.get(key, raw_profile.get(fallback_key, "")) or "")
+            return ""
+        return str(raw_profile.get(fallback_key) or "")
 
     @staticmethod
     def _normalized_victron_ess_balance_learning_metric(
@@ -57,7 +64,7 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
         key: str,
         fallback: str,
     ) -> str:
-        return str(raw_profile.get(key, fallback) or fallback)
+        return str(raw_profile.get(key) or fallback)
 
     @staticmethod
     def _normalized_victron_ess_balance_learning_profile(
@@ -103,8 +110,8 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
                 "battery_limit_phase",
                 "mid_band",
             ),
-            "delay_samples": non_negative_int(raw_profile.get("delay_samples"), 0),
-            "gain_samples": non_negative_int(raw_profile.get("gain_samples"), 0),
+            "delay_samples": non_negative_int(raw_profile.get("delay_samples")),
+            "gain_samples": non_negative_int(raw_profile.get("gain_samples")),
             "response_delay_seconds": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "response_delay_seconds",
@@ -123,8 +130,8 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
                 raw_profile,
                 "gain_mad",
             ),
-            "overshoot_count": non_negative_int(raw_profile.get("overshoot_count"), 0),
-            "settled_count": non_negative_int(raw_profile.get("settled_count"), 0),
+            "overshoot_count": non_negative_int(raw_profile.get("overshoot_count")),
+            "settled_count": non_negative_int(raw_profile.get("settled_count")),
             "stability_score": _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_learning_metric(
                 raw_profile,
                 "stability_score",
@@ -166,13 +173,17 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
 
     @staticmethod
     def _victron_ess_balance_activation_mode(payload: dict[str, object], svc: Any) -> str | None:
-        activation_mode = str(
-            payload.get(
-                "activation_mode",
-                getattr(svc, "auto_battery_discharge_balance_victron_bias_activation_mode", "always"),
+        if "activation_mode" in payload:
+            raw_mode = payload["activation_mode"]
+        else:
+            raw_mode = getattr(
+                svc,
+                "auto_battery_discharge_balance_victron_bias_activation_mode",
+                None,
             )
-            or "always"
-        ).strip().lower()
+        if raw_mode is None or not str(raw_mode).strip():
+            return "always"
+        activation_mode = str(raw_mode).strip().lower()
         if activation_mode in {"always", "export_only", "above_reserve_band", "export_and_above_reserve_band"}:
             return activation_mode
         return None
@@ -186,9 +197,10 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
         path = _victron_ess_balance_runtime_string(
             svc, "auto_battery_discharge_balance_victron_bias_path"
         )
+        normalized_source_id = str(source_id).strip() if source_id else ""
         return (
             "victron-bias-learning/v2"
-            f"/source={str(source_id or '').strip()}"
+            f"/source={normalized_source_id}"
             f"/service={service_name}"
             f"/path={path}"
             f"/energy={','.join(sorted(energy_ids))}"
@@ -281,10 +293,10 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
             payload.get("auto_apply_suspend_until")
         )
         svc._victron_ess_balance_auto_apply_suspend_reason = str(
-            payload.get("auto_apply_suspend_reason", "") or ""
+            payload.get("auto_apply_suspend_reason") or ""
         )
         svc._victron_ess_balance_safe_state_active = bool(payload.get("safe_state_active"))
-        svc._victron_ess_balance_safe_state_reason = str(payload.get("safe_state_reason", "") or "")
+        svc._victron_ess_balance_safe_state_reason = str(payload.get("safe_state_reason") or "")
 
     @staticmethod
     def _restore_victron_ess_balance_auto_apply_state(svc: Any, payload: dict[str, object]) -> None:
@@ -296,7 +308,7 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
             payload.get("auto_apply_observe_until")
         )
         svc._victron_ess_balance_auto_apply_last_applied_param = str(
-            payload.get("auto_apply_last_applied_param", "") or ""
+            payload.get("auto_apply_last_applied_param") or ""
         )
         svc._victron_ess_balance_auto_apply_last_applied_at = non_negative_float_or_none(
             payload.get("auto_apply_last_applied_at")
@@ -305,13 +317,13 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
             payload.get("oscillation_lockout_until")
         )
         svc._victron_ess_balance_oscillation_lockout_reason = str(
-            payload.get("oscillation_lockout_reason", "") or ""
+            payload.get("oscillation_lockout_reason") or ""
         )
         svc._victron_ess_balance_overshoot_cooldown_until = non_negative_float_or_none(
             payload.get("overshoot_cooldown_until")
         )
         svc._victron_ess_balance_overshoot_cooldown_reason = str(
-            payload.get("overshoot_cooldown_reason", "") or ""
+            payload.get("overshoot_cooldown_reason") or ""
         )
 
     @staticmethod
@@ -321,7 +333,7 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
         )
         svc._victron_ess_balance_last_stable_at = non_negative_float_or_none(payload.get("last_stable_at"))
         svc._victron_ess_balance_last_stable_profile_key = str(
-            payload.get("last_stable_profile_key", "") or ""
+            payload.get("last_stable_profile_key") or ""
         )
         svc._victron_ess_balance_conservative_tuning = _StateRuntimeRestoreVictronEss._normalized_victron_ess_balance_tuning_mapping(
             payload.get("conservative_tuning")
@@ -344,12 +356,13 @@ class _StateRuntimeRestoreVictronEss(_StateRuntime):
 
 def _victron_ess_balance_energy_ids(svc: Any) -> list[str]:
     energy_ids: list[str] = []
-    for definition in tuple(getattr(svc, "auto_energy_sources", ()) or ()):
-        normalized_id = str(getattr(definition, "source_id", "") or "").strip()
+    definitions = getattr(svc, "auto_energy_sources", None)
+    for definition in tuple(definitions or ()):
+        normalized_id = str(getattr(definition, "source_id", None) or "").strip()
         if normalized_id:
             energy_ids.append(normalized_id)
     return energy_ids
 
 
 def _victron_ess_balance_runtime_string(svc: Any, attr_name: str) -> str:
-    return str(getattr(svc, attr_name, "") or "").strip()
+    return str(getattr(svc, attr_name, None) or "").strip()

@@ -110,7 +110,7 @@ def normalized_control_api_error_code(value: Any) -> str:
     return code if code in CONTROL_API_ERROR_CODES else "bad_request"
 
 
-def normalized_control_api_auth_scope(value: Any, *, default: str = "read") -> str:
+def normalized_control_api_auth_scope(value: Any, *, default: str | None = None) -> str:
     scope = _normalized_text(value).lower()
     normalized_default = default if default in CONTROL_API_AUTH_SCOPES else "read"
     return scope if scope in CONTROL_API_AUTH_SCOPES else normalized_default
@@ -121,7 +121,7 @@ def normalized_control_command_name(value: Any) -> str:
     return name if name in CONTROL_COMMAND_NAMES else "legacy_unknown_write"
 
 
-def normalized_control_command_source(value: Any, *, default: str = "http") -> str:
+def normalized_control_command_source(value: Any, *, default: str | None = None) -> str:
     source = _normalized_text(value).lower()
     normalized_default = "http" if default not in CONTROL_COMMAND_SOURCES else default
     return source if source in CONTROL_COMMAND_SOURCES else normalized_default
@@ -135,7 +135,7 @@ def normalized_control_command_status(value: Any) -> str:
 def normalized_control_command_fields(
     payload: Mapping[str, Any] | None,
     *,
-    default_source: str = "http",
+    default_source: str | None = None,
 ) -> dict[str, Any]:
     raw = dict(payload or {})
     return {
@@ -149,26 +149,20 @@ def normalized_control_command_fields(
     }
 
 
-def _normalized_control_flag(raw: Mapping[str, Any], key: str, default: int = 0) -> bool:
+def _normalized_control_flag(raw: Mapping[str, Any], key: str, default: bool = False) -> bool:
     return bool(normalize_binary_flag(raw.get(key, default)))
 
 
 def normalized_control_result_fields(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = dict(payload or {})
     status = normalized_control_command_status(raw.get("status"))
-    persisted = _normalized_control_flag(raw, "persisted", int(status == "applied"))
-    reversible_failure = _normalized_control_flag(raw, "reversible_failure", int(status == "rejected"))
-    external_side_effect_started = _normalized_control_flag(
-        raw,
-        "external_side_effect_started",
-        int(status == "accepted_in_flight"),
-    )
 
     if status == "applied":
         accepted = True
         applied = True
         persisted = True
         reversible_failure = False
+        external_side_effect_started = _normalized_control_flag(raw, "external_side_effect_started")
     elif status == "accepted_in_flight":
         accepted = True
         applied = False
@@ -179,10 +173,11 @@ def normalized_control_result_fields(payload: Mapping[str, Any] | None) -> dict[
         accepted = False
         applied = False
         persisted = False
+        reversible_failure = _normalized_control_flag(raw, "reversible_failure", True)
         external_side_effect_started = False
 
     return {
-        "command": normalized_control_command_fields(raw.get("command"), default_source="http"),
+        "command": normalized_control_command_fields(raw.get("command")),
         "status": status,
         "accepted": accepted,
         "applied": applied,
@@ -197,7 +192,7 @@ def normalized_control_api_health_fields(payload: Mapping[str, Any] | None) -> d
     raw = dict(payload or {})
     read_auth_required, control_auth_required = _normalized_control_auth_flags(raw)
     return {
-        "ok": _normalized_control_flag(raw, "ok", 1),
+        "ok": _normalized_control_flag(raw, "ok", True),
         "api_version": normalized_control_api_version(raw.get("api_version")),
         "transport": normalized_control_api_transport(raw.get("transport")),
         "listen_host": _normalized_text(raw.get("listen_host")),
@@ -205,7 +200,7 @@ def normalized_control_api_health_fields(payload: Mapping[str, Any] | None) -> d
         "auth_required": bool(read_auth_required or control_auth_required),
         "read_auth_required": read_auth_required,
         "control_auth_required": control_auth_required,
-        "localhost_only": _normalized_control_flag(raw, "localhost_only", 1),
+        "localhost_only": _normalized_control_flag(raw, "localhost_only", True),
         "unix_socket_path": _normalized_text(raw.get("unix_socket_path")),
     }
 
@@ -250,9 +245,7 @@ def _normalized_command_names(value: Any) -> list[str]:
 
 
 def _normalized_command_sources(value: Any) -> list[str]:
-    return sorted(
-        {normalized_control_command_source(item, default="http") for item in _normalized_items(value, CONTROL_COMMAND_SOURCES)}
-    )
+    return sorted({normalized_control_command_source(item) for item in _normalized_items(value, CONTROL_COMMAND_SOURCES)})
 
 
 def _normalized_allowed_endpoints(value: Any, allowed: frozenset[str]) -> list[str]:
@@ -267,11 +260,11 @@ def _normalized_allowed_endpoints(value: Any, allowed: frozenset[str]) -> list[s
 
 
 def _normalized_control_auth_flags(raw: Mapping[str, Any]) -> tuple[bool, bool]:
-    read_auth_required = _normalized_control_flag(raw, "read_auth_required", int(_normalized_control_flag(raw, "auth_required")))
+    read_auth_required = _normalized_control_flag(raw, "read_auth_required", _normalized_control_flag(raw, "auth_required"))
     control_auth_required = _normalized_control_flag(
         raw,
         "control_auth_required",
-        int(read_auth_required),
+        read_auth_required,
     )
     return read_auth_required, control_auth_required
 
@@ -317,13 +310,13 @@ def normalized_control_api_capabilities_fields(payload: Mapping[str, Any] | None
     raw = dict(payload or {})
     read_auth_required, control_auth_required = _normalized_control_auth_flags(raw)
     return {
-        "ok": _normalized_control_flag(raw, "ok", 1),
+        "ok": _normalized_control_flag(raw, "ok", True),
         "api_version": normalized_control_api_version(raw.get("api_version")),
         "transport": normalized_control_api_transport(raw.get("transport")),
         "auth_required": bool(read_auth_required or control_auth_required),
         "read_auth_required": read_auth_required,
         "control_auth_required": control_auth_required,
-        "localhost_only": _normalized_control_flag(raw, "localhost_only", 1),
+        "localhost_only": _normalized_control_flag(raw, "localhost_only", True),
         "unix_socket_path": _normalized_text(raw.get("unix_socket_path")),
         "auth_header": _normalized_text(raw.get("auth_header"), "Authorization: Bearer <token>"),
         "auth_scopes": _normalized_auth_scopes(raw.get("auth_scopes")),
@@ -349,7 +342,7 @@ def normalized_control_api_command_response_fields(payload: Mapping[str, Any] | 
         "ok": _normalized_control_flag(raw, "ok"),
         "detail": _normalized_text(raw.get("detail")),
         "replayed": _normalized_control_flag(raw, "replayed"),
-        "command": normalized_control_command_fields(command, default_source="http") if isinstance(command, Mapping) else None,
+        "command": normalized_control_command_fields(command) if isinstance(command, Mapping) else None,
         "result": normalized_control_result_fields(result) if isinstance(result, Mapping) else None,
         "error": normalized_control_api_error_fields(error) if isinstance(error, Mapping) else None,
     }

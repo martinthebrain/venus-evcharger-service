@@ -81,7 +81,9 @@ class _StateRuntimeNormalize(ControllerAssemblyContract):
 
     @staticmethod
     def _normalize_phase_switch_state(value: object) -> str | None:
-        state = str(value).strip().lower() if value is not None else ""
+        if value is None:
+            return None
+        state = str(value).strip().lower()
         if state in {"waiting-relay-off", "stabilizing"}:
             return state
         return None

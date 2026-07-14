@@ -72,14 +72,13 @@ def _named_command_request_schema(
     if path_schema is not None:
         properties["path"] = dict(path_schema)
         required.append("path")
-    return _object_schema(properties, required=required, additional_properties=False)
+    return _object_schema(properties, required=required)
 
 
 def _path_command_request_schema(path_schema: Mapping[str, Any], value_schema: Mapping[str, Any]) -> dict[str, Any]:
     return _object_schema(
         {"path": dict(path_schema), "value": dict(value_schema), **_tracking_properties()},
         required=("path", "value"),
-        additional_properties=False,
     )
 
 
@@ -204,7 +203,6 @@ def _component_schemas() -> dict[str, Any]:
                 "details": {"type": "object", "additionalProperties": True},
             },
             required=("code", "message", "retryable", "details"),
-            additional_properties=False,
         ),
         "ControlCommand": _object_schema(
             {

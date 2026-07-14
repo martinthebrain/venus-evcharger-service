@@ -235,6 +235,19 @@ class BootstrapWizardEnergyContracts(unittest.TestCase):
         self.assertEqual(energy.bundle_labels("custom")[0], "External energy source integration (custom)")
         self.assertEqual(energy.bundle_block_label("huawei"), "External energy source")
         self.assertEqual(energy.bundle_block_label("custom"), "External energy source (custom)")
+        self.assertEqual(
+            energy.bundle_target_names(""),
+            {
+                "ini": "wizard-huawei-energy.ini",
+                "wizard": "wizard-huawei-energy.wizard.txt",
+                "summary": "wizard-huawei-energy.summary.txt",
+            },
+        )
+        self.assertEqual(
+            energy.bundle_labels(""),
+            ("External energy source integration", "Set usable battery capacity for weighted combined SOC"),
+        )
+        self.assertEqual(energy.bundle_block_label(""), "External energy source")
 
     def test_huawei_bundle_files_legacy_prefix_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

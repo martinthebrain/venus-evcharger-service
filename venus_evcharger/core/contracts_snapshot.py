@@ -84,7 +84,7 @@ def _snapshot_pm_payload(normalized: dict[str, Any]) -> tuple[dict[str, Any] | N
     pm_status_raw = normalized.get("pm_status")
     pm_status = _mapping_payload(pm_status_raw)
     pm_captured_at = non_negative_float_or_none(normalized.get("pm_captured_at"))
-    pm_confirmed = bool(normalized.get("pm_confirmed", False))
+    pm_confirmed = bool(normalized.get("pm_confirmed"))
     return pm_status, pm_captured_at, pm_confirmed
 
 

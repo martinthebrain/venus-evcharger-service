@@ -133,9 +133,17 @@ def parse_counts(text: str) -> dict[str, int]:
 
 
 def mutant_names(text: str, status: str) -> list[str]:
+    mutant_pattern = (
+        r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\."
+        r"x(?:_|ǁ)[^:\s]+__mutmut_\d+"
+    )
     return [
-        match.group(1).strip()
-        for match in re.finditer(rf"^\s*([^:\s][^:]*):\s+{re.escape(status)}\b", text, flags=re.I | re.M)
+        match.group(1)
+        for match in re.finditer(
+            rf"^\s*({mutant_pattern}):\s+{re.escape(status)}\b",
+            text,
+            flags=re.I | re.M,
+        )
     ]
 
 

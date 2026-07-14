@@ -52,22 +52,29 @@ def run_target(
             reason=not_applicable_reason,
         )
     clear_mutmut_worktree(repo, reuse_cache=options.reuse_cache)
-    run = run_mutmut_for_target(
-        command=command,
-        target=target,
-        artifacts=artifacts,
-        timeout_s=options.timeout_s,
-    )
-    if audit_support.generated_no_mutants(repo, target.path):
-        return audit_results.no_generated_mutants_result(target=target, started=started, artifacts=artifacts, run=run)
-    counts = target_counts(
-        command=command,
-        target=target,
-        run=run,
-        artifacts=artifacts,
-        verify_survivors=options.verify_survivors,
-    )
-    return audit_results.runtime_result(target=target, started=started, artifacts=artifacts, run=run, counts=counts)
+    target_file = repo / target.path
+    original_source = target_file.read_bytes()
+    try:
+        run = run_mutmut_for_target(
+            command=command,
+            target=target,
+            artifacts=artifacts,
+            timeout_s=options.timeout_s,
+        )
+        target_file.write_bytes(original_source)
+        if audit_support.generated_no_mutants(repo, target.path):
+            return audit_results.no_generated_mutants_result(target=target, started=started, artifacts=artifacts, run=run)
+        counts = target_counts(
+            command=command,
+            target=target,
+            run=run,
+            artifacts=artifacts,
+            verify_survivors=options.verify_survivors,
+        )
+        return audit_results.runtime_result(target=target, started=started, artifacts=artifacts, run=run, counts=counts)
+    finally:
+        target_file.write_bytes(original_source)
+        clear_target_bytecode(repo, target.path)
 
 
 def artifacts_for_target(out_dir: Path, target: audit_support.MutationTarget) -> audit_support.TargetArtifacts:
@@ -83,6 +90,19 @@ def clear_mutmut_worktree(repo: Path, *, reuse_cache: bool) -> None:
         return
     shutil.rmtree(repo / MUTMUT_CACHE, ignore_errors=True)
     shutil.rmtree(repo / MUTMUT_WORKTREE, ignore_errors=True)
+
+
+def clear_target_bytecode(repo: Path, target_path: str) -> None:
+    """Remove only cached bytecode that mutmut may leave for the target module."""
+    source = repo / target_path
+    if source.suffix != ".py":
+        return
+    cache_dir = source.parent / "__pycache__"
+    for cache_path in cache_dir.glob(f"{source.stem}.*.pyc"):
+        try:
+            cache_path.unlink()
+        except OSError:
+            pass
 
 
 def run_mutmut_for_target(

@@ -66,7 +66,6 @@ def _huawei_profile(
         default_host=default_host,
         default_port_candidates=default_port_candidates,
         default_unit_id_candidates=default_unit_id_candidates,
-        read_support="supported",
         write_support="experimental",
         probe_required=True,
     )

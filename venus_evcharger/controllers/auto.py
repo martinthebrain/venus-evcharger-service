@@ -40,7 +40,7 @@ class AutoDecisionController(AutoDecisionWorkflow):
         target = getattr(self.service, "_service", None)
         if target is None:
             return None
-        method = getattr(target, "__dict__", {}).get(legacy_name)
+        method = vars(target).get(legacy_name)
         return method if callable(method) else None
 
     def _external_service_method(self, name: str) -> Any:

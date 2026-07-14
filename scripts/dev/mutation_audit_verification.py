@@ -51,22 +51,26 @@ def verify_mutants(
     target_file = repo / target_path
     original = target_file.read_bytes()
     verified = 0
-    with log_path.open("a", encoding="utf-8") as log:
-        log.write(f"\nVerifying {status_label} mutants in clean subprocesses\n")
-        with configure_target(repo, target_path):
-            for mutant in mutant_names:
-                verified += int(
-                    mutant_fails_selected_tests(
-                        repo=repo,
-                        mutmut=mutmut,
-                        target_file=target_file,
-                        original=original,
-                        mutant=mutant,
-                        log=log,
-                        test_selection=test_selection,
+    try:
+        with log_path.open("a", encoding="utf-8") as log:
+            log.write(f"\nVerifying {status_label} mutants in clean subprocesses\n")
+            with configure_target(repo, target_path):
+                for mutant in mutant_names:
+                    target_file.write_bytes(original)
+                    verified += int(
+                        mutant_fails_selected_tests(
+                            repo=repo,
+                            mutmut=mutmut,
+                            target_file=target_file,
+                            original=original,
+                            mutant=mutant,
+                            log=log,
+                            test_selection=test_selection,
+                        )
                     )
-                )
-    return verified
+        return verified
+    finally:
+        target_file.write_bytes(original)
 
 
 def mutant_fails_selected_tests(
@@ -81,12 +85,23 @@ def mutant_fails_selected_tests(
 ) -> bool:
     try:
         if not apply_mutant(repo=repo, mutmut=mutmut, mutant=mutant, log=log):
-            return False
+            raise RuntimeError(f"unable to apply mutant during verification: {mutant}")
+        clear_source_bytecode(target_file)
         failed = run_survivor_tests(repo=repo, mutmut=mutmut, test_selection=test_selection, log=log)
         log.write(f"verification {'killed' if failed else 'kept'} {mutant}: rc={1 if failed else 0}\n")
         return failed
     finally:
         target_file.write_bytes(original)
+
+
+def clear_source_bytecode(source: Path) -> None:
+    """Prevent timestamp-based pyc reuse after applying an in-place mutant."""
+    cache_dir = source.parent / "__pycache__"
+    for cache_path in cache_dir.glob(f"{source.stem}.*.pyc"):
+        try:
+            cache_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def apply_mutant(*, repo: Path, mutmut: list[str], mutant: str, log: TextIO) -> bool:

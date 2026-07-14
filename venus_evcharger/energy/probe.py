@@ -29,13 +29,34 @@ from .profiles import energy_source_profile_details, energy_source_profile_probe
 
 
 ENERGY_PROBE_READ_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+_DETECT_COMMAND = "detect-modbus-energy"
+_VALIDATE_COMMAND = "validate-huawei-energy"
+_COMMAND_CHOICES = (_DETECT_COMMAND, _VALIDATE_COMMAND)
+_EMIT_CHOICES = ("json", "ini", "wizard-hint", "summary")
+_DEFAULT_EMIT = "json"
+_DEFAULT_SOURCE_ID = "huawei"
+_HOST_KEY = "Host"
+_PORT_KEY = "Port"
+_UNIT_ID_KEY = "UnitId"
+_SLAVE_ID_KEY = "SlaveId"
+_CLI_DESCRIPTION = "Probe external energy-source connector configs"
+_COMMAND_ARGUMENT = "command"
+_CONFIG_PATH_ARGUMENT = "config_path"
+_PROFILE_OPTION = "--profile"
+_HOST_OPTION = "--host"
+_PORT_OPTION = "--port"
+_UNIT_ID_OPTION = "--unit-id"
+_SOURCE_ID_OPTION = "--source-id"
+_EMIT_OPTION = "--emit"
+_WRITE_PREFIX_OPTION = "--write-recommendation-prefix"
+_EMPTY_TEXT = ""
 
 
 def detect_modbus_energy_source(
     config_path: str,
     *,
-    profile_name: str = "",
-    host: str = "",
+    profile_name: str = _EMPTY_TEXT,
+    host: str = _EMPTY_TEXT,
     port: int | None = None,
     unit_id: int | None = None,
 ) -> dict[str, object]:
@@ -49,8 +70,8 @@ def detect_modbus_energy_source(
         port=port,
         unit_id=unit_id,
     )
-    default_host = str(probe_plan.get("host", "")).strip()
-    if default_host and not transport.get("Host", "").strip():
+    default_host = str(probe_plan.get("host") or "").strip()
+    if default_host and not str(transport.get(_HOST_KEY) or "").strip():
         transport["Host"] = default_host
     base_transport = load_modbus_transport_settings(parser, _probe_service())
     field = _probe_field(parser, _field_settings)
@@ -70,7 +91,7 @@ def validate_huawei_energy_source(
     config_path: str,
     *,
     profile_name: str,
-    host: str = "",
+    host: str = _EMPTY_TEXT,
     port: int | None = None,
     unit_id: int | None = None,
     source_id: str = "huawei",
@@ -154,7 +175,7 @@ def _huawei_candidate_transport(
 
 
 def _apply_detected_probe_target(transport: MutableMapping[str, str], detected: Mapping[str, object]) -> None:
-    transport["Host"] = str(detected.get("host", "") or "")
+    transport["Host"] = str(detected.get("host") or "")
     detected_port = _optional_detected_int(detected.get("port"))
     if detected_port is not None:
         transport["Port"] = str(detected_port)
@@ -171,7 +192,7 @@ def _detected_candidate_transport(
     detected_unit_id = _optional_detected_int(detected.get("unit_id"))
     return replace(
         base_transport,
-        host=str(detected.get("host", "") or base_transport.host),
+        host=str(detected.get("host") or base_transport.host),
         port=detected_port if detected_port is not None else base_transport.port,
         unit_id=detected_unit_id if detected_unit_id is not None else base_transport.unit_id,
     )
@@ -194,7 +215,9 @@ def _huawei_meter_block_detected(field_results: list[dict[str, object]]) -> bool
 
 
 def _is_huawei_meter_result(result: Mapping[str, object]) -> bool:
-    section = str(result.get("section", ""))
+    section = result.get("section")
+    if not isinstance(section, str):
+        return False
     return section.startswith("HuaweiMeter") or section == "MeterStatusRead"
 
 
@@ -285,12 +308,17 @@ def _probe_plan(
     port: int | None,
     unit_id: int | None,
 ) -> dict[str, object]:
+    configured_host = host or transport.get(_HOST_KEY, "")
+    configured_port = port if port is not None else transport.get(_PORT_KEY)
+    configured_unit_id: object = unit_id
+    if configured_unit_id is None:
+        configured_unit_id = transport.get(_UNIT_ID_KEY, transport.get(_SLAVE_ID_KEY))
     return dict(
         energy_source_profile_probe_plan(
             profile_name,
-            configured_host=host or transport.get("Host", ""),
-            configured_port=port if port is not None else transport.get("Port", ""),
-            configured_unit_id=unit_id if unit_id is not None else transport.get("UnitId", transport.get("SlaveId", "")),
+            configured_host=configured_host,
+            configured_port=configured_port,
+            configured_unit_id=configured_unit_id,
         )
     )
 
@@ -311,16 +339,16 @@ def _probe_attempts(
 
 def main(argv: list[str] | None = None) -> int:
     """Run the energy probe CLI."""
-    parser = argparse.ArgumentParser(description="Probe external energy-source connector configs")
-    parser.add_argument("command", choices=("detect-modbus-energy", "validate-huawei-energy"))
-    parser.add_argument("config_path")
-    parser.add_argument("--profile", default="")
-    parser.add_argument("--host", default="")
-    parser.add_argument("--port", type=int)
-    parser.add_argument("--unit-id", type=int)
-    parser.add_argument("--source-id", default="huawei")
-    parser.add_argument("--emit", choices=("json", "ini", "wizard-hint", "summary"), default="json")
-    parser.add_argument("--write-recommendation-prefix", default="")
+    parser = argparse.ArgumentParser(description=_CLI_DESCRIPTION)
+    parser.add_argument(_COMMAND_ARGUMENT, choices=_COMMAND_CHOICES)
+    parser.add_argument(_CONFIG_PATH_ARGUMENT)
+    parser.add_argument(_PROFILE_OPTION, default=_EMPTY_TEXT)
+    parser.add_argument(_HOST_OPTION, default=_EMPTY_TEXT)
+    parser.add_argument(_PORT_OPTION, type=int)
+    parser.add_argument(_UNIT_ID_OPTION, type=int)
+    parser.add_argument(_SOURCE_ID_OPTION, default=_DEFAULT_SOURCE_ID)
+    parser.add_argument(_EMIT_OPTION, choices=_EMIT_CHOICES, default=_DEFAULT_EMIT)
+    parser.add_argument(_WRITE_PREFIX_OPTION, default=_EMPTY_TEXT)
     args = parser.parse_args(argv)
     payload = _command_payload(args)
     payload = _payload_with_written_files(args, payload)
@@ -329,9 +357,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _command_payload(args: argparse.Namespace) -> dict[str, object]:
-    if args.command == "detect-modbus-energy":
+    if args.command == _DETECT_COMMAND:
         return _detect_command_payload(args)
-    if args.command == "validate-huawei-energy":
+    if args.command == _VALIDATE_COMMAND:
         return _validate_huawei_command_payload(args)
     raise ValueError(f"Unsupported energy probe command '{args.command}'")
 
@@ -339,8 +367,8 @@ def _command_payload(args: argparse.Namespace) -> dict[str, object]:
 def _detect_command_payload(args: argparse.Namespace) -> dict[str, object]:
     return detect_modbus_energy_source(
         args.config_path,
-        profile_name=str(args.profile or ""),
-        host=str(args.host or ""),
+        profile_name=str(args.profile or _EMPTY_TEXT),
+        host=str(args.host or _EMPTY_TEXT),
         port=args.port,
         unit_id=args.unit_id,
     )
@@ -349,11 +377,11 @@ def _detect_command_payload(args: argparse.Namespace) -> dict[str, object]:
 def _validate_huawei_command_payload(args: argparse.Namespace) -> dict[str, object]:
     return validate_huawei_energy_source(
         args.config_path,
-        profile_name=str(args.profile or ""),
-        host=str(args.host or ""),
+        profile_name=str(args.profile or _EMPTY_TEXT),
+        host=str(args.host or _EMPTY_TEXT),
         port=args.port,
         unit_id=args.unit_id,
-        source_id=str(args.source_id or "huawei"),
+        source_id=str(args.source_id or _DEFAULT_SOURCE_ID),
     )
 
 

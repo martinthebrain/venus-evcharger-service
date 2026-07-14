@@ -39,7 +39,7 @@ def _victron_ess_balance_pv_phase(expected_export_w: float, pv_input_power_w: fl
 
 
 def _victron_ess_balance_adaptive_scalar_int(value: Any) -> int:
-    return max(0, int(value or 0))
+    return 0 if value is None else max(0, int(value))
 
 
 def _victron_ess_balance_adaptive_scalar_str(value: Any) -> str:
@@ -82,13 +82,20 @@ def _victron_ess_balance_profile_identity(profile_key: str) -> dict[str, str]:
     pv_phase = "pv_weak"
     battery_limit_phase = "mid_band"
     if len(parts) >= 4:
-        action_direction, site_regime, day_phase, reserve_phase = parts[:4]
+        action_direction = parts[0]
+        site_regime = parts[1]
+        day_phase = parts[2]
+        reserve_phase = parts[3]
     elif len(parts) >= 3:
-        site_regime, day_phase, reserve_phase = parts[:3]
+        site_regime = parts[0]
+        day_phase = parts[1]
+        reserve_phase = parts[2]
     elif parts:
         site_regime = parts[0]
     if len(parts) >= 7:
-        ev_phase, pv_phase, battery_limit_phase = parts[4:7]
+        ev_phase = parts[4]
+        pv_phase = parts[5]
+        battery_limit_phase = parts[6]
     return {
         "key": profile_key,
         "action_direction": action_direction,
@@ -103,7 +110,8 @@ def _victron_ess_balance_profile_identity(profile_key: str) -> dict[str, str]:
 
 
 def _victron_ess_balance_profile_counter(profile: dict[str, Any], field: str) -> int:
-    return max(0, int(profile.get(field, 0) or 0))
+    raw_count = profile.get(field)
+    return 0 if raw_count is None else max(0, int(raw_count))
 
 
 def _victron_ess_balance_update_profile_sample(
@@ -139,20 +147,26 @@ def _victron_ess_balance_update_service_sample(
     ewma: Callable[[float | None, float, int], float],
 ) -> None:
     """Update one service-level telemetry sample value and its counter."""
-    samples = max(0, int(getattr(svc, samples_attr, 0) or 0))
-    current_value = optional_float(getattr(svc, value_attr, None))
+    raw_samples = _victron_ess_balance_optional_service_attr(svc, samples_attr)
+    samples = max(0, int(raw_samples or 0))
+    raw_value = _victron_ess_balance_optional_service_attr(svc, value_attr)
+    current_value = optional_float(raw_value)
     setattr(svc, value_attr, ewma(current_value, float(sample), samples))
     setattr(svc, samples_attr, samples + 1)
+
+
+def _victron_ess_balance_optional_service_attr(svc: Any, attr_name: str) -> Any:
+    try:
+        return getattr(svc, attr_name)
+    except AttributeError:
+        return None
 
 
 def _victron_ess_balance_profile_scalar_snapshot(
     profile: dict[str, Any],
     scalar_fields: tuple[str, ...],
 ) -> dict[str, str]:
-    return {
-        field: str(profile.get(field, "") or "")
-        for field in scalar_fields[1:]
-    }
+    return {field: str(profile.get(field) or "") for field in scalar_fields[1:]}
 
 
 def _victron_ess_balance_prefixed_scalar_metrics(
@@ -160,7 +174,7 @@ def _victron_ess_balance_prefixed_scalar_metrics(
     scalar_fields: tuple[str, ...],
 ) -> dict[str, str]:
     return {
-        f"battery_discharge_balance_victron_bias_learning_profile_{field}": str(snapshot.get(field, "") or "")
+        f"battery_discharge_balance_victron_bias_learning_profile_{field}": str(snapshot.get(field) or "")
         for field in scalar_fields
     }
 
@@ -206,7 +220,7 @@ def _record_victron_ess_balance_tracking_command(
     svc._victron_ess_balance_telemetry_last_command_at = float(now)
     svc._victron_ess_balance_telemetry_last_command_setpoint_w = float(setpoint_w)
     svc._victron_ess_balance_telemetry_last_command_error_w = float(source_error_w)
-    svc._victron_ess_balance_telemetry_last_command_profile_key = str(profile_key or "").strip()
+    svc._victron_ess_balance_telemetry_last_command_profile_key = str(profile_key).strip()
     svc._victron_ess_balance_telemetry_command_response_recorded = False
     svc._victron_ess_balance_telemetry_command_overshoot_recorded = False
     svc._victron_ess_balance_telemetry_command_settled_recorded = False
@@ -234,12 +248,18 @@ def _clear_victron_ess_balance_active_profile_state(svc: Any) -> None:
 
 
 def _victron_ess_balance_energy_ids(svc: Any) -> list[str]:
+    definitions = _victron_ess_balance_optional_service_attr(svc, "auto_energy_sources")
     energy_ids: list[str] = []
-    for definition in tuple(getattr(svc, "auto_energy_sources", ()) or ()):
-        normalized_id = str(getattr(definition, "source_id", "") or "").strip()
+    for definition in tuple(definitions or ()):
+        normalized_id = _victron_ess_balance_energy_source_id(definition)
         if normalized_id:
             energy_ids.append(normalized_id)
     return energy_ids
+
+
+def _victron_ess_balance_energy_source_id(definition: Any) -> str:
+    source_id = _victron_ess_balance_optional_service_attr(definition, "source_id")
+    return str(source_id or "").strip()
 
 
 def _victron_ess_balance_adaptive_scalar_specs() -> tuple[tuple[str, str, str], ...]:
@@ -262,4 +282,8 @@ def _victron_ess_balance_adaptive_scalar_specs() -> tuple[tuple[str, str, str], 
 
 
 def _victron_ess_balance_float_attr(svc: Any, attr_name: str) -> float:
-    return float(getattr(svc, attr_name, 0.0) or 0.0)
+    try:
+        value = getattr(svc, attr_name)
+    except AttributeError:
+        return 0.0
+    return 0.0 if value is None else float(value)

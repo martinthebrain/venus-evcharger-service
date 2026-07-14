@@ -28,6 +28,15 @@ class _AutoInputSupervisorSnapshotValidation:
         "battery_discharge_balance_error_w",
         "battery_discharge_balance_max_abs_error_w",
         "battery_discharge_balance_total_discharge_w",
+        "grid_gateway_power",
+        "grid_gateway_captured_at",
+        "grid_primary_power",
+        "grid_primary_captured_at",
+        "grid_fusion_confidence",
+        "grid_fusion_primary_age_seconds",
+        "grid_fusion_backup_age_seconds",
+        "grid_fusion_difference_watts",
+        "grid_fusion_tolerance_watts",
     )
     OPTIONAL_COUNT_FIELDS = (
         "battery_source_count",
@@ -39,6 +48,9 @@ class _AutoInputSupervisorSnapshotValidation:
         "battery_discharge_balance_control_ready_count",
         "battery_discharge_balance_supported_control_source_count",
         "battery_discharge_balance_experimental_control_source_count",
+        "grid_fusion_primary_invalid_samples",
+        "grid_fusion_primary_recovery_samples",
+        "grid_fusion_mismatch_samples",
     )
 
     @staticmethod

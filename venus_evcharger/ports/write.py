@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from venus_evcharger.backend.models import (
@@ -98,8 +99,8 @@ class WriteControllerPort(WriteControllerRuntimePort):
         """Return a fresh confirmed relay output directly from the worker snapshot."""
         normalized_snapshot = normalized_worker_snapshot(snapshot, now=current_time, clamp_future_timestamps=False)
         pm_status = normalized_snapshot.get("pm_status")
-        pm_confirmed = bool(normalized_snapshot.get("pm_confirmed", False))
-        captured_at = normalized_snapshot.get("pm_captured_at", normalized_snapshot.get("captured_at"))
+        pm_confirmed = bool(normalized_snapshot["pm_confirmed"])
+        captured_at = normalized_snapshot["pm_captured_at"]
         if not WriteControllerPort._relay_output_payload_present(pm_confirmed, pm_status, captured_at):
             return None
         captured_at_value = WriteControllerPort._relay_output_timestamp(captured_at)
@@ -123,12 +124,13 @@ class WriteControllerPort(WriteControllerRuntimePort):
 
     def _last_relay_output_sample(self) -> tuple[object, object]:
         """Return the best remembered relay-output sample for cutover freshness checks."""
-        last_pm_status = getattr(self._service, "_last_confirmed_pm_status", None)
-        last_pm_status_at = getattr(self._service, "_last_confirmed_pm_status_at", None)
+        service_state = vars(self._service)
+        last_pm_status = service_state.get("_last_confirmed_pm_status")
+        last_pm_status_at = service_state.get("_last_confirmed_pm_status_at")
         if last_pm_status is not None:
             return last_pm_status, last_pm_status_at
-        if bool(getattr(self._service, "_last_pm_status_confirmed", False)):
-            return getattr(self._service, "_last_pm_status", None), getattr(self._service, "_last_pm_status_at", None)
+        if bool(service_state.get("_last_pm_status_confirmed")):
+            return service_state.get("_last_pm_status"), service_state.get("_last_pm_status_at")
         return None, None
 
     @staticmethod
@@ -206,24 +208,27 @@ class WriteControllerPort(WriteControllerRuntimePort):
         return float(self._service._time_now())
 
     def charger_enable_available(self) -> bool:
-        backend = getattr(self._service, "_charger_backend", None)
-        return backend is not None and hasattr(backend, "set_enabled")
+        return self._charger_backend_method("set_enabled") is not None
 
     def charger_current_available(self) -> bool:
+        return self._charger_backend_method("set_current") is not None
+
+    def _charger_backend_method(self, method_name: str) -> Callable[..., object] | None:
         backend = getattr(self._service, "_charger_backend", None)
-        return backend is not None and hasattr(backend, "set_current")
+        method = None if backend is None else getattr(backend, method_name, None)
+        return method if callable(method) else None
 
     def charger_set_enabled(self, enabled: bool) -> object:
-        backend = getattr(self._service, "_charger_backend", None)
-        if backend is None or not hasattr(backend, "set_enabled"):
+        set_enabled = self._charger_backend_method("set_enabled")
+        if set_enabled is None:
             raise RuntimeError("No charger backend with set_enabled configured")
-        return backend.set_enabled(bool(enabled))
+        return set_enabled(bool(enabled))
 
     def charger_set_current(self, amps: float) -> object:
-        backend = getattr(self._service, "_charger_backend", None)
-        if backend is None or not hasattr(backend, "set_current"):
+        set_current = self._charger_backend_method("set_current")
+        if set_current is None:
             raise RuntimeError("No charger backend with set_current configured")
-        return backend.set_current(float(amps))
+        return set_current(float(amps))
 
     def phase_selection_requires_pause(self) -> bool:
         return bool(self._service._phase_selection_requires_pause())
@@ -232,11 +237,9 @@ class WriteControllerPort(WriteControllerRuntimePort):
         return require_str(self._service._apply_phase_selection(selection), "_apply_phase_selection")
 
     def normalize_phase_selection(self, value: object, default: str | None = None) -> str:
-        fallback = normalize_phase_selection(
-            self.supported_phase_selections[0] if default is None else default,
-            "P1",
-        )
-        return str(normalize_phase_selection(value, fallback))
+        fallback_source = self.supported_phase_selections[0] if default is None else default
+        fallback = normalize_phase_selection(fallback_source)
+        return normalize_phase_selection(value, fallback)
 
     def normalize_mode(self, value: object) -> int:
         return int(self._service._normalize_mode(value))
@@ -251,11 +254,11 @@ class WriteControllerPort(WriteControllerRuntimePort):
         return self._service._save_runtime_state()
 
     def save_runtime_overrides(self) -> None:
-        save_overrides = getattr(self._service, "_save_runtime_overrides", None)
+        save_overrides = vars(self._service).get("_save_runtime_overrides")
         if callable(save_overrides):
             save_overrides()
 
     def validate_runtime_config(self) -> None:
-        validate_runtime = getattr(self._service, "_validate_runtime_config", None)
+        validate_runtime = vars(self._service).get("_validate_runtime_config")
         if callable(validate_runtime):
             validate_runtime()

@@ -40,6 +40,8 @@ def _normalized_connector_type(raw_value: object) -> str:
 
 
 def _optional_path(value: object) -> str | None:
+    if value is None:
+        return None
     normalized = str(value).strip()
     return normalized or None
 
@@ -73,11 +75,20 @@ def _normalized_optional_bool_value(value: object) -> bool | None:
         return value
     if isinstance(value, (int, float)):
         return bool(int(value))
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text in {"true", "false", "yes", "no", "on", "off", "enabled", "disabled"}:
-            return bool(normalize_binary_flag(text))
-    return None
+    return _normalized_optional_bool_text(value) if isinstance(value, str) else None
+
+
+def _normalized_optional_bool_text(value: str) -> bool | None:
+    return {
+        "true": True,
+        "yes": True,
+        "on": True,
+        "enabled": True,
+        "false": False,
+        "no": False,
+        "off": False,
+        "disabled": False,
+    }.get(value.strip().lower())
 
 
 def _optional_confidence_path(payload: dict[str, object], path: str | None) -> float | None:
@@ -95,6 +106,8 @@ def _sum_optional(values: Iterable[float | None]) -> float | None:
 
 
 def _csv_filter(raw_value: object) -> tuple[str, ...]:
+    if raw_value is None:
+        return ()
     raw = str(raw_value).strip()
     if not raw:
         return ()

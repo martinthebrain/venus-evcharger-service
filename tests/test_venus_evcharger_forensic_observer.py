@@ -12,6 +12,14 @@ from venus_evcharger.ops import forensic_observer as observer
 from venus_evcharger.dbus_gateway import DbusCacheStore, dbus_path_key, gateway_paths
 
 
+def _repository_script(name: str) -> Path:
+    for root in (Path.cwd(), Path.cwd().parent):
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(name)
+
+
 class _FakeDbusObject:
     def __init__(self, values, path):
         self._values = values
@@ -269,7 +277,7 @@ class ForensicObserverTests(unittest.TestCase):
             self.assertFalse(any((card / "venus-evcharger-forensics").glob("incident-*")))
 
     def test_observer_entrypoint_delegates_to_loop(self):
-        module_path = Path(__file__).resolve().parents[1] / "venus_evcharger_observer.py"
+        module_path = _repository_script("venus_evcharger_observer.py")
         with patch("venus_evcharger.ops.forensic_observer.observer_loop") as observer_loop:
             with patch.object(sys, "argv", [str(module_path), "/tmp/config.ini", "--start-delay", "1", "--interval", "2", "--cooldown", "3"]):
                 with self.assertRaises(SystemExit) as exit_ctx:
@@ -279,7 +287,7 @@ class ForensicObserverTests(unittest.TestCase):
         observer_loop.assert_called_once_with("/tmp/config.ini", start_delay=1.0, interval=2.0, incident_cooldown=3.0)
 
     def test_observer_entrypoint_import_does_not_start_loop(self):
-        module_path = Path(__file__).resolve().parents[1] / "venus_evcharger_observer.py"
+        module_path = _repository_script("venus_evcharger_observer.py")
         with patch("venus_evcharger.ops.forensic_observer.observer_loop") as observer_loop:
             runpy.run_path(str(module_path), run_name="venus_evcharger_observer_import_test")
 

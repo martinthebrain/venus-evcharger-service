@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from unittest.mock import call
 
+from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
+from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig
+
 from tests.auto_input_helper_basic_cases_common import AutoInputHelper, MagicMock, json, patch, tempfile
 
 
@@ -18,6 +21,37 @@ class _RecordingLock:
 
 
 class _AutoInputHelperBasicSnapshotCases:
+    def test_collect_snapshot_routes_huawei_primary_and_victron_backup_through_fusion(self):
+        helper = self._make_helper()
+        helper._grid_measurement_fusion = GridMeasurementFusion(
+            GridFusionConfig(enabled=True, primary_source_id="huawei", recovery_samples=2)
+        )
+        helper._get_pv_power = MagicMock(return_value=1200.0)
+        helper._get_battery_snapshot = MagicMock(
+            return_value={
+                "battery_soc": 60.0,
+                "battery_sources": [
+                    {
+                        "source_id": "huawei",
+                        "grid_interaction_w": -700.0,
+                        "captured_at": 100.0,
+                        "online": True,
+                        "confidence": 0.9,
+                    }
+                ],
+            }
+        )
+        helper._get_grid_power = MagicMock(return_value=-500.0)
+
+        snapshot = helper._collect_snapshot(100.0)
+
+        self.assertEqual(snapshot["grid_gateway_power"], -500.0)
+        self.assertEqual(snapshot["grid_primary_power"], -700.0)
+        self.assertEqual(snapshot["grid_power"], -700.0)
+        self.assertEqual(snapshot["grid_selected_source_id"], "huawei")
+        self.assertEqual(snapshot["grid_fusion_state"], "primary")
+        self.assertEqual(snapshot["grid_captured_at"], 100.0)
+
     def test_snapshot_static_contracts_are_stable(self):
         self.assertEqual(AutoInputHelper._default_source_poll_schedule(), {"pv": 0.0, "battery": 0.0, "grid": 0.0})
         self.assertEqual(
@@ -213,13 +247,16 @@ class _AutoInputHelperBasicSnapshotCases:
         due = helper._due_snapshot_sources(100.0)
         self.assertEqual([item[0] for item in due], ["pv", "grid"])
         self.assertEqual([item[1] for item in due], [2.0, 3.0])
-        self.assertEqual([item[3] for item in due], ["pv_power", "grid_power"])
-        self.assertEqual([item[4] for item in due], ["pv_captured_at", "grid_captured_at"])
+        self.assertEqual([item[3] for item in due], ["pv_power", "grid_gateway_power"])
+        self.assertEqual([item[4] for item in due], ["pv_captured_at", "grid_gateway_captured_at"])
 
         all_due = helper._due_snapshot_sources(200.0)
         self.assertEqual([item[0] for item in all_due], ["pv", "battery", "grid"])
-        self.assertEqual([item[3] for item in all_due], ["pv_power", "battery_soc", "grid_power"])
-        self.assertEqual([item[4] for item in all_due], ["pv_captured_at", "battery_captured_at", "grid_captured_at"])
+        self.assertEqual([item[3] for item in all_due], ["pv_power", "battery_soc", "grid_gateway_power"])
+        self.assertEqual(
+            [item[4] for item in all_due],
+            ["pv_captured_at", "battery_captured_at", "grid_gateway_captured_at"],
+        )
 
         helper._next_source_poll_at = {}
         self.assertEqual([item[0] for item in helper._due_snapshot_sources(0.5)], ["pv", "battery", "grid"])
@@ -303,6 +340,22 @@ class _AutoInputHelperBasicSnapshotCases:
         )
         fresh._write_snapshot.assert_called_once_with(fresh._last_snapshot_state)
         self.assertNotIn("XXsnapshot_versionXX", fresh._last_snapshot_state)
+
+    def test_set_source_value_recomputes_fusion_for_battery_and_grid_only(self):
+        helper = self._make_helper()
+        helper._write_snapshot = MagicMock()
+
+        with patch("venus_evcharger.inputs.helper.snapshot.apply_grid_fusion") as apply_fusion:
+            helper._set_source_value("pv", 100.0, 1.0)
+            apply_fusion.assert_not_called()
+
+            helper._set_source_value("battery", 50.0, 2.0)
+            helper._set_source_value("grid", -200.0, 3.0)
+
+        self.assertEqual(apply_fusion.call_count, 2)
+        self.assertIs(apply_fusion.call_args_list[0].args[0], helper._grid_measurement_fusion)
+        self.assertEqual(apply_fusion.call_args_list[0].args[2], 2.0)
+        self.assertEqual(apply_fusion.call_args_list[1].args[2], 3.0)
 
     def test_set_source_status_contracts(self):
         snapshot = {}

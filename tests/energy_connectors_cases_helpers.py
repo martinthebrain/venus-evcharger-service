@@ -377,7 +377,7 @@ class _EnergyConnectorsHelperCases:
         self.assertEqual(energy_connectors._normalized_connector_type(""), "dbus")
         self.assertEqual(energy_connectors._command_args({"Args": ""}), ())
         self.assertEqual(energy_connectors._command_args({"Args": "python3 helper.py --once"}), ("python3", "helper.py", "--once"))
-        self.assertFalse(energy_connectors._optional_bool_path({"value": "enabled"}, "value"))
+        self.assertTrue(energy_connectors._optional_bool_path({"value": "enabled"}, "value"))
         self.assertFalse(energy_connectors._optional_bool_path({"value": "disabled"}, "value"))
         self.assertTrue(energy_connectors._optional_bool_path({"value": 1}, "value"))
         self.assertTrue(energy_connectors._optional_bool_path({"value": "1"}, "value"))

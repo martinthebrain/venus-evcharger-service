@@ -47,10 +47,10 @@ class _UpdateCycleVictronEssBalanceRecommendationSupport(_UpdateCycleVictronEssB
 
     @staticmethod
     def _victron_ess_balance_has_clean_settling(observations: dict[str, Any]) -> bool:
-        return (
-            int(observations["settled_count"] or 0) >= 2
-            and int(observations["overshoot_count"] or 0) == 0
-        )
+        settled = observations["settled_count"]
+        if settled is None:
+            return False
+        return int(settled) >= 2 and int(observations["overshoot_count"] or 0) == 0
 
     @staticmethod
     def _victron_ess_balance_observations_within_relaxed_bounds(observations: dict[str, Any]) -> bool:
@@ -150,7 +150,7 @@ class _UpdateCycleVictronEssBalanceRecommendationSupport(_UpdateCycleVictronEssB
 
     @staticmethod
     def _victron_ess_balance_non_negative_attr(svc: Any, attr_name: str) -> float:
-        return max(0.0, float(getattr(svc, attr_name, 0.0) or 0.0))
+        return max(0.0, float(getattr(svc, attr_name, None) or 0.0))
 
     @staticmethod
     def _victron_ess_balance_adjusted_tuning(current: dict[str, float], reason: str) -> dict[str, float]:

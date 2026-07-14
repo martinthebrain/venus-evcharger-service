@@ -57,8 +57,9 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
     @staticmethod
     def _trim_dbus_publish_queue(svc: Any, pending: PublishQueue) -> None:
         """Trim oldest queued DBus writes when the queue is full."""
-        while len(pending) > int(getattr(svc, "_dbus_publish_max_paths", 256)):
-            pending.popitem(last=False)
+        while len(pending) > int(svc._dbus_publish_max_paths):
+            oldest_path = next(iter(pending))
+            del pending[oldest_path]
             svc._dbus_publish_dropped_count += 1
 
     @staticmethod
@@ -72,7 +73,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         svc = self.service
         with svc._dbus_publish_queue_lock:
             svc._dbus_publish_bump_pending += 1
-            if getattr(svc, "_dbus_publish_oldest_queued_at", None) is None:
+            if svc._dbus_publish_oldest_queued_at is None:
                 svc._dbus_publish_oldest_queued_at = time.time()
 
     def enqueue_companion_dbus_publish(self: Any, now: float | None = None) -> bool:
@@ -121,9 +122,9 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
             fields = list(field_pending.items())
             pending.clear()
             field_pending.clear()
-            bump_count = int(getattr(svc, "_dbus_publish_bump_pending", 0))
+            bump_count = int(svc._dbus_publish_bump_pending)
             svc._dbus_publish_bump_pending = 0
-            oldest_queued_at = getattr(svc, "_dbus_publish_oldest_queued_at", None)
+            oldest_queued_at = svc._dbus_publish_oldest_queued_at
             svc._dbus_publish_oldest_queued_at = None
         return values, fields, bump_count, oldest_queued_at
 
@@ -199,12 +200,14 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
     def _path_values_from_fields(fields: list[tuple[str, QueuedPublishValue]]) -> list[tuple[str, QueuedPublishValue]]:
         payload = _RuntimeAsyncMainloopPublish._gateway_publish_payload(fields)
         paths = evcs_fields_to_paths(payload)
-        return [
-            (path, (value, current, queued_at))
-            for field, (value, current, queued_at) in fields
-            for path in [EVCS_FIELD_TO_PATH.get(field, "")]
-            if path and paths.get(path) == value
-        ]
+        values: list[tuple[str, QueuedPublishValue]] = []
+        for field, item in fields:
+            if field not in EVCS_FIELD_TO_PATH:
+                continue
+            path = EVCS_FIELD_TO_PATH[field]
+            if paths.get(path) == item[0]:
+                values.append((path, item))
+        return values
 
     @staticmethod
     def _field_paths(fields: list[tuple[str, QueuedPublishValue]]) -> list[str]:
@@ -234,9 +237,10 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
 
     def _flush_update_index_bumps(self: Any, svc: Any, now: float, bump_count: int) -> None:
         """Flush queued UpdateIndex bumps."""
+        continue_bumps = True
         for _index in range(max(0, bump_count)):
-            if not self._bump_update_index_best_effort(svc, now):
-                break
+            if continue_bumps:
+                continue_bumps = self._bump_update_index_best_effort(svc, now)
 
     def _bump_update_index_best_effort(self: Any, svc: Any, now: float) -> bool:
         """Bump UpdateIndex and report whether more bumps should be attempted."""
@@ -251,5 +255,5 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         """Record and budget-check publish flush duration."""
         duration = time.monotonic() - started
         svc._last_publish_flush_duration_seconds = duration
-        if duration > self._float_attr(getattr(svc, "_dbus_publish_budget_seconds", 0.1), 0.1):
+        if duration > self._float_attr(svc._dbus_publish_budget_seconds, 0.1):
             logging.warning("DBus publish flush exceeded budget: %.3fs", duration)

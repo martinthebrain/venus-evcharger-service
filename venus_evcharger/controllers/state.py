@@ -19,6 +19,8 @@ from venus_evcharger.controllers.state_specs import (
 )
 from venus_evcharger.controllers.state_validation import _StateValidation
 
+_REQUIRED_HOST_KEY = "Host"
+
 
 class ServiceStateController(_StateValidation):
     """Encapsulate config loading, config validation, and volatile runtime state."""
@@ -39,7 +41,7 @@ class ServiceStateController(_StateValidation):
     def load_config(self) -> configparser.ConfigParser:
         config = configparser.ConfigParser()
         config.read(self.config_path())
-        if "DEFAULT" not in config or "Host" not in config["DEFAULT"]:
+        if "DEFAULT" not in config or _REQUIRED_HOST_KEY not in config["DEFAULT"]:
             raise ValueError(
                 "deploy/venus/config.venus_evcharger.ini is missing or incomplete. "
                 "Copy it from the documented deploy/venus/config.venus_evcharger.ini template so the required keys exist."

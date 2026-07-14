@@ -11,6 +11,12 @@ from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS, normaliz
 from venus_evcharger.controllers.state_summary import _StateSummary
 
 
+_BALANCE_ACTIVATION_MODES = frozenset(
+    {"always", "export_only", "above_reserve_band", "export_and_above_reserve_band"}
+)
+_BALANCE_SUPPORT_MODES = frozenset({"supported_only", "allow_experimental"})
+
+
 class _StateValidation(_StateSummary):
     NON_NEGATIVE_INTERVAL_ATTRS = (
         "auto_pv_scan_interval_seconds",
@@ -153,12 +159,12 @@ class _StateValidation(_StateSummary):
     def _validate_scheduled_runtime_config(svc: Any) -> None:
         if hasattr(svc, "auto_scheduled_enabled_days"):
             svc.auto_scheduled_enabled_days = scheduled_enabled_days_text(
-                getattr(svc, "auto_scheduled_enabled_days", DEFAULT_SCHEDULED_ENABLED_DAYS),
+                svc.auto_scheduled_enabled_days,
                 DEFAULT_SCHEDULED_ENABLED_DAYS,
             )
         if hasattr(svc, "auto_scheduled_latest_end_time"):
             svc.auto_scheduled_latest_end_time = normalize_hhmm_text(
-                getattr(svc, "auto_scheduled_latest_end_time", "06:30"),
+                svc.auto_scheduled_latest_end_time,
                 "06:30",
             )
         if hasattr(svc, "auto_scheduled_night_current_amps"):
@@ -261,79 +267,65 @@ class _StateValidation(_StateSummary):
     def _normalize_discharge_balance_bias_mode(svc: Any) -> None:
         if not hasattr(svc, "auto_battery_discharge_balance_bias_mode"):
             return
-        allowed = {
+        _StateValidation._normalize_choice(
+            svc,
+            "auto_battery_discharge_balance_bias_mode",
+            _BALANCE_ACTIVATION_MODES,
             "always",
-            "export_only",
-            "above_reserve_band",
-            "export_and_above_reserve_band",
-        }
-        raw_value = str(getattr(svc, "auto_battery_discharge_balance_bias_mode", "") or "").strip().lower()
-        if raw_value in allowed:
-            svc.auto_battery_discharge_balance_bias_mode = raw_value
-            return
-        logging.warning(
-            "AutoBatteryDischargeBalanceBiasMode %s invalid, clamping to always",
-            getattr(svc, "auto_battery_discharge_balance_bias_mode", ""),
+            "AutoBatteryDischargeBalanceBiasMode",
         )
-        svc.auto_battery_discharge_balance_bias_mode = "always"
 
     @staticmethod
     def _normalize_discharge_balance_coordination_support_mode(svc: Any) -> None:
         if not hasattr(svc, "auto_battery_discharge_balance_coordination_support_mode"):
             return
-        allowed = {
+        _StateValidation._normalize_choice(
+            svc,
+            "auto_battery_discharge_balance_coordination_support_mode",
+            _BALANCE_SUPPORT_MODES,
             "supported_only",
-            "allow_experimental",
-        }
-        raw_value = str(
-            getattr(svc, "auto_battery_discharge_balance_coordination_support_mode", "") or ""
-        ).strip().lower()
-        if raw_value in allowed:
-            svc.auto_battery_discharge_balance_coordination_support_mode = raw_value
-            return
-        logging.warning(
-            "AutoBatteryDischargeBalanceCoordinationSupportMode %s invalid, clamping to supported_only",
-            getattr(svc, "auto_battery_discharge_balance_coordination_support_mode", ""),
+            "AutoBatteryDischargeBalanceCoordinationSupportMode",
         )
-        svc.auto_battery_discharge_balance_coordination_support_mode = "supported_only"
 
     @staticmethod
     def _normalize_victron_balance_support_mode(svc: Any) -> None:
         if not hasattr(svc, "auto_battery_discharge_balance_victron_bias_support_mode"):
             return
-        allowed = {
-            "supported_only",
+        _StateValidation._normalize_choice(
+            svc,
+            "auto_battery_discharge_balance_victron_bias_support_mode",
+            _BALANCE_SUPPORT_MODES,
             "allow_experimental",
-        }
-        raw_value = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_support_mode", "") or "").strip().lower()
-        if raw_value in allowed:
-            svc.auto_battery_discharge_balance_victron_bias_support_mode = raw_value
-            return
-        logging.warning(
-            "AutoBatteryDischargeBalanceVictronBiasSupportMode %s invalid, clamping to allow_experimental",
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_support_mode", ""),
+            "AutoBatteryDischargeBalanceVictronBiasSupportMode",
         )
-        svc.auto_battery_discharge_balance_victron_bias_support_mode = "allow_experimental"
 
     @staticmethod
     def _normalize_victron_balance_activation_mode(svc: Any) -> None:
         if not hasattr(svc, "auto_battery_discharge_balance_victron_bias_activation_mode"):
             return
-        allowed = {
+        _StateValidation._normalize_choice(
+            svc,
+            "auto_battery_discharge_balance_victron_bias_activation_mode",
+            _BALANCE_ACTIVATION_MODES,
             "always",
-            "export_only",
-            "above_reserve_band",
-            "export_and_above_reserve_band",
-        }
-        raw_value = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_activation_mode", "") or "").strip().lower()
-        if raw_value in allowed:
-            svc.auto_battery_discharge_balance_victron_bias_activation_mode = raw_value
-            return
-        logging.warning(
-            "AutoBatteryDischargeBalanceVictronBiasActivationMode %s invalid, clamping to always",
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_activation_mode", ""),
+            "AutoBatteryDischargeBalanceVictronBiasActivationMode",
         )
-        svc.auto_battery_discharge_balance_victron_bias_activation_mode = "always"
+
+    @staticmethod
+    def _normalize_choice(
+        svc: Any,
+        attr_name: str,
+        allowed: frozenset[str],
+        fallback: str,
+        label: str,
+    ) -> None:
+        original = getattr(svc, attr_name)
+        normalized = str(original).strip().lower()
+        if normalized in allowed:
+            setattr(svc, attr_name, normalized)
+            return
+        logging.warning("%s %s invalid, clamping to %s", label, original, fallback)
+        setattr(svc, attr_name, fallback)
 
     def _normalize_victron_balance_auto_apply_settings(self, svc: Any) -> None:
         if hasattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_min_confidence"):

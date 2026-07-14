@@ -7,6 +7,22 @@ from tests.companion_dbus_bridge_cases_common import *
 
 
 class _CompanionDbusBridgeGridCases:
+    def test_grid_service_prefers_canonical_fusion_over_legacy_authoritative_source(self) -> None:
+        service = SimpleNamespace(companion_grid_authoritative_source="huawei")
+        bridge = EnergyCompanionDbusBridge(service, "/tmp/service.py")
+        snapshot = {
+            "grid_fusion_enabled": True,
+            "grid_power": -125.0,
+            "battery_combined_grid_interaction_w": 999.0,
+            "battery_sources": [
+                {"source_id": "huawei", "grid_interaction_w": -900.0, "online": True},
+            ],
+        }
+
+        self.assertEqual(bridge._aggregate_grid_input(snapshot), (-125.0, True))
+        snapshot["grid_power"] = None
+        self.assertEqual(bridge._aggregate_grid_input(snapshot), (None, False))
+
     def test_bridge_can_publish_only_grid_services_when_enabled(self) -> None:
         service = SimpleNamespace(
             companion_dbus_bridge_enabled=True,

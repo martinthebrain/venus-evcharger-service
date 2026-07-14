@@ -9,6 +9,8 @@ from venus_evcharger.controllers.state_json import read_json_object_file
 from venus_evcharger.core.contracts import finite_float_or_none
 from venus_evcharger.controllers.state_runtime_normalize import _StateRuntimeNormalize
 
+_DEFAULT_VICTRON_BIAS_ACTIVATION_MODE = "always"
+
 
 class _StateRuntimeSnapshot(_StateRuntimeNormalize):
     @staticmethod
@@ -56,9 +58,9 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
                 getattr(svc, "auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second", None)
             ),
             "activation_mode": _victron_ess_balance_runtime_attr_text(
-                svc,
-                "auto_battery_discharge_balance_victron_bias_activation_mode",
-                fallback="always",
+            svc,
+            "auto_battery_discharge_balance_victron_bias_activation_mode",
+            fallback=_DEFAULT_VICTRON_BIAS_ACTIVATION_MODE,
                 normalize_lower=True,
             ),
         }
@@ -67,7 +69,7 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
     def _victron_ess_balance_runtime_auto_apply_payload(svc: Any) -> dict[str, object]:
         return {
             "auto_apply_generation": _victron_ess_balance_runtime_non_negative_int(
-                getattr(svc, "_victron_ess_balance_auto_apply_generation", 0)
+                getattr(svc, "_victron_ess_balance_auto_apply_generation", None)
             ),
             "auto_apply_observe_until": finite_float_or_none(
                 getattr(svc, "_victron_ess_balance_auto_apply_observe_until", None)
@@ -105,14 +107,14 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
                 svc,
                 "_victron_ess_balance_overshoot_cooldown_reason",
             ),
-            "last_stable_tuning": dict(getattr(svc, "_victron_ess_balance_last_stable_tuning", {}) or {}),
+            "last_stable_tuning": dict(getattr(svc, "_victron_ess_balance_last_stable_tuning", None) or {}),
             "last_stable_at": finite_float_or_none(getattr(svc, "_victron_ess_balance_last_stable_at", None)),
             "last_stable_profile_key": _victron_ess_balance_runtime_attr_text(
                 svc,
                 "_victron_ess_balance_last_stable_profile_key",
             ),
-            "conservative_tuning": dict(getattr(svc, "_victron_ess_balance_conservative_tuning", {}) or {}),
-            "safe_state_active": bool(getattr(svc, "_victron_ess_balance_safe_state_active", False)),
+            "conservative_tuning": dict(getattr(svc, "_victron_ess_balance_conservative_tuning", None) or {}),
+            "safe_state_active": bool(getattr(svc, "_victron_ess_balance_safe_state_active", None)),
             "safe_state_reason": _victron_ess_balance_runtime_attr_text(
                 svc,
                 "_victron_ess_balance_safe_state_reason",
@@ -154,18 +156,18 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
     def _phase_selection_runtime_state(self, svc: Any) -> dict[str, object]:
         return {
             "active_phase_selection": self._normalize_runtime_phase_selection(
-                getattr(svc, "active_phase_selection", "P1")
+                getattr(svc, "active_phase_selection", None)
             ),
             "requested_phase_selection": self._normalize_runtime_phase_selection(
-                getattr(svc, "requested_phase_selection", "P1")
+                getattr(svc, "requested_phase_selection", None)
             ),
             "supported_phase_selections": list(
-                self._normalize_runtime_supported_phase_selections(getattr(svc, "supported_phase_selections", ("P1",)))
+                self._normalize_runtime_supported_phase_selections(getattr(svc, "supported_phase_selections", None))
             ),
         }
 
     def _phase_switch_runtime_state(self, svc: Any) -> dict[str, object]:
-        default_phase = self._normalize_runtime_phase_selection(getattr(svc, "requested_phase_selection", "P1"))
+        default_phase = self._normalize_runtime_phase_selection(getattr(svc, "requested_phase_selection", None))
         return {
             "phase_switch_pending_selection": self._normalized_optional_runtime_phase_selection(
                 getattr(svc, "_phase_switch_pending_selection", None),
@@ -178,8 +180,8 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
             "phase_switch_stable_until": self._coerce_optional_runtime_float(
                 getattr(svc, "_phase_switch_stable_until", None)
             ),
-            "phase_switch_resume_relay": 1 if bool(getattr(svc, "_phase_switch_resume_relay", False)) else 0,
-            "phase_switch_mismatch_counts": dict(getattr(svc, "_phase_switch_mismatch_counts", {}) or {}),
+            "phase_switch_resume_relay": 1 if bool(getattr(svc, "_phase_switch_resume_relay", None)) else 0,
+            "phase_switch_mismatch_counts": dict(getattr(svc, "_phase_switch_mismatch_counts", None) or {}),
             "phase_switch_last_mismatch_selection": self._normalized_optional_runtime_phase_selection(
                 getattr(svc, "_phase_switch_last_mismatch_selection", None),
                 default_phase,
@@ -191,7 +193,7 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
                 getattr(svc, "_phase_switch_lockout_selection", None),
                 default_phase,
             ),
-            "phase_switch_lockout_reason": str(getattr(svc, "_phase_switch_lockout_reason", "") or ""),
+            "phase_switch_lockout_reason": str(getattr(svc, "_phase_switch_lockout_reason", None) or ""),
             "phase_switch_lockout_at": self._coerce_optional_runtime_past_time(
                 getattr(svc, "_phase_switch_lockout_at", None)
             ),
@@ -202,15 +204,15 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
 
     def _contactor_runtime_state(self, svc: Any) -> dict[str, object]:
         return {
-            "contactor_fault_counts": dict(getattr(svc, "_contactor_fault_counts", {}) or {}),
+            "contactor_fault_counts": dict(getattr(svc, "_contactor_fault_counts", None) or {}),
             "contactor_fault_active_reason": self._normalized_optional_runtime_text(
-                getattr(svc, "_contactor_fault_active_reason", "")
+                getattr(svc, "_contactor_fault_active_reason", None)
             ),
             "contactor_fault_active_since": self._coerce_optional_runtime_past_time(
                 getattr(svc, "_contactor_fault_active_since", None)
             ),
-            "contactor_lockout_reason": str(getattr(svc, "_contactor_lockout_reason", "") or ""),
-            "contactor_lockout_source": str(getattr(svc, "_contactor_lockout_source", "") or ""),
+            "contactor_lockout_reason": str(getattr(svc, "_contactor_lockout_reason", None) or ""),
+            "contactor_lockout_source": str(getattr(svc, "_contactor_lockout_source", None) or ""),
             "contactor_lockout_at": self._coerce_optional_runtime_past_time(
                 getattr(svc, "_contactor_lockout_at", None)
             ),
@@ -275,8 +277,8 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
             "combined_battery_battery_source_count": snapshot.get("battery_battery_source_count", 0),
             "combined_battery_hybrid_inverter_source_count": snapshot.get("battery_hybrid_inverter_source_count", 0),
             "combined_battery_inverter_source_count": snapshot.get("battery_inverter_source_count", 0),
-            "combined_battery_sources": list(snapshot.get("battery_sources", []) or []),
-            "combined_battery_learning_profiles": dict(snapshot.get("battery_learning_profiles", {}) or {}),
+            "combined_battery_sources": list(snapshot.get("battery_sources") or []),
+            "combined_battery_learning_profiles": dict(snapshot.get("battery_learning_profiles") or {}),
         }
 
     @staticmethod
@@ -309,7 +311,7 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
     @classmethod
     def _victron_ess_balance_runtime_learning_state(cls, svc: Any) -> dict[str, object]:
         raw_profiles = getattr(svc, "_victron_ess_balance_learning_profiles", None)
-        source_id = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", "") or "").strip()
+        source_id = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", None) or "").strip()
         profiles: dict[str, object] = {}
         if isinstance(raw_profiles, dict):
             for profile_key, raw_profile in raw_profiles.items():
@@ -326,7 +328,7 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
 
     @classmethod
     def _victron_ess_balance_runtime_adaptive_tuning_state(cls, svc: Any) -> dict[str, object]:
-        source_id = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", "") or "").strip()
+        source_id = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", None) or "").strip()
         return {
             "schema_version": 2,
             "topology_key": cls._victron_ess_balance_runtime_topology_key(svc, source_id),
@@ -355,15 +357,15 @@ class _StateRuntimeSnapshot(_StateRuntimeNormalize):
 
 def _victron_ess_balance_energy_ids(svc: Any) -> list[str]:
     energy_ids: list[str] = []
-    for definition in tuple(getattr(svc, "auto_energy_sources", ()) or ()):
-        normalized_id = str(getattr(definition, "source_id", "") or "").strip()
+    for definition in tuple(getattr(svc, "auto_energy_sources", None) or ()):
+        normalized_id = str(getattr(definition, "source_id", None) or "").strip()
         if normalized_id:
             energy_ids.append(normalized_id)
     return energy_ids
 
 
 def _victron_ess_balance_runtime_string(svc: Any, attr_name: str) -> str:
-    return str(getattr(svc, attr_name, "") or "").strip()
+    return str(getattr(svc, attr_name, None) or "").strip()
 
 
 def _victron_ess_balance_runtime_non_negative_int(value: object) -> int:
@@ -381,7 +383,7 @@ def _victron_ess_balance_runtime_attr_text(
     fallback: str = "",
     normalize_lower: bool = False,
 ) -> str:
-    value = str(getattr(svc, attr_name, fallback) or fallback).strip()
+    value = str(getattr(svc, attr_name, None) or fallback).strip()
     return value.lower() if normalize_lower else value
 
 
@@ -391,7 +393,7 @@ def _victron_ess_balance_runtime_profile_text(
     *,
     fallback: str = "",
 ) -> str:
-    return str(profile.get(key, fallback) or fallback)
+    return str(profile.get(key) or fallback)
 
 
 def _victron_ess_balance_runtime_profile_identity(

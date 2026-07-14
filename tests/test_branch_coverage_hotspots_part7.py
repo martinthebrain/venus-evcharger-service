@@ -10,7 +10,7 @@ class _BranchCoverageVictronAdaptiveCasesPart1:
             auto_battery_discharge_balance_victron_bias_auto_apply_min_stability_score=0.75,
             auto_battery_discharge_balance_victron_bias_auto_apply_min_profile_samples=3,
             auto_battery_discharge_balance_victron_bias_auto_apply_blend=0.25,
-            auto_battery_discharge_balance_victron_bias_observation_window_seconds=0.0,
+            auto_battery_discharge_balance_victron_bias_observation_window_seconds=30.0,
             auto_battery_discharge_balance_victron_bias_activation_mode="always",
             auto_battery_discharge_balance_victron_bias_kp=0.2,
             auto_battery_discharge_balance_victron_bias_ki=0.02,
@@ -23,6 +23,7 @@ class _BranchCoverageVictronAdaptiveCasesPart1:
             _victron_ess_balance_auto_apply_suspend_reason="cooldown",
             _victron_ess_balance_last_stable_profile_key="stable",
         )
+        initialize_victron_test_service(svc)
         metrics = {
             "battery_discharge_balance_victron_bias_recommendation_confidence": 0.1,
             "battery_discharge_balance_victron_bias_learning_profile_stability_score": 0.1,
@@ -128,6 +129,5 @@ class _BranchCoverageVictronAdaptiveCasesPart1:
         with patch.object(controller, "_apply_victron_ess_balance_recommended_tuning_step", return_value=""):
             self.assertFalse(controller._apply_victron_ess_balance_auto_apply_step(svc, metrics, 13.0))
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_auto_apply_reason"], "already_at_recommendation")
-
 
 

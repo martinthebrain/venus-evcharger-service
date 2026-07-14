@@ -87,7 +87,7 @@ def adapter_settings(
     *,
     explicit_paths: GatewayPaths | None = None,
 ) -> GatewayAdapterSettings:
-    paths = explicit_paths or gateway_paths(defaults.get("DbusGatewayRunDir", ""))
+    paths = explicit_paths or gateway_paths(defaults.get("DbusGatewayRunDir"))
     device_instance = configured_device_instance(defaults)
     return GatewayAdapterSettings(
         paths=paths,
@@ -109,8 +109,14 @@ def evcharger_service_name(defaults: configparser.SectionProxy) -> str:
 
 
 def configured_device_instance(defaults: configparser.SectionProxy) -> int:
+    configured = defaults.get("DeviceInstance")
+    if configured is None:
+        return 60
+    value = str(configured).strip()
+    if not value:
+        return 60
     try:
-        return int(str(defaults.get("DeviceInstance", "60")).strip() or "60")
+        return int(value)
     except ValueError:
         return 60
 

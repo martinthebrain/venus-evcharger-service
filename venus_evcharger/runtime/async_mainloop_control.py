@@ -19,7 +19,7 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
     def enqueue_control_command(self: Any, command: ControlCommand) -> bool:
         """Coalesce DBus control commands for a background worker."""
         svc = self.service
-        if not bool(getattr(svc, "_control_command_async_enabled", False)):
+        if not svc._control_command_async_enabled:
             result = svc._handle_control_command(command)
             return bool(result.accepted)
         queued_at = time.time()
@@ -31,7 +31,8 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
             pending[command.path] = (int(svc._control_command_sequence), queued_at, command)
             svc._desired_control_values[command.path] = command.value
             while len(pending) > int(getattr(svc, "_control_command_max_paths", 32)):
-                dropped_path, _dropped = pending.popitem(last=False)
+                dropped_path = next(iter(pending))
+                del pending[dropped_path]
                 svc._desired_control_values.pop(dropped_path, None)
             svc._control_command_event.set()
             svc._runtime_executor_event.set()
@@ -47,7 +48,7 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
         svc = self.service
         with svc._control_command_lock:
             pending = require_control_command_queue(svc._control_command_pending, "_control_command_pending")
-            commands = sorted(pending.values(), key=lambda item: item[0])
+            commands = list(pending.values())
             pending.clear()
         if not commands:
             return False
@@ -61,7 +62,8 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
             finally:
                 duration = time.monotonic() - started
                 svc._last_write_command_duration_seconds = duration
-                if duration > self._float_attr(getattr(svc, "_write_command_budget_seconds", 2.0), 2.0):
+                budget = self._float_attr(getattr(svc, "_write_command_budget_seconds", None), 2.0)
+                if duration > budget:
                     logging.warning(
                         "Control command path=%s exceeded budget: %.3fs",
                         command.path,

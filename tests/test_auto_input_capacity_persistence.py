@@ -2,7 +2,7 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
 from venus_evcharger.energy import EnergySourceDefinition
 from venus_evcharger.inputs.helper import capacity_persistence as persistence
@@ -45,6 +45,57 @@ class TestAutoInputCapacityPersistence(unittest.TestCase):
         )
 
         self.assertEqual(payload, {"usable_capacity_wh": 4800.0, "usable_capacity_source": "config_estimated"})
+
+        for capacity_wh in (None, 0.0, -0.001):
+            self.assertIsNone(
+                persistence.configured_estimated_capacity_payload(
+                    EnergySourceDefinition("battery", estimated_capacity_wh=capacity_wh)
+                )
+            )
+        self.assertEqual(
+            persistence.configured_estimated_capacity_payload(
+                EnergySourceDefinition("battery", estimated_capacity_wh=0.5)
+            ),
+            {"usable_capacity_wh": 0.5, "usable_capacity_source": "config_estimated"},
+        )
+
+    def test_positive_payload_helpers_observe_strict_zero_boundaries(self) -> None:
+        payload: dict[str, object] = {}
+        for value in (None, 0.0, -1.0):
+            persistence._add_positive_payload_value(payload, "float", value)
+        for value in (None, 0, -1):
+            persistence._add_positive_int_payload_value(payload, "int", value)
+        self.assertEqual(payload, {})
+
+        persistence._add_positive_payload_value(payload, "float", 0.001)
+        persistence._add_positive_int_payload_value(payload, "int", 1)
+        self.assertEqual(payload, {"float": 0.001, "int": 1})
+
+    def test_persist_change_detection_uses_documented_ah_tolerance(self) -> None:
+        source = EnergySourceDefinition("primary_battery", estimated_capacity_ah=100.0)
+        with patch.object(persistence, "_persist_estimated_capacity", return_value=True) as persist:
+            self.assertFalse(
+                persistence.persist_estimated_capacity_if_ah_changed(
+                    "config.ini", source, {"installed_capacity_ah": 100.000999}
+                )
+            )
+            persist.assert_not_called()
+
+            self.assertTrue(
+                persistence.persist_estimated_capacity_if_ah_changed(
+                    "config.ini", source, {"installed_capacity_ah": 100.001}
+                )
+            )
+            persist.assert_called_once()
+
+        exact_boundary_source = EnergySourceDefinition("primary_battery", estimated_capacity_ah=0.0)
+        with patch.object(persistence, "_persist_estimated_capacity", return_value=True) as persist:
+            self.assertTrue(
+                persistence.persist_estimated_capacity_if_ah_changed(
+                    "config.ini", exact_boundary_source, {"installed_capacity_ah": 0.001}
+                )
+            )
+            persist.assert_called_once()
 
     def test_persist_estimated_capacity_rejects_missing_same_or_unwritable_inputs(self) -> None:
         source = EnergySourceDefinition("primary_battery", estimated_capacity_ah=100.0)
@@ -135,6 +186,55 @@ class TestAutoInputCapacityPersistence(unittest.TestCase):
         self.assertEqual(persistence._number_text(None), "")
         self.assertEqual(persistence._number_text("bad"), "")
         self.assertEqual(persistence._number_text(12.3456), "12.346")
+
+    def test_ini_replacement_preserves_layout_and_section_boundaries(self) -> None:
+        lines = [" # comment", "  A  =  old  ", "B=keep", "[Other]", "A=outside"]
+        seen = persistence._replace_existing_default_values(lines, 0, 3, {"A": "new", "C": "3"})
+        self.assertEqual(seen, {"A"})
+        self.assertEqual(lines, [" # comment", "  A  =  new  ", "B=keep", "[Other]", "A=outside"])
+        self.assertEqual(persistence._default_section_bounds(lines), (0, 3))
+        self.assertEqual(persistence._default_section_bounds([" [DEFAULT] ", "A=1", "[Next] ; x"]), (1, 2))
+        self.assertEqual(persistence._default_section_bounds([]), (0, 0))
+
+        bounded_lines = ["A=before", "ignored=1", "B=keep", "A=old"]
+        seen = persistence._replace_existing_default_values(bounded_lines, 2, 4, {"A": "new"})
+        self.assertEqual(seen, {"A"})
+        self.assertEqual(bounded_lines, ["A=before", "ignored=1", "B=keep", "A=new"])
+
+    def test_ini_join_and_numeric_rendering_contracts_are_exact(self) -> None:
+        self.assertEqual(persistence._join_ini_lines([], ""), "")
+        self.assertEqual(persistence._join_ini_lines([], "old\n"), "\n")
+        self.assertEqual(persistence._join_ini_lines(["A=1"], ""), "A=1\n")
+        self.assertEqual(persistence._join_ini_lines(["A=1"], "old"), "A=1\n")
+        self.assertEqual(persistence._join_ini_lines(["A=1"], "old\n"), "A=1\n")
+        self.assertIsNone(persistence._positive_float(None))
+        self.assertIsNone(persistence._positive_float(0))
+        self.assertIsNone(persistence._positive_float(-0.001))
+        self.assertEqual(persistence._positive_float(0.001), 0.001)
+        self.assertEqual(persistence._number_text(12.0009), "12")
+        self.assertEqual(persistence._number_text(0.001), "0.001")
+        self.assertEqual(persistence._number_text(12.0011), "12.001")
+        self.assertEqual(persistence._number_text(12.340), "12.34")
+
+    def test_persist_rejects_blank_path_without_attempting_io(self) -> None:
+        with patch.object(persistence, "_read_text") as read_text:
+            self.assertFalse(
+                persistence._persist_estimated_capacity(
+                    "  ", EnergySourceDefinition("primary_battery"), {"installed_capacity_ah": 1}
+                )
+            )
+        read_text.assert_not_called()
+
+    def test_read_text_uses_path_protocol_utf8_and_propagates_read_errors(self) -> None:
+        opener = mock_open(read_data="payload")
+        with patch("builtins.open", opener):
+            self.assertEqual(persistence._read_text(os.path.join("tmp", "config.ini")), "payload")
+        opener.assert_called_once_with(os.path.join("tmp", "config.ini"), encoding="utf-8")
+
+        with patch("builtins.open", mock_open()) as failing_open:
+            failing_open.return_value.__enter__.return_value.read.side_effect = OSError("read failed")
+            with self.assertRaisesRegex(OSError, "read failed"):
+                persistence._read_text("config.ini")
 
     def test_persist_estimated_capacity_keeps_false_when_rendered_text_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

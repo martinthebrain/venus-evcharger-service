@@ -342,32 +342,13 @@ class BranchCoverageNextClusterTwoProbeCoreCases(unittest.TestCase):
         )
         self.assertEqual(len(tcp_candidates), 8)
         serial_candidates = probe_core_mod._probe_candidates(serial_transport, {})
-        self.assertEqual(serial_candidates, ())
+        self.assertEqual(serial_candidates, (serial_transport,))
 
         with self.assertRaisesRegex(ValueError, "host candidate"):
-            probe_core_mod._validate_probe_host_candidates(
-                ModbusTransportSettings(
-                    transport_kind="tcp",
-                    unit_id=1,
-                    timeout_seconds=1.0,
-                    host="",
-                    port=502,
-                    device=None,
-                    baudrate=9600,
-                    bytesize=8,
-                    parity="N",
-                    stopbits=1,
-                    serial_port_owner="none",
-                    serial_port_owner_stop_command=None,
-                    serial_port_owner_start_command=None,
-                    serial_retry_count=0,
-                    serial_retry_delay_seconds=0.0,
-                ),
-                [],
-            )
+            probe_core_mod._validate_probe_host_candidates([])
 
         self.assertEqual(probe_core_mod._text_candidates((" a ", "", None)), ["a"])
-        self.assertEqual(probe_core_mod._int_candidates(["x"], 7), [7])
+        self.assertEqual(probe_core_mod._int_candidates(["x"]), [])
         self.assertEqual(probe_core_mod._probe_int_values(["1", "x", None]), [1, None, None])
         self.assertIsNone(probe_core_mod._probe_int_value(True))
         self.assertIsNone(probe_core_mod._probe_int_value(" "))

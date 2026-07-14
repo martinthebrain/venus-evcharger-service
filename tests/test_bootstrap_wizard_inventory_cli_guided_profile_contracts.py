@@ -55,6 +55,82 @@ def _namespace(**overrides: object) -> argparse.Namespace:
 
 
 class WizardInventoryCliGuidedProfileContractTests(unittest.TestCase):
+    def test_guided_profile_specs_call_exact_prompt_contracts(self) -> None:
+        namespace = _namespace()
+        with (
+            patch(
+                "venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile_specs.inventory_choice_field",
+                return_value="meter",
+            ) as choice,
+            patch(
+                "venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile_specs.parse_inventory_kind",
+                return_value="meter",
+            ) as parse_kind,
+        ):
+            self.assertEqual(guided_profile_kind(namespace), "meter")
+        choice.assert_called_once_with(
+            namespace,
+            "inventory_kind",
+            "Choose the capability kind:",
+            ("switch", "meter", "charger"),
+            "switch",
+        )
+        parse_kind.assert_called_once_with("meter")
+
+        with patch(
+            "venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile_specs.inventory_bool_field",
+            side_effect=(False, True),
+        ) as meter_bool:
+            meter = guided_capability_flags(namespace, "meter", ("L1",))
+        self.assertEqual(meter["measures_power"], False)
+        self.assertEqual(meter["measures_energy"], True)
+        self.assertEqual(
+            [call.args for call in meter_bool.call_args_list],
+            [
+                (namespace, "inventory_measures_power", "Measures power", True),
+                (namespace, "inventory_measures_energy", "Measures energy", True),
+            ],
+        )
+
+        with (
+            patch(
+                "venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile_specs.inventory_choice_field",
+                return_value="direct",
+            ) as switch_choice,
+            patch(
+                "venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile_specs.parse_inventory_switching_mode",
+                return_value="direct",
+            ) as parse_mode,
+            patch(
+                "venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile_specs.inventory_bool_field",
+                side_effect=(False, True),
+            ) as switch_bool,
+        ):
+            switch = guided_capability_flags(namespace, "switch", ("L1", "L2"))
+        self.assertEqual((switch["supports_feedback"], switch["supports_phase_selection"]), (False, True))
+        switch_choice.assert_called_once_with(
+            namespace,
+            "inventory_switching_mode",
+            "Choose the switching mode:",
+            ("contactor", "direct"),
+            "contactor",
+        )
+        parse_mode.assert_called_once_with("direct")
+        self.assertEqual(
+            [call.args for call in switch_bool.call_args_list],
+            [
+                (namespace, "inventory_supports_feedback", "Supports feedback", True),
+                (namespace, "inventory_supports_phase_selection", "Supports phase selection", True),
+            ],
+        )
+
+        with patch(
+            "venus_evcharger.bootstrap.wizard_inventory_cli_guided_profile_specs.inventory_bool_field",
+            side_effect=(True, False),
+        ) as one_phase_bool:
+            guided_capability_flags(namespace, "switch", ("L1",))
+        self.assertEqual(one_phase_bool.call_args_list[1].args[-1], False)
+
     def test_kind_defaults_flags_and_roles_are_stable(self) -> None:
         self.assertEqual(guided_profile_kind(_namespace(inventory_kind="meter")), "meter")
         self.assertEqual(guided_capability_defaults("switch"), ("switch", "template_switch"))

@@ -30,13 +30,19 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
         return raw_value if isinstance(raw_value, dict) else {}
 
     @staticmethod
+    def _normalized_text(value: object) -> str:
+        return str(value).strip() if value else ""
+
+    @staticmethod
     def _victron_ess_balance_cluster_sources(cluster: dict[str, Any]) -> list[dict[str, Any]]:
         raw_sources = cluster.get("battery_sources", [])
         return [value for value in raw_sources if isinstance(value, dict)]
 
     @staticmethod
     def _victron_ess_balance_configured_source_id(svc: Any) -> str:
-        return str(getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", "") or "").strip()
+        return _UpdateCycleVictronEssBalanceApplySources._normalized_text(
+            getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", None)
+        )
 
     @staticmethod
     def _victron_ess_balance_matching_source(
@@ -44,7 +50,7 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
         configured_source_id: str,
     ) -> dict[str, Any] | None:
         for source in sources:
-            if str(source.get("source_id", "")).strip() == configured_source_id:
+            if _UpdateCycleVictronEssBalanceApplySources._normalized_text(source.get("source_id")) == configured_source_id:
                 return source
         return None
 
@@ -53,7 +59,10 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
         return [
             source
             for source in sources
-            if str(source.get("discharge_balance_control_connector_type", "")).strip().lower() == "dbus"
+            if _UpdateCycleVictronEssBalanceApplySources._normalized_text(
+                source.get("discharge_balance_control_connector_type")
+            ).lower()
+            == "dbus"
         ]
 
     def _victron_ess_balance_source(self, cluster: dict[str, Any], svc: Any) -> tuple[dict[str, Any] | None, str]:
@@ -72,25 +81,23 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
         return None, "victron-source-ambiguous"
 
     def _victron_ess_balance_support_mode(self, svc: Any) -> str:
-        raw_mode = str(
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_support_mode", "allow_experimental") or ""
-        ).strip().lower()
-        if raw_mode in {"supported_only", "allow_experimental"}:
-            return raw_mode
-        return "allow_experimental"
+        raw_mode = self._normalized_text(
+            getattr(svc, "auto_battery_discharge_balance_victron_bias_support_mode", None)
+        ).lower()
+        return "supported_only" if raw_mode == "supported_only" else "allow_experimental"
 
     def _victron_ess_balance_source_support_allowed(self, source: dict[str, Any], svc: Any) -> bool:
         support_mode = self._victron_ess_balance_support_mode(svc)
-        support = str(source.get("discharge_balance_control_support", "")).strip().lower()
+        support = self._normalized_text(source.get("discharge_balance_control_support")).lower()
         if support_mode == "supported_only":
             return support in {"supported", ""}
         return support in {"supported", "experimental", ""}
 
     def _victron_ess_balance_activation_mode(self, svc: Any) -> str:
-        raw_mode = str(
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_activation_mode", "always") or ""
-        ).strip().lower()
-        if raw_mode in {"always", "export_only", "above_reserve_band", "export_and_above_reserve_band"}:
+        raw_mode = self._normalized_text(
+            getattr(svc, "auto_battery_discharge_balance_victron_bias_activation_mode", None)
+        ).lower()
+        if raw_mode in {"export_only", "above_reserve_band", "export_and_above_reserve_band"}:
             return raw_mode
         return "always"
 
@@ -110,8 +117,8 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
         mode = self._victron_ess_balance_activation_mode(svc)
         if mode == "always":
             return True
-        site_regime = str(learning_profile.get("site_regime", "") or "")
-        reserve_phase = str(learning_profile.get("reserve_phase", "") or "")
+        site_regime = self._normalized_text(learning_profile.get("site_regime"))
+        reserve_phase = self._normalized_text(learning_profile.get("reserve_phase"))
         return self._victron_ess_balance_activation_site_regime_matches(
             mode,
             site_regime,

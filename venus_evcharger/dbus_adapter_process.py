@@ -111,8 +111,11 @@ class DbusAdapter(DbusAdapterLoop):
         self._prefer_read_next = True
 
 def _logging_level_from_config(config: configparser.ConfigParser) -> int:
-    value = str(config["DEFAULT"].get("Logging", "INFO")).strip().upper()
-    return getattr(logging, value, logging.INFO)
+    configured = config["DEFAULT"].get("Logging")
+    if configured is None:
+        return logging.INFO
+    value = str(configured).strip().upper()
+    return logging.getLevelNamesMapping().get(value, logging.INFO)
 
 
 __all__ = [

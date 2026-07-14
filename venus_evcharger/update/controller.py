@@ -69,7 +69,8 @@ class UpdateCycleController(_UpdateCycleSoftwareUpdate):
             timeout=cls.SOFTWARE_UPDATE_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        available_version = str(response.text or "").splitlines()[0].strip()
+        version_lines = str(response.text or "").splitlines()
+        available_version = version_lines[0].strip() if version_lines else ""
         return (
             available_version,
             bool(available_version and available_version != current_version),

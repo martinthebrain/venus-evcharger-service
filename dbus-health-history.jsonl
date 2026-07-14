@@ -1,0 +1,1 @@
+{"at":1783868347.2627273,"backpressure":"ok","cache_freshness":{"battery_soc_age_s":0.0,"battery_soc_status":"missing","grid_power_w_age_s":0.0,"grid_power_w_status":"missing","pv_power_w_age_s":0.0,"pv_power_w_status":"missing"},"core_queue_oldest_age_s":0.0,"max_tick_gap_ms_60s":0.0,"queue_oldest_age_s":0.0,"state":"ok","timeouts_60s":0}

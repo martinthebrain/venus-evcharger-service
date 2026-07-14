@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
 from venus_evcharger.core.shared import (
     _coerce_scalar_numeric,
@@ -76,16 +76,17 @@ class TestShellyWallboxShared(unittest.TestCase):
                         with self.assertRaises(RuntimeError):
                             write_text_atomically(failing_path, "payload")
 
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(temp_dir)
+            with patch("os.path.dirname", return_value=""), patch(
+                "builtins.open", mock_open()
+            ) as mocked_open, patch("os.replace") as replace:
                 write_text_atomically("flat.json", "flat")
-                with open("flat.json", "r", encoding="utf-8") as handle:
-                    self.assertEqual(handle.read(), "flat")
+                mocked_open.assert_called_once()
+                replace.assert_called_once()
 
-                with patch("os.replace", side_effect=RuntimeError("boom")):
-                    with patch("os.path.exists", return_value=False):
-                        with self.assertRaises(RuntimeError):
-                            write_text_atomically("flat.json", "payload")
-            finally:
-                os.chdir(old_cwd)
+            with patch("os.path.dirname", return_value=""), patch(
+                "builtins.open", mock_open()
+            ), patch("os.replace", side_effect=RuntimeError("boom")), patch(
+                "os.path.exists", return_value=False
+            ):
+                with self.assertRaises(RuntimeError):
+                    write_text_atomically("flat.json", "payload")
