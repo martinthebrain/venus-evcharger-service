@@ -23,8 +23,6 @@ def _csv_items(value: Any) -> tuple[str, ...]:
 
 
 def _float_or_none(value: Any) -> float | None:
-    if value is None or str(value).strip() == "":
-        return None
     try:
         numeric = float(value)
     except (TypeError, ValueError):
@@ -53,16 +51,18 @@ def _bool(value: Any, default: bool) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _profile_text(profile_defaults: Mapping[str, Any], key: str, default: str = "") -> str:
+    return _text(profile_defaults.get(key), default)
+
+
 def _legacy_primary_source(defaults: Mapping[str, Any]) -> EnergySourceDefinition:
     return EnergySourceDefinition(
         source_id="primary_battery",
-        role="battery",
-        connector_type="dbus",
         service_name=_text(defaults.get("AutoBatteryService")),
         service_prefix=_text(defaults.get("AutoBatteryServicePrefix"), "com.victronenergy.battery"),
         soc_path=_text(defaults.get("AutoBatterySocPath"), "/Soc"),
         usable_capacity_wh=_float_or_none(defaults.get("AutoBatteryCapacityWh")),
-        battery_chemistry=_text(defaults.get("AutoBatteryChemistry"), "lfp").lower(),
+        battery_chemistry=_text(defaults.get("AutoBatteryChemistry"), EnergySourceDefinition.battery_chemistry).lower(),
         capacity_auto_estimate=_bool(defaults.get("AutoBatteryCapacityAutoEstimate"), True),
         capacity_wh_path=_text(defaults.get("AutoBatteryCapacityWhPath")),
         capacity_ah_path=_text(defaults.get("AutoBatteryCapacityAhPath"), "/InstalledCapacity"),
@@ -90,27 +90,30 @@ def _configured_source(defaults: Mapping[str, Any], source_id: str) -> EnergySou
     prefix = f"AutoEnergySource.{source_id}."
     profile_name = _text(defaults.get(f"{prefix}Profile")).lower()
     profile_defaults = energy_source_profile_defaults(profile_name)
-    role = _text(defaults.get(f"{prefix}Role"), str(profile_defaults.get("Role", "battery"))).lower()
+    role = _text(defaults.get(f"{prefix}Role"), _profile_text(profile_defaults, "Role")).lower()
     if role not in ENERGY_SOURCE_ROLES:
-        role = "battery"
-    connector_type = _text(defaults.get(f"{prefix}Type"), str(profile_defaults.get("Type", "dbus"))).lower()
+        role = EnergySourceDefinition.role
+    connector_type = _text(defaults.get(f"{prefix}Type"), _profile_text(profile_defaults, "Type")).lower()
     if connector_type not in ENERGY_SOURCE_CONNECTOR_TYPES:
-        connector_type = "dbus"
+        connector_type = EnergySourceDefinition.connector_type
     if connector_type == "template_http_energy":
         connector_type = "template_http"
     return EnergySourceDefinition(
         source_id=source_id,
-        profile_name=str(profile_defaults.get("Profile", profile_name or "")),
+        profile_name=_profile_text(profile_defaults, "Profile", profile_name),
         role=role,
         connector_type=connector_type,
         config_path=_text(defaults.get(f"{prefix}ConfigPath")),
         service_name=_text(defaults.get(f"{prefix}Service")),
-        service_prefix=_text(defaults.get(f"{prefix}ServicePrefix"), str(profile_defaults.get("ServicePrefix", ""))),
-        soc_path=_text(defaults.get(f"{prefix}SocPath"), str(profile_defaults.get("SocPath", "/Soc"))),
+        service_prefix=_text(defaults.get(f"{prefix}ServicePrefix"), _profile_text(profile_defaults, "ServicePrefix")),
+        soc_path=_text(defaults.get(f"{prefix}SocPath"), _profile_text(profile_defaults, "SocPath", "/Soc")),
         usable_capacity_wh=_float_or_none(defaults.get(f"{prefix}UsableCapacityWh")),
         battery_chemistry=_text(
             defaults.get(f"{prefix}Chemistry"),
-            _text(defaults.get("AutoBatteryChemistry"), str(profile_defaults.get("BatteryChemistry", "lfp"))),
+            _text(
+                defaults.get("AutoBatteryChemistry"),
+                _profile_text(profile_defaults, "BatteryChemistry", EnergySourceDefinition.battery_chemistry),
+            ),
         ).lower(),
         capacity_auto_estimate=_bool(
             defaults.get(f"{prefix}CapacityAutoEstimate"),
@@ -118,15 +121,15 @@ def _configured_source(defaults: Mapping[str, Any], source_id: str) -> EnergySou
         ),
         capacity_wh_path=_text(
             defaults.get(f"{prefix}CapacityWhPath"),
-            _text(defaults.get("AutoBatteryCapacityWhPath"), str(profile_defaults.get("CapacityWhPath", ""))),
+            _text(defaults.get("AutoBatteryCapacityWhPath"), _profile_text(profile_defaults, "CapacityWhPath")),
         ),
         capacity_ah_path=_text(
             defaults.get(f"{prefix}CapacityAhPath"),
-            _text(defaults.get("AutoBatteryCapacityAhPath"), str(profile_defaults.get("CapacityAhPath", "/InstalledCapacity"))),
+            _text(defaults.get("AutoBatteryCapacityAhPath"), _profile_text(profile_defaults, "CapacityAhPath", "/InstalledCapacity")),
         ),
         voltage_path=_text(
             defaults.get(f"{prefix}VoltagePath"),
-            _text(defaults.get("AutoBatteryVoltagePath"), str(profile_defaults.get("VoltagePath", "/Dc/0/Voltage"))),
+            _text(defaults.get("AutoBatteryVoltagePath"), _profile_text(profile_defaults, "VoltagePath", "/Dc/0/Voltage")),
         ),
         capacity_estimate_min_soc=max(
             0.0,
@@ -154,17 +157,17 @@ def _configured_source(defaults: Mapping[str, Any], source_id: str) -> EnergySou
         estimated_capacity_cell_count=_int_or_none(defaults.get(f"{prefix}CapacityEstimatedCellCount")),
         battery_power_path=_text(
             defaults.get(f"{prefix}BatteryPowerPath"),
-            str(profile_defaults.get("BatteryPowerPath", "")),
+            _profile_text(profile_defaults, "BatteryPowerPath"),
         ),
-        ac_power_path=_text(defaults.get(f"{prefix}AcPowerPath"), str(profile_defaults.get("AcPowerPath", ""))),
-        pv_power_path=_text(defaults.get(f"{prefix}PvPowerPath"), str(profile_defaults.get("PvPowerPath", ""))),
+        ac_power_path=_text(defaults.get(f"{prefix}AcPowerPath"), _profile_text(profile_defaults, "AcPowerPath")),
+        pv_power_path=_text(defaults.get(f"{prefix}PvPowerPath"), _profile_text(profile_defaults, "PvPowerPath")),
         grid_interaction_path=_text(
             defaults.get(f"{prefix}GridInteractionPath"),
-            str(profile_defaults.get("GridInteractionPath", "")),
+            _profile_text(profile_defaults, "GridInteractionPath"),
         ),
         operating_mode_path=_text(
             defaults.get(f"{prefix}OperatingModePath"),
-            str(profile_defaults.get("OperatingModePath", "")),
+            _profile_text(profile_defaults, "OperatingModePath"),
         ),
     )
 

@@ -9,8 +9,6 @@ auto-audit logging, and safe persistence of runtime-only state.
 from __future__ import annotations
 
 from collections.abc import Callable
-import logging
-import os
 import threading
 import uuid
 import time
@@ -18,7 +16,6 @@ from typing import Any
 
 import requests
 
-from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.backend.models import normalize_phase_selection, normalize_phase_selection_tuple
 
 WorkerSnapshot = dict[str, Any]

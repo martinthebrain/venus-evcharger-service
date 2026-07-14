@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import configparser
 from dataclasses import replace
+from itertools import product
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
@@ -29,6 +30,16 @@ _HUAWEI_METER_FIELDS: tuple[dict[str, object], ...] = (
     {"section": "HuaweiMeterReverseActiveEnergyRead", "register_type": "holding", "address": 37121, "data_type": "int32", "word_order": "big", "scale": 1.0},
     {"section": "MeterTypeRead", "register_type": "holding", "address": 37125, "data_type": "uint16", "word_order": "big", "scale": 1.0},
 )
+_TRANSPORT_SECTION = "Transport"
+_ADDRESS_OPTION = "Address"
+_REGISTER_TYPE_OPTION = "RegisterType"
+_DATA_TYPE_OPTION = "DataType"
+_WORD_ORDER_OPTION = "WordOrder"
+_SCALE_OPTION = "Scale"
+_DEFAULT_REGISTER_TYPE = "holding"
+_DEFAULT_DATA_TYPE = "uint16"
+_DEFAULT_WORD_ORDER = "big"
+_DEFAULT_SCALE = "1"
 
 
 def _probe_service() -> Any:
@@ -36,8 +47,8 @@ def _probe_service() -> Any:
 
 
 def _config_transport_section(parser: configparser.ConfigParser) -> configparser.SectionProxy:
-    if parser.has_section("Transport"):
-        return parser["Transport"]
+    if parser.has_section(_TRANSPORT_SECTION):
+        return parser[_TRANSPORT_SECTION]
     return parser["DEFAULT"]
 
 
@@ -56,20 +67,27 @@ def _field_settings(parser: configparser.ConfigParser, section_name: str) -> dic
     if not parser.has_section(section_name):
         return None
     section = parser[section_name]
-    address = _probe_int_value(section.get("Address", ""))
+    address = _probe_int_value(section.get(_ADDRESS_OPTION))
     if address is None:
         return None
-    register_type = _normalized_probe_text(section.get("RegisterType", "holding"), "holding")
-    data_type = _normalized_probe_text(section.get("DataType", "uint16"), "uint16")
-    word_order = _normalized_probe_text(section.get("WordOrder", "big"), "big")
+    register_type = _normalized_probe_text(section.get(_REGISTER_TYPE_OPTION), _DEFAULT_REGISTER_TYPE)
+    data_type = _normalized_probe_text(section.get(_DATA_TYPE_OPTION), _DEFAULT_DATA_TYPE)
+    word_order = _normalized_probe_text(section.get(_WORD_ORDER_OPTION), _DEFAULT_WORD_ORDER)
     return {
         "section": section_name,
         "register_type": register_type,
         "address": address,
         "data_type": data_type,
         "word_order": word_order,
-        "scale": float(str(section.get("Scale", "1")).strip() or "1"),
+        "scale": float(_section_text(section, _SCALE_OPTION, _DEFAULT_SCALE)),
     }
+
+
+def _section_text(section: Mapping[str, object], option_name: str, fallback: str = "") -> str:
+    value = section.get(option_name)
+    if value is None:
+        return fallback
+    return str(value).strip() or fallback
 
 
 def _validate_fields(
@@ -84,13 +102,13 @@ def _validate_fields(
         field = field_settings(parser, section_name)
         if field is None:
             continue
-        attempt = attempt_probe(transport_settings, field)
+        attempt = dict(attempt_probe(transport_settings, field))
         attempt["section"] = section_name
         attempt["required"] = True
         results.append(attempt)
     if profile_name.startswith("huawei_"):
         for field in _HUAWEI_METER_FIELDS:
-            attempt = attempt_probe(transport_settings, field)
+            attempt = dict(attempt_probe(transport_settings, field))
             attempt["section"] = field["section"]
             attempt["required"] = False
             results.append(attempt)
@@ -104,21 +122,23 @@ def _probe_candidates(
     host_candidates = _probe_host_candidates(base_transport, probe_plan)
     port_candidates = _probe_default_ports(
         base_transport,
-        _int_candidates(probe_plan.get("port_candidates"), base_transport.port),
+        _int_candidates(probe_plan.get("port_candidates")),
     )
     unit_id_candidates = _probe_default_unit_ids(
         base_transport,
-        _int_candidates(probe_plan.get("unit_id_candidates"), base_transport.unit_id),
+        _int_candidates(probe_plan.get("unit_id_candidates")),
     )
-    _validate_probe_host_candidates(base_transport, host_candidates)
-    candidates: list[ModbusTransportSettings] = []
-    for host in _probe_default_hosts(base_transport, host_candidates):
-        for candidate_port in port_candidates:
-            for candidate_unit_id in unit_id_candidates:
-                candidates.append(
-                    replace(base_transport, host=host, port=candidate_port, unit_id=candidate_unit_id)
-                )
-    return tuple(candidates)
+    if base_transport.transport_kind == "serial_rtu":
+        return tuple(replace(base_transport, unit_id=unit_id) for unit_id in unit_id_candidates)
+    _validate_probe_host_candidates(host_candidates)
+    return tuple(
+        replace(base_transport, host=host, port=candidate_port, unit_id=candidate_unit_id)
+        for host, candidate_port, candidate_unit_id in product(
+            host_candidates,
+            port_candidates,
+            unit_id_candidates,
+        )
+    )
 
 
 def _text_candidates(value: object) -> list[str]:
@@ -126,11 +146,8 @@ def _text_candidates(value: object) -> list[str]:
     return [text for item in raw_values if (text := _optional_probe_text(item))]
 
 
-def _int_candidates(value: object, fallback: int | None) -> list[int]:
-    candidates = [candidate for candidate in _probe_int_values(value) if candidate is not None]
-    if not candidates and fallback is not None:
-        candidates.append(int(fallback))
-    return candidates
+def _int_candidates(value: object) -> list[int]:
+    return [candidate for candidate in _probe_int_values(value) if candidate is not None]
 
 
 def _probe_host_candidates(
@@ -141,13 +158,6 @@ def _probe_host_candidates(
     if host_candidates:
         return host_candidates
     return [base_transport.host] if base_transport.host else []
-
-
-def _probe_default_hosts(
-    base_transport: ModbusTransportSettings,
-    host_candidates: list[str],
-) -> list[str]:
-    return host_candidates or ([base_transport.host] if base_transport.host else [])
 
 
 def _probe_default_ports(
@@ -164,11 +174,8 @@ def _probe_default_unit_ids(
     return unit_id_candidates or [base_transport.unit_id]
 
 
-def _validate_probe_host_candidates(
-    base_transport: ModbusTransportSettings,
-    host_candidates: list[str],
-) -> None:
-    if host_candidates or base_transport.transport_kind == "serial_rtu":
+def _validate_probe_host_candidates(host_candidates: list[str]) -> None:
+    if host_candidates:
         return
     raise ValueError("Energy probe requires a host candidate for TCP/UDP Modbus detection")
 
@@ -179,8 +186,6 @@ def _probe_int_values(value: object) -> list[int | None]:
 
 
 def _probe_int_value(value: object) -> int | None:
-    if value is None or isinstance(value, bool):
-        return None
     text = str(value).strip()
     if not text:
         return None

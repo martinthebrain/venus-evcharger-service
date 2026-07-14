@@ -225,6 +225,19 @@ class _AutoInputHelperBasicCoreCases:
             "AutoGridL2Path": "/DirectL2",
             "AutoGridL3Path": "/DirectL3",
             "AutoGridRequireAllPhases": "0",
+            "AutoGridFusionEnabled": "1",
+            "AutoGridFusionPrimarySource": "huawei",
+            "AutoGridFusionBackupSource": "victron-grid",
+            "AutoGridFusionPrimaryMaxAgeSeconds": "4",
+            "AutoGridFusionBackupMaxAgeSeconds": "5",
+            "AutoGridFusionMinimumConfidence": "0.7",
+            "AutoGridFusionFailoverSamples": "2",
+            "AutoGridFusionRecoverySamples": "8",
+            "AutoGridFusionFailoverHoldSeconds": "3",
+            "AutoGridFusionMismatchAbsoluteWatts": "250",
+            "AutoGridFusionMismatchRelative": "0.2",
+            "AutoGridFusionMismatchSamples": "4",
+            "AutoGridFusionFutureToleranceSeconds": "0.5",
             "AutoDbusBackoffBaseSeconds": "-1",
             "AutoDbusBackoffMaxSeconds": "-2",
             "AutoInputValidationPollSeconds": "1",
@@ -312,6 +325,19 @@ class _AutoInputHelperBasicCoreCases:
         self.assertFalse(helper.auto_battery_capacity_auto_estimate)
         self.assertFalse(helper.auto_grid_require_all_phases)
         self.assertTrue(helper.auto_use_combined_battery_soc)
+        self.assertTrue(helper._grid_measurement_fusion.config.enabled)
+        self.assertEqual(helper._grid_measurement_fusion.config.primary_source_id, "huawei")
+        self.assertEqual(helper._grid_measurement_fusion.config.backup_source_id, "victron-grid")
+        self.assertEqual(helper._grid_measurement_fusion.config.primary_max_age_seconds, 4.0)
+        self.assertEqual(helper._grid_measurement_fusion.config.backup_max_age_seconds, 5.0)
+        self.assertEqual(helper._grid_measurement_fusion.config.minimum_confidence, 0.7)
+        self.assertEqual(helper._grid_measurement_fusion.config.failover_samples, 2)
+        self.assertEqual(helper._grid_measurement_fusion.config.recovery_samples, 8)
+        self.assertEqual(helper._grid_measurement_fusion.config.failover_hold_seconds, 3.0)
+        self.assertEqual(helper._grid_measurement_fusion.config.mismatch_absolute_watts, 250.0)
+        self.assertEqual(helper._grid_measurement_fusion.config.mismatch_relative, 0.2)
+        self.assertEqual(helper._grid_measurement_fusion.config.mismatch_samples, 4)
+        self.assertEqual(helper._grid_measurement_fusion.config.future_tolerance_seconds, 0.5)
 
     def test_init_helper_config_uses_documented_defaults(self):
         config_path = self._write_helper_config("")
@@ -361,10 +387,28 @@ class _AutoInputHelperBasicCoreCases:
         self.assertEqual(helper.auto_grid_l2_path, "/Ac/Grid/L2/Power")
         self.assertEqual(helper.auto_grid_l3_path, "/Ac/Grid/L3/Power")
         self.assertTrue(helper.auto_grid_require_all_phases)
+        self.assertFalse(helper._grid_measurement_fusion.config.enabled)
+        self.assertEqual(helper._grid_measurement_fusion.config.backup_source_id, "victron")
+        self.assertEqual(helper._grid_measurement_fusion.config.primary_max_age_seconds, 15.0)
         self.assertEqual(helper.auto_dbus_backoff_base_seconds, 5.0)
         self.assertEqual(helper.auto_dbus_backoff_max_seconds, 60.0)
         self.assertEqual(helper.validation_poll_seconds, 30.0)
         self.assertEqual(helper.subscription_refresh_seconds, 60.0)
+
+    def test_grid_fusion_rejects_freshness_shorter_than_primary_poll_cycle(self):
+        helper = AutoInputHelper.__new__(AutoInputHelper)
+        helper.config = {
+            "AutoGridFusionEnabled": "1",
+            "AutoGridFusionPrimarySource": "huawei",
+            "AutoGridFusionPrimaryMaxAgeSeconds": "9",
+        }
+        helper.auto_battery_poll_interval_seconds = 10.0
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "^AutoGridFusionPrimaryMaxAgeSeconds must cover AutoBatteryPollIntervalMs$",
+        ):
+            helper._init_helper_grid_config()
 
     def test_base_config_clamps_gateway_retry_ceiling(self):
         config_path = self._write_helper_config("DbusGatewayErrorRetrySeconds=999\n")

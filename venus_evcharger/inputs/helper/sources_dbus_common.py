@@ -40,7 +40,8 @@ def _dbus_error_name(error: BaseException) -> str:
             return str(getter() or "")
         except DBUS_ERROR_NAME_ACCESS_ERRORS:  # pragma: no cover - defensive for foreign DBus objects
             return ""
-    return str(getattr(error, "_dbus_error_name", "") or "")
+    attribute_name = getattr(error, "_dbus_error_name", None)
+    return "" if attribute_name is None else str(attribute_name)
 
 
 def _is_expected_missing_dbus_error(error: BaseException) -> bool:

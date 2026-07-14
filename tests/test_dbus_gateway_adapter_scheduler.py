@@ -56,6 +56,7 @@ with patch.dict("sys.modules", {"vedbus": fake_vedbus, "dbus.mainloop.glib": fak
     import venus_evcharger.dbus_adapter_process_config as process_config_module
     import venus_evcharger.dbus_adapter_process_health as process_health_module
     import venus_evcharger.dbus_adapter_process_introspection as introspection_module
+    import venus_evcharger.dbus_adapter_process_introspection_snapshot as introspection_snapshot_module
     import venus_evcharger.dbus_adapter_process_io as process_io_module
     import venus_evcharger.dbus_adapter_process_loop as process_loop_module
     import venus_evcharger.dbus_adapter_process_runtime as runtime_module
@@ -2404,9 +2405,10 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                     ("first", {"kind": "register_service"}),
                     ("path", {"kind": "register_path"}),
                     ("second", {"kind": "register_service"}),
+                    ("third", {"kind": "register_service"}),
                 ]
             ),
-            ("second", {"kind": "register_service"}),
+            ("third", {"kind": "register_service"}),
         )
         self.assertIsNone(write_support_module.register_service_command([("path", {"kind": "register_path"})]))
         self.assertEqual(
@@ -5104,6 +5106,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             background._last_introspection_full_scan_at = 0.0
             background.enqueue_background_introspection_if_due()
             self.assertGreater(background.enqueue_introspection_command.call_count, 0)
+            self.assertGreater(background._last_introspection_full_scan_at, 0.0)
             background.enqueue_introspection_command.assert_any_call(
                 "com.victronenergy.battery.tty1",
                 "/Soc",
@@ -5403,13 +5406,18 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             remove_coalesced.assert_not_called()
             adapter.circuit.degraded_until = 0.0
 
+            _install_mock(adapter, "list_services", MagicMock(side_effect=DbusOperationDeferred("read")))
+            remove_coalesced.reset_mock()
+            self.assertEqual(adapter.refresh_services_command({"kind": "refresh_services"}), "deferred")
+            remove_coalesced.assert_not_called()
+
             services_error = RuntimeError("dbus down")
             _install_mock(adapter, "list_services", MagicMock(side_effect=services_error))
             record_error = _install_mock(adapter.discovery, "record_error", MagicMock())
             remove_coalesced.reset_mock()
-            self.assertEqual(adapter.refresh_services_command({"kind": "refresh_services"}), "dropped")
-            record_error.assert_called_once()
-            self.assertIs(record_error.call_args.args[0], services_error)
+            with patch.object(introspection_module.time, "time", return_value=123.0):
+                self.assertEqual(adapter.refresh_services_command({"kind": "refresh_services"}), "dropped")
+            record_error.assert_called_once_with(services_error, now=123.0)
             remove_coalesced.assert_called_once_with("refresh:services")
 
     def test_gateway_writes_legacy_introspection_snapshot_from_cache(self) -> None:
@@ -5473,11 +5481,14 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.dbus_introspection_enabled = True
-            method_globals = adapter.write_introspection_snapshot.__globals__
 
             with (
-                patch.dict(method_globals, {"write_text_atomically": MagicMock(side_effect=OSError("readonly"))}),
-                patch.object(method_globals["logging"], "debug") as debug_log,
+                patch.object(
+                    introspection_snapshot_module,
+                    "write_text_atomically",
+                    MagicMock(side_effect=OSError("readonly")),
+                ),
+                patch.object(introspection_snapshot_module.logging, "debug") as debug_log,
             ):
                 adapter.write_introspection_snapshot()
 
@@ -6106,13 +6117,16 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             adapter.read_scheduler.next_read_at = {key: time.time() + 1000 for key in adapter.read_scheduler.specs}
             self.assertFalse(adapter.poll_one_due_read_once())
 
-            adapter.read_scheduler.next_read_at = {"grid_power_w": 0.0}
+            adapter.read_scheduler.next_read_at = {
+                key: (0.0 if key == "grid_power_w" else time.time() + 1000)
+                for key in adapter.read_scheduler.specs
+            }
             _install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="applied"))
             self.assertTrue(adapter.poll_one_due_read_once())
-            adapter.read_scheduler.next_read_at = {"grid_power_w": 0.0}
+            adapter.read_scheduler.next_read_at["grid_power_w"] = 0.0
             _install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="dropped"))
             self.assertTrue(adapter.poll_one_due_read_once())
-            adapter.read_scheduler.next_read_at = {"grid_power_w": 0.0}
+            adapter.read_scheduler.next_read_at["grid_power_w"] = 0.0
             _install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="deferred"))
             self.assertFalse(adapter.poll_one_due_read_once())
 
@@ -6195,7 +6209,7 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
                 self.assertFalse(adapter.poll_one_due_read_once())
             poll_read_spec.assert_not_called()
 
-            _install_mock(adapter.discovery, "due", MagicMock(return_value=True))
+            discovery_due = _install_mock(adapter.discovery, "due", MagicMock(return_value=True))
             discovery_success = _install_mock(adapter.discovery, "record_success", MagicMock())
             discovery_error = _install_mock(adapter.discovery, "record_error", MagicMock())
             update_services = _install_mock(adapter.cache, "update_services", MagicMock())
@@ -6203,6 +6217,10 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             _install_mock(adapter, "list_services", MagicMock(return_value=["svc.a"]))
             with patch.object(process_io_module.time, "time", return_value=200.0):
                 self.assertTrue(adapter.refresh_services_if_due_once())
+            discovery_due.assert_called_once_with(
+                now=200.0,
+                priority_allowed=adapter.circuit.allows_priority,
+            )
             update_services.assert_called_once_with(["svc.a"])
             remove_coalesced.assert_called_once_with("refresh:services")
             discovery_success.assert_called_once_with(now=200.0)
@@ -6261,8 +6279,10 @@ class DbusGatewayAdapterSchedulerTests(unittest.TestCase):
             self.assertEqual(adapter.health_snapshot.call_count, 3)
             self.assertEqual(adapter.cache.write_snapshot_files.call_count, 2)
             self.assertEqual(adapter.append_health_log.call_count, 2)
+            adapter.append_health_log.assert_called_with({"state": "ok"})
             self.assertEqual(adapter.write_introspection_snapshot.call_count, 2)
             self.assertEqual(adapter._last_cache_publish_monotonic, 11.0)
+            self.assertEqual(adapter._last_cache_publish_sequence, adapter.cache.sequence)
 
             no_throttle = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-no-throttle")))
             no_throttle.cache_publish_interval_seconds = 0.0

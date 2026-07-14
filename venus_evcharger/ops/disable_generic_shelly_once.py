@@ -14,9 +14,23 @@ import os
 import sys
 import time
 import xml.etree.ElementTree as xml_et
-from typing import Any
+from typing import Any, TypedDict
 
 from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
+from venus_evcharger.ops.disable_generic_shelly_config import (
+    ALLOW_PERSISTENT_DISABLE_KEY,
+    CHANNEL_KEY,
+    DEFAULT_GATEWAY_RUN_DIR,
+    DEFAULT_SERVICE,
+    DELAY_SECONDS_KEY,
+    ENABLED_KEY,
+    GATEWAY_CACHE_PATH_KEY,
+    GATEWAY_RUN_DIR_KEY,
+    HOST_KEY,
+    SERVICE_KEY,
+    TARGET_IP_KEY,
+    TARGET_MAC_KEY,
+)
 
 
 _CONFIG_SCALAR_TYPES = (str, bytes, bytearray, int, float)
@@ -26,7 +40,7 @@ DEFAULT_CONFIG_PATH = os.path.join(
     "venus",
     "config.venus_evcharger.ini",
 )
-DEFAULT_GENERIC_SHELLY_SERVICE = "com.victronenergy.shelly"
+DEFAULT_GENERIC_SHELLY_SERVICE = DEFAULT_SERVICE
 
 GENERIC_SHELLY_HELPER_ERRORS = (
     KeyError,
@@ -37,6 +51,20 @@ GENERIC_SHELLY_HELPER_ERRORS = (
     configparser.Error,
     xml_et.ParseError,
 )
+
+
+class DisableShellySettings(TypedDict):
+    """Complete normalized settings consumed by the one-shot workflow."""
+
+    enabled: bool
+    allow_persistent_disable: bool
+    service: str
+    target_ip: str
+    target_mac: str
+    channel: int
+    delay_seconds: float
+    gateway_run_dir: str
+    gateway_cache_path: str
 
 
 def _as_bool(value: object, default: bool = False) -> bool:
@@ -71,7 +99,7 @@ def _normalize_mac(value: object) -> str:
     return str(value or "").replace(":", "").replace("-", "").replace(" ", "").strip().upper()
 
 
-def load_settings(config_path: str) -> dict[str, Any]:
+def load_settings(config_path: str) -> DisableShellySettings:
     """Load helper settings from the shared wallbox config."""
     parser = configparser.ConfigParser()
     loaded = parser.read(config_path)
@@ -80,29 +108,29 @@ def load_settings(config_path: str) -> dict[str, Any]:
 
     section = parser["DEFAULT"]
     host = _required_host(section)
-    channel = _normalized_channel(section.get("GenericShellyDisableChannel", "1"))
-    delay_seconds = _normalized_delay_seconds(section.get("GenericShellyDisableDelaySeconds", "180"))
+    channel = _normalized_channel(section.get(CHANNEL_KEY))
+    delay_seconds = _normalized_delay_seconds(section.get(DELAY_SECONDS_KEY))
 
     return {
-        "enabled": _as_bool(section.get("DisableGenericShellyDevice", "1"), True),
+        "enabled": _as_bool(section.get(ENABLED_KEY), True),
         "allow_persistent_disable": _as_bool(
-            section.get("GenericShellyAllowPersistentDisable", "1"),
+            section.get(ALLOW_PERSISTENT_DISABLE_KEY),
             True,
         ),
-        "service": section.get("GenericShellyService", DEFAULT_GENERIC_SHELLY_SERVICE).strip()
+        "service": section.get(SERVICE_KEY, DEFAULT_GENERIC_SHELLY_SERVICE).strip()
         or DEFAULT_GENERIC_SHELLY_SERVICE,
-        "target_ip": section.get("GenericShellyDisableIp", host).strip(),
-        "target_mac": _normalize_mac(section.get("GenericShellyDisableMac", "")),
+        "target_ip": section.get(TARGET_IP_KEY, host).strip(),
+        "target_mac": _normalize_mac(section.get(TARGET_MAC_KEY)),
         "channel": channel,
         "delay_seconds": delay_seconds,
-        "gateway_run_dir": section.get("DbusGatewayRunDir", "/run/venus-evcharger").strip(),
-        "gateway_cache_path": section.get("DbusGatewayCachePath", "").strip(),
+        "gateway_run_dir": section.get(GATEWAY_RUN_DIR_KEY, DEFAULT_GATEWAY_RUN_DIR).strip(),
+        "gateway_cache_path": section.get(GATEWAY_CACHE_PATH_KEY, "").strip(),
     }
 
 
 def _required_host(section: configparser.SectionProxy) -> str:
     """Return the required default Host from the shared config."""
-    host = section.get("Host", "").strip()
+    host = section.get(HOST_KEY, "").strip()
     if not host:
         raise ValueError("DEFAULT Host is required in the config")
     return host
@@ -111,13 +139,13 @@ def _required_host(section: configparser.SectionProxy) -> str:
 def _normalized_channel(value: object) -> int:
     """Return a valid generic Shelly channel number."""
     channel = _as_int(value, 1)
-    return channel if channel >= 1 else 1
+    return max(1, channel)
 
 
 def _normalized_delay_seconds(value: object) -> float:
     """Return a non-negative startup delay for the one-shot helper."""
     delay_seconds = _as_float(value, 180.0)
-    return delay_seconds if delay_seconds >= 0 else 0.0
+    return max(0.0, delay_seconds)
 
 
 def matches_device(
@@ -196,7 +224,7 @@ def get_dbus_child_nodes(bus: Any, service_name: str, path: str, timeout: float 
             }
         )
         return []
-    xml_data = entry.get("value", "")
+    xml_data = entry["value"]
     root = xml_et.fromstring(str(xml_data))
     child_nodes: list[str] = []
     for node in root.findall("node"):
@@ -207,7 +235,7 @@ def get_dbus_child_nodes(bus: Any, service_name: str, path: str, timeout: float 
 
 
 def disable_matching_device(
-    settings: dict[str, Any],
+    settings: DisableShellySettings,
     list_nodes: Callable[[str, str], list[str]],
     get_value: Callable[[str, str], Any],
     set_value: Callable[[str, str, Any], Any],
@@ -225,18 +253,18 @@ def disable_matching_device(
             continue
         return _disable_device_channel(settings, service_name, serial, get_value, set_value, resolved_logger)
 
-    target_ip = settings.get("target_ip", "")
-    target_mac = settings.get("target_mac", "")
+    target_ip = settings["target_ip"]
+    target_mac = settings["target_mac"]
     resolved_logger.info("No matching generic Shelly device found for IP %s MAC %s", target_ip, target_mac)
     return "not-found"
 
 
-def _disable_precondition_result(settings: dict[str, Any], logger: Any) -> str | None:
+def _disable_precondition_result(settings: DisableShellySettings, logger: Any) -> str | None:
     """Return an early result when helper configuration forbids any disable action."""
-    if not settings.get("enabled", False):
+    if not settings["enabled"]:
         logger.info("Generic Shelly one-shot helper disabled by config")
         return "disabled-by-config"
-    if not settings.get("allow_persistent_disable", True):
+    if not settings["allow_persistent_disable"]:
         logger.info("Generic Shelly one-shot helper blocked by config")
         return "persistent-disable-blocked"
     if _has_no_disable_target(settings):
@@ -245,13 +273,13 @@ def _disable_precondition_result(settings: dict[str, Any], logger: Any) -> str |
     return None
 
 
-def _has_no_disable_target(settings: dict[str, Any]) -> bool:
+def _has_no_disable_target(settings: DisableShellySettings) -> bool:
     """Return whether neither target IP nor target MAC is configured."""
-    return not settings.get("target_ip", "") and not settings.get("target_mac", "")
+    return not settings["target_ip"] and not settings["target_mac"]
 
 
 def _device_matches_target(
-    settings: dict[str, Any],
+    settings: DisableShellySettings,
     service_name: str,
     serial: str,
     get_value: Callable[[str, str], Any],
@@ -263,12 +291,12 @@ def _device_matches_target(
         serial,
         ip_value,
         mac_value,
-        settings.get("target_ip", ""),
-        settings.get("target_mac", ""),
+        settings["target_ip"],
+        settings["target_mac"],
     )
 
 
-def _enabled_path(settings: dict[str, Any], serial: str) -> str:
+def _enabled_path(settings: DisableShellySettings, serial: str) -> str:
     """Return the Enabled DBus path for one generic Shelly device/channel."""
     return f"/Devices/{serial}/{settings['channel']}/Enabled"
 
@@ -284,7 +312,7 @@ def _device_already_disabled(
 
 
 def _disable_device_channel(
-    settings: dict[str, Any],
+    settings: DisableShellySettings,
     service_name: str,
     serial: str,
     get_value: Callable[[str, str], Any],
@@ -304,13 +332,13 @@ def _disable_device_channel(
 def run_once(config_path: str = DEFAULT_CONFIG_PATH) -> str:
     """Execute the delayed one-shot disable check."""
     settings = load_settings(config_path)
-    delay_seconds = settings.get("delay_seconds", 0.0)
+    delay_seconds = settings["delay_seconds"]
     if delay_seconds > 0:
         logging.info("Waiting %.0f seconds before generic Shelly one-shot check", delay_seconds)
         time.sleep(delay_seconds)
 
-    run_dir = str(settings.get("gateway_run_dir") or "/run/venus-evcharger")
-    cache_path = str(settings.get("gateway_cache_path") or gateway_paths(run_dir or None).cache_path)
+    run_dir = settings["gateway_run_dir"] or DEFAULT_GATEWAY_RUN_DIR
+    cache_path = settings["gateway_cache_path"] or gateway_paths(run_dir).cache_path
     timeout = 1.0
     return disable_matching_device(
         settings,

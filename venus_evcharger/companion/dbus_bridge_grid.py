@@ -36,6 +36,9 @@ class _EnergyCompanionDbusBridgeGrid:
         return {"connected": bool(held["connected"]), "value": float(held["value"])}
 
     def _aggregate_grid_input(self, snapshot: Mapping[str, Any]) -> tuple[Any, bool]:
+        if bool(snapshot.get("grid_fusion_enabled", False)):
+            fused_value = snapshot.get("grid_power")
+            return fused_value, self._grid_numeric_value(fused_value) is not None
         authoritative_source_id = self._string_value(getattr(self.service, "companion_grid_authoritative_source", None))
         if authoritative_source_id:
             source = self._find_source_snapshot(snapshot, authoritative_source_id)

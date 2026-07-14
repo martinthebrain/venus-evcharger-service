@@ -82,15 +82,13 @@ def coerce_dbus_numeric(value: Any) -> Any:
 
 def _sum_numeric_items(items: Iterable[object]) -> float | None:
     """Return the recursive sum of usable numeric items."""
-    total = 0.0
-    seen_numeric = False
+    total: float | None = None
     for item in items:
         numeric_item = sum_dbus_numeric(item)
         if numeric_item is None:
             continue
-        total += float(numeric_item)
-        seen_numeric = True
-    return total if seen_numeric else None
+        total = (total or 0.0) + float(numeric_item)
+    return total
 
 
 def sum_dbus_numeric(value: Any) -> float | None:
@@ -157,21 +155,26 @@ def compact_json(data: Any) -> str:
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
 
 
-def write_text_atomically(path: str | PathLike[str], payload: str, encoding: str = "utf-8") -> None:
+def write_text_atomically(path: str | PathLike[str], payload: str, encoding: str | None = None) -> None:
     """Atomically replace a text file, cleaning up the temp file on failure."""
+    resolved_encoding = encoding or "utf-8"
     path_str = os.fspath(path)
     target_dir = os.path.dirname(path_str)
     if target_dir:
         os.makedirs(target_dir, exist_ok=True)
     tmp_path = f"{path_str}.tmp.{os.getpid()}.{threading.get_ident()}"
     try:
-        with open(tmp_path, "w", encoding=encoding) as handle:
+        with open(tmp_path, "w", encoding=resolved_encoding) as handle:
             handle.write(payload)
         os.replace(tmp_path, path_str)
     except (OSError, RuntimeError, TypeError, UnicodeEncodeError):
-        try:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-        except OSError:
-            pass
+        _remove_temporary_file(tmp_path)
         raise
+
+
+def _remove_temporary_file(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except OSError:
+        pass

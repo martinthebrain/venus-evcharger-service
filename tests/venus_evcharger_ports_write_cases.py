@@ -27,6 +27,8 @@ class TestWallboxPortsWrite(unittest.TestCase):
 
         _set_finite_service_float(service, "target", 0)
         self.assertEqual(service.target, 0.0)
+        _set_finite_service_float(service, "target", 3.5)
+        self.assertEqual(service.target, 3.5)
         _set_finite_service_float(service, "target", "bad")
         self.assertEqual(service.target, 0.0)
 
@@ -39,6 +41,10 @@ class TestWallboxPortsWrite(unittest.TestCase):
         service.flag = "bad"
         self.assertEqual(_service_binary_flag(service, "flag"), 1)
         service.flag = None
+        self.assertEqual(_service_binary_flag(service, "flag"), 1)
+        service.flag = 1
+        self.assertEqual(_service_binary_flag(service, "flag"), 1)
+        service.flag = 2
         self.assertEqual(_service_binary_flag(service, "flag"), 1)
 
         _set_service_binary_flag(service, "stored", "1")

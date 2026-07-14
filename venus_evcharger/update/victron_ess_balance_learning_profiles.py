@@ -75,11 +75,14 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
     def _victron_ess_balance_current_limit_settings(svc: Any) -> tuple[float, float]:
         current_ramp = max(
             0.0,
-            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second", 0.0) or 0.0),
+            _victron_ess_balance_float_attr(
+                svc,
+                "auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second",
+            ),
         )
         current_max_abs = max(
             0.0,
-            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_max_abs_watts", 0.0) or 0.0),
+            _victron_ess_balance_float_attr(svc, "auto_battery_discharge_balance_victron_bias_max_abs_watts"),
         )
         return current_ramp, current_max_abs
 
@@ -183,8 +186,8 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         phase_inputs = self._victron_ess_balance_learning_profile_phase_inputs(cluster)
         action_direction = self._victron_ess_balance_action_direction(
             source_error_w,
-            float(phase_inputs["expected_export_w"] or 0.0),
-            float(phase_inputs["expected_import_w"] or 0.0),
+            phase_inputs["expected_export_w"],
+            phase_inputs["expected_import_w"],
         )
         site_regime = self._victron_ess_balance_site_regime(
             phase_inputs["grid_interaction_w"],
@@ -304,7 +307,7 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         if not profile:
             return {}
         snapshot: dict[str, Any] = {
-            "key": str(profile.get("key", profile_key) or profile_key),
+            "key": str(profile["key"]),
             "sample_count": self._victron_ess_balance_profile_sample_count(profile),
         }
         snapshot.update(_victron_ess_balance_profile_scalar_snapshot(profile, self._victron_ess_balance_profile_scalar_fields()))
@@ -338,25 +341,23 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         profile_key: str,
     ) -> None:
         snapshot = self._victron_ess_balance_profile_snapshot(svc, profile_key)
+        if not snapshot:
+            return
         metrics.update(
             _victron_ess_balance_prefixed_scalar_metrics(
                 snapshot,
                 self._victron_ess_balance_profile_scalar_fields(),
             )
         )
-        metrics["battery_discharge_balance_victron_bias_learning_profile_sample_count"] = int(
-            snapshot.get("sample_count", 0) or 0
-        )
+        metrics["battery_discharge_balance_victron_bias_learning_profile_sample_count"] = int(snapshot["sample_count"])
         for field in self._victron_ess_balance_profile_metric_fields():
-            value = snapshot.get(field)
-            if field in {"overshoot_count", "settled_count"}:
-                value = int(value or 0)
+            value = snapshot[field]
             metrics[f"battery_discharge_balance_victron_bias_learning_profile_{field}"] = value
 
     @staticmethod
     def _set_victron_ess_balance_active_profile(svc: Any, learning_profile: dict[str, str]) -> None:
         for attr_name, field_name in _victron_ess_balance_active_profile_fields():
-            setattr(svc, attr_name, str(learning_profile.get(field_name, "") or ""))
+            setattr(svc, attr_name, str(learning_profile[field_name]))
 
     @staticmethod
     def _clear_victron_ess_balance_active_profile(svc: Any) -> None:
@@ -394,7 +395,7 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         profile = self._ensure_victron_ess_balance_learning_profile_state(svc, profile_key)
         if not profile:
             return
-        profile[field] = max(0, int(profile.get(field, 0) or 0)) + 1
+        profile[field] = _victron_ess_balance_profile_counter(profile, field) + 1
 
     def _victron_ess_balance_refresh_profile_stability(self, svc: Any, profile_key: str) -> None:
         profile = self._victron_ess_balance_learning_profile_state(svc, profile_key)
@@ -420,18 +421,18 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
 
     def _victron_ess_balance_current_topology_key(self, svc: Any, source_id: str) -> str:
         energy_ids = _victron_ess_balance_energy_ids(svc)
-        service_name = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_service", "") or "").strip()
-        path = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_path", "") or "").strip()
+        service_name = str(svc.auto_battery_discharge_balance_victron_bias_service).strip()
+        path = str(svc.auto_battery_discharge_balance_victron_bias_path).strip()
         return (
             "victron-bias-learning/v2"
-            f"/source={str(source_id or '').strip()}"
+            f"/source={str(source_id).strip()}"
             f"/service={service_name}"
             f"/path={path}"
             f"/energy={','.join(sorted(energy_ids))}"
         )
 
     def victron_ess_balance_learning_state_payload(self, svc: Any) -> dict[str, Any]:
-        source_id = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", "") or "").strip()
+        source_id = str(svc.auto_battery_discharge_balance_victron_bias_source_id).strip()
         topology_key = self._victron_ess_balance_current_topology_key(svc, source_id)
         profiles: dict[str, Any] = {}
         for profile_key in sorted(self._victron_ess_balance_learning_profiles(svc)):
@@ -444,7 +445,7 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         }
 
     def victron_ess_balance_adaptive_tuning_payload(self, svc: Any) -> dict[str, Any]:
-        source_id = str(getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", "") or "").strip()
+        source_id = str(svc.auto_battery_discharge_balance_victron_bias_source_id).strip()
         payload = {
             "schema_version": 2,
             "topology_key": self._victron_ess_balance_current_topology_key(svc, source_id),
@@ -452,8 +453,8 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
             **self._victron_ess_balance_current_tuning_snapshot(svc),
         }
         payload.update(self._victron_ess_balance_adaptive_scalar_payload(svc))
-        payload["last_stable_tuning"] = dict(getattr(svc, "_victron_ess_balance_last_stable_tuning", {}) or {})
-        payload["conservative_tuning"] = dict(getattr(svc, "_victron_ess_balance_conservative_tuning", {}) or {})
+        payload["last_stable_tuning"] = dict(svc._victron_ess_balance_last_stable_tuning or {})
+        payload["conservative_tuning"] = dict(svc._victron_ess_balance_conservative_tuning or {})
         return payload
 
     def _victron_ess_balance_adaptive_scalar_payload(self, svc: Any) -> dict[str, Any]:

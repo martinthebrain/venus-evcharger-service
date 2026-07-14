@@ -102,7 +102,7 @@ class _AutoInputHelperSourceDbusSnapshot(_AutoInputHelperSourceDbusResolve):
             service_name=service_name,
             soc=soc_value,
             usable_capacity_wh=_capacity_payload_float(capacity_payload, "usable_capacity_wh"),
-            usable_capacity_source=str(capacity_payload.get("usable_capacity_source", "")),
+            usable_capacity_source=str(capacity_payload.get("usable_capacity_source") or ""),
             installed_capacity_ah=_capacity_payload_float(capacity_payload, "installed_capacity_ah"),
             capacity_voltage_v=_capacity_payload_float(capacity_payload, "capacity_voltage_v"),
             capacity_nominal_voltage_v=_capacity_payload_float(capacity_payload, "capacity_nominal_voltage_v"),
@@ -195,7 +195,7 @@ class _AutoInputHelperSourceDbusSnapshot(_AutoInputHelperSourceDbusResolve):
         service_name: str,
     ) -> dict[str, object] | None:
         key = self._dbus_capacity_cache_key(source, service_name)
-        estimates = getattr(self, "_auto_battery_capacity_estimates", {})
+        estimates = getattr(self, "_auto_battery_capacity_estimates", None)
         cached = estimates.get(key) if isinstance(estimates, dict) else None
         return _capacity_payload_mapping(cached) or configured_estimated_capacity_payload(source)
 
@@ -208,7 +208,8 @@ class _AutoInputHelperSourceDbusSnapshot(_AutoInputHelperSourceDbusResolve):
         if not startup_recheck_done:
             return
         try:
-            changed = persist_estimated_capacity_if_ah_changed(str(getattr(self, "config_path", "")), source, payload)
+            config_path = getattr(self, "config_path", None)
+            changed = persist_estimated_capacity_if_ah_changed("" if config_path is None else str(config_path), source, payload)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             logging.warning("Unable to persist auto-estimated battery capacity: %s", error)
             return
@@ -226,11 +227,12 @@ class _AutoInputHelperSourceDbusSnapshot(_AutoInputHelperSourceDbusResolve):
         return not self._dbus_capacity_startup_recheck_seen(source, service_name)
 
     def _dbus_capacity_startup_recheck_time_due(self: Any, source: EnergySourceDefinition, now: float) -> bool:
-        recheck_at = float(getattr(self, "_auto_battery_capacity_startup_recheck_at", 0.0) or 0.0)
+        raw_recheck_at = getattr(self, "_auto_battery_capacity_startup_recheck_at", None)
+        recheck_at = 0.0 if raw_recheck_at is None else float(raw_recheck_at)
         return bool(source.capacity_startup_recheck_seconds > 0.0 and recheck_at > 0.0 and now >= recheck_at)
 
     def _dbus_capacity_startup_recheck_seen(self: Any, source: EnergySourceDefinition, service_name: str) -> bool:
-        rechecked = getattr(self, "_auto_battery_capacity_startup_rechecked", {})
+        rechecked = getattr(self, "_auto_battery_capacity_startup_rechecked", None)
         key = self._dbus_capacity_cache_key(source, service_name)
         return bool(isinstance(rechecked, dict) and rechecked.get(key))
 

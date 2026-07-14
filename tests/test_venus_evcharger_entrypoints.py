@@ -53,34 +53,17 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
         ):
             setattr(common_module, name, lambda *args, **kwargs: args[0] if args else None)
 
-        bindings_module = ModuleType("venus_evcharger.service.bindings")
+        control_module = ModuleType("venus_evcharger.service.control")
 
         class StatePublish:
             @staticmethod
             def _config_path():
                 return "/tmp/config.venus_evcharger.ini"
 
-        class RuntimeHelper:
-            pass
-
-        class DbusAutoLogic:
-            pass
-
-        class UpdateCycle:
-            pass
-
-        class ServiceControllerFactory:
-            pass
-
         class ControlApi(StatePublish):
             pass
 
-        bindings_module.ControlApi = ControlApi
-        bindings_module.StatePublish = StatePublish
-        bindings_module.RuntimeHelper = RuntimeHelper
-        bindings_module.DbusAutoLogic = DbusAutoLogic
-        bindings_module.UpdateCycle = UpdateCycle
-        bindings_module.ServiceControllerFactory = ServiceControllerFactory
+        control_module.ControlApi = ControlApi
 
         state_module = ModuleType("venus_evcharger.controllers.state")
         state_module.ServiceStateController = type(
@@ -98,7 +81,7 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
         return {
             "venus_evcharger.bootstrap.controller": bootstrap_module,
             "venus_evcharger.core.common": common_module,
-            "venus_evcharger.service.bindings": bindings_module,
+            "venus_evcharger.service.control": control_module,
             "venus_evcharger.controllers.state": state_module,
             "dbus": MagicMock(),
             "vedbus": MagicMock(),

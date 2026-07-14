@@ -110,7 +110,12 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.assertEqual(self.harness._ewma_learned_value(4.0, 8.0, 2), 5.0)
 
     def test_update_response_delay_gain_and_markers(self) -> None:
-        svc = SimpleNamespace(_victron_ess_balance_telemetry_delay_samples=0, _victron_ess_balance_telemetry_gain_samples=0)
+        svc = SimpleNamespace(
+            _victron_ess_balance_telemetry_delay_samples=0,
+            _victron_ess_balance_telemetry_gain_samples=0,
+            _victron_ess_balance_telemetry_overshoot_count=0,
+            _victron_ess_balance_telemetry_settled_count=0,
+        )
         self.harness._victron_ess_balance_update_response_delay(svc, "p", 3.0)
         self.harness._victron_ess_balance_update_gain(svc, "p", 0.5)
         self.assertEqual(self.harness.delay_updates, [("p", 3.0)])
@@ -122,7 +127,10 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.assertEqual(self.harness.cooldowns, [(10.0, "overshoot_detected")])
 
     def test_maybe_record_helpers_cover_skip_and_record_paths(self) -> None:
-        svc = SimpleNamespace()
+        svc = SimpleNamespace(
+            _victron_ess_balance_telemetry_overshoot_count=0,
+            _victron_ess_balance_telemetry_settled_count=0,
+        )
         state = {"command_response_recorded": True, "command_overshoot_recorded": True, "command_settled_recorded": True}
         self.harness._victron_ess_balance_maybe_record_response_delay(svc, 20.0, state, "p", 1.0, 10.0, 5.0)
         self.harness._victron_ess_balance_maybe_record_gain(svc, "p", 0.0, 2.0)
@@ -151,6 +159,10 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
             _victron_ess_balance_telemetry_command_response_recorded=False,
             _victron_ess_balance_telemetry_command_overshoot_recorded=False,
             _victron_ess_balance_telemetry_command_settled_recorded=False,
+            _victron_ess_balance_telemetry_overshoot_count=0,
+            _victron_ess_balance_telemetry_settled_count=0,
+            _victron_ess_balance_telemetry_estimated_gain=None,
+            _victron_ess_balance_telemetry_response_delay_seconds=None,
         )
         metrics: dict[str, Any] = {}
         cluster = {"battery_combined_grid_interaction_w": -12.0, "battery_combined_ac_power_w": 120.0}
@@ -190,7 +202,12 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.assertTrue(settling)
         profile = {"sample_count": 4, "stability_score": 0.8, "response_variance_score": 0.6}
         self.assertGreater(self.harness._victron_ess_balance_regime_consistency_score(profile), 0.0)
-        self.assertEqual(self.harness._victron_ess_balance_reproducibility_score({"response_variance_score": 0.5}), 0.8)
+        self.assertEqual(
+            self.harness._victron_ess_balance_reproducibility_score(
+                {"settled_count": 0, "overshoot_count": 0, "response_variance_score": 0.5}
+            ),
+            0.8,
+        )
         self.assertGreater(
             self.harness._victron_ess_balance_reproducibility_score(
                 {"settled_count": 3, "overshoot_count": 1, "response_variance_score": 0.5}

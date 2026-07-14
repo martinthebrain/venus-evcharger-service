@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import json
+import hashlib
 import unittest
 
 from venus_evcharger.control import build_control_api_openapi_spec
@@ -8,6 +9,19 @@ from venus_evcharger.control import openapi_helpers
 
 
 class TestVenusEvchargerControlOpenApi(unittest.TestCase):
+    def test_complete_openapi_contract_has_stable_canonical_fingerprint(self) -> None:
+        canonical = json.dumps(
+            build_control_api_openapi_spec(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+        self.assertEqual(len(canonical), 47948)
+        self.assertEqual(
+            hashlib.sha256(canonical).hexdigest(),
+            "f55eb9a400a2809d81999d5591b9d0dff7242f637430dcb9709f95dc4536ddb0",
+        )
+
     def test_string_schema_supports_optional_enum_and_default(self) -> None:
         self.assertEqual(openapi._string_schema(), {"type": "string"})
         self.assertEqual(

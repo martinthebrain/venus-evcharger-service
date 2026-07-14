@@ -33,12 +33,12 @@ class _RuntimeHealth(_RuntimeAudit):
         svc = self.service
         svc._ensure_observability_state()
         current = time.time() if now is None else float(now)
-        stale_seconds = self._float_attr(getattr(svc, "auto_watchdog_stale_seconds", 0.0))
+        stale_seconds = self._float_attr(getattr(svc, "auto_watchdog_stale_seconds", None))
         if stale_seconds <= 0:
             return False
         last_successful_update_at = getattr(svc, "_last_successful_update_at", None)
         if not isinstance(last_successful_update_at, (int, float)):
-            return (current - self._float_attr(getattr(svc, "started_at", 0.0))) > stale_seconds
+            return (current - self._float_attr(getattr(svc, "started_at", None))) > stale_seconds
         return (current - float(last_successful_update_at)) > stale_seconds
 
     @staticmethod
@@ -47,13 +47,13 @@ class _RuntimeHealth(_RuntimeAudit):
         last_successful_update_at = getattr(svc, "_last_successful_update_at", None)
         if isinstance(last_successful_update_at, (int, float)):
             return float(last_successful_update_at)
-        return _RuntimeHealth._float_attr(getattr(svc, "started_at", 0.0))
+        return _RuntimeHealth._float_attr(getattr(svc, "started_at", None))
 
     @staticmethod
     def _watchdog_recovery_suppressed(svc: Any, now: float) -> bool:
         """Return whether watchdog recovery is currently rate-limited."""
         recovery_seconds = _RuntimeHealth._float_attr(
-            getattr(svc, "auto_watchdog_recovery_seconds", 0.0)
+            getattr(svc, "auto_watchdog_recovery_seconds", None)
         )
         last_recovery_attempt_at = getattr(svc, "_last_recovery_attempt_at", None)
         if recovery_seconds <= 0 and isinstance(last_recovery_attempt_at, (int, float)):
@@ -73,7 +73,7 @@ class _RuntimeHealth(_RuntimeAudit):
     @staticmethod
     def _watchdog_restart_attempts(svc: Any) -> int:
         """Return how many recovery attempts are allowed before process restart."""
-        value = getattr(svc, "auto_watchdog_restart_attempts", 0)
+        value = getattr(svc, "auto_watchdog_restart_attempts", None)
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             return 0
         return max(0, int(value))
@@ -81,7 +81,7 @@ class _RuntimeHealth(_RuntimeAudit):
     @staticmethod
     def _watchdog_restart_enabled_for_topology(svc: Any) -> bool:
         """Return whether a configured load topology may use runit restart escalation."""
-        return bool(getattr(svc, "topology_configured", getattr(svc, "host_configured", False)))
+        return bool(getattr(svc, "topology_configured", getattr(svc, "host_configured", None)))
 
     @classmethod
     def _watchdog_restart_due(cls, svc: Any) -> bool:
@@ -179,8 +179,10 @@ class _RuntimeHealth(_RuntimeAudit):
         svc = self.service
         svc._ensure_observability_state()
         current = time.time() if now is None else float(now)
-        retry_after = float(svc._source_retry_after.get(key, 0.0))
-        return max(0, int(retry_after - current)) if retry_after > current else 0
+        retry_after = svc._source_retry_after.get(key)
+        if not isinstance(retry_after, (int, float)):
+            return 0
+        return max(0, int(float(retry_after) - current))
 
     def delay_source_retry(self, key: str, now: float | None = None, delay_seconds: float | None = None) -> None:
         """Delay repeated retries for a failing data source to keep the main loop responsive."""

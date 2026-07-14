@@ -91,7 +91,7 @@ evse_fault_reason = _evse_fault_reason
 fresh_confirmed_relay_output = _fresh_confirmed_relay_output
 
 
-def local_datetime_from_timestamp(timestamp: float, timezone_name: str = "UTC") -> datetime:
+def local_datetime_from_timestamp(timestamp: float, timezone_name: object = "UTC") -> datetime:
     """Return the configured local wall-clock time for schedule decisions."""
     zone_name = str(timezone_name or "UTC").strip() or "UTC"
     try:

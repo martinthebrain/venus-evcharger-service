@@ -73,17 +73,17 @@ class _RuntimeAudit(_RuntimeAuditFields):
         """Return a de-duplication key for audit entries."""
         metrics = cls._normalized_auto_audit_metrics(svc)
         state, _state_code = normalized_auto_state_pair(
-            getattr(svc, "_last_auto_state", None),
-            getattr(svc, "_last_auto_state_code", None),
+            svc._last_auto_state,
+            svc._last_auto_state_code,
         )
         return (
             str(reason),
             cls._auto_audit_reason_detail(svc, reason),
             int(bool(cached)),
             cls._relay_state_for_audit(svc),
-            int(getattr(svc, "virtual_mode", 0)),
-            int(bool(getattr(svc, "virtual_enable", 0))),
-            int(bool(getattr(svc, "virtual_autostart", 0))),
+            int(svc.virtual_mode),
+            int(bool(svc.virtual_enable)),
+            int(bool(svc.virtual_autostart)),
             cls._string_metric(state),
             cls._string_metric(metrics.get("profile")),
             cls._string_metric(metrics.get("stop_alpha_stage")),
@@ -131,8 +131,8 @@ class _RuntimeAudit(_RuntimeAuditFields):
         """Return one human-readable audit line describing the current Auto state."""
         fields = cls._auto_audit_display_fields(svc)
         state, _state_code = normalized_auto_state_pair(
-            getattr(svc, "_last_auto_state", None),
-            getattr(svc, "_last_auto_state_code", None),
+            svc._last_auto_state,
+            svc._last_auto_state_code,
         )
         local_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))
         return (
@@ -142,9 +142,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
             f"cached={int(bool(cached))}\t"
             f"state={state}\t"
             f"relay={cls._relay_state_for_audit(svc)}\t"
-            f"mode={getattr(svc, 'virtual_mode', 'na')}\t"
-            f"enable={int(bool(getattr(svc, 'virtual_enable', 0)))}\t"
-            f"autostart={int(bool(getattr(svc, 'virtual_autostart', 0)))}\t"
+            f"mode={svc.virtual_mode}\t"
+            f"enable={int(bool(svc.virtual_enable))}\t"
+            f"autostart={int(bool(svc.virtual_autostart))}\t"
             f"profile={fields['profile']}\t"
             f"start_threshold={fields['start_threshold']}\t"
             f"stop_threshold={fields['stop_threshold']}\t"
@@ -238,7 +238,7 @@ class _RuntimeAudit(_RuntimeAuditFields):
     @staticmethod
     def _normalized_auto_audit_metrics(svc: Any) -> dict[str, Any]:
         """Return one sanitized metric payload suitable for outward audit formatting."""
-        metrics = sanitized_auto_metrics(getattr(svc, "_last_auto_metrics", {}) or {})
+        metrics = sanitized_auto_metrics(svc._last_auto_metrics or {})
         metrics["backend_mode"] = _RuntimeAudit._backend_value(svc, "backend_mode", "combined")
         metrics["meter_backend"] = _RuntimeAudit._backend_value(
             svc,
@@ -299,7 +299,7 @@ class _RuntimeAudit(_RuntimeAuditFields):
             if not line.strip():
                 continue
             try:
-                epoch_text = line.split("\t", 1)[0]
+                epoch_text = line.partition("\t")[0]
                 if float(epoch_text) >= cutoff_epoch:
                     kept_lines.append(line)
             except (TypeError, ValueError):
@@ -309,7 +309,7 @@ class _RuntimeAudit(_RuntimeAuditFields):
     def _cleanup_auto_audit_log(self, now: float) -> None:
         """Prune old audit entries on a throttled cadence."""
         svc = self.service
-        path = getattr(svc, "auto_audit_log_path", "").strip()
+        path = svc.auto_audit_log_path.strip()
         if not self._auto_audit_cleanup_due(path, now):
             return
         svc._last_auto_audit_cleanup_at = now
@@ -330,12 +330,12 @@ class _RuntimeAudit(_RuntimeAuditFields):
         if not path:
             return False
         cleanup_interval = service_dbus_backpressure_policy(svc).audit_cleanup_interval_seconds(300.0)
-        return (now - float(getattr(svc, "_last_auto_audit_cleanup_at", 0.0))) >= cleanup_interval
+        return (now - float(svc._last_auto_audit_cleanup_at)) >= cleanup_interval
 
     @staticmethod
     def _auto_audit_cutoff_epoch(svc: Any, now: float) -> float | None:
         """Return the cutoff epoch for retained audit entries."""
-        max_age_hours = float(getattr(svc, "auto_audit_log_max_age_hours", 168.0))
+        max_age_hours = float(svc.auto_audit_log_max_age_hours)
         if max_age_hours <= 0:
             return None
         return now - (max_age_hours * 3600.0)
@@ -388,15 +388,15 @@ class _RuntimeAudit(_RuntimeAuditFields):
         """Append one audit entry when the Auto reason changes or stays active for long."""
         svc = self.service
         self.ensure_observability_state()
-        if not getattr(svc, "auto_audit_log", False):
+        if not svc.auto_audit_log:
             return
         now = svc._time_now()
         audit_key = self._auto_audit_key(svc, reason, cached)
         repeat_seconds = service_dbus_backpressure_policy(svc).audit_repeat_seconds(
-            float(getattr(svc, "auto_audit_log_repeat_seconds", 30.0))
+            float(svc.auto_audit_log_repeat_seconds)
         )
-        last_audit_key = getattr(svc, "_last_auto_audit_key", None)
-        last_audit_event_at = getattr(svc, "_last_auto_audit_event_at", None)
+        last_audit_key = svc._last_auto_audit_key
+        last_audit_event_at = svc._last_auto_audit_event_at
         if self._auto_audit_repeat_suppressed(
             audit_key,
             last_audit_key,
@@ -407,7 +407,7 @@ class _RuntimeAudit(_RuntimeAuditFields):
             self._cleanup_auto_audit_log(now)
             return
         self._cleanup_auto_audit_log(now)
-        path = getattr(svc, "auto_audit_log_path", "").strip()
+        path = svc.auto_audit_log_path.strip()
         if not path:
             return
         try:

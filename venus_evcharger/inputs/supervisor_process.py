@@ -20,6 +20,16 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
 
         def refresh_snapshot(self, now: float | None = None) -> None: ...
 
+    @staticmethod
+    def _service_text(service: object, name: str) -> str:
+        value = getattr(service, name, None)
+        return "" if value is None else str(value)
+
+    @staticmethod
+    def _process_pid(process: object) -> object:
+        pid = getattr(process, "pid", None)
+        return "na" if pid is None else pid
+
     def stop_helper(self, force: bool = False) -> None:
         svc = self.service
         svc._ensure_worker_state()
@@ -36,14 +46,15 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
             else:
                 process.terminate()
         except (OSError, RuntimeError) as error:
-            logging.debug("Unable to stop auto input helper pid=%s: %s", getattr(process, "pid", "na"), error)
+            logging.debug("Unable to stop auto input helper pid=%s: %s", self._process_pid(process), error)
 
     def spawn_helper(self, now: float | None = None) -> None:
         svc = self.service
         svc._ensure_worker_state()
         current = svc._time_now() if now is None else float(now)
         self._ensure_runtime_instance_id()
-        generation = int(getattr(svc, "_auto_input_helper_generation", 0) or 0) + 1
+        generation_text = self._service_text(svc, "_auto_input_helper_generation")
+        generation = int(generation_text) + 1 if generation_text else 1
         svc._auto_input_helper_generation = generation
         self._reset_snapshot_liveness_for_new_helper()
         self._remove_stale_snapshot_file()
@@ -55,14 +66,14 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
         svc._auto_input_helper_restart_requested_at = None
         logging.info(
             "Started auto input helper pid=%s snapshot=%s instance=%s",
-            getattr(process, "pid", "na"),
+            self._process_pid(process),
             svc.auto_input_snapshot_path,
-            getattr(svc, "_auto_input_runtime_instance_id", ""),
+            self._service_text(svc, "_auto_input_runtime_instance_id"),
         )
 
     def _ensure_runtime_instance_id(self) -> None:
         svc = self.service
-        if not str(getattr(svc, "_auto_input_runtime_instance_id", "") or "").strip():
+        if not self._service_text(svc, "_auto_input_runtime_instance_id").strip():
             svc._auto_input_runtime_instance_id = uuid.uuid4().hex
 
     def _helper_command(self, generation: int) -> list[str]:
@@ -75,7 +86,7 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
             svc.auto_input_snapshot_path,
             str(os.getpid()),
             str(generation),
-            str(getattr(svc, "_auto_input_runtime_instance_id", "") or ""),
+            self._service_text(svc, "_auto_input_runtime_instance_id"),
         ]
 
     def _reset_snapshot_liveness_for_new_helper(self) -> None:
@@ -88,7 +99,7 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
 
     def _remove_stale_snapshot_file(self) -> None:
         svc = self.service
-        path = str(getattr(svc, "auto_input_snapshot_path", "") or "").strip()
+        path = self._service_text(svc, "auto_input_snapshot_path").strip()
         if not self._stale_snapshot_path_removable(path):
             return
         try:
@@ -130,7 +141,7 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
         ]
 
     def _orphan_snapshot_path(self) -> str:
-        return str(getattr(self.service, "auto_input_snapshot_path", "") or "").strip()
+        return self._service_text(self.service, "auto_input_snapshot_path").strip()
 
     def _orphan_candidate_pids(self, current_pid: int) -> list[int]:
         return [
@@ -158,10 +169,14 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
     def _helper_cmdline_matches(pid: int, snapshot_path: str) -> bool:
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as handle:
-                cmdline = handle.read().decode("utf-8", "replace").replace("\x00", " ")
+                cmdline = _AutoInputSupervisorProcess._normalized_helper_cmdline(handle.read())
         except OSError:
             return False
         return "venus_evcharger_auto_input_helper.py" in cmdline and snapshot_path in cmdline
+
+    @staticmethod
+    def _normalized_helper_cmdline(payload: bytes) -> str:
+        return payload.decode(errors="replace").replace("\x00", " ")
 
     def _helper_snapshot_age(self, current: float) -> float | None:
         svc = self.service
@@ -176,7 +191,7 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
 
     def _refresh_snapshot_for_liveness_check(self, current: float) -> None:
         """Read the latest helper heartbeat before deciding whether it is stale."""
-        if not str(getattr(self.service, "auto_input_snapshot_path", "") or "").strip():
+        if not self._service_text(self.service, "auto_input_snapshot_path").strip():
             return
         self.refresh_snapshot(current)
 
@@ -190,7 +205,7 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
             svc._auto_input_helper_restart_requested_at = current
             logging.warning(
                 "Auto input helper pid=%s stale for %.0fs, restarting",
-                getattr(process, "pid", "na"),
+                self._process_pid(process),
                 snapshot_age,
             )
             svc._stop_auto_input_helper(force=False)
@@ -212,7 +227,7 @@ class _AutoInputSupervisorProcess(_AutoInputSupervisorSnapshot):
         logging.warning(
             "Auto input helper exited with rc=%s pid=%s",
             return_code,
-            getattr(process, "pid", "na"),
+            self._process_pid(process),
         )
         svc._auto_input_helper_process = None
         svc._auto_input_helper_restart_requested_at = None

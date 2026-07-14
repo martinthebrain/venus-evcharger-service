@@ -156,7 +156,7 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
             {
                 "seq": after_seq,
                 "api_version": "v1",
-                "kind": "heartbeat",
+                "kind": "HEARTBEAT",
                 "timestamp": time.time(),
                 "resume_token": str(after_seq),
                 "payload": {
@@ -190,25 +190,34 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
 
     @staticmethod
     def _query_int(params: dict[str, list[str]], key: str, default: int) -> int:
+        values = params.get(key)
+        if not values:
+            return default
         try:
-            return max(0, int(params.get(key, [str(default)])[0]))
+            return max(0, int(values[0]))
         except ValueError:
             return default
 
     @staticmethod
     def _query_float(params: dict[str, list[str]], key: str, default: float) -> float:
+        values = params.get(key)
+        if not values:
+            return default
         try:
-            return max(0.0, float(params.get(key, [str(default)])[0]))
+            return max(0.0, float(values[0]))
         except ValueError:
             return default
 
     @staticmethod
     def _query_bool(params: dict[str, list[str]], key: str, default: bool) -> bool:
-        raw = params.get(key, ["1" if default else "0"])[0].strip().lower()
+        values = params.get(key)
+        if not values:
+            return default
+        raw = values[0].strip().lower()
         return raw in {"1", "true", "yes", "on"}
 
     @staticmethod
     def _write_event_line(handler: BaseHTTPRequestHandler, event: Mapping[str, Any]) -> None:
         normalized_event = normalized_control_api_event_fields(event)
-        handler.wfile.write((json.dumps(normalized_event, sort_keys=True) + "\n").encode("utf-8"))
+        handler.wfile.write((json.dumps(normalized_event, sort_keys=True) + "\n").encode())
         handler.wfile.flush()

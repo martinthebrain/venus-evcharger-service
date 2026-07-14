@@ -24,12 +24,14 @@ def _health_code(reason: str) -> int:
 
 
 def _normalize_auto_state(state: Any) -> str:
-    normalized = str(state).strip().lower() if state is not None else "idle"
+    if state is None:
+        return "idle"
+    normalized = str(state).strip().lower()
     return normalized if normalized in AUTO_STATE_CODES else "idle"
 
 
 def _auto_state_code(state: Any) -> int:
-    return AUTO_STATE_CODES.get(_normalize_auto_state(state), 99)
+    return AUTO_STATE_CODES[_normalize_auto_state(state)]
 
 
 def _base_auto_reason(reason: Any) -> str:
@@ -92,7 +94,9 @@ _CHARGER_TRANSPORT_REASONS = frozenset({"busy", "ownership", "timeout", "offline
 
 
 def _normalized_charger_transport_reason(reason: Any) -> str | None:
-    normalized = str(reason).strip().lower() if reason is not None else ""
+    if reason is None:
+        return None
+    normalized = str(reason).strip().lower()
     return normalized if normalized in _CHARGER_TRANSPORT_REASONS else None
 
 
@@ -138,16 +142,10 @@ def _charger_transport_now(svc: Any, now: float | int | None = None) -> float:
 
 
 def _fresh_charger_transport_timestamp(svc: Any, now: float | int | None = None) -> float | None:
-    transport_at = _positive_service_float(svc, "_last_charger_transport_at")
+    transport_at = finite_float_or_none(getattr(svc, "_last_charger_transport_at", None))
     if transport_at is None:
-        raw_value = getattr(svc, "_last_charger_transport_at", None)
-        if raw_value is None:
-            return None
-        try:
-            transport_at = float(raw_value)
-        except (TypeError, ValueError):
-            return None
-    current = _charger_transport_now(svc, now)
+        return None
+    current = float(now) if now is not None else _charger_transport_now(svc)
     if abs(current - transport_at) > _charger_transport_max_age_seconds(svc):
         return None
     return float(transport_at)
@@ -159,18 +157,24 @@ def _fresh_charger_transport_reason(svc: Any, now: float | int | None = None) ->
     return _normalized_charger_transport_reason(getattr(svc, "_last_charger_transport_reason", None))
 
 
+def _normalized_text_attr(svc: Any, attr_name: str) -> str | None:
+    raw_value = getattr(svc, attr_name, None)
+    if raw_value is None:
+        return None
+    normalized = str(raw_value).strip()
+    return normalized or None
+
+
 def _fresh_charger_transport_source(svc: Any, now: float | int | None = None) -> str | None:
     if _fresh_charger_transport_timestamp(svc, now) is None:
         return None
-    source = str(getattr(svc, "_last_charger_transport_source", "") or "").strip()
-    return source or None
+    return _normalized_text_attr(svc, "_last_charger_transport_source")
 
 
 def _fresh_charger_transport_detail(svc: Any, now: float | int | None = None) -> str | None:
     if _fresh_charger_transport_timestamp(svc, now) is None:
         return None
-    detail = str(getattr(svc, "_last_charger_transport_detail", "") or "").strip()
-    return detail or None
+    return _normalized_text_attr(svc, "_last_charger_transport_detail")
 
 
 def _charger_transport_retry_delay_seconds(svc: Any, reason: Any) -> float:
@@ -193,7 +197,7 @@ def _fresh_charger_retry_until(svc: Any, now: float | int | None = None) -> floa
     retry_until = finite_float_or_none(getattr(svc, "_charger_retry_until", None))
     if retry_until is None:
         return None
-    current = _charger_transport_now(svc, now)
+    current = float(now) if now is not None else _charger_transport_now(svc)
     return retry_until if retry_until > current else None
 
 
@@ -206,16 +210,15 @@ def _fresh_charger_retry_reason(svc: Any, now: float | int | None = None) -> str
 def _fresh_charger_retry_source(svc: Any, now: float | int | None = None) -> str | None:
     if _fresh_charger_retry_until(svc, now) is None:
         return None
-    source = str(getattr(svc, "_charger_retry_source", "") or "").strip()
-    return source or None
+    return _normalized_text_attr(svc, "_charger_retry_source")
 
 
 def _charger_retry_remaining_seconds(svc: Any, now: float | int | None = None) -> int:
     retry_until = _fresh_charger_retry_until(svc, now)
     if retry_until is None:
         return -1
-    current = _charger_transport_now(svc, now)
-    return max(0, int(math.ceil(retry_until - current)))
+    current = float(now) if now is not None else _charger_transport_now(svc)
+    return int(math.ceil(retry_until - current))
 
 
 def _age_seconds(timestamp: float | int | None, now: float | int | None = None) -> int:
@@ -239,12 +242,17 @@ def _confirmed_relay_state_max_age_seconds(svc: Any) -> float:
 def _confirmed_relay_sample(svc: Any) -> tuple[dict[str, Any] | None, Any]:
     pm_status = getattr(svc, "_last_confirmed_pm_status", None)
     captured_at = getattr(svc, "_last_confirmed_pm_status_at", None)
-    if pm_status is None and bool(getattr(svc, "_last_pm_status_confirmed", False)):
-        pm_status = getattr(svc, "_last_pm_status", None)
-        captured_at = getattr(svc, "_last_pm_status_at", None)
+    if pm_status is None:
+        pm_status, captured_at = _legacy_confirmed_relay_sample(svc)
     if not isinstance(pm_status, dict):
         return None, None
     return {str(key): value for key, value in pm_status.items()}, captured_at
+
+
+def _legacy_confirmed_relay_sample(svc: Any) -> tuple[Any, Any]:
+    if not bool(getattr(svc, "_last_pm_status_confirmed", False)):
+        return None, None
+    return getattr(svc, "_last_pm_status", None), getattr(svc, "_last_pm_status_at", None)
 
 
 def _confirmed_relay_sample_valid(pm_status: dict[str, Any] | None, captured_at: Any) -> bool:

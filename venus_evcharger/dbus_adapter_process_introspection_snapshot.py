@@ -81,7 +81,7 @@ class DbusAdapterIntrospectionSnapshot(DbusAdapterHealth):
 
     @staticmethod
     def introspection_finding(entry: CommandMapping, now: float) -> CommandPayload:
-        status = str(entry.get("status", "") or "")
+        status = str(entry.get("status") or "")
         if status == "fresh":
             return _fresh_introspection_finding(entry, now)
         return _backoff_introspection_finding(entry, status, now)
@@ -105,7 +105,7 @@ def _paths_payload(service_payload: CommandPayload) -> dict[str, object]:
 
 
 def _fresh_introspection_finding(entry: CommandMapping, now: float) -> CommandPayload:
-    interfaces, children = DbusAdapterIntrospectionSnapshot.parse_introspection_xml(entry.get("value", ""))
+    interfaces, children = DbusAdapterIntrospectionSnapshot.parse_introspection_xml(entry.get("value"))
     return {
         "status": "fresh",
         "confidence": entry.get("confidence", 0.8),
@@ -128,10 +128,10 @@ def _backoff_introspection_finding(entry: CommandMapping, status: str, now: floa
         "source": entry.get("source", "gateway"),
         "reason": "gateway-introspection",
         "last_success_at": None,
-        "last_error": str(entry.get("last_error", "") or ""),
+        "last_error": str(entry.get("last_error") or ""),
         "retry_after": now + 900.0,
     }
 
 
 def _xml_names(root: xml_et.Element, tag: str) -> list[str]:
-    return [str(node.attrib.get("name", "")) for node in root.findall(tag) if node.attrib.get("name")]
+    return [str(node.attrib["name"]) for node in root.findall(tag) if node.attrib.get("name")]

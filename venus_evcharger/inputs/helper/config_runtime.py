@@ -9,6 +9,8 @@ from collections.abc import Callable
 
 from venus_evcharger.core.shared import config_get_float, parse_config_bool as _as_bool
 from venus_evcharger.energy import DEFAULT_BATTERY_CHEMISTRY, load_energy_source_settings
+from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
+from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig
 from venus_evcharger.inputs.helper.snapshot import _AutoInputHelperSnapshot
 
 
@@ -166,6 +168,40 @@ class _AutoInputHelperConfig(_AutoInputHelperSnapshot):
         self.auto_grid_l3_path = self.config.get("AutoGridL3Path", "/Ac/Grid/L3/Power").strip()
         self.auto_grid_require_all_phases = _as_bool(
             self.config.get("AutoGridRequireAllPhases", "1"),
+        )
+        fusion_config = self._grid_fusion_config()
+        if fusion_config.enabled and fusion_config.primary_max_age_seconds < self.auto_battery_poll_interval_seconds:
+            raise ValueError("AutoGridFusionPrimaryMaxAgeSeconds must cover AutoBatteryPollIntervalMs")
+        self._grid_measurement_fusion = GridMeasurementFusion(fusion_config)
+
+    def _grid_fusion_config(self) -> GridFusionConfig:
+        enabled = (
+            _as_bool(self.config["AutoGridFusionEnabled"])
+            if "AutoGridFusionEnabled" in self.config
+            else False
+        )
+        return GridFusionConfig(
+            enabled=enabled,
+            primary_source_id=self.config.get("AutoGridFusionPrimarySource", "").strip(),
+            backup_source_id=self.config.get("AutoGridFusionBackupSource", "victron").strip(),
+            primary_max_age_seconds=config_get_float(self.config, "AutoGridFusionPrimaryMaxAgeSeconds", 15.0),
+            backup_max_age_seconds=config_get_float(self.config, "AutoGridFusionBackupMaxAgeSeconds", 6.0),
+            minimum_confidence=config_get_float(self.config, "AutoGridFusionMinimumConfidence", 0.5),
+            failover_samples=int(config_get_float(self.config, "AutoGridFusionFailoverSamples", 3.0)),
+            recovery_samples=int(config_get_float(self.config, "AutoGridFusionRecoverySamples", 15.0)),
+            failover_hold_seconds=config_get_float(self.config, "AutoGridFusionFailoverHoldSeconds", 6.0),
+            mismatch_absolute_watts=config_get_float(
+                self.config,
+                "AutoGridFusionMismatchAbsoluteWatts",
+                300.0,
+            ),
+            mismatch_relative=config_get_float(self.config, "AutoGridFusionMismatchRelative", 0.15),
+            mismatch_samples=int(config_get_float(self.config, "AutoGridFusionMismatchSamples", 3.0)),
+            future_tolerance_seconds=config_get_float(
+                self.config,
+                "AutoGridFusionFutureToleranceSeconds",
+                1.0,
+            ),
         )
 
     def _init_helper_runtime_config(self) -> None:

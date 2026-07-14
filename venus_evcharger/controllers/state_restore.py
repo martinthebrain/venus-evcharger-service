@@ -24,19 +24,6 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
 
         def state_summary(self) -> str: ...
 
-    @staticmethod
-    def _victron_ess_balance_activation_mode(payload: dict[str, object], svc: Any) -> str | None:
-        activation_mode = str(
-            payload.get(
-                "activation_mode",
-                getattr(svc, "auto_battery_discharge_balance_victron_bias_activation_mode", "always"),
-            )
-            or "always"
-        ).strip().lower()
-        if activation_mode in {"always", "export_only", "above_reserve_band", "export_and_above_reserve_band"}:
-            return activation_mode
-        return None
-
     def _restore_basic_runtime_state(self, svc: Any, state: dict[str, object]) -> None:
         svc.virtual_mode = self._normalize_mode(state.get("mode", svc.virtual_mode))
         svc.virtual_autostart = self.coerce_runtime_int(state.get("autostart"), svc.virtual_autostart)
@@ -57,15 +44,14 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
             current_time,
         )
         svc.learned_charge_power_state = self._normalize_learned_charge_power_state(
-            state.get("learned_charge_power_state", getattr(svc, "learned_charge_power_state", "unknown"))
+            state.get("learned_charge_power_state", getattr(svc, "learned_charge_power_state", None))
         )
         svc.learned_charge_power_learning_since = self._coerce_optional_runtime_past_time(
             state.get("learned_charge_power_learning_since", getattr(svc, "learned_charge_power_learning_since", None)),
             current_time,
         )
         svc.learned_charge_power_sample_count = non_negative_int(
-            state.get("learned_charge_power_sample_count", getattr(svc, "learned_charge_power_sample_count", 0)),
-            0,
+            state.get("learned_charge_power_sample_count", getattr(svc, "learned_charge_power_sample_count", None))
         )
         svc.learned_charge_power_phase = self._normalize_learned_charge_power_phase(
             state.get("learned_charge_power_phase", getattr(svc, "learned_charge_power_phase", None))
@@ -76,9 +62,8 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
         svc.learned_charge_power_signature_mismatch_sessions = non_negative_int(
             state.get(
                 "learned_charge_power_signature_mismatch_sessions",
-                getattr(svc, "learned_charge_power_signature_mismatch_sessions", 0),
-            ),
-            0,
+                getattr(svc, "learned_charge_power_signature_mismatch_sessions", None),
+            )
         )
         svc.learned_charge_power_signature_checked_session_started_at = self._coerce_optional_runtime_past_time(
             state.get(
@@ -90,16 +75,16 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
 
     def _restore_phase_switch_runtime_state(self, svc: Any, state: dict[str, object], current_time: float) -> None:
         supported_phase_selections = self._normalize_runtime_supported_phase_selections(
-            state.get("supported_phase_selections", getattr(svc, "supported_phase_selections", ("P1",)))
+            state.get("supported_phase_selections", getattr(svc, "supported_phase_selections", None))
         )
         svc.supported_phase_selections = supported_phase_selections
         default_phase_selection = supported_phase_selections[0]
         svc.requested_phase_selection = self._normalize_runtime_phase_selection(
-            state.get("requested_phase_selection", getattr(svc, "requested_phase_selection", default_phase_selection)),
+            state.get("requested_phase_selection", getattr(svc, "requested_phase_selection", None)),
             default_phase_selection,
         )
         svc.active_phase_selection = self._normalize_runtime_phase_selection(
-            state.get("active_phase_selection", getattr(svc, "active_phase_selection", svc.requested_phase_selection)),
+            state.get("active_phase_selection", getattr(svc, "active_phase_selection", None)),
             svc.requested_phase_selection,
         )
         svc._phase_switch_pending_selection = self._normalized_optional_runtime_phase_selection(
@@ -116,14 +101,13 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
         svc._phase_switch_stable_until = self._coerce_optional_runtime_float(
             state.get("phase_switch_stable_until", getattr(svc, "_phase_switch_stable_until", None))
         )
+        previous_resume_relay = bool(getattr(svc, "_phase_switch_resume_relay", None))
+        raw_resume_relay = state.get("phase_switch_resume_relay")
         svc._phase_switch_resume_relay = bool(
-            self.coerce_runtime_int(
-                state.get("phase_switch_resume_relay", getattr(svc, "_phase_switch_resume_relay", False)),
-                1 if bool(getattr(svc, "_phase_switch_resume_relay", False)) else 0,
-            )
+            self.coerce_runtime_int(raw_resume_relay, int(previous_resume_relay))
         )
         svc._phase_switch_mismatch_counts = self._normalized_phase_switch_mismatch_counts(
-            state.get("phase_switch_mismatch_counts", getattr(svc, "_phase_switch_mismatch_counts", {})),
+            state.get("phase_switch_mismatch_counts", getattr(svc, "_phase_switch_mismatch_counts", None)),
             svc.requested_phase_selection,
         )
         svc._phase_switch_last_mismatch_selection = self._normalized_optional_runtime_phase_selection(
@@ -139,7 +123,7 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
             svc.requested_phase_selection,
         )
         svc._phase_switch_lockout_reason = str(
-            state.get("phase_switch_lockout_reason", getattr(svc, "_phase_switch_lockout_reason", "")) or ""
+            state.get("phase_switch_lockout_reason", getattr(svc, "_phase_switch_lockout_reason", None)) or ""
         )
         svc._phase_switch_lockout_at = self._coerce_optional_runtime_past_time(
             state.get("phase_switch_lockout_at", getattr(svc, "_phase_switch_lockout_at", None)),
@@ -165,7 +149,7 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
             return normalized_counts
         for raw_selection, raw_count in raw_counts.items():
             normalized_selection = self._normalize_runtime_phase_selection(raw_selection, default_selection)
-            normalized_counts[normalized_selection] = non_negative_int(raw_count, 0)
+            normalized_counts[normalized_selection] = non_negative_int(raw_count)
         return normalized_counts
 
     def _restore_relay_runtime_state(self, svc: Any, state: dict[str, object], current_time: float) -> None:
@@ -180,10 +164,10 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
 
     def _restore_contactor_runtime_state(self, svc: Any, state: dict[str, object], current_time: float) -> None:
         svc._contactor_fault_counts = self._normalized_contactor_fault_counts(
-            state.get("contactor_fault_counts", getattr(svc, "_contactor_fault_counts", {}))
+            state.get("contactor_fault_counts", getattr(svc, "_contactor_fault_counts", None))
         )
         svc._contactor_fault_active_reason = self._normalized_contactor_fault_reason(
-            state.get("contactor_fault_active_reason", getattr(svc, "_contactor_fault_active_reason", ""))
+            state.get("contactor_fault_active_reason", getattr(svc, "_contactor_fault_active_reason", None))
         )
         svc._contactor_fault_active_since = self._coerce_optional_runtime_past_time(
             state.get("contactor_fault_active_since", getattr(svc, "_contactor_fault_active_since", None)),
@@ -191,12 +175,12 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
         )
         svc._contactor_lockout_reason = (
             self._normalized_contactor_fault_reason(
-                state.get("contactor_lockout_reason", getattr(svc, "_contactor_lockout_reason", ""))
+                state.get("contactor_lockout_reason", getattr(svc, "_contactor_lockout_reason", None))
             )
             or ""
         )
         svc._contactor_lockout_source = str(
-            state.get("contactor_lockout_source", getattr(svc, "_contactor_lockout_source", "")) or ""
+            state.get("contactor_lockout_source", getattr(svc, "_contactor_lockout_source", None)) or ""
         )
         svc._contactor_lockout_at = self._coerce_optional_runtime_past_time(
             state.get("contactor_lockout_at", getattr(svc, "_contactor_lockout_at", None)),
@@ -212,12 +196,14 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
         for raw_reason, raw_count in raw_counts.items():
             reason = str(raw_reason).strip()
             if reason in allowed_reasons:
-                normalized_counts[reason] = non_negative_int(raw_count, 0)
+                normalized_counts[reason] = non_negative_int(raw_count)
         return normalized_counts
 
     @staticmethod
     def _normalized_contactor_fault_reason(value: object) -> str | None:
-        reason = str(value or "").strip()
+        if not isinstance(value, str):
+            return None
+        reason = value.strip()
         if reason not in {"contactor-suspected-open", "contactor-suspected-welded"}:
             return None
         return reason

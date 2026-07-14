@@ -19,6 +19,27 @@ from pathlib import Path
 from typing import Any
 
 from venus_evcharger.dbus_gateway import DbusCacheStore, dbus_path_key, gateway_paths
+from venus_evcharger.ops.forensic_observer_schema import (
+    AUTO_INPUT_SNAPSHOT_PATH_KEY,
+    DEFAULT_DEVICE_INSTANCE,
+    DEFAULT_FORENSIC_SUBDIR,
+    DEFAULT_GATEWAY_RUN_DIR,
+    DEFAULT_MOUNTS_PATH,
+    DEFAULT_SERVICE_NAME,
+    DEVICE_INSTANCE_KEY,
+    GATEWAY_CACHE_PATH_KEY,
+    GATEWAY_RUN_DIR_KEY,
+    HOST_KEY,
+    INCIDENT_TIME_FORMAT,
+    INTROSPECTION_SNAPSHOT_PATH_KEY,
+    REDACTED_CONFIG_FILENAME,
+    RUNTIME_LOG_DIR,
+    SERVICE_NAME_KEY,
+    SLUG_TRIM_CHARS,
+    SNAPSHOT_FILENAME,
+    UTF8,
+    WRITE_PROBE_FILENAME,
+)
 
 
 EVCHARGER_PATHS = (
@@ -55,35 +76,35 @@ def load_defaults(config_path: str) -> configparser.SectionProxy:
 
 def device_instance(defaults: configparser.SectionProxy) -> int:
     try:
-        return int(str(defaults.get("DeviceInstance", "60")).strip() or "60")
+        return int(str(defaults.get(DEVICE_INSTANCE_KEY)).strip())
     except ValueError:
-        return 60
+        return DEFAULT_DEVICE_INSTANCE
 
 
 def evcharger_service_name(defaults: configparser.SectionProxy) -> str:
-    base = str(defaults.get("ServiceName", "com.victronenergy.evcharger")).strip()
-    return f"{base or 'com.victronenergy.evcharger'}.http_{device_instance(defaults)}"
+    base = str(defaults.get(SERVICE_NAME_KEY, DEFAULT_SERVICE_NAME)).strip()
+    return f"{base or DEFAULT_SERVICE_NAME}.http_{device_instance(defaults)}"
 
 
 def auto_input_snapshot_path(defaults: configparser.SectionProxy) -> str:
-    configured = str(defaults.get("AutoInputSnapshotPath", "")).strip()
+    configured = str(defaults.get(AUTO_INPUT_SNAPSHOT_PATH_KEY, "")).strip()
     if configured:
         return configured
     return f"/run/dbus-venus-evcharger-auto-{device_instance(defaults)}.json"
 
 
 def dbus_introspection_snapshot_path(defaults: configparser.SectionProxy) -> str:
-    configured = str(defaults.get("DbusIntrospectionSnapshotPath", "")).strip()
+    configured = str(defaults.get(INTROSPECTION_SNAPSHOT_PATH_KEY, "")).strip()
     if configured:
         return configured
     return f"/run/dbus-venus-evcharger-dbus-map-{device_instance(defaults)}.json"
 
 
 def dbus_gateway_cache_path(defaults: configparser.SectionProxy) -> str:
-    configured = str(defaults.get("DbusGatewayCachePath", "")).strip()
+    configured = str(defaults.get(GATEWAY_CACHE_PATH_KEY, "")).strip()
     if configured:
         return configured
-    run_dir = str(defaults.get("DbusGatewayRunDir", "/run/venus-evcharger")).strip()
+    run_dir = str(defaults.get(GATEWAY_RUN_DIR_KEY, DEFAULT_GATEWAY_RUN_DIR)).strip()
     return gateway_paths(run_dir or None).cache_path
 
 
@@ -92,7 +113,7 @@ def runtime_state_path(defaults: configparser.SectionProxy) -> str:
 
 
 def configured_host(defaults: configparser.SectionProxy) -> str:
-    backend_host = str(defaults.get("Host", "")).strip()
+    backend_host = str(defaults.get(HOST_KEY, "")).strip()
     return backend_host
 
 
@@ -126,19 +147,19 @@ def mounted_storage_candidates(mounts_text: str) -> list[str]:
 
 def read_mounts(path: str = "/proc/mounts") -> str:
     try:
-        return Path(path).read_text(encoding="utf-8")
+        return Path(path).read_text(encoding=UTF8)
     except OSError:
         return ""
 
 
-def first_writable_log_dir(candidates: Iterable[str], subdir: str = "venus-evcharger-forensics") -> str:
+def first_writable_log_dir(candidates: Iterable[str], subdir: str = DEFAULT_FORENSIC_SUBDIR) -> str:
     for candidate in candidates:
         log_dir = Path(candidate) / subdir
         try:
             log_dir.mkdir(parents=True, exist_ok=True)
-            probe_path = log_dir / ".write-test"
-            probe_path.write_text("ok\n", encoding="utf-8")
-            probe_path.unlink(missing_ok=True)
+            probe_path = log_dir / WRITE_PROBE_FILENAME
+            probe_path.touch()
+            probe_path.unlink()
             return str(log_dir)
         except OSError:
             continue
@@ -203,7 +224,7 @@ def fetch_shelly_status(host: str, timeout: float = 2.0) -> dict[str, Any]:
     url = f"http://{host}/rpc/Shelly.GetStatus"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
-            payload = response.read(65536).decode("utf-8", errors="replace")
+            payload = response.read(65536).decode(errors="replace")
         return {"ok": True, "url": url, "payload": payload}
     except FORENSIC_HTTP_ERRORS as error:
         return {"ok": False, "url": url, "error": str(error)}
@@ -214,8 +235,8 @@ def tail_file(path: str, max_bytes: int = 20000) -> str:
         with open(path, "rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
-            handle.seek(max(0, size - max_bytes), os.SEEK_SET)
-            return handle.read(max_bytes).decode("utf-8", errors="replace")
+            handle.seek(max(0, size - max_bytes))
+            return handle.read().decode(errors="replace")
     except OSError as error:
         return f"<unavailable: {error}>"
 
@@ -234,14 +255,14 @@ def trace_markers_in_text(text: str) -> list[str]:
 
 def read_text_safe(path: str) -> str:
     try:
-        return Path(path).read_text(encoding="utf-8")
+        return Path(path).read_text(encoding=UTF8)
     except OSError as error:
         return f"<unavailable: {error}>\n"
 
 
 def read_json_file(path: str) -> dict[str, Any]:
     try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        payload = json.loads(Path(path).read_text(encoding=UTF8))
     except FORENSIC_JSON_READ_ERRORS as error:
         return {"ok": False, "path": path, "error": str(error)}
     if not isinstance(payload, dict):
@@ -256,10 +277,10 @@ def matching_processes(ps_text: str, marker: str) -> list[dict[str, Any]]:
     for line in ps_text.splitlines():
         if marker not in line:
             continue
-        fields = line.split(None, 4)
+        fields = line.split()
         processes.append(
             {
-                "pid": fields[0] if fields else "",
+                "pid": fields[0],
                 "line": line,
             }
         )
@@ -273,11 +294,13 @@ def helper_processes(ps_text: str) -> list[dict[str, Any]]:
 def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None = None) -> dict[str, Any]:
     defaults = load_defaults(config_path)
     service_name = evcharger_service_name(defaults)
-    log_dir = "/var/volatile/log/dbus-venus-evcharger"
+    log_dir = RUNTIME_LOG_DIR
     runtime_log_tail = tail_log_dir(log_dir)
-    runtime_log_text = "\n".join(runtime_log_tail.values())
+    runtime_markers = sorted(
+        {marker for text in runtime_log_tail.values() for marker in trace_markers_in_text(text)}
+    )
     ps_snapshot = command_output(["ps", "w"])
-    ps_text = str(ps_snapshot.get("stdout", "")) if isinstance(ps_snapshot, dict) else ""
+    ps_text = str(ps_snapshot.get("stdout") or "")
     return {
         "timestamp": time.time(),
         "service_name": service_name,
@@ -292,7 +315,7 @@ def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None 
         "ps": ps_snapshot,
         "uptime": command_output(["uptime"]),
         "runtime_logs": runtime_log_tail,
-        "trace_markers": trace_markers_in_text(runtime_log_text),
+        "trace_markers": runtime_markers,
     }
 
 
@@ -304,8 +327,12 @@ def incident_reasons(snapshot: dict[str, Any]) -> list[str]:
 
 
 def _dbus_incident_reasons(snapshot: dict[str, Any]) -> list[str]:
-    dbus_state = snapshot.get("dbus", {})
-    dbus_errors = dbus_state.get("errors", {}) if isinstance(dbus_state, dict) else {}
+    dbus_state = snapshot.get("dbus")
+    if not isinstance(dbus_state, dict):
+        return []
+    dbus_errors = dbus_state.get("errors")
+    if not isinstance(dbus_errors, dict):
+        return []
     reasons: list[str] = []
     for path in ("/Mode", "/StartStop", "/Ac/Power"):
         if path in dbus_errors:
@@ -314,29 +341,30 @@ def _dbus_incident_reasons(snapshot: dict[str, Any]) -> list[str]:
 
 
 def _runit_incident_reasons(snapshot: dict[str, Any]) -> list[str]:
-    svstat = snapshot.get("svstat", {})
+    svstat = snapshot.get("svstat")
     if not isinstance(svstat, dict):
         return []
-    reasons: list[str] = []
-    if svstat.get("ok") and " up " not in f" {svstat.get('stdout', '')} ":
-        reasons.append("runit-not-up")
     if not svstat.get("ok"):
-        reasons.append("runit-status-failed")
-    return reasons
+        return ["runit-status-failed"]
+    stdout = svstat.get("stdout")
+    runit_is_up = isinstance(stdout, str) and " up " in f" {stdout} "
+    return [] if runit_is_up else ["runit-not-up"]
 
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "event"
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip(SLUG_TRIM_CHARS) or "event"
 
 
 def write_incident(log_dir: str, snapshot: dict[str, Any], config_path: str, reasons: list[str]) -> str:
-    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(float(snapshot.get("timestamp", time.time()))))
+    stamp = time.strftime(INCIDENT_TIME_FORMAT, time.localtime(float(snapshot["timestamp"])))
     incident_dir = Path(log_dir) / f"incident-{stamp}-{_slug('-'.join(reasons))[:80]}"
     incident_dir.mkdir(parents=True, exist_ok=True)
     payload = dict(snapshot)
     payload["reasons"] = list(reasons)
-    (incident_dir / "snapshot.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    (incident_dir / "config.redacted.ini").write_text(redact_config_text(read_text_safe(config_path)), encoding="utf-8")
+    (incident_dir / SNAPSHOT_FILENAME).write_text(json.dumps(payload, indent=2, sort_keys=True), encoding=UTF8)
+    (incident_dir / REDACTED_CONFIG_FILENAME).write_text(
+        redact_config_text(read_text_safe(config_path)), encoding=UTF8
+    )
     return str(incident_dir)
 
 
@@ -367,7 +395,7 @@ def observer_loop(
     start_delay: float = 180.0,
     interval: float = 30.0,
     incident_cooldown: float = 900.0,
-    mounts_path: str = "/proc/mounts",
+    mounts_path: str = DEFAULT_MOUNTS_PATH,
     bus_factory: Callable[[], Any] | None = None,
 ) -> None:
     time.sleep(max(0.0, start_delay))

@@ -29,9 +29,9 @@ class DbusReadScheduler:
         due_keys = [
             key
             for key in self.specs
-            if now >= self.next_read_at.get(key, 0.0)
+            if now >= self.next_read_at[key]
         ]
-        due_keys.sort(key=lambda key: (self.next_read_at.get(key, 0.0), self._order.get(key, 0)))
+        due_keys.sort(key=lambda key: (self.next_read_at[key], self._order[key]))
         for key in due_keys:
             spec = self.specs[key]
             interval = self.effective_interval(spec, circuit_state)
@@ -61,7 +61,7 @@ class DbusReadScheduler:
 
     @staticmethod
     def effective_interval(spec: Mapping[str, object], circuit_state: str) -> float:
-        interval = _interval_seconds(spec.get("interval", 2.0))
+        interval = _interval_seconds(spec.get("interval"))
         if circuit_state == "protective":
             return interval * 5.0
         if circuit_state == "degraded":

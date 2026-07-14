@@ -88,8 +88,13 @@ class TestRuntimeSoftwareUpdateSetup(unittest.TestCase):
         self.assertEqual(service.software_update_install_script, "")
         self.assertEqual(service.software_update_restart_script, "")
         self.assertEqual(service.software_update_no_update_file, "")
+        self.assertEqual(
+            service.software_update_log_path,
+            "/var/volatile/log/dbus-venus-evcharger/software-update.log",
+        )
         self.assertEqual(service.software_update_repo_slug, "martinthebrain/venus-evcharger-service")
         self.assertEqual(service.software_update_channel, "main")
+        self.assertEqual(service.software_update_manifest_source, "")
         self.assertEqual(
             service.software_update_version_source,
             "https://raw.githubusercontent.com/martinthebrain/venus-evcharger-service/main/version.txt",

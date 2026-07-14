@@ -15,6 +15,17 @@ from .connectors_common import _typed_cache_map
 from .models import EnergySourceDefinition, EnergySourceSnapshot
 
 
+_REGISTER_TYPE_OPTION = "RegisterType"
+_ADDRESS_OPTION = "Address"
+_DATA_TYPE_OPTION = "DataType"
+_SCALE_OPTION = "Scale"
+_WORD_ORDER_OPTION = "WordOrder"
+_DEFAULT_REGISTER_TYPE = "holding"
+_DEFAULT_DATA_TYPE = "uint16"
+_DEFAULT_SCALE = "1"
+_DEFAULT_WORD_ORDER = "big"
+
+
 @dataclass(frozen=True)
 class ModbusEnergyFieldSettings:
     """One optional Modbus read mapping used by the energy connector."""
@@ -98,24 +109,31 @@ def _modbus_field_settings(parser: Any, section_name: str) -> ModbusEnergyFieldS
     if not address_text:
         return None
     return ModbusEnergyFieldSettings(
-        register_type=_modbus_field_option(section, "RegisterType", "holding"),
+        register_type=_modbus_field_option(section, _REGISTER_TYPE_OPTION, _DEFAULT_REGISTER_TYPE),
         address=int(address_text),
-        data_type=_modbus_field_option(section, "DataType", "uint16"),
+        data_type=_modbus_field_option(section, _DATA_TYPE_OPTION, _DEFAULT_DATA_TYPE),
         scale=_modbus_field_scale(section),
-        word_order=_modbus_field_option(section, "WordOrder", "big"),
+        word_order=_modbus_field_option(section, _WORD_ORDER_OPTION, _DEFAULT_WORD_ORDER),
     )
 
 
 def _modbus_field_option(section: Any, option_name: str, fallback: str) -> str:
-    return str(section.get(option_name, fallback)).strip().lower() or fallback
+    return _section_text(section, option_name, fallback).lower()
+
+
+def _section_text(section: Any, option_name: str, fallback: str = "") -> str:
+    value = section.get(option_name)
+    if value is None:
+        return fallback
+    return str(value).strip() or fallback
 
 
 def _modbus_field_address_text(section: Any) -> str:
-    return str(section.get("Address", "")).strip()
+    return _section_text(section, _ADDRESS_OPTION)
 
 
 def _modbus_field_scale(section: Any) -> float:
-    return float(str(section.get("Scale", "1")).strip() or "1")
+    return float(_section_text(section, _SCALE_OPTION, _DEFAULT_SCALE))
 
 
 def _modbus_text_map(parser: Any, section_name: str) -> dict[str, str]:

@@ -29,6 +29,28 @@ from .connectors_common import (
 from .models import EnergySourceDefinition, EnergySourceSnapshot
 
 
+_DEFAULT_TIMEOUT_SECONDS = 2.0
+_ADAPTER_SECTION = "Adapter"
+_REQUEST_SECTION = "EnergyRequest"
+_RESPONSE_SECTION = "EnergyResponse"
+_BASE_URL_KEY = "BaseUrl"
+_REQUEST_TIMEOUT_KEY = "RequestTimeoutSeconds"
+_METHOD_KEY = "Method"
+_URL_KEY = "Url"
+_DEFAULT_METHOD = "GET"
+_RESPONSE_PATH_KEYS = (
+    "SocPath",
+    "UsableCapacityWhPath",
+    "BatteryPowerPath",
+    "AcPowerPath",
+    "PvInputPowerPath",
+    "GridInteractionPath",
+    "OperatingModePath",
+    "OnlinePath",
+    "ConfidencePath",
+)
+
+
 @dataclass(frozen=True)
 class TemplateHttpEnergySourceSettings:
     """Normalized config for one HTTP/JSON-backed external energy source."""
@@ -68,8 +90,8 @@ def _template_http_energy_source_snapshot(owner: Any, source: EnergySourceDefini
         pv_input_power_w=_optional_float_path(payload, settings.pv_input_power_path),
         grid_interaction_w=_optional_float_path(payload, settings.grid_interaction_path),
         operating_mode=_optional_text_path(payload, settings.operating_mode_path) or "",
-        online=True if online is None else bool(online),
-        confidence=1.0 if confidence is None else confidence,
+        online=online,
+        confidence=confidence,
         captured_at=now,
     )
 
@@ -121,11 +143,18 @@ def _template_confidence(payload: Any, settings: TemplateHttpEnergySourceSetting
 
 
 def _template_timeout_seconds(runtime: Any, adapter: Any) -> float:
-    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", 2.0) or 2.0)
-    timeout = finite_float_or_none(adapter.get("RequestTimeoutSeconds", str(default_timeout)))
+    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", None) or _DEFAULT_TIMEOUT_SECONDS)
+    timeout = finite_float_or_none(adapter.get(_REQUEST_TIMEOUT_KEY))
     if timeout is None or timeout <= 0.0:
         return default_timeout
     return float(timeout)
+
+
+def _section_text(section: Any, key: str, default: str = "") -> str:
+    value = section.get(key)
+    if value is None:
+        return default
+    return str(value).strip() or default
 
 
 def _template_http_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> TemplateHttpEnergySourceSettings:
@@ -137,25 +166,26 @@ def _template_http_energy_source_settings(runtime: Any, source: EnergySourceDefi
     if not cache_key:
         raise ValueError(f"Energy source '{source.source_id}' requires ConfigPath for template_http connector")
     parser = load_template_config(cache_key)
-    adapter = config_section(parser, "Adapter")
-    request = config_section(parser, "EnergyRequest")
-    response = config_section(parser, "EnergyResponse")
-    base_url = str(adapter.get("BaseUrl", "")).strip()
+    adapter = config_section(parser, _ADAPTER_SECTION)
+    request = config_section(parser, _REQUEST_SECTION)
+    response = config_section(parser, _RESPONSE_SECTION)
+    base_url = _section_text(adapter, _BASE_URL_KEY)
+    response_paths = tuple(_optional_path(response.get(key)) for key in _RESPONSE_PATH_KEYS)
     settings = TemplateHttpEnergySourceSettings(
         base_url=base_url,
         auth_settings=load_template_auth_settings(adapter),
         timeout_seconds=_template_timeout_seconds(runtime, adapter),
-        request_method=normalize_http_method(request.get("Method", "GET"), "GET"),
-        request_url=resolved_url(base_url, request.get("Url", "")),
-        soc_path=_optional_path(response.get("SocPath", "")),
-        usable_capacity_wh_path=_optional_path(response.get("UsableCapacityWhPath", "")),
-        battery_power_path=_optional_path(response.get("BatteryPowerPath", "")),
-        ac_power_path=_optional_path(response.get("AcPowerPath", "")),
-        pv_input_power_path=_optional_path(response.get("PvInputPowerPath", "")),
-        grid_interaction_path=_optional_path(response.get("GridInteractionPath", "")),
-        operating_mode_path=_optional_path(response.get("OperatingModePath", "")),
-        online_path=_optional_path(response.get("OnlinePath", "")),
-        confidence_path=_optional_path(response.get("ConfidencePath", "")),
+        request_method=normalize_http_method(_section_text(request, _METHOD_KEY), _DEFAULT_METHOD),
+        request_url=resolved_url(base_url, _section_text(request, _URL_KEY)),
+        soc_path=response_paths[0],
+        usable_capacity_wh_path=response_paths[1],
+        battery_power_path=response_paths[2],
+        ac_power_path=response_paths[3],
+        pv_input_power_path=response_paths[4],
+        grid_interaction_path=response_paths[5],
+        operating_mode_path=response_paths[6],
+        online_path=response_paths[7],
+        confidence_path=response_paths[8],
     )
     _validate_template_http_energy_source_settings(source, settings)
     cache[cache_key] = settings

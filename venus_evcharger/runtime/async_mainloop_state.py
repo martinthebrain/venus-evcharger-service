@@ -51,7 +51,7 @@ class _RuntimeAsyncMainloopState:
         svc._last_update_cycle_duration_seconds = 0.0
         svc._last_update_cycle_started_at = None
         svc._last_update_cycle_finished_at = None
-        svc._update_worker_budget_seconds = max(5.0, self._float_attr(getattr(svc, "poll_interval_ms", 1000), 1000) / 250.0)
+        svc._update_worker_budget_seconds = max(5.0, self._float_attr(getattr(svc, "poll_interval_ms", None)) / 250.0)
 
         svc._control_command_async_enabled = False
         svc._control_command_event = threading.Event()
@@ -72,7 +72,7 @@ class _RuntimeAsyncMainloopState:
         svc._mainloop_watchdog_interval_seconds = 1.0
         svc._mainloop_watchdog_stale_seconds = max(
             30.0,
-            self._float_attr(getattr(svc, "auto_watchdog_stale_seconds", 180.0), 180.0),
+            self._float_attr(getattr(svc, "auto_watchdog_stale_seconds", None), 180.0),
         )
         svc._mainloop_watchdog_log_path = "/run/dbus-venus-evcharger-mainloop-hang.log"
 
@@ -85,9 +85,13 @@ class _RuntimeAsyncMainloopState:
     def dbus_publish_direct_allowed(self: Any) -> bool:
         """Return whether the caller may touch ``VeDbusService`` directly."""
         svc = self.service
-        if not bool(getattr(svc, "_dbus_async_publish_enabled", False)):
+        if not hasattr(svc, "_dbus_async_publish_enabled"):
             return True
-        mainloop_thread_id = getattr(svc, "_dbus_mainloop_thread_id", None)
+        if svc._dbus_async_publish_enabled is not True:
+            return True
+        if not hasattr(svc, "_dbus_mainloop_thread_id"):
+            return True
+        mainloop_thread_id = svc._dbus_mainloop_thread_id
         return mainloop_thread_id is None or threading.get_ident() == int(mainloop_thread_id)
 
     def assert_dbus_mainloop_thread(self: Any, operation: str = "dbus access") -> None:

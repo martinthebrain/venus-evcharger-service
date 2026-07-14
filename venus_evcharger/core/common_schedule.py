@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import calendar
 from configparser import ConfigParser
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -48,7 +49,7 @@ def _normalized_weekday_candidates(value: Any) -> list[str]:
     raw_text = _weekday_text_or_empty(value)
     if not raw_text:
         return []
-    separator_map = str.maketrans({separator: "," for separator in ";|/\\ "})
+    separator_map = str.maketrans({";": ",", "|": ",", "/": ",", "\\": ",", " ": ","})
     return [token.strip() for token in raw_text.lower().translate(separator_map).split(",") if token.strip()]
 
 
@@ -88,9 +89,9 @@ def _append_unique_weekday(target: list[int], weekday: int) -> None:
 
 
 def _weekday_range_bounds(token: str) -> tuple[int, int] | None:
-    if "-" not in token:
+    if token.count("-") != 1:
         return None
-    start_token, end_token = [part.strip() for part in token.split("-", 1)]
+    start_token, end_token = [part.strip() for part in token.split("-")]
     start_day = WEEKDAY_TOKEN_MAP.get(start_token)
     end_day = WEEKDAY_TOKEN_MAP.get(end_token)
     if start_day is None or end_day is None:
@@ -99,13 +100,8 @@ def _weekday_range_bounds(token: str) -> tuple[int, int] | None:
 
 
 def _weekday_range_values(start_day: int, end_day: int) -> list[int]:
-    current = start_day
-    weekdays: list[int] = []
-    while current != end_day:
-        weekdays.append(current)
-        current = (current + 1) % 7
-    weekdays.append(end_day)
-    return weekdays
+    distance = (end_day - start_day) % 7
+    return [(start_day + offset) % 7 for offset in range(distance + 1)]
 
 
 def _extend_weekday_range(target: list[int], token: str) -> None:
@@ -159,7 +155,10 @@ def scheduled_enabled_days_text(
 
 def parse_hhmm(value: Any, fallback: TimeWindow) -> TimeWindow:
     try:
-        hour_text, minute_text = str(value).strip().split(":", 1)
+        parts = str(value).strip().split(":")
+        if len(parts) != 2:
+            return fallback
+        hour_text, minute_text = parts
         hour = int(hour_text)
         minute = int(minute_text)
         if 0 <= hour <= 23 and 0 <= minute <= 59:
@@ -169,8 +168,8 @@ def parse_hhmm(value: Any, fallback: TimeWindow) -> TimeWindow:
     return fallback
 
 
-def normalize_hhmm_text(value: Any, fallback: str = "06:30") -> str:
-    fallback_window = parse_hhmm(fallback, (6, 30))
+def normalize_hhmm_text(value: Any, fallback: str | None = None) -> str:
+    fallback_window = (6, 30) if fallback is None else parse_hhmm(fallback, (6, 30))
     hour, minute = parse_hhmm(value, fallback_window)
     return f"{hour:02d}:{minute:02d}"
 
@@ -260,8 +259,7 @@ def _scheduled_snapshot(
 def _scheduled_daytime_window_active(when: datetime, context: _ScheduledSnapshotContext) -> bool:
     current_minutes = when.hour * 60 + when.minute
     return (
-        context.start_minutes < context.end_minutes
-        and context.start_minutes <= current_minutes < context.end_minutes
+        context.start_minutes <= current_minutes < context.end_minutes
         and when.date() == context.target_date
     )
 
@@ -289,7 +287,7 @@ def scheduled_mode_snapshot(
     month_windows: dict[int, tuple[TimeWindow, TimeWindow]] | None,
     enabled_days: Any,
     delay_seconds: float = 3600.0,
-    latest_end_time: Any = "06:30",
+    latest_end_time: Any = None,
     target_day_func: Callable[[datetime, dict[int, tuple[TimeWindow, TimeWindow]] | None], date] = _scheduled_target_day,
 ) -> ScheduledModeSnapshot:
     context = _scheduled_snapshot_context(
@@ -338,7 +336,9 @@ def month_window(
     default_start: str,
     default_end: str,
 ) -> tuple[TimeWindow, TimeWindow]:
-    month_name = datetime(2000, month, 1).strftime("%b")
-    start = parse_hhmm(config["DEFAULT"].get(f"Auto{month_name}Start", default_start), parse_hhmm(default_start, (8, 0)))
-    end = parse_hhmm(config["DEFAULT"].get(f"Auto{month_name}End", default_end), parse_hhmm(default_end, (18, 0)))
+    month_name = calendar.month_abbr[month]
+    default_start_window = parse_hhmm(default_start, (8, 0))
+    default_end_window = parse_hhmm(default_end, (18, 0))
+    start = parse_hhmm(config["DEFAULT"].get(f"Auto{month_name}Start"), default_start_window)
+    end = parse_hhmm(config["DEFAULT"].get(f"Auto{month_name}End"), default_end_window)
     return start, end

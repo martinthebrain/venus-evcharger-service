@@ -6,6 +6,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from venus_evcharger.runtime.setup_support import default_auto_metrics
+
 from .victron_ess_balance_apply_support import _UpdateCycleVictronEssBalanceApplySupport
 from .victron_ess_balance_learning_profiles_support import (
     _clear_victron_ess_balance_tracking_episode_state,
@@ -20,87 +22,13 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
 
     @staticmethod
     def _victron_ess_balance_default_metrics(reason: str = "disabled") -> dict[str, Any]:
-        return {
-            "battery_discharge_balance_victron_bias_enabled": 0,
-            "battery_discharge_balance_victron_bias_active": 0,
-            "battery_discharge_balance_victron_bias_source_id": "",
-            "battery_discharge_balance_victron_bias_topology_key": "",
-            "battery_discharge_balance_victron_bias_support_mode": "supported_only",
-            "battery_discharge_balance_victron_bias_learning_profile_key": "",
-            "battery_discharge_balance_victron_bias_learning_profile_action_direction": "",
-            "battery_discharge_balance_victron_bias_learning_profile_site_regime": "",
-            "battery_discharge_balance_victron_bias_learning_profile_direction": "",
-            "battery_discharge_balance_victron_bias_learning_profile_day_phase": "",
-            "battery_discharge_balance_victron_bias_learning_profile_reserve_phase": "",
-            "battery_discharge_balance_victron_bias_learning_profile_ev_phase": "",
-            "battery_discharge_balance_victron_bias_learning_profile_pv_phase": "",
-            "battery_discharge_balance_victron_bias_learning_profile_battery_limit_phase": "",
-            "battery_discharge_balance_victron_bias_learning_profile_sample_count": 0,
-            "battery_discharge_balance_victron_bias_learning_profile_response_delay_seconds": None,
-            "battery_discharge_balance_victron_bias_learning_profile_estimated_gain": None,
-            "battery_discharge_balance_victron_bias_learning_profile_overshoot_count": 0,
-            "battery_discharge_balance_victron_bias_learning_profile_settled_count": 0,
-            "battery_discharge_balance_victron_bias_learning_profile_stability_score": None,
-            "battery_discharge_balance_victron_bias_learning_profile_regime_consistency_score": None,
-            "battery_discharge_balance_victron_bias_learning_profile_response_variance_score": None,
-            "battery_discharge_balance_victron_bias_learning_profile_reproducibility_score": None,
-            "battery_discharge_balance_victron_bias_learning_profile_safe_ramp_rate_watts_per_second": None,
-            "battery_discharge_balance_victron_bias_learning_profile_preferred_bias_limit_watts": None,
-            "battery_discharge_balance_victron_bias_source_error_w": None,
-            "battery_discharge_balance_victron_bias_pid_output_w": 0.0,
-            "battery_discharge_balance_victron_bias_setpoint_w": None,
-            "battery_discharge_balance_victron_bias_activation_mode": "always",
-            "battery_discharge_balance_victron_bias_activation_gate_active": 0,
-            "battery_discharge_balance_victron_bias_telemetry_clean": 0,
-            "battery_discharge_balance_victron_bias_telemetry_clean_reason": "unknown",
-            "battery_discharge_balance_victron_bias_response_delay_seconds": None,
-            "battery_discharge_balance_victron_bias_estimated_gain": None,
-            "battery_discharge_balance_victron_bias_overshoot_active": 0,
-            "battery_discharge_balance_victron_bias_overshoot_count": 0,
-            "battery_discharge_balance_victron_bias_overshoot_cooldown_active": 0,
-            "battery_discharge_balance_victron_bias_overshoot_cooldown_reason": "",
-            "battery_discharge_balance_victron_bias_overshoot_cooldown_until": None,
-            "battery_discharge_balance_victron_bias_settling_active": 0,
-            "battery_discharge_balance_victron_bias_settled_count": 0,
-            "battery_discharge_balance_victron_bias_stability_score": None,
-            "battery_discharge_balance_victron_bias_oscillation_lockout_enabled": 0,
-            "battery_discharge_balance_victron_bias_oscillation_lockout_active": 0,
-            "battery_discharge_balance_victron_bias_oscillation_lockout_reason": "",
-            "battery_discharge_balance_victron_bias_oscillation_lockout_until": None,
-            "battery_discharge_balance_victron_bias_oscillation_direction_change_count": 0,
-            "battery_discharge_balance_victron_bias_recommended_kp": None,
-            "battery_discharge_balance_victron_bias_recommended_ki": None,
-            "battery_discharge_balance_victron_bias_recommended_kd": None,
-            "battery_discharge_balance_victron_bias_recommended_deadband_watts": None,
-            "battery_discharge_balance_victron_bias_recommended_max_abs_watts": None,
-            "battery_discharge_balance_victron_bias_recommended_ramp_rate_watts_per_second": None,
-            "battery_discharge_balance_victron_bias_recommended_activation_mode": "",
-            "battery_discharge_balance_victron_bias_recommendation_confidence": None,
-            "battery_discharge_balance_victron_bias_recommendation_regime_consistency_score": None,
-            "battery_discharge_balance_victron_bias_recommendation_response_variance_score": None,
-            "battery_discharge_balance_victron_bias_recommendation_reproducibility_score": None,
-            "battery_discharge_balance_victron_bias_recommendation_reason": "disabled",
-            "battery_discharge_balance_victron_bias_recommendation_profile_key": "",
-            "battery_discharge_balance_victron_bias_recommendation_ini_snippet": "",
-            "battery_discharge_balance_victron_bias_recommendation_hint": "",
-            "battery_discharge_balance_victron_bias_auto_apply_enabled": 0,
-            "battery_discharge_balance_victron_bias_auto_apply_active": 0,
-            "battery_discharge_balance_victron_bias_auto_apply_reason": "disabled",
-            "battery_discharge_balance_victron_bias_auto_apply_generation": 0,
-            "battery_discharge_balance_victron_bias_auto_apply_observation_window_active": 0,
-            "battery_discharge_balance_victron_bias_auto_apply_observation_window_until": None,
-            "battery_discharge_balance_victron_bias_auto_apply_last_param": "",
-            "battery_discharge_balance_victron_bias_auto_apply_suspend_active": 0,
-            "battery_discharge_balance_victron_bias_auto_apply_suspend_reason": "",
-            "battery_discharge_balance_victron_bias_auto_apply_suspend_until": None,
-            "battery_discharge_balance_victron_bias_rollback_enabled": 0,
-            "battery_discharge_balance_victron_bias_rollback_active": 0,
-            "battery_discharge_balance_victron_bias_rollback_reason": "disabled",
-            "battery_discharge_balance_victron_bias_rollback_stable_profile_key": "",
-            "battery_discharge_balance_victron_bias_safe_state_active": 0,
-            "battery_discharge_balance_victron_bias_safe_state_reason": "",
-            "battery_discharge_balance_victron_bias_reason": reason,
+        metrics = {
+            key: value
+            for key, value in default_auto_metrics().items()
+            if key.startswith("battery_discharge_balance_victron_bias_")
         }
+        metrics["battery_discharge_balance_victron_bias_reason"] = reason
+        return metrics
 
     def apply_victron_ess_balance_bias(self, svc: Any, now: float, auto_mode_active: bool) -> None:
         metrics = self._victron_ess_balance_default_metrics("disabled")
@@ -133,12 +61,12 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         metrics["battery_discharge_balance_victron_bias_support_mode"] = self._victron_ess_balance_support_mode(svc)
         metrics["battery_discharge_balance_victron_bias_activation_mode"] = self._victron_ess_balance_activation_mode(svc)
         metrics["battery_discharge_balance_victron_bias_auto_apply_enabled"] = int(
-            bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_enabled", False))
+            bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_enabled", None))
         )
 
     @staticmethod
     def _victron_ess_balance_enabled(svc: Any) -> bool:
-        return bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_enabled", False))
+        return bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_enabled", None))
 
     @staticmethod
     def _reset_victron_ess_balance_pid(svc: Any) -> None:
@@ -173,9 +101,9 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
     ) -> tuple[dict[str, Any], str]:
         if not auto_mode_active:
             return {}, "auto-mode-inactive"
-        cluster = self._normalized_mapping(getattr(svc, "_last_energy_cluster", {}))
-        eligible_source_count = int(cluster.get("battery_discharge_balance_eligible_source_count", 0) or 0)
-        if eligible_source_count < 2:
+        cluster = self._normalized_mapping(getattr(svc, "_last_energy_cluster", None))
+        raw_source_count = cluster.get("battery_discharge_balance_eligible_source_count")
+        if not isinstance(raw_source_count, (int, float)) or int(raw_source_count) < 2:
             return cluster, "insufficient-eligible-sources"
         return cluster, ""
 
@@ -188,13 +116,22 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         source, resolve_reason = self._victron_ess_balance_source(cluster, svc)
         if source is None:
             return None, None, resolve_reason
-        source_id = str(source.get("source_id", "")).strip()
+        return self._victron_ess_balance_resolved_source_state(source, svc, metrics)
+
+    def _victron_ess_balance_resolved_source_state(
+        self,
+        source: dict[str, Any],
+        svc: Any,
+        metrics: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, float | None, str]:
+        source_id = self._normalized_text(source.get("source_id"))
         metrics["battery_discharge_balance_victron_bias_source_id"] = source_id
         metrics["battery_discharge_balance_victron_bias_topology_key"] = self._victron_ess_balance_current_topology_key(
             svc,
             source_id,
         )
-        if not bool(source.get("online", True)):
+        online = source.get("online")
+        if online is not None and not bool(online):
             return None, None, "victron-source-offline"
         source_error_w = self._optional_float(source.get("discharge_balance_error_w"))
         metrics["battery_discharge_balance_victron_bias_source_error_w"] = source_error_w
@@ -215,11 +152,12 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
     ) -> dict[str, str]:
         learning_profile = self._victron_ess_balance_learning_profile(svc, cluster, source, source_error_w)
         self._set_victron_ess_balance_active_profile(svc, learning_profile)
+        self._ensure_victron_ess_balance_learning_profile_state(svc, learning_profile["key"])
         self._merge_victron_ess_balance_learning_profile_metrics(svc, metrics, learning_profile["key"])
         self._victron_ess_balance_refresh_stable_tuning(svc, metrics, now)
         direction_change_count = self._victron_ess_balance_note_action_direction(
             svc,
-            str(learning_profile.get("action_direction", "") or ""),
+            learning_profile["action_direction"],
             now,
         )
         metrics["battery_discharge_balance_victron_bias_oscillation_direction_change_count"] = int(direction_change_count)

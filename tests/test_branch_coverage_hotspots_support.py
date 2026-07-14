@@ -7,7 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from tests.venus_evcharger_update_cycle_controller_support import UpdateCycleController, _phase_values
+from tests.venus_evcharger_update_cycle_controller_support import (
+    UpdateCycleController,
+    _phase_values,
+    initialize_victron_test_service,
+)
 from venus_evcharger.bootstrap.wizard_energy import (
     _config_auto_energy_sources_value,
     _structured_energy_source_line,

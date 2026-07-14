@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from typing import Any
 
 from venus_evcharger.dbus_gateway import GatewayClient, gateway_paths
@@ -20,7 +19,7 @@ class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApply
     def _victron_ess_balance_should_write(self, svc: Any, now: float, setpoint_w: float) -> bool:
         min_update_seconds = max(
             0.0,
-            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_min_update_seconds", 0.0) or 0.0),
+            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_min_update_seconds", None) or 0.0),
         )
         last_write_at = self._optional_float(getattr(svc, "_victron_ess_balance_last_write_at", None))
         if last_write_at is not None and (float(now) - float(last_write_at)) < min_update_seconds:
@@ -49,7 +48,7 @@ class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApply
         normalized_path: str,
         value: float,
     ) -> None:
-        GatewayClient(gateway_paths(str(getattr(svc, "dbus_gateway_run_dir", "") or "") or None)).enqueue_command(
+        GatewayClient(gateway_paths(str(getattr(svc, "dbus_gateway_run_dir", None) or "") or None)).enqueue_command(
             {
                 "kind": "set_value",
                 "source": "victron-ess-balance",
@@ -67,7 +66,7 @@ class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApply
         normalized_path: str,
         error: Exception,
     ) -> None:
-        _UpdateCycleVictronEssBalanceApplyWrite._victron_ess_balance_logging_module().debug(
+        logging.debug(
             "Victron ESS balance-bias write retry for %s %s after error: %s",
             normalized_service,
             normalized_path,
@@ -109,39 +108,23 @@ class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApply
         normalized_path: str,
         value: float,
     ) -> Exception | None:
-        last_error: Exception | None = None
-        for attempt in range(2):
-            try:
-                self._victron_ess_balance_try_write_setpoint(
-                    svc,
-                    normalized_service,
-                    normalized_path,
-                    value,
-                )
-                return None
-            except VICTRON_ESS_BALANCE_WRITE_ERRORS as error:
-                last_error = error
-                if attempt == 0:
-                    self._victron_ess_balance_log_write_retry(normalized_service, normalized_path, error)
-        return last_error
+        try:
+            self._victron_ess_balance_try_write_setpoint(svc, normalized_service, normalized_path, value)
+            return None
+        except VICTRON_ESS_BALANCE_WRITE_ERRORS as error:
+            self._victron_ess_balance_log_write_retry(normalized_service, normalized_path, error)
+        try:
+            self._victron_ess_balance_try_write_setpoint(svc, normalized_service, normalized_path, value)
+            return None
+        except VICTRON_ESS_BALANCE_WRITE_ERRORS as error:
+            return error
 
     @staticmethod
     def _victron_ess_balance_write_warning_interval_seconds(svc: Any) -> float:
-        return max(
-            5.0,
-            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_min_update_seconds", 2.0) or 2.0),
-        )
-
-    @staticmethod
-    def _victron_ess_balance_apply_module() -> Any:
-        return sys.modules.get("venus_evcharger.update.victron_ess_balance_apply")
+        configured = getattr(svc, "auto_battery_discharge_balance_victron_bias_min_update_seconds", None)
+        return 5.0 if configured is None else max(5.0, float(configured))
 
     @classmethod
     def _victron_ess_balance_dbus_module(cls) -> Any:
         del cls
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
-
-    @classmethod
-    def _victron_ess_balance_logging_module(cls) -> Any:
-        module = cls._victron_ess_balance_apply_module()
-        return getattr(module, "logging", logging)

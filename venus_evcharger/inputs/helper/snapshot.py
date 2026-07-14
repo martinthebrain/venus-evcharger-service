@@ -11,6 +11,9 @@ import os
 import time
 from typing import Any
 
+from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
+from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig
+from venus_evcharger.inputs.helper.grid_fusion_snapshot import apply_grid_fusion
 from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscription
 
 
@@ -110,6 +113,7 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
             "_stop_requested": False,
             "helper_generation": 0,
             "runtime_instance_id": "",
+            "_grid_measurement_fusion": lambda: GridMeasurementFusion(GridFusionConfig()),
         }
         for attr_name, default in default_values.items():
             self._ensure_default_attr(attr_name, default)
@@ -139,6 +143,7 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
 
         with self._snapshot_guard():
             final_current = timestamp_after_work()
+            apply_grid_fusion(self._grid_measurement_fusion, snapshot, final_current)
             snapshot["captured_at"] = final_current
             snapshot["heartbeat_at"] = final_current
             snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
@@ -150,7 +155,13 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
         source_specs = (
             ("pv", self.auto_pv_poll_interval_seconds, self._get_pv_power, "pv_power", "pv_captured_at"),
             ("battery", self.auto_battery_poll_interval_seconds, self._get_battery_snapshot, "battery_soc", "battery_captured_at"),
-            ("grid", self.auto_grid_poll_interval_seconds, self._get_grid_power, "grid_power", "grid_captured_at"),
+            (
+                "grid",
+                self.auto_grid_poll_interval_seconds,
+                self._get_grid_power,
+                "grid_gateway_power",
+                "grid_gateway_captured_at",
+            ),
         )
         return tuple(
             source_spec
@@ -169,6 +180,8 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
                 return
             value_key, captured_key = snapshot_keys
             self._apply_source_snapshot_value(snapshot, source_name, value_key, captured_key, value, current)
+            if source_name in {"battery", "grid"}:
+                apply_grid_fusion(self._grid_measurement_fusion, snapshot, current)
             snapshot["captured_at"] = current
             snapshot["heartbeat_at"] = current
             snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
@@ -218,7 +231,7 @@ class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
         return {
             "pv": ("pv_power", "pv_captured_at"),
             "battery": ("battery_soc", "battery_captured_at"),
-            "grid": ("grid_power", "grid_captured_at"),
+            "grid": ("grid_gateway_power", "grid_gateway_captured_at"),
         }.get(source_name)
 
     def _heartbeat_snapshot(self: Any) -> bool:

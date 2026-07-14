@@ -46,7 +46,7 @@ from venus_evcharger.core.common import (
     phase_values,
     read_version,
 )
-from venus_evcharger.service.bindings import (
+from venus_evcharger.service.control import (
     ControlApi,
 )
 from venus_evcharger.controllers.state import ServiceStateController

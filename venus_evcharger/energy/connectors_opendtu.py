@@ -21,6 +21,20 @@ from .models import EnergySourceDefinition, EnergySourceSnapshot
 from .profiles import resolve_energy_source_profile
 
 
+_DEFAULT_TIMEOUT_SECONDS = 2.0
+_DEFAULT_MAX_DATA_AGE_SECONDS = 600.0
+_ADAPTER_SECTION = "Adapter"
+_OPENDTU_SECTION = "OpenDTU"
+_BASE_URL_KEY = "BaseUrl"
+_REQUEST_TIMEOUT_KEY = "RequestTimeoutSeconds"
+_MAX_DATA_AGE_KEY = "MaxDataAgeSeconds"
+_STATUS_URL_KEY = "StatusUrl"
+_INVERTER_STATUS_URL_KEY = "InverterStatusUrl"
+_INVERTER_SERIALS_KEY = "InverterSerials"
+_DEFAULT_STATUS_URL = "/api/livedata/status"
+_DEFAULT_INVERTER_STATUS_URL = "/api/livedata/status?inv=${serial}"
+
+
 @dataclass(frozen=True)
 class OpenDtuEnergySourceSettings:
     """Normalized config for one OpenDTU-backed energy source."""
@@ -110,14 +124,21 @@ def _opendtu_source_name(source: EnergySourceDefinition, settings: OpenDtuEnergy
 
 
 def _opendtu_timeout_seconds(runtime: Any, adapter: Any) -> float:
-    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", 2.0) or 2.0)
-    timeout = finite_float_or_none(adapter.get("RequestTimeoutSeconds", str(default_timeout)))
+    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", None) or _DEFAULT_TIMEOUT_SECONDS)
+    timeout = finite_float_or_none(adapter.get(_REQUEST_TIMEOUT_KEY))
     return default_timeout if timeout is None or timeout <= 0.0 else float(timeout)
 
 
 def _opendtu_max_data_age_seconds(opendtu: Any) -> float:
-    max_data_age = finite_float_or_none(opendtu.get("MaxDataAgeSeconds", "600"))
-    return 600.0 if max_data_age is None or max_data_age < 0.0 else float(max_data_age)
+    max_data_age = finite_float_or_none(opendtu.get(_MAX_DATA_AGE_KEY))
+    return _DEFAULT_MAX_DATA_AGE_SECONDS if max_data_age is None or max_data_age < 0.0 else float(max_data_age)
+
+
+def _section_text(section: Any, key: str, default: str = "") -> str:
+    value = section.get(key)
+    if value is None:
+        return default
+    return str(value).strip() or default
 
 
 def _opendtu_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> OpenDtuEnergySourceSettings:
@@ -129,16 +150,19 @@ def _opendtu_energy_source_settings(runtime: Any, source: EnergySourceDefinition
     if not cache_key:
         raise ValueError(f"Energy source '{source.source_id}' requires ConfigPath for opendtu_http connector")
     parser = load_template_config(cache_key)
-    adapter = config_section(parser, "Adapter")
-    opendtu = config_section(parser, "OpenDTU")
-    base_url = str(adapter.get("BaseUrl", "")).strip()
+    adapter = config_section(parser, _ADAPTER_SECTION)
+    opendtu = config_section(parser, _OPENDTU_SECTION)
+    base_url = _section_text(adapter, _BASE_URL_KEY)
     settings = OpenDtuEnergySourceSettings(
         base_url=base_url,
         auth_settings=load_template_auth_settings(adapter),
         timeout_seconds=_opendtu_timeout_seconds(runtime, adapter),
-        status_url=resolved_url(base_url, opendtu.get("StatusUrl", "/api/livedata/status")),
-        inverter_status_url=resolved_url(base_url, opendtu.get("InverterStatusUrl", "/api/livedata/status?inv=${serial}")),
-        serial_filter=_csv_filter(opendtu.get("InverterSerials", "")),
+        status_url=resolved_url(base_url, _section_text(opendtu, _STATUS_URL_KEY, _DEFAULT_STATUS_URL)),
+        inverter_status_url=resolved_url(
+            base_url,
+            _section_text(opendtu, _INVERTER_STATUS_URL_KEY, _DEFAULT_INVERTER_STATUS_URL),
+        ),
+        serial_filter=_csv_filter(opendtu.get(_INVERTER_SERIALS_KEY)),
         max_data_age_seconds=_opendtu_max_data_age_seconds(opendtu),
     )
     _validate_opendtu_energy_source_settings(source, settings)
@@ -191,7 +215,7 @@ def _opendtu_filtered_raw_inverter(
 
 
 def _opendtu_matches_serial_filter(inverter: dict[str, object], serial_filter: tuple[str, ...]) -> bool:
-    serial = str(inverter.get("serial", "")).strip()
+    serial = _opendtu_serial(inverter)
     return not serial_filter or serial in serial_filter
 
 
@@ -200,13 +224,18 @@ def _opendtu_selected_inverter(
     settings: OpenDtuEnergySourceSettings,
     client: TemplateHttpBackendBase,
 ) -> dict[str, object] | None:
-    serial = str(raw_inverter.get("serial", "")).strip()
+    serial = _opendtu_serial(raw_inverter)
     if "AC" in raw_inverter or _opendtu_unreachable_idle_stub(raw_inverter):
         return raw_inverter
     if not serial:
         return None
     detail = client._perform_request("GET", settings.inverter_status_url, context={"serial": serial})
     return _opendtu_detail_inverter(detail)
+
+
+def _opendtu_serial(inverter: dict[str, object]) -> str:
+    value = inverter.get("serial")
+    return "" if value is None else str(value).strip()
 
 
 def _opendtu_detail_inverter(payload: dict[str, object]) -> dict[str, object] | None:

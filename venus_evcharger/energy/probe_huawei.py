@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from .numeric import optional_int
-from .profiles import resolve_energy_source_profile
+from .profiles import EnergySourceProfile, resolve_energy_source_profile
 from .recommendation_schema import RECOMMENDATION_BUNDLE_SCHEMA_TYPE, RECOMMENDATION_BUNDLE_SCHEMA_VERSION
 
 
@@ -80,7 +80,7 @@ def _recommended_huawei_template(profile_name: str) -> str:
 
 
 def _recommended_huawei_config_path(template_name: str) -> str:
-    filename = str(template_name).strip().rsplit("/", 1)[-1]
+    filename = str(template_name).strip().rsplit("/")[-1]
     if filename.startswith("template-energy-source-"):
         filename = filename[len("template-energy-source-") :]
     return f"/data/etc/{filename}"
@@ -105,7 +105,7 @@ def _recommendation_config_snippet(
     config_path: str,
     source_id: str,
 ) -> str:
-    host = str(detected.get("host", "") or "").strip()
+    host = str(detected.get("host") or "").strip()
     port = _optional_int(detected.get("port"))
     unit_id = _optional_int(detected.get("unit_id"))
     lines = [
@@ -183,14 +183,17 @@ def _recommended_huawei_unit_template(normalized_profile_name: str) -> str | Non
     return None
 
 
-def _recommended_huawei_ma_profile(profile: object, normalized_profile_name: str) -> bool:
-    if profile is not None and str(getattr(profile, "platform", "")).upper() == "MA":
+def _recommended_huawei_ma_profile(
+    profile: EnergySourceProfile | None,
+    normalized_profile_name: str,
+) -> bool:
+    if profile is not None and profile.platform.upper() == "MA":
         return True
     return normalized_profile_name.startswith("huawei_ma_")
 
 
 def _recommendation_location_text(detected: Mapping[str, object]) -> str:
-    host = str(detected.get("host", "") or "")
+    host = str(detected.get("host") or "")
     location_parts = [f"host={host}" if host else "host=unknown"]
     port = detected.get("port")
     unit_id = detected.get("unit_id")
@@ -202,7 +205,7 @@ def _recommendation_location_text(detected: Mapping[str, object]) -> str:
 
 
 def _recommendation_hint_values(detected: Mapping[str, object]) -> tuple[str, str, str]:
-    host = str(detected.get("host", "") or "").strip() or "unknown"
+    host = str(detected.get("host") or "").strip() or "unknown"
     port_text = str(_optional_int(detected.get("port")) or "unknown")
     unit_text = str(_optional_int(detected.get("unit_id")) or "unknown")
     return host, port_text, unit_text

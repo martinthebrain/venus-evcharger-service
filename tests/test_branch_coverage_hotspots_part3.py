@@ -306,7 +306,18 @@ class _BranchCoverageVictronApplyCasesPart1:
                 ({"cluster": 1}, None, None, "profile-blocked"),
             )
 
-        with patch.object(controller, "_victron_ess_balance_learning_profile", return_value={"key": "profile", "site_regime": "export", "reserve_phase": "above_reserve_band"}), patch.object(
+        learning_profile = {
+            "key": "profile",
+            "action_direction": "more_export",
+            "site_regime": "export",
+            "direction": "export",
+            "day_phase": "day",
+            "reserve_phase": "above_reserve_band",
+            "ev_phase": "ev_idle",
+            "pv_phase": "pv_active",
+            "battery_limit_phase": "unconstrained",
+        }
+        with patch.object(controller, "_victron_ess_balance_learning_profile", return_value=learning_profile), patch.object(
             controller, "_merge_victron_ess_balance_learning_profile_metrics"
         ), patch.object(controller, "_victron_ess_balance_refresh_stable_tuning"), patch.object(
             controller, "_victron_ess_balance_note_action_direction", return_value=0

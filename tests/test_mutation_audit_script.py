@@ -76,12 +76,15 @@ class MutationAuditScriptTests(unittest.TestCase):
                 package.module.x_func__mutmut_2: killed
                 package.module.x_func__mutmut_3: no tests
                 package.module.x_func__mutmut_4: SURVIVED
+                package.module.xǁPortǁmethod__mutmut_5: survived
+                $ python -m mutmut results --all true: survived
                 """,
                 "survived",
             ),
             [
                 "package.module.x_func__mutmut_1",
                 "package.module.x_func__mutmut_4",
+                "package.module.xǁPortǁmethod__mutmut_5",
             ],
         )
 
@@ -142,12 +145,13 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertEqual(mutation_audit_support.exit_code(["not_applicable"], no_fail=False), 0)
 
     def test_default_mutation_config_contains_update_cycle_contract_tests(self) -> None:
-        config = mutation_audit_config.mutmut_config_toml("venus_evcharger/update/learning_signature.py")
+        target = "venus_evcharger/unmapped_runtime.py"
+        config = mutation_audit_config.mutmut_config_toml(target)
         parsed = tomllib.loads(config)
         mutmut_config = parsed["tool"]["mutmut"]
 
         self.assertEqual(mutmut_config["source_paths"], ["venus_evcharger"])
-        self.assertEqual(mutmut_config["only_mutate"], ["venus_evcharger/update/learning_signature.py"])
+        self.assertEqual(mutmut_config["only_mutate"], [target])
         self.assertEqual(
             mutmut_config["also_copy"],
             [
@@ -198,6 +202,373 @@ class MutationAuditScriptTests(unittest.TestCase):
             mutation_audit_config.test_selection_for_target("scripts/dev/run_mutation_audit.py"),
             ("tests/test_mutation_audit_script.py",),
         )
+
+    def test_grid_fusion_targets_use_focused_contract_selection(self) -> None:
+        expected = ("tests/test_grid_measurement_fusion.py",)
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/energy/grid_fusion.py"),
+            expected,
+        )
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/energy/grid_fusion_contracts.py"),
+            expected,
+        )
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger/inputs/helper/grid_fusion_snapshot.py"),
+            expected,
+        )
+
+    def test_split_runtime_targets_use_their_contract_suites(self) -> None:
+        expected = {
+            "venus_evcharger/backend/modbus_transport_serial.py": (
+                "tests/test_venus_evcharger_backend_modbus_transport.py",
+            ),
+            "venus_evcharger/backend/shelly_io_worker_status.py": (
+                "tests/test_venus_evcharger_backend_shelly_support.py",
+            ),
+            "venus_evcharger/bootstrap/wizard_energy_bundle.py": (
+                "tests/test_bootstrap_wizard_energy_contracts.py",
+            ),
+            "venus_evcharger/control/http_api.py": (
+                "tests/test_control_http_lifecycle_contracts.py",
+            ),
+            "venus_evcharger/control/http_api_events.py": (
+                "tests/test_control_http_events_contracts.py",
+            ),
+            "venus_evcharger/control/service.py": (
+                "tests/test_control_service_contracts.py",
+            ),
+            "venus_evcharger/controllers/auto.py": (
+                "tests/test_auto_controller_facade_contracts.py",
+            ),
+            "venus_evcharger/controllers/state.py": (
+                "tests/test_state_controller_config_contracts.py",
+            ),
+            "venus_evcharger/controllers/state_json.py": (
+                "tests/test_state_json_contracts.py",
+            ),
+            "venus_evcharger/controllers/state_restore.py": (
+                "tests/test_venus_evcharger_state_controller.py",
+                "tests/test_state_restore_contracts.py",
+            ),
+            "venus_evcharger/controllers/state_restore_support.py": (
+                "tests/test_venus_evcharger_state_controller.py",
+                "tests/test_state_restore_support_contracts.py",
+            ),
+            "venus_evcharger/controllers/state_runtime_normalize.py": (
+                "tests/test_state_runtime_normalize_contracts.py",
+            ),
+            "venus_evcharger/controllers/state_runtime_overrides.py": (
+                "tests/test_state_runtime_overrides_contracts.py",
+            ),
+            "venus_evcharger/controllers/state_runtime_snapshot.py": (
+                "tests/test_state_runtime_snapshot_contracts.py",
+                "tests/test_state_runtime_snapshot_defaults_contracts.py",
+                "tests/venus_evcharger_state_controller_cases_primary.py",
+                "tests/venus_evcharger_state_controller_cases_quaternary.py",
+            ),
+            "venus_evcharger/controllers/state_summary.py": (
+                "tests/test_state_summary_contracts.py",
+                "tests/test_state_summary_edge_contracts.py",
+                "tests/venus_evcharger_state_controller_cases_primary.py",
+                "tests/venus_evcharger_state_controller_cases_quaternary.py",
+            ),
+            "venus_evcharger/controllers/state_validation.py": (
+                "tests/test_state_validation_contracts.py",
+                "tests/test_state_validation_logging_contracts.py",
+                "tests/venus_evcharger_state_controller_cases_tertiary.py",
+            ),
+            "venus_evcharger/controllers/write.py": (
+                "tests/test_write_controller_contracts.py",
+                "tests/test_write_controller_handler_contracts.py",
+                "tests/test_venus_evcharger_write_controller.py",
+            ),
+            "venus_evcharger/controllers/write_snapshot.py": (
+                "tests/test_write_snapshot_contracts.py",
+                "tests/test_venus_evcharger_write_controller.py",
+                "tests/test_remaining_coverage_helpers.py",
+            ),
+            "venus_evcharger/controllers/write_support.py": (
+                "tests/test_write_support_contracts.py",
+                "tests/test_write_controller_handler_contracts.py",
+                "tests/test_venus_evcharger_write_controller.py",
+            ),
+            "venus_evcharger/core/common.py": (
+                "tests/test_core_common_boundary_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/common_auto.py": (
+                "tests/test_core_common_auto_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/common_schedule.py": (
+                "tests/test_core_common_schedule_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/common_types.py": (
+                "tests/test_core_common_types_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/common_values.py": (
+                "tests/test_core_common_values_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/contracts_basic.py": (
+                "tests/test_core_contracts_basic_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/contracts_bootstrap.py": (
+                "tests/test_core_contracts_bootstrap_contracts.py",
+                "tests/test_bootstrap_contracts.py",
+            ),
+            "venus_evcharger/core/contracts_control.py": (
+                "tests/test_core_contracts_control_command_contracts.py",
+                "tests/test_core_contracts_control_api_contracts.py",
+                "tests/test_venus_evcharger_control_contracts.py",
+            ),
+            "venus_evcharger/core/contracts_outward.py": (
+                "tests/test_core_contracts_outward_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/contracts_snapshot.py": (
+                "tests/test_core_contracts_snapshot_contracts.py",
+                "tests/test_venus_evcharger_common.py",
+            ),
+            "venus_evcharger/core/contracts_state_endpoints.py": (
+                "tests/test_core_contracts_state_endpoints_contracts.py",
+                "tests/test_venus_evcharger_state_contracts.py",
+            ),
+            "venus_evcharger/core/contracts_state_operational.py": (
+                "tests/test_venus_evcharger_state_contracts.py",
+            ),
+            "venus_evcharger/core/contracts_state_shared.py": (
+                "tests/test_core_contracts_state_shared_contracts.py",
+                "tests/test_core_contracts_state_endpoints_contracts.py",
+                "tests/test_venus_evcharger_state_contracts.py",
+            ),
+            "venus_evcharger/core/return_contracts.py": (
+                "tests/test_core_return_contracts.py",
+                "tests/test_runtime_async_mainloop_types.py",
+            ),
+            "venus_evcharger/core/shared.py": (
+                "tests/test_core_shared_contracts.py",
+                "tests/test_venus_evcharger_shared.py",
+            ),
+            "venus_evcharger/dbus_adapter_components_rate.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py",
+            ),
+            "venus_evcharger/dbus_adapter_components_resource.py": (
+                "tests/test_dbus_adapter_resource_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_components_scheduler.py": (
+                "tests/test_dbus_adapter_scheduler_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_health_backpressure.py": (
+                "tests/test_dbus_adapter_backpressure_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_health_freshness.py": (
+                "tests/test_dbus_adapter_freshness_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_health_history.py": (
+                "tests/test_dbus_adapter_health_history_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_health_queue.py": (
+                "tests/test_dbus_adapter_health_queue_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_health_slo.py": (
+                "tests/test_dbus_adapter_health_slo_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_jsonl.py": (
+                "tests/test_dbus_adapter_jsonl_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_process.py": ("tests/test_dbus_adapter_process_contracts.py",),
+            "venus_evcharger/dbus_adapter_process_config.py": (
+                "tests/test_dbus_adapter_process_config_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_process_identity.py": (
+                "tests/test_dbus_adapter_process_identity_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_process_introspection.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_processes_legacy_introspection_request_file",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_request_and_background_edges",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_request_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_file_payload_uses_utf8_and_dict_payloads",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_enqueue_introspection_requests_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_enqueue_command_payload_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_background_introspection_spec_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_non_write_introspection_command_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_non_write_introspection_timed_logging_main_and_json_ready",
+            ),
+            "venus_evcharger/dbus_adapter_process_introspection_snapshot.py": (
+                "tests/test_dbus_adapter_introspection_snapshot_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_process_io.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_poll_and_discovery_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_poll_and_discovery_edges",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_cache_publish_interval_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_signal_handlers_andlist_services_edges",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_timed_operation_contracts_record_latency_and_errors",
+            ),
+            "venus_evcharger/dbus_adapter_process_runtime.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_signal_handlers_andlist_services_edges",
+            ),
+            "venus_evcharger/dbus_adapter_process_socket.py": (
+                "tests/test_dbus_adapter_process_ipc_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter_read_aggregate.py": ("tests/test_dbus_adapter_read_aggregate_contracts.py",),
+            "venus_evcharger/dbus_adapter_read_targets.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_read_target_contract_requires_service_and_absolute_path",
+            ),
+            "venus_evcharger/dbus_adapter_read_types.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_read_spec_from_mapping_validates_known_fields",
+            ),
+            "venus_evcharger/dbus_adapter_write.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_health_budgets_lifecycle_and_remote_write_edges",
+            ),
+            "venus_evcharger/dbus_adapter_write_support.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_support_helper_contracts",
+            ),
+            "venus_evcharger/dbus_gateway_surface.py": ("tests/test_dbus_gateway_primitives.py",),
+            "venus_evcharger/dbus_introspection.py": (
+                "tests/test_dbus_introspection_gateway_cache.py",
+                "tests/test_dbus_introspection_contracts.py",
+            ),
+            "venus_evcharger/energy/config.py": (
+                "tests/test_energy_config_contracts.py",
+            ),
+            "venus_evcharger/energy/connectors.py": (
+                "tests/test_energy_connectors_facade_contracts.py",
+            ),
+            "venus_evcharger/energy/connectors_command.py": (
+                "tests/test_energy_connectors_command_contracts.py",
+            ),
+            "venus_evcharger/energy/connectors_common.py": (
+                "tests/test_energy_connectors_common_contracts.py",
+            ),
+            "venus_evcharger/energy/connectors_modbus.py": (
+                "tests/test_energy_connectors_modbus_contracts.py",
+            ),
+            "venus_evcharger/energy/connectors_opendtu.py": (
+                "tests/test_energy_connectors_opendtu_contracts.py",
+            ),
+            "venus_evcharger/energy/connectors_template.py": (
+                "tests/test_energy_connectors_template_contracts.py",
+            ),
+            "venus_evcharger/energy/learning.py": (
+                "tests/test_venus_evcharger_energy_aggregate.py",
+            ),
+            "venus_evcharger/energy/learning_coercion.py": (
+                "tests/test_energy_learning_coercion_contracts.py",
+            ),
+            "venus_evcharger/energy/probe.py": (
+                "tests/test_energy_probe_facade_contracts.py",
+                "tests/test_venus_evcharger_energy_probe.py",
+            ),
+            "venus_evcharger/energy/probe_cli.py": (
+                "tests/test_energy_probe_cli_contracts.py",
+            ),
+            "venus_evcharger/energy/probe_core.py": (
+                "tests/test_energy_probe_core_contracts.py",
+            ),
+            "venus_evcharger/energy/probe_huawei.py": (
+                "tests/test_energy_probe_huawei_contracts.py",
+            ),
+            "venus_evcharger/energy/profiles.py": (
+                "tests/test_energy_profiles_contracts.py",
+            ),
+            "venus_evcharger/energy/recommendation_schema.py": (
+                "tests/test_energy_recommendation_schema_contracts.py",
+            ),
+            "venus_evcharger/inputs/dbus.py": (
+                "tests/test_input_boundary_contracts.py",
+            ),
+            "venus_evcharger/inputs/energy_snapshot_contracts.py": (
+                "tests/test_input_boundary_contracts.py",
+            ),
+            "venus_evcharger/inputs/gateway_read.py": (
+                "tests/test_gateway_input_reader_contracts.py",
+            ),
+            "venus_evcharger/inputs/helper/capacity_persistence.py": (
+                "tests/test_auto_input_capacity_persistence.py",
+            ),
+            "venus_evcharger/inputs/helper/config_runtime.py": (
+                "tests/test_auto_input_config_runtime_contracts.py",
+                "tests/test_venus_evcharger_auto_input_helper.py",
+            ),
+            "venus_evcharger/inputs/helper/snapshot.py": (
+                "tests/test_venus_evcharger_auto_input_helper.py",
+            ),
+            "venus_evcharger/inputs/helper/sources_dbus_common.py": (
+                "tests/test_auto_input_sources_dbus_contracts.py",
+                "tests/test_venus_evcharger_auto_input_helper.py",
+            ),
+            "venus_evcharger/inputs/helper/sources_dbus_primary.py": (
+                "tests/test_auto_input_sources_dbus_contracts.py",
+                "tests/test_venus_evcharger_auto_input_helper.py",
+            ),
+            "venus_evcharger/inputs/helper/sources_dbus_resolve.py": (
+                "tests/test_auto_input_sources_resolution_snapshot_contracts.py",
+                "tests/test_venus_evcharger_auto_input_helper.py",
+            ),
+            "venus_evcharger/inputs/helper/sources_dbus_snapshot.py": (
+                "tests/test_auto_input_sources_resolution_snapshot_contracts.py",
+                "tests/test_venus_evcharger_auto_input_helper.py",
+            ),
+            "venus_evcharger/runtime/async_mainloop_control.py": (
+                "tests/test_runtime_async_mainloop_control_contracts.py",
+                "tests/test_venus_evcharger_runtime_support_controller.py",
+            ),
+            "venus_evcharger/runtime/async_mainloop_publish.py": (
+                "tests/test_runtime_async_mainloop_publish_contracts.py",
+                "tests/test_venus_evcharger_runtime_support_controller.py",
+            ),
+            "venus_evcharger/runtime/async_mainloop_state.py": (
+                "tests/test_runtime_async_mainloop_state_contracts.py",
+                "tests/test_venus_evcharger_runtime_support_controller.py",
+                "tests/test_venus_evcharger_service_roles.py",
+            ),
+            "venus_evcharger/runtime/async_mainloop_types.py": (
+                "tests/test_runtime_async_mainloop_types.py",
+            ),
+            "venus_evcharger/runtime/async_mainloop_watchdog.py": (
+                "tests/test_runtime_async_mainloop_watchdog_contracts.py",
+            ),
+            "venus_evcharger/runtime/audit.py": (
+                "tests/test_runtime_audit_contracts.py",
+                "tests/test_venus_evcharger_runtime_support_controller.py",
+            ),
+            "venus_evcharger/runtime/audit_fields.py": (
+                "tests/test_runtime_audit_fields_contracts.py",
+            ),
+            "venus_evcharger/runtime/health.py": (
+                "tests/test_runtime_health_contracts.py",
+            ),
+            "venus_evcharger/runtime/setup.py": (
+                "tests/test_runtime_setup_contracts.py",
+            ),
+            "venus_evcharger/runtime/setup_support.py": (
+                "tests/test_runtime_setup_support_contracts.py",
+            ),
+            "venus_evcharger/runtime/software_update_setup.py": (
+                "tests/test_runtime_software_update_setup.py",
+            ),
+            "venus_evcharger/runtime/support.py": (
+                "tests/test_runtime_support_contracts.py",
+            ),
+            "venus_evcharger/service/auto.py": (
+                "tests/test_service_auto_contracts.py",
+            ),
+            "venus_evcharger/service/control_runtime.py": (
+                "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_runtime_components_replace_invalid_cached_instances_and_reuse_valid",
+                "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_health_payload_uses_stale_callback_and_event_bus_is_reused",
+                "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_records_runtime_only_command_audit_entries",
+                "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_audit_payload_helpers_cover_dict_and_none_inputs",
+                "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_skips_disabled_server_and_can_create_one",
+            ),
+        }
+        for target, selection in expected.items():
+            with self.subTest(target=target):
+                self.assertEqual(mutation_audit_config.test_selection_for_target(target), selection)
 
     def test_bootstrap_mutation_targets_use_focused_test_selection(self) -> None:
         self.assertEqual(
@@ -629,22 +1000,23 @@ class MutationAuditScriptTests(unittest.TestCase):
             repo = Path(temp_dir)
             log_path = repo / "verify.log"
             with patch.object(Path, "read_bytes", autospec=True, return_value=b"original\n"):
-                with patch.object(Path, "open", autospec=True, side_effect=open_path):
-                    with patch.object(
-                        mutation_audit_verification,
-                        "mutant_fails_selected_tests",
-                        side_effect=[True, False, True],
-                    ):
-                        verified = mutation_audit_verification.verify_mutants(
-                            repo=repo,
-                            mutmut=["python3", "-m", "mutmut"],
-                            target_path="target.py",
-                            mutant_names=["mutant-a", "mutant-b", "mutant-c"],
-                            log_path=log_path,
-                            test_selection=("tests/example.py",),
-                            configure_target=configure,
-                            status_label="survived",
-                        )
+                with patch.object(Path, "write_bytes", autospec=True):
+                    with patch.object(Path, "open", autospec=True, side_effect=open_path):
+                        with patch.object(
+                            mutation_audit_verification,
+                            "mutant_fails_selected_tests",
+                            side_effect=[True, False, True],
+                        ):
+                            verified = mutation_audit_verification.verify_mutants(
+                                repo=repo,
+                                mutmut=["python3", "-m", "mutmut"],
+                                target_path="target.py",
+                                mutant_names=["mutant-a", "mutant-b", "mutant-c"],
+                                log_path=log_path,
+                                test_selection=("tests/example.py",),
+                                configure_target=configure,
+                                status_label="survived",
+                            )
 
         self.assertEqual(verified, 2)
         self.assertEqual(opened, [(log_path, "a", "utf-8")])
@@ -710,7 +1082,7 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "verification kept pkg.x__mutmut_2: rc=0\n",
             )
 
-    def test_mutant_fails_selected_tests_skips_tests_when_apply_fails(self) -> None:
+    def test_mutant_fails_selected_tests_rejects_apply_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             target = repo / "target.py"
@@ -718,17 +1090,17 @@ class MutationAuditScriptTests(unittest.TestCase):
             with (repo / "verify.log").open("w", encoding="utf-8") as log:
                 with patch.object(mutation_audit_verification, "apply_mutant", return_value=False):
                     with patch.object(mutation_audit_verification, "run_survivor_tests") as run_tests:
-                        failed = mutation_audit_verification.mutant_fails_selected_tests(
-                            repo=repo,
-                            mutmut=["mutmut"],
-                            target_file=target,
-                            original=b"original\n",
-                            mutant="pkg.x__mutmut_1",
-                            log=log,
-                            test_selection=("tests/test.py",),
-                        )
+                        with self.assertRaisesRegex(RuntimeError, "unable to apply mutant"):
+                            mutation_audit_verification.mutant_fails_selected_tests(
+                                repo=repo,
+                                mutmut=["mutmut"],
+                                target_file=target,
+                                original=b"original\n",
+                                mutant="pkg.x__mutmut_1",
+                                log=log,
+                                test_selection=("tests/test.py",),
+                            )
 
-            self.assertFalse(failed)
             self.assertEqual(target.read_text(encoding="utf-8"), "original\n")
             run_tests.assert_not_called()
 
@@ -803,6 +1175,26 @@ class MutationAuditScriptTests(unittest.TestCase):
             self.assertIs(run.call_args.kwargs["stderr"], subprocess.STDOUT)
             self.assertIs(run.call_args.kwargs["text"], True)
 
+            with patch("subprocess.run", return_value=subprocess.CompletedProcess(["cmd"], 0)):
+                self.assertFalse(
+                    mutation_audit_verification.run_survivor_tests(
+                        repo=repo,
+                        mutmut=["python3", "-m", "mutmut"],
+                        test_selection=("tests/test.py",),
+                        log=log,
+                    )
+                )
+
+            with patch("subprocess.run", return_value=subprocess.CompletedProcess(["cmd"], 1)):
+                self.assertTrue(
+                    mutation_audit_verification.run_survivor_tests(
+                        repo=repo,
+                        mutmut=["python3", "-m", "mutmut"],
+                        test_selection=("tests/test.py",),
+                        log=log,
+                    )
+                )
+
             with patch("subprocess.run", return_value=completed_fail):
                 self.assertFalse(
                     mutation_audit_verification.apply_mutant(
@@ -833,25 +1225,40 @@ class MutationAuditScriptTests(unittest.TestCase):
             self.assertIs(run.call_args.kwargs["stderr"], subprocess.STDOUT)
             self.assertIs(run.call_args.kwargs["text"], True)
 
-            with patch("subprocess.run", return_value=subprocess.CompletedProcess(["cmd"], 0)):
-                self.assertFalse(
-                    mutation_audit_verification.run_survivor_tests(
+    def test_verification_rejects_apply_failure_instead_of_counting_survivor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            target = repo / "target.py"
+            target.write_text("original\n", encoding="utf-8")
+            log = _MemoryTextWriter()
+            with patch.object(mutation_audit_verification, "apply_mutant", return_value=False):
+                with self.assertRaisesRegex(RuntimeError, "unable to apply mutant"):
+                    mutation_audit_verification.mutant_fails_selected_tests(
                         repo=repo,
-                        mutmut=["python3", "-m", "mutmut"],
-                        test_selection=("tests/test.py",),
+                        mutmut=["mutmut"],
+                        target_file=target,
+                        original=b"original\n",
+                        mutant="pkg.x__mutmut_1",
                         log=log,
+                        test_selection=("tests/test.py",),
                     )
-                )
+            self.assertEqual(target.read_bytes(), b"original\n")
 
-            with patch("subprocess.run", return_value=subprocess.CompletedProcess(["cmd"], 1)):
-                self.assertTrue(
-                    mutation_audit_verification.run_survivor_tests(
-                        repo=repo,
-                        mutmut=["python3", "-m", "mutmut"],
-                        test_selection=("tests/test.py",),
-                        log=log,
-                    )
-                )
+    def test_clear_source_bytecode_removes_only_matching_module_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "target.py"
+            cache = root / "__pycache__"
+            cache.mkdir()
+            matching = cache / "target.cpython-311.pyc"
+            unrelated = cache / "other.cpython-311.pyc"
+            matching.write_bytes(b"cached")
+            unrelated.write_bytes(b"cached")
+
+            mutation_audit_verification.clear_source_bytecode(source)
+
+            self.assertFalse(matching.exists())
+            self.assertTrue(unrelated.exists())
 
     def test_python_for_mutmut_command_only_reuses_python_module_mutmut(self) -> None:
         self.assertEqual(
@@ -1243,6 +1650,118 @@ class MutationAuditScriptTests(unittest.TestCase):
             mutation_audit_execution.clear_mutmut_worktree(repo, reuse_cache=True)
         rmtree.assert_not_called()
 
+    def test_clear_target_bytecode_removes_only_target_cache_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            package = repo / "package"
+            cache_dir = package / "__pycache__"
+            cache_dir.mkdir(parents=True)
+            (package / "module.py").write_text("value = 1\n", encoding="utf-8")
+            target_cache = cache_dir / "module.cpython-314.pyc"
+            optimized_cache = cache_dir / "module.cpython-314.opt-1.pyc"
+            sibling_cache = cache_dir / "sibling.cpython-314.pyc"
+            for path in (target_cache, optimized_cache, sibling_cache):
+                path.write_bytes(b"bytecode")
+
+            mutation_audit_execution.clear_target_bytecode(repo, "package/module.py")
+
+            self.assertFalse(target_cache.exists())
+            self.assertFalse(optimized_cache.exists())
+            self.assertTrue(sibling_cache.exists())
+            mutation_audit_execution.clear_target_bytecode(repo, "package/data.json")
+
+    def test_run_target_clears_bytecode_after_survivor_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            target = mutation_audit_support.MutationTarget("package/module.py")
+            target_file = repo / target.path
+            target_file.parent.mkdir()
+            target_file.write_text("VALUE = 1\n", encoding="utf-8")
+            run = mutation_audit_support.TargetMutmutRun(
+                run_result=subprocess.CompletedProcess(["mutmut"], 0),
+                results_result=subprocess.CompletedProcess(["mutmut"], 0),
+                result_text="1 survived\n",
+                log_text="",
+            )
+            counts = mutation_audit_results.zero_counts()
+            counts["survived"] = 1
+            events: list[str] = []
+
+            with (
+                patch.object(mutation_audit_execution.audit_support, "not_applicable_mutation_target", return_value=None),
+                patch.object(mutation_audit_execution, "clear_mutmut_worktree"),
+                patch.object(mutation_audit_execution, "run_mutmut_for_target", return_value=run),
+                patch.object(mutation_audit_execution.audit_support, "generated_no_mutants", return_value=False),
+                patch.object(
+                    mutation_audit_execution,
+                    "target_counts",
+                    side_effect=lambda **_kwargs: events.append("verify") or counts,
+                ),
+                patch.object(
+                    mutation_audit_execution.audit_results,
+                    "runtime_result",
+                    return_value=unittest.mock.sentinel.result,
+                ),
+                patch.object(
+                    mutation_audit_execution,
+                    "clear_target_bytecode",
+                    side_effect=lambda *_args: events.append("cleanup"),
+                ),
+            ):
+                result = mutation_audit_execution.run_target(
+                    repo=repo,
+                    out_dir=repo / "out",
+                    mutmut=["mutmut"],
+                    target=target,
+                    options=mutation_audit_execution.TargetRunOptions(10.0, False, True),
+                )
+
+        self.assertIs(result, unittest.mock.sentinel.result)
+        self.assertEqual(events, ["verify", "cleanup"])
+
+    def test_run_target_restores_source_before_counting_and_after_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            target = mutation_audit_support.MutationTarget("package/target.py")
+            target_file = repo / target.path
+            target_file.parent.mkdir()
+            target_file.write_text("VALUE = 'original'\n", encoding="utf-8")
+            run = mutation_audit_support.TargetMutmutRun(
+                run_result=subprocess.CompletedProcess(["mutmut"], 0),
+                results_result=subprocess.CompletedProcess(["mutmut"], 0),
+                result_text="1 killed\n",
+                log_text="",
+            )
+            counts = mutation_audit_results.zero_counts()
+            counts["killed"] = 1
+
+            def dirty_run(**_kwargs: object) -> mutation_audit_support.TargetMutmutRun:
+                target_file.write_text("VALUE = 'mutant'\n", encoding="utf-8")
+                return run
+
+            def assert_clean_counts(**_kwargs: object) -> dict[str, int]:
+                self.assertEqual(target_file.read_text(encoding="utf-8"), "VALUE = 'original'\n")
+                target_file.write_text("VALUE = 'verification-mutant'\n", encoding="utf-8")
+                return counts
+
+            with (
+                patch.object(mutation_audit_execution.audit_support, "not_applicable_mutation_target", return_value=None),
+                patch.object(mutation_audit_execution, "clear_mutmut_worktree"),
+                patch.object(mutation_audit_execution, "run_mutmut_for_target", side_effect=dirty_run),
+                patch.object(mutation_audit_execution.audit_support, "generated_no_mutants", return_value=False),
+                patch.object(mutation_audit_execution, "target_counts", side_effect=assert_clean_counts),
+            ):
+                result = mutation_audit_execution.run_target(
+                    repo=repo,
+                    out_dir=repo / "out",
+                    mutmut=["mutmut"],
+                    target=target,
+                    options=mutation_audit_execution.TargetRunOptions(10.0, False, True),
+                )
+
+            self.assertEqual(result.counts["killed"], 1)
+            self.assertEqual(target_file.read_text(encoding="utf-8"), "VALUE = 'original'\n")
+
     def test_read_artifact_uses_replace_errors_and_empty_missing_file(self) -> None:
         path = Path("/tmp/artifact.log")
 
@@ -1572,28 +2091,30 @@ class MutationAuditScriptTests(unittest.TestCase):
             str(artifacts.results_path),
             mutation_audit_results.zero_counts(),
         )
-        with patch.object(mutation_audit_execution.time, "monotonic", return_value=234.0):
-            with patch.object(mutation_audit_execution, "artifacts_for_target", return_value=artifacts):
-                with patch.object(mutation_audit_execution.audit_support, "not_applicable_mutation_target", return_value=None):
-                    with patch.object(mutation_audit_execution, "clear_mutmut_worktree") as clear:
-                        with patch.object(mutation_audit_execution, "run_mutmut_for_target", return_value=run) as run_mutmut:
-                            with patch.object(
-                                mutation_audit_execution.audit_support,
-                                "generated_no_mutants",
-                                return_value=True,
-                            ) as generated_no_mutants:
-                                with patch.object(
-                                    mutation_audit_execution.audit_results,
-                                    "no_generated_mutants_result",
-                                    return_value=no_mutants_result,
-                                ) as no_generated_result:
-                                    result = mutation_audit_execution.run_target(
-                                        repo=repo,
-                                        out_dir=out_dir,
-                                        mutmut=["mutmut"],
-                                        target=target,
-                                        options=options,
-                                    )
+        with patch.object(Path, "read_bytes", autospec=True, return_value=b"source"):
+            with patch.object(Path, "write_bytes", autospec=True):
+                with patch.object(mutation_audit_execution.time, "monotonic", return_value=234.0):
+                    with patch.object(mutation_audit_execution, "artifacts_for_target", return_value=artifacts):
+                        with patch.object(mutation_audit_execution.audit_support, "not_applicable_mutation_target", return_value=None):
+                            with patch.object(mutation_audit_execution, "clear_mutmut_worktree") as clear:
+                                with patch.object(mutation_audit_execution, "run_mutmut_for_target", return_value=run) as run_mutmut:
+                                    with patch.object(
+                                        mutation_audit_execution.audit_support,
+                                        "generated_no_mutants",
+                                        return_value=True,
+                                    ) as generated_no_mutants:
+                                        with patch.object(
+                                            mutation_audit_execution.audit_results,
+                                            "no_generated_mutants_result",
+                                            return_value=no_mutants_result,
+                                        ) as no_generated_result:
+                                            result = mutation_audit_execution.run_target(
+                                                repo=repo,
+                                                out_dir=out_dir,
+                                                mutmut=["mutmut"],
+                                                target=target,
+                                                options=options,
+                                            )
 
         self.assertIs(result, no_mutants_result)
         clear.assert_called_once_with(repo, reuse_cache=True)
@@ -1616,25 +2137,27 @@ class MutationAuditScriptTests(unittest.TestCase):
             str(artifacts.results_path),
             counts,
         )
-        with patch.object(mutation_audit_execution.time, "monotonic", return_value=345.0):
-            with patch.object(mutation_audit_execution, "artifacts_for_target", return_value=artifacts):
-                with patch.object(mutation_audit_execution.audit_support, "not_applicable_mutation_target", return_value=None):
-                    with patch.object(mutation_audit_execution, "clear_mutmut_worktree"):
-                        with patch.object(mutation_audit_execution, "run_mutmut_for_target", return_value=run):
-                            with patch.object(mutation_audit_execution.audit_support, "generated_no_mutants", return_value=False):
-                                with patch.object(mutation_audit_execution, "target_counts", return_value=counts) as target_counts:
-                                    with patch.object(
-                                        mutation_audit_execution.audit_results,
-                                        "runtime_result",
-                                        return_value=runtime_result,
-                                    ) as runtime:
-                                        result = mutation_audit_execution.run_target(
-                                            repo=repo,
-                                            out_dir=out_dir,
-                                            mutmut=["mutmut"],
-                                            target=target,
-                                            options=options,
-                                        )
+        with patch.object(Path, "read_bytes", autospec=True, return_value=b"source"):
+            with patch.object(Path, "write_bytes", autospec=True):
+                with patch.object(mutation_audit_execution.time, "monotonic", return_value=345.0):
+                    with patch.object(mutation_audit_execution, "artifacts_for_target", return_value=artifacts):
+                        with patch.object(mutation_audit_execution.audit_support, "not_applicable_mutation_target", return_value=None):
+                            with patch.object(mutation_audit_execution, "clear_mutmut_worktree"):
+                                with patch.object(mutation_audit_execution, "run_mutmut_for_target", return_value=run):
+                                    with patch.object(mutation_audit_execution.audit_support, "generated_no_mutants", return_value=False):
+                                        with patch.object(mutation_audit_execution, "target_counts", return_value=counts) as target_counts:
+                                            with patch.object(
+                                                mutation_audit_execution.audit_results,
+                                                "runtime_result",
+                                                return_value=runtime_result,
+                                            ) as runtime:
+                                                result = mutation_audit_execution.run_target(
+                                                    repo=repo,
+                                                    out_dir=out_dir,
+                                                    mutmut=["mutmut"],
+                                                    target=target,
+                                                    options=options,
+                                                )
 
         self.assertIs(result, runtime_result)
         target_counts.assert_called_once()
@@ -1653,6 +2176,7 @@ class MutationAuditScriptTests(unittest.TestCase):
             out_dir = repo / "out"
             out_dir.mkdir()
             target = mutation_audit_support.MutationTarget("target.py")
+            (repo / target.path).write_text("VALUE = 1\n", encoding="utf-8")
             options = mutation_audit_execution.TargetRunOptions(
                 timeout_s=1.0,
                 reuse_cache=False,

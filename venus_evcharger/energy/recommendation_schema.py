@@ -57,7 +57,8 @@ def recommendation_bundle_manifest(
 
 
 def _manifest_string(payload: Mapping[str, object], key: str) -> str:
-    return str(payload.get(key, "")).strip()
+    value = payload.get(key)
+    return "" if value is None else str(value).strip()
 
 
 def _manifest_required_string(payload: Mapping[str, object], key: str) -> str:
@@ -76,9 +77,9 @@ def _manifest_files(payload: Mapping[str, object]) -> Mapping[str, object]:
 
 def _normalized_manifest_files(files: Mapping[str, object]) -> RecommendationBundleManifestFiles:
     normalized_files: RecommendationBundleManifestFiles = {
-        "config_snippet": str(files.get("config_snippet", "")).strip(),
-        "wizard_hint": str(files.get("wizard_hint", "")).strip(),
-        "summary": str(files.get("summary", "")).strip(),
+        "config_snippet": _manifest_string(files, "config_snippet"),
+        "wizard_hint": _manifest_string(files, "wizard_hint"),
+        "summary": _manifest_string(files, "summary"),
     }
     for key, value in normalized_files.items():
         if not value:

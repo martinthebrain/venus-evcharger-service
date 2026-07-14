@@ -55,8 +55,8 @@ class _BranchCoverageVictronApplyCasesPart2:
             _victron_ess_balance_telemetry_last_command_error_w=-60.0,
             _victron_ess_balance_telemetry_last_command_setpoint_w=70.0,
             _victron_ess_balance_telemetry_last_command_profile_key="profile",
-            _victron_ess_balance_learning_profiles={"profile": {"delay_samples": 0, "gain_samples": 0, "settled_count": 0, "overshoot_count": 0}},
         )
+        initialize_victron_test_service(service)
         metrics = controller._victron_ess_balance_default_metrics()
         cluster = {
             "battery_discharge_balance_eligible_source_count": 2,
@@ -168,14 +168,27 @@ class _BranchCoverageVictronApplyCasesPart2:
             apply_tracking.assert_called_once()
 
         metrics = {}
-        learning_profile = {"key": "profile", "action_direction": "more_export"}
+        learning_profile = {
+            "key": "profile",
+            "action_direction": "more_export",
+            "site_regime": "export",
+            "direction": "export",
+            "day_phase": "day",
+            "reserve_phase": "above_reserve_band",
+            "ev_phase": "ev_idle",
+            "pv_phase": "pv_active",
+            "battery_limit_phase": "unconstrained",
+        }
         with patch.object(controller, "_victron_ess_balance_learning_profile", return_value=learning_profile), patch.object(
+            controller, "_ensure_victron_ess_balance_learning_profile_state"
+        ) as ensure_profile, patch.object(
             controller, "_merge_victron_ess_balance_learning_profile_metrics"
         ) as merge_metrics, patch.object(controller, "_victron_ess_balance_refresh_stable_tuning") as refresh_tuning, patch.object(
             controller, "_victron_ess_balance_note_action_direction", return_value=2
         ) as note_direction, patch.object(controller, "_populate_victron_ess_balance_runtime_safety_metrics") as populate_safety:
             returned = controller._prepare_victron_ess_balance_learning_state(service, 20.0, {"c": 1}, {"source_id": "victron"}, -20.0, metrics)
             self.assertEqual(returned, learning_profile)
+            ensure_profile.assert_called_once_with(service, "profile")
             merge_metrics.assert_called_once()
             refresh_tuning.assert_called_once()
             note_direction.assert_called_once()
@@ -217,4 +230,3 @@ class _BranchCoverageVictronApplyCasesPart2:
             service._victron_ess_balance_last_setpoint_w = 70.0
             controller._restore_victron_ess_balance_base_setpoint(service, 17.0, metrics, "blocked")
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "blocked-restored")
-

@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import time
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
@@ -32,7 +32,7 @@ class TickHealth:
         current = time.monotonic() if now is None else float(now)
         late = float(duration_ms) > max(0.0, float(expected_interval_s)) * 1000.0 * 2.0
         gap_ms = max(0.0, (current - self._last_tick_start) * 1000.0) if self._last_tick_start > 0.0 else 0.0
-        late_gap = gap_ms > max(0.0, float(expected_interval_s)) * 1000.0 * 2.0 if gap_ms > 0.0 else False
+        late_gap = gap_ms > max(0.0, float(expected_interval_s)) * 1000.0 * 2.0
         self._last_tick_start = current
         self._ticks.append((current, max(0.0, float(duration_ms)), late, gap_ms, late_gap))
         self._prune(current)
@@ -104,8 +104,8 @@ class ResourceMonitor:
     ) -> CommandPayload:
         load1, load5, load15 = load
         cpu_count = max(1, os.cpu_count() or 1)
-        mem_total = float(meminfo.get("MemTotal", 0.0) or 0.0)
-        mem_available = float(meminfo.get("MemAvailable", 0.0) or 0.0)
+        mem_total = float(meminfo.get("MemTotal") or 0.0)
+        mem_available = float(meminfo.get("MemAvailable") or 0.0)
         return {
             "state": resource_state(load1 / cpu_count, system_cpu_pct, mem_available),
             "loadavg_1m": load1,
@@ -122,10 +122,10 @@ class ResourceMonitor:
     def _process_snapshot(self, status: Mapping[str, float], process_cpu_pct: float) -> CommandPayload:
         return {
             "pid": self.pid,
-            "rss_kb": float(status.get("VmRSS", 0.0) or 0.0),
-            "rss_hwm_kb": float(status.get("VmHWM", 0.0) or 0.0),
-            "threads": int(status.get("Threads", 0) or 0),
-            "fd_size": int(status.get("FDSize", 0) or 0),
+            "rss_kb": float(status.get("VmRSS") or 0.0),
+            "rss_hwm_kb": float(status.get("VmHWM") or 0.0),
+            "threads": int(status.get("Threads") or 0),
+            "fd_size": int(status.get("FDSize") or 0),
             "open_fds": self._open_fd_count(),
             "cpu_pct_one_core": process_cpu_pct,
         }
@@ -175,28 +175,10 @@ class ResourceMonitor:
 
     @staticmethod
     def _read_meminfo() -> dict[str, float]:
-        values: dict[str, float] = {}
-        try:
-            with open("/proc/meminfo", encoding="utf-8") as handle:
-                for line in handle:
-                    key, raw_value = line.split(":", 1)
-                    values[key] = float(raw_value.strip().split()[0])
-        except (OSError, ValueError, IndexError):
-            return {}
-        return values
+        return _read_proc_numeric_mapping("/proc/meminfo")
 
     def _read_process_status(self) -> dict[str, float]:
-        values: dict[str, float] = {}
-        try:
-            with open(f"/proc/{self.pid}/status", encoding="utf-8") as handle:
-                for line in handle:
-                    key, raw_value = line.split(":", 1)
-                    token = raw_value.strip().split()[0]
-                    if token.isdigit():
-                        values[key] = float(token)
-        except (OSError, ValueError, IndexError):
-            return {}
-        return values
+        return _read_proc_numeric_mapping(f"/proc/{self.pid}/status", digits_only=True)
 
     def _open_fd_count(self) -> int:
         try:
@@ -207,6 +189,26 @@ class ResourceMonitor:
 
 def _average(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def _read_proc_numeric_mapping(path: str, *, digits_only: bool = False) -> dict[str, float]:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return _proc_numeric_lines(handle, digits_only=digits_only)
+    except (OSError, ValueError, IndexError):
+        return {}
+
+
+def _proc_numeric_lines(lines: Iterable[str], *, digits_only: bool) -> dict[str, float]:
+    values: dict[str, float] = {}
+    for line in lines:
+        key, separator, raw_value = line.partition(":")
+        if not separator:
+            return {}
+        token = raw_value.strip().split()[0]
+        if not digits_only or token.isdigit():
+            values[key] = float(token)
+    return values
 
 
 def _percentage(value: float, total: float) -> float:

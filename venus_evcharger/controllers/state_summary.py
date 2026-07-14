@@ -50,10 +50,10 @@ class _StateSummary(_StateRuntimeRestore):
 
     @staticmethod
     def _summary_phase_mismatch_active(svc: Any) -> str:
-        active = bool(getattr(svc, "_phase_switch_mismatch_active", False))
+        active = bool(getattr(svc, "_phase_switch_mismatch_active", None))
         if active:
             return "1"
-        return "1" if str(getattr(svc, "_last_health_reason", "")) == "phase-switch-mismatch" else "0"
+        return "1" if str(getattr(svc, "_last_health_reason", None)) == "phase-switch-mismatch" else "0"
 
     @classmethod
     def _summary_phase_lockout_active(cls, svc: Any) -> str:
@@ -73,7 +73,7 @@ class _StateSummary(_StateRuntimeRestore):
     @classmethod
     def _summary_phase_supported_effective(cls, svc: Any) -> str:
         effective_supported = effective_supported_phase_selections(
-            getattr(svc, "supported_phase_selections", ("P1",)),
+            getattr(svc, "supported_phase_selections", None),
             lockout_selection=getattr(svc, "_phase_switch_lockout_selection", None),
             lockout_until=getattr(svc, "_phase_switch_lockout_until", None),
             now=time.time(),
@@ -82,7 +82,7 @@ class _StateSummary(_StateRuntimeRestore):
 
     @classmethod
     def _summary_phase_degraded_active(cls, svc: Any) -> str:
-        configured = normalize_phase_selection_tuple(getattr(svc, "supported_phase_selections", ("P1",)), ("P1",))
+        configured = normalize_phase_selection_tuple(getattr(svc, "supported_phase_selections", None), ("P1",))
         effective = effective_supported_phase_selections(
             configured,
             lockout_selection=getattr(svc, "_phase_switch_lockout_selection", None),
@@ -105,15 +105,15 @@ class _StateSummary(_StateRuntimeRestore):
     def _summary_switch_feedback_mismatch(cls, svc: Any) -> str:
         feedback_closed = getattr(svc, "_last_switch_feedback_closed", None)
         if feedback_closed is None:
-            return "1" if str(getattr(svc, "_last_health_reason", "")) == "contactor-feedback-mismatch" else "0"
+            return "1" if str(getattr(svc, "_last_health_reason", None)) == "contactor-feedback-mismatch" else "0"
         confirmed_pm_status = getattr(svc, "_last_confirmed_pm_status", None)
-        relay_on = False if not isinstance(confirmed_pm_status, dict) else bool(confirmed_pm_status.get("output", False))
+        relay_on = False if not isinstance(confirmed_pm_status, dict) else bool(confirmed_pm_status.get("output"))
         return str(int(switch_feedback_mismatch(relay_on, feedback_closed)))
 
     @staticmethod
     def _summary_contactor_count_reason(svc: Any) -> str:
-        lockout_reason = str(getattr(svc, "_contactor_lockout_reason", "") or "")
-        return lockout_reason or str(getattr(svc, "_contactor_fault_active_reason", "") or "")
+        lockout_reason = str(getattr(svc, "_contactor_lockout_reason", None) or "")
+        return lockout_reason or str(getattr(svc, "_contactor_fault_active_reason", None) or "")
 
     @classmethod
     def _summary_contactor_fault_count(cls, svc: Any) -> str:
@@ -127,15 +127,15 @@ class _StateSummary(_StateRuntimeRestore):
 
     @staticmethod
     def _summary_contactor_suspected_open(svc: Any) -> str:
-        return "1" if str(getattr(svc, "_last_health_reason", "")) == "contactor-suspected-open" else "0"
+        return "1" if str(getattr(svc, "_last_health_reason", None)) == "contactor-suspected-open" else "0"
 
     @staticmethod
     def _summary_contactor_suspected_welded(svc: Any) -> str:
-        return "1" if str(getattr(svc, "_last_health_reason", "")) == "contactor-suspected-welded" else "0"
+        return "1" if str(getattr(svc, "_last_health_reason", None)) == "contactor-suspected-welded" else "0"
 
     @staticmethod
     def _summary_contactor_lockout_active(svc: Any) -> str:
-        return "1" if str(getattr(svc, "_contactor_lockout_reason", "") or "") else "0"
+        return "1" if str(getattr(svc, "_contactor_lockout_reason", None) or "") else "0"
 
     @classmethod
     def _summary_contactor_lockout_reason(cls, svc: Any) -> str:
@@ -145,11 +145,11 @@ class _StateSummary(_StateRuntimeRestore):
 
     @staticmethod
     def _summary_fault_active(svc: Any) -> str:
-        return "1" if evse_fault_reason(getattr(svc, "_last_health_reason", "")) is not None else "0"
+        return "1" if evse_fault_reason(getattr(svc, "_last_health_reason", None)) is not None else "0"
 
     @staticmethod
     def _summary_fault_reason(svc: Any) -> str:
-        reason = evse_fault_reason(getattr(svc, "_last_health_reason", ""))
+        reason = evse_fault_reason(getattr(svc, "_last_health_reason", None))
         return "na" if reason is None else reason
 
     @classmethod
@@ -170,11 +170,11 @@ class _StateSummary(_StateRuntimeRestore):
 
     @staticmethod
     def _summary_recovery_active(svc: Any) -> str:
-        return "1" if str(getattr(svc, "_last_auto_state", "idle")) == "recovery" else "0"
+        return "1" if str(getattr(svc, "_last_auto_state", None)) == "recovery" else "0"
 
     @classmethod
     def _scheduled_snapshot(cls, svc: Any, current_time: float) -> Any | None:
-        if not mode_uses_scheduled_logic(getattr(svc, "virtual_mode", 0)):
+        if not mode_uses_scheduled_logic(getattr(svc, "virtual_mode", None)):
             return None
         return scheduled_mode_snapshot(
             datetime.fromtimestamp(current_time),
@@ -191,8 +191,8 @@ class _StateSummary(_StateRuntimeRestore):
             f"enable={getattr(svc, 'virtual_enable', 'na')}",
             f"startstop={getattr(svc, 'virtual_startstop', 'na')}",
             f"autostart={getattr(svc, 'virtual_autostart', 'na')}",
-            f"cutover={cls._summary_flag(getattr(svc, '_auto_mode_cutover_pending', False))}",
-            f"ignore_offtime={cls._summary_flag(getattr(svc, '_ignore_min_offtime_once', False))}",
+            f"cutover={cls._summary_flag(getattr(svc, '_auto_mode_cutover_pending', None))}",
+            f"ignore_offtime={cls._summary_flag(getattr(svc, '_ignore_min_offtime_once', None))}",
         )
 
     @classmethod
@@ -230,8 +230,8 @@ class _StateSummary(_StateRuntimeRestore):
             f"switch_backend={backend_type_for_service(svc, 'switch', 'shelly_contactor_switch')}",
             f"charger_backend={cls._summary_text(backend_type_for_service(svc, 'charger', ''), 'na')}",
             f"charger_target={cls._summary_float(getattr(svc, '_charger_target_current_amps', None))}",
-            f"charger_status={cls._summary_text(getattr(svc, '_last_charger_state_status', ''), 'na')}",
-            f"charger_fault={cls._summary_text(getattr(svc, '_last_charger_state_fault', ''), 'na')}",
+            f"charger_status={cls._summary_text(getattr(svc, '_last_charger_state_status', None), 'na')}",
+            f"charger_fault={cls._summary_text(getattr(svc, '_last_charger_state_fault', None), 'na')}",
             f"charger_transport={cls._summary_charger_transport_reason(svc)}",
             f"charger_transport_source={cls._summary_charger_transport_source(svc)}",
             f"charger_retry={cls._summary_charger_retry_reason(svc)}",
@@ -242,7 +242,7 @@ class _StateSummary(_StateRuntimeRestore):
     @classmethod
     def _summary_status_parts(cls, svc: Any) -> tuple[str, ...]:
         return (
-            f"status_source={cls._summary_text(getattr(svc, '_last_status_source', ''), 'unknown')}",
+            f"status_source={cls._summary_text(getattr(svc, '_last_status_source', None), 'unknown')}",
             f"fault={cls._summary_fault_active(svc)}",
             f"fault_reason={cls._summary_fault_reason(svc)}",
             f"auto_state={getattr(svc, '_last_auto_state', 'na')}",

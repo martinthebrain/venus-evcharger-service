@@ -23,6 +23,7 @@ NUMERIC_TEXT_TYPES = (str, bytes, bytearray, int, float)
 IntrospectionPayload: TypeAlias = dict[str, object]
 IntrospectionMapping: TypeAlias = Mapping[str, object]
 IntrospectionRequestList: TypeAlias = list[object]
+_TEXT_ENCODING = "utf-8"
 
 
 def _optional_float(value: object) -> float | None:
@@ -41,7 +42,7 @@ def _optional_int(value: object) -> int | None:
 
 def load_introspection_snapshot(path: str, *, max_age_seconds: float, now: float | None = None) -> IntrospectionPayload:
     """Load a fresh introspection snapshot, returning an empty mapping when unusable."""
-    normalized_path = str(path or "").strip()
+    normalized_path = str(path).strip()
     if not normalized_path:
         return {}
     payload = _read_snapshot_payload(normalized_path)
@@ -52,7 +53,7 @@ def load_introspection_snapshot(path: str, *, max_age_seconds: float, now: float
 
 def _read_snapshot_payload(path: str) -> IntrospectionPayload:
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding=_TEXT_ENCODING) as handle:
             payload = _object_mapping(json.load(handle))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
@@ -87,7 +88,10 @@ def path_unusable_until(
 ) -> tuple[bool, str]:
     """Return whether a cached finding says the path should currently be skipped."""
     finding = service_path_finding(snapshot, service_name, path)
-    status = str(finding.get("status", "") or "")
+    status_value = finding.get("status")
+    if not status_value:
+        return False, ""
+    status = str(status_value)
     if status not in UNUSABLE_PATH_STATUSES:
         return False, ""
     if _retry_after_pending(finding, now):
@@ -97,15 +101,17 @@ def path_unusable_until(
 
 def _retry_after_pending(finding: IntrospectionMapping, now: float | None) -> bool:
     current = time.time() if now is None else float(now)
-    return (_optional_float(finding.get("retry_after")) or 0.0) > current
+    retry_after = _optional_float(finding.get("retry_after"))
+    return retry_after is not None and retry_after > current
 
 
 def path_children(snapshot: IntrospectionMapping, service_name: str, path: str) -> list[str]:
     """Return cached child nodes for one service/path when the finding is fresh."""
     finding = service_path_finding(snapshot, service_name, path)
-    if str(finding.get("status", "") or "") != "fresh":
+    status_value = finding.get("status")
+    if not status_value or str(status_value) != "fresh":
         return []
-    return _normalized_children(finding.get("children", []))
+    return _normalized_children(finding.get("children"))
 
 
 def _normalized_children(children: object) -> list[str]:
@@ -125,7 +131,7 @@ def load_owner_introspection_snapshot(owner: object, *, now: float | None = None
 
 
 def _owner_snapshot_path(owner: object) -> str:
-    return str(getattr(owner, "dbus_introspection_snapshot_path", "") or "").strip()
+    return str(getattr(owner, "dbus_introspection_snapshot_path", None) or "").strip()
 
 
 def _refresh_owner_snapshot_if_due(owner: object, snapshot_path: str, current: float) -> None:
@@ -134,19 +140,19 @@ def _refresh_owner_snapshot_if_due(owner: object, snapshot_path: str, current: f
 
 
 def _owner_cached_snapshot(owner: object) -> IntrospectionPayload:
-    cached_snapshot = getattr(owner, "_dbus_introspection_snapshot_cache", {})
+    cached_snapshot = getattr(owner, "_dbus_introspection_snapshot_cache", None)
     return _object_mapping(cached_snapshot)
 
 
 def _owner_snapshot_reload_due(owner: object, current: float) -> bool:
-    cache_loaded_at = float(getattr(owner, "_dbus_introspection_snapshot_loaded_at", 0.0) or 0.0)
+    cache_loaded_at = float(getattr(owner, "_dbus_introspection_snapshot_loaded_at", None) or 0.0)
     return current - cache_loaded_at > 5.0
 
 
 def _reload_owner_snapshot(owner: object, snapshot_path: str, current: float) -> None:
     snapshot = load_introspection_snapshot(
         snapshot_path,
-        max_age_seconds=float(getattr(owner, "dbus_introspection_max_age_seconds", 900.0) or 900.0),
+        max_age_seconds=float(getattr(owner, "dbus_introspection_max_age_seconds", None) or 900.0),
         now=current,
     )
     setattr(owner, "_dbus_introspection_snapshot_cache", snapshot)
@@ -175,7 +181,7 @@ def request_owner_introspection(
     now: float | None = None,
 ) -> bool:
     """Queue a best-effort request using request-path configuration from an object."""
-    request_path = str(getattr(owner, "dbus_introspection_request_path", "") or "").strip()
+    request_path = str(getattr(owner, "dbus_introspection_request_path", None) or "").strip()
     if not request_path:
         return False
     return request_introspection(
@@ -245,7 +251,7 @@ def _append_request(
 
 
 def _request_list(payload: IntrospectionPayload) -> IntrospectionRequestList:
-    requests = payload.setdefault("requests", [])
+    requests = payload.get("requests")
     if isinstance(requests, list):
         existing_requests = list(requests)
         payload["requests"] = existing_requests
@@ -265,7 +271,7 @@ def _write_request_payload(request_path: str, payload: IntrospectionMapping) -> 
 
 def _load_request_payload(request_path: str) -> IntrospectionPayload:
     try:
-        with open(request_path, "r", encoding="utf-8") as handle:
+        with open(request_path, encoding=_TEXT_ENCODING) as handle:
             payload = _object_mapping(json.load(handle))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {}
@@ -273,7 +279,7 @@ def _load_request_payload(request_path: str) -> IntrospectionPayload:
 
 
 def _mapping_field(payload: IntrospectionMapping, key: str) -> IntrospectionPayload:
-    return _object_mapping(payload.get(key, {}))
+    return _object_mapping(payload.get(key))
 
 
 def _object_mapping(payload: object) -> IntrospectionPayload:

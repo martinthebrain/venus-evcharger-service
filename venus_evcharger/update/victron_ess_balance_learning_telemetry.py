@@ -81,12 +81,8 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
         current_abs_error_w: float,
         improvement_threshold_w: float,
     ) -> bool:
-        return bool(
-            command_error_w_f != 0.0
-            and float(source_error_w) != 0.0
-            and (command_error_w_f * float(source_error_w)) < 0.0
-            and current_abs_error_w >= improvement_threshold_w
-        )
+        opposite_signs = (command_error_w_f * float(source_error_w)) < 0.0
+        return bool(opposite_signs and current_abs_error_w >= improvement_threshold_w)
 
     def _victron_ess_balance_telemetry_command_state(
         self,
@@ -94,36 +90,19 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
         profile_key: str,
     ) -> dict[str, Any]:
         return {
-            "command_at": self._optional_float(getattr(svc, "_victron_ess_balance_telemetry_last_command_at", None)),
-            "command_error_w": self._optional_float(
-                getattr(svc, "_victron_ess_balance_telemetry_last_command_error_w", None)
-            ),
-            "command_setpoint_w": self._optional_float(
-                getattr(svc, "_victron_ess_balance_telemetry_last_command_setpoint_w", None)
-            ),
-            "command_profile_key": str(
-                getattr(svc, "_victron_ess_balance_telemetry_last_command_profile_key", profile_key) or profile_key
-            ).strip(),
-            "command_response_recorded": bool(
-                getattr(svc, "_victron_ess_balance_telemetry_command_response_recorded", False)
-            ),
-            "command_overshoot_recorded": bool(
-                getattr(svc, "_victron_ess_balance_telemetry_command_overshoot_recorded", False)
-            ),
-            "command_settled_recorded": bool(
-                getattr(svc, "_victron_ess_balance_telemetry_command_settled_recorded", False)
-            ),
+            "command_at": self._optional_float(svc._victron_ess_balance_telemetry_last_command_at),
+            "command_error_w": self._optional_float(svc._victron_ess_balance_telemetry_last_command_error_w),
+            "command_setpoint_w": self._optional_float(svc._victron_ess_balance_telemetry_last_command_setpoint_w),
+            "command_profile_key": str(svc._victron_ess_balance_telemetry_last_command_profile_key or profile_key).strip(),
+            "command_response_recorded": bool(svc._victron_ess_balance_telemetry_command_response_recorded),
+            "command_overshoot_recorded": bool(svc._victron_ess_balance_telemetry_command_overshoot_recorded),
+            "command_settled_recorded": bool(svc._victron_ess_balance_telemetry_command_settled_recorded),
         }
 
     @staticmethod
     def _victron_ess_balance_telemetry_thresholds(svc: Any) -> tuple[float, float]:
-        deadband_w = max(
-            0.0,
-            float(getattr(svc, "auto_battery_discharge_balance_victron_bias_deadband_watts", 0.0) or 0.0),
-        )
-        base_setpoint_w = float(
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_base_setpoint_watts", 50.0) or 0.0
-        )
+        deadband_w = max(0.0, float(svc.auto_battery_discharge_balance_victron_bias_deadband_watts))
+        base_setpoint_w = float(svc.auto_battery_discharge_balance_victron_bias_base_setpoint_watts)
         return deadband_w, base_setpoint_w
 
     def _victron_ess_balance_update_response_delay(
@@ -166,7 +145,7 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
     ) -> None:
         svc._victron_ess_balance_telemetry_command_overshoot_recorded = True
         svc._victron_ess_balance_telemetry_overshoot_count = int(
-            getattr(svc, "_victron_ess_balance_telemetry_overshoot_count", 0) or 0
+            svc._victron_ess_balance_telemetry_overshoot_count
         ) + 1
         self._victron_ess_balance_increment_profile_counter(svc, command_profile_key, "overshoot_count")
         self._enter_victron_ess_balance_overshoot_cooldown(svc, now, "overshoot_detected")
@@ -174,9 +153,7 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
 
     def _victron_ess_balance_mark_settled(self, svc: Any, command_profile_key: str) -> None:
         svc._victron_ess_balance_telemetry_command_settled_recorded = True
-        svc._victron_ess_balance_telemetry_settled_count = int(
-            getattr(svc, "_victron_ess_balance_telemetry_settled_count", 0) or 0
-        ) + 1
+        svc._victron_ess_balance_telemetry_settled_count = int(svc._victron_ess_balance_telemetry_settled_count) + 1
         self._victron_ess_balance_increment_profile_counter(svc, command_profile_key, "settled_count")
 
     def _victron_ess_balance_maybe_record_response_delay(
@@ -356,7 +333,7 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
         svc._victron_ess_balance_telemetry_stability_score = self._victron_ess_balance_stability_score(svc)
         self._victron_ess_balance_refresh_profile_stability(
             svc,
-            str(command_state.get("command_profile_key", "") or profile_key),
+            str(command_state["command_profile_key"] or profile_key),
         )
         self._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
 
@@ -383,12 +360,10 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
 
     @classmethod
     def _victron_ess_balance_stability_score(cls, svc: Any) -> float:
-        settled_count = max(0, int(getattr(svc, "_victron_ess_balance_telemetry_settled_count", 0) or 0))
-        overshoot_count = max(0, int(getattr(svc, "_victron_ess_balance_telemetry_overshoot_count", 0) or 0))
-        estimated_gain = cls._optional_float(getattr(svc, "_victron_ess_balance_telemetry_estimated_gain", None))
-        response_delay_seconds = cls._optional_float(
-            getattr(svc, "_victron_ess_balance_telemetry_response_delay_seconds", None)
-        )
+        settled_count = max(0, int(svc._victron_ess_balance_telemetry_settled_count))
+        overshoot_count = max(0, int(svc._victron_ess_balance_telemetry_overshoot_count))
+        estimated_gain = cls._optional_float(svc._victron_ess_balance_telemetry_estimated_gain)
+        response_delay_seconds = cls._optional_float(svc._victron_ess_balance_telemetry_response_delay_seconds)
         return cls._victron_ess_balance_stability_score_values(
             settled_count,
             overshoot_count,
@@ -420,7 +395,7 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
             gain_mad,
             0.1,
         )
-        return max(0.0, min(1.0, (delay_ratio + gain_ratio) / 2.0))
+        return (delay_ratio + gain_ratio) / 2.0
 
     @classmethod
     def _victron_ess_balance_regime_consistency_score(cls, profile: dict[str, Any]) -> float:
@@ -432,8 +407,8 @@ class _UpdateCycleVictronEssBalanceLearningTelemetry(_UpdateCycleVictronEssBalan
 
     @classmethod
     def _victron_ess_balance_reproducibility_score(cls, profile: dict[str, Any]) -> float:
-        settled_count = max(0, int(profile.get("settled_count", 0) or 0))
-        overshoot_count = max(0, int(profile.get("overshoot_count", 0) or 0))
+        settled_count = max(0, int(profile["settled_count"]))
+        overshoot_count = max(0, int(profile["overshoot_count"]))
         total = settled_count + overshoot_count
         settle_ratio = 1.0 if total <= 0 else float(settled_count) / float(total)
         variance_score = cls._optional_float(profile.get("response_variance_score")) or 0.0

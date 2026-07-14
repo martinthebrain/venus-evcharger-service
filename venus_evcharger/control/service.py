@@ -11,8 +11,10 @@ phase-selection writes.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Callable
 from typing import TypeGuard
+
 from venus_evcharger.control.models import ControlCommand, ControlCommandName, ControlCommandSource
 
 
@@ -120,25 +122,14 @@ class ControlApiV1Service:
         }
     )
     _INTEGER_AUTO_RUNTIME_PATHS = frozenset({"/Auto/PhaseMismatchLockoutCount"})
+
     @staticmethod
     def _always_valid_value(_value: Any) -> bool:
         return True
 
-    @staticmethod
-    def _is_command_name(value: str) -> TypeGuard[ControlCommandName]:
-        return value in {
-            "legacy_unknown_write",
-            "reset_contactor_lockout",
-            "reset_phase_lockout",
-            "set_auto_runtime_setting",
-            "set_auto_start",
-            "set_current_setting",
-            "set_enable",
-            "set_mode",
-            "set_phase_selection",
-            "set_start_stop",
-            "trigger_software_update",
-        }
+    @classmethod
+    def _is_command_name(cls, value: str) -> TypeGuard[ControlCommandName]:
+        return value in cls._COMMAND_NAMES
 
     @staticmethod
     def _is_bool_or_binary_int(value: Any) -> bool:
@@ -184,7 +175,7 @@ class ControlApiV1Service:
 
     def command_for_dbus_write(self, path: str, value: Any) -> ControlCommand:
         """Translate one DBus write into one canonical Control API command."""
-        return self.command_for_write(path, value, source="dbus")
+        return self.command_for_write(path, value)
 
     def command_from_payload(
         self,
@@ -211,11 +202,8 @@ class ControlApiV1Service:
         if command.name == "legacy_unknown_write":
             raise ValueError(f"Unsupported control path '{path}'.")
         self._validate_command_value(command.name, path, payload.get("value"))
-        return ControlCommand(
-            name=command.name,
-            path=path,
-            value=payload.get("value"),
-            source=source,
+        return replace(
+            command,
             detail=str(payload.get("detail", "")).strip(),
             command_id=str(payload.get("command_id", "")).strip(),
             idempotency_key=str(payload.get("idempotency_key", "")).strip(),
@@ -291,15 +279,11 @@ class ControlApiV1Service:
         return f"Control command '{command_name}' does not support path '{path}'."
 
     def _specialized_command_path_error(self, command_name: ControlCommandName, path: str) -> str:
-        handlers: dict[ControlCommandName, Callable[[], str]] = {
-            "legacy_unknown_write": lambda: "Control command 'legacy_unknown_write' requires an explicit 'path'."
-            if not path
-            else "",
-            "set_auto_runtime_setting": lambda: self._path_membership_error(command_name, path, self._auto_runtime_setting_paths),
-            "set_current_setting": lambda: self._path_membership_error(command_name, path, self._current_setting_paths),
-        }
-        handler = handlers.get(command_name)
-        return handler() if handler is not None else ""
+        if command_name == "set_auto_runtime_setting":
+            return self._path_membership_error(command_name, path, self._auto_runtime_setting_paths)
+        if command_name == "set_current_setting":
+            return self._path_membership_error(command_name, path, self._current_setting_paths)
+        return ""
 
     @staticmethod
     def _path_membership_error(command_name: ControlCommandName, path: str, allowed_paths: frozenset[str]) -> str:
@@ -397,9 +381,10 @@ class ControlApiV1Service:
 
     @staticmethod
     def _is_valid_hour_minute(value: str) -> bool:
-        hour_text, separator, minute_text = value.strip().partition(":")
-        if separator != ":":
+        normalized = value.strip()
+        if normalized.count(":") != 1:
             return False
+        hour_text, minute_text = normalized.split(":")
         if not hour_text.isdigit() or not minute_text.isdigit():
             return False
         return ControlApiV1Service._hour_in_range(hour_text) and ControlApiV1Service._minute_in_range(minute_text)

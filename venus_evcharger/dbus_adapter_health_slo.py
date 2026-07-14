@@ -143,7 +143,8 @@ def runtime_pressure_state(resource_state: str, backpressure_state: str) -> Gate
 
 
 def higher_pressure_state(left: GatewayPressureState, right: GatewayPressureState) -> GatewayPressureState:
-    return left if _PRESSURE_RANK[left] >= _PRESSURE_RANK[right] else right
+    # Equal ranks necessarily represent the same Literal value, so either side is equivalent.
+    return left if _PRESSURE_RANK[left] >= _PRESSURE_RANK[right] else right  # pragma: no mutate
 
 
 def pressure_limited_publish_burst(
@@ -152,6 +153,7 @@ def pressure_limited_publish_burst(
     base_burst: int,
     pressure_state: GatewayPressureState,
 ) -> int:
+    validate_pressure_inputs(base_burst, pressure_state)
     if pressure_state == "protective":
         return 1
     if pressure_state == "slow":
@@ -167,24 +169,30 @@ def pressure_limited_queue_budgets(
     base_local_publish_burst: int,
     pressure_state: GatewayPressureState,
 ) -> dict[str, int]:
+    validate_pressure_inputs(base_local_publish_burst, pressure_state)
     adjusted = dict(budgets)
     if pressure_state == "ok":
         return adjusted
     if pressure_state == "protective":
-        return _with_publish_caps(adjusted, gui_cap=1, local_cap=1, diagnostic_cap=0)
+        return _with_publish_caps(adjusted, gui_cap=1, local_cap=1)
     if pressure_state == "slow":
         return _with_publish_caps(
             adjusted,
             gui_cap=max(1, base_local_publish_burst // 4),
             local_cap=1,
-            diagnostic_cap=0,
         )
     return _with_publish_caps(
         adjusted,
         gui_cap=max(1, base_local_publish_burst // 2),
         local_cap=max(1, base_local_publish_burst // 4),
-        diagnostic_cap=0,
     )
+
+
+def validate_pressure_inputs(base_burst: int, pressure_state: GatewayPressureState) -> None:
+    if base_burst < 1:
+        raise ValueError("base publish burst must be positive")
+    if pressure_state not in _PRESSURE_RANK:
+        raise ValueError(f"unknown gateway pressure state: {pressure_state}")
 
 
 def _with_publish_caps(
@@ -192,9 +200,8 @@ def _with_publish_caps(
     *,
     gui_cap: int,
     local_cap: int,
-    diagnostic_cap: int,
 ) -> dict[str, int]:
     budgets["gui-critical-publish"] = min(int(budgets.get("gui-critical-publish", gui_cap)), gui_cap)
     budgets["local-publish"] = min(int(budgets.get("local-publish", local_cap)), local_cap)
-    budgets["diagnostic"] = min(int(budgets.get("diagnostic", diagnostic_cap)), diagnostic_cap)
+    budgets["diagnostic"] = 0
     return budgets

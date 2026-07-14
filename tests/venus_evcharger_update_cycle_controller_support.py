@@ -6,13 +6,16 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.modbus_transport import ModbusRequest, ModbusSlaveOfflineError
 from venus_evcharger.backend.shelly_io import ShellyIoController
 from venus_evcharger.auto.policy import AutoPolicy
-from venus_evcharger.update.controller import UpdateCycleController
+from venus_evcharger.runtime.setup_support import initialize_victron_balance_runtime_state
+from venus_evcharger.service.control_state_config import _VICTRON_BIAS_FIELDS
+from venus_evcharger.update.controller import UpdateCycleController as _RuntimeUpdateCycleController
 from venus_evcharger.update.relay import _UpdateCycleRelay
 
 
@@ -27,6 +30,25 @@ def _phase_values(total_power, voltage, _phase, _voltage_mode):
 
 def utc_timestamp(year: int, month: int, day: int, hour: int, minute: int = 0) -> float:
     return datetime(year, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
+
+
+class UpdateCycleController(_RuntimeUpdateCycleController):
+    """Production controller with the runtime initialization contract applied to test doubles."""
+
+    def __init__(self, service: Any, phase_values_func: Any, health_code_func: Any) -> None:
+        initialize_victron_test_service(service)
+        super().__init__(service, phase_values_func, health_code_func)
+
+
+def initialize_victron_test_service(service: Any) -> None:
+    """Apply production config/runtime defaults while preserving explicit scenario state."""
+    for field in _VICTRON_BIAS_FIELDS:
+        attr_name = field.attr or field.name
+        if not hasattr(service, attr_name):
+            setattr(service, attr_name, field.default)
+    explicit_state = vars(service).copy()
+    initialize_victron_balance_runtime_state(service)
+    vars(service).update(explicit_state)
 
 
 class _FakeTemplateResponse:

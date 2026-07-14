@@ -112,14 +112,14 @@ def _optional_float(value: object) -> float | None:
 
 
 def _coerced_int(raw_profile: Mapping[str, Any], key: str) -> int:
-    return int(raw_profile.get(key, 0) or 0)
+    return int(raw_profile.get(key) or 0)
 
 
 def _normalized_direction(value: object) -> str:
     normalized = str(value).strip().lower()
-    return normalized if normalized in {"idle", "charge", "discharge"} else "idle"
+    return normalized if normalized in {"charge", "discharge"} else "idle"
 
 
 def _normalized_activity_state(value: object) -> str:
     normalized = str(value).strip().lower()
-    return normalized if normalized in {"idle", "active"} else "idle"
+    return "active" if normalized == "active" else "idle"
