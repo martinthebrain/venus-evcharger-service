@@ -798,9 +798,18 @@ class ServiceCompositionContractTests(unittest.TestCase):
         self.assertEqual(service._charger_backend, "charger")
         self.assertTrue(service.topology_configured)
         self.assertFalse(service.primary_rpc_configured)
-        self.assertEqual(runtime.calls[0][0], "initialize_runtime_support")
+        self.assertEqual(
+            [call[0] for call in runtime.calls[:2]],
+            ["initialize_runtime_support", "init_worker_state"],
+        )
         with self.assertRaisesRegex(RuntimeError, "already initialized"):
             owner.initialize_runtime()
+
+        prepared_owner = ServiceControllerOwner(service, _functions())
+        self.assertIs(prepared_owner.prepare_runtime_state(), runtime)
+        with self.assertRaisesRegex(RuntimeError, "already prepared"):
+            prepared_owner.prepare_runtime_state()
+        self.assertIs(prepared_owner.initialize_runtime().runtime, runtime)
 
 
 if __name__ == "__main__":

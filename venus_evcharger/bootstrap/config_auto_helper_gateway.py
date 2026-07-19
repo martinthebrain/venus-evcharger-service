@@ -15,6 +15,7 @@ DBUS_GATEWAY_HEALTH_PATH_KEY = "DbusGatewayHealthPath"
 DBUS_GATEWAY_SOCKET_PATH_KEY = "DbusGatewaySocketPath"
 DBUS_GATEWAY_COMMAND_DIR_KEY = "DbusGatewayCommandDir"
 DBUS_GATEWAY_CORE_COMMAND_DIR_KEY = "DbusGatewayCoreCommandDir"
+DBUS_GATEWAY_MAX_AGE_KEY = "DbusGatewayMaxAgeSeconds"
 DBUS_INTROSPECTION_ENABLED_KEY = "DbusIntrospectionEnabled"
 DBUS_INTROSPECTION_SNAPSHOT_PATH_KEY = "DbusIntrospectionSnapshotPath"
 DBUS_INTROSPECTION_REQUEST_PATH_KEY = "DbusIntrospectionRequestPath"
@@ -51,6 +52,10 @@ def load_gateway_path_config(svc: Any, defaults: configparser.SectionProxy) -> N
         DBUS_GATEWAY_CORE_COMMAND_DIR_KEY,
         _default_gateway_path(svc, "core-commands"),
     ).strip()
+    svc.dbus_gateway_max_age_seconds = max(
+        0.0,
+        float(_config_value(defaults, DBUS_GATEWAY_MAX_AGE_KEY, 10.0)),
+    )
 
 
 def load_introspection_config(svc: Any, defaults: configparser.SectionProxy) -> None:

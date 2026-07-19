@@ -103,6 +103,7 @@ class ServiceControllerOwner:
             formatters=dict(functions.formatters),
         )
         self._runtime: RuntimeControllers | None = None
+        self._prepared_runtime: RuntimeSupportController | None = None
 
     @property
     def runtime(self) -> RuntimeControllers:
@@ -111,21 +112,36 @@ class ServiceControllerOwner:
             raise RuntimeError("wallbox runtime controllers are not initialized")
         return self._runtime
 
+    def prepare_runtime_state(self) -> RuntimeSupportController:
+        """Initialize shared runtime state and resolve backends before composing controllers."""
+        if self._runtime is not None or self._prepared_runtime is not None:
+            raise RuntimeError("wallbox runtime state is already prepared")
+        runtime = RuntimeSupportController(
+            service=self._service,
+            age_seconds_func=self.functions.age_seconds,
+            health_code_func=self.functions.health_code,
+        )
+        runtime.initialize_runtime_support()
+        runtime.init_worker_state()
+        self._apply_resolved_backends()
+        self._prepared_runtime = runtime
+        return runtime
+
     def initialize_runtime(self) -> RuntimeControllers:
         """Build the configured runtime object graph exactly once."""
         if self._runtime is not None:
             raise RuntimeError("wallbox runtime controllers are already initialized")
 
         service = self._service
-        runtime = RuntimeSupportController(service, self.functions.age_seconds, self.functions.health_code)
-        runtime.initialize_runtime_support()
+        runtime = self._prepared_runtime
+        if runtime is None:
+            runtime = self.prepare_runtime_state()
         auto = AutoDecisionController(
             AutoDecisionPort(service),
             self.functions.health_code,
             self.functions.mode_uses_auto_logic,
         )
         publisher = DbusPublishController(require_publish_service(service), self.functions.age_seconds)
-        self._apply_resolved_backends()
         shelly = ShellyIoController(service)
         write = DbusWriteController(WriteControllerPort(service))
         auto_input = AutoInputSupervisor(

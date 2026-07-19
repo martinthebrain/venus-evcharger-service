@@ -773,6 +773,7 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
         self.assertEqual(service.dbus_gateway_socket_path, "/run/venus-evcharger/gateway.sock")
         self.assertEqual(service.dbus_gateway_command_dir, "/run/venus-evcharger/dbus-commands")
         self.assertEqual(service.dbus_gateway_core_command_dir, "/run/venus-evcharger/core-commands")
+        self.assertEqual(service.dbus_gateway_max_age_seconds, 10.0)
         self.assertTrue(service.dbus_introspection_enabled)
         self.assertEqual(service.dbus_introspection_snapshot_path, "/run/dbus-venus-evcharger-dbus-map-23.json")
         self.assertEqual(
@@ -796,6 +797,7 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
                             "DbusGatewaySocketPath": " /tmp/gateway.sock ",
                             "DbusGatewayCommandDir": " /tmp/commands ",
                             "DbusGatewayCoreCommandDir": " /tmp/core-commands ",
+                            "DbusGatewayMaxAgeSeconds": "4.5",
                             "DbusIntrospectionEnabled": raw_value,
                             "DbusIntrospectionSnapshotPath": " /tmp/map.json ",
                             "DbusIntrospectionRequestPath": " /tmp/map-requests.json ",
@@ -810,10 +812,21 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
                 self.assertEqual(service.dbus_gateway_socket_path, "/tmp/gateway.sock")
                 self.assertEqual(service.dbus_gateway_command_dir, "/tmp/commands")
                 self.assertEqual(service.dbus_gateway_core_command_dir, "/tmp/core-commands")
+                self.assertEqual(service.dbus_gateway_max_age_seconds, 4.5)
                 self.assertTrue(service.dbus_introspection_enabled)
                 self.assertEqual(service.dbus_introspection_snapshot_path, "/tmp/map.json")
                 self.assertEqual(service.dbus_introspection_request_path, "/tmp/map-requests.json")
                 self.assertEqual(service.dbus_introspection_max_age_seconds, 321.0)
+
+    def test_gateway_cache_max_age_clamps_negative_values(self) -> None:
+        service = SimpleNamespace(deviceinstance=25)
+
+        load_gateway_and_introspection_config(
+            service,
+            _defaults({"DbusGatewayMaxAgeSeconds": "-1"}),
+        )
+
+        self.assertEqual(service.dbus_gateway_max_age_seconds, 0.0)
 
     def test_helper_resilience_config_uses_defaults(self) -> None:
         service = SimpleNamespace()

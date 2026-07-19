@@ -121,11 +121,12 @@ class ServiceBootstrapController:
         """Fully initialize the wallbox service instance."""
         bootstrap_steps = (
             ("load-runtime-configuration", self.load_runtime_configuration),
-            ("initialize-controllers", self.initialize_controllers),
+            ("prepare-runtime-state", self.prepare_runtime_state),
             ("initialize-virtual-state", self.initialize_virtual_state),
+            ("initialize-dbus-service", self.initialize_dbus_service),
+            ("initialize-controllers", self.initialize_controllers),
             ("restore-runtime-state", self.restore_runtime_state),
             ("apply-device-metadata", self.apply_device_metadata),
-            ("initialize-dbus-service", self.initialize_dbus_service),
             ("register-dbus-paths", self.register_paths),
             ("publish-dbus-service", self.publish_dbus_service),
             ("start-runtime-loops", self.start_runtime_loops),
@@ -142,6 +143,10 @@ class ServiceBootstrapController:
     def initialize_controllers(self) -> None:
         """Create the configured runtime controller graph."""
         self.components.runtime.initialize_controllers()
+
+    def prepare_runtime_state(self) -> None:
+        """Initialize shared runtime state before phase-dependent controllers."""
+        self.components.runtime.prepare_runtime_state()
 
     def initialize_virtual_state(self) -> None:
         """Initialize DBus-facing volatile state."""

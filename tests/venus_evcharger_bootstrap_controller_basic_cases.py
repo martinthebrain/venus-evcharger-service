@@ -48,16 +48,20 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         self.assertIs(controller.components.config.backend, controller.components.backend)
         self.assertIs(controller.components.config.auto, controller.components.auto)
 
+        controller.components.runtime.prepare_runtime_state = MagicMock()
+        controller.prepare_runtime_state()
+        controller.components.runtime.prepare_runtime_state.assert_called_once_with()
+
     def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self):
         service = SimpleNamespace(
             startup_device_info_retries=2,
             startup_device_info_retry_seconds=0,
-            fetch_rpc=MagicMock(side_effect=RuntimeError("offline")),
+            runtime=SimpleNamespace(rpc_call=MagicMock(side_effect=RuntimeError("offline"))),
         )
 
         controller = self._controller(service)
         self.assertEqual(controller.fetch_device_info_with_fallback(), {})
-        self.assertEqual(service.fetch_rpc.call_count, 3)
+        self.assertEqual(service.runtime.rpc_call.call_count, 3)
 
     def test_logging_level_and_signal_install_cover_default_and_error_paths(self):
         empty_config = configparser.ConfigParser(default_section="NOT_DEFAULT")
@@ -85,7 +89,9 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         service = SimpleNamespace(
             startup_device_info_retries=1,
             startup_device_info_retry_seconds=2.5,
-            fetch_rpc=MagicMock(side_effect=[RuntimeError("offline"), {"mac": "ABC"}]),
+            runtime=SimpleNamespace(
+                rpc_call=MagicMock(side_effect=[RuntimeError("offline"), {"mac": "ABC"}])
+            ),
         )
         controller = self._controller(service)
 
@@ -101,7 +107,7 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         service = SimpleNamespace(
             startup_device_info_retries=0,
             startup_device_info_retry_seconds=0,
-            fetch_rpc=MagicMock(return_value=["not", "a", "mapping"]),
+            runtime=SimpleNamespace(rpc_call=MagicMock(return_value=["not", "a", "mapping"])),
         )
         controller = self._controller(service)
 

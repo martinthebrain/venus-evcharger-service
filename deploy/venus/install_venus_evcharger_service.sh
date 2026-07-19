@@ -125,13 +125,13 @@ chmod 755 "$OBSERVER_SERVICE_DIR/run"
 # shellcheck source=deploy/venus/service_lifecycle.sh
 . "$SERVICE_LIFECYCLE"
 
-# Reconcile runit's watched directories before restarting. Removing the links
-# gives runsvdir time to release old supervisors; the targeted /proc cleanup is
-# a final guard for upgrades that previously replaced a live service directory.
-venus_stop_and_deregister_services
-venus_cleanup_deleted_service_processes
-venus_register_service_links
-venus_start_services
+# Venus classic uses svscan/supervise and may retain replaced service-directory
+# inodes. Reconcile only this project's process tree before starting one fresh
+# instance of each service.
+if ! venus_reconcile_services; then
+	echo "Failed to start Venus EV charger services under runit." >&2
+	exit 1
+fi
 
 remove_rc_local_line() {
 	line="$1"

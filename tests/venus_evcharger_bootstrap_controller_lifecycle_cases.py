@@ -18,6 +18,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         controller = self._controller(service)
         calls = []
         controller.load_runtime_configuration = MagicMock(side_effect=lambda: calls.append("config"))
+        controller.prepare_runtime_state = MagicMock(side_effect=lambda: calls.append("prepare"))
         controller.initialize_controllers = MagicMock(side_effect=lambda: calls.append("controllers"))
         controller.initialize_virtual_state = MagicMock(side_effect=lambda: calls.append("virtual"))
         controller.restore_runtime_state = MagicMock(side_effect=lambda: calls.append("restore"))
@@ -32,23 +33,25 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
 
         self.assertEqual(
             calls,
-            ["config", "controllers", "virtual", "restore", "metadata", "dbus", "paths", "publish", "loops"],
+            ["config", "prepare", "virtual", "dbus", "controllers", "restore", "metadata", "paths", "publish", "loops"],
         )
         self.assertEqual(
             [call.args for call in info_mock.call_args_list],
             [
                 ("Bootstrap step start: %s", "load-runtime-configuration"),
                 ("Bootstrap step complete: %s", "load-runtime-configuration"),
-                ("Bootstrap step start: %s", "initialize-controllers"),
-                ("Bootstrap step complete: %s", "initialize-controllers"),
+                ("Bootstrap step start: %s", "prepare-runtime-state"),
+                ("Bootstrap step complete: %s", "prepare-runtime-state"),
                 ("Bootstrap step start: %s", "initialize-virtual-state"),
                 ("Bootstrap step complete: %s", "initialize-virtual-state"),
+                ("Bootstrap step start: %s", "initialize-dbus-service"),
+                ("Bootstrap step complete: %s", "initialize-dbus-service"),
+                ("Bootstrap step start: %s", "initialize-controllers"),
+                ("Bootstrap step complete: %s", "initialize-controllers"),
                 ("Bootstrap step start: %s", "restore-runtime-state"),
                 ("Bootstrap step complete: %s", "restore-runtime-state"),
                 ("Bootstrap step start: %s", "apply-device-metadata"),
                 ("Bootstrap step complete: %s", "apply-device-metadata"),
-                ("Bootstrap step start: %s", "initialize-dbus-service"),
-                ("Bootstrap step complete: %s", "initialize-dbus-service"),
                 ("Bootstrap step start: %s", "register-dbus-paths"),
                 ("Bootstrap step complete: %s", "register-dbus-paths"),
                 ("Bootstrap step start: %s", "publish-dbus-service"),
@@ -62,6 +65,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         service = MagicMock()
         controller = self._controller(service)
         controller.load_runtime_configuration = MagicMock()
+        controller.prepare_runtime_state = MagicMock()
         controller.initialize_controllers = MagicMock()
         controller.initialize_virtual_state = MagicMock()
         controller.restore_runtime_state = MagicMock()
