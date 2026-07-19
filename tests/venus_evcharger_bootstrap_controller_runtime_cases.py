@@ -18,7 +18,6 @@ class _StatePort:
 
 class _RuntimePort:
     def __init__(self) -> None:
-        self.initialize_worker_state = MagicMock()
         self.mark_mainloop_thread = MagicMock()
         self.start_io_worker = MagicMock()
         self.start_update_worker = MagicMock()
@@ -70,12 +69,26 @@ def _initializer(service: object, *, mode_uses_auto: bool = False) -> RuntimeIni
 
 class TestServiceBootstrapRuntimeComponent(unittest.TestCase):
     def test_initialize_controllers_uses_explicit_controller_owner_port(self) -> None:
-        owner = SimpleNamespace(initialize_runtime=MagicMock(return_value=object()))
+        owner = SimpleNamespace(
+            prepare_runtime_state=MagicMock(),
+            initialize_runtime=MagicMock(return_value=object()),
+        )
         service = _runtime_service(controllers=owner)
 
         _initializer(service).initialize_controllers()
 
         owner.initialize_runtime.assert_called_once_with()
+
+    def test_prepare_runtime_state_uses_explicit_controller_owner_port(self) -> None:
+        owner = SimpleNamespace(
+            prepare_runtime_state=MagicMock(),
+            initialize_runtime=MagicMock(return_value=object()),
+        )
+        service = _runtime_service(controllers=owner)
+
+        _initializer(service).prepare_runtime_state()
+
+        owner.prepare_runtime_state.assert_called_once_with()
 
     def test_initialize_virtual_state_applies_configured_values(self) -> None:
         parser = configparser.ConfigParser()
@@ -95,14 +108,13 @@ class TestServiceBootstrapRuntimeComponent(unittest.TestCase):
         self.assertEqual(service.supported_phase_selections, ("P1",))
         self.assertEqual(service.learned_charge_power_state, "unknown")
 
-    def test_restore_runtime_state_records_manual_target_and_initializes_worker_state(self) -> None:
+    def test_restore_runtime_state_records_manual_target_without_reinitializing_workers(self) -> None:
         service = _runtime_service(virtual_mode=0, virtual_enable=0, virtual_startstop=1)
 
         _initializer(service).restore_runtime_state()
 
         self.assertTrue(service._startup_manual_target)
         service.state.load_runtime_state.assert_called_once_with()
-        service.runtime.initialize_worker_state.assert_called_once_with()
 
     def test_restore_runtime_state_does_not_carry_manual_target_into_auto(self) -> None:
         service = _runtime_service(virtual_mode=1, virtual_enable=1, virtual_startstop=1)

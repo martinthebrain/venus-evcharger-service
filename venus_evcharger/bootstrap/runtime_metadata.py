@@ -6,9 +6,24 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from venus_evcharger.bootstrap.errors import BOOTSTRAP_DEVICE_INFO_ERRORS
+
+
+@runtime_checkable
+class DeviceInfoRpcPort(Protocol):
+    """Narrow runtime boundary used for startup device metadata."""
+
+    def rpc_call(self, method: str) -> object: ...
+
+
+def require_device_info_rpc(svc: object) -> DeviceInfoRpcPort:
+    """Return the runtime RPC port or fail at the metadata boundary."""
+    runtime = getattr(svc, "runtime", None)
+    if not isinstance(runtime, DeviceInfoRpcPort):
+        raise TypeError("metadata service runtime does not implement DeviceInfoRpcPort")
+    return runtime
 
 
 def topology_configured(svc: Any) -> bool:
@@ -41,7 +56,7 @@ def fetch_device_info_with_fallback(svc: Any, sleep_func: Callable[[float], None
     sleep = time.sleep if sleep_func is None else sleep_func
     for attempt in range(attempts):
         try:
-            return device_info_payload(svc.fetch_rpc("Shelly.GetDeviceInfo"))
+            return device_info_payload(require_device_info_rpc(svc).rpc_call("Shelly.GetDeviceInfo"))
         except BOOTSTRAP_DEVICE_INFO_ERRORS as error:
             last_error = error
             if _should_retry_device_info(attempt, attempts, svc.startup_device_info_retry_seconds):

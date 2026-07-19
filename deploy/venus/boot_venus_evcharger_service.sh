@@ -49,11 +49,13 @@ fi
 # shellcheck source=deploy/venus/service_lifecycle.sh
 . "$SERVICE_LIFECYCLE"
 
-# Boot normally has no stale processes. The cleanup also repairs systems left
-# behind by an interrupted updater from an older release.
-venus_cleanup_deleted_service_processes
+# Keep repeated boot-helper calls idempotent. Full process-tree reconciliation
+# belongs to the installer, where an update may have replaced live directories.
 venus_register_service_links
-venus_start_services
+if ! venus_start_services; then
+	echo "Failed to start Venus EV charger services under runit." >&2
+	exit 1
+fi
 
 # Optionally kick off the generic Shelly disable helper in the background. This
 # avoids two Venus services trying to own the same physical Shelly device.

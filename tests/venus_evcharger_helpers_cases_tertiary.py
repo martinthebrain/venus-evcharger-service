@@ -81,10 +81,10 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service = make_helper_service()
         service.startup_device_info_retries = 2
         service.startup_device_info_retry_seconds = 0
-        service.fetch_rpc = MagicMock(side_effect=RuntimeError("offline"))
+        service.controllers.runtime.shelly.rpc_call = MagicMock(side_effect=RuntimeError("offline"))
 
         self.assertEqual(service.controllers.bootstrap.fetch_device_info_with_fallback(), {})
-        self.assertEqual(service.fetch_rpc.call_count, 3)
+        self.assertEqual(service.controllers.runtime.shelly.rpc_call.call_count, 3)
 
     def test_handle_write_startstop_switches_relay_and_updates_dbus(self):
         service = make_helper_service()

@@ -14,7 +14,6 @@ from venus_evcharger.bootstrap.contracts import (
     require_dbus_service,
     require_gobject_timers,
     require_runtime_state,
-    require_worker_runtime,
     require_write_handler,
 )
 from venus_evcharger.dbus_adapter.process.protocols.context import DbusAdapterProcessContext
@@ -150,10 +149,6 @@ class BoundaryRequirementFailureTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "does not expose ControllerOwnerPort"):
             require_controller_owner(SimpleNamespace())
 
-    def test_require_worker_runtime_rejects_missing_port(self) -> None:
-        with self.assertRaisesRegex(TypeError, "does not expose WorkerRuntimePort"):
-            require_worker_runtime(SimpleNamespace())
-
     def test_require_dbus_service_rejects_missing_port(self) -> None:
         with self.assertRaisesRegex(TypeError, "does not expose DbusServicePort"):
             require_dbus_service(SimpleNamespace())
@@ -210,8 +205,14 @@ class ServiceCompositionGuardContractTests(unittest.TestCase):
         attributes_only.runtime = SimpleNamespace()
         method_only = SimpleNamespace(runtime=_composition_host().runtime)
 
+        bootstrap_phase = _composition_host()
+        del bootstrap_phase._dbusservice
+        del bootstrap_phase.last_status
+        del bootstrap_phase.virtual_set_current
+
         self.assertFalse(is_publish_service(attributes_only))
         self.assertFalse(is_publish_service(method_only))
+        self.assertFalse(is_publish_service(bootstrap_phase))
 
     def test_auto_input_guard_requires_all_three_boundary_parts(self) -> None:
         missing_attributes = _composition_host()

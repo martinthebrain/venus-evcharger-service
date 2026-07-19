@@ -47,14 +47,9 @@ class RuntimeStatePort(Protocol):
 class ControllerOwnerPort(Protocol):
     """Controller-owner operation required by runtime initialization."""
 
+    def prepare_runtime_state(self) -> None: ...
+
     def initialize_runtime(self) -> object: ...
-
-
-@runtime_checkable
-class WorkerRuntimePort(Protocol):
-    """Runtime bookkeeping operation required after state restoration."""
-
-    def initialize_worker_state(self) -> None: ...
 
 
 @runtime_checkable
@@ -102,14 +97,6 @@ def require_controller_owner(service: object) -> ControllerOwnerPort:
     if not isinstance(owner, ControllerOwnerPort):
         raise TypeError("bootstrap service does not expose ControllerOwnerPort")
     return owner
-
-
-def require_worker_runtime(service: object) -> WorkerRuntimePort:
-    """Return the worker runtime facade or fail at the bootstrap boundary."""
-    runtime = getattr(service, "runtime", None)
-    if not isinstance(runtime, WorkerRuntimePort):
-        raise TypeError("bootstrap service does not expose WorkerRuntimePort")
-    return runtime
 
 
 def require_dbus_service(service: object) -> DbusServicePort:

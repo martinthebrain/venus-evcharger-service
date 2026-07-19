@@ -36,7 +36,7 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
         service = SimpleNamespace(
             startup_device_info_retries=1,
             startup_device_info_retry_seconds=2.5,
-            fetch_rpc=MagicMock(side_effect=[failure, {"mac": "ABC"}]),
+            runtime=SimpleNamespace(rpc_call=MagicMock(side_effect=[failure, {"mac": "ABC"}])),
         )
         sleep = MagicMock()
 
@@ -44,8 +44,8 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
             result = fetch_device_info_with_fallback(service, sleep_func=sleep)
 
         self.assertEqual(result, {"mac": "ABC"})
-        service.fetch_rpc.assert_called_with("Shelly.GetDeviceInfo")
-        self.assertEqual(service.fetch_rpc.call_count, 2)
+        service.runtime.rpc_call.assert_called_with("Shelly.GetDeviceInfo")
+        self.assertEqual(service.runtime.rpc_call.call_count, 2)
         sleep.assert_called_once_with(2.5)
         warning_mock.assert_called_once_with(
             "Shelly.GetDeviceInfo failed during startup (attempt %s/%s): %s",
@@ -59,14 +59,14 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
         service = SimpleNamespace(
             startup_device_info_retries=2,
             startup_device_info_retry_seconds=0,
-            fetch_rpc=MagicMock(side_effect=failure),
+            runtime=SimpleNamespace(rpc_call=MagicMock(side_effect=failure)),
         )
 
         with patch("venus_evcharger.bootstrap.runtime_metadata.logging.warning") as warning_mock:
             result = fetch_device_info_with_fallback(service, sleep_func=MagicMock())
 
         self.assertEqual(result, {})
-        self.assertEqual(service.fetch_rpc.call_count, 3)
+        self.assertEqual(service.runtime.rpc_call.call_count, 3)
         warning_mock.assert_called_once_with(
             "Shelly.GetDeviceInfo unavailable during startup, continuing with generic metadata: %s",
             failure,
@@ -76,7 +76,7 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
         service = SimpleNamespace(
             startup_device_info_retries=0,
             startup_device_info_retry_seconds=1.0,
-            fetch_rpc=MagicMock(side_effect=RuntimeError("offline")),
+            runtime=SimpleNamespace(rpc_call=MagicMock(side_effect=RuntimeError("offline"))),
         )
         sleep = MagicMock()
 
@@ -88,7 +88,9 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
         service = SimpleNamespace(
             startup_device_info_retries=1,
             startup_device_info_retry_seconds=0.5,
-            fetch_rpc=MagicMock(side_effect=[RuntimeError("offline"), {"mac": "ABC"}]),
+            runtime=SimpleNamespace(
+                rpc_call=MagicMock(side_effect=[RuntimeError("offline"), {"mac": "ABC"}])
+            ),
         )
         sleep = MagicMock()
 
@@ -100,7 +102,7 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
         service = SimpleNamespace(
             startup_device_info_retries=0,
             startup_device_info_retry_seconds=0,
-            fetch_rpc=MagicMock(return_value=["not", "mapping"]),
+            runtime=SimpleNamespace(rpc_call=MagicMock(return_value=["not", "mapping"])),
         )
 
         self.assertEqual(fetch_device_info_with_fallback(service, sleep_func=MagicMock()), {})
@@ -109,14 +111,14 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
         service = SimpleNamespace(
             startup_device_info_retries=-1,
             startup_device_info_retry_seconds=1.0,
-            fetch_rpc=MagicMock(),
+            runtime=SimpleNamespace(rpc_call=MagicMock()),
         )
 
         with patch("venus_evcharger.bootstrap.runtime_metadata.logging.warning") as warning_mock:
             result = fetch_device_info_with_fallback(service, sleep_func=MagicMock())
 
         self.assertEqual(result, {})
-        service.fetch_rpc.assert_not_called()
+        service.runtime.rpc_call.assert_not_called()
         warning_mock.assert_called_once_with(
             "Shelly.GetDeviceInfo unavailable during startup, continuing with generic metadata: %s",
             None,
