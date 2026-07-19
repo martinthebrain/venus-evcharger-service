@@ -30,6 +30,8 @@ Responsibilities:
 - check for `noUpdate`
 - ensure a local updater is available
 - refresh the codebase when updates are enabled
+- run the updater at reduced CPU and I/O priority on constrained GX hardware
+- atomically refresh this outer bootstrap after a verified promotion
 - run the regular Venus installer from the resulting tree
 
 The service calls this same script when a user triggers an update through DBus
@@ -43,6 +45,7 @@ Responsibilities:
 
 - read update inputs from local sources or manifests
 - refresh the target tree
+- preserve live runit service-directory inodes during direct-layout updates
 - preserve local deployment files
 - prepare versioned release directories
 - keep rollback targets available
@@ -56,6 +59,8 @@ Responsibilities:
 - restore executable bits
 - register the runit service
 - refresh the service wiring
+- remove project processes left in deleted service directories by older updaters
+- start the DBus adapter before the core and observer
 - complete the local deployment
 
 ## What Gets Updated
@@ -141,6 +146,21 @@ The bootstrap launches the updater with a low CPU scheduling priority and, when
 `ionice` is available, idle I/O priority. Child operations such as archive
 decompression inherit those priorities. This keeps the GX services responsive
 while an update is prepared; it does not weaken bundle or manifest validation.
+The updater also applies these priorities to itself when invoked by an older
+bootstrap, so the one-time transition to this update flow is resource-aware.
+
+The service remains online while the bundle is downloaded, unpacked, merged,
+validated, and promoted. Direct-layout promotion updates the existing runit
+directories in place, so a supervisor cannot retain a deleted working
+directory. Manifest updates never replace an existing release directory with
+the same version; they select a hash-qualified release path instead. The
+regular installer then performs one short, ordered service restart.
+
+After a successful promotion, the updater atomically replaces the standalone
+bootstrap that launched it. This matters for older field installations: the
+next update therefore inherits current resource controls even when no formal
+release bundle was built. `update_status.json` exposes this as
+`bootstrap_entrypoint_path` and `bootstrap_refreshed`.
 
 ## Resource-Conscious Verification
 
@@ -243,6 +263,7 @@ This is useful when:
 - `VENUS_EVCHARGER_DOWNLOAD_TIMEOUT_SECONDS`
 - `VENUS_EVCHARGER_DOWNLOAD_ATTEMPTS`
 - `VENUS_EVCHARGER_UPDATER_NICE_LEVEL`
+- `VENUS_EVCHARGER_BOOTSTRAP_ENTRYPOINT`
 - `VENUS_EVCHARGER_SOURCE_DIR`
 - `VENUS_EVCHARGER_UPDATER_SOURCE`
 - `VENUS_EVCHARGER_UPDATER_HASH_SOURCE`

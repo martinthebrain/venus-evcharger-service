@@ -57,8 +57,8 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
 
     def _rewrite_shell_paths(self, repo_copy: Path, service_root: Path, rc_local_path: Path) -> None:
         replacements = (
-            ('"/service/$SERVICE_NAME"', f'"{service_root}/$SERVICE_NAME"'),
-            ("RC_LOCAL_FILE=/data/rc.local", f'RC_LOCAL_FILE="{rc_local_path}"'),
+            ('SERVICE_ROOT="${VENUS_EVCHARGER_SERVICE_ROOT:-/service}"', f'SERVICE_ROOT="{service_root}"'),
+            ('RC_LOCAL_FILE="${VENUS_EVCHARGER_RC_LOCAL_FILE:-/data/rc.local}"', f'RC_LOCAL_FILE="{rc_local_path}"'),
         )
         for rel_path in (
             "deploy/venus/install_venus_evcharger_service.sh",
@@ -149,6 +149,11 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
                 ["bash", str(repo_copy / "deploy/venus/install_venus_evcharger_service.sh")],
                 cwd=repo_copy,
                 check=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_SERVICE_SETTLE_SECONDS": "0",
+                    "VENUS_EVCHARGER_ADAPTER_START_SECONDS": "0",
+                },
             )
 
             self.assertTrue(service_link.is_symlink())
@@ -166,6 +171,7 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
                 ["bash", str(repo_copy / "deploy/venus/boot_venus_evcharger_service.sh")],
                 cwd=repo_copy,
                 check=True,
+                env={**os.environ, "VENUS_EVCHARGER_ADAPTER_START_SECONDS": "0"},
             )
             self.assertTrue(service_link.is_symlink())
             self._wait_for_file(helper_marker)

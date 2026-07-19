@@ -29,6 +29,7 @@ class _BootstrapInstallScriptsBundleCases(_BootstrapInstallScriptsBase):
                 "./deploy/venus/service_venus_evcharger/run",
                 "./deploy/venus/service_venus_evcharger_dbus_adapter/run",
                 "./deploy/venus/service_venus_evcharger_observer/run",
+                "./deploy/venus/service_lifecycle.sh",
             ):
                 self.assertIn(rel_path, bundle_names)
 
