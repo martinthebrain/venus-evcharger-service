@@ -48,6 +48,10 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         self.assertIs(controller.components.config.backend, controller.components.backend)
         self.assertIs(controller.components.config.auto, controller.components.auto)
 
+        controller.components.runtime.prepare_runtime_state = MagicMock()
+        controller.prepare_runtime_state()
+        controller.components.runtime.prepare_runtime_state.assert_called_once_with()
+
     def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self):
         service = SimpleNamespace(
             startup_device_info_retries=2,

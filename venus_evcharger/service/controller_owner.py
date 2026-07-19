@@ -112,7 +112,7 @@ class ServiceControllerOwner:
             raise RuntimeError("wallbox runtime controllers are not initialized")
         return self._runtime
 
-    def prepare_runtime_state(self) -> None:
+    def prepare_runtime_state(self) -> RuntimeSupportController:
         """Initialize shared runtime state and resolve backends before composing controllers."""
         if self._runtime is not None or self._prepared_runtime is not None:
             raise RuntimeError("wallbox runtime state is already prepared")
@@ -125,6 +125,7 @@ class ServiceControllerOwner:
         runtime.init_worker_state()
         self._apply_resolved_backends()
         self._prepared_runtime = runtime
+        return runtime
 
     def initialize_runtime(self) -> RuntimeControllers:
         """Build the configured runtime object graph exactly once."""
@@ -132,11 +133,9 @@ class ServiceControllerOwner:
             raise RuntimeError("wallbox runtime controllers are already initialized")
 
         service = self._service
-        if self._prepared_runtime is None:
-            self.prepare_runtime_state()
         runtime = self._prepared_runtime
         if runtime is None:
-            raise RuntimeError("wallbox runtime state was not prepared")
+            runtime = self.prepare_runtime_state()
         auto = AutoDecisionController(
             AutoDecisionPort(service),
             self.functions.health_code,

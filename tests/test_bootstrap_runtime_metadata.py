@@ -11,6 +11,7 @@ from venus_evcharger.bootstrap.runtime_metadata import (
     device_info_payload,
     fetch_device_info_with_fallback,
     primary_rpc_configured,
+    require_device_info_rpc,
     topology_configured,
 )
 
@@ -30,6 +31,10 @@ class BootstrapRuntimeMetadataContracts(unittest.TestCase):
         self.assertEqual(device_info_payload({"name": "EVCS"}), {"name": "EVCS"})
         self.assertEqual(device_info_payload([("name", "EVCS")]), {})
         self.assertEqual(device_info_payload(None), {})
+
+    def test_device_info_rpc_contract_rejects_missing_runtime_port(self) -> None:
+        with self.assertRaisesRegex(TypeError, "DeviceInfoRpcPort"):
+            require_device_info_rpc(SimpleNamespace())
 
     def test_fetch_device_info_retries_sleeps_and_normalizes_payload(self) -> None:
         failure = RuntimeError("offline")
