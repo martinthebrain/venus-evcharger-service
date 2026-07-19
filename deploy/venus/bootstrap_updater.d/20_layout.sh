@@ -92,14 +92,104 @@ promote_release_layout() {
 
 record_install_state() {
 	mkdir -p "$STATE_DIR"
-	if [ -n "${MANIFEST_BUNDLE_SHA256:-}" ]; then
-		printf '%s\n' "$MANIFEST_BUNDLE_SHA256" >"$INSTALLED_BUNDLE_HASH_FILE"
+	if [ -n "$RUN_NEW_BUNDLE_SHA256" ]; then
+		atomic_write_line "$RUN_NEW_BUNDLE_SHA256" "$INSTALLED_BUNDLE_HASH_FILE"
 	fi
 	if [ -n "${MANIFEST_VERSION:-}" ]; then
-		printf '%s\n' "$MANIFEST_VERSION" >"$INSTALLED_VERSION_FILE"
+		atomic_write_line "$MANIFEST_VERSION" "$INSTALLED_VERSION_FILE"
 	elif [ -n "$RUN_NEW_VERSION" ]; then
-		printf '%s\n' "$(normalize_version_value "$RUN_NEW_VERSION")" >"$INSTALLED_VERSION_FILE"
+		atomic_write_line "$(normalize_version_value "$RUN_NEW_VERSION")" "$INSTALLED_VERSION_FILE"
 	fi
+	if [ -n "$RUN_NEW_SOURCE_COMMIT" ]; then
+		atomic_write_line "$RUN_NEW_SOURCE_COMMIT" "$INSTALLED_SOURCE_COMMIT_FILE"
+	fi
+}
+
+atomic_write_line() {
+	line_value="$1"
+	destination="$2"
+	temporary_path="${destination}.tmp.$$"
+	printf '%s\n' "$line_value" >"$temporary_path"
+	mv "$temporary_path" "$destination"
+}
+
+deployment_sentinel_paths() {
+	printf '%s\n' \
+		venus_evcharger_service.py \
+		venus_evcharger_dbus_adapter.py \
+		venus_evcharger_auto_input_helper.py \
+		venus_evcharger/dbus_adapter/process/adapter.py \
+		venus_evcharger/core/contracts_bootstrap.py \
+		deploy/venus/bootstrap_updater.sh \
+		deploy/venus/install_venus_evcharger_service.sh
+}
+
+write_deployment_receipt() {
+	active_root=$(current_codebase_dir)
+	sentinel_list="${TMP_DIR}/deployment_sentinels.txt"
+	deployment_sentinel_paths >"$sentinel_list"
+	python3 - "$DEPLOYMENT_RECEIPT_FILE" "$active_root" "$sentinel_list" <<'PY'
+import hashlib
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+receipt_path = Path(sys.argv[1])
+active_root = Path(sys.argv[2]).resolve()
+sentinel_paths = Path(sys.argv[3]).read_text(encoding="utf-8").splitlines()
+critical_files: dict[str, str] = {}
+missing_files: list[str] = []
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(64 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+for relative_path in sentinel_paths:
+    candidate = active_root / relative_path
+    if not candidate.is_file():
+        missing_files.append(relative_path)
+        continue
+    critical_files[relative_path] = file_sha256(candidate)
+
+payload = {
+    "schema_version": 1,
+    "installed_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "target_dir": os.environ.get("TARGET_DIR", ""),
+    "active_root": str(active_root),
+    "source_repo": os.environ.get("REPO_SLUG", ""),
+    "source_channel": os.environ.get("CHANNEL", ""),
+    "source_commit": os.environ.get("RUN_NEW_SOURCE_COMMIT", ""),
+    "bundle_sha256": os.environ.get("RUN_NEW_BUNDLE_SHA256", ""),
+    "version": os.environ.get("RUN_NEW_VERSION", ""),
+    "critical_files": critical_files,
+    "missing_critical_files": missing_files,
+}
+receipt_path.parent.mkdir(parents=True, exist_ok=True)
+temporary_path = receipt_path.with_name(f"{receipt_path.name}.tmp.{os.getpid()}")
+with temporary_path.open("w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+os.replace(temporary_path, receipt_path)
+try:
+    directory_fd = os.open(receipt_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+except (AttributeError, OSError):
+    pass
+else:
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+PY
 }
 
 materialize_source_from_bundle() {

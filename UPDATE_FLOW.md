@@ -117,6 +117,10 @@ The updater records the latest apply run under `.bootstrap-state/`:
 
 - `update_status.json` for the latest result
 - `update_audit.log` as a compact append-only history
+- `deployment_receipt.json` as the atomic identity and lightweight integrity
+  record for the installed tree
+- `installed_source_commit`, `installed_bundle_sha256`, and
+  `installed_version` as small machine-readable identity markers
 
 These artifacts include:
 
@@ -126,6 +130,49 @@ These artifacts include:
 - whether validation passed
 - whether the active `current/` release was kept
 - why promotion was aborted when an update failed
+
+Normal GitHub updates resolve the channel to one concrete commit before the
+archive is downloaded. The updater then downloads that commit-specific archive
+and records its SHA-256. Downloads have bounded connection/runtime attempts, so
+a broken resolver or unreachable GitHub endpoint produces a failed update
+instead of an indefinitely waiting installer.
+
+The bootstrap launches the updater with a low CPU scheduling priority and, when
+`ionice` is available, idle I/O priority. Child operations such as archive
+decompression inherit those priorities. This keeps the GX services responsive
+while an update is prepared; it does not weaken bundle or manifest validation.
+
+## Resource-Conscious Verification
+
+The default deployment check reads the receipt and hashes only a small set of
+critical entrypoint, gateway, contract, and installer files:
+
+```bash
+python3 scripts/ops/verify_venus_evcharger_deployment.py \
+  /data/venus-evcharger/dbus-venus-evcharger
+```
+
+This is the normal GX check. It does not walk the full Python tree.
+
+For a suspected corruption incident, create the expected full manifest on a
+development host and transfer only that small JSON file to the GX:
+
+```bash
+python3 scripts/ops/verify_venus_evcharger_deployment.py \
+  --create-manifest "$PWD" \
+  --manifest-output /tmp/venus-evcharger-main-files.json
+```
+
+Then request the deliberately slow full comparison:
+
+```bash
+python3 scripts/ops/verify_venus_evcharger_deployment.py \
+  /data/venus-evcharger/dbus-venus-evcharger \
+  --full-manifest /tmp/venus-evcharger-main-files.json
+```
+
+The full mode hashes small batches, pauses between them, and defers work while
+load per CPU or memory availability crosses its configured resource gates.
 
 ## Manifest-Based Updates
 
@@ -192,6 +239,10 @@ This is useful when:
 
 - `VENUS_EVCHARGER_TARGET_DIR`
 - `VENUS_EVCHARGER_CHANNEL`
+- `VENUS_EVCHARGER_SOURCE_COMMIT`
+- `VENUS_EVCHARGER_DOWNLOAD_TIMEOUT_SECONDS`
+- `VENUS_EVCHARGER_DOWNLOAD_ATTEMPTS`
+- `VENUS_EVCHARGER_UPDATER_NICE_LEVEL`
 - `VENUS_EVCHARGER_SOURCE_DIR`
 - `VENUS_EVCHARGER_UPDATER_SOURCE`
 - `VENUS_EVCHARGER_UPDATER_HASH_SOURCE`

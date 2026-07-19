@@ -56,12 +56,19 @@ download_to() {
 		return 0
 	fi
 	if command -v wget >/dev/null 2>&1; then
-		wget -q -O "$dst" "$src"
-		return 0
+		if wget -q -T "$DOWNLOAD_TIMEOUT_SECONDS" -t "$DOWNLOAD_ATTEMPTS" -O "$dst" "$src"; then
+			return 0
+		fi
+		log "Download failed or timed out: $src"
+		return 1
 	fi
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL -o "$dst" "$src"
-		return 0
+		if curl -fsSL --connect-timeout "$DOWNLOAD_TIMEOUT_SECONDS" --max-time "$DOWNLOAD_TIMEOUT_SECONDS" \
+			--retry "$DOWNLOAD_ATTEMPTS" -o "$dst" "$src"; then
+			return 0
+		fi
+		log "Download failed or timed out: $src"
+		return 1
 	fi
 	log "Neither wget nor curl is available to fetch $src"
 	set_failure_reason_once "download-unavailable"
@@ -209,6 +216,32 @@ detect_current_bundle_hash() {
 	read_text_file "$INSTALLED_BUNDLE_HASH_FILE" || true
 }
 
+detect_current_source_commit() {
+	read_text_file "$INSTALLED_SOURCE_COMMIT_FILE" || true
+}
+
+valid_source_commit() {
+	printf '%s\n' "$1" | awk 'length($0) == 40 && $0 ~ /^[0-9a-f]+$/ { valid=1 } END { exit valid ? 0 : 1 }'
+}
+
+resolve_github_source_commit() {
+	metadata_path="$1"
+	if [ -n "$SOURCE_COMMIT_OVERRIDE" ]; then
+		RUN_NEW_SOURCE_COMMIT="$SOURCE_COMMIT_OVERRIDE"
+	elif download_to "$SOURCE_REF_URL" "$metadata_path"; then
+		RUN_NEW_SOURCE_COMMIT=$(json_field "$metadata_path" "sha" || true)
+	else
+		set_failure_reason_once "source-commit-resolution-failed"
+		return 1
+	fi
+	if ! valid_source_commit "$RUN_NEW_SOURCE_COMMIT"; then
+		log "Resolved source commit is invalid"
+		set_failure_reason_once "invalid-source-commit"
+		return 1
+	fi
+	ARCHIVE_URL="https://codeload.github.com/${REPO_SLUG}/tar.gz/${RUN_NEW_SOURCE_COMMIT}"
+}
+
 normalize_multiline_var() {
 	input_value="$1"
 	printf '%s' "$input_value" | awk 'NF {print}'
@@ -238,9 +271,15 @@ load_manifest() {
 	MANIFEST_BUNDLE_SHA256=$(manifest_field "$manifest_path" "bundle_sha256" || true)
 	MANIFEST_VERSION=$(manifest_field "$manifest_path" "version" || true)
 	MANIFEST_CHANNEL=$(manifest_field "$manifest_path" "channel" || true)
+	MANIFEST_SOURCE_COMMIT=$(manifest_field "$manifest_path" "source_commit" || true)
+	MANIFEST_SOURCE_REPO=$(manifest_field "$manifest_path" "source_repo" || true)
 
 	[ -n "$MANIFEST_BUNDLE_URL" ] || return 1
 	[ -n "$MANIFEST_BUNDLE_SHA256" ] || return 1
+	if [ -n "$MANIFEST_SOURCE_COMMIT" ] && ! valid_source_commit "$MANIFEST_SOURCE_COMMIT"; then
+		set_failure_reason_once "invalid-manifest-source-commit"
+		return 1
+	fi
 	return 0
 }
 

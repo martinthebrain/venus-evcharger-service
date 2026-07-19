@@ -72,7 +72,16 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
 
             bundle_hash = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
             signing_key, public_key = self._generate_signing_keypair(root)
-            manifest = {"format": 1, "channel": "stable", "version": "9.9.9", "bundle_url": str(bundle_path), "bundle_sha256": bundle_hash}
+            source_commit = "a" * 40
+            manifest = {
+                "format": 1,
+                "channel": "stable",
+                "version": "9.9.9",
+                "source_repo": "example/venus-evcharger-service",
+                "source_commit": source_commit,
+                "bundle_url": str(bundle_path),
+                "bundle_sha256": bundle_hash,
+            }
             manifest_path = release_dir / "bootstrap_manifest.json"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             manifest_sig_path = release_dir / "bootstrap_manifest.json.sig"
@@ -169,7 +178,16 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
 
             bundle_hash = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
             signing_key, public_key = self._generate_signing_keypair(root)
-            manifest = {"format": 1, "channel": "stable", "version": "9.9.9", "bundle_url": str(bundle_path), "bundle_sha256": bundle_hash}
+            source_commit = "b" * 40
+            manifest = {
+                "format": 1,
+                "channel": "stable",
+                "version": "9.9.9",
+                "source_repo": "example/venus-evcharger-service",
+                "source_commit": source_commit,
+                "bundle_url": str(bundle_path),
+                "bundle_sha256": bundle_hash,
+            }
             manifest_path = release_dir / "bootstrap_manifest.json"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             manifest_sig_path = release_dir / "bootstrap_manifest.json.sig"
@@ -204,6 +222,15 @@ class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
             self.assertTrue((target_dir / "current/deploy/venus/service_venus_evcharger_dbus_adapter/run").is_file())
             self.assertEqual((target_dir / ".bootstrap-state/installed_bundle_sha256").read_text(encoding="utf-8"), f"{bundle_hash}\n")
             self.assertEqual((target_dir / ".bootstrap-state/installed_version").read_text(encoding="utf-8"), "9.9.9\n")
+            self.assertEqual((target_dir / ".bootstrap-state/installed_source_commit").read_text(encoding="utf-8"), f"{source_commit}\n")
+            receipt = json.loads((target_dir / ".bootstrap-state/deployment_receipt.json").read_text(encoding="utf-8"))
+            status = json.loads((target_dir / ".bootstrap-state/update_status.json").read_text(encoding="utf-8"))
+            self.assertEqual(status["source_repo"], "example/venus-evcharger-service")
+            self.assertEqual(status["source_channel"], "stable")
+            self.assertEqual(receipt["source_repo"], "example/venus-evcharger-service")
+            self.assertEqual(receipt["source_channel"], "stable")
+            self.assertEqual(receipt["source_commit"], source_commit)
+            self.assertEqual(receipt["bundle_sha256"], bundle_hash)
             self.assertTrue((target_dir / "noUpdate").is_file())
 
             sentinel = target_dir / "sentinel.txt"
