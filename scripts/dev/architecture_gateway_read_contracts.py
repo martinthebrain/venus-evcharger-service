@@ -8,8 +8,8 @@ import ast
 from pathlib import Path
 
 SEMANTIC_READ_FUNCTIONS = {
-    "venus_evcharger/inputs/helper/sources_pv_grid.py": ("_get_pv_power", "_get_grid_power"),
-    "venus_evcharger/inputs/helper/sources.py": ("_get_battery_snapshot", "_get_battery_soc"),
+    "venus_evcharger/inputs/helper/sources_pv_grid.py": ("pv_power", "grid_power"),
+    "venus_evcharger/inputs/helper/sources.py": ("battery_snapshot",),
     "venus_evcharger/inputs/pv.py": ("get_pv_power",),
     "venus_evcharger/inputs/storage.py": ("get_grid_power", "get_battery_soc"),
 }
@@ -30,32 +30,29 @@ SEMANTIC_READ_FORBIDDEN_MARKERS = (
 )
 
 SEMANTIC_READ_REQUIRED_MARKERS = {
-    ("venus_evcharger/inputs/helper/sources_pv_grid.py", "_get_pv_power"): (
+    ("venus_evcharger/inputs/helper/sources_pv_grid.py", "pv_power"): (
         "PV_POWER_READ_KEY",
-        "_get_gateway_read_value(",
+        ".semantic_value(",
     ),
-    ("venus_evcharger/inputs/helper/sources_pv_grid.py", "_get_grid_power"): (
+    ("venus_evcharger/inputs/helper/sources_pv_grid.py", "grid_power"): (
         "GRID_POWER_READ_KEY",
-        "_get_gateway_read_value(",
+        ".semantic_value(",
     ),
-    ("venus_evcharger/inputs/helper/sources.py", "_get_battery_snapshot"): (
+    ("venus_evcharger/inputs/helper/sources.py", "battery_snapshot"): (
         "BATTERY_SOC_READ_KEY",
-        "_get_gateway_read_value(",
-    ),
-    ("venus_evcharger/inputs/helper/sources.py", "_get_battery_soc"): (
-        "_get_battery_snapshot(",
+        ".semantic_value(",
     ),
     ("venus_evcharger/inputs/pv.py", "get_pv_power"): (
         "PV_POWER_READ_KEY",
-        "get_gateway_read_value(",
+        "read_semantic_value(",
     ),
     ("venus_evcharger/inputs/storage.py", "get_grid_power"): (
         "GRID_POWER_READ_KEY",
-        "get_gateway_read_value(",
+        "read_semantic_value(",
     ),
     ("venus_evcharger/inputs/storage.py", "get_battery_soc"): (
         "BATTERY_SOC_READ_KEY",
-        "get_gateway_read_value(",
+        "read_semantic_value(",
     ),
 }
 

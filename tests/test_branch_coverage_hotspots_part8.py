@@ -3,7 +3,9 @@ from tests.test_branch_coverage_hotspots_support import *  # noqa: F401,F403
 
 class _BranchCoverageVictronRecommendationCasesPart1:
     def test_victron_recommendation_helper_branches(self) -> None:
-        controller = _controller()
+        components = _components()
+        policy = components.policy
+        recommendation = components.recommendation
         svc = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=False,
             auto_battery_discharge_balance_victron_bias_kp=0.2,
@@ -15,9 +17,9 @@ class _BranchCoverageVictronRecommendationCasesPart1:
             auto_battery_discharge_balance_victron_bias_activation_mode="always",
             _victron_ess_balance_active_learning_profile_key="",
         )
-        self.assertFalse(controller._victron_ess_balance_can_relax_conservatism({"stability_score": None}))
+        self.assertFalse(policy._victron_ess_balance_can_relax_conservatism({"stability_score": None}))
         self.assertEqual(
-            controller._victron_ess_balance_recommendation_reason(
+            recommendation._victron_ess_balance_recommendation_reason(
                 {
                     "response_delay_seconds": 9.0,
                     "estimated_gain": 1.0,
@@ -30,20 +32,19 @@ class _BranchCoverageVictronRecommendationCasesPart1:
             "slow_response",
         )
         self.assertEqual(
-            controller._victron_ess_balance_adjusted_kd(0.04, {"kd_factor": 0.5}),
+            policy._victron_ess_balance_adjusted_kd(0.04, {"kd_factor": 0.5}),
             0.02,
         )
-        self.assertIn("slow site response", controller._victron_ess_balance_recommendation_hint("slow_response", 0.6))
+        self.assertIn("slow site response", policy._victron_ess_balance_recommendation_hint("slow_response", 0.6))
         self.assertEqual(
-            controller._victron_ess_balance_recommended_activation_mode(
+            recommendation._victron_ess_balance_recommended_activation_mode(
                 {"site_regime": "import", "reserve_phase": "above_reserve_band"},
                 svc,
             ),
             "above_reserve_band",
         )
-        self.assertEqual(controller._victron_ess_balance_export_activation_mode("reserve_band"), "export_only")
-        disabled = controller._victron_ess_balance_recommendation_metrics(svc)
+        self.assertEqual(recommendation._victron_ess_balance_export_activation_mode("reserve_band"), "export_only")
+        disabled = recommendation._victron_ess_balance_recommendation_metrics(svc)
         self.assertEqual(disabled["battery_discharge_balance_victron_bias_recommendation_reason"], "disabled")
-
 
 

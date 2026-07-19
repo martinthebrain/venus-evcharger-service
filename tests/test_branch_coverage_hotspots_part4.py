@@ -2,34 +2,25 @@
 from tests.test_branch_coverage_hotspots_support import *  # noqa: F401,F403
 
 class _BranchCoverageVictronApplyCasesPart2:
-    def test_victron_apply_state_wrapper_methods_delegate_to_profile_helpers(self) -> None:
-        from venus_evcharger.update.victron_ess_balance_apply import _UpdateCycleVictronEssBalanceApply
-
-        controller = _UpdateCycleVictronEssBalanceApply()
-        service = SimpleNamespace()
-
-        with patch("venus_evcharger.update.victron_ess_balance_apply._reset_victron_ess_balance_pid_state") as reset_pid:
-            controller._reset_victron_ess_balance_pid(service)
-            reset_pid.assert_called_once_with(service)
-
-        with patch(
-            "venus_evcharger.update.victron_ess_balance_apply._reset_victron_ess_balance_pid_integral_state"
-        ) as reset_integral:
-            controller._reset_victron_ess_balance_pid_integral(service, aggressive=True)
-            reset_integral.assert_called_once_with(service, True)
-
-        with patch("venus_evcharger.update.victron_ess_balance_apply._record_victron_ess_balance_tracking_command") as record:
-            controller._record_victron_ess_balance_command(service, 10.0, 75.0, -25.0, "profile")
-            record.assert_called_once_with(service, 10.0, 75.0, -25.0, "profile")
-
-        with patch(
-            "venus_evcharger.update.victron_ess_balance_apply._clear_victron_ess_balance_tracking_episode_state"
-        ) as clear_episode:
-            controller._clear_victron_ess_balance_tracking_episode(service)
-            clear_episode.assert_called_once_with(service)
+    def test_victron_state_owners_update_their_explicit_state(self) -> None:
+        components = _components()
+        service = SimpleNamespace(
+            _victron_ess_balance_pid_last_error_w=2.0,
+            _victron_ess_balance_pid_last_at=3.0,
+            _victron_ess_balance_pid_integral_output_w=4.0,
+            _victron_ess_balance_pid_last_output_w=5.0,
+        )
+        initialize_victron_test_service(service)
+        components.pid.reset(service)
+        self.assertEqual(service._victron_ess_balance_pid_last_output_w, 0.0)
+        components.telemetry._record_victron_ess_balance_command(service, 10.0, 75.0, -25.0, "profile")
+        self.assertEqual(service._victron_ess_balance_telemetry_last_command_profile_key, "profile")
+        components.telemetry._clear_victron_ess_balance_tracking_episode(service)
+        self.assertIsNone(service._victron_ess_balance_telemetry_last_command_at)
 
     def test_victron_apply_prepare_and_telemetry_branches(self) -> None:
-        controller = _controller()
+        components = _components()
+        controller = components.executor
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
@@ -78,9 +69,9 @@ class _BranchCoverageVictronApplyCasesPart2:
                 {"source_id": "hybrid", "online": True},
             ],
         }
-        controller._victron_ess_balance_ev_power_w = MagicMock(return_value=0.0)
-        controller._victron_ess_balance_telemetry_is_clean = MagicMock(return_value=(True, "clean"))
-        controller._populate_victron_ess_balance_telemetry_metrics = MagicMock()
+        components.sources._victron_ess_balance_ev_power_w = MagicMock(return_value=0.0)
+        components.safety._victron_ess_balance_telemetry_is_clean = MagicMock(return_value=(True, "clean"))
+        components.recommendation._populate_victron_ess_balance_telemetry_metrics = MagicMock()
 
         command_state = {
             "command_at": 100.0,
@@ -91,7 +82,7 @@ class _BranchCoverageVictronApplyCasesPart2:
             "command_overshoot_recorded": False,
             "command_settled_recorded": False,
         }
-        overshoot_active, settling_active = controller._victron_ess_balance_process_clean_episode(
+        overshoot_active, settling_active = components.telemetry._victron_ess_balance_process_clean_episode(
             service,
             105.0,
             -10.0,
@@ -104,10 +95,14 @@ class _BranchCoverageVictronApplyCasesPart2:
         self.assertFalse(settling_active)
 
         service._victron_ess_balance_telemetry_last_command_at = None
-        controller._update_victron_ess_balance_telemetry(service, 105.5, cluster, -12.0, metrics, "profile")
+        components.telemetry._update_victron_ess_balance_telemetry(
+            service, 105.5, cluster, -12.0, metrics, "profile"
+        )
         self.assertFalse(service._victron_ess_balance_telemetry_settling_active)
         service._victron_ess_balance_telemetry_last_command_at = 100.0
-        controller._update_victron_ess_balance_telemetry(service, 106.0, cluster, -10.0, metrics, "profile")
+        components.telemetry._update_victron_ess_balance_telemetry(
+            service, 106.0, cluster, -10.0, metrics, "profile"
+        )
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_telemetry_clean_reason"], "clean")
         self.assertEqual(service._victron_ess_balance_telemetry_last_observed_error_w, -10.0)
 
@@ -121,14 +116,15 @@ class _BranchCoverageVictronApplyCasesPart2:
 
         with patch.object(controller, "_prepare_victron_ess_balance_learning_state", return_value={"key": "profile"}), patch.object(
             controller, "_victron_ess_balance_safety_block_reason", return_value=""
-        ), patch.object(controller, "_victron_ess_balance_activation_allowed", return_value=False):
+        ), patch.object(components.sources, "_victron_ess_balance_activation_allowed", return_value=False):
             self.assertEqual(
                 controller._prepare_victron_ess_balance_tracking_profile(service, 100.0, cluster, cluster["battery_sources"][0], -60.0, metrics),
                 (None, "activation-mode-blocked"),
             )
 
     def test_victron_apply_composite_branches(self) -> None:
-        controller = _controller()
+        components = _components()
+        controller = components.executor
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=False,
             auto_battery_discharge_balance_victron_bias_activation_mode="always",
@@ -179,13 +175,13 @@ class _BranchCoverageVictronApplyCasesPart2:
             "pv_phase": "pv_active",
             "battery_limit_phase": "unconstrained",
         }
-        with patch.object(controller, "_victron_ess_balance_learning_profile", return_value=learning_profile), patch.object(
-            controller, "_ensure_victron_ess_balance_learning_profile_state"
+        with patch.object(components.profiles, "_victron_ess_balance_learning_profile", return_value=learning_profile), patch.object(
+            components.profiles, "_ensure_victron_ess_balance_learning_profile_state"
         ) as ensure_profile, patch.object(
-            controller, "_merge_victron_ess_balance_learning_profile_metrics"
-        ) as merge_metrics, patch.object(controller, "_victron_ess_balance_refresh_stable_tuning") as refresh_tuning, patch.object(
-            controller, "_victron_ess_balance_note_action_direction", return_value=2
-        ) as note_direction, patch.object(controller, "_populate_victron_ess_balance_runtime_safety_metrics") as populate_safety:
+            components.profiles, "_merge_victron_ess_balance_learning_profile_metrics"
+        ) as merge_metrics, patch.object(components.recovery, "_victron_ess_balance_refresh_stable_tuning") as refresh_tuning, patch.object(
+            components.safety, "_victron_ess_balance_note_action_direction", return_value=2
+        ) as note_direction, patch.object(components.safety, "_populate_victron_ess_balance_runtime_safety_metrics") as populate_safety:
             returned = controller._prepare_victron_ess_balance_learning_state(service, 20.0, {"c": 1}, {"source_id": "victron"}, -20.0, metrics)
             self.assertEqual(returned, learning_profile)
             ensure_profile.assert_called_once_with(service, "profile")
@@ -195,20 +191,20 @@ class _BranchCoverageVictronApplyCasesPart2:
             populate_safety.assert_called_once()
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_oscillation_direction_change_count"], 2)
 
-        with patch.object(controller, "_maybe_auto_apply_victron_ess_balance_recommendation") as maybe_auto_apply, patch.object(
-            controller, "_merge_victron_ess_balance_metrics"
+        with patch.object(components.adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation") as maybe_auto_apply, patch.object(
+            components.sources, "_merge_victron_ess_balance_metrics"
         ) as merge_metrics:
             controller._finalize_victron_ess_balance_metrics(service, 13.0, {})
             maybe_auto_apply.assert_called_once()
             merge_metrics.assert_called_once()
 
         metrics = {}
-        with patch.object(controller, "_victron_ess_balance_pid_output", return_value=12.0):
+        with patch.object(components.pid, "_victron_ess_balance_pid_output", return_value=12.0):
             self.assertEqual(controller._victron_ess_balance_tracking_setpoint(service, 14.0, -40.0, metrics), 62.0)
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "tracking")
 
         service._victron_ess_balance_last_setpoint_w = 60.0
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
             metrics = {}
             controller._victron_ess_balance_apply_write_outcome(service, 15.0, 70.0, -20.0, "profile", metrics)
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "applied")
@@ -221,11 +217,11 @@ class _BranchCoverageVictronApplyCasesPart2:
             write_state.assert_called_once()
             finalize_metrics.assert_called_once()
 
-        with patch.object(controller, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
-            controller, "_maybe_auto_apply_victron_ess_balance_recommendation"
-        ), patch.object(controller, "_merge_victron_ess_balance_metrics"), patch.object(
-            controller, "_victron_ess_balance_should_write", return_value=True
-        ), patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(components.recommendation, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
+            components.adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation"
+        ), patch.object(components.sources, "_merge_victron_ess_balance_metrics"), patch.object(
+            components.writer, "_victron_ess_balance_should_write", return_value=True
+        ), patch.object(components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
             metrics = {}
             service._victron_ess_balance_last_setpoint_w = 70.0
             controller._restore_victron_ess_balance_base_setpoint(service, 17.0, metrics, "blocked")

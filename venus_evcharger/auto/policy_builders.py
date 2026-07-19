@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Builder helpers for Auto policy loading and compatibility syncing."""
+"""Builder helpers for loading and validating the canonical Auto policy."""
 
 from __future__ import annotations
 
@@ -73,66 +73,12 @@ def build_auto_policy_from_config(policy_cls: type["AutoPolicy"], defaults: Sect
     )
 
 
-def build_auto_policy_from_service(policy_cls: type["AutoPolicy"], svc: Any) -> "AutoPolicy":
-    from venus_evcharger.auto.policy import AutoLearnChargePowerPolicy, AutoPhasePolicy, AutoStopEwmaPolicy, AutoThresholdProfile
-
-    return policy_cls(
-        normal_profile=AutoThresholdProfile(
-            float(getattr(svc, "auto_start_surplus_watts", 1500.0)),
-            float(getattr(svc, "auto_stop_surplus_watts", 1100.0)),
-        ),
-        high_soc_profile=AutoThresholdProfile(
-            float(getattr(svc, "auto_high_soc_start_surplus_watts", getattr(svc, "auto_start_surplus_watts", 1500.0))),
-            float(getattr(svc, "auto_high_soc_stop_surplus_watts", getattr(svc, "auto_stop_surplus_watts", 1100.0))),
-        ),
-        high_soc_threshold=float(getattr(svc, "auto_high_soc_threshold", 50.0)),
-        high_soc_release_threshold=float(
-            getattr(svc, "auto_high_soc_release_threshold", getattr(svc, "auto_high_soc_threshold", 50.0))
-        ),
-        min_soc=float(getattr(svc, "auto_min_soc", 30.0)),
-        resume_soc=float(getattr(svc, "auto_resume_soc", 33.0)),
-        start_max_grid_import_watts=float(getattr(svc, "auto_start_max_grid_import_watts", 50.0)),
-        stop_grid_import_watts=float(getattr(svc, "auto_stop_grid_import_watts", 300.0)),
-        grid_recovery_start_seconds=float(getattr(svc, "auto_grid_recovery_start_seconds", 10.0)),
-        stop_surplus_delay_seconds=float(getattr(svc, "auto_stop_surplus_delay_seconds", 10.0)),
-        ewma=AutoStopEwmaPolicy(
-            base_alpha=float(getattr(svc, "auto_stop_ewma_alpha", 0.35)),
-            stable_alpha=float(getattr(svc, "auto_stop_ewma_alpha_stable", 0.55)),
-            volatile_alpha=float(getattr(svc, "auto_stop_ewma_alpha_volatile", 0.15)),
-            volatility_low_watts=float(getattr(svc, "auto_stop_surplus_volatility_low_watts", 150.0)),
-            volatility_high_watts=float(getattr(svc, "auto_stop_surplus_volatility_high_watts", 400.0)),
-        ),
-        learn_charge_power=AutoLearnChargePowerPolicy(
-            enabled=bool(getattr(svc, "auto_learn_charge_power_enabled", True)),
-            reference_power_watts=float(getattr(svc, "auto_reference_charge_power_watts", 1900.0)),
-            min_watts=float(getattr(svc, "auto_learn_charge_power_min_watts", 500.0)),
-            alpha=float(getattr(svc, "auto_learn_charge_power_alpha", 0.2)),
-            start_delay_seconds=float(getattr(svc, "auto_learn_charge_power_start_delay_seconds", 30.0)),
-            window_seconds=float(getattr(svc, "auto_learn_charge_power_window_seconds", 180.0)),
-            max_age_seconds=float(getattr(svc, "auto_learn_charge_power_max_age_seconds", 21600.0)),
-        ),
-        phase=AutoPhasePolicy(
-            enabled=bool(getattr(svc, "auto_phase_switching_enabled", True)),
-            upshift_delay_seconds=float(getattr(svc, "auto_phase_upshift_delay_seconds", 120.0)),
-            downshift_delay_seconds=float(getattr(svc, "auto_phase_downshift_delay_seconds", 30.0)),
-            upshift_headroom_watts=float(getattr(svc, "auto_phase_upshift_headroom_watts", 250.0)),
-            downshift_margin_watts=float(getattr(svc, "auto_phase_downshift_margin_watts", 150.0)),
-            mismatch_retry_seconds=float(getattr(svc, "auto_phase_mismatch_retry_seconds", 300.0)),
-            mismatch_lockout_count=int(getattr(svc, "auto_phase_mismatch_lockout_count", 3)),
-            mismatch_lockout_seconds=float(getattr(svc, "auto_phase_mismatch_lockout_seconds", 1800.0)),
-            prefer_lowest_phase_when_idle=bool(getattr(svc, "auto_phase_prefer_lowest_when_idle", True)),
-        ),
-    )
-
-
-def validate_auto_policy(policy: "AutoPolicy", svc: Any | None = None) -> "AutoPolicy":
+def validate_auto_policy(policy: "AutoPolicy") -> "AutoPolicy":
     policy.clamp()
-    if svc is not None:
-        policy.apply_to_service(svc)
     return policy
 
 
-def load_auto_policy_from_config(defaults: SectionProxy, svc: Any | None = None) -> "AutoPolicy":
+def load_auto_policy_from_config(defaults: SectionProxy) -> "AutoPolicy":
     from venus_evcharger.auto.policy import AutoPolicy
 
-    return validate_auto_policy(AutoPolicy.from_config(defaults), svc)
+    return validate_auto_policy(AutoPolicy.from_config(defaults))

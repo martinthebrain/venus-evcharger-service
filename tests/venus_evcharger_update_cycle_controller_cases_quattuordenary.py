@@ -30,7 +30,7 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
             phase="L1",
             voltage_mode="phase",
             auto_dbus_backoff_base_seconds=5.0,
-            auto_learn_charge_power_max_age_seconds=21600.0,
+            auto_policy=_learning_policy(),
             _charger_target_current_amps=None,
             _charger_target_current_applied_at=None,
             _charger_retry_reason=None,
@@ -39,9 +39,9 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        first = controller.apply_charger_current_target(service, True, 100.0, True)
-        second = controller.apply_charger_current_target(service, True, 105.0, True)
-        third = controller.apply_charger_current_target(service, True, 121.0, True)
+        first = controller.components.relay.foundation.targets.apply_current_target(service, True, 100.0, True)
+        second = controller.components.relay.foundation.targets.apply_current_target(service, True, 105.0, True)
+        third = controller.components.relay.foundation.targets.apply_current_target(service, True, 121.0, True)
 
         self.assertIsNone(first)
         self.assertIsNone(second)
@@ -61,7 +61,9 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
             _warning_throttled=MagicMock(),
         )
 
-        UpdateCycleController._handle_charger_current_target_failure(service, RuntimeError("boom"), now=100.0)
+        relay_components_for_test(service).foundation.targets._handle_current_target_failure(
+            service, RuntimeError("boom"), now=100.0
+        )
 
         service._mark_failure.assert_called_once_with("charger")
         service._warning_throttled.assert_called_once()
@@ -72,7 +74,7 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
             auto_dbus_backoff_base_seconds=5.0,
         )
 
-        UpdateCycleController._remember_charger_retry(service, "offline", "read", 100.0)
+        ChargerTransportTracker.remember_retry(service, "offline", "read", 100.0)
 
         self.assertEqual(service._source_retry_after["charger"], 120.0)
 
@@ -82,7 +84,7 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
             auto_dbus_backoff_base_seconds=5.0,
         )
 
-        UpdateCycleController._remember_charger_retry(service, "offline", "read", 100.0)
+        ChargerTransportTracker.remember_retry(service, "offline", "read", 100.0)
 
         self.assertEqual(service._charger_retry_reason, "offline")
         self.assertEqual(service._charger_retry_source, "read")
@@ -98,7 +100,7 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertTrue(controller._relay_sync_confirmed_match(service, True, True, True))
+        self.assertTrue(controller.components.relay.foundation.telemetry._relay_sync_confirmed_match(service, True, True, True))
         service._mark_recovery.assert_not_called()
         self.assertIsNone(service._relay_sync_expected_state)
 
@@ -122,7 +124,8 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed = controller.apply_relay_decision(
+        relay_on, power, current, confirmed = controller.components.relay.status.apply_relay_decision(
+            service,
             True,
             False,
             {"output": False, "_pm_confirmed": True},
@@ -159,7 +162,8 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed = controller.apply_relay_decision(
+        relay_on, power, current, confirmed = controller.components.relay.status.apply_relay_decision(
+            service,
             True,
             False,
             {"output": False, "_pm_confirmed": True},
@@ -192,7 +196,8 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed = controller.apply_relay_decision(
+        relay_on, power, current, confirmed = controller.components.relay.status.apply_relay_decision(
+            service,
             True,
             False,
             {"output": False, "_pm_confirmed": True},
@@ -219,7 +224,8 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed = controller.apply_relay_decision(
+        relay_on, power, current, confirmed = controller.components.relay.status.apply_relay_decision(
+            service,
             True,
             False,
             {"output": False, "apower": 0.0, "current": 0.0, "_pm_confirmed": True},
@@ -245,13 +251,27 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertIsNone(controller.relay_sync_health_override(True, False, 102.0))
+        self.assertIsNone(
+            controller.components.relay.foundation.telemetry.relay_sync_health_override(
+                service, True, False, 102.0
+            )
+        )
         self.assertFalse(service._relay_sync_failure_reported)
-        self.assertEqual(controller.relay_sync_health_override(False, True, 102.0), "command-mismatch")
+        self.assertEqual(
+            controller.components.relay.foundation.telemetry.relay_sync_health_override(
+                service, False, True, 102.0
+            ),
+            "command-mismatch",
+        )
         self.assertFalse(service._relay_sync_failure_reported)
         service._mark_failure.assert_not_called()
 
-        self.assertEqual(controller.relay_sync_health_override(False, False, 105.0), "relay-sync-failed")
+        self.assertEqual(
+            controller.components.relay.foundation.telemetry.relay_sync_health_override(
+                service, False, False, 105.0
+            ),
+            "relay-sync-failed",
+        )
         service._mark_failure.assert_called_once_with("shelly")
         service._warning_throttled.assert_called_once()
         self.assertIsNone(service._relay_sync_expected_state)
@@ -261,13 +281,18 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
 
         service._mark_failure.reset_mock()
         service._warning_throttled.reset_mock()
-        self.assertIsNone(controller.relay_sync_health_override(False, False, 106.0))
+        self.assertIsNone(
+            controller.components.relay.foundation.telemetry.relay_sync_health_override(
+                service, False, False, 106.0
+            )
+        )
         service._mark_failure.assert_not_called()
         service._warning_throttled.assert_not_called()
 
         service._queue_relay_command = MagicMock()
         service._publish_local_pm_status = MagicMock()
-        relay_on, power, current, confirmed = controller.apply_relay_decision(
+        relay_on, power, current, confirmed = controller.components.relay.status.apply_relay_decision(
+            service,
             True,
             False,
             {"output": False, "_pm_confirmed": True},
@@ -293,7 +318,11 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertIsNone(controller.relay_sync_health_override(True, True, 103.0))
+        self.assertIsNone(
+            controller.components.relay.foundation.telemetry.relay_sync_health_override(
+                service, True, True, 103.0
+            )
+        )
 
         service._mark_recovery.assert_called_once_with("shelly", "Shelly relay confirmation recovered")
         self.assertIsNone(service._relay_sync_expected_state)
@@ -303,7 +332,7 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
 
     def test_update_overrides_health_when_relay_confirmation_times_out(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=105.0),
+            time_now=MagicMock(return_value=105.0),
             _state_summary=lambda: "state",
             _watchdog_recover=MagicMock(),
             _ensure_auto_input_helper_process=MagicMock(),
@@ -374,12 +403,7 @@ class TestUpdateCycleControllerQuattuordenary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=None,
             learned_charge_power_signature_mismatch_sessions=0,
             learned_charge_power_signature_checked_session_started_at=None,
-            auto_learn_charge_power_enabled=False,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            auto_learn_charge_power_window_seconds=180.0,
-            auto_learn_charge_power_max_age_seconds=21600.0,
-            auto_learn_charge_power_min_watts=500.0,
-            auto_learn_charge_power_alpha=0.2,
+            auto_policy=_learning_policy(enabled=False),
             max_current=16.0,
             _relay_sync_expected_state=True,
             _relay_sync_requested_at=100.0,

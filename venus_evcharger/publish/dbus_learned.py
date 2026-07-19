@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any
-
 from venus_evcharger.core.common import (
     _fresh_charger_retry_reason,
     _fresh_charger_retry_source,
@@ -21,8 +19,12 @@ from venus_evcharger.core.contracts import (
     normalize_learning_phase,
     normalize_learning_state,
 )
-from venus_evcharger.publish.dbus_config import _DbusPublishConfig
-from venus_evcharger.publish.dbus_shared import _LearnedDisplayCurrentInputs
+from venus_evcharger.publish.dbus_shared import (
+    DbusPublishContext,
+    LearnedDisplayCurrentInputs,
+    PublishServicePort,
+    diagnostic_text,
+)
 
 
 _VOLTAGE_MODE_PHASE = "phase"
@@ -50,8 +52,11 @@ def _optional_binary_flag_int(value: object) -> int | None:
         return None
 
 
-class _DbusPublishLearned(_DbusPublishConfig):
-    service: Any
+class DbusPublishLearned:
+    """Derive GUI control values from charger readback and learned power."""
+
+    def __init__(self, context: DbusPublishContext) -> None:
+        self.service: PublishServicePort = context.service
 
     def _display_uses_learned_set_current(self) -> bool:
         """Return whether the GUI SetCurrent field should mirror the learned EVSE current."""
@@ -79,9 +84,9 @@ class _DbusPublishLearned(_DbusPublishConfig):
         if state_at is None:
             return False
         current = time.time() if now is None else float(now)
-        return abs(current - state_at) <= self._charger_state_max_age_seconds()
+        return bool(abs(current - float(state_at)) <= self._charger_state_max_age_seconds())
 
-    def _charger_enabled_readback(self, now: float | None) -> bool | None:
+    def charger_enabled_readback(self, now: float | None) -> bool | None:
         """Return fresh native charger enabled-state readback when available."""
         if not self._charger_state_fresh(now):
             return None
@@ -97,47 +102,47 @@ class _DbusPublishLearned(_DbusPublishConfig):
             return None
         return float(current_amps)
 
-    def _charger_text_observed(self, attribute_name: str) -> str:
+    def charger_text_observed(self, attribute_name: str) -> str:
         """Return the last observed charger text field for diagnostics."""
         raw_value = getattr(self.service, attribute_name, None)
         text = str(raw_value).strip() if raw_value is not None else ""
         return text
 
-    def _charger_estimate_active(self) -> int:
+    def charger_estimate_active(self) -> int:
         """Return whether meterless charger values are currently estimated."""
         return int(bool(getattr(self.service, "_last_charger_estimate_source", None)))
 
-    def _charger_estimate_source(self) -> str:
+    def charger_estimate_source(self) -> str:
         """Return the current charger estimate source label for diagnostics."""
-        return self._diagnostic_text_value(getattr(self.service, "_last_charger_estimate_source", None))
+        return diagnostic_text(getattr(self.service, "_last_charger_estimate_source", None))
 
-    def _charger_transport_active(self, now: float) -> int:
+    def charger_transport_active(self, now: float) -> int:
         """Return whether a charger-transport issue is currently active."""
         return int(_fresh_charger_transport_timestamp(self.service, now) is not None)
 
-    def _charger_transport_reason(self, now: float) -> str:
+    def charger_transport_reason(self, now: float) -> str:
         """Return the current charger-transport reason label for diagnostics."""
-        return self._diagnostic_text_value(_fresh_charger_transport_reason(self.service, now))
+        return diagnostic_text(_fresh_charger_transport_reason(self.service, now))
 
-    def _charger_transport_source(self, now: float) -> str:
+    def charger_transport_source(self, now: float) -> str:
         """Return the current charger-transport source label for diagnostics."""
-        return self._diagnostic_text_value(_fresh_charger_transport_source(self.service, now))
+        return diagnostic_text(_fresh_charger_transport_source(self.service, now))
 
-    def _charger_transport_detail(self, now: float) -> str:
+    def charger_transport_detail(self, now: float) -> str:
         """Return the current charger-transport detail text for diagnostics."""
-        return self._diagnostic_text_value(_fresh_charger_transport_detail(self.service, now))
+        return diagnostic_text(_fresh_charger_transport_detail(self.service, now))
 
-    def _charger_retry_active(self, now: float) -> int:
+    def charger_retry_active(self, now: float) -> int:
         """Return whether charger retry backoff is currently active."""
         return int(_fresh_charger_retry_until(self.service, now) is not None)
 
-    def _charger_retry_reason(self, now: float) -> str:
+    def charger_retry_reason(self, now: float) -> str:
         """Return the current charger retry reason label for diagnostics."""
-        return self._diagnostic_text_value(_fresh_charger_retry_reason(self.service, now))
+        return diagnostic_text(_fresh_charger_retry_reason(self.service, now))
 
-    def _charger_retry_source(self, now: float) -> str:
+    def charger_retry_source(self, now: float) -> str:
         """Return the current charger retry source label for diagnostics."""
-        return self._diagnostic_text_value(_fresh_charger_retry_source(self.service, now))
+        return diagnostic_text(_fresh_charger_retry_source(self.service, now))
 
     def _learned_charge_power_expired_for_display(self, now: float | None) -> bool:
         """Return True when learned charging power is too old for GUI display reuse."""
@@ -150,7 +155,7 @@ class _DbusPublishLearned(_DbusPublishConfig):
         if updated_at is None:
             return True
         current = time.time() if now is None else float(now)
-        return (current - updated_at) > max_age_seconds
+        return bool((current - float(updated_at)) > float(max_age_seconds))
 
     def _learned_display_current_allowed(self, now: float | None) -> bool:
         """Return whether learned charging power may currently drive the GUI current display."""
@@ -179,7 +184,8 @@ class _DbusPublishLearned(_DbusPublishConfig):
         raw_phase = learned_phase if learned_phase is not None else getattr(self.service, "phase", None)
         if raw_phase is None:
             return "L1"
-        return normalize_learning_phase(raw_phase)
+        normalized = normalize_learning_phase(raw_phase)
+        return None if normalized is None else str(normalized)
 
     def _raw_learned_display_values(self) -> tuple[float, float, str] | None:
         """Return raw learned display values before phase-voltage normalization."""
@@ -193,7 +199,7 @@ class _DbusPublishLearned(_DbusPublishConfig):
         learned_power, voltage = scalars
         return learned_power, voltage, phase
 
-    def _stable_learned_display_inputs(self, now: float | None) -> _LearnedDisplayCurrentInputs | None:
+    def _stable_learned_display_inputs(self, now: float | None) -> LearnedDisplayCurrentInputs | None:
         """Return the validated inputs used to derive SetCurrent from learned charging power."""
         if not self._learned_display_current_allowed(now):
             return None
@@ -204,7 +210,7 @@ class _DbusPublishLearned(_DbusPublishConfig):
         phase_voltage = self._phase_voltage_for_display_current(voltage, phase)
         if phase_voltage is None:
             return None
-        return _LearnedDisplayCurrentInputs(
+        return LearnedDisplayCurrentInputs(
             power_w=learned_power,
             phase_voltage_v=phase_voltage,
             phase_count=3.0 if phase == "3P" else 1.0,
@@ -254,7 +260,7 @@ class _DbusPublishLearned(_DbusPublishConfig):
             return None
         return self._clamped_display_current(rounded_current)
 
-    def _display_set_current(self, now: float | None) -> float:
+    def display_set_current(self, now: float | None) -> float:
         """Return the GUI-facing SetCurrent value with learned-current display fallback."""
         charger_current = self._charger_current_readback(now)
         if charger_current is not None:

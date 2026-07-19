@@ -4,44 +4,28 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 from requests.auth import HTTPDigestAuth
 
-from venus_evcharger.backend.models import ChargerState
+from venus_evcharger.backend.shelly_io_ports import ShellyRequestHost
 from venus_evcharger.backend.shelly_io_types import (
     EncodedRpcScalar,
     JsonObject,
-    ShellyIoHost,
+    ShellyHttpResponse,
+    ShellyHttpSession,
     ShellyRpcScalar,
-    _EnableBackendLike,
     _RequestAuthKwargs,
     _RequestKwargs,
-    _SessionLike,
+    normalized_json_object,
 )
 
 
-class ShellyIoRequests:
+class ShellyRequestClient:
     """Encapsulate low-level request and direct RPC helpers."""
 
-    if TYPE_CHECKING:
-        service: ShellyIoHost
-
-        def _runtime_now(self) -> float: ...
-
-        def _read_charger_state_best_effort(self, now: float | None = None) -> ChargerState | None: ...
-
-        def _uses_split_backends(self) -> bool: ...
-
-        def _read_split_pm_status(
-            self,
-            charger_state: ChargerState | None = None,
-            *,
-            now: float | None = None,
-        ) -> JsonObject: ...
-
-        def _split_enable_backend(self) -> _EnableBackendLike | None: ...
+    def __init__(self, service: ShellyRequestHost) -> None:
+        self.service = service
 
     @staticmethod
     def _encoded_rpc_params(params: Mapping[str, ShellyRpcScalar]) -> dict[str, EncodedRpcScalar]:
@@ -82,74 +66,58 @@ class ShellyIoRequests:
     @staticmethod
     def _json_object(value: object) -> JsonObject:
         """Return JSON responses as a typed object mapping."""
-        if not isinstance(value, dict):
-            raise ValueError("Shelly response must be a JSON object")
-        return {str(key): item for key, item in value.items()}
+        return normalized_json_object(value, error_message="Shelly response must be a JSON object")
 
     def request(self, url: str) -> JsonObject:
         """Perform a Shelly HTTP request through the main-session client."""
-        response = self.service.session.get(**self._request_kwargs(url))
+        response = self._get(self.service.session, url)
         response.raise_for_status()
         return self._json_object(response.json())
 
-    def request_with_session(self, session: _SessionLike, url: str) -> JsonObject:
+    def request_with_session(self, session: ShellyHttpSession, url: str) -> JsonObject:
         """Perform a Shelly HTTP request through a specific requests session."""
-        response = session.get(**self._request_kwargs(url))
+        response = self._get(session, url)
         response.raise_for_status()
         return self._json_object(response.json())
 
     def rpc_call(self, method: str, **params: ShellyRpcScalar) -> JsonObject:
         """Perform a Shelly RPC call with query encoding."""
-        return self.service._request(self._rpc_url(method, params))
+        return self.request(self._rpc_url(method, params))
 
     def rpc_call_with_session(
         self,
-        session: object,
+        session: ShellyHttpSession,
         method: str,
         **params: ShellyRpcScalar,
     ) -> JsonObject:
         """Perform a Shelly RPC call through a specific requests session."""
-        return self.service._request_with_session(session, self._rpc_url(method, params))
+        return self.request_with_session(session, self._rpc_url(method, params))
+
+    def _get(self, session: ShellyHttpSession, url: str) -> ShellyHttpResponse:
+        """Issue one GET while preserving requests-compatible optional auth."""
+        kwargs = self._request_kwargs(url)
+        if "auth" in kwargs:
+            return session.get(url=url, timeout=kwargs["timeout"], auth=kwargs["auth"])
+        return session.get(url=url, timeout=kwargs["timeout"])
 
     def fetch_pm_status_rpc(self) -> JsonObject:
         """Fetch Shelly component status for power data through the legacy direct RPC path."""
         svc = self.service
-        return svc.rpc_call(f"{svc.pm_component}.GetStatus", id=svc.pm_id)
-
-    def fetch_pm_status(self) -> JsonObject:
-        """Fetch PM status through the selected runtime backend seam."""
-        now = self._runtime_now()
-        charger_state = self._read_charger_state_best_effort(now=now)
-        if self._uses_split_backends():
-            return self._read_split_pm_status(charger_state, now=now)
-        return self.fetch_pm_status_rpc()
+        return self.rpc_call(f"{svc.pm_component}.GetStatus", id=svc.pm_id)
 
     def set_relay_rpc(self, on: bool) -> JsonObject:
         """Switch the Shelly relay output through the legacy direct RPC path."""
         svc = self.service
-        return svc.rpc_call("Switch.Set", id=svc.pm_id, on=bool(on))
-
-    def set_relay(self, on: bool) -> JsonObject:
-        """Switch relay state through the selected runtime backend seam."""
-        backend = self._split_enable_backend()
-        if backend is not None:
-            backend.set_enabled(bool(on))
-            return {"output": bool(on)}
-        return self.set_relay_rpc(on)
+        return self.rpc_call("Switch.Set", id=svc.pm_id, on=bool(on))
 
     def worker_fetch_pm_status_rpc(self) -> JsonObject:
         """Fetch Shelly power status from the background worker session."""
         svc = self.service
-        return svc._rpc_call_with_session(
+        return self.rpc_call_with_session(
             svc._worker_session,
             f"{svc.pm_component}.GetStatus",
             id=svc.pm_id,
         )
 
-    def worker_fetch_pm_status(self) -> JsonObject:
-        """Fetch PM status for the worker, using split backends when configured."""
-        now = self._runtime_now()
-        charger_state = self._read_charger_state_best_effort(now=now)
-        if self._uses_split_backends():
-            return self._read_split_pm_status(charger_state, now=now)
-        return self.worker_fetch_pm_status_rpc()
+
+__all__ = ["ShellyRequestClient"]

@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from venus_evcharger.dbus_adapter_health_slo import (
+from venus_evcharger.dbus_adapter.health.slo import (
     SloThresholds,
     core_read_stale,
     effective_gui_max_age_seconds,

@@ -424,13 +424,6 @@ ChargerType=
         self.assertEqual(_runtime_meter_role_from_legacy("combined", None), "shelly_meter")
         self.assertEqual(_runtime_switch_role_from_legacy("combined", None), "shelly_contactor_switch")
 
-        self.assertEqual(_legacy_meter_view_role_from_runtime("combined", None), "shelly_meter")
-        self.assertEqual(_legacy_switch_view_role_from_runtime("combined", None), "shelly_contactor_switch")
-        self.assertEqual(_legacy_meter_view_role_from_runtime("combined", ""), "shelly_meter")
-        self.assertEqual(_legacy_switch_view_role_from_runtime("combined", ""), "shelly_contactor_switch")
-        self.assertEqual(_legacy_meter_view_role_from_runtime("split", ""), "none")
-        self.assertEqual(_legacy_switch_view_role_from_runtime("split", ""), "none")
-
     def test_legacy_policy_uses_exact_default_field_names_at_mapping_boundary(self) -> None:
         config = self._LegacyCaseSensitiveConfig(defaults={"Mode": "2", "Phase": "L3"})
 
@@ -457,16 +450,15 @@ ChargerType=goe_charger
         self.assertEqual(parsed.topology.type, "hybrid_topology")
         self.assertEqual(parsed.actuator.type, "shelly_contactor_switch")
 
-    def test_runtime_summary_from_service_maps_legacy_service_attrs_as_contract_boundary(self) -> None:
+    def test_runtime_summary_from_service_uses_bootstrap_summary_as_contract_boundary(self) -> None:
         service = SimpleNamespace(
-            backend_mode=" split ",
-            meter_backend_type=" SHELLY_COMBINED ",
-            switch_backend_type=" TEMPLATE_SWITCH ",
-            charger_backend_type=" GOE_CHARGER ",
-            meter_backend_config_path=" /data/etc/meter.ini ",
-            switch_backend_config_path=" /data/etc/switch.ini ",
-            charger_backend_config_path=" /data/etc/charger.ini ",
-            host="direct.local",
+            _backend_runtime_summary=runtime_summary_fixture(
+                meter_type="shelly_meter",
+                switch_type="template_switch",
+                meter_config_path=Path("/data/etc/meter.ini"),
+                switch_config_path=Path("/data/etc/switch.ini"),
+                charger_config_path=Path("/data/etc/charger.ini"),
+            )
         )
 
         summary = runtime_summary_from_service(service)
@@ -481,66 +473,19 @@ ChargerType=goe_charger
         self.assertTrue(summary.topology_configured)
         self.assertFalse(summary.primary_rpc_configured)
 
-    def test_runtime_summary_from_service_preserves_minimal_service_host_default_contract(self) -> None:
-        service = SimpleNamespace(host="direct.local")
-
-        summary = runtime_summary_from_service(service)
-
-        self.assertEqual(summary.backend_mode, "combined")
-        self.assertEqual(summary.meter_type, "shelly_meter")
-        self.assertIsNone(summary.meter_config_path)
-        self.assertEqual(summary.switch_type, "shelly_contactor_switch")
-        self.assertIsNone(summary.switch_config_path)
-        self.assertIsNone(summary.charger_type)
-        self.assertIsNone(summary.charger_config_path)
-        self.assertTrue(summary.topology_configured)
-        self.assertTrue(summary.primary_rpc_configured)
-
-    def test_runtime_summary_from_service_preserves_legacy_service_defaults_when_attr_triggers_legacy_path(self) -> None:
-        service = SimpleNamespace(
-            meter_backend_config_path="",
-            host="direct.local",
-        )
-
-        summary = runtime_summary_from_service(service)
-
-        self.assertEqual(summary.backend_mode, "combined")
-        self.assertEqual(summary.meter_type, "shelly_meter")
-        self.assertEqual(summary.switch_type, "shelly_contactor_switch")
-        self.assertIsNone(summary.charger_type)
-        self.assertTrue(summary.topology_configured)
-        self.assertTrue(summary.primary_rpc_configured)
-
-    def test_runtime_summary_from_service_expands_combined_switch_alias_at_service_boundary(self) -> None:
-        summary = runtime_summary_from_service(
-            SimpleNamespace(
-                backend_mode="split",
-                switch_backend_type="shelly_combined",
-                charger_backend_type="goe_charger",
-            )
-        )
-
-        self.assertEqual(summary.switch_type, "shelly_contactor_switch")
-        self.assertEqual(summary.charger_type, "goe_charger")
-
-    def test_backend_service_label_helpers_preserve_default_and_legacy_attr_contracts(self) -> None:
+    def test_backend_service_label_helpers_use_defaults_without_canonical_state(self) -> None:
         empty_service = SimpleNamespace()
         self.assertEqual(backend_mode_for_service(empty_service), "combined")
         self.assertEqual(backend_mode_for_service(empty_service, "fallback"), "fallback")
         self.assertEqual(backend_type_for_service(empty_service, "meter", "fallback"), "fallback")
         self.assertEqual(backend_type_for_service(empty_service, "meter"), "")
-        self.assertEqual(backend_mode_for_service(SimpleNamespace(backend_mode=""), "fallback"), "fallback")
-
-        legacy_service = SimpleNamespace(
-            backend_mode=" split ",
-            meter_backend_type=" template_meter ",
-            switch_backend_type=" template_switch ",
-            charger_backend_type=" goe_charger ",
+        configured_service = SimpleNamespace(
+            _backend_runtime_summary=runtime_summary_fixture(),
         )
-        self.assertEqual(backend_mode_for_service(legacy_service), "split")
-        self.assertEqual(backend_type_for_service(legacy_service, "meter", "fallback"), "template_meter")
-        self.assertEqual(backend_type_for_service(legacy_service, "switch", "fallback"), "template_switch")
-        self.assertEqual(backend_type_for_service(legacy_service, "charger", "fallback"), "goe_charger")
+        self.assertEqual(backend_mode_for_service(configured_service), "split")
+        self.assertEqual(backend_type_for_service(configured_service, "meter", "fallback"), "template_meter")
+        self.assertEqual(backend_type_for_service(configured_service, "switch", "fallback"), "template_switch")
+        self.assertEqual(backend_type_for_service(configured_service, "charger", "fallback"), "goe_charger")
 
     def test_backend_service_label_helpers_normalize_roles_and_empty_runtime_labels(self) -> None:
         runtime = BackendRuntimeSummary(
@@ -585,8 +530,8 @@ ChargerType=goe_charger
         self.assertEqual(backend_type_for_service(service, "switch", "fallback"), "template_switch")
         self.assertEqual(backend_type_for_service(service, "charger", "fallback"), "goe_charger")
 
-    def test_compat_legacy_backend_view_from_runtime_maps_combined_defaults_exactly(self) -> None:
-        view = compat_legacy_backend_view_from_runtime(
+    def test_backend_selection_view_maps_combined_defaults_exactly(self) -> None:
+        view = backend_selection_view(
             BackendRuntimeSummary(
                 backend_mode="combined",
                 meter_type=None,
@@ -613,16 +558,18 @@ ChargerType=goe_charger
             },
         )
 
-    def test_compat_legacy_backend_view_from_runtime_maps_split_roles_and_paths_exactly(self) -> None:
-        view = compat_legacy_backend_view_from_runtime(
-            SimpleNamespace(
-                backend_mode=" split ",
+    def test_backend_selection_view_maps_split_roles_and_paths_exactly(self) -> None:
+        view = backend_selection_view(
+            BackendRuntimeSummary(
+                backend_mode="split",
                 meter_type=None,
-                meter_config_path=" /data/etc/meter.ini ",
+                meter_config_path=Path("/data/etc/meter.ini"),
                 switch_type=None,
-                switch_config_path=" /data/etc/switch.ini ",
-                charger_type=" GOE_CHARGER ",
-                charger_config_path=" /data/etc/charger.ini ",
+                switch_config_path=Path("/data/etc/switch.ini"),
+                charger_type="goe_charger",
+                charger_config_path=Path("/data/etc/charger.ini"),
+                topology_configured=True,
+                primary_rpc_configured=False,
             )
         )
 
@@ -634,12 +581,26 @@ ChargerType=goe_charger
         self.assertEqual(view["charger_type"], "goe_charger")
         self.assertEqual(str(view["charger_config_path"]), "/data/etc/charger.ini")
 
-    def test_compat_legacy_backend_view_from_runtime_rejects_non_runtime_objects(self) -> None:
-        self.assertIsNone(compat_legacy_backend_view_from_runtime(None))
-        self.assertIsNone(compat_legacy_backend_view_from_runtime(SimpleNamespace(meter_type="template_meter")))
+    def test_backend_selection_view_rejects_non_runtime_objects(self) -> None:
+        with self.assertRaisesRegex(TypeError, "BackendRuntimeSummary"):
+            backend_selection_view(cast(Any, None))
+        with self.assertRaisesRegex(TypeError, "BackendRuntimeSummary"):
+            backend_selection_view(cast(Any, SimpleNamespace(meter_type="template_meter")))
 
-    def test_compat_legacy_backend_view_from_runtime_treats_missing_optional_attrs_as_none(self) -> None:
-        view = compat_legacy_backend_view_from_runtime(SimpleNamespace(backend_mode="split"))
+    def test_backend_selection_view_maps_empty_canonical_roles(self) -> None:
+        view = backend_selection_view(
+            BackendRuntimeSummary(
+                backend_mode="split",
+                meter_type=None,
+                meter_config_path=None,
+                switch_type=None,
+                switch_config_path=None,
+                charger_type=None,
+                charger_config_path=None,
+                topology_configured=False,
+                primary_rpc_configured=False,
+            )
+        )
 
         self.assertEqual(view["mode"], "split")
         self.assertEqual(view["meter_type"], "none")
@@ -649,43 +610,16 @@ ChargerType=goe_charger
         self.assertIsNone(view["switch_config_path"])
         self.assertIsNone(view["charger_config_path"])
 
-    def test_runtime_summary_from_service_validates_legacy_service_none_roles(self) -> None:
-        with self.assertRaisesRegex(ValueError, "MeterType=none is only supported in split backend mode"):
-            runtime_summary_from_service(
-                SimpleNamespace(
-                    backend_mode="combined",
-                    meter_backend_type="none",
-                    charger_backend_type="goe_charger",
-                )
-            )
-
-        with self.assertRaisesRegex(ValueError, "MeterType=none requires a configured charger backend"):
-            runtime_summary_from_service(
-                SimpleNamespace(
-                    backend_mode="split",
-                    meter_backend_type="none",
-                    charger_backend_type=None,
-                )
-            )
-
+    def test_runtime_summary_from_service_accepts_canonical_none_roles(self) -> None:
         allowed_none_roles = runtime_summary_from_service(
             SimpleNamespace(
-                backend_mode="split",
-                meter_backend_type="none",
-                switch_backend_type="none",
-                charger_backend_type="goe_charger",
+                _backend_runtime_summary=runtime_summary_fixture(
+                    meter_type=None,
+                    switch_type=None,
+                )
             )
         )
         self.assertEqual(allowed_none_roles.backend_mode, "split")
         self.assertIsNone(allowed_none_roles.meter_type)
         self.assertIsNone(allowed_none_roles.switch_type)
         self.assertEqual(allowed_none_roles.charger_type, "goe_charger")
-
-        with self.assertRaisesRegex(ValueError, "SwitchType=none requires a configured charger backend"):
-            runtime_summary_from_service(
-                SimpleNamespace(
-                    backend_mode="split",
-                    switch_backend_type="none",
-                    charger_backend_type=None,
-                )
-            )

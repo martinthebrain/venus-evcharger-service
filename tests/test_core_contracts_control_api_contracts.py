@@ -109,7 +109,7 @@ class TestCoreContractsControlApiContracts(unittest.TestCase):
         self.assertEqual(_normalized_phase_selections(None), ["P1"])
         self.assertEqual(_normalized_phase_selections([" P3 ", "P1", ""]), ["P1", "P3"])
         self.assertEqual(_normalized_command_names(None), sorted(CONTROL_COMMAND_NAMES))
-        self.assertEqual(_normalized_command_names(["set_mode", "invalid"]), ["legacy_unknown_write", "set_mode"])
+        self.assertEqual(_normalized_command_names(["set_mode", "invalid"]), ["set_mode"])
         self.assertEqual(_normalized_command_sources(None), sorted(CONTROL_COMMAND_SOURCES))
         self.assertEqual(_normalized_command_sources(["MQTT", "invalid"]), ["http", "mqtt"])
         self.assertEqual(_normalized_auth_scopes(None), ["control_admin", "control_basic", "read", "update_admin"])
@@ -126,7 +126,7 @@ class TestCoreContractsControlApiContracts(unittest.TestCase):
         self.assertEqual(_normalized_command_scope_requirements(None), {})
         self.assertEqual(
             _normalized_command_scope_requirements({"set_mode": "control_admin", "invalid": "invalid"}),
-            {"set_mode": "control_admin", "legacy_unknown_write": "control_basic"},
+            {"set_mode": "control_admin"},
         )
 
     def test_versioning_contract(self) -> None:

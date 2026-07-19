@@ -6,7 +6,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from venus_evcharger.dbus_adapter_components_scheduler import (
+from venus_evcharger.dbus_adapter.scheduling import (
     AtomicJsonWriter,
     DbusDiscoveryManager,
     DbusReadScheduler,
@@ -139,7 +139,7 @@ class TestDbusAdapterSchedulerContracts(unittest.TestCase):
     def test_atomic_json_writer_delegates_exact_payload(self) -> None:
         payload = {"kind": "set_value", "value": 2}
         with patch(
-            "venus_evcharger.dbus_adapter_components_scheduler.write_json_file"
+            "venus_evcharger.dbus_adapter.scheduling.write_json_file"
         ) as write_json_file:
             self.assertIsNone(AtomicJsonWriter().write("/tmp/command.json", payload))
         write_json_file.assert_called_once_with("/tmp/command.json", payload)

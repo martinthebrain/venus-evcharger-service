@@ -28,18 +28,14 @@ class RelayDecisionState:
 
     def resolved_value(self) -> bool:
         """Return the settled relay decision value."""
-        assert self.relay_on is not None
-        return bool(self.relay_on)
+        if self.relay_on is None:
+            raise RelayDecisionTypeError("pending relay decision has no resolved value")
+        return self.relay_on
 
     @property
     def is_pending(self) -> bool:
         """Return True when later workflow stages must keep evaluating."""
         return self.relay_on is None
-
-    def __bool__(self) -> bool:
-        """Preserve legacy truthiness for tests and gradual call-site migration."""
-        return bool(self.relay_on)
-
 
 NO_RELAY_DECISION = RelayDecisionState.pending()
 RelayDecision = bool | RelayDecisionState

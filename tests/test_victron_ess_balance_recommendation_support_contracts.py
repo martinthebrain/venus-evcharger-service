@@ -7,7 +7,7 @@ import unittest
 from types import SimpleNamespace
 
 from venus_evcharger.update.victron_ess_balance_recommendation_support import (
-    _UpdateCycleVictronEssBalanceRecommendationSupport as Recommendation,
+    VictronEssRecommendationPolicy as Recommendation,
 )
 
 

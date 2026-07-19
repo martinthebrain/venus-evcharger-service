@@ -10,50 +10,51 @@ from venus_evcharger.control.http_api_command_payloads import (
     tracked_command,
     tracked_payload,
 )
+from venus_evcharger.control.service import ControlApiV1Service
 
 class __ControlApiHttpTailCasesPart2:
     def test_command_endpoint_rejects_payloads_that_fail_strict_command_schema_validation(self) -> None:
         record_audit = MagicMock()
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(side_effect=ValueError("Control command 'set_mode' requires an integer value.")),
-            _handle_control_command=MagicMock(),
-            _record_control_api_command_audit=record_audit,
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(side_effect=ValueError("Control command 'set_mode' requires an integer value.")),
+            handle_control_command=MagicMock(),
+            record_command_audit=record_audit,
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         handler = _FakeHandler("/v1/control/command", body=b'{"name":"set_mode","value":"1"}')
 
-        server._handle_post(handler)
+        server.router.handle_post(handler)
 
         self.assertEqual(handler.status_code, 400)
         self.assertEqual(handler.json_payload()["error"]["code"], "validation_error")
         self.assertIn("requires an integer value", handler.json_payload()["error"]["message"])
-        service._handle_control_command.assert_not_called()
+        service.handle_control_command.assert_not_called()
         record_audit.assert_called_once()
         self.assertEqual(record_audit.call_args.kwargs["status_code"], 400)
 
     def test_read_json_payload_rejects_invalid_content_length_and_non_object_json(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         invalid_length_handler = _FakeHandler("/v1/control/command")
         invalid_length_handler.headers["Content-Length"] = "abc"
         list_handler = _FakeHandler("/v1/control/command", body=b"[]")
 
-        self.assertIsNone(server._read_json_payload(invalid_length_handler))
+        self.assertIsNone(server.commands.read_json_payload(invalid_length_handler))
         self.assertEqual(invalid_length_handler.status_code, 400)
         self.assertEqual(invalid_length_handler.json_payload()["error"]["code"], "invalid_content_length")
         self.assertEqual(invalid_length_handler.json_payload()["detail"], "Invalid Content-Length.")
-        self.assertIsNone(server._read_json_payload(list_handler))
+        self.assertIsNone(server.commands.read_json_payload(list_handler))
         self.assertEqual(list_handler.status_code, 400)
         self.assertEqual(list_handler.json_payload()["error"]["code"], "invalid_payload")
         self.assertEqual(list_handler.json_payload()["detail"], "JSON body must be an object.")
 
     def test_read_json_payload_accepts_empty_and_valid_json_and_rejects_bad_utf8(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         empty_handler = _FakeHandler("/v1/control/command", body=b"")
@@ -64,11 +65,11 @@ class __ControlApiHttpTailCasesPart2:
         missing_length_handler = _FakeHandler("/v1/control/command", body=b"")
         del missing_length_handler.headers["Content-Length"]
 
-        self.assertEqual(server._read_json_payload(empty_handler), {})
-        self.assertEqual(server._read_json_payload(valid_handler), {"name": "set_mode", "value": 1})
-        self.assertEqual(server._read_json_payload(negative_length_handler), {})
-        self.assertEqual(server._read_json_payload(missing_length_handler), {})
-        self.assertIsNone(server._read_json_payload(bad_utf8_handler))
+        self.assertEqual(server.commands.read_json_payload(empty_handler), {})
+        self.assertEqual(server.commands.read_json_payload(valid_handler), {"name": "set_mode", "value": 1})
+        self.assertEqual(server.commands.read_json_payload(negative_length_handler), {})
+        self.assertEqual(server.commands.read_json_payload(missing_length_handler), {})
+        self.assertIsNone(server.commands.read_json_payload(bad_utf8_handler))
         self.assertEqual(bad_utf8_handler.status_code, HTTPStatus.BAD_REQUEST)
         self.assertEqual(bad_utf8_handler.json_payload()["error"]["code"], "invalid_json")
         self.assertEqual(bad_utf8_handler.json_payload()["detail"], "Invalid JSON body.")
@@ -90,23 +91,23 @@ class __ControlApiHttpTailCasesPart2:
             allow_request=MagicMock(return_value=(True, 0.0)),
             allow_command=MagicMock(return_value=(True, 0.0)),
         )
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(return_value=command),
-            _handle_control_command=MagicMock(return_value=result),
-            _control_api_idempotency_store=MagicMock(return_value=store),
-            _control_api_rate_limiter=MagicMock(return_value=limiter),
-            _publish_control_api_command_event=event_publish,
-            _record_control_api_command_audit=audit,
-            _control_api_state_token=MagicMock(return_value="state-1"),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(return_value=command),
+            handle_control_command=MagicMock(return_value=result),
+            idempotency_store=MagicMock(return_value=store),
+            rate_limiter=MagicMock(return_value=limiter),
+            publish_command_event=event_publish,
+            record_command_audit=audit,
+            state_token=MagicMock(return_value="state-1"),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
-        self.assertIsNone(server._rate_limit_error("", "set_mode"))
+        self.assertIsNone(server.rate_limit.error("", "set_mode"))
         limiter.allow_request.assert_called_with("local")
         limiter.allow_command.assert_called_with("local", "set_mode")
 
         limiter.allow_request.return_value = (False, 1.2)
-        request_limit = server._rate_limit_error("client-a", "set_mode")
+        request_limit = server.rate_limit.error("client-a", "set_mode")
         self.assertIsNotNone(request_limit)
         assert request_limit is not None
         self.assertEqual(request_limit[0], HTTPStatus.TOO_MANY_REQUESTS)
@@ -117,16 +118,16 @@ class __ControlApiHttpTailCasesPart2:
 
         limiter.allow_request.return_value = (True, 0.0)
         limiter.allow_command.return_value = (False, 2.0)
-        command_limit = server._rate_limit_error("client-b", "set_mode")
+        command_limit = server.rate_limit.error("client-b", "set_mode")
         self.assertIsNotNone(command_limit)
         assert command_limit is not None
         self.assertEqual(command_limit[1]["error"]["code"], "cooldown_active")
         self.assertIn("set_mode", command_limit[1]["detail"])
         self.assertEqual(command_limit[1]["error"]["message"], "Command 'set_mode' is temporarily cooling down.")
 
-        self.assertIsNone(server._replayed_response({}))
-        self.assertIsNone(server._replayed_response({"idempotency_key": ""}))
-        self.assertIsNone(server._replayed_response({"idempotency_key": "missing"}))
+        self.assertIsNone(server.idempotency.replayed_response({}))
+        self.assertIsNone(server.idempotency.replayed_response({"idempotency_key": ""}))
+        self.assertIsNone(server.idempotency.replayed_response({"idempotency_key": "missing"}))
         cached_payload = {
             "ok": True,
             "detail": "Applied.",
@@ -135,22 +136,42 @@ class __ControlApiHttpTailCasesPart2:
             "replayed": False,
             "error": None,
         }
-        store.get.return_value = (server._idempotency_fingerprint({"idempotency_key": "idem-1", "value": 1}), 200, cached_payload)
-        replay = server._replayed_response({"idempotency_key": "idem-1", "value": 1})
+        store.get.return_value = (idempotency_fingerprint({"idempotency_key": "idem-1", "value": 1}), 200, cached_payload)
+        replay = server.idempotency.replayed_response({"idempotency_key": "idem-1", "value": 1})
         self.assertEqual(replay, (HTTPStatus.OK, {**cached_payload, "replayed": True}))
         event_publish.assert_called_once_with({"name": "set_mode"}, {"status": "applied"}, replayed=True)
 
-        conflict = server._replayed_response({"idempotency_key": "idem-1", "value": 2})
+        conflict = server.idempotency.replayed_response({"idempotency_key": "idem-1", "value": 2})
         self.assertIsNotNone(conflict)
         assert conflict is not None
         self.assertEqual(conflict[0], HTTPStatus.CONFLICT)
         self.assertEqual(conflict[1]["error"]["code"], "idempotency_conflict")
         self.assertEqual(conflict[1]["error"]["details"], {"idempotency_key": "idem-1"})
 
-        server._cache_idempotent_response({}, HTTPStatus.OK, cached_payload, command, result)
-        server._cache_idempotent_response({"idempotency_key": ""}, HTTPStatus.OK, cached_payload, command, result)
+        serialized_command = server.responder.command_payload(command)
+        serialized_result = server.responder.result_payload(result)
+        server.idempotency.cache_response(
+            {},
+            HTTPStatus.OK,
+            cached_payload,
+            command_payload=serialized_command,
+            result_payload=serialized_result,
+        )
+        server.idempotency.cache_response(
+            {"idempotency_key": ""},
+            HTTPStatus.OK,
+            cached_payload,
+            command_payload=serialized_command,
+            result_payload=serialized_result,
+        )
         put_calls_after_empty = store.put.call_count
-        server._cache_idempotent_response({"idempotency_key": "idem-1", "value": 1}, HTTPStatus.ACCEPTED, cached_payload, command, result)
+        server.idempotency.cache_response(
+            {"idempotency_key": "idem-1", "value": 1},
+            HTTPStatus.ACCEPTED,
+            cached_payload,
+            command_payload=serialized_command,
+            result_payload=serialized_result,
+        )
         self.assertEqual(store.put.call_count, put_calls_after_empty + 1)
         put_args = store.put.call_args.args
         self.assertEqual(put_args[0], "idem-1")
@@ -162,24 +183,23 @@ class __ControlApiHttpTailCasesPart2:
         wildcard_handler = _FakeHandler("/v1/control/command", headers={"If-Match": "*"})
         matching_handler = _FakeHandler("/v1/control/command", headers={"If-Match": '"state-1"'})
         stale_handler = _FakeHandler("/v1/control/command", headers={"If-Match": '"stale"'})
-        self.assertIsNone(server._optimistic_concurrency_error(no_token_handler))
-        self.assertIsNone(server._optimistic_concurrency_error(wildcard_handler))
-        self.assertIsNone(server._optimistic_concurrency_error(matching_handler))
-        concurrency = server._optimistic_concurrency_error(stale_handler)
+        self.assertIsNone(server.authenticator.concurrency_error(no_token_handler))
+        self.assertIsNone(server.authenticator.concurrency_error(wildcard_handler))
+        self.assertIsNone(server.authenticator.concurrency_error(matching_handler))
+        concurrency = server.authenticator.concurrency_error(stale_handler)
         self.assertIsNotNone(concurrency)
         assert concurrency is not None
         self.assertEqual(concurrency[0], HTTPStatus.CONFLICT)
         self.assertEqual(concurrency[1]["error"]["details"]["current"], "state-1")
         self.assertEqual(concurrency[2], {"ETag": '"state-1"', "X-State-Token": "state-1"})
 
-        server._record_command_audit(
+        server.commands.record_audit(
             command={"name": "set_mode"},
             result={"status": "applied"},
             error=None,
             replayed=False,
-            scope="control",
             client_host="client-c",
-            status_code=200,
+            status=HTTPStatus.OK,
         )
         self.assertEqual(
             audit.call_args.kwargs,
@@ -195,17 +215,12 @@ class __ControlApiHttpTailCasesPart2:
             },
         )
 
-        silent_server = LocalControlApiHttpServer(SimpleNamespace(_control_command_from_payload=MagicMock(), _handle_control_command=MagicMock()), host="127.0.0.1", port=8765)
-        silent_server._record_command_audit(command=None, result=None, error=None, replayed=False, scope="control", client_host="", status_code=204)
-        silent_server._publish_replayed_command_event(None, {"status": "applied"})
-        silent_server._publish_replayed_command_event({"name": "set_mode"}, None)
-
     def test_write_command_result_delegates_each_branch_with_tracked_payload_and_client_host(self) -> None:
         command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
         result = ControlResult.applied_result(command)
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(return_value=command),
-            _handle_control_command=MagicMock(return_value=result),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(return_value=command),
+            handle_control_command=MagicMock(return_value=result),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         handler = _FakeHandler("/v1/control/command", client_host="10.0.0.7")
@@ -214,62 +229,62 @@ class __ControlApiHttpTailCasesPart2:
         rate_limit = (HTTPStatus.TOO_MANY_REQUESTS, {"error": {"code": "rate_limited"}}, {"Retry-After": "1"})
 
         with (
-            patch.object(server, "_tracked_payload", return_value=tracked) as tracked_payload_mock,
-            patch.object(server, "_client_host", return_value="client-x") as client_host_mock,
-            patch.object(server, "_replayed_response", return_value=replay) as replay_mock,
-            patch.object(server, "_write_replayed_command_response") as write_replay,
+            patch("venus_evcharger.control.http_api_commands.tracked_payload", return_value=tracked) as tracked_payload_mock,
+            patch.object(server.authenticator, "client_host", return_value="client-x") as client_host_mock,
+            patch.object(server.idempotency, "replayed_response", return_value=replay) as replay_mock,
+            patch.object(server.commands, "write_replayed_response") as write_replay,
         ):
-            server._write_command_result(handler, {"raw": True})
+            server.commands.write_command_result(handler, {"raw": True})
         tracked_payload_mock.assert_called_once_with(handler, {"raw": True})
         client_host_mock.assert_called_once_with(handler)
         replay_mock.assert_called_once_with(tracked)
         write_replay.assert_called_once_with(handler, replay, "client-x")
 
         with (
-            patch.object(server, "_tracked_payload", return_value=tracked),
-            patch.object(server, "_client_host", return_value="client-y"),
-            patch.object(server, "_replayed_response", return_value=None),
-            patch.object(service, "_control_command_from_payload", side_effect=ValueError("bad command")),
-            patch.object(server, "_write_validation_error_response") as write_validation,
+            patch("venus_evcharger.control.http_api_commands.tracked_payload", return_value=tracked),
+            patch.object(server.authenticator, "client_host", return_value="client-y"),
+            patch.object(server.idempotency, "replayed_response", return_value=None),
+            patch.object(service, "control_command_from_payload", side_effect=ValueError("bad command")),
+            patch.object(server.commands, "write_validation_error") as write_validation,
         ):
-            server._write_command_result(handler, {"raw": True})
+            server.commands.write_command_result(handler, {"raw": True})
         write_validation.assert_called_once_with(handler, tracked, "bad command", "client-y")
 
-        service._control_command_from_payload.side_effect = None
-        service._control_command_from_payload.return_value = command
+        service.control_command_from_payload.side_effect = None
+        service.control_command_from_payload.return_value = command
         with (
-            patch.object(server, "_tracked_payload", return_value=tracked),
-            patch.object(server, "_client_host", return_value="client-z"),
-            patch.object(server, "_replayed_response", return_value=None),
-            patch.object(server, "_tracked_command", return_value=command) as tracked_command_mock,
-            patch.object(server, "_rate_limit_error", return_value=rate_limit) as rate_limit_mock,
-            patch.object(server, "_write_rate_limit_error_response") as write_rate_limit,
+            patch("venus_evcharger.control.http_api_commands.tracked_payload", return_value=tracked),
+            patch.object(server.authenticator, "client_host", return_value="client-z"),
+            patch.object(server.idempotency, "replayed_response", return_value=None),
+            patch("venus_evcharger.control.http_api_commands.tracked_command", return_value=command) as tracked_command_mock,
+            patch.object(server.rate_limit, "error", return_value=rate_limit) as rate_limit_mock,
+            patch.object(server.commands, "write_rate_limit_error") as write_rate_limit,
         ):
-            server._write_command_result(handler, {"raw": True})
-        service._control_command_from_payload.assert_called_with(tracked, source="http")
+            server.commands.write_command_result(handler, {"raw": True})
+        service.control_command_from_payload.assert_called_with(tracked, source="http")
         tracked_command_mock.assert_called_once_with(tracked, command)
         rate_limit_mock.assert_called_once_with("client-z", "set_mode")
         write_rate_limit.assert_called_once_with(handler, command, rate_limit, "client-z")
 
         with (
-            patch.object(server, "_tracked_payload", return_value=tracked),
-            patch.object(server, "_client_host", return_value="client-ok"),
-            patch.object(server, "_replayed_response", return_value=None),
-            patch.object(server, "_tracked_command", return_value=command),
-            patch.object(server, "_rate_limit_error", return_value=None),
-            patch.object(server, "_write_new_command_response") as write_new,
+            patch("venus_evcharger.control.http_api_commands.tracked_payload", return_value=tracked),
+            patch.object(server.authenticator, "client_host", return_value="client-ok"),
+            patch.object(server.idempotency, "replayed_response", return_value=None),
+            patch("venus_evcharger.control.http_api_commands.tracked_command", return_value=command),
+            patch.object(server.rate_limit, "error", return_value=None),
+            patch.object(server.commands, "write_new_response") as write_new,
         ):
-            server._write_command_result(handler, {"raw": True})
-        service._handle_control_command.assert_called_with(command)
+            server.commands.write_command_result(handler, {"raw": True})
+        service.handle_control_command.assert_called_with(command)
         write_new.assert_called_once_with(handler, tracked, command, result, "client-ok")
 
     def test_command_role_response_writers_emit_exact_audit_and_json_calls(self) -> None:
         command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http", command_id="cmd-1", idempotency_key="idem-1")
         result = ControlResult.applied_result(command)
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(return_value=command),
-            _handle_control_command=MagicMock(return_value=result),
-            _control_api_state_token=MagicMock(return_value="state-1"),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(return_value=command),
+            handle_control_command=MagicMock(return_value=result),
+            state_token=MagicMock(return_value="state-1"),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         handler = _FakeHandler("/v1/control/command")
@@ -281,16 +296,16 @@ class __ControlApiHttpTailCasesPart2:
         }
         limit_payload = {"error": {"code": "rate_limited"}, "detail": "Slow down."}
 
-        with patch.object(server, "_record_command_audit") as audit_mock, patch.object(server, "_write_json") as write_mock:
-            server._write_replayed_command_response(handler, (HTTPStatus.ACCEPTED, replay_payload), "client-a")
-            server._write_validation_error_response(handler, {"name": "bad"}, "Unsupported control path /bad.", "client-b")
-            server._write_rate_limit_error_response(
+        with patch.object(service, "record_command_audit") as audit_mock, patch.object(server.responder, "write_json") as write_mock:
+            server.commands.write_replayed_response(handler, (HTTPStatus.ACCEPTED, replay_payload), "client-a")
+            server.commands.write_validation_error(handler, {"name": "bad"}, "Unsupported control path /bad.", "client-b")
+            server.commands.write_rate_limit_error(
                 handler,
                 command,
                 (HTTPStatus.TOO_MANY_REQUESTS, limit_payload, {"Retry-After": "5"}),
                 "client-c",
             )
-            server._write_new_command_response(handler, {"idempotency_key": ""}, command, result, "client-d")
+            server.commands.write_new_response(handler, {"idempotency_key": ""}, command, result, "client-d")
 
         self.assertEqual(audit_mock.call_count, 4)
         self.assertEqual(write_mock.call_count, 4)
@@ -304,6 +319,7 @@ class __ControlApiHttpTailCasesPart2:
                 "scope": "control",
                 "client_host": "client-a",
                 "status_code": int(HTTPStatus.ACCEPTED),
+                "transport": "http",
             },
         )
         self.assertEqual(audit_mock.call_args_list[1].kwargs["command"], {"name": "bad"})
@@ -348,15 +364,23 @@ class __ControlApiHttpTailCasesPart2:
 
         for payload in ({}, {"idempotency_key": ""}, {"idempotency_key": "   "}):
             store = SimpleNamespace(get=MagicMock(), put=MagicMock())
-            service = SimpleNamespace(
-                _control_command_from_payload=MagicMock(return_value=command),
-                _handle_control_command=MagicMock(return_value=result),
-                _control_api_idempotency_store=MagicMock(return_value=store),
+            service = control_api_http_service(
+                control_command_from_payload=MagicMock(return_value=command),
+                handle_control_command=MagicMock(return_value=result),
+                idempotency_store=MagicMock(return_value=store),
             )
             server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
-            self.assertIsNone(server._replayed_response(dict(payload)))
-            self.assertIsNone(server._cache_idempotent_response(dict(payload), HTTPStatus.OK, response_payload, command, result))
+            self.assertIsNone(server.idempotency.replayed_response(dict(payload)))
+            self.assertIsNone(
+                server.idempotency.cache_response(
+                    dict(payload),
+                    HTTPStatus.OK,
+                    response_payload,
+                    command_payload=server.responder.command_payload(command),
+                    result_payload=server.responder.result_payload(result),
+                )
+            )
             store.get.assert_not_called()
             store.put.assert_not_called()
 
@@ -376,15 +400,15 @@ class __ControlApiHttpTailCasesPart2:
             put=MagicMock(),
         )
         event_publish = MagicMock()
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
-            _control_api_idempotency_store=MagicMock(return_value=store),
-            _publish_control_api_command_event=event_publish,
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
+            idempotency_store=MagicMock(return_value=store),
+            publish_command_event=event_publish,
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
-        replay = server._replayed_response({"idempotency_key": " idem-1 ", "value": 1})
+        replay = server.idempotency.replayed_response({"idempotency_key": " idem-1 ", "value": 1})
 
         self.assertEqual(replay, (HTTPStatus.OK, {**cached_payload, "replayed": True}))
         store.get.assert_called_once_with("idem-1")
@@ -396,14 +420,14 @@ class __ControlApiHttpTailCasesPart2:
             get=MagicMock(return_value=('{"value":1}', int(HTTPStatus.OK), cached_payload)),
             put=MagicMock(),
         )
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
-            _control_api_idempotency_store=MagicMock(return_value=store),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
+            idempotency_store=MagicMock(return_value=store),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
-        conflict = server._replayed_response({"idempotency_key": " idem-2 ", "value": 2})
+        conflict = server.idempotency.replayed_response({"idempotency_key": " idem-2 ", "value": 2})
 
         self.assertIsNotNone(conflict)
         assert conflict is not None
@@ -412,18 +436,31 @@ class __ControlApiHttpTailCasesPart2:
 
     def test_replayed_command_event_requires_command_and_result_payloads(self) -> None:
         event_publish = MagicMock()
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
-            _publish_control_api_command_event=event_publish,
+        request = {"idempotency_key": "idem", "value": 1}
+        fingerprint = idempotency_fingerprint(request)
+        store = SimpleNamespace(
+            get=MagicMock(
+                side_effect=[
+                    (fingerprint, 200, {"command": None, "result": {"status": "applied"}}),
+                    (fingerprint, 200, {"command": {"name": "set_mode"}, "result": None}),
+                    (fingerprint, 200, {"command": {"name": "set_mode"}, "result": {"status": "applied"}}),
+                ]
+            ),
+            put=MagicMock(),
+        )
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
+            idempotency_store=MagicMock(return_value=store),
+            publish_command_event=event_publish,
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
-        server._publish_replayed_command_event(None, {"status": "applied"})
-        server._publish_replayed_command_event({"name": "set_mode"}, None)
+        server.idempotency.replayed_response(request)
+        server.idempotency.replayed_response(request)
         event_publish.assert_not_called()
 
-        server._publish_replayed_command_event({"name": "set_mode"}, {"status": "applied"})
+        server.idempotency.replayed_response(request)
         event_publish.assert_called_once_with({"name": "set_mode"}, {"status": "applied"}, replayed=True)
 
     def test_command_response_payload_method_uses_exact_replay_flag_and_rejected_error_contract(self) -> None:
@@ -436,13 +473,18 @@ class __ControlApiHttpTailCasesPart2:
             idempotency_key="idem-1",
         )
         result = ControlResult.rejected_result(command, detail="Unsupported phase selection", reversible_failure=False)
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(return_value=command),
-            _handle_control_command=MagicMock(return_value=result),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(return_value=command),
+            handle_control_command=MagicMock(return_value=result),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
-        payload = server._command_response_payload(command, result, replayed=True)
+        payload = command_response_payload(
+            result,
+            replayed=True,
+            command_payload=server.responder.command_payload(command),
+            result_payload=server.responder.result_payload(result),
+        )
 
         self.assertIs(payload["replayed"], True)
         self.assertFalse(payload["ok"])
@@ -474,17 +516,17 @@ class __ControlApiHttpTailCasesPart2:
         )
         result = ControlResult.rejected_result(command, detail="Unsupported phase selection", reversible_failure=False)
         store = SimpleNamespace(get=MagicMock(), put=MagicMock())
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(return_value=command),
-            _handle_control_command=MagicMock(return_value=result),
-            _control_api_idempotency_store=MagicMock(return_value=store),
-            _control_api_state_token=MagicMock(return_value="state-1"),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(return_value=command),
+            handle_control_command=MagicMock(return_value=result),
+            idempotency_store=MagicMock(return_value=store),
+            state_token=MagicMock(return_value="state-1"),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         handler = _FakeHandler("/v1/control/command")
 
-        with patch.object(server, "_record_command_audit") as audit_mock, patch.object(server, "_write_json") as write_mock:
-            server._write_new_command_response(handler, {"idempotency_key": "idem-1", "value": "P1_P2_P3"}, command, result, "client-e")
+        with patch.object(service, "record_command_audit") as audit_mock, patch.object(server.responder, "write_json") as write_mock:
+            server.commands.write_new_response(handler, {"idempotency_key": "idem-1", "value": "P1_P2_P3"}, command, result, "client-e")
 
         persisted = store.put.call_args.args[3]
         self.assertEqual(store.put.call_args.args[:3], ("idem-1", '{"value":"P1_P2_P3"}', int(HTTPStatus.CONFLICT)))
@@ -501,22 +543,21 @@ class __ControlApiHttpTailCasesPart2:
 
     def test_record_command_audit_preserves_non_empty_error_payload_exactly(self) -> None:
         audit = MagicMock()
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
-            _record_control_api_command_audit=audit,
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
+            record_command_audit=audit,
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         error_payload = {"code": "blocked_by_health", "message": "fault"}
 
-        server._record_command_audit(
+        server.commands.record_audit(
             command={"name": "set_enable"},
             result={"status": "rejected"},
             error=error_payload,
             replayed=True,
-            scope="control",
             client_host="client-f",
-            status_code=409,
+            status=HTTPStatus.CONFLICT,
         )
 
         self.assertEqual(
@@ -534,15 +575,15 @@ class __ControlApiHttpTailCasesPart2:
         )
 
     def test_write_command_result_rejects_value_errors_and_maps_statuses(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         handler = _FakeHandler("/v1/control/command", body=b"{}")
 
-        with patch.object(service, "_control_command_from_payload", side_effect=ValueError("bad payload")):
-            server._write_command_result(handler, {})
+        with patch.object(service, "control_command_from_payload", side_effect=ValueError("bad payload")):
+            server.commands.write_command_result(handler, {})
 
         self.assertEqual(handler.status_code, 400)
         self.assertEqual(handler.json_payload()["detail"], "bad payload")
@@ -551,21 +592,21 @@ class __ControlApiHttpTailCasesPart2:
         self.assertIsNone(handler.json_payload()["result"])
 
         command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
-        self.assertEqual(server._http_status_for_result(ControlResult.applied_result(command)), 200)
-        self.assertEqual(server._http_status_for_result(ControlResult.accepted_in_flight_result(command)), 202)
-        self.assertEqual(server._http_status_for_result(ControlResult.rejected_result(command)), 409)
+        self.assertEqual(http_status_for_result(ControlResult.applied_result(command)), 200)
+        self.assertEqual(http_status_for_result(ControlResult.accepted_in_flight_result(command)), 202)
+        self.assertEqual(http_status_for_result(ControlResult.rejected_result(command)), 409)
 
     def test_rejected_command_response_contains_structured_error(self) -> None:
         command = ControlCommand(name="set_phase_selection", path="/PhaseSelection", value="P1_P2_P3", source="http")
         result = ControlResult.rejected_result(command, detail="Unsupported phase selection")
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(return_value=command),
-            _handle_control_command=MagicMock(return_value=result),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(return_value=command),
+            handle_control_command=MagicMock(return_value=result),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         handler = _FakeHandler("/v1/control/command", body=b'{"name": "set_phase_selection", "value": "P1_P2_P3"}')
 
-        server._handle_post(handler)
+        server.router.handle_post(handler)
 
         self.assertEqual(handler.status_code, 409)
         payload = handler.json_payload()
@@ -575,27 +616,66 @@ class __ControlApiHttpTailCasesPart2:
         self.assertEqual(payload["error"]["details"]["status"], "rejected")
 
     def test_command_endpoint_rejects_unknown_commands_with_semantic_error_code(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(side_effect=ValueError("Unsupported control command 'boom'.")),
-            _handle_control_command=MagicMock(),
-            _record_control_api_command_audit=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(side_effect=ValueError("Unsupported control command 'boom'.")),
+            handle_control_command=MagicMock(),
+            record_command_audit=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         handler = _FakeHandler("/v1/control/command", body=b'{"name":"boom","value":1}')
 
-        server._handle_post(handler)
+        server.router.handle_post(handler)
 
         self.assertEqual(handler.status_code, 400)
         self.assertEqual(handler.json_payload()["error"]["code"], "unsupported_command")
 
+    def test_real_command_boundary_rejects_unsupported_command_and_path_without_dispatch(self) -> None:
+        api = ControlApiV1Service(
+            current_setting_paths=("/SetCurrent",),
+            auto_runtime_setting_paths=set(),
+        )
+        dispatch = MagicMock()
+        record_audit = MagicMock()
+        service = control_api_http_service(
+            control_command_from_payload=api.command_from_payload,
+            handle_control_command=dispatch,
+            record_command_audit=record_audit,
+        )
+        server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        scenarios = (
+            (
+                b'{"name":"set_everything_on","value":1}',
+                "Unsupported control command 'set_everything_on'.",
+            ),
+            (
+                b'{"path":"/Unknown","value":1}',
+                "Unsupported control path '/Unknown'.",
+            ),
+        )
+
+        for body, expected_detail in scenarios:
+            with self.subTest(body=body):
+                handler = _FakeHandler("/v1/control/command", body=body)
+                server.router.handle_post(handler)
+                payload = handler.json_payload()
+                self.assertEqual(handler.status_code, 400)
+                self.assertEqual(payload["detail"], expected_detail)
+                self.assertEqual(payload["error"]["code"], "unsupported_command")
+                self.assertFalse(payload["error"]["retryable"])
+                self.assertIsNone(payload["command"])
+                self.assertIsNone(payload["result"])
+
+        dispatch.assert_not_called()
+        self.assertEqual(record_audit.call_count, len(scenarios))
+
     def test_payload_error_code_maps_supported_choice_failures_to_unsupported_command(self) -> None:
         self.assertEqual(
-            LocalControlApiHttpServer._payload_error_code("Control command 'set_mode' requires one of: 0, 1, 2."),
+            payload_error_code("Control command 'set_mode' requires one of: 0, 1, 2."),
             "unsupported_command",
         )
-        self.assertEqual(LocalControlApiHttpServer._payload_error_code("Unsupported control path '/Bogus'."), "unsupported_command")
-        self.assertEqual(LocalControlApiHttpServer._payload_error_code("Command does not support path /Bogus."), "unsupported_command")
-        self.assertEqual(LocalControlApiHttpServer._payload_error_code("Plain validation failure."), "validation_error")
+        self.assertEqual(payload_error_code("Unsupported control path '/Bogus'."), "unsupported_command")
+        self.assertEqual(payload_error_code("Command does not support path /Bogus."), "unsupported_command")
+        self.assertEqual(payload_error_code("Plain validation failure."), "validation_error")
 
     def test_command_payload_helpers_emit_exact_structured_contracts(self) -> None:
         conflict_status, conflict_payload = idempotency_conflict_response("idem-1")
@@ -787,70 +867,70 @@ class __ControlApiHttpTailCasesPart2:
         health_command = ControlCommand(name="set_enable", path="/Enable", value=1)
 
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(topology_command, detail="Unsupported phase selection")
             ),
             "unsupported_for_topology",
         )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(update_command, detail="Update already running")
             ),
             "update_in_progress",
         )
         for detail in ("Update in progress", "Update running now", "Update busy", "Update already queued"):
             self.assertEqual(
-                LocalControlApiHttpServer._result_error_code(ControlResult.rejected_result(update_command, detail=detail)),
+                result_error_code(ControlResult.rejected_result(update_command, detail=detail)),
                 "update_in_progress",
             )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(update_command, detail="Update rejected by policy")
             ),
             "command_rejected",
         )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(topology_command, detail="Path unsupported for this topology")
             ),
             "unsupported_for_topology",
         )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(mode_command, detail="Unsupported mode transition")
             ),
             "blocked_by_mode",
         )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(health_command, detail="Health fault lockout active")
             ),
             "blocked_by_health",
         )
         for detail in ("Health degraded", "Fault active", "Lockout active", "Recovery running"):
             self.assertEqual(
-                LocalControlApiHttpServer._result_error_code(ControlResult.rejected_result(health_command, detail=detail)),
+                result_error_code(ControlResult.rejected_result(health_command, detail=detail)),
                 "blocked_by_health",
             )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(mode_command, detail="Mode blocked while charging")
             ),
             "blocked_by_mode",
         )
         for detail in ("Mode blocked", "Mode cannot change", "Mode while update runs"):
             self.assertEqual(
-                LocalControlApiHttpServer._result_error_code(ControlResult.rejected_result(mode_command, detail=detail)),
+                result_error_code(ControlResult.rejected_result(mode_command, detail=detail)),
                 "blocked_by_mode",
             )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.rejected_result(mode_command, detail="Mode changed externally")
             ),
             "command_rejected",
         )
         self.assertEqual(
-            LocalControlApiHttpServer._result_error_code(
+            result_error_code(
                 ControlResult.accepted_in_flight_result(mode_command, detail="still busy")
             ),
             "conflict",
@@ -863,18 +943,18 @@ class __ControlApiHttpTailCasesPart2:
             allow_request=MagicMock(side_effect=[(False, 1.5), (True, 0.0)]),
             allow_command=MagicMock(return_value=(False, 2.25)),
         )
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(return_value=command),
-            _handle_control_command=MagicMock(return_value=result),
-            _record_control_api_command_audit=MagicMock(),
-            _control_api_rate_limiter=lambda: rate_limiter,
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(return_value=command),
+            handle_control_command=MagicMock(return_value=result),
+            record_command_audit=MagicMock(),
+            rate_limiter=lambda: rate_limiter,
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         rate_handler = _FakeHandler("/v1/control/command", body=b'{"name":"trigger_software_update","value":1}')
         cooldown_handler = _FakeHandler("/v1/control/command", body=b'{"name":"trigger_software_update","value":1}')
 
-        server._handle_post(rate_handler)
-        server._handle_post(cooldown_handler)
+        server.router.handle_post(rate_handler)
+        server.router.handle_post(cooldown_handler)
 
         self.assertEqual(rate_handler.status_code, 429)
         self.assertEqual(rate_handler.json_payload()["error"]["code"], "rate_limited")

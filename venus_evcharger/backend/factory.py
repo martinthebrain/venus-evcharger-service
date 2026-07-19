@@ -19,8 +19,6 @@ from .registry import (
     create_meter_backend,
     create_switch_backend,
 )
-from .shelly_contactor_switch import ShellyContactorSwitchBackend
-from .shelly_meter import ShellyMeterBackend
 from venus_evcharger.topology.config import parse_topology_config
 from venus_evcharger.topology.schema import EvChargerTopologyConfig
 

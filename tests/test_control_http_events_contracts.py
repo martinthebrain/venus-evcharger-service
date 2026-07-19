@@ -8,20 +8,21 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
+from tests.control_api_http_cases_common import control_api_http_service
 from venus_evcharger.control.http_api import LocalControlApiHttpServer
 
 
 class TestControlHttpEventsContracts(unittest.TestCase):
     def setUp(self) -> None:
         self.bus = MagicMock()
-        self.service = SimpleNamespace(
-            _control_api_event_bus=MagicMock(return_value=self.bus),
-            _state_api_event_snapshot_payload=MagicMock(return_value={"mode": 2}),
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        self.service = control_api_http_service(
+            event_bus=MagicMock(return_value=self.bus),
+            event_snapshot_payload=MagicMock(return_value={"mode": 2}),
+            state_token=MagicMock(return_value="state-token"),
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         self.server = LocalControlApiHttpServer(self.service, host="localhost", port=1)
-        self.server._state_token = MagicMock(return_value="state-token")
 
     def test_stream_orchestration_has_exact_queries_headers_and_calls(self) -> None:
         handler = MagicMock()
@@ -35,12 +36,12 @@ class TestControlHttpEventsContracts(unittest.TestCase):
             "once": ["0"],
         }
         with (
-            patch.object(self.server, "_write_initial_event_snapshot", return_value=5) as initial,
-            patch.object(self.server, "_write_recent_events", return_value=8) as recent,
-            patch.object(self.server, "_write_live_events") as live,
+            patch.object(self.server.events, "write_initial_snapshot", return_value=5) as initial,
+            patch.object(self.server.events, "write_recent_events", return_value=8) as recent,
+            patch.object(self.server.events, "write_live_events") as live,
         ):
-            self.server._write_event_stream(handler, params)
-        self.service._control_api_event_bus.assert_called_once_with()
+            self.server.events.write_stream(handler, params)
+        self.service.event_bus.assert_called_once_with()
         handler.send_response.assert_called_once_with(200)
         self.assertEqual(
             handler.send_header.call_args_list,
@@ -67,25 +68,25 @@ class TestControlHttpEventsContracts(unittest.TestCase):
     def test_once_stream_omits_live_follow(self) -> None:
         handler = MagicMock()
         with (
-            patch.object(self.server, "_write_initial_event_snapshot", return_value=0),
-            patch.object(self.server, "_write_recent_events", return_value=0),
-            patch.object(self.server, "_write_live_events") as live,
+            patch.object(self.server.events, "write_initial_snapshot", return_value=0),
+            patch.object(self.server.events, "write_recent_events", return_value=0),
+            patch.object(self.server.events, "write_live_events") as live,
         ):
-            self.server._write_event_stream(handler, {"once": ["true"]})
+            self.server.events.write_stream(handler, {"once": ["true"]})
         live.assert_not_called()
 
     def test_stream_query_contract_uses_every_canonical_key_and_default(self) -> None:
         handler = MagicMock()
         with (
-            patch.object(self.server, "_query_int", side_effect=[20, 0, 0]) as query_int,
-            patch.object(self.server, "_query_float", side_effect=[5.0, 1.0]) as query_float,
-            patch.object(self.server, "_query_event_kinds", return_value=frozenset()) as query_kinds,
-            patch.object(self.server, "_recommended_retry_ms", return_value=1000) as retry,
-            patch.object(self.server, "_query_bool", return_value=True) as query_bool,
-            patch.object(self.server, "_write_initial_event_snapshot", return_value=0),
-            patch.object(self.server, "_write_recent_events", return_value=0),
+            patch.object(self.server.events, "query_int", side_effect=[20, 0, 0]) as query_int,
+            patch.object(self.server.events, "query_float", side_effect=[5.0, 1.0]) as query_float,
+            patch.object(self.server.events, "query_event_kinds", return_value=frozenset()) as query_kinds,
+            patch.object(self.server.events, "recommended_retry_ms", return_value=1000) as retry,
+            patch.object(self.server.events, "query_bool", return_value=True) as query_bool,
+            patch.object(self.server.events, "write_initial_snapshot", return_value=0),
+            patch.object(self.server.events, "write_recent_events", return_value=0),
         ):
-            self.server._write_event_stream(handler, {})
+            self.server.events.write_stream(handler, {})
         self.assertEqual(
             query_int.call_args_list,
             [call({}, "limit", 20), call({}, "after", 0), call({}, "resume", 0)],
@@ -100,13 +101,13 @@ class TestControlHttpEventsContracts(unittest.TestCase):
 
     def test_initial_snapshot_raw_contract_and_skip_rules_are_exact(self) -> None:
         handler = MagicMock()
-        with patch.object(self.server, "_write_event_line") as write, patch(
+        with patch.object(self.server.events, "write_event_line") as write, patch(
             "venus_evcharger.control.http_api_events.time.time", return_value=123.5
         ), patch(
             "venus_evcharger.control.http_api_events.normalized_control_api_event_fields",
             side_effect=lambda value: value,
         ) as normalize:
-            self.assertEqual(self.server._write_initial_event_snapshot(handler, 0, frozenset(), 900), 0)
+            self.assertEqual(self.server.events.write_initial_snapshot(handler, 0, frozenset(), 900), 0)
         expected = {
             "seq": 0,
             "api_version": "v1",
@@ -116,20 +117,20 @@ class TestControlHttpEventsContracts(unittest.TestCase):
         }
         normalize.assert_called_once_with(expected)
         write.assert_called_once_with(handler, expected)
-        self.service._state_api_event_snapshot_payload.assert_called_once_with()
-        self.server._state_token.assert_called_once_with()
+        self.service.event_snapshot_payload.assert_called_once_with()
+        self.service.state_token.assert_called_once_with()
 
-        with patch.object(self.server, "_write_event_line") as write:
-            self.assertEqual(self.server._write_initial_event_snapshot(handler, 7, frozenset(), 1), 7)
-            self.assertEqual(self.server._write_initial_event_snapshot(handler, 1, frozenset(), 1), 1)
+        with patch.object(self.server.events, "write_event_line") as write:
+            self.assertEqual(self.server.events.write_initial_snapshot(handler, 7, frozenset(), 1), 7)
+            self.assertEqual(self.server.events.write_initial_snapshot(handler, 1, frozenset(), 1), 1)
             self.assertEqual(
-                self.server._write_initial_event_snapshot(handler, 0, frozenset({"command"}), 1),
+                self.server.events.write_initial_snapshot(handler, 0, frozenset({"command"}), 1),
                 0,
             )
         write.assert_not_called()
 
-        with patch.object(self.server, "_write_event_line") as write:
-            self.server._write_initial_event_snapshot(handler, 0, frozenset({"snapshot"}), 1)
+        with patch.object(self.server.events, "write_event_line") as write:
+            self.server.events.write_initial_snapshot(handler, 0, frozenset({"snapshot"}), 1)
         write.assert_called_once()
 
     def test_recent_events_advance_sequence_even_when_filtered(self) -> None:
@@ -140,9 +141,9 @@ class TestControlHttpEventsContracts(unittest.TestCase):
             {"seq": 6, "kind": "command"},
         ]
         self.bus.recent.return_value = events
-        with patch.object(self.server, "_write_event_line") as write:
+        with patch.object(self.server.events, "write_event_line") as write:
             self.assertEqual(
-                self.server._write_recent_events(
+                self.server.events.write_recent_events(
                     handler, self.bus, limit=3, after_seq=2, event_kinds=frozenset({"state"})
                 ),
                 8,
@@ -155,7 +156,7 @@ class TestControlHttpEventsContracts(unittest.TestCase):
         second = {"seq": 7, "kind": "state"}
         self.bus.wait_for_next.side_effect = [first, second]
         with patch("venus_evcharger.control.http_api_events.time.time", side_effect=[10.0, 10.25, 10.5]):
-            result = self.server._wait_for_matching_event(
+            result = self.server.events.wait_for_matching_event(
                 self.bus, after_seq=3, timeout=2.0, event_kinds=frozenset({"state"})
             )
         self.assertEqual(result, (second, 7))
@@ -169,7 +170,7 @@ class TestControlHttpEventsContracts(unittest.TestCase):
         self.bus.wait_for_next.side_effect = None
         with patch("venus_evcharger.control.http_api_events.time.time", side_effect=[20.0, 21.0]):
             self.assertEqual(
-                self.server._wait_for_matching_event(
+                self.server.events.wait_for_matching_event(
                     self.bus, after_seq=9, timeout=3.0, event_kinds=frozenset()
                 ),
                 (None, 9),
@@ -178,7 +179,7 @@ class TestControlHttpEventsContracts(unittest.TestCase):
 
         self.bus.wait_for_next.reset_mock()
         with patch("venus_evcharger.control.http_api_events.time.time", side_effect=[30.0, 30.25]):
-            self.server._wait_for_matching_event(
+            self.server.events.wait_for_matching_event(
                 self.bus, after_seq=9, timeout=-2.0, event_kinds=frozenset()
             )
         self.bus.wait_for_next.assert_called_once_with(after_seq=9, timeout=0.0)
@@ -193,13 +194,13 @@ class TestControlHttpEventsContracts(unittest.TestCase):
                 side_effect=[0.0, 0.25, 0.5, 0.75, 1.0, 2.0],
             ),
             patch.object(
-                self.server,
-                "_wait_for_matching_event",
+                self.server.events,
+                "wait_for_matching_event",
                 side_effect=[(first_event, 5), (second_event, 6)],
             ) as wait,
-            patch.object(self.server, "_write_event_line") as write,
+            patch.object(self.server.events, "write_event_line") as write,
         ):
-            self.server._write_live_events(
+            self.server.events.write_live_events(
                 handler,
                 self.bus,
                 after_seq=2,
@@ -223,13 +224,13 @@ class TestControlHttpEventsContracts(unittest.TestCase):
                 "venus_evcharger.control.http_api_events.time.time",
                 side_effect=[0.0, 0.25, 0.5, 0.75, 1.0],
             ),
-            patch.object(self.server, "_wait_for_matching_event", return_value=(None, 4)),
-            patch.object(self.server, "_event_wait_timeout", return_value=0.2) as wait_timeout,
-            patch.object(self.server, "_should_end_live_stream", side_effect=[False, True]) as should_end,
-            patch.object(self.server, "_heartbeat_event", return_value=heartbeat) as heartbeat_factory,
-            patch.object(self.server, "_write_event_line") as write,
+            patch.object(self.server.events, "wait_for_matching_event", return_value=(None, 4)),
+            patch.object(self.server.events, "event_wait_timeout", return_value=0.2) as wait_timeout,
+            patch.object(self.server.events, "should_end_live_stream", side_effect=[False, True]) as should_end,
+            patch.object(self.server.events, "heartbeat_event", return_value=heartbeat) as heartbeat_factory,
+            patch.object(self.server.events, "write_event_line") as write,
         ):
-            self.server._write_live_events(
+            self.server.events.write_live_events(
                 handler,
                 self.bus,
                 after_seq=4,
@@ -245,9 +246,9 @@ class TestControlHttpEventsContracts(unittest.TestCase):
 
         with (
             patch("venus_evcharger.control.http_api_events.time.time", side_effect=[10.0, 10.0]),
-            patch.object(self.server, "_wait_for_matching_event") as wait,
+            patch.object(self.server.events, "wait_for_matching_event") as wait,
         ):
-            self.server._write_live_events(
+            self.server.events.write_live_events(
                 handler,
                 self.bus,
                 after_seq=1,
@@ -259,42 +260,42 @@ class TestControlHttpEventsContracts(unittest.TestCase):
         wait.assert_not_called()
 
     def test_event_helper_boundaries_are_exact(self) -> None:
-        self.assertEqual(self.server._event_wait_timeout(3.0, 0.0), 3.0)
-        self.assertEqual(self.server._event_wait_timeout(3.0, -1.0), 3.0)
-        self.assertEqual(self.server._event_wait_timeout(3.0, 0.5), 0.5)
-        self.assertEqual(self.server._event_wait_timeout(0.25, 0.5), 0.25)
-        self.assertTrue(self.server._should_end_live_stream(3.0, 0.0))
-        self.assertTrue(self.server._should_end_live_stream(0.0, 1.0))
-        self.assertFalse(self.server._should_end_live_stream(0.1, 1.0))
-        self.assertEqual(self.server._recommended_retry_ms(-1.0), 1000)
-        self.assertEqual(self.server._recommended_retry_ms(0.0), 1000)
-        self.assertEqual(self.server._recommended_retry_ms(0.1), 250)
-        self.assertEqual(self.server._recommended_retry_ms(1.25), 1250)
+        self.assertEqual(self.server.events.event_wait_timeout(3.0, 0.0), 3.0)
+        self.assertEqual(self.server.events.event_wait_timeout(3.0, -1.0), 3.0)
+        self.assertEqual(self.server.events.event_wait_timeout(3.0, 0.5), 0.5)
+        self.assertEqual(self.server.events.event_wait_timeout(0.25, 0.5), 0.25)
+        self.assertTrue(self.server.events.should_end_live_stream(3.0, 0.0))
+        self.assertTrue(self.server.events.should_end_live_stream(0.0, 1.0))
+        self.assertFalse(self.server.events.should_end_live_stream(0.1, 1.0))
+        self.assertEqual(self.server.events.recommended_retry_ms(-1.0), 1000)
+        self.assertEqual(self.server.events.recommended_retry_ms(0.0), 1000)
+        self.assertEqual(self.server.events.recommended_retry_ms(0.1), 250)
+        self.assertEqual(self.server.events.recommended_retry_ms(1.25), 1250)
 
     def test_query_and_filter_helpers_cover_defaults_normalization_and_invalid_values(self) -> None:
         self.assertEqual(
-            self.server._query_event_kinds({"kind": [" STATE,command,unknown ", "snapshot"]}),
+            self.server.events.query_event_kinds({"kind": [" STATE,command,unknown ", "snapshot"]}),
             frozenset({"state", "command", "snapshot"}),
         )
-        self.assertEqual(self.server._query_event_kinds({}), frozenset())
+        self.assertEqual(self.server.events.query_event_kinds({}), frozenset())
         event = {"kind": " STATE "}
-        self.assertTrue(self.server._event_matches_kinds(event, frozenset()))
-        self.assertTrue(self.server._event_matches_kinds(event, frozenset({"state"})))
-        self.assertFalse(self.server._event_matches_kinds(event, frozenset({"command"})))
-        self.assertFalse(self.server._event_matches_kinds({}, frozenset({"none"})))
-        self.assertFalse(self.server._event_matches_kinds({}, frozenset({"xxxx"})))
-        self.assertEqual(self.server._query_int({}, "limit", 7), 7)
-        self.assertEqual(self.server._query_int({"limit": ["-2"]}, "limit", 7), 0)
-        self.assertEqual(self.server._query_int({"limit": ["bad"]}, "limit", 7), 7)
-        self.assertEqual(self.server._query_float({}, "timeout", 2.5), 2.5)
-        self.assertEqual(self.server._query_float({"timeout": ["-2"]}, "timeout", 2.5), 0.0)
-        self.assertEqual(self.server._query_float({"timeout": ["bad"]}, "timeout", 2.5), 2.5)
+        self.assertTrue(self.server.events.event_matches_kinds(event, frozenset()))
+        self.assertTrue(self.server.events.event_matches_kinds(event, frozenset({"state"})))
+        self.assertFalse(self.server.events.event_matches_kinds(event, frozenset({"command"})))
+        self.assertFalse(self.server.events.event_matches_kinds({}, frozenset({"none"})))
+        self.assertFalse(self.server.events.event_matches_kinds({}, frozenset({"xxxx"})))
+        self.assertEqual(self.server.events.query_int({}, "limit", 7), 7)
+        self.assertEqual(self.server.events.query_int({"limit": ["-2"]}, "limit", 7), 0)
+        self.assertEqual(self.server.events.query_int({"limit": ["bad"]}, "limit", 7), 7)
+        self.assertEqual(self.server.events.query_float({}, "timeout", 2.5), 2.5)
+        self.assertEqual(self.server.events.query_float({"timeout": ["-2"]}, "timeout", 2.5), 0.0)
+        self.assertEqual(self.server.events.query_float({"timeout": ["bad"]}, "timeout", 2.5), 2.5)
         for raw in ("1", "true", "yes", "on", " TRUE "):
-            self.assertTrue(self.server._query_bool({"once": [raw]}, "once", False), raw)
+            self.assertTrue(self.server.events.query_bool({"once": [raw]}, "once", False), raw)
         for raw in ("0", "false", "no", "off", "unknown"):
-            self.assertFalse(self.server._query_bool({"once": [raw]}, "once", True), raw)
-        self.assertTrue(self.server._query_bool({}, "once", True))
-        self.assertFalse(self.server._query_bool({}, "once", False))
+            self.assertFalse(self.server.events.query_bool({"once": [raw]}, "once", True), raw)
+        self.assertTrue(self.server.events.query_bool({}, "once", True))
+        self.assertFalse(self.server.events.query_bool({}, "once", False))
 
     def test_heartbeat_and_line_serialization_pass_exact_contracts(self) -> None:
         raw = {
@@ -312,7 +313,7 @@ class TestControlHttpEventsContracts(unittest.TestCase):
                 side_effect=lambda value: value,
             ) as normalize,
         ):
-            self.assertEqual(self.server._heartbeat_event(8, 500), raw)
+            self.assertEqual(self.server.events.heartbeat_event(8, 500), raw)
         normalize.assert_called_once_with(raw)
 
         handler = SimpleNamespace(wfile=MagicMock())
@@ -321,7 +322,7 @@ class TestControlHttpEventsContracts(unittest.TestCase):
             "venus_evcharger.control.http_api_events.normalized_control_api_event_fields",
             return_value=normalized,
         ) as normalize:
-            self.server._write_event_line(handler, {"z": 2})
+            self.server.events.write_event_line(handler, {"z": 2})
         normalize.assert_called_once_with({"z": 2})
         handler.wfile.write.assert_called_once_with((json.dumps(normalized, sort_keys=True) + "\n").encode())
         handler.wfile.flush.assert_called_once_with()

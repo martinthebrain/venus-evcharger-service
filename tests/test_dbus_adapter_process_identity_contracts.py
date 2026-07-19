@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 
@@ -29,8 +29,8 @@ class FakeVeDbusService(dict[str, object]):
 
 install_venus_adapter_stubs()
 
-import venus_evcharger.dbus_adapter_process_identity as identity
-from venus_evcharger.dbus_adapter_process_config import CasePreservingConfigParser
+import venus_evcharger.dbus_adapter.process.identity as identity
+from venus_evcharger.dbus_adapter.process.config import CasePreservingConfigParser
 
 
 def adapter(values: dict[str, str] | None = None) -> identity.DbusAdapterIdentity:

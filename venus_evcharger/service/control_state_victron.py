@@ -6,12 +6,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from venus_evcharger.service.control_state_operational import _ControlApiStateOperational
 
+class ControlStateVictron:
+    """Build Victron bias recommendations from the state-owning service."""
 
-class _ControlApiStateVictron(_ControlApiStateOperational):
-    def _state_api_victron_bias_recommendation_payload(self) -> dict[str, Any]:
-        return _state_api_victron_bias_recommendation_payload(self)
+    def __init__(self, service: object) -> None:
+        self.service = service
+
+    def recommendation_payload(self) -> dict[str, Any]:
+        return _state_api_victron_bias_recommendation_payload(self.service)
 
 
 def _state_api_victron_bias_recommendation_payload(owner: Any) -> dict[str, Any]:
@@ -78,7 +81,9 @@ def _state_api_victron_bias_core_state(owner: Any, metrics: dict[str, Any]) -> d
         "recommended_ramp_rate_watts_per_second": metrics.get(
             "battery_discharge_balance_victron_bias_recommended_ramp_rate_watts_per_second"
         ),
-        "recommended_activation_mode": metrics.get("battery_discharge_balance_victron_bias_recommended_activation_mode"),
+        "recommended_activation_mode": metrics.get(
+            "battery_discharge_balance_victron_bias_recommended_activation_mode"
+        ),
         "recommendation_confidence": metrics.get("battery_discharge_balance_victron_bias_recommendation_confidence"),
         "recommendation_regime_consistency_score": metrics.get(
             "battery_discharge_balance_victron_bias_recommendation_regime_consistency_score"
@@ -99,14 +104,20 @@ def _state_api_victron_bias_core_state(owner: Any, metrics: dict[str, Any]) -> d
         "estimated_gain": metrics.get("battery_discharge_balance_victron_bias_estimated_gain"),
         "overshoot_active": bool(metrics.get("battery_discharge_balance_victron_bias_overshoot_active")),
         "overshoot_count": metrics.get("battery_discharge_balance_victron_bias_overshoot_count"),
-        "overshoot_cooldown_active": bool(metrics.get("battery_discharge_balance_victron_bias_overshoot_cooldown_active")),
+        "overshoot_cooldown_active": bool(
+            metrics.get("battery_discharge_balance_victron_bias_overshoot_cooldown_active")
+        ),
         "overshoot_cooldown_reason": metrics.get("battery_discharge_balance_victron_bias_overshoot_cooldown_reason"),
         "overshoot_cooldown_until": metrics.get("battery_discharge_balance_victron_bias_overshoot_cooldown_until"),
         "settling_active": bool(metrics.get("battery_discharge_balance_victron_bias_settling_active")),
         "settled_count": metrics.get("battery_discharge_balance_victron_bias_settled_count"),
         "stability_score": metrics.get("battery_discharge_balance_victron_bias_stability_score"),
-        "oscillation_lockout_enabled": bool(metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_enabled")),
-        "oscillation_lockout_active": bool(metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_active")),
+        "oscillation_lockout_enabled": bool(
+            metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_enabled")
+        ),
+        "oscillation_lockout_active": bool(
+            metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_active")
+        ),
         "oscillation_lockout_reason": metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_reason"),
         "oscillation_lockout_until": metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_until"),
         "oscillation_direction_change_count": metrics.get(
@@ -123,13 +134,17 @@ def _state_api_victron_bias_core_state(owner: Any, metrics: dict[str, Any]) -> d
             "battery_discharge_balance_victron_bias_auto_apply_observation_window_until"
         ),
         "auto_apply_last_param": metrics.get("battery_discharge_balance_victron_bias_auto_apply_last_param"),
-        "auto_apply_suspend_active": bool(metrics.get("battery_discharge_balance_victron_bias_auto_apply_suspend_active")),
+        "auto_apply_suspend_active": bool(
+            metrics.get("battery_discharge_balance_victron_bias_auto_apply_suspend_active")
+        ),
         "auto_apply_suspend_reason": metrics.get("battery_discharge_balance_victron_bias_auto_apply_suspend_reason"),
         "auto_apply_suspend_until": metrics.get("battery_discharge_balance_victron_bias_auto_apply_suspend_until"),
         "rollback_enabled": bool(metrics.get("battery_discharge_balance_victron_bias_rollback_enabled")),
         "rollback_active": bool(metrics.get("battery_discharge_balance_victron_bias_rollback_active")),
         "rollback_reason": metrics.get("battery_discharge_balance_victron_bias_rollback_reason"),
-        "rollback_stable_profile_key": metrics.get("battery_discharge_balance_victron_bias_rollback_stable_profile_key"),
+        "rollback_stable_profile_key": metrics.get(
+            "battery_discharge_balance_victron_bias_rollback_stable_profile_key"
+        ),
         "safe_state_active": bool(metrics.get("battery_discharge_balance_victron_bias_safe_state_active")),
         "safe_state_reason": metrics.get("battery_discharge_balance_victron_bias_safe_state_reason"),
         "controller_reason": metrics.get("battery_discharge_balance_victron_bias_reason"),
@@ -146,7 +161,9 @@ def _state_api_victron_active_learning_profile(metrics: dict[str, Any]) -> dict[
         "reserve_phase": metrics.get("battery_discharge_balance_victron_bias_learning_profile_reserve_phase"),
         "ev_phase": metrics.get("battery_discharge_balance_victron_bias_learning_profile_ev_phase"),
         "pv_phase": metrics.get("battery_discharge_balance_victron_bias_learning_profile_pv_phase"),
-        "battery_limit_phase": metrics.get("battery_discharge_balance_victron_bias_learning_profile_battery_limit_phase"),
+        "battery_limit_phase": metrics.get(
+            "battery_discharge_balance_victron_bias_learning_profile_battery_limit_phase"
+        ),
         "sample_count": metrics.get("battery_discharge_balance_victron_bias_learning_profile_sample_count"),
         "response_delay_seconds": metrics.get(
             "battery_discharge_balance_victron_bias_learning_profile_response_delay_seconds"
@@ -202,7 +219,9 @@ def _state_api_victron_bias_adaptive_tuning(owner: Any, metrics: dict[str, Any])
         ),
         "activation_mode": metrics.get("battery_discharge_balance_victron_bias_activation_mode"),
         "auto_apply_generation": metrics.get("battery_discharge_balance_victron_bias_auto_apply_generation"),
-        "auto_apply_observe_until": metrics.get("battery_discharge_balance_victron_bias_auto_apply_observation_window_until"),
+        "auto_apply_observe_until": metrics.get(
+            "battery_discharge_balance_victron_bias_auto_apply_observation_window_until"
+        ),
         "auto_apply_last_applied_param": metrics.get("battery_discharge_balance_victron_bias_auto_apply_last_param"),
         "oscillation_lockout_until": metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_until"),
         "oscillation_lockout_reason": metrics.get("battery_discharge_balance_victron_bias_oscillation_lockout_reason"),

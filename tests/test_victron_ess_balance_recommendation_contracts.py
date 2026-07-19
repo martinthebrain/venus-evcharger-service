@@ -5,37 +5,38 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 from venus_evcharger.update.victron_ess_balance_recommendation import (
-    _UpdateCycleVictronEssBalanceRecommendation,
+    VictronEssRecommendationEngine,
 )
 from venus_evcharger.update.victron_ess_balance_recommendation_support import (
-    _UpdateCycleVictronEssBalanceRecommendationSupport,
+    VictronEssRecommendationPolicy,
 )
-
-
-class _RecommendationHarness(_UpdateCycleVictronEssBalanceRecommendation):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        return float(value) if isinstance(value, (str, int, float)) else None
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.recommendation = _RecommendationHarness()
+        components = build_victron_ess_components()
+        self.recommendation: VictronEssRecommendationEngine = components.recommendation
+        self.profiles = components.profiles
+        self.policy = components.policy
+        self.recovery = components.recovery
+        self.safety = components.safety
+        self.sources = components.sources
 
     def test_source_uses_trimmed_active_profile_and_positive_sample_count(self) -> None:
         svc = SimpleNamespace(_victron_ess_balance_active_learning_profile_key=" profile ")
         profile = {"sample_count": 1}
         with (
-            patch.object(self.recommendation, "_victron_ess_balance_learning_profile_state", return_value=profile) as state,
-            patch.object(self.recommendation, "_victron_ess_balance_profile_sample_count", return_value=1) as count,
+            patch.object(self.profiles, "_victron_ess_balance_learning_profile_state", return_value=profile) as state,
+            patch.object(self.profiles, "_victron_ess_balance_profile_sample_count", return_value=1) as count,
         ):
             self.assertEqual(self.recommendation._victron_ess_balance_recommendation_source(svc), ("profile", profile, True))
         state.assert_called_once_with(svc, "profile")
         count.assert_called_once_with(profile)
-        with patch.object(self.recommendation, "_victron_ess_balance_profile_sample_count", return_value=0):
+        with patch.object(self.profiles, "_victron_ess_balance_profile_sample_count", return_value=0):
             self.assertEqual(self.recommendation._victron_ess_balance_recommendation_source(SimpleNamespace()), ("", {}, False))
 
     def test_observation_value_and_count_select_profile_or_runtime(self) -> None:
@@ -113,10 +114,10 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         for index, (winner, expected) in enumerate(checks):
             values = {name: position == index for position, (name, _reason) in enumerate(checks)}
             with (
-                patch.object(self.recommendation, checks[0][0], return_value=values[checks[0][0]]) as insufficient,
-                patch.object(self.recommendation, checks[1][0], return_value=values[checks[1][0]]) as overshoot,
-                patch.object(self.recommendation, checks[2][0], return_value=values[checks[2][0]]) as slow,
-                patch.object(self.recommendation, checks[3][0], return_value=values[checks[3][0]]) as relax,
+                patch.object(self.policy, checks[0][0], return_value=values[checks[0][0]]) as insufficient,
+                patch.object(self.policy, checks[1][0], return_value=values[checks[1][0]]) as overshoot,
+                patch.object(self.policy, checks[2][0], return_value=values[checks[2][0]]) as slow,
+                patch.object(self.policy, checks[3][0], return_value=values[checks[3][0]]) as relax,
             ):
                 self.assertEqual(self.recommendation._victron_ess_balance_recommendation_reason(observations, 0.5), expected)
             insufficient.assert_called_once_with(observations, 0.5)
@@ -133,10 +134,10 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
             else:
                 relax.assert_not_called()
         with (
-            patch.object(self.recommendation, checks[0][0], return_value=False) as insufficient,
-            patch.object(self.recommendation, checks[1][0], return_value=False) as overshoot,
-            patch.object(self.recommendation, checks[2][0], return_value=False) as slow,
-            patch.object(self.recommendation, checks[3][0], return_value=False) as relax,
+            patch.object(self.policy, checks[0][0], return_value=False) as insufficient,
+            patch.object(self.policy, checks[1][0], return_value=False) as overshoot,
+            patch.object(self.policy, checks[2][0], return_value=False) as slow,
+            patch.object(self.policy, checks[3][0], return_value=False) as relax,
         ):
             self.assertEqual(self.recommendation._victron_ess_balance_recommendation_reason(observations, 0.5), "telemetry_nominal")
         insufficient.assert_called_once_with(observations, 0.5)
@@ -147,7 +148,7 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
     def test_adjusted_tuning_delegates_to_support_contract(self) -> None:
         current = {"kp": 1.0}
         with patch.object(
-            _UpdateCycleVictronEssBalanceRecommendationSupport,
+            VictronEssRecommendationPolicy,
             "_victron_ess_balance_adjusted_tuning",
             return_value={"kp": 2.0},
         ) as adjusted:
@@ -160,12 +161,12 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         observations = {"regime_consistency_score": 0.8, "response_variance_score": 0.7, "reproducibility_score": 0.6}
         adjusted = {"kp": 1.23456, "ki": 2.34567, "kd": 3.45678, "deadband": 4.56789, "max_abs": 5.67891, "ramp": 6.78912}
         with (
-            patch.object(self.recommendation, "_victron_ess_balance_current_tuning_values", return_value={"kp": 1.0}) as current,
+            patch.object(self.policy, "_victron_ess_balance_current_tuning_values", return_value={"kp": 1.0}) as current,
             patch.object(self.recommendation, "_victron_ess_balance_recommendation_reason", return_value="reason") as reason,
             patch.object(self.recommendation, "_victron_ess_balance_adjusted_tuning", return_value=adjusted) as tune,
             patch.object(self.recommendation, "_victron_ess_balance_recommended_activation_mode", return_value="export_only") as mode,
-            patch.object(self.recommendation, "_victron_ess_balance_recommendation_ini_snippet", return_value="ini") as ini,
-            patch.object(self.recommendation, "_victron_ess_balance_recommendation_hint", return_value="hint") as hint,
+            patch.object(self.policy, "_victron_ess_balance_recommendation_ini_snippet", return_value="ini") as ini,
+            patch.object(self.policy, "_victron_ess_balance_recommendation_hint", return_value="hint") as hint,
         ):
             result = self.recommendation._victron_ess_balance_recommendation_payload(svc, "profile", True, profile, observations, 0.87654)
         self.assertEqual(result, {
@@ -193,12 +194,12 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         hint.assert_called_once_with("reason", 0.87654)
 
         with (
-            patch.object(self.recommendation, "_victron_ess_balance_current_tuning_values", return_value={"kp": 1.0}),
+            patch.object(self.policy, "_victron_ess_balance_current_tuning_values", return_value={"kp": 1.0}),
             patch.object(self.recommendation, "_victron_ess_balance_recommendation_reason", return_value="reason"),
             patch.object(self.recommendation, "_victron_ess_balance_adjusted_tuning", return_value=adjusted),
             patch.object(self.recommendation, "_victron_ess_balance_recommended_activation_mode", return_value="always") as mode,
-            patch.object(self.recommendation, "_victron_ess_balance_recommendation_ini_snippet", return_value="ini"),
-            patch.object(self.recommendation, "_victron_ess_balance_recommendation_hint", return_value="hint"),
+            patch.object(self.policy, "_victron_ess_balance_recommendation_ini_snippet", return_value="ini"),
+            patch.object(self.policy, "_victron_ess_balance_recommendation_hint", return_value="hint"),
         ):
             without_profile = self.recommendation._victron_ess_balance_recommendation_payload(
                 svc, "ignored-profile", False, profile, observations, 0.5
@@ -222,8 +223,8 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         )
         metrics: dict[str, object] = {}
         with (
-            patch.object(self.recommendation, "_victron_ess_balance_overshoot_cooldown_active", return_value=True) as cooldown,
-            patch.object(self.recommendation, "_populate_victron_ess_balance_runtime_safety_metrics") as safety,
+            patch.object(self.recovery, "_victron_ess_balance_overshoot_cooldown_active", return_value=True) as cooldown,
+            patch.object(self.safety, "_populate_victron_ess_balance_runtime_safety_metrics") as safety,
         ):
             self.recommendation._populate_victron_ess_balance_recommendation_telemetry_metrics(svc, metrics, 10.0)
         self.assertEqual(metrics, {
@@ -243,8 +244,8 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
 
         empty_metrics: dict[str, object] = {}
         with (
-            patch.object(self.recommendation, "_victron_ess_balance_overshoot_cooldown_active", return_value=False),
-            patch.object(self.recommendation, "_populate_victron_ess_balance_runtime_safety_metrics"),
+            patch.object(self.recovery, "_victron_ess_balance_overshoot_cooldown_active", return_value=False),
+            patch.object(self.safety, "_populate_victron_ess_balance_runtime_safety_metrics"),
         ):
             self.recommendation._populate_victron_ess_balance_recommendation_telemetry_metrics(
                 SimpleNamespace(), empty_metrics, 0.0
@@ -265,7 +266,7 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         metrics = {}
         with (
             patch.object(self.recommendation, "_populate_victron_ess_balance_recommendation_telemetry_metrics") as telemetry,
-            patch.object(self.recommendation, "_merge_victron_ess_balance_learning_profile_metrics") as merge,
+            patch.object(self.profiles, "_merge_victron_ess_balance_learning_profile_metrics") as merge,
             patch.object(self.recommendation, "_victron_ess_balance_recommendation_metrics", return_value={"recommendation": 1}) as recommendation,
         ):
             self.recommendation._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
@@ -278,7 +279,7 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         missing = SimpleNamespace()
         with (
             patch.object(self.recommendation, "_populate_victron_ess_balance_recommendation_telemetry_metrics") as telemetry,
-            patch.object(self.recommendation, "_merge_victron_ess_balance_learning_profile_metrics") as merge,
+            patch.object(self.profiles, "_merge_victron_ess_balance_learning_profile_metrics") as merge,
             patch.object(self.recommendation, "_victron_ess_balance_recommendation_metrics", return_value={}),
         ):
             self.recommendation._populate_victron_ess_balance_telemetry_metrics(missing, metrics)
@@ -287,10 +288,10 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
 
     def test_metrics_disabled_and_enabled_orchestration(self) -> None:
         disabled = SimpleNamespace(auto_battery_discharge_balance_victron_bias_enabled=False)
-        with patch.object(self.recommendation, "_victron_ess_balance_disabled_recommendation_metrics", return_value={"disabled": 1}) as result:
+        with patch.object(self.policy, "_victron_ess_balance_disabled_recommendation_metrics", return_value={"disabled": 1}) as result:
             self.assertEqual(self.recommendation._victron_ess_balance_recommendation_metrics(disabled), {"disabled": 1})
         result.assert_called_once_with()
-        with patch.object(self.recommendation, "_victron_ess_balance_disabled_recommendation_metrics", return_value={"disabled": 2}):
+        with patch.object(self.policy, "_victron_ess_balance_disabled_recommendation_metrics", return_value={"disabled": 2}):
             self.assertEqual(self.recommendation._victron_ess_balance_recommendation_metrics(SimpleNamespace()), {"disabled": 2})
 
         svc = SimpleNamespace(auto_battery_discharge_balance_victron_bias_enabled=True)
@@ -298,7 +299,7 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         with (
             patch.object(self.recommendation, "_victron_ess_balance_recommendation_source", return_value=("key", {"p": 1}, True)) as source,
             patch.object(self.recommendation, "_victron_ess_balance_recommendation_observations", return_value=observations) as observed,
-            patch.object(self.recommendation, "_victron_ess_balance_recommendation_confidence", return_value=0.9) as confidence,
+            patch.object(self.policy, "_victron_ess_balance_recommendation_confidence", return_value=0.9) as confidence,
             patch.object(self.recommendation, "_victron_ess_balance_recommendation_payload", return_value={"ok": 1}) as payload,
         ):
             self.assertEqual(self.recommendation._victron_ess_balance_recommendation_metrics(svc), {"ok": 1})
@@ -309,7 +310,7 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
 
     def test_recommended_activation_modes_cover_export_reserve_and_fallback(self) -> None:
         svc = object()
-        with patch.object(self.recommendation, "_victron_ess_balance_activation_mode", return_value="always") as current:
+        with patch.object(self.sources, "_victron_ess_balance_activation_mode", return_value="always") as current:
             self.assertEqual(self.recommendation._victron_ess_balance_recommended_activation_mode({}, svc), "always")
             self.assertEqual(
                 self.recommendation._victron_ess_balance_recommended_activation_mode(
@@ -333,7 +334,7 @@ class VictronEssBalanceRecommendationContractTests(unittest.TestCase):
         self.assertEqual(self.recommendation._victron_ess_balance_export_activation_mode("reserve_band"), "export_only")
         current.assert_called_once_with(svc)
 
-        with patch.object(self.recommendation, "_victron_ess_balance_activation_mode", return_value="always"):
+        with patch.object(self.sources, "_victron_ess_balance_activation_mode", return_value="always"):
             self.assertEqual(
                 self.recommendation._victron_ess_balance_recommended_activation_mode(
                     {"site_regime": " export ", "reserve_phase": " above_reserve_band "}, svc

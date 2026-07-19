@@ -14,7 +14,6 @@ from venus_evcharger.core.contracts_basic import (
 )
 from venus_evcharger.core.contracts_outward import normalized_software_update_state_fields
 from venus_evcharger.core.contracts_state_shared import (
-    _normalized_state_mapping_fields,
     _normalized_text,
     _optional_float,
     normalized_state_api_kind,

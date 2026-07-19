@@ -13,7 +13,7 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 
 install_venus_adapter_stubs()
 
-import venus_evcharger.dbus_adapter_process_introspection_snapshot as snapshot
+import venus_evcharger.dbus_adapter.process.introspection_snapshot as snapshot
 from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
 
 

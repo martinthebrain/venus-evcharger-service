@@ -1,5 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from tests.venus_evcharger_state_controller_support import *
+import os
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from venus_evcharger.controllers.state import ServiceStateController
+from tests.venus_evcharger_state_controller_support import (
+    STATE_RUNTIME_WRITE,
+    RuntimeOverrideServiceFixture,
+    ServiceStateControllerTestBase,
+)
 
 
 class TestServiceStateControllerSecondary(ServiceStateControllerTestBase):
@@ -67,49 +77,9 @@ class TestServiceStateControllerSecondary(ServiceStateControllerTestBase):
     def test_save_runtime_overrides_writes_small_ini_and_skips_unchanged_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             overrides_path = os.path.join(temp_dir, "runtime-overrides.ini")
-            service = SimpleNamespace(
-                runtime_overrides_path=overrides_path,
-                virtual_mode=1,
-                virtual_autostart=0,
-                virtual_set_current=13.5,
-                min_current=6.0,
-                max_current=16.0,
+            service = RuntimeOverrideServiceFixture(
+                overrides_path,
                 requested_phase_selection="P1_P2",
-                auto_start_surplus_watts=1850.0,
-                auto_stop_surplus_watts=1350.0,
-                auto_min_soc=40.0,
-                auto_resume_soc=50.0,
-                auto_start_delay_seconds=10.0,
-                auto_stop_delay_seconds=30.0,
-                auto_scheduled_enabled_days="Mon,Tue,Wed,Thu,Fri",
-                auto_scheduled_night_start_delay_seconds=3600.0,
-                auto_scheduled_latest_end_time="06:30",
-                auto_scheduled_night_current_amps=13.0,
-                auto_dbus_backoff_base_seconds=5.0,
-                auto_dbus_backoff_max_seconds=60.0,
-                auto_grid_recovery_start_seconds=14.0,
-                auto_stop_surplus_delay_seconds=45.0,
-                auto_stop_surplus_volatility_low_watts=80.0,
-                auto_stop_surplus_volatility_high_watts=240.0,
-                auto_reference_charge_power_watts=2100.0,
-                auto_learn_charge_power_enabled=False,
-                auto_learn_charge_power_min_watts=1400.0,
-                auto_learn_charge_power_alpha=0.25,
-                auto_learn_charge_power_start_delay_seconds=12.0,
-                auto_learn_charge_power_window_seconds=180.0,
-                auto_learn_charge_power_max_age_seconds=21600.0,
-                auto_phase_switching_enabled=True,
-                auto_phase_prefer_lowest_when_idle=False,
-                auto_phase_upshift_delay_seconds=120.0,
-                auto_phase_downshift_delay_seconds=30.0,
-                auto_phase_upshift_headroom_watts=250.0,
-                auto_phase_downshift_margin_watts=150.0,
-                auto_phase_mismatch_retry_seconds=300.0,
-                auto_phase_mismatch_lockout_count=3,
-                auto_phase_mismatch_lockout_seconds=1800.0,
-                _runtime_overrides_serialized=None,
-                _runtime_overrides_active=False,
-                _runtime_overrides_values={},
             )
             controller = ServiceStateController(service, self._normalize_mode)
 
@@ -143,56 +113,10 @@ class TestServiceStateControllerSecondary(ServiceStateControllerTestBase):
         current_time = 10.0
         with tempfile.TemporaryDirectory() as temp_dir:
             overrides_path = os.path.join(temp_dir, "runtime-overrides.ini")
-            service = SimpleNamespace(
-                runtime_overrides_path=overrides_path,
+            service = RuntimeOverrideServiceFixture(
+                overrides_path,
                 runtime_overrides_write_min_interval_seconds=1.0,
-                _time_now=lambda: current_time,
-                virtual_mode=1,
-                virtual_autostart=0,
-                virtual_set_current=13.5,
-                min_current=6.0,
-                max_current=16.0,
-                requested_phase_selection="P1",
-                auto_start_surplus_watts=1850.0,
-                auto_stop_surplus_watts=1350.0,
-                auto_min_soc=40.0,
-                auto_resume_soc=50.0,
-                auto_start_delay_seconds=10.0,
-                auto_stop_delay_seconds=30.0,
-                auto_scheduled_enabled_days="Mon,Tue,Wed,Thu,Fri",
-                auto_scheduled_night_start_delay_seconds=3600.0,
-                auto_scheduled_latest_end_time="06:30",
-                auto_scheduled_night_current_amps=13.0,
-                auto_dbus_backoff_base_seconds=5.0,
-                auto_dbus_backoff_max_seconds=60.0,
-                auto_grid_recovery_start_seconds=14.0,
-                auto_stop_surplus_delay_seconds=45.0,
-                auto_stop_surplus_volatility_low_watts=80.0,
-                auto_stop_surplus_volatility_high_watts=240.0,
-                auto_reference_charge_power_watts=2100.0,
-                auto_learn_charge_power_enabled=False,
-                auto_learn_charge_power_min_watts=1400.0,
-                auto_learn_charge_power_alpha=0.25,
-                auto_learn_charge_power_start_delay_seconds=12.0,
-                auto_learn_charge_power_window_seconds=180.0,
-                auto_learn_charge_power_max_age_seconds=21600.0,
-                auto_phase_switching_enabled=True,
-                auto_phase_prefer_lowest_when_idle=False,
-                auto_phase_upshift_delay_seconds=120.0,
-                auto_phase_downshift_delay_seconds=30.0,
-                auto_phase_upshift_headroom_watts=250.0,
-                auto_phase_downshift_margin_watts=150.0,
-                auto_phase_mismatch_retry_seconds=300.0,
-                auto_phase_mismatch_lockout_count=3,
-                auto_phase_mismatch_lockout_seconds=1800.0,
-                _runtime_overrides_serialized=None,
-                _runtime_overrides_last_saved_at=None,
-                _runtime_overrides_pending_serialized=None,
-                _runtime_overrides_pending_values=None,
-                _runtime_overrides_pending_text=None,
-                _runtime_overrides_pending_due_at=None,
-                _runtime_overrides_active=False,
-                _runtime_overrides_values={},
+                time_now=lambda: current_time,
             )
             controller = ServiceStateController(service, self._normalize_mode)
 
@@ -224,56 +148,10 @@ class TestServiceStateControllerSecondary(ServiceStateControllerTestBase):
         current_time = 10.0
         with tempfile.TemporaryDirectory() as temp_dir:
             overrides_path = os.path.join(temp_dir, "runtime-overrides.ini")
-            service = SimpleNamespace(
-                runtime_overrides_path=overrides_path,
+            service = RuntimeOverrideServiceFixture(
+                overrides_path,
                 runtime_overrides_write_min_interval_seconds=1.0,
-                _time_now=lambda: current_time,
-                virtual_mode=1,
-                virtual_autostart=0,
-                virtual_set_current=13.5,
-                min_current=6.0,
-                max_current=16.0,
-                requested_phase_selection="P1",
-                auto_start_surplus_watts=1850.0,
-                auto_stop_surplus_watts=1350.0,
-                auto_min_soc=40.0,
-                auto_resume_soc=50.0,
-                auto_start_delay_seconds=10.0,
-                auto_stop_delay_seconds=30.0,
-                auto_scheduled_enabled_days="Mon,Tue,Wed,Thu,Fri",
-                auto_scheduled_night_start_delay_seconds=3600.0,
-                auto_scheduled_latest_end_time="06:30",
-                auto_scheduled_night_current_amps=13.0,
-                auto_dbus_backoff_base_seconds=5.0,
-                auto_dbus_backoff_max_seconds=60.0,
-                auto_grid_recovery_start_seconds=14.0,
-                auto_stop_surplus_delay_seconds=45.0,
-                auto_stop_surplus_volatility_low_watts=80.0,
-                auto_stop_surplus_volatility_high_watts=240.0,
-                auto_reference_charge_power_watts=2100.0,
-                auto_learn_charge_power_enabled=False,
-                auto_learn_charge_power_min_watts=1400.0,
-                auto_learn_charge_power_alpha=0.25,
-                auto_learn_charge_power_start_delay_seconds=12.0,
-                auto_learn_charge_power_window_seconds=180.0,
-                auto_learn_charge_power_max_age_seconds=21600.0,
-                auto_phase_switching_enabled=True,
-                auto_phase_prefer_lowest_when_idle=False,
-                auto_phase_upshift_delay_seconds=120.0,
-                auto_phase_downshift_delay_seconds=30.0,
-                auto_phase_upshift_headroom_watts=250.0,
-                auto_phase_downshift_margin_watts=150.0,
-                auto_phase_mismatch_retry_seconds=300.0,
-                auto_phase_mismatch_lockout_count=3,
-                auto_phase_mismatch_lockout_seconds=1800.0,
-                _runtime_overrides_serialized=None,
-                _runtime_overrides_last_saved_at=None,
-                _runtime_overrides_pending_serialized=None,
-                _runtime_overrides_pending_values=None,
-                _runtime_overrides_pending_text=None,
-                _runtime_overrides_pending_due_at=None,
-                _runtime_overrides_active=False,
-                _runtime_overrides_values={},
+                time_now=lambda: current_time,
             )
             controller = ServiceStateController(service, self._normalize_mode)
 
@@ -298,56 +176,10 @@ class TestServiceStateControllerSecondary(ServiceStateControllerTestBase):
         current_time = 10.0
         with tempfile.TemporaryDirectory() as temp_dir:
             overrides_path = os.path.join(temp_dir, "runtime-overrides.ini")
-            service = SimpleNamespace(
-                runtime_overrides_path=overrides_path,
+            service = RuntimeOverrideServiceFixture(
+                overrides_path,
                 runtime_overrides_write_min_interval_seconds=1.0,
-                _time_now=lambda: current_time,
-                virtual_mode=1,
-                virtual_autostart=0,
-                virtual_set_current=13.5,
-                min_current=6.0,
-                max_current=16.0,
-                requested_phase_selection="P1",
-                auto_start_surplus_watts=1850.0,
-                auto_stop_surplus_watts=1350.0,
-                auto_min_soc=40.0,
-                auto_resume_soc=50.0,
-                auto_start_delay_seconds=10.0,
-                auto_stop_delay_seconds=30.0,
-                auto_scheduled_enabled_days="Mon,Tue,Wed,Thu,Fri",
-                auto_scheduled_night_start_delay_seconds=3600.0,
-                auto_scheduled_latest_end_time="06:30",
-                auto_scheduled_night_current_amps=13.0,
-                auto_dbus_backoff_base_seconds=5.0,
-                auto_dbus_backoff_max_seconds=60.0,
-                auto_grid_recovery_start_seconds=14.0,
-                auto_stop_surplus_delay_seconds=45.0,
-                auto_stop_surplus_volatility_low_watts=80.0,
-                auto_stop_surplus_volatility_high_watts=240.0,
-                auto_reference_charge_power_watts=2100.0,
-                auto_learn_charge_power_enabled=False,
-                auto_learn_charge_power_min_watts=1400.0,
-                auto_learn_charge_power_alpha=0.25,
-                auto_learn_charge_power_start_delay_seconds=12.0,
-                auto_learn_charge_power_window_seconds=180.0,
-                auto_learn_charge_power_max_age_seconds=21600.0,
-                auto_phase_switching_enabled=True,
-                auto_phase_prefer_lowest_when_idle=False,
-                auto_phase_upshift_delay_seconds=120.0,
-                auto_phase_downshift_delay_seconds=30.0,
-                auto_phase_upshift_headroom_watts=250.0,
-                auto_phase_downshift_margin_watts=150.0,
-                auto_phase_mismatch_retry_seconds=300.0,
-                auto_phase_mismatch_lockout_count=3,
-                auto_phase_mismatch_lockout_seconds=1800.0,
-                _runtime_overrides_serialized=None,
-                _runtime_overrides_last_saved_at=None,
-                _runtime_overrides_pending_serialized=None,
-                _runtime_overrides_pending_values=None,
-                _runtime_overrides_pending_text=None,
-                _runtime_overrides_pending_due_at=None,
-                _runtime_overrides_active=False,
-                _runtime_overrides_values={},
+                time_now=lambda: current_time,
             )
             controller = ServiceStateController(service, self._normalize_mode)
 

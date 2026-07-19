@@ -3,14 +3,37 @@ import json
 import os
 import tempfile
 import threading
+from collections.abc import Callable
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
-from venus_evcharger.backend.shelly_io import ShellyIoController
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
+from venus_evcharger.readback_store import InMemoryReadbackStore
 from venus_evcharger.runtime.support import RuntimeSupportController
+from tests.support.auto_input_supervisor import (
+    AutoInputSupervisorServiceFake,
+    HelperProcessFake,
+    SupervisorAutoFake,
+    SupervisorRuntimeFake,
+)
+from tests.venus_evcharger_shelly_io_controller_support import (
+    ShellyAutoOperationsHarness,
+    ShellyIoController,
+    ShellyRuntimeOperationsHarness,
+)
 from tests.venus_evcharger_stress_support import StressTestCaseBase, _FastStopEvent, _SteppingClock
+
+
+def _shelly_runtime_ports(clock: Callable[[], float], **fields: object) -> SimpleNamespace:
+    service = SimpleNamespace(
+        time_now=clock,
+        _readback_store=InMemoryReadbackStore(),
+        **fields,
+    )
+    service.runtime = ShellyRuntimeOperationsHarness(service)
+    service.auto = ShellyAutoOperationsHarness()
+    service.auto.mode_uses_auto_logic.side_effect = lambda mode: int(mode) in (1, 2)
+    return service
 
 
 class TestShellyWallboxStressRuntime(StressTestCaseBase):
@@ -78,14 +101,7 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
         self.assertIn("pm_status", final_snapshot)
 
     def test_relay_queue_survives_concurrent_writers_and_consumers(self):
-        service = SimpleNamespace(
-            poll_interval_ms=1000,
-            deviceinstance=60,
-            _time_now=_SteppingClock(),
-        )
-        runtime = RuntimeSupportController(service, lambda *_args, **_kwargs: 0, lambda *_args, **_kwargs: 0)
-        service._ensure_worker_state = runtime.ensure_worker_state
-        runtime.ensure_worker_state()
+        service = _shelly_runtime_ports(_SteppingClock())
         controller = ShellyIoController(service)
 
         start = threading.Event()
@@ -151,81 +167,53 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                 raise RuntimeError("fault-injected Shelly read failure")
             return {"output": bool(current % 2), "apower": float(current)}
 
-        service = SimpleNamespace(
-            _ensure_worker_state=MagicMock(),
+        service = _shelly_runtime_ports(
+            _SteppingClock(step=3.0),
             _worker_stop_event=stop_event,
             _worker_poll_interval_seconds=0.001,
-            _time_now=_SteppingClock(),
-            _update_worker_snapshot=MagicMock(),
-            _worker_apply_pending_relay_command=MagicMock(),
-            _worker_fetch_pm_status=fetch_pm_status,
-            _mark_recovery=MagicMock(),
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
-            _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
             virtual_mode=1,
             auto_shelly_soft_fail_seconds=0.001,
         )
         controller = ShellyIoController(service)
+        controller.worker._fetch_pm_status = fetch_pm_status
 
         controller.io_worker_loop()
 
         self.assertGreaterEqual(read_counter["count"], iterations)
-        self.assertGreater(service._mark_failure.call_count, 0)
-        self.assertGreater(service._mark_recovery.call_count, 0)
-        self.assertGreater(service._update_worker_snapshot.call_count, 0)
-        self.assertGreater(service._warning_throttled.call_count, 0)
+        self.assertGreater(service.runtime.mark_failure.call_count, 0)
+        self.assertGreater(service.runtime.mark_recovery.call_count, 0)
+        self.assertGreater(service.runtime.update_worker_snapshot.call_count, 0)
+        self.assertGreater(service.runtime.warning_throttled.call_count, 0)
 
     def test_auto_input_supervisor_handles_fault_injected_snapshot_stream(self):
         iterations = self._stress_iters()
-        updates = []
         errors = []
-        updates_lock = threading.Lock()
         errors_lock = threading.Lock()
         start = threading.Event()
 
         with tempfile.TemporaryDirectory() as temp_dir:
             snapshot_path = os.path.join(temp_dir, "auto-input.json")
-            mtime_lock = threading.Lock()
-            mtime_state = {"ns": 0}
-
-            def load_json_file(path):
-                with open(path, "r", encoding="utf-8") as handle:
-                    return json.load(handle)
 
             def write_snapshot(payload):
                 write_text_atomically(snapshot_path, payload)
-                with mtime_lock:
-                    mtime_state["ns"] += 1
 
-            def stat_snapshot(path):
-                if not os.path.exists(path):
-                    raise FileNotFoundError(path)
-                with mtime_lock:
-                    mtime_ns = mtime_state["ns"]
-                return SimpleNamespace(st_mtime_ns=mtime_ns, st_mtime=mtime_ns / 1_000_000_000)
-
-            def update_worker_snapshot(**fields):
-                with updates_lock:
-                    updates.append(dict(fields))
-
-            service = SimpleNamespace(
-                _ensure_worker_state=MagicMock(),
+            runtime = SupervisorRuntimeFake()
+            service = AutoInputSupervisorServiceFake(
+                runtime=runtime,
+                auto=SupervisorAutoFake(),
                 auto_input_snapshot_path=snapshot_path,
                 auto_input_helper_stale_seconds=5.0,
                 auto_input_helper_restart_seconds=1.0,
-                _time_now=lambda: 0.0,
-                _stat_path=stat_snapshot,
-                _load_json_file=load_json_file,
-                _warning_throttled=MagicMock(),
-                _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
                 virtual_mode=1,
+                _auto_input_helper_generation=1,
+                _auto_input_helper_process=HelperProcessFake(pid=4321),
                 _auto_input_runtime_instance_id="instance-1",
-                _auto_input_snapshot_mtime_ns=None,
-                _auto_input_snapshot_last_seen=None,
-                _update_worker_snapshot=update_worker_snapshot,
             )
-            controller = AutoInputSupervisor(service)
+            controller = AutoInputSupervisor(
+                service,
+                config_path="/config.ini",
+                helper_path="/venus_evcharger_auto_input_helper.py",
+            )
 
             def _record_error(message):
                 with errors_lock:
@@ -303,13 +291,13 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                 json.dumps(
                     {
                         "snapshot_version": 1,
-                        "captured_at": float(iterations - 100),
-                        "heartbeat_at": float(iterations - 100),
-                        "pv_captured_at": float(iterations - 100),
+                        "captured_at": float(iterations + 2),
+                        "heartbeat_at": float(iterations + 2),
+                        "pv_captured_at": float(iterations + 2),
                         "pv_power": 900.0,
-                        "battery_captured_at": float(iterations - 100),
+                        "battery_captured_at": float(iterations + 2),
                         "battery_soc": 50.0,
-                        "grid_captured_at": float(iterations - 100),
+                        "grid_captured_at": float(iterations + 2),
                         "grid_power": -500.0,
                         "writer_pid": 4321,
                         "helper_generation": 1,
@@ -323,13 +311,13 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                 json.dumps(
                     {
                         "snapshot_version": 1,
-                        "captured_at": float(iterations + 1),
-                        "heartbeat_at": float(iterations + 1),
-                        "pv_captured_at": float(iterations + 1),
+                        "captured_at": float(iterations + 11),
+                        "heartbeat_at": float(iterations + 11),
+                        "pv_captured_at": float(iterations + 11),
                         "pv_power": 1200.0,
-                        "battery_captured_at": float(iterations + 1),
+                        "battery_captured_at": float(iterations + 11),
                         "battery_soc": 55.0,
-                        "grid_captured_at": float(iterations + 1),
+                        "grid_captured_at": float(iterations + 11),
                         "grid_power": -800.0,
                         "writer_pid": 4321,
                         "helper_generation": 1,
@@ -337,10 +325,10 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                     }
                 ),
             )
-            controller.refresh_snapshot(now=float(iterations + 1))
+            controller.refresh_snapshot(now=float(iterations + 11))
 
         self.assertEqual(errors, [])
-        self.assertGreater(len(updates), 0)
-        self.assertGreater(service._warning_throttled.call_count, 0)
-        self.assertTrue(any(update.get("pv_power") is None for update in updates))
-        self.assertTrue(any(update.get("pv_power") == 1200.0 for update in updates))
+        self.assertGreater(len(service.runtime.snapshots), 0)
+        self.assertGreater(len(service.runtime.warnings), 0)
+        self.assertTrue(any(update.get("pv_power") is None for update in service.runtime.snapshots))
+        self.assertTrue(any(update.get("pv_power") == 1200.0 for update in service.runtime.snapshots))

@@ -5,15 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .openapi_helpers import (
-    _boolean_schema,
-    _integer_schema,
-    _number_schema,
-    _object_schema,
-    _string_schema,
-)
 from .openapi_paths import _paths_spec
-from .openapi_schemas import _component_schemas, _named_command_request_schema
+from .openapi_schemas import _component_schemas
 
 
 def build_control_api_openapi_spec() -> dict[str, Any]:

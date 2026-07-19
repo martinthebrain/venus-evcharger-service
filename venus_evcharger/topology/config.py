@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import configparser
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar
 
+from venus_evcharger.backend.config_migration import (
+    LegacyConfigMigrationError,
+    migrate_legacy_backend_config,
+)
 from venus_evcharger.core.contracts import optional_text
 
 from .schema import (
@@ -18,8 +21,8 @@ from .schema import (
     EvChargerTopologyConfig,
     MeasurementConfig,
     MeasurementType,
-    PolicyMode,
     PolicyConfig,
+    PolicyMode,
     TopologyConfig,
     TopologyType,
 )
@@ -76,20 +79,6 @@ _CHARGER_CHOICES: Mapping[str, ChargerType] = {
 }
 
 
-@dataclass(frozen=True)
-class _LegacyTopologyRuntime:
-    """Normalized legacy topology values used to reconstruct one topology config."""
-
-    defaults: Mapping[str, object]
-    host: str
-    meter_type: str
-    switch_type: str
-    charger_type_raw: str
-    meter_path: str | None
-    switch_path: str | None
-    charger_path: str | None
-
-
 class _TopologySection(Protocol):
     """Minimal section surface used by the topology parser."""
 
@@ -134,16 +123,17 @@ def parse_topology_config(config: configparser.ConfigParser) -> EvChargerTopolog
 
 
 def legacy_topology_from_config(config: configparser.ConfigParser) -> EvChargerTopologyConfig:
-    """Translate one legacy wallbox config into the normalized topology model."""
-    runtime = _legacy_runtime_values(config)
-    policy = PolicyConfig(
-        mode=_legacy_policy_mode(runtime.defaults.get("Mode")),
-        phase=_legacy_phase(runtime.defaults.get("Phase")),
-    )
-    charger = _legacy_charger(runtime.charger_type_raw, runtime.charger_path)
-    parsed = _legacy_topology_config(runtime, charger, policy)
-    validate_topology_config(parsed)
-    return parsed
+    """Migrate one historical wallbox config at the public load boundary.
+
+    The implementation deliberately lives in the backend migration module so
+    the normalized topology parser remains unaware of historical INI fields.
+    This function remains as the supported public migration entry point.
+    """
+    try:
+        migrated = migrate_legacy_backend_config(config)
+    except LegacyConfigMigrationError as error:
+        raise TopologyConfigError(str(error)) from error
+    return validate_topology_config(migrated.topology)
 
 
 def validate_topology_config(config: EvChargerTopologyConfig) -> EvChargerTopologyConfig:
@@ -274,153 +264,12 @@ def _policy(config: _TopologyConfigSections) -> PolicyConfig:
 
 
 def _optional_text(value: object) -> str | None:
-    return optional_text(value)
+    normalized: str | None = optional_text(value)
+    return normalized
 
 
 def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _legacy_policy_mode(value: object) -> PolicyMode:
-    normalized = str(value).strip()
-    if normalized == "1":
-        return "auto"
-    if normalized == "2":
-        return "scheduled"
-    return "manual"
-
-
-def _legacy_phase(value: object) -> str:
-    return _optional_text(value) or "L1"
-
-
-def _legacy_runtime_values(config: configparser.ConfigParser) -> _LegacyTopologyRuntime:
-    """Return normalized legacy config fields used to build one topology."""
-    defaults = _default_mapping(config)
-
-    backends: Mapping[str, object] = config["Backends"] if config.has_section("Backends") else defaults
-
-    return _LegacyTopologyRuntime(
-        defaults=defaults,
-        host=str(defaults.get("Host", "")).strip(),
-        meter_type=_legacy_text_value(backends, "MeterType", "shelly_meter"),
-        switch_type=_legacy_text_value(backends, "SwitchType", "shelly_contactor_switch"),
-        charger_type_raw=_legacy_text_value(backends, "ChargerType", ""),
-        meter_path=_optional_text(backends.get("MeterConfigPath")),
-        switch_path=_optional_text(backends.get("SwitchConfigPath")),
-        charger_path=_optional_text(backends.get("ChargerConfigPath")),
-    )
-
-
-def _default_mapping(config: configparser.ConfigParser) -> Mapping[str, object]:
-    """Return the legacy DEFAULT section with ConfigParser lookup semantics."""
-    if "DEFAULT" not in config:
-        return {}
-    return config["DEFAULT"]
-
-
-def _legacy_charger(charger_type_raw: str, charger_path: str | None) -> ChargerConfig | None:
-    """Return one legacy charger role when configured."""
-    if not charger_type_raw:
-        return None
-    return ChargerConfig(type=_charger_type(charger_type_raw), config_path=charger_path)
-
-
-def _legacy_topology_config(
-    runtime: _LegacyTopologyRuntime,
-    charger: ChargerConfig | None,
-    policy: PolicyConfig,
-) -> EvChargerTopologyConfig:
-    """Return one normalized topology config reconstructed from legacy runtime fields."""
-    if charger is None:
-        return EvChargerTopologyConfig(
-            topology=TopologyConfig(type="simple_relay"),
-            actuator=_legacy_actuator_config(runtime.switch_type, runtime.switch_path, runtime.host),
-            measurement=_legacy_measurement_config(runtime.meter_type, runtime.meter_path, runtime.host),
-            policy=policy,
-        )
-    if runtime.switch_type == "none":
-        return EvChargerTopologyConfig(
-            topology=TopologyConfig(type="native_device"),
-            measurement=_legacy_native_measurement_config(runtime.meter_path),
-            charger=charger,
-            policy=policy,
-        )
-    return EvChargerTopologyConfig(
-        topology=TopologyConfig(type="hybrid_topology"),
-        actuator=_legacy_actuator_config(runtime.switch_type, runtime.switch_path, runtime.host),
-        measurement=_legacy_hybrid_measurement_config(
-            runtime.meter_type,
-            runtime.meter_path,
-            runtime.charger_type_raw,
-        ),
-        charger=charger,
-        policy=policy,
-    )
-
-
-def _legacy_switch_actuator_type(switch_type: str, host: str) -> ActuatorType:
-    normalized = _legacy_switch_type(switch_type, host)
-    alias = _legacy_switch_alias(normalized, host)
-    if alias is not None:
-        return alias
-    if _known_legacy_switch_type(normalized):
-        return _actuator_type(normalized)
-    return "custom"
-
-
-def _legacy_switch_type(switch_type: str, host: str) -> str:
-    """Return the normalized legacy switch type or a direct-host default."""
-    return switch_type or ("shelly_contactor_switch" if host else "")
-
-
-def _legacy_switch_alias(normalized: str, host: str) -> ActuatorType | None:
-    """Return a direct actuator alias for legacy switch labels."""
-    if normalized == "shelly_combined" and host:
-        return "shelly_contactor_switch"
-    return None
-
-
-def _known_legacy_switch_type(normalized: str) -> bool:
-    """Return whether one legacy switch label maps directly to a known actuator type."""
-    return normalized in _ACTUATOR_CHOICES and normalized != "custom"
-
-
-def _legacy_actuator_config(switch_type: str, switch_path: str | None, host: str) -> ActuatorConfig | None:
-    if switch_type == "none" and switch_path is None and not host:
-        return None
-    return ActuatorConfig(type=_legacy_switch_actuator_type(switch_type, host), config_path=switch_path)
-
-
-def _legacy_measurement_config(meter_type: str, meter_path: str | None, host: str) -> MeasurementConfig:
-    if meter_type == "none":
-        return MeasurementConfig(type="none")
-    if meter_path is not None:
-        return MeasurementConfig(type="external_meter", config_path=meter_path)
-    if host:
-        return MeasurementConfig(type="actuator_native")
-    return MeasurementConfig(type="none")
-
-
-def _legacy_native_measurement_config(meter_path: str | None) -> MeasurementConfig:
-    if meter_path is not None:
-        return MeasurementConfig(type="external_meter", config_path=meter_path)
-    return MeasurementConfig(type="charger_native")
-
-
-def _legacy_text_value(mapping: Mapping[str, object], key: str, fallback: str) -> str:
-    raw = mapping.get(key)
-    if raw is None:
-        return fallback
-    return str(raw).strip().lower()
-
-
-def _legacy_hybrid_measurement_config(meter_type: str, meter_path: str | None, charger_type: str) -> MeasurementConfig:
-    if meter_type == "none":
-        return MeasurementConfig(type="charger_native" if charger_type else "none")
-    if meter_path is not None:
-        return MeasurementConfig(type="external_meter", config_path=meter_path)
-    return MeasurementConfig(type="actuator_native")
 
 
 def _topology_type(value: str) -> TopologyType:

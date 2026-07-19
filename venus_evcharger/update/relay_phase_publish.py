@@ -1,37 +1,69 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Phase-metadata, relay-sync, and PM publish helpers for the update cycle."""
+"""Phase measurements and relay-confirmation telemetry component."""
 
 from __future__ import annotations
 
 import logging
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Protocol
 
-from venus_evcharger.update.relay_phase_switch_runtime import _RelayPhaseSwitchRuntime
+from venus_evcharger.core.contracts import finite_float_or_none
 
 RELAY_PLACEHOLDER_PUBLISH_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
+class RelayTelemetryRuntimePort(Protocol):
+    def mark_failure(self, source_key: str) -> None: ...
+    def mark_recovery(self, source_key: str, message: str, *args: object) -> None: ...
+    def publish_local_pm_status(self, relay_on: bool, current_time: float) -> object: ...
+    def warning_throttled(
+        self,
+        warning_key: str,
+        interval_seconds: float,
+        warning_message: str,
+        *args: object,
+        **kwargs: object,
+    ) -> None: ...
+
+
+class RelayTelemetryService(Protocol):
+    @property
+    def runtime(self) -> RelayTelemetryRuntimePort: ...
+
+    phase: str
+    voltage_mode: str
+    relay_sync_timeout_seconds: float
+    _last_auto_metrics: dict[str, object]
+    _last_health_reason: str
+    _relay_sync_expected_state: bool | None
+    _relay_sync_requested_at: float | None
+    _relay_sync_deadline_at: float | None
+    _relay_sync_failure_reported: bool
+
+
+class RelayTelemetry:
     """Translate PM metadata into phase displays and track relay confirmations."""
 
-    if TYPE_CHECKING:  # pragma: no cover
-        _phase_values: Callable[[float, float, Any, Any], dict[str, Any]]
+    def __init__(
+        self,
+        phase_values: Callable[[float, float, object, object], object],
+    ) -> None:
+        self._phase_values = phase_values
 
     @staticmethod
-    def _phase_tuple(raw_value: Any) -> tuple[float, float, float] | None:
+    def _phase_tuple(raw_value: object) -> tuple[float, float, float] | None:
         if not isinstance(raw_value, (tuple, list)) or len(raw_value) != 3:
             return None
         values: tuple[float | None, float | None, float | None] = (
-            _RelayPhasePublish._phase_tuple_item(raw_value[0]),
-            _RelayPhasePublish._phase_tuple_item(raw_value[1]),
-            _RelayPhasePublish._phase_tuple_item(raw_value[2]),
+            RelayTelemetry._phase_tuple_item(raw_value[0]),
+            RelayTelemetry._phase_tuple_item(raw_value[1]),
+            RelayTelemetry._phase_tuple_item(raw_value[2]),
         )
-        return _RelayPhasePublish._resolved_phase_tuple(values)
+        return RelayTelemetry._resolved_phase_tuple(values)
 
     @staticmethod
-    def _phase_tuple_item(raw_value: Any) -> float | None:
+    def _phase_tuple_item(raw_value: object) -> float | None:
         if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool):
             return None
         return float(raw_value)
@@ -46,19 +78,19 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         return first, second, third
 
     @staticmethod
-    def _phase_voltage(voltage: float, selection: Any, voltage_mode: Any) -> float:
-        normalized_selection = _RelayPhasePublish._normalized_phase_selection(selection)
-        normalized_voltage_mode = _RelayPhasePublish._normalized_voltage_mode(voltage_mode)
-        if not _RelayPhasePublish._selection_uses_line_to_line_voltage(normalized_selection, normalized_voltage_mode):
+    def phase_voltage(voltage: float, selection: object, voltage_mode: object) -> float:
+        normalized_selection = RelayTelemetry._normalized_phase_selection(selection)
+        normalized_voltage_mode = RelayTelemetry._normalized_voltage_mode(voltage_mode)
+        if not RelayTelemetry._selection_uses_line_to_line_voltage(normalized_selection, normalized_voltage_mode):
             return float(voltage)
         return max(0.0, float(voltage)) / math.sqrt(3.0)
 
     @staticmethod
-    def _normalized_phase_selection(selection: Any) -> str:
+    def _normalized_phase_selection(selection: object) -> str:
         return str(selection).strip().upper() if selection is not None else ""
 
     @staticmethod
-    def _normalized_voltage_mode(voltage_mode: Any) -> str:
+    def _normalized_voltage_mode(voltage_mode: object) -> str:
         return str(voltage_mode).strip().lower() if voltage_mode is not None else "phase"
 
     @staticmethod
@@ -67,29 +99,29 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
 
     def _phase_data_for_pm_status(
         self,
-        pm_status: dict[str, Any] | None,
+        svc: RelayTelemetryService,
+        pm_status: dict[str, object] | None,
         power: float,
         voltage: float,
     ) -> dict[str, dict[str, float]]:
-        svc = self.service
         phase_data = self._phase_data_from_backend_metadata(pm_status, voltage, getattr(svc, "voltage_mode", "phase"))
         if phase_data is not None:
             return phase_data
         return self._checked_phase_data(self._phase_values(power, voltage, svc.phase, svc.voltage_mode))
 
     @staticmethod
-    def _checked_phase_data(value: Any) -> dict[str, dict[str, float]]:
+    def _checked_phase_data(value: object) -> dict[str, dict[str, float]]:
         if not isinstance(value, dict):
             raise TypeError(f"_phase_values must return dict, got {type(value).__name__}")
         checked: dict[str, dict[str, float]] = {}
         for phase_name, phase_values in value.items():
             if not isinstance(phase_name, str) or not isinstance(phase_values, dict):
                 raise TypeError("_phase_values must return dict[str, dict[str, float]]")
-            checked[phase_name] = _RelayPhasePublish._checked_phase_values(phase_values)
+            checked[phase_name] = RelayTelemetry._checked_phase_values(phase_values)
         return checked
 
     @staticmethod
-    def _checked_phase_values(values: dict[Any, Any]) -> dict[str, float]:
+    def _checked_phase_values(values: dict[object, object]) -> dict[str, float]:
         checked: dict[str, float] = {}
         for key, value in values.items():
             if not isinstance(key, str) or not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -99,9 +131,9 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
 
     def _phase_data_from_backend_metadata(
         self,
-        pm_status: dict[str, Any] | None,
+        pm_status: dict[str, object] | None,
         voltage: float,
-        voltage_mode: Any,
+        voltage_mode: object,
     ) -> dict[str, dict[str, float]] | None:
         if not isinstance(pm_status, dict):
             return None
@@ -109,7 +141,7 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         if phase_powers is None:
             return None
         phase_currents = self._phase_tuple(pm_status.get("_phase_currents_a"))
-        phase_voltage = self._phase_voltage(voltage, pm_status.get("_phase_selection"), voltage_mode)
+        phase_voltage = self.phase_voltage(voltage, pm_status.get("_phase_selection"), voltage_mode)
         return self._phase_data_from_phase_tuples(phase_powers, phase_currents, phase_voltage)
 
     @staticmethod
@@ -141,7 +173,7 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         return phase_data
 
     @staticmethod
-    def log_auto_relay_change(svc: Any, desired_relay: bool) -> None:
+    def log_auto_relay_change(svc: RelayTelemetryService, desired_relay: bool) -> None:
         metrics = svc._last_auto_metrics
         logging.info(
             "Auto relay %s reason=%s surplus=%sW grid=%sW soc=%s%%",
@@ -153,31 +185,35 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         )
 
     @staticmethod
-    def _clear_relay_sync_tracking(svc: Any) -> None:
+    def _clear_relay_sync_tracking(svc: RelayTelemetryService) -> None:
         svc._relay_sync_expected_state = None
         svc._relay_sync_requested_at = None
         svc._relay_sync_deadline_at = None
         svc._relay_sync_failure_reported = False
 
     @staticmethod
-    def _pm_status_confirmed(pm_status: dict[str, Any]) -> bool:
+    def pm_status_confirmed(pm_status: dict[str, object]) -> bool:
         return bool(pm_status.get("_pm_confirmed"))
 
     @staticmethod
-    def _relay_sync_timeout_warning_window_seconds(svc: Any) -> float:
+    def _relay_sync_timeout_warning_window_seconds(svc: RelayTelemetryService) -> float:
         raw_timeout = svc.relay_sync_timeout_seconds if hasattr(svc, "relay_sync_timeout_seconds") else 2.0
         return max(1.0, float(raw_timeout or 2.0))
 
     @staticmethod
-    def _relay_sync_failure_reported(svc: Any) -> bool:
+    def _relay_sync_failure_reported(svc: RelayTelemetryService) -> bool:
         return bool(svc._relay_sync_failure_reported) if hasattr(svc, "_relay_sync_failure_reported") else False
 
-    def _publish_local_pm_status_best_effort(self, relay_on: bool, now: float) -> None:
-        svc = self.service
+    def publish_local_pm_status_best_effort(
+        self,
+        svc: RelayTelemetryService,
+        relay_on: bool,
+        now: float,
+    ) -> None:
         try:
-            svc._publish_local_pm_status(relay_on, now)
+            svc.runtime.publish_local_pm_status(relay_on, now)
         except RELAY_PLACEHOLDER_PUBLISH_ERRORS as error:
-            svc._warning_throttled(
+            svc.runtime.warning_throttled(
                 "relay-placeholder-publish-failed",
                 self._relay_sync_timeout_warning_window_seconds(svc),
                 "Local relay placeholder publish failed after queueing relay=%s: %s",
@@ -186,8 +222,13 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
                 exc_info=error,
             )
 
-    def relay_sync_health_override(self, relay_on: bool, pm_confirmed: bool, now: float) -> str | None:
-        svc = self.service
+    def relay_sync_health_override(
+        self,
+        svc: RelayTelemetryService,
+        relay_on: bool,
+        pm_confirmed: bool,
+        now: float,
+    ) -> str | None:
         expected_state = getattr(svc, "_relay_sync_expected_state", None)
         if expected_state is None:
             return None
@@ -203,7 +244,7 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
 
     def _relay_sync_confirmed_match(
         self,
-        svc: Any,
+        svc: RelayTelemetryService,
         relay_on: bool,
         pm_confirmed: bool,
         expected_relay: bool,
@@ -211,13 +252,14 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
         if not pm_confirmed or bool(relay_on) != expected_relay:
             return False
         if self._relay_sync_failure_reported(svc):
-            svc._mark_recovery("shelly", "Shelly relay confirmation recovered")
+            svc.runtime.mark_recovery("shelly", "Shelly relay confirmation recovered")
         self._clear_relay_sync_tracking(svc)
         return True
 
     @staticmethod
-    def _relay_sync_before_deadline(deadline_at: Any, now: float) -> bool:
-        return deadline_at is None or float(now) < float(deadline_at)
+    def _relay_sync_before_deadline(deadline_at: object, now: float) -> bool:
+        deadline = finite_float_or_none(deadline_at)
+        return deadline is None or float(now) < deadline
 
     @staticmethod
     def _relay_sync_pre_timeout_result(
@@ -231,18 +273,20 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
 
     def _record_relay_sync_timeout(
         self,
-        svc: Any,
+        svc: RelayTelemetryService,
         relay_on: bool,
         pm_confirmed: bool,
         expected_relay: bool,
-        deadline_at: Any,
+        deadline_at: object,
     ) -> None:
         if self._relay_sync_failure_reported(svc):
             return
         svc._relay_sync_failure_reported = True
-        timeout_seconds = max(0.0, float(deadline_at) - float(getattr(svc, "_relay_sync_requested_at", deadline_at)))
-        svc._mark_failure("shelly")
-        svc._warning_throttled(
+        deadline = finite_float_or_none(deadline_at)
+        requested_at = finite_float_or_none(svc._relay_sync_requested_at)
+        timeout_seconds = 0.0 if deadline is None else max(0.0, deadline - (deadline if requested_at is None else requested_at))
+        svc.runtime.mark_failure("shelly")
+        svc.runtime.warning_throttled(
             "relay-sync-failed",
             max(1.0, timeout_seconds),
             "Shelly relay state did not confirm to %s within %.1fs (actual=%s confirmed=%s)",
@@ -251,3 +295,6 @@ class _RelayPhasePublish(_RelayPhaseSwitchRuntime):
             bool(relay_on),
             int(bool(pm_confirmed)),
         )
+
+
+__all__ = ["RelayTelemetry", "RelayTelemetryService"]

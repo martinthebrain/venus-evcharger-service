@@ -1,5 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from tests.venus_evcharger_state_controller_support import *
+import json
+import os
+import tempfile
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from venus_evcharger.controllers.state import ServiceStateController
+from tests.venus_evcharger_state_controller_support import (
+    STATE_RESTORE_LOG_WARNING,
+    STATE_RESTORE_WRITE,
+    STATE_SUMMARY_TIME,
+    ServiceStateControllerTestBase,
+)
+from tests.venus_evcharger_test_fixtures import make_runtime_state_service
 
 
 class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
@@ -7,6 +21,7 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = f"{temp_dir}/state.json"
             service = SimpleNamespace(
+                time_now=lambda: 1000.0,
                 runtime_state_path=path,
                 virtual_mode=1,
                 virtual_autostart=0,
@@ -115,14 +130,16 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
             service._phase_switch_requested_at = None
             service._phase_switch_stable_until = None
             service._phase_switch_resume_relay = False
-            service._phase_switch_mismatch_counts = {}
+            phase_switch_mismatch_counts: dict[str, int] = {}
+            service._phase_switch_mismatch_counts = phase_switch_mismatch_counts
             service._phase_switch_last_mismatch_selection = None
             service._phase_switch_last_mismatch_at = None
             service._phase_switch_lockout_selection = None
             service._phase_switch_lockout_reason = ""
             service._phase_switch_lockout_at = None
             service._phase_switch_lockout_until = None
-            service._contactor_fault_counts = {}
+            contactor_fault_counts: dict[str, int] = {}
+            service._contactor_fault_counts = contactor_fault_counts
             service._contactor_fault_active_reason = None
             service._contactor_fault_active_since = None
             service._contactor_lockout_reason = ""
@@ -233,7 +250,7 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
                 )
 
             service = make_runtime_state_service(runtime_state_path=path)
-            service._time_now = lambda: 100.0
+            service.time_now = lambda: 100.0
             controller = ServiceStateController(service, self._normalize_mode)
             controller.load_runtime_state()
 
@@ -265,7 +282,7 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
                 )
 
             service = make_runtime_state_service(runtime_state_path=path)
-            service._time_now = lambda: 100.0
+            service.time_now = lambda: 100.0
             controller = ServiceStateController(service, self._normalize_mode)
             controller.load_runtime_state()
 
@@ -358,7 +375,8 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
                 100.0,
             )
 
-            service._victron_ess_balance_learning_profiles = {}
+            learning_profiles: dict[str, dict[str, object]] = {}
+            service._victron_ess_balance_learning_profiles = learning_profiles
             service.auto_battery_discharge_balance_victron_bias_kp = 0.0
             service.auto_battery_discharge_balance_victron_bias_ki = 0.0
             service.auto_battery_discharge_balance_victron_bias_kd = 0.0
@@ -372,7 +390,8 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
             service._victron_ess_balance_auto_apply_last_applied_at = None
             service._victron_ess_balance_oscillation_lockout_until = None
             service._victron_ess_balance_oscillation_lockout_reason = ""
-            service._victron_ess_balance_last_stable_tuning = {}
+            stable_tuning: dict[str, object] = {}
+            service._victron_ess_balance_last_stable_tuning = stable_tuning
             service._victron_ess_balance_last_stable_at = None
             service._victron_ess_balance_last_stable_profile_key = ""
 

@@ -3,11 +3,31 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from .logic_gates_battery_balance import _AutoDecisionBatteryBalance
+from .component_context import AutoDecisionContext
+from .logic_gates_battery_balance import AutoBatteryBalance
+from .logic_gates_battery_learning import AutoBatteryLearning
+from .logic_learning import AutoLearningPolicy
+from .logic_samples import AutoSampleTracker
 
 
-class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
-    def _update_average_metrics(
+class AutoDecisionMetrics:
+    """Calculate the smoothed, battery-adjusted metrics used by decisions."""
+
+    def __init__(
+        self,
+        context: AutoDecisionContext,
+        learning: AutoLearningPolicy,
+        samples: AutoSampleTracker,
+        battery_learning: AutoBatteryLearning,
+        battery_balance: AutoBatteryBalance,
+    ) -> None:
+        self.service = context.service
+        self.learning = learning
+        self.samples = samples
+        self.battery_learning = battery_learning
+        self.battery_balance = battery_balance
+
+    def update_average_metrics(
         self,
         now: float,
         pv_power: float,
@@ -17,17 +37,17 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
     ) -> tuple[float | None, float | None]:
         """Update rolling Auto metrics and return averaged surplus/grid values."""
         svc = self.service
-        surplus_power = self.available_surplus_watts(pv_power, grid_power)
-        self.add_auto_sample(now, surplus_power, float(grid_power))
-        avg_surplus_power = self.average_auto_metric(1)
-        avg_grid_power = self.average_auto_metric(2)
+        surplus_power = self.samples.get_available_surplus_watts(pv_power, grid_power)
+        self.samples.add_auto_sample(now, surplus_power, float(grid_power))
+        avg_surplus_power = self.samples.average_auto_metric(1)
+        avg_grid_power = self.samples.average_auto_metric(2)
         if avg_surplus_power is None or avg_grid_power is None:
             return None, None
 
         threshold_metrics = self._surplus_threshold_metrics(battery_soc)
         smoothing_metrics = self._smoothing_metrics(relay_on, float(avg_surplus_power), float(avg_grid_power))
-        smoothed_surplus = self._required_float(smoothing_metrics["surplus"])
-        smoothed_grid = self._required_float(smoothing_metrics["grid"])
+        smoothed_surplus = self.battery_learning._required_float(smoothing_metrics["surplus"])
+        smoothed_grid = self.battery_learning._required_float(smoothing_metrics["grid"])
         battery_metrics = self._battery_adjusted_surplus_metrics(smoothed_surplus)
         learned_metrics = self._learned_threshold_metrics(now)
         svc._last_auto_metrics = self._auto_metrics_snapshot(
@@ -39,10 +59,12 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
             battery_metrics=battery_metrics,
             learned_metrics=learned_metrics,
         )
-        return self._required_float(battery_metrics["decision_surplus"]), smoothed_grid
+        return self.battery_learning._required_float(battery_metrics["decision_surplus"]), smoothed_grid
 
     def _surplus_threshold_metrics(self, battery_soc: float) -> dict[str, float | str | None]:
-        start_surplus_watts, stop_surplus_watts, threshold_profile = self._surplus_thresholds_for_soc(battery_soc)
+        start_surplus_watts, stop_surplus_watts, threshold_profile = self.learning._surplus_thresholds_for_soc(
+            battery_soc
+        )
         return {
             "start_threshold": float(start_surplus_watts),
             "stop_threshold": float(stop_surplus_watts),
@@ -55,7 +77,7 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
         avg_surplus_power: float,
         avg_grid_power: float,
     ) -> dict[str, float | str | None]:
-        adaptive_alpha, adaptive_alpha_stage, surplus_volatility = self._adaptive_stop_alpha()
+        adaptive_alpha, adaptive_alpha_stage, surplus_volatility = self.samples._adaptive_stop_alpha()
         decision_surplus_power, decision_grid_power = self._smoothed_decision_metrics(
             relay_on,
             avg_surplus_power,
@@ -71,9 +93,11 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
         }
 
     def _battery_adjusted_surplus_metrics(self, decision_surplus_power: float) -> dict[str, float | int | str | None]:
-        battery_activity = self._combined_battery_activity_context()
-        surplus_penalty_w = self._non_negative_optional_float(battery_activity.get("surplus_penalty_w")) or 0.0
-        near_term_adjustment_w = self._near_term_grid_adjustment(battery_activity)
+        battery_activity = self.battery_balance._combined_battery_activity_context()
+        surplus_penalty_w = (
+            self.battery_learning._non_negative_optional_float(battery_activity.get("surplus_penalty_w")) or 0.0
+        )
+        near_term_adjustment_w = self.battery_learning._near_term_grid_adjustment(battery_activity)
         learning_profile_count = battery_activity.get("learning_profile_count")
         normalized_learning_profile_count = int(learning_profile_count) if isinstance(learning_profile_count, int) else 0
         return {
@@ -86,11 +110,11 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
         }
 
     def _learned_threshold_metrics(self, now: float) -> dict[str, float | str | None]:
-        learned_charge_power = self._active_learned_charge_power(now)
+        learned_charge_power = self.learning._active_learned_charge_power(now)
         return {
             "learned_charge_power": learned_charge_power,
-            "learned_charge_power_state": self._current_learned_charge_power_state(now),
-            "threshold_scale": float(self._learned_charge_power_scale(now)),
+            "learned_charge_power_state": self.learning._current_learned_charge_power_state(now),
+            "threshold_scale": float(self.learning._learned_charge_power_scale(now)),
             "threshold_mode": "adaptive" if learned_charge_power is not None else "static",
         }
 
@@ -105,13 +129,13 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
         battery_metrics: Mapping[str, float | int | str | None],
         learned_metrics: Mapping[str, float | str | None],
     ) -> dict[str, float | int | str | None]:
-        decision_surplus = self._required_float(battery_metrics["decision_surplus"])
-        raw_decision_surplus = self._required_float(battery_metrics["raw_decision_surplus"])
-        grid = self._required_float(smoothing_metrics["grid"])
-        start_threshold = self._required_float(threshold_metrics["start_threshold"])
-        stop_threshold = self._required_float(threshold_metrics["stop_threshold"])
-        threshold_scale = self._required_float(learned_metrics["threshold_scale"])
-        stop_alpha = self._required_float(smoothing_metrics["stop_alpha"])
+        decision_surplus = self.battery_learning._required_float(battery_metrics["decision_surplus"])
+        raw_decision_surplus = self.battery_learning._required_float(battery_metrics["raw_decision_surplus"])
+        grid = self.battery_learning._required_float(smoothing_metrics["grid"])
+        start_threshold = self.battery_learning._required_float(threshold_metrics["start_threshold"])
+        stop_threshold = self.battery_learning._required_float(threshold_metrics["stop_threshold"])
+        threshold_scale = self.battery_learning._required_float(learned_metrics["threshold_scale"])
+        stop_alpha = self.battery_learning._required_float(smoothing_metrics["stop_alpha"])
         return {
             "surplus": decision_surplus,
             "grid": grid,
@@ -201,12 +225,12 @@ class _AutoDecisionMetrics(_AutoDecisionBatteryBalance):
             svc._stop_smoothed_surplus_power = None
             svc._stop_smoothed_grid_power = None
             return avg_surplus_power, avg_grid_power
-        decision_surplus_power = self._smooth_metric(
+        decision_surplus_power = self.samples._smooth_metric(
             getattr(svc, "_stop_smoothed_surplus_power", None),
             avg_surplus_power,
             adaptive_alpha,
         )
-        decision_grid_power = self._smooth_metric(
+        decision_grid_power = self.samples._smooth_metric(
             getattr(svc, "_stop_smoothed_grid_power", None),
             avg_grid_power,
             adaptive_alpha,

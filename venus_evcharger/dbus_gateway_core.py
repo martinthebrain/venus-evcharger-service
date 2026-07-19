@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, SupportsFloat, SupportsIndex
+from typing import Literal, SupportsFloat, SupportsIndex, TypeGuard
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 
@@ -138,12 +138,28 @@ def priority_rank(priority: object) -> int:
     return PRIORITY_VALUES.get(str(priority).strip().lower(), PRIORITY_VALUES["diagnostic"])
 
 
+def is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Narrow an untrusted JSON value to a mapping with explicit object types."""
+    return isinstance(value, Mapping)
+
+
+def normalized_object_mapping(value: object) -> dict[str, object] | None:
+    """Normalize an untrusted mapping to the gateway's string-key contract."""
+    if not is_object_mapping(value):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
+def _is_object_sequence(value: object) -> TypeGuard[list[object] | tuple[object, ...]]:
+    return isinstance(value, (list, tuple))
+
+
 def _json_ready(value: object) -> object:
     if _is_json_scalar(value):
         return value
-    if isinstance(value, Mapping):
+    if is_object_mapping(value):
         return _json_ready_mapping(value)
-    if isinstance(value, (list, tuple)):
+    if _is_object_sequence(value):
         return [_json_ready(item) for item in value]
     return str(value)
 

@@ -1,161 +1,90 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from types import SimpleNamespace
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
-from venus_evcharger.bootstrap.runtime_loops import (
-    call_runtime_hook,
-    register_runtime_timers,
-    start_runtime_loops,
-    start_runtime_optional_hooks,
-)
+from venus_evcharger.bootstrap.runtime_loops import register_runtime_timers, start_runtime_loops
+
+
+def _service(*, configured: bool) -> SimpleNamespace:
+    runtime = SimpleNamespace(
+        mark_mainloop_thread=MagicMock(),
+        start_io_worker=MagicMock(),
+        start_update_worker=MagicMock(),
+        start_control_command_worker=MagicMock(),
+        start_mainloop_watchdog=MagicMock(),
+        schedule_update_cycle=MagicMock(return_value=True),
+        flush_dbus_publish_queue=MagicMock(return_value=True),
+        mainloop_heartbeat_tick=MagicMock(return_value=True),
+    )
+    state = SimpleNamespace(start_companion_bridge=MagicMock(), summary=MagicMock(return_value="mode=1"))
+    update = SimpleNamespace(update=MagicMock(return_value=True), sign_of_life=MagicMock(return_value=True))
+    control = SimpleNamespace(start_server=MagicMock())
+    return SimpleNamespace(
+        runtime=runtime,
+        state=state,
+        update=update,
+        control=control,
+        poll_interval_ms=1000,
+        sign_of_life_minutes=10,
+        runtime_state_path="/run/state.json",
+        topology_configured=configured,
+        host_configured=configured,
+        _dbus_publish_flush_interval_ms=200,
+    )
 
 
 class BootstrapRuntimeLoopContracts(unittest.TestCase):
-    def test_call_runtime_hook_invokes_only_callable_hooks(self) -> None:
-        hook = MagicMock()
-        service = SimpleNamespace(callable_hook=hook, non_callable_hook=None)
+    def test_register_runtime_timers_uses_role_facade_callbacks(self) -> None:
+        gobject = MagicMock()
+        service = _service(configured=True)
 
-        self.assertTrue(call_runtime_hook(service, "callable_hook"))
-        self.assertFalse(call_runtime_hook(service, "non_callable_hook"))
-        self.assertFalse(call_runtime_hook(service, "missing_hook"))
-        hook.assert_called_once_with()
+        register_runtime_timers(service, gobject)
 
-    def test_start_runtime_optional_hooks_calls_known_hooks_in_order(self) -> None:
-        calls: list[str] = []
-        service = SimpleNamespace(
-            _start_update_worker=lambda: calls.append("update"),
-            _start_control_command_worker=lambda: calls.append("commands"),
-            _start_mainloop_watchdog=lambda: calls.append("watchdog"),
-            _start_companion_dbus_bridge=lambda: calls.append("bridge"),
+        self.assertEqual(
+            gobject.timeout_add.call_args_list,
+            [
+                call(1000, service.runtime.schedule_update_cycle),
+                call(200, service.runtime.flush_dbus_publish_queue),
+                call(1000, service.runtime.mainloop_heartbeat_tick),
+            ],
         )
 
-        start_runtime_optional_hooks(service)
+    def test_start_runtime_loops_starts_all_roles_for_configured_topology(self) -> None:
+        gobject = MagicMock()
+        service = _service(configured=True)
+        with patch("venus_evcharger.bootstrap.runtime_loops.os.getpid", return_value=4242), patch(
+            "venus_evcharger.bootstrap.runtime_loops.logging.info"
+        ) as info:
+            start_runtime_loops(service, gobject)
 
-        self.assertEqual(calls, ["update", "commands", "watchdog", "bridge"])
-
-    def test_start_runtime_optional_hooks_skips_missing_and_non_callable_hooks(self) -> None:
-        service = SimpleNamespace(
-            _start_update_worker=MagicMock(),
-            _start_control_command_worker=None,
-            _start_companion_dbus_bridge=MagicMock(),
-        )
-
-        start_runtime_optional_hooks(service)
-
-        service._start_update_worker.assert_called_once_with()
-        service._start_companion_dbus_bridge.assert_called_once_with()
-
-    def test_register_runtime_timers_uses_update_fallback_and_signals_optional_ticks(self) -> None:
-        gobject_module = MagicMock()
-        service = SimpleNamespace(
-            poll_interval_ms=1000,
-            _update=MagicMock(),
-            _flush_dbus_publish_queue=MagicMock(),
-            _mainloop_heartbeat_tick=MagicMock(),
-        )
-
-        register_runtime_timers(service, gobject_module)
-
-        gobject_module.timeout_add.assert_any_call(1000, service._update)
-        gobject_module.timeout_add.assert_any_call(200, service._flush_dbus_publish_queue)
-        gobject_module.timeout_add.assert_any_call(1000, service._mainloop_heartbeat_tick)
-
-    def test_register_runtime_timers_prefers_schedule_hook_and_configured_flush_interval(self) -> None:
-        gobject_module = MagicMock()
-        service = SimpleNamespace(
-            poll_interval_ms=1500,
-            _update=MagicMock(),
-            _schedule_update_cycle=MagicMock(),
-            _flush_dbus_publish_queue=MagicMock(),
-            _dbus_publish_flush_interval_ms=123,
-        )
-
-        register_runtime_timers(service, gobject_module)
-
-        gobject_module.timeout_add.assert_any_call(1500, service._schedule_update_cycle)
-        gobject_module.timeout_add.assert_any_call(123, service._flush_dbus_publish_queue)
-        self.assertFalse(any(call.args == (1500, service._update) for call in gobject_module.timeout_add.call_args_list))
-
-    def test_register_runtime_timers_skips_non_callable_optional_hooks(self) -> None:
-        gobject_module = MagicMock()
-        service = SimpleNamespace(
-            poll_interval_ms=1000,
-            _update=MagicMock(),
-            _flush_dbus_publish_queue=None,
-            _mainloop_heartbeat_tick=None,
-        )
-
-        register_runtime_timers(service, gobject_module)
-
-        self.assertEqual(gobject_module.timeout_add.call_args_list, [unittest.mock.call(1000, service._update)])
-
-    def test_start_runtime_loops_starts_configured_topology_and_schedules_sign_of_life(self) -> None:
-        gobject_module = MagicMock()
-        service = SimpleNamespace(
-            _mark_mainloop_thread=MagicMock(),
-            _start_io_worker=MagicMock(),
-            _start_control_api_server=MagicMock(),
-            _start_companion_dbus_bridge=MagicMock(),
-            topology_configured=True,
-            runtime_state_path="/run/state.json",
-            _state_summary=MagicMock(return_value="mode=1"),
-            poll_interval_ms=1000,
-            sign_of_life_minutes=10,
-            _update=MagicMock(),
-            _sign_of_life=MagicMock(),
-        )
-
-        with patch("venus_evcharger.bootstrap.runtime_loops.logging.info") as info_mock:
-            with patch("venus_evcharger.bootstrap.runtime_loops.os.getpid", return_value=4242):
-                start_runtime_loops(service, gobject_module)
-
-        service._mark_mainloop_thread.assert_called_once_with()
-        service._start_io_worker.assert_called_once_with()
-        service._start_control_api_server.assert_called_once_with()
-        service._start_companion_dbus_bridge.assert_called_once_with()
-        gobject_module.timeout_add.assert_any_call(1000, service._update)
-        gobject_module.timeout_add.assert_any_call(600000, service._sign_of_life)
-        info_mock.assert_called_once_with(
+        service.runtime.mark_mainloop_thread.assert_called_once_with()
+        service.runtime.start_io_worker.assert_called_once_with()
+        service.control.start_server.assert_called_once_with()
+        service.runtime.start_update_worker.assert_called_once_with()
+        service.runtime.start_control_command_worker.assert_called_once_with()
+        service.runtime.start_mainloop_watchdog.assert_called_once_with()
+        service.state.start_companion_bridge.assert_called_once_with()
+        gobject.timeout_add.assert_any_call(600000, service.update.sign_of_life)
+        info.assert_called_once_with(
             "Initialized Venus EV charger service pid=%s runtime_state=%s %s",
             4242,
             "/run/state.json",
             "mode=1",
         )
 
-    def test_start_runtime_loops_skips_io_worker_for_unconfigured_topology(self) -> None:
-        gobject_module = MagicMock()
-        service = SimpleNamespace(
-            _start_io_worker=MagicMock(),
-            _start_control_api_server=MagicMock(),
-            topology_configured=False,
-            host_configured=False,
-            runtime_state_path="/run/state.json",
-            _state_summary=MagicMock(return_value="mode=0"),
-            poll_interval_ms=1000,
-            sign_of_life_minutes=1,
-            _update=MagicMock(),
-            _sign_of_life=MagicMock(),
-        )
+    def test_start_runtime_loops_skips_only_io_for_unconfigured_topology(self) -> None:
+        gobject = MagicMock()
+        service = _service(configured=False)
+        with patch("venus_evcharger.bootstrap.runtime_loops.logging.info") as info:
+            start_runtime_loops(service, gobject)
 
-        with patch("venus_evcharger.bootstrap.runtime_loops.logging.info") as info_mock:
-            with patch("venus_evcharger.bootstrap.runtime_loops.os.getpid", return_value=99):
-                start_runtime_loops(service, gobject_module)
-
-        service._start_io_worker.assert_not_called()
-        service._start_control_api_server.assert_called_once_with()
-        gobject_module.timeout_add.assert_any_call(60000, service._sign_of_life)
-        self.assertEqual(
-            info_mock.call_args_list,
-            [
-                unittest.mock.call("No load topology is configured yet; skipping runtime I/O worker startup"),
-                unittest.mock.call(
-                    "Initialized Venus EV charger service pid=%s runtime_state=%s %s",
-                    99,
-                    "/run/state.json",
-                    "mode=0",
-                ),
-            ],
+        service.runtime.start_io_worker.assert_not_called()
+        service.control.start_server.assert_called_once_with()
+        service.runtime.start_update_worker.assert_called_once_with()
+        self.assertIn(
+            call("No load topology is configured yet; skipping runtime I/O worker startup"),
+            info.call_args_list,
         )
 
 

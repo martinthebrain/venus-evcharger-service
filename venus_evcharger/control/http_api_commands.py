@@ -1,310 +1,237 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+"""Command endpoint for the local Control API HTTP adapter."""
+
 from __future__ import annotations
 
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from venus_evcharger.control.http_api_auth import ControlApiHttpAuthenticator
+from venus_evcharger.control.http_api_command_contracts import (
+    ControlApiCommandPort,
+    optional_error_payload,
+)
 from venus_evcharger.control.http_api_command_payloads import (
     command_response_payload,
     http_status_for_result,
-    idempotency_conflict_response,
-    idempotency_fingerprint,
-    optimistic_concurrency_payload,
     payload_error_code,
-    replayed_payload,
-    result_error_code,
-    throttled_response,
     tracked_command,
     tracked_payload,
 )
-from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
-from venus_evcharger.control.http_api_command_contracts import (
-    ControlApiIdempotencyStoreLike,
-    ControlApiHttpService,
-    ControlApiRateLimiterLike,
-    optional_error_payload,
-    require_idempotency_store,
-    require_rate_limiter,
-)
+from venus_evcharger.control.http_api_idempotency import ControlApiHttpIdempotency
+from venus_evcharger.control.http_api_rate_limit import ControlApiHttpRateLimit, RateLimitError
+from venus_evcharger.control.http_api_response import ControlApiHttpResponder
 from venus_evcharger.control.models import ControlCommand, ControlResult
-from venus_evcharger.control.rate_limit import ControlApiRateLimiter
-from venus_evcharger.control.http_api_response import (
-    error_response_payload,
-)
-from venus_evcharger.control.http_api_auth import _LocalControlApiAuth
 
 
-class _LocalControlApiCommand(_LocalControlApiAuth):
-    _http_status_for_result = staticmethod(http_status_for_result)
-    _idempotency_conflict_response = staticmethod(idempotency_conflict_response)
-    _idempotency_fingerprint = staticmethod(idempotency_fingerprint)
-    _payload_error_code = staticmethod(payload_error_code)
-    _replayed_payload = staticmethod(replayed_payload)
-    _result_error_code = staticmethod(result_error_code)
-    _throttled_response = staticmethod(throttled_response)
-    _tracked_command = staticmethod(tracked_command)
-    _tracked_payload = staticmethod(tracked_payload)
+class ControlApiHttpCommandEndpoint:
+    """Validate, execute, audit, and serialize Control API commands."""
 
-    if TYPE_CHECKING:
-        _fallback_idempotency_store: ControlApiIdempotencyStore
-        _fallback_rate_limiter: ControlApiRateLimiter
-        _service: ControlApiHttpService
+    _INVALID_JSON = object()
 
-        def _request_state_tokens(self, handler: BaseHTTPRequestHandler) -> set[str]: ...
+    def __init__(
+        self,
+        service: ControlApiCommandPort,
+        responder: ControlApiHttpResponder,
+        authenticator: ControlApiHttpAuthenticator,
+        rate_limit: ControlApiHttpRateLimit,
+        idempotency: ControlApiHttpIdempotency,
+    ) -> None:
+        self._service = service
+        self._responder = responder
+        self._authenticator = authenticator
+        self._rate_limit = rate_limit
+        self._idempotency = idempotency
 
-        def _state_token(self) -> str: ...
-
-        def _state_token_headers(self) -> dict[str, str]: ...
-
-    def _read_json_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
-        try:
-            content_length = int(handler.headers.get("Content-Length", "0"))
-        except ValueError:
-            self._write_error(handler, HTTPStatus.BAD_REQUEST, "invalid_content_length", "Invalid Content-Length.")
+    def read_json_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
+        content_length = self._content_length(handler)
+        if content_length is None:
             return None
-        try:
-            raw_payload = handler.rfile.read(max(0, content_length))
-            parsed = json.loads(raw_payload.decode() or "{}")
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._write_error(handler, HTTPStatus.BAD_REQUEST, "invalid_json", "Invalid JSON body.")
+        parsed = self._parsed_json(handler, content_length)
+        if parsed is self._INVALID_JSON:
             return None
         if not isinstance(parsed, dict):
-            self._write_error(handler, HTTPStatus.BAD_REQUEST, "invalid_payload", "JSON body must be an object.")
+            self._responder.write_error(
+                handler,
+                HTTPStatus.BAD_REQUEST,
+                "invalid_payload",
+                "JSON body must be an object.",
+            )
             return None
-        return parsed
+        return {str(key): value for key, value in parsed.items()}
 
-    def _write_command_result(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None:
-        tracked_payload = self._tracked_payload(handler, payload)
-        client_host = self._client_host(handler)
-        replay = self._replayed_response(tracked_payload)
+    def _content_length(self, handler: BaseHTTPRequestHandler) -> int | None:
+        try:
+            return int(handler.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._responder.write_error(
+                handler,
+                HTTPStatus.BAD_REQUEST,
+                "invalid_content_length",
+                "Invalid Content-Length.",
+            )
+            return None
+
+    def _parsed_json(self, handler: BaseHTTPRequestHandler, content_length: int) -> object:
+        try:
+            raw_payload = handler.rfile.read(max(0, content_length))
+            return json.loads(raw_payload.decode() or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._responder.write_error(handler, HTTPStatus.BAD_REQUEST, "invalid_json", "Invalid JSON body.")
+            return self._INVALID_JSON
+
+    def execute_payload(self, payload: dict[str, Any]) -> tuple[ControlCommand, ControlResult]:
+        command = self._service.control_command_from_payload(payload, source="http")
+        if not command.command_id or command.idempotency_key != str(payload.get("idempotency_key", "")).strip():
+            command = tracked_command(payload, command)
+        return command, self._service.handle_control_command(command)
+
+    def write_command_result(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None:
+        request_payload = tracked_payload(handler, payload)
+        client_host = self._authenticator.client_host(handler)
+        replay = self._idempotency.replayed_response(request_payload)
         if replay is not None:
-            self._write_replayed_command_response(handler, replay, client_host)
+            self.write_replayed_response(handler, replay, client_host)
             return
         try:
-            command = self._service._control_command_from_payload(tracked_payload, source="http")
-            command = self._tracked_command(tracked_payload, command)
+            command = self._service.control_command_from_payload(request_payload, source="http")
+            command = tracked_command(request_payload, command)
         except ValueError as error:
-            self._write_validation_error_response(handler, tracked_payload, str(error), client_host)
+            self.write_validation_error(handler, request_payload, str(error), client_host)
             return
-        rate_limit_error = self._rate_limit_error(client_host, command.name)
+        rate_limit_error = self._rate_limit.error(client_host, command.name)
         if rate_limit_error is not None:
-            self._write_rate_limit_error_response(handler, command, rate_limit_error, client_host)
+            self.write_rate_limit_error(handler, command, rate_limit_error, client_host)
             return
-        result = self._service._handle_control_command(command)
-        self._write_new_command_response(handler, tracked_payload, command, result, client_host)
+        result = self._service.handle_control_command(command)
+        self.write_new_response(handler, request_payload, command, result, client_host)
 
-    def _write_replayed_command_response(
+    def write_replayed_response(
         self,
         handler: BaseHTTPRequestHandler,
         replay: tuple[HTTPStatus, dict[str, Any]],
         client_host: str,
     ) -> None:
         status, response_payload = replay
-        self._record_command_audit(
+        self.record_audit(
             command=response_payload.get("command"),
             result=response_payload.get("result"),
-            error=response_payload.get("error"),
+            error=response_payload.get("error") if isinstance(response_payload.get("error"), dict) else None,
             replayed=True,
-            scope="control",
             client_host=client_host,
-            status_code=int(status),
+            status=status,
         )
-        self._write_json(handler, status, response_payload, extra_headers=self._state_token_headers())
+        self._responder.write_json(
+            handler,
+            status,
+            response_payload,
+            extra_headers=self._authenticator.state_token_headers,
+        )
 
-    def _write_validation_error_response(
+    def write_validation_error(
         self,
         handler: BaseHTTPRequestHandler,
-        tracked_payload: dict[str, Any],
+        request_payload: dict[str, Any],
         error_message: str,
         client_host: str,
     ) -> None:
-        response_payload = self._error_response_payload(self._payload_error_code(error_message), error_message)
-        self._record_command_audit(
-            command=tracked_payload,
+        response_payload = self._responder.error_payload(payload_error_code(error_message), error_message)
+        self.record_audit(
+            command=request_payload,
             result=None,
             error=optional_error_payload(response_payload),
             replayed=False,
-            scope="control",
             client_host=client_host,
-            status_code=int(HTTPStatus.BAD_REQUEST),
+            status=HTTPStatus.BAD_REQUEST,
         )
-        self._write_json(handler, HTTPStatus.BAD_REQUEST, response_payload, extra_headers=self._state_token_headers())
+        self._responder.write_json(
+            handler,
+            HTTPStatus.BAD_REQUEST,
+            response_payload,
+            extra_headers=self._authenticator.state_token_headers,
+        )
 
-    def _write_rate_limit_error_response(
+    def write_rate_limit_error(
         self,
         handler: BaseHTTPRequestHandler,
         command: ControlCommand,
-        rate_limit_error: tuple[HTTPStatus, dict[str, Any], dict[str, str]],
+        rate_limit_error: RateLimitError,
         client_host: str,
     ) -> None:
         status, response_payload, headers = rate_limit_error
-        self._record_command_audit(
+        self.record_audit(
             command=command,
             result=None,
             error=optional_error_payload(response_payload),
             replayed=False,
-            scope="control",
             client_host=client_host,
-            status_code=int(status),
+            status=status,
         )
-        self._write_json(handler, status, response_payload, extra_headers={**self._state_token_headers(), **headers})
+        self._responder.write_json(
+            handler,
+            status,
+            response_payload,
+            extra_headers={**self._authenticator.state_token_headers, **headers},
+        )
 
-    def _write_new_command_response(
+    def write_new_response(
         self,
         handler: BaseHTTPRequestHandler,
-        tracked_payload: dict[str, Any],
+        request_payload: dict[str, Any],
         command: ControlCommand,
         result: ControlResult,
         client_host: str,
     ) -> None:
-        status = self._http_status_for_result(result)
-        response_payload = self._command_response_payload(command, result, replayed=False)
-        self._cache_idempotent_response(tracked_payload, status, response_payload, command, result)
-        self._record_command_audit(
+        status = http_status_for_result(result)
+        serialized_command = self._responder.command_payload(command)
+        serialized_result = self._responder.result_payload(result)
+        response_payload = command_response_payload(
+            result,
+            replayed=False,
+            command_payload=serialized_command,
+            result_payload=serialized_result,
+        )
+        self._idempotency.cache_response(
+            request_payload,
+            status,
+            response_payload,
+            command_payload=serialized_command,
+            result_payload=serialized_result,
+        )
+        self.record_audit(
             command=command,
             result=result,
             error=optional_error_payload(response_payload),
             replayed=False,
-            scope="control",
             client_host=client_host,
-            status_code=int(status),
+            status=status,
         )
-        self._write_json(handler, status, response_payload, extra_headers=self._state_token_headers())
-
-    def _rate_limit_error(
-        self,
-        client_host: str,
-        command_name: str,
-    ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]] | None:
-        client_key = client_host if client_host else "local"
-        request_allowed, retry_after = self._rate_limiter().allow_request(client_key)
-        if not request_allowed:
-            return self._throttled_response(
-                "rate_limited",
-                "Too many control requests in a short time window.",
-                retry_after,
-            )
-        command_allowed, retry_after = self._rate_limiter().allow_command(client_key, command_name)
-        if command_allowed:
-            return None
-        return self._throttled_response(
-            "cooldown_active",
-            f"Command '{command_name}' is temporarily cooling down.",
-            retry_after,
+        self._responder.write_json(
+            handler,
+            status,
+            response_payload,
+            extra_headers=self._authenticator.state_token_headers,
         )
 
-    def _rate_limiter(self) -> ControlApiRateLimiterLike:
-        rate_limiter_factory = getattr(self._service, "_control_api_rate_limiter", None)
-        if callable(rate_limiter_factory):
-            return require_rate_limiter(rate_limiter_factory())
-        return self._fallback_rate_limiter
-
-    def _replayed_response(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]] | None:
-        idempotency_key = str(payload.get("idempotency_key", "")).strip()
-        if not idempotency_key:
-            return None
-        cached = self._cached_idempotent_response(idempotency_key)
-        if cached is None:
-            return None
-        fingerprint, status, response_payload, command, result = cached
-        if fingerprint != self._idempotency_fingerprint(payload):
-            return self._idempotency_conflict_response(idempotency_key)
-        replayed_payload = self._replayed_payload(response_payload)
-        self._publish_replayed_command_event(command, result)
-        return (HTTPStatus(status), replayed_payload)
-
-    def _cached_idempotent_response(
-        self,
-        idempotency_key: str,
-    ) -> tuple[str, int, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None] | None:
-        cached = self._idempotency_store().get(idempotency_key)
-        if cached is None:
-            return None
-        fingerprint, status, response_payload = cached
-        command = response_payload.get("command")
-        result = response_payload.get("result")
-        return fingerprint, status, response_payload, command if isinstance(command, dict) else None, result if isinstance(result, dict) else None
-
-    def _publish_replayed_command_event(
-        self,
-        command: Any,
-        result: Any,
-    ) -> None:
-        publish_event = getattr(self._service, "_publish_control_api_command_event", None)
-        if not callable(publish_event) or command is None or result is None:
-            return
-        publish_event(command, result, replayed=True)
-
-    def _cache_idempotent_response(
-        self,
-        payload: dict[str, Any],
-        status: HTTPStatus,
-        response_payload: dict[str, Any],
-        command: ControlCommand,
-        result: ControlResult,
-    ) -> None:
-        idempotency_key = str(payload.get("idempotency_key", "")).strip()
-        if not idempotency_key:
-            return
-        persisted_response = dict(response_payload)
-        persisted_response["command"] = self._command_payload(command)
-        persisted_response["result"] = self._result_payload(result)
-        self._idempotency_store().put(
-            idempotency_key,
-            self._idempotency_fingerprint(payload),
-            int(status),
-            persisted_response,
-        )
-
-    def _idempotency_store(self) -> ControlApiIdempotencyStoreLike:
-        store_factory = getattr(self._service, "_control_api_idempotency_store", None)
-        if callable(store_factory):
-            return require_idempotency_store(store_factory())
-        return self._fallback_idempotency_store
-
-    def _optimistic_concurrency_error(
-        self,
-        handler: BaseHTTPRequestHandler,
-    ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]] | None:
-        expected_tokens = self._request_state_tokens(handler)
-        if not expected_tokens or "*" in expected_tokens:
-            return None
-        current_token = self._state_token()
-        if current_token in expected_tokens:
-            return None
-        return HTTPStatus.CONFLICT, optimistic_concurrency_payload(expected_tokens, current_token), self._state_token_headers()
-
-    def _command_response_payload(self, command: ControlCommand, result: ControlResult, *, replayed: bool) -> dict[str, Any]:
-        return command_response_payload(
-            result,
-            replayed=replayed,
-            command_payload=self._command_payload(command),
-            result_payload=self._result_payload(result),
-        )
-
-    def _record_command_audit(
+    def record_audit(
         self,
         *,
-        command: Any,
-        result: Any,
+        command: ControlCommand | dict[str, Any] | None,
+        result: ControlResult | dict[str, Any] | None,
         error: dict[str, Any] | None,
         replayed: bool,
-        scope: str,
         client_host: str,
-        status_code: int,
+        status: HTTPStatus,
     ) -> None:
-        record_audit = getattr(self._service, "_record_control_api_command_audit", None)
-        if not callable(record_audit):
-            return
-        record_audit(
+        self._service.record_command_audit(
             command=command,
             result=result,
             error=error,
             replayed=replayed,
-            scope=scope,
+            scope="control",
             client_host=client_host,
-            status_code=status_code,
+            status_code=int(status),
             transport="http",
         )

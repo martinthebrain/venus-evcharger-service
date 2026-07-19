@@ -6,8 +6,9 @@ from __future__ import annotations
 import logging
 from typing import Protocol, TypedDict
 
-from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
+from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.update.learning_runtime import _LearningRuntime
 
 
 class _LearningSignatureSnapshot(TypedDict):
@@ -18,6 +19,7 @@ class _LearningSignatureSnapshot(TypedDict):
 
 
 class _LearningSignatureService(Protocol):
+    auto_policy: AutoPolicy
     charging_started_at: float | None
     learned_charge_power_watts: float | None
     learned_charge_power_updated_at: float | None
@@ -27,10 +29,9 @@ class _LearningSignatureService(Protocol):
     learned_charge_power_voltage: float | None
     learned_charge_power_signature_mismatch_sessions: int
     learned_charge_power_signature_checked_session_started_at: float | None
-    auto_learn_charge_power_start_delay_seconds: float
 
 
-class _UpdateCycleLearningSignature(ControllerAssemblyContract):
+class _UpdateCycleLearningSignature(_LearningRuntime):
     """Reconcile stable learned power against per-session signatures."""
 
     def _learning_signature_service(self) -> _LearningSignatureService:
@@ -47,7 +48,9 @@ class _UpdateCycleLearningSignature(ControllerAssemblyContract):
 
     def _signature_session_delay_elapsed(self, current_session_started_at: float, now: float) -> bool:
         """Return whether the current session is old enough for signature checks."""
-        minimum_seconds = float(self._learning_signature_service().auto_learn_charge_power_start_delay_seconds)
+        minimum_seconds = float(
+            self._learning_signature_service().auto_policy.learn_charge_power.start_delay_seconds
+        )
         return (float(now) - current_session_started_at) >= minimum_seconds
 
     def _signature_session_already_checked(self, current_session_started_at: float) -> bool:

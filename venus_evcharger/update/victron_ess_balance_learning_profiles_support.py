@@ -90,7 +90,7 @@ def _victron_ess_balance_profile_identity(profile_key: str) -> dict[str, str]:
         site_regime = parts[0]
         day_phase = parts[1]
         reserve_phase = parts[2]
-    elif parts:
+    else:
         site_regime = parts[0]
     if len(parts) >= 7:
         ev_phase = parts[4]

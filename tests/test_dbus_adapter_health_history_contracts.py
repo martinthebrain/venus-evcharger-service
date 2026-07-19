@@ -6,7 +6,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-import venus_evcharger.dbus_adapter_health_history as history
+import venus_evcharger.dbus_adapter.health.history as history
 
 
 class DbusAdapterHealthHistoryContractTests(unittest.TestCase):

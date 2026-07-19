@@ -10,10 +10,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from venus_evcharger.core.common import confirmed_relay_state_max_age_seconds as _confirmed_relay_state_max_age_seconds
-from venus_evcharger.core.contracts import cutover_confirmed_off
 from venus_evcharger.auto.logic_types import NO_RELAY_DECISION, RelayDecision, require_relay_bool, require_relay_decision
-from .logic_gates_metrics import _AutoDecisionMetrics
+from venus_evcharger.core.common_auto import (
+    _confirmed_relay_state_max_age_seconds,
+)
+from venus_evcharger.core.contracts_snapshot import cutover_confirmed_off
+from .component_context import AutoDecisionContext
+from .logic_learning import AutoLearningPolicy
+from .logic_samples import AutoSampleTracker
 
 AutoDecision = RelayDecision
 
@@ -37,7 +41,20 @@ def _battery_scan_warning_interval_seconds(svc: Any) -> float:
     return max(1.0, float(configured))
 
 
-class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
+class AutoRuntimeGates:
+    """Apply runtime, freshness, and transition gates to Auto decisions."""
+
+    def __init__(
+        self,
+        context: AutoDecisionContext,
+        learning: AutoLearningPolicy,
+        samples: AutoSampleTracker,
+    ) -> None:
+        self._context = context
+        self.service = context.service
+        self.learning = learning
+        self.samples = samples
+
     def _pending_stop_or_running(
         self,
         now: float,
@@ -55,8 +72,8 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
             delay_seconds=delay_seconds,
             stop_key=stop_key,
         )
-        if decision is self._NO_DECISION:
-            return require_relay_bool(self._set_health_result(running_reason, cached_inputs, True))
+        if decision is NO_RELAY_DECISION:
+            return require_relay_bool(self.samples._set_health_result(running_reason, cached_inputs, True))
         return False
 
     def _minimum_runtime_elapsed(self, now: float) -> bool:
@@ -67,14 +84,14 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
     def _minimum_offtime_elapsed(self, now: float) -> bool:
         """Return True when the relay may be started again."""
         svc = self.service
-        if _bool_attr_is_true(svc, "_ignore_min_offtime_once"):
+        if self._context.port.minimum_offtime_bypass_active():
             return True
         relay_last_off_at = svc.relay_last_off_at
         if relay_last_off_at is None:
             return True
         return (now - float(relay_last_off_at)) >= float(svc.auto_min_offtime_seconds)
 
-    def _grid_recently_read(self, grid_power: float | None, now: float) -> bool:
+    def grid_recently_read(self, grid_power: float | None, now: float) -> bool:
         """Return True when the grid reading is still fresh enough for Auto decisions."""
         svc = self.service
         grid_last_read_at = getattr(svc, "_last_grid_at", None)
@@ -83,24 +100,20 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
             return grid_power is not None
         return (now - float(grid_last_read_at)) <= grid_missing_stop_seconds
 
-    def _handle_non_auto_mode(self, relay_on: bool) -> bool:
+    def handle_non_auto_mode(self, relay_on: bool) -> bool:
         """Leave relay state untouched outside of Auto-like modes."""
-        svc = self.service
-        self._reset_auto_state()
-        svc._auto_mode_cutover_pending = False
-        svc._ignore_min_offtime_once = False
-        self._set_auto_state("idle")
-        self.save_runtime_state()
+        self.samples._reset_auto_state()
+        self._context.port.reset_mode_cutover()
+        self.samples._set_auto_state("idle")
+        self._context.port.save_runtime_state()
         return relay_on
 
-    def _handle_disabled_mode(self, cached_inputs: bool) -> bool:
+    def handle_disabled_mode(self, cached_inputs: bool) -> bool:
         """Force relay off when Auto has been disabled by the GUI."""
-        svc = self.service
-        self._reset_auto_state()
-        svc._auto_mode_cutover_pending = False
-        svc._ignore_min_offtime_once = False
-        self.set_health("disabled", cached_inputs, relay_intent=False)
-        self.save_runtime_state()
+        self.samples._reset_auto_state()
+        self._context.port.reset_mode_cutover()
+        self.samples.set_health("disabled", cached_inputs, relay_intent=False)
+        self._context.port.save_runtime_state()
         return False
 
     def _normalized_battery_soc(self, battery_soc: float | int | None) -> float | None:
@@ -112,14 +125,12 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
         if 0.0 <= normalized_battery_soc <= 100.0:
             svc._last_battery_allow_warning = None
             return normalized_battery_soc
-        warning_throttled = getattr(svc, "_warning_throttled", None)
-        if callable(warning_throttled):
-            warning_throttled(
-                "battery-soc-invalid",
-                _battery_scan_warning_interval_seconds(svc),
-                "Auto mode ignored out-of-range battery SOC %s",
-                normalized_battery_soc,
-            )
+        svc.runtime.warning_throttled(
+            "battery-soc-invalid",
+            _battery_scan_warning_interval_seconds(svc),
+            "Auto mode ignored out-of-range battery SOC %s",
+            normalized_battery_soc,
+        )
         return None
 
     def _allowed_missing_battery_soc(
@@ -136,8 +147,8 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
         ):
             logging.warning("Auto mode: battery SOC missing, allowing Auto based on resume SOC.")
             svc._last_battery_allow_warning = now
-        self.set_health("battery-soc-missing-allowed", cached_inputs, relay_intent=relay_on)
-        return float(self._auto_policy().resume_soc), self._NO_DECISION
+        self.samples.set_health("battery-soc-missing-allowed", cached_inputs, relay_intent=relay_on)
+        return float(self.learning._auto_policy().resume_soc), NO_RELAY_DECISION
 
     def _blocked_missing_battery_soc(
         self,
@@ -145,11 +156,11 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
         cached_inputs: bool,
     ) -> tuple[None, AutoDecision]:
         """Return the terminal decision when missing battery SOC must block Auto mode."""
-        self._reset_auto_state()
-        self.set_health("battery-soc-missing", cached_inputs, relay_intent=relay_on)
+        self.samples._reset_auto_state()
+        self.samples.set_health("battery-soc-missing", cached_inputs, relay_intent=relay_on)
         return None, relay_on
 
-    def _resolve_battery_soc(
+    def resolve_battery_soc(
         self,
         battery_soc: float | int | None,
         relay_on: bool,
@@ -160,39 +171,35 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
         svc = self.service
         normalized_battery_soc = self._normalized_battery_soc(battery_soc)
         if normalized_battery_soc is not None:
-            return normalized_battery_soc, self._NO_DECISION
+            return normalized_battery_soc, NO_RELAY_DECISION
         if _bool_attr_is_true(svc, "auto_allow_without_battery_soc"):
             return self._allowed_missing_battery_soc(relay_on, now, cached_inputs)
         return self._blocked_missing_battery_soc(relay_on, cached_inputs)
 
-    def _handle_cutover_pending(self, relay_on: bool, cached_inputs: bool) -> AutoDecision:
+    def handle_cutover_pending(self, relay_on: bool, cached_inputs: bool) -> AutoDecision:
         """Honor the Manual -> Auto clean-cutover until the relay is confirmed off."""
         svc = self.service
-        if not _bool_attr_is_true(svc, "_auto_mode_cutover_pending"):
+        if not self._context.port.mode_cutover_pending():
             return NO_RELAY_DECISION
 
-        now = self._learning_policy_now()
-        self._reset_auto_state()
+        now = self.learning.learning_policy_now()
+        self.samples._reset_auto_state()
         if not self._cutover_relay_off_confirmed(relay_on, now):
-            self.set_health("mode-transition", cached_inputs, relay_intent=False)
+            self.samples.set_health("mode-transition", cached_inputs, relay_intent=False)
             return False
 
         self._complete_cutover_pending()
         return NO_RELAY_DECISION
 
     def _confirmed_cutover_pm_status(self) -> tuple[dict[str, Any] | None, float | None]:
-        """Return the best confirmed Shelly PM status available for cutover checks."""
-        svc = self.service
-        confirmed_pm_status = getattr(svc, "_last_confirmed_pm_status", None)
-        confirmed_pm_status_at = getattr(svc, "_last_confirmed_pm_status_at", None)
-        if confirmed_pm_status is not None:
-            return confirmed_pm_status, confirmed_pm_status_at
-        if _bool_attr_is_true(svc, "_last_pm_status_confirmed"):
-            fallback_pm_status = getattr(svc, "_last_pm_status", None)
-            if fallback_pm_status is None:
-                return None, None
-            return fallback_pm_status, getattr(svc, "_last_pm_status_at", None)
-        return None, None
+        """Return only the canonical confirmed Shelly PM status and timestamp."""
+        confirmed_pm_status = getattr(self.service, "_last_confirmed_pm_status", None)
+        if not isinstance(confirmed_pm_status, dict):
+            return None, None
+        confirmed_at = getattr(self.service, "_last_confirmed_pm_status_at", None)
+        if isinstance(confirmed_at, bool) or not isinstance(confirmed_at, int | float):
+            return confirmed_pm_status, None
+        return confirmed_pm_status, float(confirmed_at)
 
     def _cutover_confirmed_sample_fresh(self, confirmed_pm_status_at: float | None, now: float) -> bool:
         """Return True when the confirmed relay sample is fresh enough for cutover release."""
@@ -214,7 +221,7 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
     def _cutover_relay_off_confirmed(self, relay_on: bool, now: float) -> bool:
         """Return True when the relay-off cutover has been confirmed by Shelly."""
         svc = self.service
-        pending_state, _ = self.peek_pending_relay_command()
+        pending_state, _ = self._context.port.peek_pending_relay_command()
         confirmed_pm_status, confirmed_pm_status_at = self._confirmed_cutover_pm_status()
         if not isinstance(confirmed_pm_status, dict):
             return False
@@ -230,10 +237,8 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
 
     def _complete_cutover_pending(self) -> None:
         """Finish one confirmed Manual -> Auto cutover."""
-        svc = self.service
-        svc._auto_mode_cutover_pending = False
-        svc._ignore_min_offtime_once = True
-        self.save_runtime_state()
+        self._context.port.complete_mode_cutover()
+        self._context.port.save_runtime_state()
 
     @staticmethod
     def _stop_tracking_needs_reset(
@@ -293,28 +298,28 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
         assert svc.auto_stop_condition_since is not None
         if not self._stop_delay_elapsed(svc.auto_stop_condition_since, now, effective_delay):
             return NO_RELAY_DECISION
-        self.set_health(reason, cached_inputs, relay_intent=False)
+        self.samples.set_health(reason, cached_inputs, relay_intent=False)
         return False
 
-    def _handle_grid_missing(self, relay_on: bool, now: float, cached_inputs: bool) -> bool:
+    def handle_grid_missing(self, relay_on: bool, now: float, cached_inputs: bool) -> bool:
         """Fail safe when no fresh grid reading is available."""
         svc = self.service
-        self._clear_auto_start_tracking(clear_samples=True)
+        self.samples._clear_auto_start_tracking(clear_samples=True)
         svc._grid_recovery_required = True
         svc._grid_recovery_since = None
         if not relay_on:
-            return require_relay_bool(self._idle_result_with_health("grid-missing", cached_inputs))
+            return require_relay_bool(self.samples._idle_result_with_health("grid-missing", cached_inputs))
 
         if not self._minimum_runtime_elapsed(now):
-            return require_relay_bool(self._running_result_with_health("grid-missing", cached_inputs))
+            return require_relay_bool(self.samples._running_result_with_health("grid-missing", cached_inputs))
         return self._pending_stop_or_running(now, "grid-missing", cached_inputs, "grid-missing")
 
-    def _handle_grid_recovery_start_gate(self, relay_on: bool, now: float, cached_inputs: bool) -> AutoDecision:
+    def handle_grid_recovery_start_gate(self, relay_on: bool, now: float, cached_inputs: bool) -> AutoDecision:
         """Require a short fresh-grid window before Auto may start after grid loss."""
         svc = self.service
         if not self._grid_recovery_gate_active(svc):
             return NO_RELAY_DECISION
-        recovery_seconds = float(self._auto_policy().grid_recovery_start_seconds)
+        recovery_seconds = float(self.learning._auto_policy().grid_recovery_start_seconds)
         if self._grid_recovery_completes_immediately(now, recovery_seconds):
             return NO_RELAY_DECISION
         if self._grid_recovery_waiting(now, recovery_seconds):
@@ -357,12 +362,12 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
         """Return the relay decision while the fresh-grid recovery window is still open."""
         if relay_on:
             return NO_RELAY_DECISION
-        self._clear_auto_start_tracking()
-        return require_relay_decision(self._set_health_result("waiting-grid-recovery", cached_inputs, False))
+        self.samples._clear_auto_start_tracking()
+        return require_relay_decision(self.samples._set_health_result("waiting-grid-recovery", cached_inputs, False))
 
     def _policy_stop_reason(self, battery_soc: float, grid_power: float | None) -> str | None:
         """Return a stop reason caused by SOC or grid import thresholds."""
-        policy = self._auto_policy()
+        policy = self.learning._auto_policy()
         if battery_soc < policy.min_soc:
             return "auto-stop"
         if grid_power is not None and float(grid_power) >= policy.stop_grid_import_watts:
@@ -381,7 +386,7 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
             return "night-lock"
         return self._policy_stop_reason(battery_soc, grid_power)
 
-    def _handle_missing_inputs(
+    def handle_missing_inputs(
         self,
         relay_on: bool,
         battery_soc: float,
@@ -390,26 +395,26 @@ class _AutoDecisionRuntimeGates(_AutoDecisionMetrics):
         cached_inputs: bool,
     ) -> bool:
         """Preserve safe behavior when PV or grid inputs are incomplete."""
-        self._clear_auto_start_tracking(clear_samples=True)
+        self.samples._clear_auto_start_tracking(clear_samples=True)
 
         if not relay_on:
-            return require_relay_bool(self._idle_result_with_health("inputs-missing", cached_inputs))
+            return require_relay_bool(self.samples._idle_result_with_health("inputs-missing", cached_inputs))
 
-        daytime_window_open = self.is_within_auto_daytime_window()
+        daytime_window_open = self.samples.is_within_auto_daytime_window()
         stop_reason = self._known_missing_input_stop_reason(battery_soc, grid_power, daytime_window_open)
         if not self._minimum_runtime_elapsed(now) or stop_reason is None:
-            return require_relay_bool(self._running_result_with_health("inputs-missing", cached_inputs))
+            return require_relay_bool(self.samples._running_result_with_health("inputs-missing", cached_inputs))
         return self._pending_stop_or_running(now, stop_reason, cached_inputs, "inputs-missing")
 
-    def _handle_common_runtime_gates(self, relay_on: bool, now: float, cached_inputs: bool) -> AutoDecision:
+    def handle_common_runtime_gates(self, relay_on: bool, now: float, cached_inputs: bool) -> AutoDecision:
         """Honor startup warmup and manual override holdoff."""
         svc = self.service
         if (now - svc.started_at) < svc.auto_startup_warmup_seconds:
-            self._reset_auto_state()
-            return require_relay_decision(self._set_health_result("warmup", cached_inputs, relay_on))
+            self.samples._reset_auto_state()
+            return require_relay_decision(self.samples._set_health_result("warmup", cached_inputs, relay_on))
 
         if now < svc.manual_override_until:
-            self._reset_auto_state()
-            return require_relay_decision(self._set_health_result("manual-override", cached_inputs, relay_on))
+            self.samples._reset_auto_state()
+            return require_relay_decision(self.samples._set_health_result("manual-override", cached_inputs, relay_on))
 
         return NO_RELAY_DECISION

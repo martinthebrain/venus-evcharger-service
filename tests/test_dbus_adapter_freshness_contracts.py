@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from venus_evcharger.dbus_adapter_health_freshness import (
+from venus_evcharger.dbus_adapter.health.freshness import (
     cache_freshness,
     cached_entry_age,
     cached_entry_float,

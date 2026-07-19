@@ -7,10 +7,10 @@ REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 
 cd "$REPO_DIR"
 
-if python3 -m pylint --version >/dev/null 2>&1; then
-	PYLINT=(python3 -m pylint)
-elif [ -x "$REPO_DIR/.venv-ruff/bin/python" ] && "$REPO_DIR/.venv-ruff/bin/python" -m pylint --version >/dev/null 2>&1; then
+if [ -x "$REPO_DIR/.venv-ruff/bin/python" ] && "$REPO_DIR/.venv-ruff/bin/python" -m pylint --version >/dev/null 2>&1; then
 	PYLINT=("$REPO_DIR/.venv-ruff/bin/python" -m pylint)
+elif python3 -m pylint --version >/dev/null 2>&1; then
+	PYLINT=(python3 -m pylint)
 else
 	echo "pylint is required for the optional audit. Install it with: .venv-ruff/bin/python -m pip install pylint" >&2
 	exit 1

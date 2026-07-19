@@ -4,7 +4,9 @@ import unittest
 from types import SimpleNamespace
 from typing import Any, cast
 
-from venus_evcharger.auto.logic_gates_metrics import _AutoDecisionMetrics
+from venus_evcharger.auto.component_context import AutoDecisionContext
+from venus_evcharger.auto.logic_gates_metrics import AutoDecisionMetrics
+from venus_evcharger.ports.auto import AutoDecisionPort
 
 
 def battery_activity(**overrides: float | int | str | None) -> dict[str, float | int | str | None]:
@@ -54,7 +56,7 @@ def battery_activity(**overrides: float | int | str | None) -> dict[str, float |
     return activity
 
 
-class MetricsHarness(_AutoDecisionMetrics):
+class MetricsHarness:
     def __init__(self) -> None:
         self.service = SimpleNamespace(
             _last_auto_metrics={},
@@ -71,6 +73,29 @@ class MetricsHarness(_AutoDecisionMetrics):
         self.smoothing_factor = 0.5
         self.thresholds = (1500.0, 900.0, "normal")
         self.volatility: float | None = 17.0
+        context = AutoDecisionContext(AutoDecisionPort(self.service), lambda _reason: 0, lambda _mode: True)
+        self.metrics = AutoDecisionMetrics(
+            context,
+            cast(Any, SimpleNamespace(
+                _surplus_thresholds_for_soc=self._surplus_thresholds_for_soc,
+                _active_learned_charge_power=self._active_learned_charge_power,
+                _current_learned_charge_power_state=self._current_learned_charge_power_state,
+                _learned_charge_power_scale=self._learned_charge_power_scale,
+            )),
+            cast(Any, SimpleNamespace(
+                get_available_surplus_watts=self.available_surplus_watts,
+                add_auto_sample=self.add_auto_sample,
+                average_auto_metric=self.average_auto_metric,
+                _adaptive_stop_alpha=self._adaptive_stop_alpha,
+                _smooth_metric=self._smooth_metric,
+            )),
+            cast(Any, SimpleNamespace(
+                _required_float=self._required_float,
+                _non_negative_optional_float=self._non_negative_optional_float,
+                _near_term_grid_adjustment=self._near_term_grid_adjustment,
+            )),
+            cast(Any, SimpleNamespace(_combined_battery_activity_context=self._combined_battery_activity_context)),
+        )
 
     def available_surplus_watts(self, pv_power: float, grid_power: float) -> float:
         self.calls.append(("available_surplus", pv_power, grid_power))
@@ -129,11 +154,11 @@ class MetricsHarness(_AutoDecisionMetrics):
 
 
 class TestAutoLogicGatesMetrics(unittest.TestCase):
-    def test_update_average_metrics_waits_until_both_averages_are_available(self) -> None:
+    def testupdate_average_metrics_waits_until_both_averages_are_available(self) -> None:
         harness = MetricsHarness()
         harness.average_values = {1: None, 2: -300.0}
 
-        self.assertEqual(harness._update_average_metrics(10.0, 2500.0, -400.0, 55.0, False), (None, None))
+        self.assertEqual(harness.metrics.update_average_metrics(10.0, 2500.0, -400.0, 55.0, False), (None, None))
         self.assertEqual(harness.service._last_auto_metrics, {})
         self.assertEqual(
             harness.calls,
@@ -148,13 +173,13 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness = MetricsHarness()
         harness.average_values = {1: 1200.0, 2: None}
 
-        self.assertEqual(harness._update_average_metrics(11.0, 2500.0, -400.0, 55.0, False), (None, None))
+        self.assertEqual(harness.metrics.update_average_metrics(11.0, 2500.0, -400.0, 55.0, False), (None, None))
         self.assertEqual(harness.service._last_auto_metrics, {})
 
-    def test_update_average_metrics_builds_snapshot_and_returns_battery_adjusted_surplus(self) -> None:
+    def testupdate_average_metrics_builds_snapshot_and_returns_battery_adjusted_surplus(self) -> None:
         harness = MetricsHarness()
 
-        self.assertEqual(harness._update_average_metrics(20.0, 2600.0, -500.0, 56.0, False), (1225.0, -300.0))
+        self.assertEqual(harness.metrics.update_average_metrics(20.0, 2600.0, -500.0, 56.0, False), (1225.0, -300.0))
 
         metrics = harness.service._last_auto_metrics
         self.assertEqual(metrics["surplus"], 1225.0)
@@ -184,13 +209,13 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness = MetricsHarness()
         harness.thresholds = (1600, 800, "high-soc")
         self.assertEqual(
-            harness._surplus_threshold_metrics(91.0),
+            harness.metrics._surplus_threshold_metrics(91.0),
             {"start_threshold": 1600.0, "stop_threshold": 800.0, "profile": "high-soc"},
         )
 
         harness = MetricsHarness()
         harness.volatility = None
-        smoothing = harness._smoothing_metrics(True, 1000.0, -200.0)
+        smoothing = harness.metrics._smoothing_metrics(True, 1000.0, -200.0)
         self.assertEqual(
             smoothing,
             {
@@ -204,7 +229,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
 
         harness = MetricsHarness()
         self.assertEqual(
-            harness._learned_threshold_metrics(33.0),
+            harness.metrics._learned_threshold_metrics(33.0),
             {
                 "learned_charge_power": 1900.0,
                 "learned_charge_power_state": "stable",
@@ -225,7 +250,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness.learned_charge_power = None
         harness.learned_state = "unknown"
         self.assertEqual(
-            harness._learned_threshold_metrics(34.0),
+            harness.metrics._learned_threshold_metrics(34.0),
             {
                 "learned_charge_power": None,
                 "learned_charge_power_state": "unknown",
@@ -247,7 +272,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness.battery_activity = battery_activity(surplus_penalty_w=80.0, learning_profile_count=4)
         harness.near_term_adjustment = 25.0
 
-        metrics = harness._battery_adjusted_surplus_metrics(1000.0)
+        metrics = harness.metrics._battery_adjusted_surplus_metrics(1000.0)
 
         self.assertEqual(metrics["decision_surplus"], 945.0)
         self.assertEqual(metrics["raw_decision_surplus"], 1000.0)
@@ -260,7 +285,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness.battery_activity = battery_activity(surplus_penalty_w=-1.0, learning_profile_count="4")
         harness.near_term_adjustment = -15.0
 
-        metrics = harness._battery_adjusted_surplus_metrics(1000.0)
+        metrics = harness.metrics._battery_adjusted_surplus_metrics(1000.0)
 
         self.assertEqual(metrics["decision_surplus"], 985.0)
         self.assertEqual(metrics["surplus_penalty_w"], 0.0)
@@ -269,7 +294,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
 
     def test_auto_metrics_snapshot_maps_all_public_metric_keys(self) -> None:
         harness = MetricsHarness()
-        snapshot = harness._auto_metrics_snapshot(
+        snapshot = harness.metrics._auto_metrics_snapshot(
             avg_surplus_power=1200.0,
             avg_grid_power=-300.0,
             battery_soc=56.0,
@@ -362,7 +387,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness.service._stop_smoothed_surplus_power = 100.0
         harness.service._stop_smoothed_grid_power = -100.0
 
-        self.assertEqual(harness._smoothed_decision_metrics(False, 1200.0, -300.0, 0.25), (1200.0, -300.0))
+        self.assertEqual(harness.metrics._smoothed_decision_metrics(False, 1200.0, -300.0, 0.25), (1200.0, -300.0))
         self.assertIsNone(harness.service._stop_smoothed_surplus_power)
         self.assertIsNone(harness.service._stop_smoothed_grid_power)
         self.assertEqual(harness.calls, [])
@@ -371,7 +396,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness.service._stop_smoothed_surplus_power = 1000.0
         harness.service._stop_smoothed_grid_power = -100.0
 
-        self.assertEqual(harness._smoothed_decision_metrics(True, 1200.0, -300.0, 0.25), (1050.0, -150.0))
+        self.assertEqual(harness.metrics._smoothed_decision_metrics(True, 1200.0, -300.0, 0.25), (1050.0, -150.0))
         self.assertEqual(harness.service._stop_smoothed_surplus_power, 1050.0)
         self.assertEqual(harness.service._stop_smoothed_grid_power, -150.0)
         self.assertEqual(
@@ -386,7 +411,7 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         delattr(harness.service, "_stop_smoothed_surplus_power")
         delattr(harness.service, "_stop_smoothed_grid_power")
 
-        self.assertEqual(harness._smoothed_decision_metrics(True, 1300.0, -350.0, 0.4), (1300.0, -350.0))
+        self.assertEqual(harness.metrics._smoothed_decision_metrics(True, 1300.0, -350.0, 0.4), (1300.0, -350.0))
         self.assertEqual(harness.service._stop_smoothed_surplus_power, 1300.0)
         self.assertEqual(harness.service._stop_smoothed_grid_power, -350.0)
         self.assertEqual(

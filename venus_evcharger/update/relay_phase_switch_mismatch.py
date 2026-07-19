@@ -4,22 +4,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
-from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_or_none
+from venus_evcharger.backend.models import (
+    PhaseSelection,
+    normalize_phase_selection,
+    normalize_phase_selection_or_none,
+    phase_selection_count,
+)
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.update.relay_charger_readback import _RelayChargerReadback
-
-
-class _PhaseSwitchMismatchState(Protocol):
-    _phase_switch_mismatch_active: bool
-    _phase_switch_mismatch_counts: dict[str, int]
-    _phase_switch_last_mismatch_selection: str | None
-    _phase_switch_last_mismatch_at: float | None
-    _phase_switch_lockout_selection: str | None
-    _phase_switch_lockout_reason: str
-    _phase_switch_lockout_at: float | None
-    _phase_switch_lockout_until: float | None
+from venus_evcharger.update.relay_ports import PhaseSwitchServicePort
 
 
 class _PhaseSwitchMismatchPolicy(Protocol):
@@ -28,26 +22,26 @@ class _PhaseSwitchMismatchPolicy(Protocol):
     mismatch_lockout_seconds: float
 
 
-class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
+class PhaseSwitchMismatchMonitor:
     """Track phase-switch mismatch retries and scoped lockouts."""
 
     _PHASE_SELECTION_VALUES = {"P1", "P1_P2", "P1_P2_P3"}
 
-    if TYPE_CHECKING:  # pragma: no cover
-        @classmethod
-        def _phase_selection_is_upshift(
-            cls,
-            current_selection: PhaseSelection,
-            target_selection: PhaseSelection,
-        ) -> bool: ...
+    @staticmethod
+    def _phase_selection_is_upshift(
+        current_selection: PhaseSelection,
+        target_selection: PhaseSelection,
+    ) -> bool:
+        return phase_selection_count(target_selection) > phase_selection_count(current_selection)
 
-        @staticmethod
-        def _auto_phase_policy(svc: object) -> _PhaseSwitchMismatchPolicy | None: ...
+    @staticmethod
+    def _auto_phase_policy(svc: PhaseSwitchServicePort) -> _PhaseSwitchMismatchPolicy:
+        return svc.auto_policy.phase
 
     @classmethod
     def _phase_switch_mismatch_retry_active(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         current_selection: PhaseSelection,
         target_selection: PhaseSelection,
         now: float,
@@ -63,7 +57,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
 
     @staticmethod
     def _phase_switch_mismatch_timestamp(
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         target_selection: PhaseSelection,
     ) -> float | None:
         mismatch_selection = svc._phase_switch_last_mismatch_selection
@@ -74,28 +68,22 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
         return finite_float_or_none(svc._phase_switch_last_mismatch_at)
 
     @classmethod
-    def _phase_switch_mismatch_retry_seconds(cls, svc: object) -> float:
+    def _phase_switch_mismatch_retry_seconds(cls, svc: PhaseSwitchServicePort) -> float:
         phase_policy = cls._auto_phase_policy(svc)
-        if phase_policy is not None:
-            return max(0.0, float(getattr(phase_policy, "mismatch_retry_seconds", 300.0)))
-        return max(0.0, float(getattr(svc, "auto_phase_mismatch_retry_seconds", 300.0)))
+        return max(0.0, float(phase_policy.mismatch_retry_seconds))
 
     @classmethod
-    def _phase_switch_lockout_threshold(cls, svc: object) -> int:
+    def _phase_switch_lockout_threshold(cls, svc: PhaseSwitchServicePort) -> int:
         phase_policy = cls._auto_phase_policy(svc)
-        if phase_policy is not None:
-            return max(0, int(getattr(phase_policy, "mismatch_lockout_count", 3)))
-        return max(0, int(getattr(svc, "auto_phase_mismatch_lockout_count", 3)))
+        return max(0, int(phase_policy.mismatch_lockout_count))
 
     @classmethod
-    def _phase_switch_lockout_seconds(cls, svc: object) -> float:
+    def _phase_switch_lockout_seconds(cls, svc: PhaseSwitchServicePort) -> float:
         phase_policy = cls._auto_phase_policy(svc)
-        if phase_policy is not None:
-            return max(0.0, float(getattr(phase_policy, "mismatch_lockout_seconds", 1800.0)))
-        return max(0.0, float(getattr(svc, "auto_phase_mismatch_lockout_seconds", 1800.0)))
+        return max(0.0, float(phase_policy.mismatch_lockout_seconds))
 
     @classmethod
-    def _phase_switch_mismatch_counts(cls, svc: _PhaseSwitchMismatchState) -> dict[str, int]:
+    def _phase_switch_mismatch_counts(cls, svc: PhaseSwitchServicePort) -> dict[str, int]:
         counts = getattr(svc, "_phase_switch_mismatch_counts", None)
         if isinstance(counts, dict):
             normalized = cls._normalized_phase_switch_mismatch_counts(counts)
@@ -109,7 +97,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
     def _normalized_phase_switch_mismatch_counts(counts: Mapping[object, object]) -> dict[str, int]:
         normalized: dict[str, int] = {}
         for selection, count in counts.items():
-            if selection not in _RelayPhaseSwitchMismatch._PHASE_SELECTION_VALUES:
+            if selection not in PhaseSwitchMismatchMonitor._PHASE_SELECTION_VALUES:
                 continue
             if not isinstance(count, int) or isinstance(count, bool):
                 continue
@@ -117,13 +105,13 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
         return normalized
 
     @classmethod
-    def _phase_switch_mismatch_count(cls, svc: _PhaseSwitchMismatchState, selection: PhaseSelection) -> int:
+    def _phase_switch_mismatch_count(cls, svc: PhaseSwitchServicePort, selection: PhaseSelection) -> int:
         return max(0, int(cls._phase_switch_mismatch_counts(svc).get(selection, 0)))
 
     @classmethod
     def _remember_phase_switch_mismatch(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         selection: PhaseSelection,
         now: float,
     ) -> int:
@@ -138,7 +126,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
     @classmethod
     def _clear_phase_switch_mismatch_tracking(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         selection: PhaseSelection | None = None,
     ) -> None:
         svc._phase_switch_mismatch_active = False
@@ -154,7 +142,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
             svc._phase_switch_last_mismatch_at = None
 
     @staticmethod
-    def _clear_phase_switch_lockout(svc: _PhaseSwitchMismatchState) -> None:
+    def _clear_phase_switch_lockout(svc: PhaseSwitchServicePort) -> None:
         svc._phase_switch_lockout_selection = None
         svc._phase_switch_lockout_reason = ""
         svc._phase_switch_lockout_at = None
@@ -163,7 +151,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
     @classmethod
     def _engage_phase_switch_lockout(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         selection: PhaseSelection,
         now: float,
     ) -> None:
@@ -179,7 +167,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
     @classmethod
     def _phase_switch_lockout_active(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         now: float,
         selection: PhaseSelection | None = None,
     ) -> bool:
@@ -189,7 +177,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
     @classmethod
     def _current_lockout_selection(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         now: float,
     ) -> PhaseSelection | None:
         lockout_selection = getattr(svc, "_phase_switch_lockout_selection", None)
@@ -204,7 +192,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
     @classmethod
     def _active_lockout_selection(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         lockout_selection: object,
     ) -> PhaseSelection | None:
         normalized_selection = normalize_phase_selection_or_none(lockout_selection)
@@ -215,7 +203,7 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
     @classmethod
     def _phase_switch_fallback_selection(
         cls,
-        svc: _PhaseSwitchMismatchState,
+        svc: PhaseSwitchServicePort,
         observed_selection: PhaseSelection | None,
         pending_selection: PhaseSelection,
     ) -> PhaseSelection:
@@ -226,3 +214,6 @@ class _RelayPhaseSwitchMismatch(_RelayChargerReadback):
             return active_selection
         requested_selection = normalize_phase_selection_or_none(getattr(svc, "requested_phase_selection", None))
         return requested_selection if requested_selection is not None else pending_selection
+
+
+__all__ = ["PhaseSwitchMismatchMonitor"]

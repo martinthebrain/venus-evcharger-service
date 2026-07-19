@@ -1,7 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import configparser
+import os
+import tempfile
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from tests.venus_evcharger_state_controller_support import *
+from venus_evcharger.auto.policy import AutoPolicy
+from venus_evcharger.controllers.state import ServiceStateController
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
+from venus_evcharger.controllers.state_runtime_overrides import RuntimeOverrideStore
+from venus_evcharger.controllers.state_runtime_snapshot import RuntimeStateSnapshotBuilder
+from venus_evcharger.controllers.state_validation import RuntimeConfigValidator
+from tests.venus_evcharger_state_controller_support import (
+    STATE_RUNTIME_PARSER_READ,
+    STATE_SUMMARY_TIME,
+    ServiceStateControllerTestBase,
+)
 
 
 def _with_backends_config(
@@ -82,10 +97,11 @@ class TestServiceStateControllerPrimary(ServiceStateControllerTestBase):
         self.assertEqual(controller.coerce_runtime_float("bad", 3.5), 3.5)
         self.assertEqual(controller.coerce_runtime_float(float("nan"), 3.5), 3.5)
         self.assertEqual(controller.coerce_runtime_float(float("inf"), 3.5), 3.5)
-        self.assertIsNone(controller._coerce_optional_runtime_float(None))
-        self.assertEqual(controller._coerce_optional_runtime_float("7.5"), 7.5)
-        self.assertIsNone(controller._coerce_optional_runtime_past_time(110.0, 100.0))
-        self.assertEqual(controller._coerce_optional_runtime_past_time(100.5, 100.0), 100.5)
+        normalizer = RuntimeStateNormalizer()
+        self.assertIsNone(normalizer.optional_float(None))
+        self.assertEqual(normalizer.optional_float("7.5"), 7.5)
+        self.assertIsNone(normalizer.optional_past_time(110.0, 100.0))
+        self.assertEqual(normalizer.optional_past_time(100.5, 100.0), 100.5)
         self.assertIn("mode=1", summary)
         self.assertIn("phase=P1_P2", summary)
         self.assertIn("phase_req=P1_P2_P3", summary)
@@ -176,7 +192,7 @@ class TestServiceStateControllerPrimary(ServiceStateControllerTestBase):
 
     def test_energy_runtime_state_ignores_non_mapping_worker_snapshot(self) -> None:
         service = SimpleNamespace(_get_worker_snapshot=lambda: ["not-a-mapping"])
-        state = ServiceStateController._energy_runtime_state(service)
+        state = RuntimeStateSnapshotBuilder._energy_runtime_state(service)
 
         self.assertEqual(state["combined_battery_soc"], None)
         self.assertEqual(state["combined_battery_source_count"], 0)
@@ -185,21 +201,25 @@ class TestServiceStateControllerPrimary(ServiceStateControllerTestBase):
         service = SimpleNamespace(
             _contactor_fault_counts={},
             auto_start_delay_seconds=-1.0,
+            auto_policy=AutoPolicy(),
         )
-        controller = ServiceStateController(service, self._normalize_mode)
+        overrides = RuntimeOverrideStore(service, RuntimeStateNormalizer())
 
-        self.assertEqual(controller._read_runtime_override_values(""), {})
+        self.assertEqual(overrides._read_runtime_override_values(""), {})
         with patch(STATE_RUNTIME_PARSER_READ, side_effect=RuntimeError("boom")):
-            self.assertEqual(controller._read_runtime_override_values("/tmp/runtime.ini"), {})
-        self.assertIn("AutoDbusBackoffBaseSeconds", controller._serialized_runtime_overrides())
-        controller._restore_contactor_runtime_state(
+            self.assertEqual(overrides._read_runtime_override_values("/tmp/runtime.ini"), {})
+        self.assertIn("AutoDbusBackoffBaseSeconds", overrides.serialized())
+        self.runtime_restorer(service)._restore_contactor_runtime_state(
             service,
             {"contactor_fault_counts": {"contactor-suspected-open": 2, "ignored": 9}},
             100.0,
         )
         self.assertEqual(service._contactor_fault_counts, {"contactor-suspected-open": 2})
-        controller._validate_optional_non_negative_int(service, "auto_start_delay_seconds", "AutoStartDelaySeconds")
-        self.assertEqual(service.auto_start_delay_seconds, 0)
+        RuntimeConfigValidator._clamp_non_negative_float(
+            service,
+            "auto_start_delay_seconds",
+        )
+        self.assertEqual(service.auto_start_delay_seconds, 0.0)
 
     def test_flush_runtime_overrides_keeps_pending_snapshot_after_write_failure(self) -> None:
         service = SimpleNamespace(
@@ -209,11 +229,17 @@ class TestServiceStateControllerPrimary(ServiceStateControllerTestBase):
             _runtime_overrides_pending_text="[RuntimeOverrides]\nMode=1\n",
             _runtime_overrides_pending_due_at=0.0,
             runtime_overrides_write_min_interval_seconds=2.0,
-            _time_now=lambda: 100.0,
+            time_now=lambda: 100.0,
         )
         controller = ServiceStateController(service, self._normalize_mode)
+        overrides = controller.components.overrides
+        self.assertIsInstance(overrides, RuntimeOverrideStore)
 
-        with patch.object(controller, "_write_runtime_overrides_payload", side_effect=RuntimeError("boom")):
+        with patch.object(
+            overrides,
+            "_write_runtime_overrides_payload",
+            side_effect=RuntimeError("boom"),
+        ):
             controller.flush_runtime_overrides(100.0)
 
         self.assertEqual(service._runtime_overrides_pending_due_at, 102.0)

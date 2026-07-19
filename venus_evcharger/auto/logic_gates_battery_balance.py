@@ -1,54 +1,31 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import Any, Mapping
 
-from venus_evcharger.energy import derive_energy_forecast, summarize_energy_learning_profiles
-from .logic_gates_battery_learning import _AutoDecisionBatteryLearning
-from .logic_gates_battery_balance_support import (
-    _battery_discharge_balance_allowed_feasibilities,
-    _battery_discharge_balance_coordination_blocked_by_availability,
-    _battery_discharge_balance_coordination_counts,
-    _battery_discharge_balance_coordination_experimental,
-    _battery_discharge_balance_coordination_not_needed,
-    _battery_discharge_balance_coordination_partial,
-    _battery_discharge_balance_coordination_supported,
-    _battery_discharge_balance_penalty_inputs_valid,
-    _battery_discharge_balance_penalty_scale,
-    _battery_discharge_balance_penalty_value,
-    _battery_discharge_balance_zero_start_penalty,
-    _discharge_balance_bias_mode_active,
-)
+from venus_evcharger.energy.forecast import derive_energy_forecast
+from venus_evcharger.energy.learning import summarize_energy_learning_profiles
+from .component_context import AutoDecisionContext
+from .logic_gates_battery_balance_support import AutoBatteryBalancePolicy
+from .logic_gates_battery_learning import AutoBatteryLearning
 
 
-class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
-    if TYPE_CHECKING:  # pragma: no cover
+class AutoBatteryBalance:
+    """Build the combined battery activity model used by Auto decisions."""
 
-        def _source_activity_penalties(
-            self,
-            sources: list[dict[str, Any]],
-            profiles: dict[str, Any],
-        ) -> tuple[float, float, float | None, float | None]: ...
-
-        def _cluster_activity_penalties(
-            self,
-            cluster: dict[str, Any],
-            learning_summary: dict[str, float | int | None],
-        ) -> tuple[float, float, float | None, float | None]: ...
-
-        def _battery_penalty_multiplier(
-            self,
-            *,
-            direction: str,
-            response_delay_seconds: float | None,
-            support_bias: float | None,
-            import_support_bias: float | None,
-            export_bias: float | None,
-        ) -> float: ...
+    def __init__(
+        self,
+        context: AutoDecisionContext,
+        learning: AutoBatteryLearning,
+        policy: AutoBatteryBalancePolicy,
+    ) -> None:
+        self.service = context.service
+        self.learning = learning
+        self.policy = policy
 
     def _combined_battery_activity_context(self) -> dict[str, float | int | str | None]:
         """Return a conservative battery activity picture used to de-bias surplus decisions."""
-        cluster, sources, profiles = self._battery_activity_inputs()
+        cluster, sources, profiles = self.learning._battery_activity_inputs()
         learning_summary = self._combined_battery_learning_summary(profiles)
         charge_penalty, discharge_penalty, max_charge_ratio, max_discharge_ratio = self._combined_battery_penalties(
             cluster,
@@ -56,7 +33,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
             profiles,
             learning_summary,
         )
-        behavior = self._battery_learning_behavior(learning_summary)
+        behavior = self.learning._battery_learning_behavior(learning_summary)
         forecast = derive_energy_forecast(cluster, learning_summary)
         scaled_charge_penalty, scaled_discharge_penalty = self._combined_battery_scaled_penalties(
             charge_penalty,
@@ -101,8 +78,8 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         learning_summary: dict[str, float | int | None],
     ) -> tuple[float, float, float | None, float | None]:
         if sources:
-            return self._source_activity_penalties(sources, profiles)
-        return self._cluster_activity_penalties(cluster, learning_summary)
+            return self.learning._source_activity_penalties(sources, profiles)
+        return self.learning._cluster_activity_penalties(cluster, learning_summary)
 
     def _combined_battery_scaled_penalties(
         self,
@@ -120,7 +97,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         direction: str,
         behavior: Mapping[str, float | None],
     ) -> float:
-        return self._battery_penalty_multiplier(
+        return self.learning._battery_penalty_multiplier(
             direction=direction,
             response_delay_seconds=behavior["response_delay_seconds"],
             support_bias=behavior["support_bias"],
@@ -135,9 +112,9 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         behavior: Mapping[str, float | None],
     ) -> dict[str, bool | float | str]:
         warning_active, error_w, warn_threshold_w, bias_mode, gate_active, start_error_w, penalty_w = (
-            self._battery_discharge_balance_policy_context(
+            self.policy._battery_discharge_balance_policy_context(
                 cluster,
-                expected_export_w=self._cluster_or_forecast_metric(
+                expected_export_w=self.learning._cluster_or_forecast_metric(
                     cluster,
                     forecast,
                     "expected_near_term_export_w",
@@ -160,7 +137,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         cluster: Mapping[str, Any],
         warning_active: bool | float | str,
     ) -> dict[str, bool | str]:
-        feasibility, advisory_active, advisory_reason = self._battery_discharge_balance_coordination_advisory(
+        feasibility, advisory_active, advisory_reason = self.policy._battery_discharge_balance_coordination_advisory(
             cluster,
             warning_active=bool(warning_active),
         )
@@ -176,7 +153,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         feasibility: bool | float | str,
     ) -> dict[str, bool | float | str]:
         enabled, support_mode, gate_active, start_error_w, penalty_w = (
-            self._battery_discharge_balance_coordination_policy_context(
+            self.policy._battery_discharge_balance_coordination_policy_context(
                 cluster,
                 feasibility=str(feasibility),
             )
@@ -227,12 +204,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
 
     def _combined_battery_warning_throttled(self, key: str, message: str, *args: object) -> None:
         svc = self.service
-        if not hasattr(svc, "_warning_throttled"):
-            return
-        warning_throttled = svc._warning_throttled
-        if not callable(warning_throttled):
-            return
-        warning_throttled(
+        svc.runtime.warning_throttled(
             key,
             self._combined_battery_warning_interval_seconds(svc),
             message,
@@ -294,7 +266,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
             "discharge_power_w": discharge_penalty if discharge_penalty > 0.0 else None,
             "charge_activity_ratio": max_charge_ratio,
             "discharge_activity_ratio": max_discharge_ratio,
-            "mode": self._battery_activity_mode(charge_penalty, discharge_penalty),
+            "mode": self.learning._battery_activity_mode(charge_penalty, discharge_penalty),
         }
 
     def _combined_battery_learning_payload(
@@ -303,10 +275,10 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
     ) -> dict[str, float | int | str | None]:
         return {
             "learning_profile_count": int(learning_summary.get("profile_count") or 0),
-            "observed_max_charge_power_w": self._non_negative_optional_float(
+            "observed_max_charge_power_w": self.learning._non_negative_optional_float(
                 learning_summary.get("observed_max_charge_power_w")
             ),
-            "observed_max_discharge_power_w": self._non_negative_optional_float(
+            "observed_max_discharge_power_w": self.learning._non_negative_optional_float(
                 learning_summary.get("observed_max_discharge_power_w")
             ),
         }
@@ -335,10 +307,10 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         forecast: Mapping[str, Any],
     ) -> dict[str, float | int | str | None]:
         return {
-            "battery_headroom_charge_w": self._cluster_or_forecast_metric(cluster, forecast, "battery_headroom_charge_w"),
-            "battery_headroom_discharge_w": self._cluster_or_forecast_metric(cluster, forecast, "battery_headroom_discharge_w"),
-            "expected_near_term_export_w": self._cluster_or_forecast_metric(cluster, forecast, "expected_near_term_export_w"),
-            "expected_near_term_import_w": self._cluster_or_forecast_metric(cluster, forecast, "expected_near_term_import_w"),
+            "battery_headroom_charge_w": self.learning._cluster_or_forecast_metric(cluster, forecast, "battery_headroom_charge_w"),
+            "battery_headroom_discharge_w": self.learning._cluster_or_forecast_metric(cluster, forecast, "battery_headroom_discharge_w"),
+            "expected_near_term_export_w": self.learning._cluster_or_forecast_metric(cluster, forecast, "expected_near_term_export_w"),
+            "expected_near_term_import_w": self.learning._cluster_or_forecast_metric(cluster, forecast, "expected_near_term_import_w"),
         }
 
     def _combined_battery_bias_payload(
@@ -346,7 +318,7 @@ class _AutoDecisionBatteryBalance(_AutoDecisionBatteryLearning):
         bias_context: Mapping[str, bool | float | str],
     ) -> dict[str, float | int | str | None]:
         return {
-            "discharge_balance_policy_enabled": 1 if self._battery_discharge_balance_policy_enabled() else 0,
+            "discharge_balance_policy_enabled": 1 if self.policy._battery_discharge_balance_policy_enabled() else 0,
             "discharge_balance_warning_active": 1 if bool(bias_context["warning_active"]) else 0,
             "discharge_balance_warning_error_w": self._combined_battery_warning_error_w(bias_context),
             "discharge_balance_warn_threshold_w": float(bias_context["warn_threshold_w"]),

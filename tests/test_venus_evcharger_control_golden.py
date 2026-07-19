@@ -8,21 +8,11 @@ from unittest.mock import MagicMock
 sys.modules["vedbus"] = MagicMock()
 
 from venus_evcharger.core.contracts import CONTROL_API_ERROR_CODES
-from venus_evcharger.service.control import ControlApi
+from venus_evcharger.service.control import ServiceControlFacade
 
 
-class _GoldenControlService(ControlApi):
-    def _ensure_write_controller(self):
-        return None
-
-    def _ensure_dbus_publisher(self):
-        return None
-
-    def _state_summary(self):
-        return "mode=1 enable=1"
-
-    def _current_runtime_state(self):
-        return {"mode": 1}
+class _GoldenControlService:
+    pass
 
 
 class TestVenusEvchargerControlGolden(unittest.TestCase):
@@ -46,12 +36,14 @@ ChargerType=goe_charger
         service.control_api_localhost_only = True
         service.control_api_bound_unix_socket_path = "/run/venus-evcharger-control.sock"
         service.supported_phase_selections = ("P1", "P1_P2", "P1_P2_P3")
+        control = ServiceControlFacade(service)
+        capabilities = control.capabilities_payload()
 
         projection = {
-            "auth_scopes": service._control_api_capabilities_payload()["auth_scopes"],
-            "command_scope_requirements": service._control_api_capabilities_payload()["command_scope_requirements"],
+            "auth_scopes": capabilities["auth_scopes"],
+            "command_scope_requirements": capabilities["command_scope_requirements"],
             "features": {
-                key: service._control_api_capabilities_payload()["features"][key]
+                key: capabilities["features"][key]
                 for key in (
                     "command_audit_trail",
                     "event_kind_filters",
@@ -62,13 +54,12 @@ ChargerType=goe_charger
                     "rate_limiting",
                 )
             },
-            "topology": service._control_api_capabilities_payload()["topology"],
-            "supported_phase_selections": service._control_api_capabilities_payload()["supported_phase_selections"],
+            "topology": capabilities["topology"],
+            "supported_phase_selections": capabilities["supported_phase_selections"],
         }
         golden = {
             "auth_scopes": ["control_admin", "control_basic", "read", "update_admin"],
             "command_scope_requirements": {
-                "legacy_unknown_write": "control_admin",
                 "reset_contactor_lockout": "control_admin",
                 "reset_phase_lockout": "control_admin",
                 "set_auto_runtime_setting": "control_admin",

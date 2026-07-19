@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 
 from venus_evcharger.bootstrap.wizard_charger_presets import CHARGER_PRESET_VALUES
-from venus_evcharger.bootstrap.wizard_models import WizardTransportKind
 from venus_evcharger.bootstrap.wizard_support import (
     NATIVE_CHARGER_VALUES,
     POLICY_VALUES,

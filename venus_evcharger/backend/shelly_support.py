@@ -8,7 +8,7 @@ readback handling while individual meter/switch classes keep role behavior.
 from __future__ import annotations
 
 import configparser
-from typing import Any, Mapping
+from typing import Mapping
 from urllib.parse import urlencode
 
 import requests
@@ -20,7 +20,12 @@ from .models import (
     SwitchingMode,
     normalize_phase_selection,
 )
-from .shelly_io_types import _SessionLike
+from .shelly_io_types import (
+    ShellyHttpSession,
+    is_object_mapping,
+    normalized_json_object,
+    require_session,
+)
 from .shelly_profiles import (
     ShellyProfileDefaults,
     normalize_shelly_profile_name,
@@ -136,14 +141,14 @@ def _mapping_path_value(payload: Mapping[str, object], path: str) -> object:
         token = part.strip()
         if not token:
             continue
-        if not isinstance(current, Mapping) or token not in current:
+        if not is_object_mapping(current) or token not in current:
             raise ValueError(f"Missing Shelly signal response path '{path}'")
         current = current[token]
     return current
 
 
 def load_shelly_backend_settings(
-    service: Any,
+    service: object,
     config_path: str = "",
     *,
     default_switching_mode: SwitchingMode = "direct",
@@ -202,7 +207,7 @@ def load_shelly_backend_settings(
 def _resolved_shelly_component(
     adapter: configparser.SectionProxy,
     profile_defaults: ShellyProfileDefaults | None,
-    service: Any,
+    service: object,
 ) -> str:
     """Return the effective Shelly RPC component for one backend."""
     values = _section_values(adapter)
@@ -235,7 +240,7 @@ def _configured_max_direct_switch_power_w(capabilities: configparser.SectionProx
     return finite_float_or_none(values.get("maxdirectswitchpowerwatts"))
 
 
-def _derived_max_direct_switch_power_w(service: Any) -> float | None:
+def _derived_max_direct_switch_power_w(service: object) -> float | None:
     """Return a fallback direct-switch power limit from service max current and voltage."""
     max_current = finite_float_or_none(getattr(service, "max_current", None))
     voltage = finite_float_or_none(getattr(service, "_last_voltage", None))
@@ -245,7 +250,7 @@ def _derived_max_direct_switch_power_w(service: Any) -> float | None:
 
 
 def _resolved_max_direct_switch_power_w(
-    service: Any,
+    service: object,
     capabilities: configparser.SectionProxy,
     switching_mode: SwitchingMode,
 ) -> float | None:
@@ -256,7 +261,7 @@ def _resolved_max_direct_switch_power_w(
     return configured_power if configured_power is not None else _derived_max_direct_switch_power_w(service)
 
 
-def _resolved_timeout_seconds(adapter: configparser.SectionProxy, service: Any) -> float:
+def _resolved_timeout_seconds(adapter: configparser.SectionProxy, service: object) -> float:
     """Return the normalized Shelly backend timeout in seconds."""
     values = _section_values(adapter)
     return float(_config_value(values, "requesttimeoutseconds", getattr(service, "shelly_request_timeout_seconds", 2.0)))
@@ -284,7 +289,7 @@ class ShellyBackendBase:
 
     def __init__(
         self,
-        service: Any,
+        service: object,
         config_path: str = "",
         *,
         default_switching_mode: SwitchingMode = "direct",
@@ -297,9 +302,11 @@ class ShellyBackendBase:
             default_switching_mode=default_switching_mode,
         )
         session = getattr(service, "session", None)
-        self._session: _SessionLike = session if session is not None else requests.Session()
+        self._session: ShellyHttpSession = (
+            require_session(session) if session is not None else requests.Session()
+        )
 
-    def reset_transport_session(self, session: Any | None = None) -> None:
+    def reset_transport_session(self, session: ShellyHttpSession | None = None) -> None:
         """Replace the HTTP session after transport-level failures."""
         old_session = getattr(self, "_session", None)
         if old_session is not None and old_session is not session and hasattr(old_session, "close"):
@@ -332,19 +339,18 @@ class ShellyBackendBase:
 
     def _request_json(self, url: str) -> JsonObject:
         """Perform one requests-based JSON call."""
-        kwargs: dict[str, object] = {
-            "url": url,
-            "timeout": float(self.settings.timeout_seconds),
-        }
         auth = self._auth()
-        if auth is not None:
-            kwargs["auth"] = auth
-        response = self._session.get(**kwargs)
+        timeout = float(self.settings.timeout_seconds)
+        response = (
+            self._session.get(url=url, timeout=timeout, auth=auth)
+            if auth is not None
+            else self._session.get(url=url, timeout=timeout)
+        )
         response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("Shelly RPC response must be a JSON object")
-        return {str(key): value for key, value in payload.items()}
+        return normalized_json_object(
+            response.json(),
+            error_message="Shelly RPC response must be a JSON object",
+        )
 
     def _rpc_call(self, method: str, **params: ShellyRpcScalar) -> JsonObject:
         """Call one Shelly RPC method on the configured backend target."""
@@ -375,6 +381,8 @@ __all__ = [
     "ShellyProfileDefaults",
     "ShellyRpcScalar",
     "ShellySignalReadbackSettings",
+    "_parse_switch_channel_ids",
+    "_switch_channel_id",
     "load_shelly_backend_settings",
     "normalize_shelly_profile_name",
     "normalize_switching_mode",

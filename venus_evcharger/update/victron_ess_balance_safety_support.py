@@ -7,13 +7,22 @@ from typing import Any
 
 from venus_evcharger.core.contracts_basic import non_negative_int
 
-from .victron_ess_balance_learning import _UpdateCycleVictronEssBalanceLearning
+from .victron_ess_balance_apply_sources import VictronEssSourceResolver
+from .victron_ess_balance_learning_profiles import VictronEssLearningProfiles
 
 
-class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLearning):
+class VictronEssSafetyRecovery:
+    def __init__(self, sources: VictronEssSourceResolver, profiles: VictronEssLearningProfiles) -> None:
+        self._sources = sources
+        self._profiles = profiles
+
     def _victron_ess_balance_refresh_stable_tuning(self, svc: Any, metrics: dict[str, Any], now: float) -> None:
-        confidence = self._optional_float(metrics.get("battery_discharge_balance_victron_bias_recommendation_confidence"))
-        stability = self._optional_float(metrics.get("battery_discharge_balance_victron_bias_learning_profile_stability_score"))
+        confidence = self._sources._optional_float(
+            metrics.get("battery_discharge_balance_victron_bias_recommendation_confidence")
+        )
+        stability = self._sources._optional_float(
+            metrics.get("battery_discharge_balance_victron_bias_learning_profile_stability_score")
+        )
         sample_count = non_negative_int(
             metrics.get("battery_discharge_balance_victron_bias_learning_profile_sample_count")
         )
@@ -28,7 +37,7 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
         ):
             return
         self._victron_ess_balance_ensure_conservative_tuning(svc)
-        svc._victron_ess_balance_last_stable_tuning = self._victron_ess_balance_current_tuning_snapshot(svc)
+        svc._victron_ess_balance_last_stable_tuning = self._profiles._victron_ess_balance_current_tuning_snapshot(svc)
         svc._victron_ess_balance_last_stable_at = float(now)
         svc._victron_ess_balance_last_stable_profile_key = str(
             metrics.get("battery_discharge_balance_victron_bias_learning_profile_key") or ""
@@ -42,8 +51,8 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
         overshoot_count: int,
     ) -> bool:
         return (
-            _UpdateCycleVictronEssBalanceSafetySupport._victron_ess_balance_has_minimum_confidence(confidence)
-            and _UpdateCycleVictronEssBalanceSafetySupport._victron_ess_balance_has_minimum_stability(stability)
+            VictronEssSafetyRecovery._victron_ess_balance_has_minimum_confidence(confidence)
+            and VictronEssSafetyRecovery._victron_ess_balance_has_minimum_stability(stability)
             and sample_count >= 2
             and overshoot_count <= 0
         )
@@ -58,7 +67,7 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
 
     def _victron_ess_balance_ensure_conservative_tuning(self, svc: Any) -> None:
         if not svc._victron_ess_balance_conservative_tuning:
-            svc._victron_ess_balance_conservative_tuning = self._victron_ess_balance_current_tuning_snapshot(svc)
+            svc._victron_ess_balance_conservative_tuning = self._profiles._victron_ess_balance_current_tuning_snapshot(svc)
 
     def _victron_ess_balance_should_rollback_stable_tuning(
         self,
@@ -68,12 +77,12 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
     ) -> bool:
         if not bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_rollback_enabled", True)):
             return False
-        observe_until = self._optional_float(svc._victron_ess_balance_auto_apply_observe_until)
+        observe_until = self._sources._optional_float(svc._victron_ess_balance_auto_apply_observe_until)
         if not self._victron_ess_balance_observation_window_active(now, observe_until):
             return False
         if self._victron_ess_balance_has_immediate_rollback_signal(metrics):
             return True
-        stability = self._optional_float(metrics.get("battery_discharge_balance_victron_bias_stability_score"))
+        stability = self._sources._optional_float(metrics.get("battery_discharge_balance_victron_bias_stability_score"))
         rollback_min_stability = self._victron_ess_balance_rollback_min_stability_score(svc)
         return bool(stability is not None and stability < rollback_min_stability)
 
@@ -119,7 +128,7 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
         self._victron_ess_balance_suspend_auto_apply(
             svc,
             reason,
-            self._optional_float(getattr(svc, "_victron_ess_balance_auto_apply_last_applied_at", None)),
+            self._sources._optional_float(getattr(svc, "_victron_ess_balance_auto_apply_last_applied_at", None)),
         )
         metrics["battery_discharge_balance_victron_bias_rollback_active"] = 1
         metrics["battery_discharge_balance_victron_bias_rollback_reason"] = str(reason)
@@ -167,44 +176,21 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
     def _victron_ess_balance_restored_activation_mode(self, svc: Any, stable: dict[str, Any]) -> str:
         if "activation_mode" in stable:
             return str(stable.get("activation_mode") or "always").strip()
-        return str(self._victron_ess_balance_activation_mode(svc) or "always").strip()
-
-    @staticmethod
-    def _victron_ess_balance_ev_power_w(svc: Any) -> float | None:
-        direct = _UpdateCycleVictronEssBalanceSafetySupport._victron_ess_balance_direct_ev_power_w(svc)
-        if direct is not None:
-            return direct
-        learned_charge_power = getattr(svc, "learned_charge_power_watts", None)
-        if isinstance(learned_charge_power, (int, float)) and int(getattr(svc, "virtual_startstop", None) or 0):
-            return float(learned_charge_power)
-        return None
-
-    @staticmethod
-    def _victron_ess_balance_direct_ev_power_w(svc: Any) -> float | None:
-        for attr_name in ("_last_charger_state_power_w", "_charger_estimated_power_w", "_last_power", "ac_power"):
-            value = getattr(svc, attr_name, None)
-            if isinstance(value, (int, float)):
-                return float(value)
-        return None
-
-    @classmethod
-    def _victron_ess_balance_ev_active(cls, svc: Any) -> bool:
-        ev_power_w = cls._victron_ess_balance_ev_power_w(svc)
-        if ev_power_w is not None and ev_power_w >= 200.0:
-            return True
-        if getattr(svc, "charging_started_at", None) is not None:
-            return True
-        return bool(int(getattr(svc, "virtual_startstop", None) or 0))
+        return str(self._sources._victron_ess_balance_activation_mode(svc) or "always").strip()
 
     def _enter_victron_ess_balance_overshoot_cooldown(self, svc: Any, now: float, reason: str) -> None:
-        response_delay = self._optional_float(getattr(svc, "_victron_ess_balance_telemetry_response_delay_seconds", None))
+        response_delay = self._sources._optional_float(
+            getattr(svc, "_victron_ess_balance_telemetry_response_delay_seconds", None)
+        )
         cooldown_seconds = max(20.0, min(180.0, (response_delay or 10.0) * 4.0))
         svc._victron_ess_balance_overshoot_cooldown_until = float(now + cooldown_seconds)
         svc._victron_ess_balance_overshoot_cooldown_reason = str(reason)
         self._victron_ess_balance_suspend_auto_apply(svc, "overshoot_cooldown", now)
 
     def _victron_ess_balance_overshoot_cooldown_active(self, svc: Any, now: float) -> bool:
-        cooldown_until = self._optional_float(getattr(svc, "_victron_ess_balance_overshoot_cooldown_until", None))
+        cooldown_until = self._sources._optional_float(
+            getattr(svc, "_victron_ess_balance_overshoot_cooldown_until", None)
+        )
         return cooldown_until is not None and float(now) < float(cooldown_until)
 
     def _victron_ess_balance_suspend_auto_apply(self, svc: Any, reason: str, now: float | None = None) -> None:
@@ -212,8 +198,10 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
             float(now)
             if isinstance(now, (int, float))
             else (
-                self._optional_float(getattr(svc, "_victron_ess_balance_telemetry_last_observed_at", None))
-                or self._optional_float(getattr(svc, "_victron_ess_balance_auto_apply_last_applied_at", None))
+                self._sources._optional_float(getattr(svc, "_victron_ess_balance_telemetry_last_observed_at", None))
+                or self._sources._optional_float(
+                    getattr(svc, "_victron_ess_balance_auto_apply_last_applied_at", None)
+                )
                 or 0.0
             )
         )
@@ -227,5 +215,7 @@ class _UpdateCycleVictronEssBalanceSafetySupport(_UpdateCycleVictronEssBalanceLe
         svc._victron_ess_balance_auto_apply_suspend_reason = str(reason)
 
     def _victron_ess_balance_auto_apply_suspended(self, svc: Any, now: float) -> bool:
-        suspend_until = self._optional_float(getattr(svc, "_victron_ess_balance_auto_apply_suspend_until", None))
+        suspend_until = self._sources._optional_float(
+            getattr(svc, "_victron_ess_balance_auto_apply_suspend_until", None)
+        )
         return suspend_until is not None and float(now) < float(suspend_until)

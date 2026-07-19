@@ -4,21 +4,27 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 from venus_evcharger.core.contracts import finite_float_or_none, sanitized_auto_metrics
 from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue
-from venus_evcharger.publish.dbus_diagnostics_schedule import _DbusDiagnosticsSchedule
+from venus_evcharger.publish.dbus_ports import DecisionRuntimeViewPort
+from venus_evcharger.publish.dbus_shared import DbusPublishContext, PublishServicePort
 
 
-class _DbusDiagnosticsRuntime(_DbusDiagnosticsSchedule):
+class DbusDiagnosticsRuntime:
+    """Build event-loop timing and Auto-decision diagnostics."""
+
+    def __init__(self, context: DbusPublishContext, runtime_view: DecisionRuntimeViewPort) -> None:
+        self.service: PublishServicePort = context.service
+        self.runtime_view = runtime_view
+
     @staticmethod
-    def _bool_attr_as_int(service: Any, attr_name: str) -> int:
+    def _bool_attr_as_int(service: object, attr_name: str) -> int:
         if not hasattr(service, attr_name):
             return 0
         return int(bool(getattr(service, attr_name)))
 
-    def _runtime_timing_values(self, now: float) -> dict[str, int | float]:
+    def runtime_timing_values(self, now: float) -> dict[str, int | float]:
         """Return timing and queue diagnostics for async runtime health."""
         svc = self.service
         mainloop_heartbeat_at = getattr(svc, "_mainloop_heartbeat_at", None)
@@ -40,29 +46,29 @@ class _DbusDiagnosticsRuntime(_DbusDiagnosticsSchedule):
         }
 
     @staticmethod
-    def _auto_decision_metric_float(metrics: Mapping[str, Any], field_name: str) -> float:
+    def _auto_decision_metric_float(metrics: Mapping[str, object], field_name: str) -> float:
         value = finite_float_or_none(metrics.get(field_name))
         return -1.0 if value is None else float(value)
 
     @staticmethod
-    def _auto_decision_metric_text(metrics: Mapping[str, Any], field_name: str) -> str:
+    def _auto_decision_metric_text(metrics: Mapping[str, object], field_name: str) -> str:
         value = metrics.get(field_name)
         return "" if value is None else str(value).strip()
 
     @staticmethod
-    def _auto_decision_relay_intent(metrics: Mapping[str, Any]) -> int:
+    def _auto_decision_relay_intent(metrics: Mapping[str, object]) -> int:
         value = metrics.get("relay_intent")
         if value is None:
             return -1
         return int(bool(value))
 
-    def _auto_decision_counter_values(
+    def auto_decision_values(
         self,
         auto_state: str,
         auto_state_code: int,
     ) -> dict[str, DiagnosticValue]:
         """Return the compact 'why did it start/stop?' diagnostic surface."""
-        metrics = sanitized_auto_metrics(self._auto_metrics(self.service))
+        metrics = sanitized_auto_metrics(self.runtime_view.auto_metrics(self.service))
         return {
             "auto_decision_reason": str(self.service._last_health_reason),
             "auto_decision_state": auto_state,

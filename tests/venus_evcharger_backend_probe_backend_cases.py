@@ -9,7 +9,6 @@ from tests.venus_evcharger_backend_probe_support import (
     probe_switch_backend,
     read_charger_backend,
     validate_backend_config,
-    validate_wallbox_config,
     io,
     json,
     redirect_stdout,

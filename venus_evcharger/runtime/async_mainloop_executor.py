@@ -10,34 +10,45 @@ from typing import Any, Mapping
 
 from venus_evcharger.core.contracts import finite_float_or_none
 from venus_evcharger.core.return_contracts import require_bool
-from venus_evcharger.runtime.async_mainloop_state import _RuntimeAsyncMainloopState
+from venus_evcharger.runtime.contracts import ControlCommandQueuePort
 
 ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
-    def start_update_worker(self: Any) -> None:
+class RuntimeExecutor:
+    """Serialize gateway commands, control commands, and update cycles."""
+
+    def __init__(self, service: Any, control_commands: ControlCommandQueuePort) -> None:
+        self.service = service
+        self.control_commands = control_commands
+
+    def start_update_worker(self) -> None:
         """Enable periodic update cycles in the serialized runtime executor."""
         svc = self.service
         svc._update_worker_enabled = True
-        self._start_runtime_executor()
+        self.start()
 
-    def _start_runtime_executor(self: Any) -> None:
+    def start(self) -> None:
         """Start the single owner for mutable runtime state."""
         svc = self.service
         if getattr(svc, "_runtime_executor_thread", None) is not None:
             return
-        thread = threading.Thread(target=self._runtime_executor_loop, name="evcharger-runtime-executor", daemon=True)
+        thread = threading.Thread(target=self._executor_loop, name="evcharger-runtime-executor", daemon=True)
         svc._runtime_executor_thread = thread
         svc._update_worker_thread = thread
         svc._control_command_thread = thread
         thread.start()
 
-    def schedule_update_cycle(self: Any) -> bool:
+    def start_control_command_worker(self) -> None:
+        """Enable command execution in this serialized executor."""
+        self.service._control_command_async_enabled = True
+        self.start()
+
+    def schedule_update_cycle(self) -> bool:
         """Request one update cycle without running it in the caller thread."""
         svc = self.service
         if not _update_worker_enabled(svc):
-            return bool(svc._update())
+            return bool(svc.update.update())
         with svc._update_worker_lock:
             if svc._update_worker_pending or svc._update_worker_running:
                 svc._update_worker_skipped_count += 1
@@ -46,7 +57,7 @@ class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
             svc._runtime_executor_event.set()
         return True
 
-    def _runtime_executor_stop_requested(self: Any) -> bool:
+    def stop_requested(self) -> bool:
         svc = self.service
         return bool(
             svc._runtime_executor_stop_event.is_set()
@@ -54,36 +65,37 @@ class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
             or svc._control_command_stop_event.is_set()
         )
 
-    def _runtime_executor_loop(self: Any) -> None:
+    def _executor_loop(self) -> None:
         svc = self.service
-        while not self._runtime_executor_stop_requested():
-            self._runtime_executor_wait_for_work(svc)
-            if self._runtime_executor_should_continue():
-                self._runtime_executor_drain_available_work()
+        while not self.stop_requested():
+            self.wait_for_work(svc)
+            if self.should_continue():
+                self.drain_available_work()
 
-    def _runtime_executor_should_continue(self: Any) -> bool:
+    def should_continue(self) -> bool:
         """Return whether the runtime executor should keep processing."""
-        return not self._runtime_executor_stop_requested()
+        return not self.stop_requested()
 
-    def _runtime_executor_wait_for_work(self: Any, svc: Any) -> None:
+    @staticmethod
+    def wait_for_work(svc: Any) -> None:
         """Wait for and clear runtime executor wake events."""
         svc._runtime_executor_event.wait(0.5)
         svc._runtime_executor_event.clear()
         svc._update_worker_event.clear()
         svc._control_command_event.clear()
 
-    def _runtime_executor_drain_available_work(self: Any) -> None:
+    def drain_available_work(self) -> None:
         """Drain commands and update cycles until no more work is pending."""
-        while self._runtime_executor_should_continue() and self._runtime_executor_run_once():
+        while self.should_continue() and self.run_once():
             pass
 
-    def _runtime_executor_run_once(self: Any) -> bool:
+    def run_once(self) -> bool:
         """Run one serialized runtime executor pass."""
-        gateway_work = self._drain_gateway_core_commands_once()
-        did_work = self._drain_control_commands_once()
-        return bool(self._run_pending_update_cycle_once() or did_work or gateway_work)
+        gateway_work = self.drain_gateway_commands_once()
+        did_work = self.control_commands.drain_once()
+        return bool(self.run_pending_update_once() or did_work or gateway_work)
 
-    def _drain_gateway_core_commands_once(self: Any) -> bool:
+    def drain_gateway_commands_once(self) -> bool:
         """Handle GUI/user commands delivered by the DBus gateway."""
         svc = self.service
         inbox = getattr(svc, "_gateway_core_commands", None)
@@ -94,41 +106,42 @@ class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
             return False
         for path, payload in inbox.coalesce(pending):
             try:
-                self._handle_gateway_core_command(payload, command_file=path)
+                self.handle_gateway_command(payload, command_file=path)
             finally:
                 inbox.remove(path)
         return True
 
-    def _handle_gateway_core_command(self: Any, payload: Mapping[str, Any], *, command_file: str = "") -> None:
+    def handle_gateway_command(self, payload: Mapping[str, Any], *, command_file: str = "") -> None:
         """Translate one gateway command file into an existing control command."""
-        if not self._is_gateway_user_command(payload):
+        if not self.is_gateway_user_command(payload):
             return
         _log_gateway_user_command(payload, command_file=command_file, now=time.time())
-        if self._apply_gateway_write_if_supported(payload):
+        if self.apply_gateway_write_if_supported(payload):
             return
-        self._dispatch_gateway_control_command(payload)
+        self.dispatch_gateway_control_command(payload)
 
-    def _is_gateway_user_command(self: Any, payload: Mapping[str, Any]) -> bool:
+    @staticmethod
+    def is_gateway_user_command(payload: Mapping[str, Any]) -> bool:
         """Return whether a gateway command is intended for the core command API."""
         return (payload.get("kind") or payload.get("type")) == "user_command"
 
-    def _apply_gateway_write_if_supported(self: Any, payload: Mapping[str, Any]) -> bool:
+    def apply_gateway_write_if_supported(self, payload: Mapping[str, Any]) -> bool:
         """Let the DBus proxy consume gateway writes that map directly to local paths."""
         svc = self.service
         path = str(payload.get("path") or "")
         apply_gateway_write = getattr(getattr(svc, "_dbusservice", None), "apply_gateway_write", None)
         if not callable(apply_gateway_write):
             return False
-        return require_bool(apply_gateway_write(path, payload.get("value")), "apply_gateway_write")
+        return bool(require_bool(apply_gateway_write(path, payload.get("value")), "apply_gateway_write"))
 
-    def _dispatch_gateway_control_command(self: Any, payload: Mapping[str, Any]) -> None:
+    def dispatch_gateway_control_command(self, payload: Mapping[str, Any]) -> None:
         """Dispatch a gateway command through the existing control command path."""
         svc = self.service
         path = str(payload.get("path") or "")
-        command = svc._control_command_from_write(path, payload.get("value"), source="dbus")
-        svc._handle_control_command(command)
+        command = svc.auto.command_from_write(path, payload.get("value"), source="dbus")
+        svc.auto.handle_command(command)
 
-    def _run_pending_update_cycle_once(self: Any) -> bool:
+    def run_pending_update_once(self) -> bool:
         svc = self.service
         with svc._update_worker_lock:
             if not svc._update_worker_pending:
@@ -139,7 +152,7 @@ class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
         started = time.monotonic()
         svc._last_update_cycle_started_at = started_at
         try:
-            svc._update()
+            svc.update.update()
         except ASYNC_UPDATE_CYCLE_ERRORS:
             logging.exception("Async update worker cycle failed")
         finally:
@@ -151,6 +164,9 @@ class _RuntimeAsyncMainloopExecutor(_RuntimeAsyncMainloopState):
             if duration > _update_worker_budget_seconds(svc):
                 logging.warning("Update worker cycle exceeded budget: %.3fs", duration)
         return True
+
+
+__all__ = ["RuntimeExecutor"]
 
 
 def _update_worker_enabled(svc: Any) -> bool:

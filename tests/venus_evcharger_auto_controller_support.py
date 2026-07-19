@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from venus_evcharger.controllers.auto import AutoDecisionController
+from venus_evcharger.auto.logic_types import NO_RELAY_DECISION
+from venus_evcharger.ports.auto import AutoDecisionPort
 from tests.venus_evcharger_test_fixtures import make_auto_controller_service
 
 
@@ -37,13 +39,7 @@ def utc_timestamp(year: int, month: int, day: int, hour: int, minute: int = 0) -
 class AutoDecisionControllerTestCase(unittest.TestCase):
     def _make_controller(self):
         service = make_auto_controller_service()
-        controller = AutoDecisionController(service, _health_code, _mode_uses_auto_logic)
-        service._clear_auto_samples = controller.clear_auto_samples
-        service._set_health = controller.set_health
-        service._get_available_surplus_watts = controller.get_available_surplus_watts
-        service._add_auto_sample = controller.add_auto_sample
-        service._average_auto_metric = controller.average_auto_metric
-        service._is_within_auto_daytime_window = lambda: True
+        controller = AutoDecisionController(AutoDecisionPort(service), _health_code, _mode_uses_auto_logic)
         return controller, service
 
 
@@ -51,6 +47,7 @@ __all__ = [
     "AutoDecisionController",
     "AutoDecisionControllerTestCase",
     "MagicMock",
+    "NO_RELAY_DECISION",
     "SimpleNamespace",
     "_health_code",
     "_mode_uses_auto_logic",

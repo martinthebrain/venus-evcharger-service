@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from venus_evcharger.dbus_adapter_health_queue import (
+from venus_evcharger.dbus_adapter.health.queue import (
     command_activity_at,
     oldest_command_age,
     physical_command_count_from_pending,

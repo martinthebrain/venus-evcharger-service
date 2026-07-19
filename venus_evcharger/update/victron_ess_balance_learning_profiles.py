@@ -7,11 +7,9 @@ telemetry fields close together so adaptive decisions remain traceable.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import Any, TypeGuard, TypedDict
 
-from venus_evcharger.core.contracts import mutable_dict_attr
-
-from .victron_ess_balance_learning_telemetry import _UpdateCycleVictronEssBalanceLearningTelemetry
+from .victron_ess_balance_apply_sources import VictronEssSourceResolver
 from .victron_ess_balance_learning_profiles_support import (
     _clear_victron_ess_balance_active_profile_state,
     _victron_ess_balance_action_direction_site_regime,
@@ -32,15 +30,17 @@ from .victron_ess_balance_learning_profiles_support import (
     _victron_ess_balance_pv_phase,
     _victron_ess_balance_update_profile_sample,
 )
+from .victron_ess_balance_scoring import VictronEssTelemetryScorer
 
 
-class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanceLearningTelemetry):
-    if TYPE_CHECKING:  # pragma: no cover
+def _is_learning_profile_store(value: object) -> TypeGuard[dict[str, dict[str, Any]]]:
+    return isinstance(value, dict)
 
-        @staticmethod
-        def _victron_ess_balance_ev_active(svc: Any) -> bool: ...
 
-        def _victron_ess_balance_activation_mode(self, svc: Any) -> str: ...
+class VictronEssLearningProfiles:
+    def __init__(self, sources: VictronEssSourceResolver, scorer: VictronEssTelemetryScorer) -> None:
+        self._sources = sources
+        self._scorer = scorer
 
     @staticmethod
     def _victron_ess_balance_profile_scalar_fields() -> tuple[str, ...]:
@@ -150,8 +150,8 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         return "day" if max(expected_export_w, pv_input_power_w) >= 50.0 else "night"
 
     def _victron_ess_balance_reserve_phase(self, source: dict[str, Any]) -> str:
-        source_soc = self._optional_float(source.get("soc"))
-        reserve_floor_soc = self._optional_float(source.get("discharge_balance_reserve_floor_soc"))
+        source_soc = self._sources._optional_float(source.get("soc"))
+        reserve_floor_soc = self._sources._optional_float(source.get("discharge_balance_reserve_floor_soc"))
         if source_soc is not None and reserve_floor_soc is not None and source_soc <= (reserve_floor_soc + 5.0):
             return "reserve_band"
         return "above_reserve_band"
@@ -199,7 +199,7 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
             phase_inputs["expected_export_w"],
             phase_inputs["pv_input_power_w"],
         )
-        ev_phase = "ev_active" if self._victron_ess_balance_ev_active(svc) else "ev_idle"
+        ev_phase = "ev_active" if self._sources._victron_ess_balance_ev_active(svc) else "ev_idle"
         pv_phase = _victron_ess_balance_pv_phase(
             phase_inputs["expected_export_w"],
             phase_inputs["pv_input_power_w"],
@@ -236,17 +236,22 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         cluster: dict[str, Any],
     ) -> _LearningProfilePhaseInputs:
         return {
-            "grid_interaction_w": self._optional_float(cluster.get("battery_combined_grid_interaction_w")),
-            "expected_export_w": self._optional_float(cluster.get("expected_near_term_export_w")) or 0.0,
-            "expected_import_w": self._optional_float(cluster.get("expected_near_term_import_w")) or 0.0,
-            "pv_input_power_w": self._optional_float(cluster.get("battery_combined_pv_input_power_w")) or 0.0,
-            "combined_charge_headroom_w": self._optional_float(cluster.get("battery_headroom_charge_w")),
-            "combined_discharge_headroom_w": self._optional_float(cluster.get("battery_headroom_discharge_w")),
+            "grid_interaction_w": self._sources._optional_float(cluster.get("battery_combined_grid_interaction_w")),
+            "expected_export_w": self._sources._optional_float(cluster.get("expected_near_term_export_w")) or 0.0,
+            "expected_import_w": self._sources._optional_float(cluster.get("expected_near_term_import_w")) or 0.0,
+            "pv_input_power_w": self._sources._optional_float(cluster.get("battery_combined_pv_input_power_w")) or 0.0,
+            "combined_charge_headroom_w": self._sources._optional_float(cluster.get("battery_headroom_charge_w")),
+            "combined_discharge_headroom_w": self._sources._optional_float(cluster.get("battery_headroom_discharge_w")),
         }
 
     @staticmethod
     def _victron_ess_balance_learning_profiles(svc: Any) -> dict[str, dict[str, Any]]:
-        return mutable_dict_attr(svc, "_victron_ess_balance_learning_profiles")
+        current: object = getattr(svc, "_victron_ess_balance_learning_profiles", None)
+        if _is_learning_profile_store(current):
+            return current
+        profiles: dict[str, dict[str, Any]] = {}
+        setattr(svc, "_victron_ess_balance_learning_profiles", profiles)
+        return profiles
 
     def _victron_ess_balance_learning_profile_state(self, svc: Any, profile_key: str) -> dict[str, Any]:
         if not profile_key:
@@ -316,8 +321,8 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
 
     def _victron_ess_balance_profile_metric_snapshot(self, profile: dict[str, Any]) -> dict[str, Any]:
         snapshot = {
-            "response_delay_seconds": self._optional_float(profile.get("response_delay_seconds")),
-            "estimated_gain": self._optional_float(profile.get("estimated_gain")),
+            "response_delay_seconds": self._sources._optional_float(profile.get("response_delay_seconds")),
+            "estimated_gain": self._sources._optional_float(profile.get("estimated_gain")),
         }
         for field in ("overshoot_count", "settled_count"):
             snapshot[field] = _victron_ess_balance_profile_counter(profile, field)
@@ -329,7 +334,7 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
             "safe_ramp_rate_watts_per_second",
             "preferred_bias_limit_watts",
         ):
-            snapshot[field] = self._optional_float(profile.get(field))
+            snapshot[field] = self._sources._optional_float(profile.get(field))
         snapshot["typical_response_delay_seconds"] = snapshot["response_delay_seconds"]
         snapshot["effective_gain"] = snapshot["estimated_gain"]
         return snapshot
@@ -373,8 +378,8 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
             samples_field="delay_samples",
             value_field="response_delay_seconds",
             deviation_field="response_delay_mad_seconds",
-            optional_float=self._optional_float,
-            ewma=self._ewma_learned_value,
+            optional_float=self._sources._optional_float,
+            ewma=self._scorer.ewma_learned_value,
         )
 
     def _victron_ess_balance_update_profile_gain(self, svc: Any, profile_key: str, sample: float) -> None:
@@ -387,8 +392,8 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
             samples_field="gain_samples",
             value_field="estimated_gain",
             deviation_field="gain_mad",
-            optional_float=self._optional_float,
-            ewma=self._ewma_learned_value,
+            optional_float=self._sources._optional_float,
+            ewma=self._scorer.ewma_learned_value,
         )
 
     def _victron_ess_balance_increment_profile_counter(self, svc: Any, profile_key: str, field: str) -> None:
@@ -401,21 +406,21 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         profile = self._victron_ess_balance_learning_profile_state(svc, profile_key)
         if not profile:
             return
-        profile["stability_score"] = self._victron_ess_balance_stability_score_values(
+        profile["stability_score"] = self._scorer.stability_score_values(
             _victron_ess_balance_profile_counter(profile, "settled_count"),
             _victron_ess_balance_profile_counter(profile, "overshoot_count"),
-            self._optional_float(profile.get("estimated_gain")),
-            self._optional_float(profile.get("response_delay_seconds")),
+            self._sources._optional_float(profile.get("estimated_gain")),
+            self._sources._optional_float(profile.get("response_delay_seconds")),
         )
-        profile["response_variance_score"] = self._victron_ess_balance_variance_score(
-            self._optional_float(profile.get("response_delay_seconds")),
-            self._optional_float(profile.get("response_delay_mad_seconds")),
-            self._optional_float(profile.get("estimated_gain")),
-            self._optional_float(profile.get("gain_mad")),
+        profile["response_variance_score"] = self._scorer.variance_score(
+            self._sources._optional_float(profile.get("response_delay_seconds")),
+            self._sources._optional_float(profile.get("response_delay_mad_seconds")),
+            self._sources._optional_float(profile.get("estimated_gain")),
+            self._sources._optional_float(profile.get("gain_mad")),
         )
-        profile["regime_consistency_score"] = self._victron_ess_balance_regime_consistency_score(profile)
-        profile["reproducibility_score"] = self._victron_ess_balance_reproducibility_score(profile)
-        stability = self._optional_float(profile.get("stability_score")) or 0.0
+        profile["regime_consistency_score"] = self._scorer.regime_consistency_score(profile)
+        profile["reproducibility_score"] = self._scorer.reproducibility_score(profile)
+        stability = self._sources._optional_float(profile.get("stability_score")) or 0.0
         overshoot_count = _victron_ess_balance_profile_counter(profile, "overshoot_count")
         profile.update(self._victron_ess_balance_profile_limit_recommendations(svc, stability, overshoot_count))
 
@@ -465,7 +470,7 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
         return payload
 
     def _victron_ess_balance_adaptive_scalar_value(self, raw_value: Any, caster: Any) -> Any:
-        return _victron_ess_balance_adaptive_scalar_value(raw_value, caster, self._optional_float)
+        return _victron_ess_balance_adaptive_scalar_value(raw_value, caster, self._sources._optional_float)
 
     def _victron_ess_balance_current_tuning_snapshot(self, svc: Any) -> dict[str, Any]:
         return {
@@ -484,5 +489,5 @@ class _UpdateCycleVictronEssBalanceLearningProfiles(_UpdateCycleVictronEssBalanc
                 svc,
                 "auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second",
             ),
-            "activation_mode": self._victron_ess_balance_activation_mode(svc),
+            "activation_mode": self._sources._victron_ess_balance_activation_mode(svc),
         }

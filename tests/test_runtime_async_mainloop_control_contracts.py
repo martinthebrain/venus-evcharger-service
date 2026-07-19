@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 from venus_evcharger.control import ControlCommand
-from venus_evcharger.runtime.support import RuntimeSupportController
+from tests.venus_evcharger_runtime_support_support import RuntimeSupportController
 from tests.venus_evcharger_test_fixtures import make_runtime_support_service
 
 
@@ -26,13 +26,13 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
     def test_sync_fallback_returns_exact_acceptance(self) -> None:
         service, controller = _controller()
         command = _command("/Mode")
-        service._handle_control_command = MagicMock(
+        service.handle_control_command = MagicMock(
             side_effect=(SimpleNamespace(accepted=False), SimpleNamespace(accepted=True))
         )
 
         self.assertFalse(controller.enqueue_control_command(command))
         self.assertTrue(controller.enqueue_control_command(command))
-        self.assertEqual(service._handle_control_command.call_args_list, [call(command), call(command)])
+        self.assertEqual(service.handle_control_command.call_args_list, [call(command), call(command)])
 
     def test_async_enqueue_increments_coalesces_and_signals(self) -> None:
         service, controller = _controller()
@@ -87,7 +87,7 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
         service._control_command_pending = OrderedDict(
             ((earlier.path, (1, 103.0, earlier)), (later.path, (2, 104.0, later)))
         )
-        service._handle_control_command = MagicMock()
+        service.handle_control_command = MagicMock()
         service._write_command_budget_seconds = 10.0
 
         with (
@@ -98,20 +98,20 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
             ),
             patch("venus_evcharger.runtime.async_mainloop_control.logging.warning") as warning,
         ):
-            self.assertTrue(controller._drain_control_commands_once())
+            self.assertTrue(controller.control_commands.drain_once())
 
-        self.assertEqual(service._handle_control_command.call_args_list, [call(earlier), call(later)])
+        self.assertEqual(service.handle_control_command.call_args_list, [call(earlier), call(later)])
         self.assertEqual(service._control_command_pending, OrderedDict())
         self.assertEqual(service._last_write_command_queue_lag_seconds, 2.0)
         self.assertEqual(service._last_write_command_duration_seconds, 0.5)
         warning.assert_not_called()
-        self.assertFalse(controller._drain_control_commands_once())
+        self.assertFalse(controller.control_commands.drain_once())
 
     def test_drain_clamps_negative_lag_and_logs_exact_failure_and_budget(self) -> None:
         service, controller = _controller()
         command = _command("/Mode")
         service._control_command_pending[command.path] = (1, 110.0, command)
-        service._handle_control_command = MagicMock(side_effect=RuntimeError("failed"))
+        service.handle_control_command = MagicMock(side_effect=RuntimeError("failed"))
         service._write_command_budget_seconds = 0.5
 
         with (
@@ -123,7 +123,7 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
             patch("venus_evcharger.runtime.async_mainloop_control.logging.exception") as exception,
             patch("venus_evcharger.runtime.async_mainloop_control.logging.warning") as warning,
         ):
-            self.assertTrue(controller._drain_control_commands_once())
+            self.assertTrue(controller.control_commands.drain_once())
 
         self.assertEqual(service._last_write_command_queue_lag_seconds, 0.0)
         self.assertEqual(service._last_write_command_duration_seconds, 1.0)
@@ -136,7 +136,7 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
 
     def test_drain_budget_is_strict_and_defaults_to_two_seconds(self) -> None:
         service, controller = _controller()
-        service._handle_control_command = MagicMock()
+        service.handle_control_command = MagicMock()
         first = _command("/Equal")
         service._control_command_pending[first.path] = (1, 0.0, first)
         service._write_command_budget_seconds = 2.0
@@ -149,7 +149,7 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
             ),
             patch("venus_evcharger.runtime.async_mainloop_control.logging.warning") as warning,
         ):
-            self.assertTrue(controller._drain_control_commands_once())
+            self.assertTrue(controller.control_commands.drain_once())
         warning.assert_not_called()
 
         second = _command("/Default")
@@ -163,7 +163,7 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
             ),
             patch("venus_evcharger.runtime.async_mainloop_control.logging.warning") as warning,
         ):
-            self.assertTrue(controller._drain_control_commands_once())
+            self.assertTrue(controller.control_commands.drain_once())
         warning.assert_called_once_with(
             "Control command path=%s exceeded budget: %.3fs",
             "/Default",
@@ -181,7 +181,7 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
             ),
             patch("venus_evcharger.runtime.async_mainloop_control.logging.warning") as warning,
         ):
-            self.assertTrue(controller._drain_control_commands_once())
+            self.assertTrue(controller.control_commands.drain_once())
         warning.assert_not_called()
 
     def test_drain_queue_contract_reports_the_exact_field_name(self) -> None:
@@ -189,7 +189,7 @@ class RuntimeAsyncMainloopControlContractTests(unittest.TestCase):
         service._control_command_pending = {}
 
         with self.assertRaisesRegex(TypeError, "_control_command_pending must be OrderedDict"):
-            controller._drain_control_commands_once()
+            controller.control_commands.drain_once()
 
 
 if __name__ == "__main__":  # pragma: no cover

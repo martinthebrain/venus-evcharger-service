@@ -9,52 +9,122 @@ state back to Venus OS.
 
 from __future__ import annotations
 
-import time
-from typing import Any
+from collections.abc import Callable
+from typing import Protocol, TypeGuard
 
 from venus_evcharger.auto.tracking import clear_auto_decision_tracking
-from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.update.relay import _UpdateCycleRelay
+from venus_evcharger.update.readback_resolver import FreshReadbacks
+from venus_evcharger.update.relay_charger_current import ChargerTargetController
+from venus_evcharger.update.relay_charger_health import ChargerHealthMonitor
 
 STARTUP_MANUAL_TARGET_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 RUNTIME_STATE_SAVE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
-class _UpdateCycleState(_UpdateCycleRelay):
+
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_string_keyed_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_object_dict(value) and all(isinstance(key, str) for key in value)
+
+
+class StateAutoPort(Protocol):
+    def mode_uses_auto_logic(self, mode: object) -> bool: ...
+
+
+class StateReadbackPort(Protocol):
+    def resolve(self, now: float | None = None) -> FreshReadbacks: ...
+
+
+class StateRuntimePort(Protocol):
+    def ensure_observability_state(self) -> None: ...
+    def ensure_auto_input_helper(self, now: float) -> None: ...
+    def recover_watchdog(self, now: float) -> None: ...
+    def refresh_auto_input_snapshot(self, now: float) -> None: ...
+    def worker_snapshot(self) -> dict[str, object]: ...
+    def mark_failure(self, source_key: str) -> None: ...
+    def mark_recovery(self, source_key: str, message: str, *args: object) -> None: ...
+    def queue_relay_command(self, relay_on: bool, current_time: float) -> object: ...
+    def publish_local_pm_status(self, relay_on: bool, now: float) -> object: ...
+    def start_io_worker(self) -> None: ...
+    def warning_throttled(
+        self,
+        warning_key: str,
+        interval_seconds: float,
+        warning_message: str,
+        *args: object,
+        **kwargs: object,
+    ) -> None: ...
+
+
+class StatePublishPort(Protocol):
+    def save_runtime_state(self) -> object: ...
+    def publish_energy_time_measurements(
+        self,
+        session_energy: float,
+        phase_energies: dict[str, float],
+        charging_time: int,
+        energy_forward: float,
+        now: float,
+    ) -> bool: ...
+    def publish_config_paths(self, startstop_display: int, now: float) -> bool: ...
+    def publish_diagnostic_paths(self, now: float) -> bool: ...
+
+
+class SessionStatePort(Protocol):
+    charging_started_at: float | None
+    energy_at_start: float
+
+
+class UpdateStateService(Protocol):
+    @property
+    def auto(self) -> StateAutoPort: ...
+
+    @property
+    def runtime(self) -> StateRuntimePort: ...
+
+    @property
+    def state(self) -> StatePublishPort: ...
+
+    @property
+    def _readback_resolver(self) -> StateReadbackPort: ...
+
+    auto_shelly_soft_fail_seconds: float
+    virtual_mode: int
+    virtual_enable: int
+    virtual_startstop: int
+    charging_started_at: float | None
+    energy_at_start: float
+    phase: str
+    last_status: int
+    _startup_manual_target: bool | None
+    _last_health_reason: str
+    _last_health_code: int
+    _charger_target_current_amps: float | None
+    _charger_target_current_applied_at: float | None
+    topology_configured: bool
+
+    def time_now(self) -> float: ...
+
+
+class UpdateStateController:
+    """Own virtual-session state transitions and their outward publication."""
+
+    def __init__(
+        self,
+        service: UpdateStateService,
+        targets: ChargerTargetController,
+        health: ChargerHealthMonitor,
+        health_code: Callable[[str], int],
+    ) -> None:
+        self.service = service
+        self._targets = targets
+        self._health = health
+        self._health_code = health_code
+
     @staticmethod
-    def _charger_state_max_age_seconds(svc: Any) -> float:
-        """Return how fresh charger readback must be before it drives session state."""
-        candidates = [2.0]
-        worker_poll_interval = finite_float_or_none(getattr(svc, "_worker_poll_interval_seconds", None))
-        if worker_poll_interval is not None and worker_poll_interval > 0.0:
-            candidates.append(float(worker_poll_interval) * 2.0)
-        soft_fail_seconds = finite_float_or_none(getattr(svc, "auto_shelly_soft_fail_seconds", None))
-        if soft_fail_seconds is not None and soft_fail_seconds > 0.0:
-            candidates.append(float(soft_fail_seconds))
-        return max(1.0, min(candidates))
-
-    @classmethod
-    def _fresh_charger_enabled_readback(cls, svc: Any, now: float | None = None) -> bool | None:
-        """Return fresh native charger enabled-state readback when available."""
-        if getattr(svc, "_charger_backend", None) is None:
-            return None
-        raw_enabled = getattr(svc, "_last_charger_state_enabled", None)
-        if raw_enabled is None:
-            return None
-        if cls._stale_charger_enabled_readback(svc, now):
-            return None
-        return bool(raw_enabled)
-
-    @classmethod
-    def _stale_charger_enabled_readback(cls, svc: Any, now: float | None = None) -> bool:
-        """Return whether cached charger enabled readback is too old to trust."""
-        state_at = finite_float_or_none(getattr(svc, "_last_charger_state_at", None))
-        if state_at is None:
-            return True
-        current = float(now) if now is not None else time.time()
-        return abs(current - state_at) > cls._charger_state_max_age_seconds(svc)
-
-    @staticmethod
-    def _fallback_local_pm_status(pm_status: dict[str, Any], relay_on: bool) -> dict[str, Any]:
+    def _fallback_local_pm_status(pm_status: dict[str, object], relay_on: bool) -> dict[str, object]:
         """Return one synthesized local PM payload when no helper publish is available."""
         local_status = dict(pm_status)
         local_status["output"] = bool(relay_on)
@@ -64,34 +134,36 @@ class _UpdateCycleState(_UpdateCycleRelay):
 
     def _publish_startup_local_pm_status(
         self,
-        pm_status: dict[str, Any],
+        pm_status: dict[str, object],
         relay_on: bool,
         now: float,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Publish or synthesize a startup placeholder relay state without losing the target."""
         svc = self.service
-        publish_local_pm_status = getattr(svc, "_publish_local_pm_status", None)
-        if callable(publish_local_pm_status):
-            try:
-                published = publish_local_pm_status(relay_on, now)
-                if isinstance(published, dict):
-                    return published
-            except STARTUP_MANUAL_TARGET_ERRORS as error:
-                svc._warning_throttled(
-                    "startup-manual-target-placeholder-failed",
-                    svc.auto_shelly_soft_fail_seconds,
-                    "Failed to publish startup manual placeholder state %s: %s",
-                    relay_on,
-                    error,
-                    exc_info=error,
-                )
+        try:
+            published = self._string_keyed_pm_status(svc.runtime.publish_local_pm_status(relay_on, now))
+            if published is not None:
+                return published
+        except STARTUP_MANUAL_TARGET_ERRORS as error:
+            svc.runtime.warning_throttled(
+                "startup-manual-target-placeholder-failed",
+                svc.auto_shelly_soft_fail_seconds,
+                "Failed to publish startup manual placeholder state %s: %s",
+                relay_on,
+                error,
+                exc_info=error,
+            )
         return self._fallback_local_pm_status(pm_status, relay_on)
 
-    def apply_startup_manual_target(self, pm_status: dict[str, Any], now: float) -> dict[str, Any]:
+    @staticmethod
+    def _string_keyed_pm_status(value: object) -> dict[str, object] | None:
+        return value if _is_string_keyed_dict(value) else None
+
+    def apply_startup_manual_target(self, pm_status: dict[str, object], now: float) -> dict[str, object]:
         """Synchronize the configured manual on/off state once after startup."""
         svc = self.service
         target_on = self._startup_manual_target(svc)
-        if target_on is None or svc._mode_uses_auto_logic(svc.virtual_mode):
+        if target_on is None or svc.auto.mode_uses_auto_logic(svc.virtual_mode):
             return pm_status
         relay_on = bool(pm_status.get("output"))
         if relay_on == target_on:
@@ -101,7 +173,7 @@ class _UpdateCycleState(_UpdateCycleRelay):
         return self._apply_startup_manual_target(pm_status, now, target_on)
 
     @staticmethod
-    def _startup_manual_target(svc: Any) -> bool | None:
+    def _startup_manual_target(svc: UpdateStateService) -> bool | None:
         """Return the pending startup manual target, initializing the field when needed."""
         if not hasattr(svc, "_startup_manual_target"):
             svc._startup_manual_target = None
@@ -110,10 +182,10 @@ class _UpdateCycleState(_UpdateCycleRelay):
 
     def _apply_startup_manual_target(
         self,
-        pm_status: dict[str, Any],
+        pm_status: dict[str, object],
         now: float,
         target_on: bool,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Apply the pending startup manual target or keep live PM status on failure."""
         svc = self.service
 
@@ -121,12 +193,12 @@ class _UpdateCycleState(_UpdateCycleRelay):
             # Startup manual state is best-effort. If Shelly access is currently
             # unavailable, we keep the live status and let the normal update loop
             # retry on the next cycle instead of failing startup.
-            applied = self._apply_enabled_target(svc, target_on, now)
+            applied = self._targets.apply_enabled_target(svc, target_on, now)
         except STARTUP_MANUAL_TARGET_ERRORS as error:
-            source_key = self._enable_control_source_key(svc)
-            source_label = self._enable_control_label(svc)
-            svc._mark_failure(source_key)
-            svc._warning_throttled(
+            source_key = self._health._enable_control_source_key(svc)
+            source_label = self._health._enable_control_label(svc)
+            svc.runtime.mark_failure(source_key)
+            svc.runtime.warning_throttled(
                 "startup-manual-target-failed",
                 svc.auto_shelly_soft_fail_seconds,
                 "Failed to apply startup manual %s state %s: %s",
@@ -144,7 +216,7 @@ class _UpdateCycleState(_UpdateCycleRelay):
     def ensure_virtual_state_defaults(self) -> None:
         """Populate defaults used by virtual session and health publishing."""
         svc = self.service
-        svc._ensure_observability_state()
+        svc.runtime.ensure_observability_state()
         if not hasattr(svc, "_last_health_reason"):
             svc._last_health_reason = "init"
         if not hasattr(svc, "_last_health_code"):
@@ -153,7 +225,7 @@ class _UpdateCycleState(_UpdateCycleRelay):
     @classmethod
     def session_state_from_status(
         cls,
-        svc: Any,
+        svc: UpdateStateService,
         status: int,
         current_total_energy: float,
         relay_on: bool,
@@ -172,46 +244,41 @@ class _UpdateCycleState(_UpdateCycleRelay):
         return status == 2
 
     @staticmethod
-    def _session_was_active(svc: Any) -> bool:
+    def _session_was_active(svc: SessionStatePort) -> bool:
         """Return whether the previous update still considered a car session active."""
         return getattr(svc, "charging_started_at", None) is not None
 
     @staticmethod
-    def _clear_auto_tracking_after_physical_session_end(svc: Any) -> None:
+    def _clear_auto_tracking_after_physical_session_end(svc: UpdateStateService) -> None:
         """Treat a load drop with relay still on as the end of one plug session."""
         clear_auto_decision_tracking(svc)
 
     def save_runtime_state_best_effort(self, reason: str) -> None:
         """Persist runtime state without letting persistence break the live loop."""
         svc = self.service
-        save_runtime_state = getattr(svc, "_save_runtime_state", None)
-        if not callable(save_runtime_state):
-            return
         try:
-            save_runtime_state()
+            svc.state.save_runtime_state()
         except RUNTIME_STATE_SAVE_ERRORS as error:
-            warning_throttled = getattr(svc, "_warning_throttled", None)
-            if callable(warning_throttled):
-                warning_throttled(
-                    f"runtime-state-save-failed-{reason}",
-                    getattr(svc, "auto_shelly_soft_fail_seconds", 10.0),
-                    "Unable to save runtime state during %s update: %s",
-                    reason,
-                    error,
-                    exc_info=error,
-                )
+            svc.runtime.warning_throttled(
+                f"runtime-state-save-failed-{reason}",
+                svc.auto_shelly_soft_fail_seconds,
+                "Unable to save runtime state during %s update: %s",
+                reason,
+                error,
+                exc_info=error,
+            )
 
     @classmethod
-    def _active_session_state(cls, svc: Any, current_total_energy: float, now: float) -> tuple[int, float]:
+    def _active_session_state(cls, svc: SessionStatePort, current_total_energy: float, now: float) -> tuple[int, float]:
         """Return timing and energy values for an active charging session."""
         if svc.charging_started_at is None:
             svc.charging_started_at = now
             svc.energy_at_start = current_total_energy
-        charging_time = int(now - svc.charging_started_at)
+        charging_time = max(0, int(now - svc.charging_started_at))
         return charging_time, cls._session_energy(current_total_energy, svc.energy_at_start)
 
     @classmethod
-    def _reset_session_state(cls, svc: Any, current_total_energy: float) -> tuple[int, float]:
+    def _reset_session_state(cls, svc: SessionStatePort, current_total_energy: float) -> tuple[int, float]:
         """Reset session timing and energy when charging is no longer enabled."""
         svc.charging_started_at = None
         svc.energy_at_start = current_total_energy
@@ -223,18 +290,27 @@ class _UpdateCycleState(_UpdateCycleRelay):
         return round(max(0.0, current_total_energy - energy_at_start), 3)
 
     @classmethod
-    def startstop_display_for_state(cls, svc: Any, relay_on: bool, now: float) -> int:
+    def startstop_display_for_state(cls, svc: UpdateStateService, relay_on: bool, now: float) -> int:
         """Return the GUI start/stop indicator for the current mode."""
-        charger_enabled = cls._fresh_charger_enabled_readback(svc, now)
+        charger_enabled = cls._charger_enabled_for_display(svc, now)
         if charger_enabled is not None:
             return int(charger_enabled)
+        return cls._fallback_startstop_display(svc, relay_on)
+
+    @staticmethod
+    def _charger_enabled_for_display(svc: UpdateStateService, now: float) -> bool | None:
+        charger = svc._readback_resolver.resolve(now).charger
+        return None if charger is None else charger.state.enabled
+
+    @staticmethod
+    def _fallback_startstop_display(svc: UpdateStateService, relay_on: bool) -> int:
         svc.virtual_startstop = 1 if relay_on else 0
-        if svc._mode_uses_auto_logic(svc.virtual_mode):
+        if svc.auto.mode_uses_auto_logic(svc.virtual_mode):
             return int(relay_on or svc.virtual_enable)
         return int(svc.virtual_startstop)
 
     @staticmethod
-    def phase_energies_for_total(svc: Any, current_total_energy: float) -> dict[str, float]:
+    def phase_energies_for_total(svc: UpdateStateService, current_total_energy: float) -> dict[str, float]:
         """Split total energy across phases according to configured wiring."""
         phase = getattr(svc, "phase", "L1")
         if phase == "3P":
@@ -259,15 +335,15 @@ class _UpdateCycleState(_UpdateCycleRelay):
         # Shelly ``aenergy.total`` is a lifetime counter. Venus' EV-charger UI
         # expects the charger-facing energy paths to describe the active charge.
         phase_energies = self.phase_energies_for_total(svc, session_energy)
-        changed = svc._publish_energy_time_measurements(
+        changed = svc.state.publish_energy_time_measurements(
             session_energy,
             phase_energies,
             charging_time,
             session_energy,
             now,
         )
-        changed |= svc._publish_config_paths(startstop_display, now)
-        changed |= svc._publish_diagnostic_paths(now)
+        changed |= svc.state.publish_config_paths(startstop_display, now)
+        changed |= svc.state.publish_diagnostic_paths(now)
         return bool(changed)
 
     @staticmethod
@@ -282,7 +358,7 @@ class _UpdateCycleState(_UpdateCycleRelay):
         current_total_energy = float(current_total_energy)
         relay_on = bool(relay_on)
         self.ensure_virtual_state_defaults()
-        now = svc._time_now()
+        now = svc.time_now()
         charging_time, session_energy = self.session_state_from_status(
             svc,
             status,
@@ -303,16 +379,14 @@ class _UpdateCycleState(_UpdateCycleRelay):
         return bool(changed)
 
     @staticmethod
-    def prepare_update_cycle(svc: Any, now: float) -> Any:
+    def prepare_update_cycle(svc: UpdateStateService, now: float) -> dict[str, object]:
         """Run pre-update recovery/supervision hooks and return the latest worker snapshot."""
-        start_io_worker = getattr(svc, "_start_io_worker", None)
-        if hasattr(svc, "topology_configured"):
-            topology_configured = bool(svc.topology_configured)
-        else:
-            topology_configured = bool(svc.host_configured) if hasattr(svc, "host_configured") else False
-        if topology_configured and callable(start_io_worker):
-            start_io_worker()
-        svc._watchdog_recover(now)
-        svc._ensure_auto_input_helper_process(now)
-        svc._refresh_auto_input_snapshot(now)
-        return svc._get_worker_snapshot()
+        if svc.topology_configured:
+            svc.runtime.start_io_worker()
+        svc.runtime.recover_watchdog(now)
+        svc.runtime.ensure_auto_input_helper(now)
+        svc.runtime.refresh_auto_input_snapshot(now)
+        return svc.runtime.worker_snapshot()
+
+
+__all__ = ["UpdateStateController", "UpdateStateService"]

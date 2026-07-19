@@ -8,13 +8,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from venus_evcharger.update.victron_ess_balance_apply_sources import (
-    _UpdateCycleVictronEssBalanceApplySources,
+    VictronEssSourceResolver,
 )
 
 
 class VictronEssBalanceApplySourcesContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.sources = _UpdateCycleVictronEssBalanceApplySources()
+        self.sources = VictronEssSourceResolver()
 
     def test_metric_merge_replaces_invalid_state_and_updates_mapping_in_place(self) -> None:
         svc = SimpleNamespace(_last_auto_metrics=None)

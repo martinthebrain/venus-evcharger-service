@@ -116,7 +116,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             )
             fake_transport = _FakeSimpleEvseTransport()
             with patch(
-                "venus_evcharger.backend.simpleevse_charger.create_modbus_transport",
+                "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                 return_value=fake_transport,
             ):
                 backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
@@ -142,7 +142,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             )
             fake_transport = _FakeSimpleEvseTransport()
             with patch(
-                "venus_evcharger.backend.simpleevse_charger.create_modbus_transport",
+                "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                 return_value=fake_transport,
             ):
                 backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
@@ -171,7 +171,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             fake_transport.holding_registers[1002] = 99
             fake_transport.holding_registers[1006] = 3
             with patch(
-                "venus_evcharger.backend.simpleevse_charger.create_modbus_transport",
+                "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                 return_value=fake_transport,
             ):
                 backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
@@ -193,7 +193,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             fake_transport.holding_registers[1006] = 1
             fake_transport.holding_registers[1007] = 0x0012
             with patch(
-                "venus_evcharger.backend.simpleevse_charger.create_modbus_transport",
+                "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                 return_value=fake_transport,
             ):
                 backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
@@ -212,7 +212,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             )
             fake_transport = _FakeSimpleEvseTransport()
             with patch(
-                "venus_evcharger.backend.simpleevse_charger.create_modbus_transport",
+                "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                 return_value=fake_transport,
             ):
                 backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
@@ -313,7 +313,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
             backend._transport = _FakeSimpleEvseTransport()
 
-            with patch("venus_evcharger.backend.simpleevse_charger.create_modbus_transport") as create_transport:
+            with patch("venus_evcharger.backend.native_modbus_backend.create_modbus_transport") as create_transport:
                 client = backend._client()
 
             self.assertIs(client, backend._client_cache)

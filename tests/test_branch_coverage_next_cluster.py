@@ -3,7 +3,7 @@ import unittest
 
 from tests.venus_evcharger_auto_controller_support import AutoDecisionControllerTestCase
 from tests.wizard_branch_coverage_cases_common import _result
-from venus_evcharger.auto import logic_gates_battery_balance as battery_balance_mod
+from venus_evcharger.auto import logic_gates_battery_balance_support as battery_balance_support_mod
 from venus_evcharger.bootstrap import wizard_cli_output
 from venus_evcharger.energy import EnergySourceDefinition, EnergySourceSnapshot
 from venus_evcharger.energy import aggregate as aggregate_mod
@@ -216,28 +216,28 @@ class BranchCoverageNextBatteryBalanceCases(AutoDecisionControllerTestCase):
         service.auto_battery_discharge_balance_bias_mode = "unexpected"
         service.auto_battery_discharge_balance_coordination_support_mode = "unexpected"
 
-        self.assertEqual(controller._discharge_balance_bias_mode(), "always")
-        self.assertEqual(controller._discharge_balance_coordination_support_mode(), "supported_only")
+        self.assertEqual(controller.battery_balance_policy._discharge_balance_bias_mode(), "always")
+        self.assertEqual(controller.battery_balance_policy._discharge_balance_coordination_support_mode(), "supported_only")
 
         service._warning_throttled = None
-        controller._combined_battery_warning_throttled("balance", "message %s", "ignored")
+        controller.battery_balance._combined_battery_warning_throttled("balance", "message %s", "ignored")
 
         self.assertEqual(
-            battery_balance_mod._battery_discharge_balance_penalty_value(5.0, 0.0, 150.0),
+            battery_balance_support_mod._battery_discharge_balance_penalty_value(5.0, 0.0, 150.0),
             150.0,
         )
         self.assertEqual(
-            battery_balance_mod._battery_discharge_balance_penalty_value(0.0, 0.0, 150.0),
+            battery_balance_support_mod._battery_discharge_balance_penalty_value(0.0, 0.0, 150.0),
             0.0,
         )
         self.assertEqual(
-            battery_balance_mod._battery_discharge_balance_penalty_value(400.0, 500.0, 150.0),
+            battery_balance_support_mod._battery_discharge_balance_penalty_value(400.0, 500.0, 150.0),
             0.0,
         )
 
     def test_battery_balance_coordination_helpers_cover_remaining_advisory_paths(self) -> None:
         self.assertIsNone(
-            battery_balance_mod._battery_discharge_balance_coordination_experimental(
+            battery_balance_support_mod._battery_discharge_balance_coordination_experimental(
                 {
                     "control_ready_count": 2,
                     "supported_count": 0,
@@ -247,7 +247,7 @@ class BranchCoverageNextBatteryBalanceCases(AutoDecisionControllerTestCase):
             )
         )
         self.assertIsNone(
-            battery_balance_mod._battery_discharge_balance_coordination_experimental(
+            battery_balance_support_mod._battery_discharge_balance_coordination_experimental(
                 {
                     "control_ready_count": 2,
                     "supported_count": 2,
@@ -257,7 +257,7 @@ class BranchCoverageNextBatteryBalanceCases(AutoDecisionControllerTestCase):
             )
         )
         self.assertIsNone(
-            battery_balance_mod._battery_discharge_balance_coordination_blocked_by_availability(
+            battery_balance_support_mod._battery_discharge_balance_coordination_blocked_by_availability(
                 {
                     "control_candidate_count": 2,
                     "control_ready_count": 2,
@@ -266,7 +266,7 @@ class BranchCoverageNextBatteryBalanceCases(AutoDecisionControllerTestCase):
             )
         )
         self.assertEqual(
-            battery_balance_mod._battery_discharge_balance_coordination_partial(
+            battery_balance_support_mod._battery_discharge_balance_coordination_partial(
                 {
                     "control_candidate_count": 1,
                 },

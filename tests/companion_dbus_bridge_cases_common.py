@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import sys
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+from tests.support.publish_runtime import PublishServiceHarness as SimpleNamespace
 
 sys.modules["vedbus"] = MagicMock()
 

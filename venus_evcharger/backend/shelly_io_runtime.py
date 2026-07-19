@@ -4,48 +4,43 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.models import ChargerState, PhaseSelection, phase_selection_count
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
-from venus_evcharger.backend.shelly_io_runtime_cache import ShellyIoRuntimeCache
+from venus_evcharger.backend.shelly_io_capabilities import ShellyCapabilities
+from venus_evcharger.backend.shelly_io_ports import ShellyRuntimeHost
+from venus_evcharger.backend.shelly_io_runtime_cache import ShellyRuntimeCache
 from venus_evcharger.backend.shelly_io_types import (
-    ShellyIoHost,
     _ChargerStateBackendLike,
-    _PhaseSelectionBackendLike,
 )
 from venus_evcharger.core.common import (
     _charger_transport_retry_delay_seconds,
     _fresh_charger_retry_until,
 )
 from venus_evcharger.core.contracts import exception_detail, finite_float_or_none
+from venus_evcharger.ports.readback import TimedChargerState
 
 
-class ShellyIoRuntime(ShellyIoRuntimeCache):
+class ShellyChargerRuntime:
     """Mirror charger readback into runtime state and synthesize retry behavior."""
 
-    if TYPE_CHECKING:
-
-        def _runtime_now(self) -> float: ...
-
-        def _phase_selection_switch_backend(self) -> _PhaseSelectionBackendLike | None: ...
-
-        def _charger_supported_phase_selections(self) -> tuple[PhaseSelection, ...]: ...
-
-        def _remember_phase_selection_state(
-            self,
-            *,
-            active: object | None = None,
-            requested: object | None = None,
-            supported: object | None = None,
-        ) -> None: ...
-
-        def _charger_state_backend(self) -> _ChargerStateBackendLike | None: ...
+    def __init__(
+        self,
+        service: ShellyRuntimeHost,
+        cache: ShellyRuntimeCache,
+        capabilities: ShellyCapabilities,
+        clock: Callable[[], float],
+    ) -> None:
+        self.service = service
+        self.cache = cache
+        self.capabilities = capabilities
+        self._clock = clock
 
     def _sync_charger_runtime_state(self, state: ChargerState, now: float | None = None) -> None:
         svc = self.service
-        state_at = svc._time_now() if now is None else float(now)
+        state_at = svc.time_now() if now is None else float(now)
         auto_mode_active = self._auto_mode_active(getattr(svc, "virtual_mode", 0))
         self._store_runtime_charger_snapshot(state, state_at)
         self._sync_virtual_enabled_state(state, auto_mode_active)
@@ -54,14 +49,15 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
 
     def _store_runtime_charger_snapshot(self, state: ChargerState, state_at: float) -> None:
         svc = self.service
+        svc._readback_store.replace_charger(TimedChargerState(state=state, captured_at=state_at))
         svc._last_charger_state_enabled = self._optional_bool(getattr(state, "enabled", None))
         svc._last_charger_state_current_amps = self._optional_float(getattr(state, "current_amps", None))
         svc._last_charger_state_phase_selection = getattr(state, "phase_selection", None)
         svc._last_charger_state_actual_current_amps = self._optional_float(getattr(state, "actual_current_amps", None))
         svc._last_charger_state_power_w = self._optional_float(getattr(state, "power_w", None))
         svc._last_charger_state_energy_kwh = self._optional_float(getattr(state, "energy_kwh", None))
-        svc._last_charger_state_status = self._cached_optional_text(getattr(state, "status_text", None))
-        svc._last_charger_state_fault = self._cached_optional_text(getattr(state, "fault_text", None))
+        svc._last_charger_state_status = self.cache._cached_optional_text(getattr(state, "status_text", None))
+        svc._last_charger_state_fault = self.cache._cached_optional_text(getattr(state, "fault_text", None))
         svc._last_charger_state_at = state_at
 
     @staticmethod
@@ -73,21 +69,20 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         return finite_float_or_none(value)
 
     def _auto_mode_active(self, current_mode: object) -> bool:
-        mode_uses_auto_logic = getattr(self.service, "_mode_uses_auto_logic", None)
-        return bool(mode_uses_auto_logic(current_mode)) if callable(mode_uses_auto_logic) else False
+        return self.service.auto.mode_uses_auto_logic(current_mode)
 
-    def _remember_charger_estimate(self, source: str, now: float | None = None) -> None:
+    def remember_charger_estimate(self, source: str, now: float | None = None) -> None:
         svc = self.service
-        captured_at = self._runtime_now() if now is None else float(now)
+        captured_at = self._clock() if now is None else float(now)
         svc._last_charger_estimate_source = str(source).strip() or None
         svc._last_charger_estimate_at = captured_at
 
-    def _clear_charger_estimate(self) -> None:
+    def clear_charger_estimate(self) -> None:
         svc = self.service
         svc._last_charger_estimate_source = None
         svc._last_charger_estimate_at = None
 
-    def _estimated_phase_voltage_v(self, selection: PhaseSelection) -> float:
+    def estimated_phase_voltage_v(self, selection: PhaseSelection) -> float:
         cached_voltage = self._cached_runtime_voltage()
         if cached_voltage is None:
             return 230.0
@@ -116,7 +111,7 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         return status.startswith("charging")
 
     @classmethod
-    def _resolved_pm_charger_current(cls, state: ChargerState) -> float | None:
+    def resolved_pm_charger_current(cls, state: ChargerState) -> float | None:
         actual_current = cls._actual_pm_charger_current(state)
         if actual_current is not None:
             return actual_current
@@ -136,24 +131,24 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
             return 0.0
         return float(state.current_amps)
 
-    def _estimated_charger_power_w(
+    def estimated_charger_power_w(
         self,
         current_a: float | None,
         phase_selection: PhaseSelection,
     ) -> float | None:
         if current_a is None:
             return None
-        return float(current_a) * self._estimated_phase_voltage_v(phase_selection) * float(
+        return float(current_a) * self.estimated_phase_voltage_v(phase_selection) * float(
             phase_selection_count(phase_selection)
         )
 
-    def _sync_estimated_charger_energy_cache(self, energy_kwh: float, power_w: float, now: float) -> None:
+    def sync_estimated_charger_energy_cache(self, energy_kwh: float, power_w: float, now: float) -> None:
         svc = self.service
         svc._charger_estimated_energy_kwh = max(0.0, float(energy_kwh))
         svc._charger_estimated_energy_at = float(now)
         svc._charger_estimated_power_w = max(0.0, float(power_w))
 
-    def _integrated_estimated_charger_energy_kwh(self, power_w: float, now: float) -> float:
+    def integrated_estimated_charger_energy_kwh(self, power_w: float, now: float) -> float:
         svc = self.service
         energy_kwh = finite_float_or_none(getattr(svc, "_charger_estimated_energy_kwh", None)) or 0.0
         last_at = finite_float_or_none(getattr(svc, "_charger_estimated_energy_at", None))
@@ -161,7 +156,7 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         if last_at is not None and last_power is not None:
             elapsed_seconds = max(0.0, float(now) - last_at)
             energy_kwh += (max(0.0, float(last_power)) * (elapsed_seconds / 3600.0)) / 1000.0
-        self._sync_estimated_charger_energy_cache(energy_kwh, power_w, now)
+        self.sync_estimated_charger_energy_cache(energy_kwh, power_w, now)
         return energy_kwh
 
     def _sync_virtual_enabled_state(self, state: ChargerState, auto_mode_active: bool) -> None:
@@ -181,11 +176,11 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         svc._charger_target_current_applied_at = state_at
 
     def _sync_runtime_phase_selection_from_charger(self, state: ChargerState) -> None:
-        if state.phase_selection is None or self._phase_selection_switch_backend() is not None:
+        if state.phase_selection is None or self.capabilities.phase_selection_switch_backend() is not None:
             return
         svc = self.service
-        self._remember_phase_selection_state(
-            supported=self._charger_supported_phase_selections(),
+        self.capabilities.remember_phase_selection_state(
+            supported=self.capabilities.charger_supported_phase_selections(),
             requested=getattr(svc, "requested_phase_selection", state.phase_selection),
             active=state.phase_selection,
         )
@@ -194,7 +189,7 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
     def _charger_transport_detail(error: BaseException) -> str:
         return exception_detail(error)
 
-    def _remember_charger_transport_issue(
+    def remember_charger_transport_issue(
         self,
         reason: str,
         source: str,
@@ -202,22 +197,22 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         now: float | None = None,
     ) -> None:
         svc = self.service
-        captured_at = self._runtime_now() if now is None else float(now)
+        captured_at = self._clock() if now is None else float(now)
         svc._last_charger_transport_reason = str(reason).strip() or None
         svc._last_charger_transport_source = str(source).strip() or None
         svc._last_charger_transport_detail = self._charger_transport_detail(error)
         svc._last_charger_transport_at = captured_at
 
-    def _clear_charger_transport_issue(self) -> None:
+    def clear_charger_transport_issue(self) -> None:
         svc = self.service
         svc._last_charger_transport_reason = None
         svc._last_charger_transport_source = None
         svc._last_charger_transport_detail = None
         svc._last_charger_transport_at = None
 
-    def _remember_charger_retry(self, reason: str, source: str, now: float | None = None) -> None:
+    def remember_charger_retry(self, reason: str, source: str, now: float | None = None) -> None:
         svc = self.service
-        captured_at = self._runtime_now() if now is None else float(now)
+        captured_at = self._clock() if now is None else float(now)
         delay_seconds = _charger_transport_retry_delay_seconds(svc, reason)
         self._schedule_charger_retry_backoff(svc, captured_at, delay_seconds)
         svc._charger_retry_reason = str(reason).strip() or None
@@ -225,15 +220,10 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         svc._charger_retry_until = captured_at + delay_seconds
 
     @staticmethod
-    def _schedule_charger_retry_backoff(svc: ShellyIoHost, captured_at: float, delay_seconds: float) -> None:
-        delay_retry = getattr(svc, "_delay_source_retry", None)
-        if callable(delay_retry):
-            delay_retry("charger", captured_at, delay_seconds)
-            return
-        if isinstance(getattr(svc, "_source_retry_after", None), dict):
-            svc._source_retry_after["charger"] = captured_at + delay_seconds
+    def _schedule_charger_retry_backoff(svc: ShellyRuntimeHost, captured_at: float, delay_seconds: float) -> None:
+        svc.runtime.delay_source_retry("charger", captured_at, delay_seconds)
 
-    def _clear_charger_retry(self) -> None:
+    def clear_charger_retry(self) -> None:
         svc = self.service
         svc._charger_retry_reason = None
         svc._charger_retry_source = None
@@ -241,12 +231,12 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
         if isinstance(getattr(svc, "_source_retry_after", None), dict):
             svc._source_retry_after["charger"] = 0.0
 
-    def _charger_retry_active(self, now: float | None = None) -> bool:
+    def charger_retry_active(self, now: float | None = None) -> bool:
         svc = self.service
-        current = self._runtime_now() if now is None else float(now)
+        current = self._clock() if now is None else float(now)
         return _fresh_charger_retry_until(svc, current) is not None
 
-    def _read_charger_state_best_effort(self, now: float | None = None) -> ChargerState | None:
+    def read_charger_state_best_effort(self, now: float | None = None) -> ChargerState | None:
         read_context = self._charger_read_context(now)
         if read_context is None:
             return None
@@ -257,34 +247,38 @@ class ShellyIoRuntime(ShellyIoRuntimeCache):
             self._handle_charger_state_read_error(svc, error, current)
             return None
         self._sync_charger_runtime_state(state, now=current)
-        self._clear_charger_transport_issue()
-        self._clear_charger_retry()
-        svc._mark_recovery("charger", "Charger state reads recovered")
+        self.clear_charger_transport_issue()
+        self.clear_charger_retry()
+        svc.runtime.mark_recovery("charger", "Charger state reads recovered")
         return state
 
     def _charger_read_context(
         self,
         now: float | None,
-    ) -> tuple[ShellyIoHost, _ChargerStateBackendLike, float] | None:
+    ) -> tuple[ShellyRuntimeHost, _ChargerStateBackendLike, float] | None:
         svc = self.service
-        backend = self._charger_state_backend()
+        backend = self.capabilities.charger_state_backend()
         if backend is None:
+            svc._readback_store.replace_charger(None)
             return None
-        current = self._runtime_now() if now is None else float(now)
-        if self._charger_retry_active(current):
+        current = self._clock() if now is None else float(now)
+        if self.charger_retry_active(current):
             return None
         return svc, backend, current
 
-    def _handle_charger_state_read_error(self, svc: ShellyIoHost, error: BaseException, current: float) -> None:
+    def _handle_charger_state_read_error(self, svc: ShellyRuntimeHost, error: BaseException, current: float) -> None:
         transport_reason = modbus_transport_issue_reason(error)
         if transport_reason is not None:
-            self._remember_charger_transport_issue(transport_reason, "read", error, current)
-            self._remember_charger_retry(transport_reason, "read", current)
-        svc._mark_failure("charger")
-        svc._warning_throttled(
+            self.remember_charger_transport_issue(transport_reason, "read", error, current)
+            self.remember_charger_retry(transport_reason, "read", current)
+        svc.runtime.mark_failure("charger")
+        svc.runtime.warning_throttled(
             "charger-state-failed",
             svc.auto_shelly_soft_fail_seconds,
             "Charger state read failed: %s",
             error,
             exc_info=error,
         )
+
+
+__all__ = ["ShellyChargerRuntime"]

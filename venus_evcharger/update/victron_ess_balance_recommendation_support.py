@@ -5,10 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .victron_ess_balance_safety import _UpdateCycleVictronEssBalanceSafety
-
-
-class _UpdateCycleVictronEssBalanceRecommendationSupport(_UpdateCycleVictronEssBalanceSafety):
+class VictronEssRecommendationPolicy:
     @staticmethod
     def _victron_ess_balance_has_insufficient_telemetry(
         observations: dict[str, Any],
@@ -39,9 +36,9 @@ class _UpdateCycleVictronEssBalanceRecommendationSupport(_UpdateCycleVictronEssB
         stability_score = observations["stability_score"]
         if stability_score is None or stability_score < 0.8:
             return False
-        if not _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_has_clean_settling(observations):
+        if not VictronEssRecommendationPolicy._victron_ess_balance_has_clean_settling(observations):
             return False
-        return _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_observations_within_relaxed_bounds(
+        return VictronEssRecommendationPolicy._victron_ess_balance_observations_within_relaxed_bounds(
             observations
         )
 
@@ -122,27 +119,27 @@ class _UpdateCycleVictronEssBalanceRecommendationSupport(_UpdateCycleVictronEssB
     @staticmethod
     def _victron_ess_balance_current_tuning_values(svc: Any) -> dict[str, float]:
         return {
-            "kp": _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_non_negative_attr(
+            "kp": VictronEssRecommendationPolicy._victron_ess_balance_non_negative_attr(
                 svc,
                 "auto_battery_discharge_balance_victron_bias_kp",
             ),
-            "ki": _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_non_negative_attr(
+            "ki": VictronEssRecommendationPolicy._victron_ess_balance_non_negative_attr(
                 svc,
                 "auto_battery_discharge_balance_victron_bias_ki",
             ),
-            "kd": _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_non_negative_attr(
+            "kd": VictronEssRecommendationPolicy._victron_ess_balance_non_negative_attr(
                 svc,
                 "auto_battery_discharge_balance_victron_bias_kd",
             ),
-            "deadband": _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_non_negative_attr(
+            "deadband": VictronEssRecommendationPolicy._victron_ess_balance_non_negative_attr(
                 svc,
                 "auto_battery_discharge_balance_victron_bias_deadband_watts",
             ),
-            "max_abs": _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_non_negative_attr(
+            "max_abs": VictronEssRecommendationPolicy._victron_ess_balance_non_negative_attr(
                 svc,
                 "auto_battery_discharge_balance_victron_bias_max_abs_watts",
             ),
-            "ramp": _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_non_negative_attr(
+            "ramp": VictronEssRecommendationPolicy._victron_ess_balance_non_negative_attr(
                 svc,
                 "auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second",
             ),
@@ -155,21 +152,21 @@ class _UpdateCycleVictronEssBalanceRecommendationSupport(_UpdateCycleVictronEssB
     @staticmethod
     def _victron_ess_balance_adjusted_tuning(current: dict[str, float], reason: str) -> dict[str, float]:
         adjusted = dict(current)
-        preset = _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_reason_adjustment(reason)
+        preset = VictronEssRecommendationPolicy._victron_ess_balance_reason_adjustment(reason)
         if preset:
             adjusted["kp"] = current["kp"] * float(preset["kp_factor"])
             adjusted["ki"] = current["ki"] * float(preset["ki_factor"])
-            adjusted["kd"] = _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_adjusted_kd(
+            adjusted["kd"] = VictronEssRecommendationPolicy._victron_ess_balance_adjusted_kd(
                 current["kd"],
                 preset,
             )
-            adjusted["deadband"] = _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_scaled_or_default(
+            adjusted["deadband"] = VictronEssRecommendationPolicy._victron_ess_balance_scaled_or_default(
                 current["deadband"], preset, "deadband_factor", "deadband_default"
             )
-            adjusted["max_abs"] = _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_scaled_or_default(
+            adjusted["max_abs"] = VictronEssRecommendationPolicy._victron_ess_balance_scaled_or_default(
                 current["max_abs"], preset, "max_abs_factor", "max_abs_default"
             )
-            adjusted["ramp"] = _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_scaled_or_default(
+            adjusted["ramp"] = VictronEssRecommendationPolicy._victron_ess_balance_scaled_or_default(
                 current["ramp"], preset, "ramp_factor", "ramp_default"
             )
         adjusted["deadband"] = max(0.0, float(adjusted["deadband"]))

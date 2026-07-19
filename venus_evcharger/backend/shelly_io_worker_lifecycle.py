@@ -4,67 +4,66 @@
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 import requests
 
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
-from venus_evcharger.backend.shelly_io_types import ShellyIoHost, is_closeable, is_settable_event
-from venus_evcharger.backend.shelly_io_worker_transport import ShellyIoWorkerTransport
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from venus_evcharger.backend.shelly_io_ports import ShellyLifecycleHost
+from venus_evcharger.backend.shelly_io_types import is_settable_event, optional_json_object
+from venus_evcharger.backend.shelly_io_worker_transport import ShellyWorkerTransport
 
 
-class ShellyIoWorkerLifecycle(ShellyIoWorkerTransport):
+class ShellyWorkerLifecycle:
     """Start, restart, and inspect the Shelly background worker thread."""
 
-    if TYPE_CHECKING:
-        service: ShellyIoHost
-        io_worker_loop: Callable[[], None]
-
-        def _runtime_now(self) -> float: ...
+    def __init__(
+        self,
+        service: ShellyLifecycleHost,
+        transport: ShellyWorkerTransport,
+        clock: Callable[[], float],
+        worker_loop: Callable[[], None],
+    ) -> None:
+        self.service = service
+        self.transport = transport
+        self._clock = clock
+        self._worker_loop = worker_loop
 
     @staticmethod
-    def _worker_stale_restart_seconds(svc: ShellyIoHost) -> float:
+    def _worker_stale_restart_seconds(svc: ShellyLifecycleHost) -> float:
         poll_seconds = max(
             0.2,
-            ShellyIoWorkerLifecycle._runtime_seconds_setting(svc, "_worker_poll_interval_seconds", 1.0),
+            ShellyWorkerLifecycle._runtime_seconds_setting(svc, "_worker_poll_interval_seconds", 1.0),
         )
-        request_timeout = ShellyIoWorkerLifecycle._runtime_seconds_setting(
+        request_timeout = ShellyWorkerLifecycle._runtime_seconds_setting(
             svc, "shelly_request_timeout_seconds", 2.0
         )
-        relay_sync_timeout = ShellyIoWorkerLifecycle._runtime_seconds_setting(
+        relay_sync_timeout = ShellyWorkerLifecycle._runtime_seconds_setting(
             svc, "relay_sync_timeout_seconds", 2.0
         )
         return max(5.0, poll_seconds * 5.0, request_timeout * 3.0, relay_sync_timeout * 2.0)
 
     @staticmethod
-    def _runtime_seconds_setting(svc: ShellyIoHost, name: str, fallback: float) -> float:
+    def _runtime_seconds_setting(svc: ShellyLifecycleHost, name: str, fallback: float) -> float:
         value = getattr(svc, name, None)
         if not value:
             return fallback
         return float(value)
 
     @staticmethod
-    def _worker_snapshot_captured_at(svc: ShellyIoHost) -> float | None:
-        snapshot = ShellyIoWorkerLifecycle._worker_snapshot_payload(svc)
+    def _worker_snapshot_captured_at(svc: ShellyLifecycleHost) -> float | None:
+        snapshot = ShellyWorkerLifecycle._worker_snapshot_payload(svc)
         if snapshot is None:
             return None
-        return ShellyIoWorkerLifecycle._worker_snapshot_number(snapshot, "captured_at")
+        return ShellyWorkerLifecycle._worker_snapshot_number(snapshot, "captured_at")
 
     @staticmethod
-    def _worker_snapshot_payload(svc: ShellyIoHost) -> dict[str, object] | None:
-        get_snapshot = getattr(svc, "_get_worker_snapshot", None)
-        if not callable(get_snapshot):
-            return None
+    def _worker_snapshot_payload(svc: ShellyLifecycleHost) -> dict[str, object] | None:
         try:
-            snapshot = get_snapshot()
+            snapshot = svc.runtime.worker_snapshot()
         except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
             return None
-        if not isinstance(snapshot, dict):
-            return None
-        return {str(key): value for key, value in snapshot.items()}
+        return optional_json_object(snapshot)
 
     @staticmethod
     def _worker_snapshot_number(snapshot: dict[str, object], key: str) -> float | None:
@@ -74,14 +73,14 @@ class ShellyIoWorkerLifecycle(ShellyIoWorkerTransport):
         return float(value)
 
     @classmethod
-    def _worker_snapshot_age(cls, svc: ShellyIoHost, now: float) -> float | None:
+    def _worker_snapshot_age(cls, svc: ShellyLifecycleHost, now: float) -> float | None:
         captured_at = cls._worker_snapshot_captured_at(svc)
         if captured_at is None:
             return None
         return max(0.0, float(now) - captured_at)
 
     @classmethod
-    def _worker_thread_stale(cls, svc: ShellyIoHost, now: float) -> bool:
+    def _worker_thread_stale(cls, svc: ShellyLifecycleHost, now: float) -> bool:
         thread = getattr(svc, "_worker_thread", None)
         if thread is None or not thread.is_alive():
             return False
@@ -92,14 +91,14 @@ class ShellyIoWorkerLifecycle(ShellyIoWorkerTransport):
         svc = self.service
         stale_after = self._worker_stale_restart_seconds(svc)
         snapshot_age = self._worker_snapshot_age(svc, now)
-        svc._warning_throttled(
+        svc.runtime.warning_throttled(
             "io-worker-stale-restart",
             stale_after,
             "Background I/O worker stale for %.1fs, restarting worker session",
             self._display_snapshot_age(snapshot_age),
         )
         self._set_object_event(getattr(svc, "_worker_stop_event", None))
-        self._close_object(getattr(svc, "_worker_session", None))
+        self.transport.close_object(getattr(svc, "_worker_session", None))
         svc._worker_stop_event = threading.Event()
         svc._worker_session = requests.Session()
         svc._worker_thread = None
@@ -113,22 +112,20 @@ class ShellyIoWorkerLifecycle(ShellyIoWorkerTransport):
         if is_settable_event(candidate):
             candidate.set()
 
-    @staticmethod
-    def _close_object(candidate: object) -> None:
-        if is_closeable(candidate):
-            candidate.close()
-
     def start_io_worker(self) -> None:
         svc = self.service
-        svc._ensure_worker_state()
-        current = self._runtime_now()
+        svc.runtime.ensure_worker_state()
+        current = self._clock()
         if self._worker_thread_stale(svc, current):
             self._restart_stale_io_worker(current)
         if svc._worker_thread is None or not svc._worker_thread.is_alive():
             svc._worker_thread = threading.Thread(
-                target=self.io_worker_loop,
+                target=self._worker_loop,
                 name="shelly-wallbox-shelly-io",
                 daemon=True,
             )
             svc._worker_thread.start()
-        svc._ensure_auto_input_helper_process()
+        svc.runtime.ensure_auto_input_helper()
+
+
+__all__ = ["ShellyWorkerLifecycle"]

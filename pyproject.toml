@@ -14,20 +14,7 @@ select = [
 ]
 
 [tool.mutmut]
-source_paths = ["venus_evcharger"]
-only_mutate = ["venus_evcharger/service/control_runtime.py"]
-also_copy = [
-    "venus_evcharger_auto_input_helper.py",
-    "venus_evcharger_dbus_adapter.py",
-    "venus_evcharger_service.py",
-    "CONTROL_API.md",
-    "deploy/venus",
-]
-pytest_add_cli_args = ["-k", "not socket"]
 pytest_add_cli_args_test_selection = [
-    "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_runtime_components_replace_invalid_cached_instances_and_reuse_valid",
-    "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_health_payload_uses_stale_callback_and_event_bus_is_reused",
-    "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_records_runtime_only_command_audit_entries",
-    "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_audit_payload_helpers_cover_dict_and_none_inputs",
-    "tests/test_venus_evcharger_service_roles.py::TestShellyWallboxServiceRoles::test_control_api_mixin_skips_disabled_server_and_can_create_one",
+    "tests/test_service_control_runtime_contracts.py",
+    "tests/test_service_control_state_contracts.py",
 ]

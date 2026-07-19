@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_bootstrap_controller_support import (
     MagicMock,
-    ModuleType,
     ServiceBootstrapControllerTestCase,
     _enable_fault_diagnostics,
     _install_signal_logging,
@@ -9,7 +8,6 @@ from tests.venus_evcharger_bootstrap_controller_support import (
     _run_service_loop,
     patch,
     run_service_main,
-    sys,
     tempfile,
 )
 
@@ -116,65 +114,16 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         with patch("venus_evcharger.bootstrap.controller.faulthandler.enable", side_effect=RuntimeError("nope")):
             _enable_fault_diagnostics()
 
-    def test_setup_dbus_mainloop_is_core_compatibility_hook(self):
-        dbus_module = ModuleType("dbus")
-        mainloop_module = ModuleType("dbus.mainloop")
-        glib_module = ModuleType("dbus.mainloop.glib")
-        glib_module.DBusGMainLoop = MagicMock()
-        glib_module.threads_init = MagicMock()
-
-        with patch.dict(
-            sys.modules,
-            {
-                "dbus": dbus_module,
-                "dbus.mainloop": mainloop_module,
-                "dbus.mainloop.glib": glib_module,
-            },
-            clear=False,
-        ):
-            import dbus as imported_dbus
-
-            imported_dbus.mainloop = mainloop_module
-            mainloop_module.glib = glib_module
-            from venus_evcharger.bootstrap.controller import _setup_dbus_mainloop
-
-            _setup_dbus_mainloop()
-
-        glib_module.threads_init.assert_not_called()
-        glib_module.DBusGMainLoop.assert_not_called()
-
-        glib_module = ModuleType("dbus.mainloop.glib")
-        glib_module.DBusGMainLoop = MagicMock()
-        glib_module.threads_init = MagicMock(side_effect=AttributeError("missing"))
-        with patch.dict(
-            sys.modules,
-            {
-                "dbus": dbus_module,
-                "dbus.mainloop": mainloop_module,
-                "dbus.mainloop.glib": glib_module,
-            },
-            clear=False,
-        ):
-            import dbus as imported_dbus
-
-            imported_dbus.mainloop = mainloop_module
-            mainloop_module.glib = glib_module
-            _setup_dbus_mainloop()
-
-        glib_module.DBusGMainLoop.assert_not_called()
-
     def test_run_service_main_runs_loop_and_logs_critical_on_failure(self):
         gobject_module = MagicMock()
         with patch("venus_evcharger.bootstrap.controller._enable_fault_diagnostics") as enable_faults:
-            with patch("venus_evcharger.bootstrap.controller._setup_dbus_mainloop") as setup_loop:
-                with patch("venus_evcharger.bootstrap.controller._run_service_loop") as run_loop:
-                    run_service_main(lambda: None, "/tmp/does-not-matter.ini", gobject_module)
+            with patch("venus_evcharger.bootstrap.controller._run_service_loop") as run_loop:
+                run_service_main(lambda: None, "/tmp/does-not-matter.ini", gobject_module)
 
         enable_faults.assert_called_once_with()
-        setup_loop.assert_called_once_with()
         run_loop.assert_called_once()
 
-        with patch("venus_evcharger.bootstrap.controller._setup_dbus_mainloop", side_effect=RuntimeError("boom")):
+        with patch("venus_evcharger.bootstrap.controller._run_service_loop", side_effect=RuntimeError("boom")):
             with patch("venus_evcharger.bootstrap.controller.logging.critical") as critical_mock:
                 with self.assertRaises(RuntimeError):
                     run_service_main(lambda: None, "/tmp/does-not-matter.ini", gobject_module)
@@ -193,9 +142,8 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
                 with patch("venus_evcharger.bootstrap.controller.logging.basicConfig") as basic_config:
                     with patch("venus_evcharger.bootstrap.controller.logging.info") as info_mock:
                         with patch("venus_evcharger.bootstrap.controller._enable_fault_diagnostics") as enable_faults:
-                            with patch("venus_evcharger.bootstrap.controller._setup_dbus_mainloop") as setup_loop:
-                                with patch("venus_evcharger.bootstrap.controller._run_service_loop") as run_loop:
-                                    run_service_main(service_factory, config_path, gobject_module)
+                            with patch("venus_evcharger.bootstrap.controller._run_service_loop") as run_loop:
+                                run_service_main(service_factory, config_path, gobject_module)
 
         basic_config.assert_called_once_with(
             format="%(levelname)s [pid=%(process)d %(threadName)s] %(message)s",
@@ -203,7 +151,6 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         )
         info_mock.assert_called_once_with("Start Venus EV charger service pid=%s", 4321)
         enable_faults.assert_called_once_with()
-        setup_loop.assert_called_once_with()
         run_loop.assert_called_once_with(service_factory, gobject_module)
 
     def test_run_service_main_logs_pid_and_exception_object_on_startup_failure(self):
@@ -211,7 +158,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         error = RuntimeError("boom")
 
         with patch("venus_evcharger.bootstrap.controller.os.getpid", return_value=9876):
-            with patch("venus_evcharger.bootstrap.controller._setup_dbus_mainloop", side_effect=error):
+            with patch("venus_evcharger.bootstrap.controller._run_service_loop", side_effect=error):
                 with patch("venus_evcharger.bootstrap.controller.logging.critical") as critical_mock:
                     with self.assertRaises(RuntimeError) as raised:
                         run_service_main(lambda: None, "/tmp/does-not-matter.ini", gobject_module)

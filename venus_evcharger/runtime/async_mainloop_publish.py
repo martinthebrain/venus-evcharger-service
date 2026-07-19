@@ -8,14 +8,26 @@ import time
 from typing import Any
 
 from venus_evcharger.dbus_gateway import EVCS_FIELD_TO_PATH, evcs_fields_to_paths
-from venus_evcharger.runtime.async_mainloop_watchdog import _RuntimeAsyncMainloopWatchdog
+from venus_evcharger.runtime.contracts import AsyncRuntimeStatePort, MainloopWatchdogPort
 from venus_evcharger.runtime.async_mainloop_types import PublishQueue, QueuedPublishValue, require_publish_queue
 
 DBUS_PUBLISH_QUEUE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
-    def enqueue_dbus_publish_values(self: Any, values: list[tuple[str, Any]], current: float) -> bool:
+class DbusPublishQueue:
+    """Coalesce and flush semantic or path-based DBus publishes."""
+
+    def __init__(
+        self,
+        service: Any,
+        thread_guard: AsyncRuntimeStatePort,
+        watchdog: MainloopWatchdogPort,
+    ) -> None:
+        self.service = service
+        self.thread_guard = thread_guard
+        self.watchdog = watchdog
+
+    def enqueue_values(self, values: list[tuple[str, Any]], current: float) -> bool:
         """Coalesce DBus path writes for the GLib thread."""
         svc = self.service
         if not values:
@@ -28,7 +40,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
             self._remember_oldest_dbus_publish(svc, pending)
         return True
 
-    def enqueue_dbus_publish_fields(self: Any, fields: list[tuple[str, Any]], current: float) -> bool:
+    def enqueue_fields(self, fields: list[tuple[str, Any]], current: float) -> bool:
         """Coalesce semantic EVCS field writes for the GLib thread."""
         svc = self.service
         if not fields:
@@ -68,7 +80,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         if pending:
             svc._dbus_publish_oldest_queued_at = min(item[2] for item in pending.values())
 
-    def enqueue_dbus_update_index_bump(self: Any, current: float) -> None:
+    def enqueue_update_index_bump(self, current: float) -> None:
         """Queue an UpdateIndex bump for the GLib thread."""
         svc = self.service
         with svc._dbus_publish_queue_lock:
@@ -76,7 +88,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
             if svc._dbus_publish_oldest_queued_at is None:
                 svc._dbus_publish_oldest_queued_at = time.time()
 
-    def enqueue_companion_dbus_publish(self: Any, now: float | None = None) -> bool:
+    def enqueue_companion_publish(self, now: float | None = None) -> bool:
         """Coalesce optional companion-service publishes for the GLib thread."""
         svc = self.service
         with svc._companion_publish_lock:
@@ -92,12 +104,12 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         svc._dbusservice["/UpdateIndex"] = next_index
         svc._dbus_publish_state["/UpdateIndex"] = {"value": next_index, "updated_at": current}
 
-    def flush_dbus_publish_queue(self: Any) -> bool:
+    def flush(self) -> bool:
         """Apply queued DBus writes quickly from the GLib thread."""
         svc = self.service
         if not hasattr(svc, "_dbusservice"):
             return True
-        self.assert_dbus_mainloop_thread("main DBus publish flush")
+        self.thread_guard.assert_mainloop_thread("main DBus publish flush")
         started = time.monotonic()
         now = time.time()
         values, fields, bump_count, oldest_queued_at = self._drain_dbus_publish_queue(svc)
@@ -107,7 +119,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         self._report_dbus_publish_failures(svc, failed_paths)
         self._flush_update_index_bumps(svc, now, bump_count)
         self._record_publish_flush_duration(svc, started)
-        self.flush_companion_dbus_publish_queue()
+        self.watchdog.flush_companion_publish()
         return True
 
     @staticmethod
@@ -139,7 +151,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         """Apply drained DBus publish values and return failed paths."""
         batch_publish = getattr(svc._dbusservice, "publish_paths", None)
         if callable(batch_publish):
-            return _RuntimeAsyncMainloopPublish._apply_gateway_publish_values(svc, values, batch_publish)
+            return DbusPublishQueue._apply_gateway_publish_values(svc, values, batch_publish)
         failed_paths: list[str] = []
         for path, (value, current, _queued_at) in values:
             try:
@@ -158,10 +170,10 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         if not values:
             return []
         try:
-            batch_publish(_RuntimeAsyncMainloopPublish._gateway_publish_payload(values))
+            batch_publish(DbusPublishQueue._gateway_publish_payload(values))
         except DBUS_PUBLISH_QUEUE_ERRORS:
             return [path for path, _item in values]
-        _RuntimeAsyncMainloopPublish._remember_gateway_publish_success(svc, values)
+        DbusPublishQueue._remember_gateway_publish_success(svc, values)
         return []
 
     @staticmethod
@@ -171,8 +183,8 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
             return []
         publish_fields = getattr(svc._dbusservice, "publish_fields", None)
         if callable(publish_fields):
-            return _RuntimeAsyncMainloopPublish._apply_gateway_publish_fields(svc, fields, publish_fields)
-        return _RuntimeAsyncMainloopPublish._apply_dbus_publish_field_fallback(svc, fields)
+            return DbusPublishQueue._apply_gateway_publish_fields(svc, fields, publish_fields)
+        return DbusPublishQueue._apply_dbus_publish_field_fallback(svc, fields)
 
     @staticmethod
     def _apply_gateway_publish_fields(
@@ -181,16 +193,16 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         publish_fields: Any,
     ) -> list[str]:
         try:
-            publish_fields(_RuntimeAsyncMainloopPublish._gateway_publish_payload(fields))
+            publish_fields(DbusPublishQueue._gateway_publish_payload(fields))
         except DBUS_PUBLISH_QUEUE_ERRORS:
-            return _RuntimeAsyncMainloopPublish._field_paths(fields)
-        _RuntimeAsyncMainloopPublish._remember_gateway_field_publish_success(svc, fields)
+            return DbusPublishQueue._field_paths(fields)
+        DbusPublishQueue._remember_gateway_field_publish_success(svc, fields)
         return []
 
     @staticmethod
     def _apply_dbus_publish_field_fallback(svc: Any, fields: list[tuple[str, QueuedPublishValue]]) -> list[str]:
-        values = _RuntimeAsyncMainloopPublish._path_values_from_fields(fields)
-        return _RuntimeAsyncMainloopPublish._apply_dbus_publish_values(svc, values)
+        values = DbusPublishQueue._path_values_from_fields(fields)
+        return DbusPublishQueue._apply_dbus_publish_values(svc, values)
 
     @staticmethod
     def _gateway_publish_payload(values: list[tuple[str, QueuedPublishValue]]) -> dict[str, Any]:
@@ -198,7 +210,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
 
     @staticmethod
     def _path_values_from_fields(fields: list[tuple[str, QueuedPublishValue]]) -> list[tuple[str, QueuedPublishValue]]:
-        payload = _RuntimeAsyncMainloopPublish._gateway_publish_payload(fields)
+        payload = DbusPublishQueue._gateway_publish_payload(fields)
         paths = evcs_fields_to_paths(payload)
         values: list[tuple[str, QueuedPublishValue]] = []
         for field, item in fields:
@@ -211,7 +223,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
 
     @staticmethod
     def _field_paths(fields: list[tuple[str, QueuedPublishValue]]) -> list[str]:
-        return [path for path, _item in _RuntimeAsyncMainloopPublish._path_values_from_fields(fields)]
+        return [path for path, _item in DbusPublishQueue._path_values_from_fields(fields)]
 
     @staticmethod
     def _remember_gateway_publish_success(svc: Any, values: list[tuple[str, QueuedPublishValue]]) -> None:
@@ -220,9 +232,9 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
 
     @staticmethod
     def _remember_gateway_field_publish_success(svc: Any, fields: list[tuple[str, QueuedPublishValue]]) -> None:
-        _RuntimeAsyncMainloopPublish._remember_gateway_publish_success(
+        DbusPublishQueue._remember_gateway_publish_success(
             svc,
-            _RuntimeAsyncMainloopPublish._path_values_from_fields(fields),
+            DbusPublishQueue._path_values_from_fields(fields),
         )
 
     @staticmethod
@@ -230,9 +242,7 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         """Record and log DBus publish failures."""
         if not failed_paths:
             return
-        mark_failure = getattr(svc, "_mark_failure", None)
-        if callable(mark_failure):
-            mark_failure("dbus")
+        svc.runtime.mark_failure("dbus")
         logging.warning("DBus publish queue failed for paths %s", ",".join(failed_paths))
 
     def _flush_update_index_bumps(self: Any, svc: Any, now: float, bump_count: int) -> None:
@@ -255,5 +265,12 @@ class _RuntimeAsyncMainloopPublish(_RuntimeAsyncMainloopWatchdog):
         """Record and budget-check publish flush duration."""
         duration = time.monotonic() - started
         svc._last_publish_flush_duration_seconds = duration
-        if duration > self._float_attr(svc._dbus_publish_budget_seconds, 0.1):
+        if duration > _float_attr(svc._dbus_publish_budget_seconds, 0.1):
             logging.warning("DBus publish flush exceeded budget: %.3fs", duration)
+
+
+def _float_attr(value: Any, default: float = 0.0) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float(default)
+
+
+__all__ = ["DbusPublishQueue"]

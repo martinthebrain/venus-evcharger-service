@@ -10,11 +10,14 @@ from unittest.mock import MagicMock
 
 sys.modules["vedbus"] = MagicMock()
 
+from tests.venus_evcharger_test_fixtures import make_runtime_state_service
+from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 from venus_evcharger.companion import dbus_bridge_grid as bridge_grid_mod
 from venus_evcharger.controllers import state_json as state_json_mod
 from venus_evcharger.controllers import state_runtime_snapshot as runtime_snapshot_mod
+from venus_evcharger.controllers import state_runtime_snapshot_victron as snapshot_victron
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
 from venus_evcharger.energy import probe_core as probe_core_mod
-from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 
 
 class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGrid):
@@ -26,35 +29,6 @@ class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGrid):
     def _normalized_source_snapshots(snapshot: dict[str, object]) -> list[dict[str, object]]:
         sources = snapshot.get("battery_sources", [])
         return list(sources) if isinstance(sources, list) else []
-
-
-class _DummyRuntimeSnapshot(runtime_snapshot_mod._StateRuntimeSnapshot):
-    def __init__(self, service: object) -> None:
-        self.service = service
-
-    @staticmethod
-    def _base_runtime_state(_svc: object) -> dict[str, object]:
-        return {"base": True}
-
-    @staticmethod
-    def _learned_charge_power_runtime_state(_svc: object) -> dict[str, object]:
-        return {"learned": True}
-
-    @staticmethod
-    def _phase_selection_runtime_state(_svc: object) -> dict[str, object]:
-        return {"phase_selection": True}
-
-    @staticmethod
-    def _phase_switch_runtime_state(_svc: object) -> dict[str, object]:
-        return {"phase_switch": True}
-
-    @staticmethod
-    def _contactor_runtime_state(_svc: object) -> dict[str, object]:
-        return {"contactor": True}
-
-    @staticmethod
-    def _energy_runtime_state(_svc: object) -> dict[str, object]:
-        return {"energy": True}
 
 
 class BranchCoverageNextClusterTwoDbusBridgeGridCases(unittest.TestCase):
@@ -130,7 +104,8 @@ class BranchCoverageNextClusterTwoDbusBridgeGridCases(unittest.TestCase):
 
 class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
     def test_runtime_snapshot_helpers_cover_profile_payloads_and_state_loading(self) -> None:
-        service = SimpleNamespace(
+        service = make_runtime_state_service(
+            virtual_mode=0,
             auto_energy_sources=(SimpleNamespace(source_id="hybrid"), SimpleNamespace(source_id="victron"), SimpleNamespace(source_id=""),),
             auto_battery_discharge_balance_victron_bias_source_id=" victron ",
             auto_battery_discharge_balance_victron_bias_service=" com.victronenergy.settings ",
@@ -182,7 +157,7 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
             },
             _get_worker_snapshot=lambda: {"battery_combined_soc": 62.0},
         )
-        snapshot = _DummyRuntimeSnapshot(service)
+        snapshot = runtime_snapshot_mod.RuntimeStateSnapshotBuilder(service, RuntimeStateNormalizer())
 
         explicit_profile = {"sample_count": 5}
         self.assertEqual(snapshot._victron_ess_balance_runtime_profile_sample_count(explicit_profile), 5)
@@ -201,17 +176,17 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
             "victron",
         )
 
-        current_state = snapshot.current_runtime_state()
-        self.assertTrue(current_state["base"])
+        current_state = snapshot.build()
+        self.assertEqual(current_state["mode"], 0)
         self.assertIn("victron_ess_balance_learning_state", current_state)
         self.assertIn("victron_ess_balance_adaptive_tuning_state", current_state)
         self.assertEqual(
-            runtime_snapshot_mod._StateRuntimeSnapshot._energy_runtime_state(service)["combined_battery_soc"],
+            runtime_snapshot_mod.RuntimeStateSnapshotBuilder._energy_runtime_state(service)["combined_battery_soc"],
             62.0,
         )
         non_mapping_service = SimpleNamespace(_get_worker_snapshot=lambda: "bad")
         self.assertIsNone(
-            runtime_snapshot_mod._StateRuntimeSnapshot._energy_runtime_state(non_mapping_service)[
+            runtime_snapshot_mod.RuntimeStateSnapshotBuilder._energy_runtime_state(non_mapping_service)[
                 "combined_battery_soc"
             ]
         )
@@ -229,18 +204,18 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
             self.assertIsNone(snapshot._read_runtime_state_payload(str(list_path)))
             self.assertIsNone(state_json_mod.json_object_payload({1: "bad-key"}))
 
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_energy_ids(service), ["hybrid", "victron"])
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_string(service, "auto_battery_discharge_balance_victron_bias_service"), "com.victronenergy.settings")
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_non_negative_int(-5), 0)
+        self.assertEqual(snapshot_victron._victron_ess_balance_energy_ids(service), ["hybrid", "victron"])
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_string(service, "auto_battery_discharge_balance_victron_bias_service"), "com.victronenergy.settings")
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_non_negative_int(-5), 0)
         self.assertEqual(
-            runtime_snapshot_mod._victron_ess_balance_runtime_attr_text(service, "auto_battery_discharge_balance_victron_bias_activation_mode", normalize_lower=True),
+            snapshot_victron._victron_ess_balance_runtime_attr_text(service, "auto_battery_discharge_balance_victron_bias_activation_mode", normalize_lower=True),
             "export_only",
         )
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_profile_text({}, "missing", fallback="x"), "x")
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_profile_counts({"delay_samples": 1})["sample_count"], 1)
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_profile_response_metrics({"response_delay_seconds": 4.0})["response_delay_seconds"], 4.0)
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_profile_learning_metrics({"estimated_gain": 2.0})["effective_gain"], 2.0)
-        self.assertEqual(runtime_snapshot_mod._victron_ess_balance_runtime_profile_limit_metrics({"preferred_bias_limit_watts": 300.0})["preferred_bias_limit_watts"], 300.0)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_profile_text({}, "missing", fallback="x"), "x")
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_profile_counts({"delay_samples": 1})["sample_count"], 1)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_profile_response_metrics({"response_delay_seconds": 4.0})["response_delay_seconds"], 4.0)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_profile_learning_metrics({"estimated_gain": 2.0})["effective_gain"], 2.0)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_profile_limit_metrics({"preferred_bias_limit_watts": 300.0})["preferred_bias_limit_watts"], 300.0)
 
 
 class BranchCoverageNextClusterTwoProbeCoreCases(unittest.TestCase):

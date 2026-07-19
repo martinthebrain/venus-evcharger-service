@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import unittest
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from tests.support.publish_runtime import PublishServiceHarness as SimpleNamespace
 from venus_evcharger.publish.dbus import DbusPublishController
 
 

@@ -3,7 +3,8 @@
 The Venus EV charger service treats the Victron DBus as a scarce and fragile
 resource. Only one process may talk to it directly:
 
-`venus_evcharger_dbus_adapter.py`
+`venus_evcharger_dbus_adapter.py`, assembled from the exclusive
+`venus_evcharger/dbus_adapter/` package.
 
 All other service components, helper processes, forensic tools, companion
 publishers, and operational scripts must use the gateway interfaces. They must
@@ -25,6 +26,27 @@ The adapter owns:
 - write command coalescing
 
 The rest of the project reads gateway snapshots or submits gateway commands.
+
+## Implementation Layout
+
+The adapter package is grouped by responsibility:
+
+- `process/`: process assembly, GLib lifecycle, socket IPC, identity,
+  introspection, and the process-only protocols
+- `read/`: typed read specifications, targets, PV source selection,
+  aggregation, and execution
+- `write/`: command scheduling, local publication, remote writes, lifecycle,
+  and write-side protocols
+- `health/`: freshness, queue, backpressure, history, GUI, and SLO metrics
+- `rate.py`: DBus connection ownership, rate limiting, and circuit breaking
+- `resources.py`: CPU, memory, and event-loop timing observations
+- `scheduling.py`: read and discovery due-time scheduling
+- `contracts.py`: shared adapter boundary contracts
+- `jsonl.py`: bounded RAM-backed operational history
+
+There are deliberately no top-level compatibility modules for the former
+fragmented layout. Imports must use these canonical package paths so that
+architecture checks can detect renewed top-level fragmentation.
 
 The gateway owns DBus transport; it does not own the semantic Venus EV charger
 surface. GUI/VRM-visible path requirements live in
@@ -189,6 +211,6 @@ When adding new code, search before merging:
 rg -n "^import dbus|from dbus|from vedbus|SystemBus\\(|SessionBus\\(|GetValue\\(|SetValue\\(|Introspect\\(|VeDbusService" venus_evcharger venus_evcharger_*.py scripts -g '*.py'
 ```
 
-Only the gateway entrypoint and its adapter component modules may contain real
-DBus access. The allow-list is enforced by
+Only the gateway entrypoint and modules below `venus_evcharger/dbus_adapter/`
+may contain real DBus access. This package boundary is enforced by
 `scripts/dev/check_dbus_isolation.py`.

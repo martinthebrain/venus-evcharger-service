@@ -7,8 +7,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-
-import requests
+from typing import TypedDict
 
 from venus_evcharger.core.contracts import finite_float_or_none
 
@@ -16,11 +15,16 @@ from .config_file import backend_request_timeout_seconds
 from .models import ChargerState, PhaseSelection, normalize_phase_selection
 from .template_support import (
     TemplateAuthSettings,
+    RequestAuth,
     config_section,
     load_template_auth_settings,
     load_template_config,
     _request_auth,
     _request_headers,
+    _request_method_callable,
+    http_session,
+    normalized_object_mapping,
+    object_list,
     resolved_url,
 )
 
@@ -53,6 +57,17 @@ _GOE_ERROR_TEXT: dict[int, str] = {
     15: "error-status-lock-stuck-open",
     16: "error-status-lock-stuck-locked",
 }
+
+
+class _RequiredGoERequestKwargs(TypedDict):
+    url: str
+    timeout: float
+
+
+class _GoERequestKwargs(_RequiredGoERequestKwargs, total=False):
+    params: dict[str, str]
+    auth: RequestAuth
+    headers: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -95,7 +110,7 @@ def load_goe_charger_settings(service: object, config_path: str) -> GoEChargerSe
     )
 
 
-def _goe_auth(auth_settings: TemplateAuthSettings) -> object | None:
+def _goe_auth(auth_settings: TemplateAuthSettings) -> RequestAuth | None:
     """Return one optional requests-compatible auth object for the go-e API."""
     return _request_auth(auth_settings)
 
@@ -112,12 +127,11 @@ def _goe_query_value(value: object) -> str:
 
 def _goe_payload(response_payload: object) -> dict[str, object]:
     """Return the plain status object for local or wrapped cloud responses."""
-    if not isinstance(response_payload, dict):
+    payload = normalized_object_mapping(response_payload)
+    if payload is None:
         return {}
-    data_payload = response_payload.get("data")
-    if isinstance(data_payload, dict):
-        return {str(key): value for key, value in data_payload.items()}
-    return {str(key): value for key, value in response_payload.items()}
+    data_payload = normalized_object_mapping(payload.get("data"))
+    return data_payload if data_payload is not None else payload
 
 
 def _goe_optional_int(value: object) -> int | None:
@@ -161,7 +175,7 @@ def _goe_phase_selection(payload: dict[str, object], default: PhaseSelection) ->
 def _goe_nrg_values(payload: dict[str, object]) -> list[float] | None:
     """Return the go-e `nrg` array as a numeric list when present."""
     raw = payload.get("nrg")
-    if not isinstance(raw, list):
+    if not object_list(raw):
         return None
     values: list[float] = []
     for item in raw:
@@ -226,7 +240,7 @@ class GoEChargerBackend:
         self.config_path = str(config_path).strip()
         self.settings = load_goe_charger_settings(service, self.config_path)
         session = getattr(service, "session", None)
-        self._session = session if session is not None else requests.Session()
+        self._session = http_session(session)
         self._observed_phase_selection: PhaseSelection = "P1"
 
     def _request_kwargs(
@@ -234,9 +248,9 @@ class GoEChargerBackend:
         url: str,
         *,
         params: dict[str, str] | None = None,
-    ) -> dict[str, object]:
+    ) -> _GoERequestKwargs:
         """Return one ready-to-use requests kwargs mapping."""
-        kwargs: dict[str, object] = {
+        kwargs: _GoERequestKwargs = {
             "url": str(url),
             "timeout": float(self.settings.timeout_seconds),
         }
@@ -252,7 +266,7 @@ class GoEChargerBackend:
 
     def _status_payload(self) -> dict[str, object]:
         """Return one normalized go-e status payload."""
-        response = self._session.get(
+        response = _request_method_callable(self._session, "GET")(
             **self._request_kwargs(
                 self.settings.state_url,
                 params={"filter": self.settings.status_filter},
@@ -263,7 +277,7 @@ class GoEChargerBackend:
 
     def _set_value(self, key: str, value: object) -> None:
         """Write one documented go-e API key through `/api/set`."""
-        response = self._session.get(
+        response = _request_method_callable(self._session, "GET")(
             **self._request_kwargs(
                 self.settings.enable_url,
                 params={str(key): _goe_query_value(value)},

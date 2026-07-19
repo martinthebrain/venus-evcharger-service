@@ -354,7 +354,7 @@ class _CompanionDbusBridgeCoreCases:
 
         self.assertTrue(EnergyCompanionDbusBridge._companion_publish_should_enqueue(direct_false))
         self.assertFalse(EnergyCompanionDbusBridge._companion_publish_should_enqueue(direct_true))
-        self.assertFalse(EnergyCompanionDbusBridge._companion_publish_should_enqueue(missing_enqueue))
+        self.assertTrue(EnergyCompanionDbusBridge._companion_publish_should_enqueue(missing_enqueue))
         self.assertFalse(EnergyCompanionDbusBridge._companion_publish_should_enqueue(missing_direct))
         self.assertEqual(EnergyCompanionDbusBridge._companion_publish_time(12), 12.0)
         self.assertEqual(EnergyCompanionDbusBridge._companion_publish_time(12.5), 12.5)

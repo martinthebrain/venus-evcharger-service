@@ -21,7 +21,8 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+        relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1_P2"},
             False,
             0.0,
@@ -109,6 +110,8 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
                 shelly_request_timeout_seconds=2.0,
             )
 
+            sync_backend_runtime_test_service(service)
+            sync_readback_test_service(service)
             resolved = build_service_backends(service)
             service._backend_bundle = resolved
             service._meter_backend = resolved.meter
@@ -122,7 +125,7 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
 
             controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-            override = controller.maybe_apply_auto_phase_selection(
+            override = controller.components.relay.foundation.auto_phase.maybe_apply_auto_phase_selection(
                 service,
                 True,
                 True,
@@ -136,7 +139,8 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
             self.assertEqual(service._phase_switch_pending_selection, "P1_P2")
             self.assertEqual(service._phase_switch_state, "waiting-relay-off")
 
-            relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+            relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+                service,
                 {"output": False, "_phase_selection": "P1"},
                 False,
                 0.0,
@@ -154,7 +158,8 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
             self.assertEqual(service.requested_phase_selection, "P1_P2")
             self.assertEqual(service._phase_switch_state, "stabilizing")
 
-            relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+            relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+                service,
                 {"output": False, "_phase_selection": "P1_P2"},
                 False,
                 0.0,
@@ -253,6 +258,8 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
                 shelly_request_timeout_seconds=2.0,
             )
 
+            sync_backend_runtime_test_service(service)
+            sync_readback_test_service(service)
             resolved = build_service_backends(service)
             service._backend_bundle = resolved
             service._meter_backend = resolved.meter
@@ -266,7 +273,7 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
 
             controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-            override = controller.maybe_apply_auto_phase_selection(
+            override = controller.components.relay.foundation.auto_phase.maybe_apply_auto_phase_selection(
                 service,
                 True,
                 True,
@@ -280,7 +287,8 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
             self.assertEqual(service._phase_switch_pending_selection, "P1_P2")
             self.assertEqual(service._phase_switch_state, "waiting-relay-off")
 
-            relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+            relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+                service,
                 {"output": False, "_phase_selection": "P1"},
                 False,
                 0.0,
@@ -298,7 +306,8 @@ class TestUpdateCycleControllerQuinary(UpdateCycleControllerTestBase):
             self.assertEqual(service.requested_phase_selection, "P1_P2")
             self.assertEqual(service._phase_switch_state, "stabilizing")
 
-            relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+            relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+                service,
                 {"output": False, "_phase_selection": "P1_P2"},
                 False,
                 0.0,

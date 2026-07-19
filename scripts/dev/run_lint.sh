@@ -4,13 +4,20 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
+PROJECT_PYTHON="$REPO_DIR/.venv-ruff/bin/python"
 
 cd "$REPO_DIR"
 
-if python3 -m ruff --version >/dev/null 2>&1; then
-	RUFF=(python3 -m ruff)
-elif [ -x "$REPO_DIR/.venv-ruff/bin/python" ]; then
+if [ -x "$PROJECT_PYTHON" ]; then
+	"$PROJECT_PYTHON" scripts/dev/check_test_facades.py
+else
+	python3 scripts/dev/check_test_facades.py
+fi
+
+if [ -x "$REPO_DIR/.venv-ruff/bin/python" ] && "$REPO_DIR/.venv-ruff/bin/python" -m ruff --version >/dev/null 2>&1; then
 	RUFF=("$REPO_DIR/.venv-ruff/bin/python" -m ruff)
+elif python3 -m ruff --version >/dev/null 2>&1; then
+	RUFF=(python3 -m ruff)
 else
 	echo "ruff is required for linting. Install it with: python3 -m venv .venv-ruff && .venv-ruff/bin/python -m pip install ruff" >&2
 	exit 1
@@ -33,24 +40,7 @@ fi
 	scripts/dev/pi_safety_invariants_gate.py \
 	scripts/dev/run_mutation_audit.py \
 	venus_evcharger_dbus_adapter.py \
-	venus_evcharger/dbus_adapter_components.py \
-	venus_evcharger/dbus_adapter_components_rate.py \
-	venus_evcharger/dbus_adapter_components_resource.py \
-	venus_evcharger/dbus_adapter_components_scheduler.py \
-	venus_evcharger/dbus_adapter_process.py \
-	venus_evcharger/dbus_adapter_process_health.py \
-	venus_evcharger/dbus_adapter_process_introspection.py \
-	venus_evcharger/dbus_adapter_process_introspection_snapshot.py \
-	venus_evcharger/dbus_adapter_process_io.py \
-	venus_evcharger/dbus_adapter_process_loop.py \
-	venus_evcharger/dbus_adapter_process_protocols.py \
-	venus_evcharger/dbus_adapter_process_runtime.py \
-	venus_evcharger/dbus_adapter_read.py \
-	venus_evcharger/dbus_adapter_write.py \
-	venus_evcharger/dbus_adapter_write_core.py \
-	venus_evcharger/dbus_adapter_write_health.py \
-	venus_evcharger/dbus_adapter_write_publish.py \
-	venus_evcharger/dbus_adapter_write_support.py \
+	venus_evcharger/dbus_adapter \
 	venus_evcharger/dbus_gateway.py \
 	venus_evcharger/dbus_gateway_cache.py \
 	venus_evcharger/dbus_gateway_client.py \

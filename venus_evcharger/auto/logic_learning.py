@@ -8,19 +8,23 @@ import time
 from typing import Any
 
 from venus_evcharger.core.contracts import thresholds_ordered
-from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
 
-from .policy import AutoPolicy, validate_auto_policy
+from .component_context import AutoDecisionContext
+from .policy import AutoPolicy
 
 LEARNED_CHARGE_POWER_STATES = {"unknown", "learning", "stable", "stale"}
 
 
-class _AutoDecisionLearning(ControllerAssemblyContract):
+class AutoLearningPolicy:
     """Expose learned charge-power state and Auto threshold scaling."""
 
-    def _learning_policy_now(self) -> float:
+    def __init__(self, context: AutoDecisionContext) -> None:
+        self._context = context
+        self.service = context.service
+
+    def learning_policy_now(self) -> float:
         """Return the current timestamp for learned-power freshness checks."""
-        time_now = getattr(self.service, "_time_now", None)
+        time_now = getattr(self.service, "time_now", None)
         if callable(time_now):
             current_time = time_now()
             if isinstance(current_time, (int, float)):
@@ -91,7 +95,7 @@ class _AutoDecisionLearning(ControllerAssemblyContract):
         updated_at = getattr(self.service, "learned_charge_power_updated_at", None)
         if updated_at is None:
             return None
-        current_time = self._learning_policy_now() if now is None else float(now)
+        current_time = self.learning_policy_now() if now is None else float(now)
         return current_time - float(updated_at)
 
     def _learned_charge_power_expired(self, now: float | None = None) -> bool:
@@ -174,13 +178,5 @@ class _AutoDecisionLearning(ControllerAssemblyContract):
         return start_watts, stop_watts, profile_name
 
     def _auto_policy(self) -> AutoPolicy:
-        """Return the structured AutoPolicy, synthesizing it from legacy attrs when needed."""
-        svc = self.service
-        policy = getattr(svc, "auto_policy", None)
-        if policy is None:
-            policy = validate_auto_policy(AutoPolicy.from_service(svc))
-            try:
-                svc.auto_policy = policy
-            except AttributeError:
-                pass
-        return policy
+        """Return the canonical Auto policy from the typed decision port."""
+        return self._context.port.auto_policy()

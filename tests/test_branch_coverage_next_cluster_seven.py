@@ -8,7 +8,12 @@ from tests.venus_evcharger_test_fixtures import make_runtime_state_service
 from tests.wizard_branch_runtime_cases_common import _imported_defaults, _namespace
 from venus_evcharger.bootstrap import wizard_cli_imports, wizard_cli_non_interactive
 from venus_evcharger.companion import EnergyCompanionDbusBridge
-from venus_evcharger.controllers.state_restore import _StateRuntimeRestore, _victron_ess_balance_energy_ids
+from venus_evcharger.controllers.state_restore import RuntimeStateRestorer
+from venus_evcharger.controllers.state_restore_victron_ess import (
+    VictronEssRuntimeRestorer,
+    _victron_ess_balance_energy_ids,
+)
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
 
 
 class BranchCoverageNextClusterSevenTests(unittest.TestCase):
@@ -69,54 +74,55 @@ class BranchCoverageNextClusterSevenTests(unittest.TestCase):
             auto_energy_sources=[SimpleNamespace(source_id=""), SimpleNamespace(source_id="hybrid")],
             _victron_ess_balance_learning_profiles={"keep": {"sample_count": 1}},
         )
+        restorer = VictronEssRuntimeRestorer()
 
-        self.assertIsNone(_StateRuntimeRestore._victron_ess_balance_activation_mode({"activation_mode": "bad"}, service))
+        self.assertIsNone(restorer._victron_ess_balance_activation_mode({"activation_mode": "bad"}, service))
         self.assertEqual(_victron_ess_balance_energy_ids(service), ["hybrid"])
 
         learning_payload = {
             "schema_version": 1,
             "source_id": "hybrid",
-            "topology_key": _StateRuntimeRestore._victron_ess_balance_runtime_topology_key(service, "hybrid"),
+            "topology_key": restorer._victron_ess_balance_runtime_topology_key(service, "hybrid"),
             "profiles": {"": {}, "bad": "x", "ok": {"delay_samples": 2}},
         }
-        normalized = _StateRuntimeRestore._normalized_victron_ess_balance_learning_profiles(learning_payload["profiles"])
+        normalized = restorer._normalized_victron_ess_balance_learning_profiles(learning_payload["profiles"])
         self.assertEqual(set(normalized), {"ok"})
 
-        _StateRuntimeRestore._restore_victron_ess_balance_learning_state_payload(service, {"schema_version": 9})
+        restorer._restore_victron_ess_balance_learning_state_payload(service, {"schema_version": 9})
         self.assertIn("keep", service._victron_ess_balance_learning_profiles)
 
-        _StateRuntimeRestore._restore_victron_ess_balance_learning_state_payload(
+        restorer._restore_victron_ess_balance_learning_state_payload(
             service,
             {"schema_version": 1, "topology_key": "mismatch", "profiles": {"ok": {}}},
         )
         self.assertIn("keep", service._victron_ess_balance_learning_profiles)
 
-        _StateRuntimeRestore._restore_victron_ess_balance_learning_state_payload(
+        restorer._restore_victron_ess_balance_learning_state_payload(
             service,
             {
                 "schema_version": 1,
                 "source_id": "hybrid",
-                "topology_key": _StateRuntimeRestore._victron_ess_balance_runtime_topology_key(service, "hybrid"),
+                "topology_key": restorer._victron_ess_balance_runtime_topology_key(service, "hybrid"),
                 "profiles": "bad",
             },
         )
         self.assertIn("keep", service._victron_ess_balance_learning_profiles)
 
-        _StateRuntimeRestore._restore_victron_ess_balance_adaptive_tuning_payload(service, {"schema_version": 9})
+        restorer._restore_victron_ess_balance_adaptive_tuning_payload(service, {"schema_version": 9})
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_activation_mode, "always")
 
-        _StateRuntimeRestore._restore_victron_ess_balance_adaptive_tuning_payload(
+        restorer._restore_victron_ess_balance_adaptive_tuning_payload(
             service,
             {"schema_version": 1, "topology_key": "mismatch"},
         )
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_activation_mode, "always")
 
-        _StateRuntimeRestore._restore_victron_ess_balance_adaptive_tuning_payload(
+        restorer._restore_victron_ess_balance_adaptive_tuning_payload(
             service,
             {
                 "schema_version": 1,
                 "source_id": "hybrid",
-                "topology_key": _StateRuntimeRestore._victron_ess_balance_runtime_topology_key(service, "hybrid"),
+                "topology_key": restorer._victron_ess_balance_runtime_topology_key(service, "hybrid"),
                 "activation_mode": "bad",
             },
         )
@@ -124,19 +130,21 @@ class BranchCoverageNextClusterSevenTests(unittest.TestCase):
 
     def test_state_restore_helpers_cover_non_dict_counts_and_empty_runtime_paths(self) -> None:
         service = make_runtime_state_service(runtime_state_path="")
-        controller = type("RestoreHarness", (_StateRuntimeRestore,), {"service": service, "_normalize_mode": staticmethod(int), "_runtime_load_time": staticmethod(lambda _svc: 0.0), "_read_runtime_state_payload": staticmethod(lambda _path: None), "_normalize_runtime_phase_selection": staticmethod(lambda value, default: str(value or default))})()
+        controller = RuntimeStateRestorer(
+            service,
+            int,
+            RuntimeStateNormalizer(),
+            VictronEssRuntimeRestorer(),
+        )
 
         self.assertEqual(controller._normalized_phase_switch_mismatch_counts("bad", "P1"), {})
-        self.assertEqual(_StateRuntimeRestore._normalized_contactor_fault_counts("bad"), {})
-        self.assertEqual(_StateRuntimeRestore._normalized_contactor_fault_counts({"bad": 2, "contactor-suspected-open": 3}), {"contactor-suspected-open": 3})
-
-        service.virtual_mode = 1
-        controller.load_runtime_state()
-        self.assertEqual(service.virtual_mode, 1)
-
-        service.runtime_state_path = "/tmp/runtime.json"
-        controller.load_runtime_state()
-        self.assertEqual(service.virtual_mode, 1)
+        self.assertEqual(RuntimeStateRestorer._normalized_contactor_fault_counts("bad"), {})
+        self.assertEqual(
+            RuntimeStateRestorer._normalized_contactor_fault_counts(
+                {"bad": 2, "contactor-suspected-open": 3}
+            ),
+            {"contactor-suspected-open": 3},
+        )
 
 
 if __name__ == "__main__":

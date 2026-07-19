@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from typing import ClassVar, Protocol, TypedDict
 
+from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.core.contracts import normalize_learning_phase, normalize_learning_state
 from venus_evcharger.update.learning_profile import (
     LearnedChargePowerProfile,
@@ -13,7 +14,6 @@ from venus_evcharger.update.learning_profile import (
     normalized_learning_score,
     normalized_learning_text,
 )
-from venus_evcharger.update.victron_ess_balance import _UpdateCycleVictronEssBalance
 
 _DEFAULT_LEARNING_PHASE = "L1"
 _DEFAULT_LEARNING_VOLTAGE = 230.0
@@ -24,6 +24,8 @@ _DEFAULT_LEARNING_DIAGNOSTIC_DETAIL = ""
 
 
 class _LearningRuntimeService(Protocol):
+    charging_started_at: float | None
+    auto_policy: AutoPolicy
     learned_charge_power_state: str
     learned_charge_power_watts: float | None
     learned_charge_power_updated_at: float | None
@@ -37,7 +39,6 @@ class _LearningRuntimeService(Protocol):
     max_current: float
     voltage_mode: str
     _last_voltage: float | None
-    auto_learn_charge_power_max_age_seconds: float
 
 
 class _LearningTrackingSnapshot(TypedDict):
@@ -52,7 +53,10 @@ class _LearningTrackingSnapshot(TypedDict):
     checked_session_started_at: float | None
 
 
-class _UpdateCycleLearningRuntime(_UpdateCycleVictronEssBalance):
+class _LearningRuntime:
+    LEARNED_POWER_SIGNATURE_MISMATCH_SESSIONS: ClassVar[int]
+    LEARNED_POWER_STABLE_MIN_SAMPLES: ClassVar[int]
+    LEARNED_POWER_STABLE_MIN_SECONDS: ClassVar[float]
     LEARNED_POWER_STABLE_TOLERANCE_RATIO: ClassVar[float]
     LEARNED_POWER_STABLE_TOLERANCE_WATTS: ClassVar[float]
     LEARNED_POWER_VOLTAGE_TOLERANCE_VOLTS: ClassVar[float]
@@ -403,7 +407,7 @@ class _UpdateCycleLearningRuntime(_UpdateCycleVictronEssBalance):
     def _is_learned_charge_power_stale(self, now: float) -> bool:
         """Return True when the persisted learned value is too old for reuse."""
         svc = self.service
-        max_age_seconds = float(getattr(svc, "auto_learn_charge_power_max_age_seconds", 21600.0))
+        max_age_seconds = float(svc.auto_policy.learn_charge_power.max_age_seconds)
         if max_age_seconds <= 0:
             return False
         updated_at = getattr(svc, "learned_charge_power_updated_at", None)

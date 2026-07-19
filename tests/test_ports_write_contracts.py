@@ -9,21 +9,33 @@ from venus_evcharger.ports.write import WriteControllerPort
 
 
 def _service_double(**overrides: object) -> SimpleNamespace:
+    auto = SimpleNamespace(
+        clear_samples=MagicMock(return_value="cleared"),
+        normalize_mode=MagicMock(return_value=2),
+        mode_uses_auto_logic=MagicMock(return_value=1),
+    )
+    runtime = SimpleNamespace(
+        queue_relay_command=MagicMock(return_value="queued"),
+        publish_local_pm_status=MagicMock(return_value="published"),
+        worker_snapshot=MagicMock(return_value={}),
+        pending_relay_command=MagicMock(return_value=(False, 99.0)),
+        update_worker_snapshot=MagicMock(return_value="updated"),
+        phase_selection_requires_pause=MagicMock(return_value=1),
+        apply_phase_selection=MagicMock(return_value="P1_P2_P3"),
+    )
+    state = SimpleNamespace(
+        publish_field=MagicMock(return_value="dbus-published"),
+        summary=MagicMock(return_value="ready"),
+        save_runtime_state=MagicMock(return_value="saved"),
+        save_runtime_overrides=MagicMock(),
+        validate_runtime_config=MagicMock(),
+    )
     values: dict[str, object] = {
         "supported_phase_selections": ("P1_P2_P3", "P1"),
-        "_clear_auto_samples": MagicMock(return_value="cleared"),
-        "_queue_relay_command": MagicMock(return_value="queued"),
-        "_publish_local_pm_status": MagicMock(return_value="published"),
-        "_get_worker_snapshot": MagicMock(return_value={}),
-        "_update_worker_snapshot": MagicMock(return_value="updated"),
-        "_publish_dbus_field": MagicMock(return_value="dbus-published"),
-        "_time_now": MagicMock(return_value=100.25),
-        "_phase_selection_requires_pause": MagicMock(return_value=1),
-        "_apply_phase_selection": MagicMock(return_value="P1_P2_P3"),
-        "_normalize_mode": MagicMock(return_value=2),
-        "_mode_uses_auto_logic": MagicMock(return_value=1),
-        "_state_summary": MagicMock(return_value="ready"),
-        "_save_runtime_state": MagicMock(return_value="saved"),
+        "auto": auto,
+        "runtime": runtime,
+        "state": state,
+        "time_now": MagicMock(return_value=100.25),
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -43,16 +55,16 @@ class WriteControllerPortContractTests(unittest.TestCase):
         self.assertEqual(port.publish_dbus_field("status", 1, 15.5), "dbus-published")
         self.assertEqual(port.time_now(), 100.25)
 
-        service._clear_auto_samples.assert_called_once_with()
-        service._queue_relay_command.assert_called_once_with(True, 12.5)
-        service._publish_local_pm_status.assert_called_once_with(False, 13.5)
-        service._get_worker_snapshot.assert_called_once_with()
-        service._update_worker_snapshot.assert_called_once_with(pm_status={"output": True})
+        service.auto.clear_samples.assert_called_once_with()
+        service.runtime.queue_relay_command.assert_called_once_with(True, 12.5)
+        service.runtime.publish_local_pm_status.assert_called_once_with(False, 13.5)
+        service.runtime.worker_snapshot.assert_called_once_with()
+        service.runtime.update_worker_snapshot.assert_called_once_with(pm_status={"output": True})
         self.assertEqual(
-            service._publish_dbus_field.call_args_list,
+            service.state.publish_field.call_args_list,
             [call("mode", 2, 14.5, force=True), call("status", 1, 15.5, force=False)],
         )
-        service._time_now.assert_called_once_with()
+        service.time_now.assert_called_once_with()
 
     def test_relay_freshness_budget_uses_the_tightest_positive_runtime_limit(self) -> None:
         self.assertEqual(WriteControllerPort(_service_double())._relay_status_freshness_seconds(), 2.0)
@@ -143,7 +155,7 @@ class WriteControllerPortContractTests(unittest.TestCase):
         self.assertFalse(pending((0, 1.0)))
         self.assertTrue(pending((1,)))
 
-    def test_last_relay_sample_prefers_latest_confirmed_sample(self) -> None:
+    def test_last_relay_sample_uses_only_canonical_confirmed_snapshot(self) -> None:
         primary = _service_double(
             _last_confirmed_pm_status={},
             _last_confirmed_pm_status_at=12.0,
@@ -153,7 +165,7 @@ class WriteControllerPortContractTests(unittest.TestCase):
         )
         self.assertEqual(WriteControllerPort(primary)._last_relay_output_sample(), ({}, 12.0))
 
-        fallback = _service_double(
+        obsolete_fields_only = _service_double(
             _last_confirmed_pm_status=None,
             _last_confirmed_pm_status_at=12.0,
             _last_pm_status={"output": False},
@@ -161,11 +173,9 @@ class WriteControllerPortContractTests(unittest.TestCase):
             _last_pm_status_at=13.0,
         )
         self.assertEqual(
-            WriteControllerPort(fallback)._last_relay_output_sample(),
-            ({"output": False}, 13.0),
+            WriteControllerPort(obsolete_fields_only)._last_relay_output_sample(),
+            (None, 12.0),
         )
-        fallback._last_pm_status_confirmed = False
-        self.assertEqual(WriteControllerPort(fallback)._last_relay_output_sample(), (None, None))
 
         missing_flag = _service_double(_last_pm_status={"output": True}, _last_pm_status_at=14.0)
         self.assertEqual(WriteControllerPort(missing_flag)._last_relay_output_sample(), (None, None))
@@ -173,16 +183,15 @@ class WriteControllerPortContractTests(unittest.TestCase):
         self.assertEqual(WriteControllerPort(missing_fallback)._last_relay_output_sample(), (None, None))
 
     def test_cutover_is_conservative_without_fresh_confirmation(self) -> None:
-        service = _service_double(
-            _get_worker_snapshot=MagicMock(return_value={}),
-            _peek_pending_relay_command=MagicMock(return_value=(True, 99.0)),
-        )
+        service = _service_double()
+        service.runtime.worker_snapshot.return_value = {}
+        service.runtime.pending_relay_command.return_value = (True, 99.0)
         port = WriteControllerPort(service)
         with patch.object(WriteControllerPort, "_fresh_confirmed_relay_output") as confirmed:
             self.assertTrue(port.relay_may_be_on_for_cutover())
             confirmed.assert_not_called()
 
-        service._peek_pending_relay_command.return_value = (False, 99.0)
+        service.runtime.pending_relay_command.return_value = (False, 99.0)
         with patch.object(WriteControllerPort, "_fresh_confirmed_relay_output", return_value=False) as confirmed:
             self.assertFalse(port.relay_may_be_on_for_cutover())
             confirmed.assert_called_once_with({})
@@ -190,10 +199,6 @@ class WriteControllerPortContractTests(unittest.TestCase):
             self.assertTrue(port.relay_may_be_on_for_cutover())
         with patch.object(WriteControllerPort, "_fresh_confirmed_relay_output", return_value=None):
             self.assertTrue(port.relay_may_be_on_for_cutover())
-
-        del service._peek_pending_relay_command
-        with patch.object(WriteControllerPort, "_fresh_confirmed_relay_output", return_value=False):
-            self.assertFalse(port.relay_may_be_on_for_cutover())
 
     def test_charger_backend_capabilities_and_commands_are_explicit(self) -> None:
         service = _service_double()
@@ -241,39 +246,27 @@ class WriteControllerPortContractTests(unittest.TestCase):
         self.assertEqual(port.state_summary(), "ready")
         self.assertEqual(port.save_runtime_state(), "saved")
 
-        service._phase_selection_requires_pause.assert_called_once_with()
-        service._apply_phase_selection.assert_called_once_with("P1")
-        service._normalize_mode.assert_called_once_with("scheduled")
-        service._mode_uses_auto_logic.assert_called_once_with(2)
-        service._state_summary.assert_called_once_with()
-        service._save_runtime_state.assert_called_once_with()
+        service.runtime.phase_selection_requires_pause.assert_called_once_with()
+        service.runtime.apply_phase_selection.assert_called_once_with("P1")
+        service.auto.normalize_mode.assert_called_once_with("scheduled")
+        service.auto.mode_uses_auto_logic.assert_called_once_with(2)
+        service.state.summary.assert_called_once_with()
+        service.state.save_runtime_state.assert_called_once_with()
 
-        service._apply_phase_selection.return_value = 3
-        with self.assertRaisesRegex(TypeError, "_apply_phase_selection must return str, got int"):
+        service.runtime.apply_phase_selection.return_value = 3
+        with self.assertRaisesRegex(TypeError, "apply_phase_selection must return str, got int"):
             port.apply_phase_selection("P1")
-        service._state_summary.return_value = None
-        with self.assertRaisesRegex(TypeError, "_state_summary must return str, got NoneType"):
+        service.state.summary.return_value = None
+        with self.assertRaisesRegex(TypeError, "state.summary must return str, got NoneType"):
             port.state_summary()
 
-    def test_optional_runtime_hooks_run_only_when_callable(self) -> None:
-        service = _service_double(
-            _save_runtime_overrides=MagicMock(),
-            _validate_runtime_config=MagicMock(),
-        )
+    def test_state_runtime_hooks_are_explicit_role_contracts(self) -> None:
+        service = _service_double()
         port = WriteControllerPort(service)
         port.save_runtime_overrides()
         port.validate_runtime_config()
-        service._save_runtime_overrides.assert_called_once_with()
-        service._validate_runtime_config.assert_called_once_with()
-
-        service._save_runtime_overrides = "disabled"
-        service._validate_runtime_config = None
-        port.save_runtime_overrides()
-        port.validate_runtime_config()
-
-        service_without_hooks = _service_double()
-        WriteControllerPort(service_without_hooks).save_runtime_overrides()
-        WriteControllerPort(service_without_hooks).validate_runtime_config()
+        service.state.save_runtime_overrides.assert_called_once_with()
+        service.state.validate_runtime_config.assert_called_once_with()
 
 
 if __name__ == "__main__":

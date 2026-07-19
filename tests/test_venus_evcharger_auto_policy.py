@@ -14,6 +14,21 @@ from venus_evcharger.auto.policy import (
 
 
 class TestAutoPolicy(unittest.TestCase):
+    def test_threshold_profile_clamps_inverted_stop_threshold(self) -> None:
+        profile = AutoThresholdProfile(1200.0, 1300.0)
+
+        with patch("venus_evcharger.auto.policy.logging.warning") as warning_mock:
+            profile.clamp("Start", "Stop")
+
+        self.assertEqual(profile.stop_surplus_watts, 1200.0)
+        warning_mock.assert_called_once_with(
+            "%s %s above %s %s, clamping",
+            "Stop",
+            1300.0,
+            "Start",
+            1200.0,
+        )
+
     def test_non_negative_helper_preserves_zero_and_logs_negative_values(self) -> None:
         with patch("venus_evcharger.auto.policy.logging.warning") as warning_mock:
             self.assertEqual(auto_policy_module._clamp_non_negative_value(0.0, "ExactZero"), 0.0)
@@ -43,6 +58,37 @@ class TestAutoPolicy(unittest.TestCase):
 
         self.assertEqual(policy.volatility_low_watts, 0.0)
         self.assertEqual(policy.volatility_high_watts, 0.0)
+
+    def test_ewma_policy_clamps_fractions_and_orders_volatility_bounds(self) -> None:
+        policy = AutoStopEwmaPolicy(
+            base_alpha=0.0,
+            stable_alpha=1.1,
+            volatile_alpha=-0.1,
+            volatility_low_watts=500.0,
+            volatility_high_watts=400.0,
+        )
+
+        policy.clamp()
+
+        self.assertEqual(policy.base_alpha, 0.35)
+        self.assertEqual(policy.stable_alpha, 0.55)
+        self.assertEqual(policy.volatile_alpha, 0.15)
+        self.assertEqual(policy.volatility_low_watts, 500.0)
+        self.assertEqual(policy.volatility_high_watts, 500.0)
+
+    def test_ewma_policy_selects_each_adaptive_alpha_stage(self) -> None:
+        policy = AutoStopEwmaPolicy(
+            base_alpha=0.3,
+            stable_alpha=0.6,
+            volatile_alpha=0.1,
+            volatility_low_watts=100.0,
+            volatility_high_watts=300.0,
+        )
+
+        self.assertEqual(policy.adaptive_alpha(None), (0.3, "base", None))
+        self.assertEqual(policy.adaptive_alpha(100.0), (0.6, "stable", 100.0))
+        self.assertEqual(policy.adaptive_alpha(200.0), (0.3, "medium", 200.0))
+        self.assertEqual(policy.adaptive_alpha(300.0), (0.1, "volatile", 300.0))
 
     def test_percentage_helper_clamps_out_of_range_values(self) -> None:
         self.assertEqual(AutoPolicy._clamp_percentage(120.0, "AutoMinSoc"), 100.0)
@@ -222,3 +268,43 @@ class TestAutoPolicy(unittest.TestCase):
             "AutoStopGridImportWatts %s at or below AutoStartMaxGridImportWatts %s, grid-import hysteresis is zero or negative",
             warning_messages,
         )
+
+    def test_auto_policy_clamps_cross_field_soc_relationships(self) -> None:
+        policy = AutoPolicy(
+            high_soc_threshold=60.0,
+            high_soc_release_threshold=70.0,
+            min_soc=40.0,
+            resume_soc=30.0,
+        )
+
+        policy.clamp()
+
+        self.assertEqual(policy.high_soc_release_threshold, 60.0)
+        self.assertEqual(policy.resume_soc, 40.0)
+
+    def test_auto_policy_accepts_well_separated_hysteresis_without_warning(self) -> None:
+        policy = AutoPolicy(
+            normal_profile=AutoThresholdProfile(1500.0, 1100.0),
+            high_soc_profile=AutoThresholdProfile(1800.0, 1400.0),
+            high_soc_threshold=60.0,
+            high_soc_release_threshold=55.0,
+            min_soc=30.0,
+            resume_soc=35.0,
+            start_max_grid_import_watts=50.0,
+            stop_grid_import_watts=300.0,
+        )
+
+        with patch("venus_evcharger.auto.policy.logging.warning") as warning_mock:
+            policy.clamp()
+
+        warning_mock.assert_not_called()
+
+    def test_threshold_profile_resolution_preserves_soc_hysteresis(self) -> None:
+        policy = AutoPolicy(high_soc_threshold=60.0, high_soc_release_threshold=55.0)
+
+        self.assertEqual(policy.resolve_threshold_profile(61.0, None), (policy.high_soc_profile, True, "high-soc"))
+        self.assertEqual(policy.resolve_threshold_profile(60.0, None), (policy.normal_profile, False, "normal"))
+        self.assertEqual(policy.resolve_threshold_profile(55.0, True), (policy.high_soc_profile, True, "high-soc"))
+        self.assertEqual(policy.resolve_threshold_profile(54.9, True), (policy.normal_profile, False, "normal"))
+        self.assertEqual(policy.resolve_threshold_profile(61.0, False), (policy.high_soc_profile, True, "high-soc"))
+        self.assertEqual(policy.resolve_threshold_profile(60.0, False), (policy.normal_profile, False, "normal"))

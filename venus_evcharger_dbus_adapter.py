@@ -8,7 +8,7 @@ import argparse
 import configparser
 import logging
 
-from venus_evcharger.dbus_adapter_process import DbusAdapter, _logging_level_from_config
+from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter, _logging_level_from_config
 from venus_evcharger.dbus_gateway import gateway_paths
 
 __all__ = ["DbusAdapter", "main"]

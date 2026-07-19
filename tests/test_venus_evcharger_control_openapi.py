@@ -4,8 +4,9 @@ import hashlib
 import unittest
 
 from venus_evcharger.control import build_control_api_openapi_spec
-from venus_evcharger.control import openapi
 from venus_evcharger.control import openapi_helpers
+from venus_evcharger.control import openapi_schemas
+from venus_evcharger.core.contracts_control_surface import CONTROL_COMMAND_NAMES
 
 
 class TestVenusEvchargerControlOpenApi(unittest.TestCase):
@@ -16,16 +17,16 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             separators=(",", ":"),
             ensure_ascii=True,
         ).encode("utf-8")
-        self.assertEqual(len(canonical), 47948)
+        self.assertEqual(len(canonical), 47486)
         self.assertEqual(
             hashlib.sha256(canonical).hexdigest(),
-            "f55eb9a400a2809d81999d5591b9d0dff7242f637430dcb9709f95dc4536ddb0",
+            "e26e4893af1bf60f89fe96cfe0e70c09bf135a40716f734a7c9672cfd11ffd7f",
         )
 
     def test_string_schema_supports_optional_enum_and_default(self) -> None:
-        self.assertEqual(openapi._string_schema(), {"type": "string"})
+        self.assertEqual(openapi_helpers._string_schema(), {"type": "string"})
         self.assertEqual(
-            openapi._string_schema(enum=("b", "a"), default="a"),
+            openapi_helpers._string_schema(enum=("b", "a"), default="a"),
             {"type": "string", "enum": ["a", "b"], "default": "a"},
         )
         self.assertEqual(
@@ -34,40 +35,40 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
         )
 
     def test_boolean_schema_supports_optional_default(self) -> None:
-        self.assertEqual(openapi._boolean_schema(), {"type": "boolean"})
+        self.assertEqual(openapi_helpers._boolean_schema(), {"type": "boolean"})
         self.assertEqual(
-            openapi._boolean_schema(default=True),
+            openapi_helpers._boolean_schema(default=True),
             {"type": "boolean", "default": True},
         )
-        self.assertEqual(openapi._boolean_schema(default=False), {"type": "boolean", "default": False})
+        self.assertEqual(openapi_helpers._boolean_schema(default=False), {"type": "boolean", "default": False})
 
     def test_integer_schema_supports_optional_minimum(self) -> None:
-        self.assertEqual(openapi._integer_schema(), {"type": "integer"})
+        self.assertEqual(openapi_helpers._integer_schema(), {"type": "integer"})
         self.assertEqual(
-            openapi._integer_schema(minimum=0),
+            openapi_helpers._integer_schema(minimum=0),
             {"type": "integer", "minimum": 0},
         )
         self.assertEqual(
-            openapi._integer_schema(enum=(2, 0, 1)),
+            openapi_helpers._integer_schema(enum=(2, 0, 1)),
             {"type": "integer", "enum": [0, 1, 2]},
         )
         self.assertEqual(
-            openapi._integer_schema(minimum=1, enum=(3, 1, 2)),
+            openapi_helpers._integer_schema(minimum=1, enum=(3, 1, 2)),
             {"type": "integer", "minimum": 1, "enum": [1, 2, 3]},
         )
 
     def test_number_schema_supports_optional_minimum(self) -> None:
-        self.assertEqual(openapi._number_schema(), {"type": "number"})
+        self.assertEqual(openapi_helpers._number_schema(), {"type": "number"})
         self.assertEqual(
-            openapi._number_schema(minimum=0.0),
+            openapi_helpers._number_schema(minimum=0.0),
             {"type": "number", "minimum": 0.0},
         )
         self.assertEqual(
-            openapi._number_schema(exclusive_minimum=0.0, maximum=1.0),
+            openapi_helpers._number_schema(exclusive_minimum=0.0, maximum=1.0),
             {"type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0},
         )
         self.assertEqual(
-            openapi._number_schema(minimum=0.0, exclusive_minimum=0.5, maximum=16.0),
+            openapi_helpers._number_schema(minimum=0.0, exclusive_minimum=0.5, maximum=16.0),
             {"type": "number", "minimum": 0.0, "exclusiveMinimum": 0.5, "maximum": 16.0},
         )
 
@@ -94,7 +95,7 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             {"oneOf": [{"type": "boolean"}, {"type": "integer", "enum": [0, 1]}]},
         )
         self.assertEqual(
-            openapi._object_schema({"a": {"type": "string"}}, required=(), additional_properties=False),
+            openapi_helpers._object_schema({"a": {"type": "string"}}, required=(), additional_properties=False),
             {
                 "type": "object",
                 "properties": {"a": {"type": "string"}},
@@ -102,7 +103,7 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             },
         )
         self.assertEqual(
-            openapi._object_schema(
+            openapi_helpers._object_schema(
                 {"a": {"type": "string"}},
                 required=(field for field in ("a", "b")),
                 additional_properties={"type": "string"},
@@ -115,7 +116,7 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             },
         )
         self.assertEqual(
-            openapi._object_schema({"a": {"type": "string"}}),
+            openapi_helpers._object_schema({"a": {"type": "string"}}),
             {
                 "type": "object",
                 "properties": {"a": {"type": "string"}},
@@ -136,7 +137,7 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             },
         )
         self.assertEqual(
-            openapi._named_command_request_schema("set_mode", {"type": "integer"}),
+            openapi_schemas._named_command_request_schema("set_mode", {"type": "integer"}),
             {
                 "type": "object",
                 "properties": {
@@ -233,8 +234,13 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
         )
         self.assertEqual(
             schemas["ControlCommandRequest"]["oneOf"][0]["$ref"],
-            "#/components/schemas/LegacyUnknownWriteCommandRequest",
+            "#/components/schemas/ResetContactorLockoutCommandRequest",
         )
+        self.assertEqual(
+            schemas["ControlCommand"]["properties"]["name"]["enum"],
+            sorted(CONTROL_COMMAND_NAMES),
+        )
+        self.assertNotIn("default", schemas["ControlCommand"]["properties"]["name"])
         self.assertEqual(
             schemas["SetModeCommandRequest"]["properties"]["value"]["enum"],
             [0, 1, 2],
@@ -297,7 +303,6 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
                 "/v1/state/victron-bias-recommendation",
             ],
             "request_schema_refs": [
-                "LegacyUnknownWriteCommandRequest",
                 "ResetContactorLockoutCommandRequest",
                 "ResetContactorLockoutPathRequest",
                 "ResetPhaseLockoutCommandRequest",

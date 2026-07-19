@@ -12,7 +12,7 @@ from venus_evcharger.runtime.async_mainloop_types import (
     require_control_command_queue,
     require_publish_queue,
 )
-from venus_evcharger.service import return_contracts as service_return_contracts
+from venus_evcharger.core import return_contracts
 
 
 class RuntimeAsyncMainloopTypeContractTests(unittest.TestCase):
@@ -115,13 +115,13 @@ class RuntimeAsyncMainloopTypeContractTests(unittest.TestCase):
             "named",
         )
 
-    def test_service_return_contract_compatibility_path_exports_core_contracts(self) -> None:
-        self.assertIs(service_return_contracts.require_bool(True, "flag"), True)
-        self.assertIsNone(service_return_contracts.require_none(None, "noop"))
-        self.assertEqual(service_return_contracts.require_tuple2(("a", "b"), "pair"), ("a", "b"))
+    def test_core_return_contracts_validate_exact_runtime_shapes(self) -> None:
+        self.assertIs(return_contracts.require_bool(True, "flag"), True)
+        self.assertIsNone(return_contracts.require_none(None, "noop"))
+        self.assertEqual(return_contracts.require_tuple2(("a", "b"), "pair"), ("a", "b"))
 
         with self.assertRaisesRegex(TypeError, "noop must return None, got int"):
-            service_return_contracts.require_none(1, "noop")
+            return_contracts.require_none(1, "noop")
 
 
 if __name__ == "__main__":

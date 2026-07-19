@@ -4,100 +4,85 @@
 from __future__ import annotations
 
 import logging
-import subprocess
-from typing import Any
+from collections.abc import Callable
+from dataclasses import dataclass
 
-import requests
+from venus_evcharger.update.input_cache import InputCacheResolver
+from venus_evcharger.update.learning import LearningController
+from venus_evcharger.update.offline_publish import OfflinePublisher
+from venus_evcharger.update.pm_snapshot import PmSnapshotResolver
+from venus_evcharger.update.readback_resolver import ReadbackResolver
+from venus_evcharger.update.relay import RelayComponents, build_relay_foundation, complete_relay_components
+from venus_evcharger.update.runtime_cycle import RuntimeCycleCoordinator
+from venus_evcharger.update.runtime_cycle_contracts import UpdateCycleServicePort
+from venus_evcharger.update.software_update_controller import SoftwareUpdateController
+from venus_evcharger.update.state import UpdateStateController
+from venus_evcharger.update.victron_ess_balance import VictronEssBalanceController
 
-from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_PROCESS_ERRORS
-from venus_evcharger.update.software_update_support import _UpdateCycleSoftwareUpdate
+
+@dataclass(frozen=True, slots=True)
+class UpdateCycleComponents:
+    """Named component graph owned by one periodic update controller."""
+
+    readbacks: ReadbackResolver
+    state: UpdateStateController
+    pm_snapshots: PmSnapshotResolver
+    inputs: InputCacheResolver
+    offline: OfflinePublisher
+    relay: RelayComponents
+    learning: LearningController
+    victron_ess_balance: VictronEssBalanceController
+    runtime_cycle: RuntimeCycleCoordinator
+    software_update: SoftwareUpdateController
 
 
-class UpdateCycleController(_UpdateCycleSoftwareUpdate):
+class UpdateCycleController:
     """Encapsulate the periodic Shelly/Auto update pipeline."""
 
-    LEARNED_POWER_STABLE_MIN_SAMPLES = 3
-    LEARNED_POWER_STABLE_MIN_SECONDS = 15.0
-    LEARNED_POWER_STABLE_TOLERANCE_WATTS = 150.0
-    LEARNED_POWER_STABLE_TOLERANCE_RATIO = 0.08
-    LEARNED_POWER_SIGNATURE_MISMATCH_SESSIONS = 2
-    LEARNED_POWER_VOLTAGE_TOLERANCE_VOLTS = 10.0
-    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS = 1.0
-    SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS = 7.0 * 24.0 * 3600.0
-    SOFTWARE_UPDATE_REQUEST_TIMEOUT_SECONDS = 5.0
-
-    def __init__(self, service: Any, phase_values_func: Any, health_code_func: Any) -> None:
+    def __init__(
+        self,
+        service: UpdateCycleServicePort,
+        phase_values_func: Callable[[float, float, object, object], object],
+        health_code_func: Callable[[str], int],
+    ) -> None:
         self.service = service
-        self._phase_values = phase_values_func
-        self._health_code = health_code_func
-
-    @classmethod
-    def _software_update_manifest_result(
-        cls,
-        manifest_source: str,
-        current_version: str,
-        installed_bundle_hash: str,
-    ) -> tuple[str, bool, str]:
-        """Return version, availability, and detail from one manifest source."""
-        response = requests.get(
-            manifest_source,
-            timeout=cls.SOFTWARE_UPDATE_REQUEST_TIMEOUT_SECONDS,
+        readbacks = ReadbackResolver(service._readback_store, service, service.time_now)
+        service._readback_resolver = readbacks
+        relay_foundation = build_relay_foundation(phase_values_func)
+        state = UpdateStateController(
+            service,
+            relay_foundation.targets,
+            relay_foundation.health,
+            health_code_func,
         )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            return "", False, ""
-        available_version = cls._software_update_payload_value(payload, "version")
-        bundle_hash = cls._software_update_payload_value(payload, "bundle_sha256")
-        available = cls._software_update_manifest_available(
-            available_version,
-            bundle_hash,
-            current_version,
-            installed_bundle_hash,
+        relay = complete_relay_components(relay_foundation, state)
+        pm_snapshots = PmSnapshotResolver()
+        inputs = InputCacheResolver(service)
+        offline = OfflinePublisher(service, relay_foundation.telemetry, state)
+        learning = LearningController(service)
+        victron_ess_balance = VictronEssBalanceController()
+        runtime_cycle = RuntimeCycleCoordinator(
+            service,
+            state,
+            pm_snapshots,
+            inputs,
+            offline,
+            relay,
+            learning,
+            victron_ess_balance,
         )
-        return available_version, available, "manifest"
-
-    @classmethod
-    def _software_update_version_result(
-        cls,
-        version_source: str,
-        current_version: str,
-    ) -> tuple[str, bool, str]:
-        """Return version, availability, and detail from one version-text source."""
-        response = requests.get(
-            version_source,
-            timeout=cls.SOFTWARE_UPDATE_REQUEST_TIMEOUT_SECONDS,
+        self.components = UpdateCycleComponents(
+            readbacks=readbacks,
+            state=state,
+            pm_snapshots=pm_snapshots,
+            inputs=inputs,
+            offline=offline,
+            relay=relay,
+            learning=learning,
+            victron_ess_balance=victron_ess_balance,
+            runtime_cycle=runtime_cycle,
+            software_update=SoftwareUpdateController(),
         )
-        response.raise_for_status()
-        version_lines = str(response.text or "").splitlines()
-        available_version = version_lines[0].strip() if version_lines else ""
-        return (
-            available_version,
-            bool(available_version and available_version != current_version),
-            "version-file",
-        )
-
-    @classmethod
-    def _spawn_software_update_process(
-        cls,
-        log_path: str,
-        repo_root: str,
-        restart_script: str,
-    ) -> tuple[subprocess.Popen[bytes], Any]:
-        """Start one detached update process and return the child plus log handle."""
-        log_handle = cls._software_update_log_handle(log_path)
-        try:
-            process = subprocess.Popen(  # pylint: disable=consider-using-with
-                cls._software_update_command(repo_root, restart_script),
-                cwd=repo_root,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-        except SOFTWARE_UPDATE_PROCESS_ERRORS:
-            cls._close_open_log_handle(log_handle)
-            raise
-        return process, log_handle
 
     def sign_of_life(self) -> bool:
         """Periodic heartbeat log for troubleshooting."""
@@ -109,18 +94,19 @@ class UpdateCycleController(_UpdateCycleSoftwareUpdate):
         """Periodic update loop: read Shelly, compute auto logic, update DBus."""
         svc = self.service
         try:
-            result = self._run_update_cycle()
-            now = svc._time_now()
-            flush_runtime_overrides = getattr(svc, "_flush_runtime_overrides", None)
-            if callable(flush_runtime_overrides):
-                flush_runtime_overrides(now)
-            self._software_update_housekeeping(svc, now)
+            result = self.components.runtime_cycle.run()
+            now = svc.time_now()
+            svc.state.flush_runtime_overrides(now)
+            self.components.software_update.housekeeping(svc, now)
             return result
         except Exception as error:  # pylint: disable=broad-except
             logging.warning(
                 "Error updating Venus EV charger data: %s (%s)",
                 error,
-                svc._state_summary(),
+                svc.state.summary(),
                 exc_info=error,
             )
         return True
+
+
+__all__ = ["UpdateCycleComponents", "UpdateCycleController"]

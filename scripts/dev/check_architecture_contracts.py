@@ -7,19 +7,21 @@ from __future__ import annotations
 import ast
 import re
 import sys
-import tokenize
 from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
 
 from architecture_gateway_read_contracts import check_gateway_read_contracts
+from architecture_suppression_contracts import check_suppression_contracts
 
 REPO = Path(__file__).resolve().parents[2]
 
 FORBIDDEN_SUBSTRINGS = {
-    "venus_evcharger/ports/base.py": (
-        "_resolve_compat_method_alias",
-        "legacy ``_method`` lookups",
+    "venus_evcharger/app/bootstrap_support.py": (
+        "setup_dbus_mainloop",
+    ),
+    "venus_evcharger/bootstrap/controller.py": (
+        "_setup_dbus_mainloop",
+        "_dbus_service_owned_by_current_process",
     ),
     "venus_evcharger/inputs/helper/sources_pv_grid.py": (
         "_read_ac_pv_total",
@@ -48,6 +50,18 @@ FORBIDDEN_SUBSTRINGS = {
 }
 
 FORBIDDEN_FILE_PATTERNS = {
+    "venus_evcharger/controllers": {
+        "retired state-controller inheritance artifacts": re.compile(
+            r"\b(?:_StateValidation|_StateSummary|_StateRuntime(?:Restore(?:VictronEss)?|Overrides|Snapshot|Normalize)?|"
+            r"_StateRestore)\b|venus_evcharger\.controllers\.(?:state_restore_support|state_runtime)\b"
+        ),
+    },
+    "venus_evcharger": {
+        "retired backend compatibility APIs": re.compile(
+            r"\b(?:compat_legacy_backend_view|config_service_compat|"
+            r"runtime_summary_from_legacy_service_attrs|service_has_legacy_backend_attrs)\b"
+        ),
+    },
     "tests": {
         "legacy private port calls": re.compile(
             r"\bport\._(?:"
@@ -110,7 +124,7 @@ class _AllowedMultipleInheritance:
 
 
 ALLOWED_MULTIPLE_INHERITANCE = {
-    "venus_evcharger/dbus_adapter_process_protocols.py": {
+    "venus_evcharger/dbus_adapter/process/protocols/context.py": {
         "DbusAdapterProcessContext": _AllowedMultipleInheritance(
             bases=(
                 "DbusAdapterRuntimeContext",
@@ -132,50 +146,114 @@ ALLOWED_MULTIPLE_INHERITANCE = {
             reason="stdlib server composition for threaded Unix-domain HTTP.",
         ),
     },
+    "venus_evcharger/update/offline_publish.py": {
+        "OfflineService": _AllowedMultipleInheritance(
+            bases=("RelayTelemetryService", "Protocol"),
+            reason="Protocol-only composition of offline publication capabilities.",
+        ),
+    },
+    "venus_evcharger/update/relay_ports.py": {
+        "PhaseSwitchCombinedRuntimePort": _AllowedMultipleInheritance(
+            bases=("PhaseSwitchRuntimePort", "RelayTelemetryRuntimePort", "Protocol"),
+            reason="Protocol-only composition of phase-switch runtime capabilities.",
+        ),
+        "PhaseSwitchServicePort": _AllowedMultipleInheritance(
+            bases=("RelayTelemetryService", "Protocol"),
+            reason="Protocol-only composition of phase-switch service capabilities.",
+        ),
+    },
+    "venus_evcharger/update/relay_status_publish.py": {
+        "RelayStatusRuntimePort": _AllowedMultipleInheritance(
+            bases=("StatusRuntimePort", "ChargerRuntimePort", "RelayTelemetryRuntimePort", "Protocol"),
+            reason="Protocol-only composition of relay-status runtime capabilities.",
+        ),
+        "RelayStatusService": _AllowedMultipleInheritance(
+            bases=("ChargerControlService", "RelayTelemetryService", "Protocol"),
+            reason="Protocol-only composition of relay-status service capabilities.",
+        ),
+    },
+    "venus_evcharger/update/runtime_cycle_contracts.py": {
+        "UpdateCycleAutoPort": _AllowedMultipleInheritance(
+            bases=("StateAutoPort", "PhaseSwitchAutoPort", "OfflineAutoPort", "Protocol"),
+            reason="Protocol-only composition of update-cycle Auto capabilities.",
+        ),
+        "UpdateCycleRuntimePort": _AllowedMultipleInheritance(
+            bases=(
+                "StateRuntimePort",
+                "PhaseSwitchRuntimePort",
+                "ChargerRuntimePort",
+                "RelayTelemetryRuntimePort",
+                "StatusRuntimePort",
+                "Protocol",
+            ),
+            reason="Protocol-only composition of update-cycle runtime capabilities.",
+        ),
+        "UpdateCycleStatePort": _AllowedMultipleInheritance(
+            bases=("StatePublishPort", "PhaseSwitchStatePort", "OfflineStatePort", "Protocol"),
+            reason="Protocol-only composition of update-cycle state capabilities.",
+        ),
+        "UpdateCycleReadbackPort": _AllowedMultipleInheritance(
+            bases=("StateReadbackPort", "PhaseSwitchReadbackPort", "StatusReadbackPort", "Protocol"),
+            reason="Protocol-only composition of update-cycle readback capabilities.",
+        ),
+        "UpdateCycleServicePort": _AllowedMultipleInheritance(
+            bases=(
+                "UpdateStateService",
+                "InputCacheService",
+                "PmSnapshotService",
+                "OfflineService",
+                "PhaseSwitchServicePort",
+                "RelayStatusService",
+                "ChargerControlService",
+                "ChargerHealthService",
+                "_LearningRuntimeService",
+                "RuntimeWarningServicePort",
+                "Protocol",
+            ),
+            reason="Protocol-only composition of the complete update-cycle boundary.",
+        ),
+    },
 }
 
 EXPECTED_CLASS_BASES = {
-    "venus_evcharger/dbus_adapter_process.py": {
+    "venus_evcharger/controllers/state.py": {
+        "ServiceStateController": (),
+    },
+    "venus_evcharger/dbus_adapter/process/adapter.py": {
         "DbusAdapter": ("DbusAdapterLoop",),
     },
     "venus_evcharger/update/controller.py": {
-        "UpdateCycleController": ("_UpdateCycleSoftwareUpdate",),
+        "UpdateCycleController": (),
     },
-    "venus_evcharger/service/factory.py": {
-        "ServiceControllerFactory": (),
+    "venus_evcharger/service/controller_owner.py": {
+        "ServiceControllerOwner": (),
     },
-    "venus_evcharger/service/update.py": {
-        "UpdateCycle": ("ServiceControllerFactory",),
+    "venus_evcharger/service/auto_facade.py": {
+        "ServiceAutoFacade": (),
     },
-    "venus_evcharger/service/auto.py": {
-        "DbusAutoLogic": ("UpdateCycle",),
+    "venus_evcharger/service/runtime_facade.py": {
+        "ServiceRuntimeFacade": (),
     },
-    "venus_evcharger/service/runtime.py": {
-        "RuntimeHelper": ("DbusAutoLogic",),
+    "venus_evcharger/service/state_facade.py": {
+        "ServiceStateFacade": (),
     },
-    "venus_evcharger/service/state_publish.py": {
-        "StatePublish": ("RuntimeHelper",),
+    "venus_evcharger/service/update_facade.py": {
+        "ServiceUpdateFacade": (),
     },
     "venus_evcharger/service/control.py": {
-        "ControlApi": ("_ControlApiRuntime",),
+        "ServiceControlFacade": (),
+    },
+    "venus_evcharger_service.py": {
+        "ShellyWallboxService": (),
     },
     "venus_evcharger_auto_input_helper.py": {
-        "AutoInputHelper": ("_AutoInputHelperConfig",),
+        "AutoInputHelper": (),
     },
 }
 
-ALLOWED_NOQA_CODES = {
-    "E402",
-    "F401",
-    "F403",
-    "N802",
-    "S310",
-    "S603",
-}
-
-NO_MUTATE_FILE_PREFIXES = (
-    "venus_evcharger/dbus_adapter",
-    "venus_evcharger/dbus_gateway",
+RETIRED_STATE_MODULES = (
+    "venus_evcharger/controllers/state_restore_support.py",
+    "venus_evcharger/controllers/state_runtime.py",
 )
 
 GATEWAY_SURFACE_IMPORT_PATTERN = re.compile(r"\b(?:from|import)\s+venus_evcharger\.dbus_gateway_surface\b")
@@ -222,6 +300,14 @@ def _check_forbidden_patterns() -> list[str]:
             for label, pattern in patterns.items():
                 failures.extend(_pattern_failures_for(path, label, pattern))
     return failures
+
+
+def _check_retired_state_modules() -> list[str]:
+    return [
+        f"{relative_path}: retired state-controller module must remain absent"
+        for relative_path in RETIRED_STATE_MODULES
+        if (REPO / relative_path).exists()
+    ]
 
 
 def _class_base_name(base: ast.expr) -> str:
@@ -317,112 +403,6 @@ def _check_multiple_inheritance_contract() -> list[str]:
     return failures
 
 
-def _suppression_scan_paths() -> list[Path]:
-    roots = [
-        REPO / "venus_evcharger",
-        REPO / "tests",
-        REPO / "scripts" / "dev",
-    ]
-    paths = [path for root in roots for path in sorted(root.rglob("*.py"))]
-    paths.extend(
-        REPO / name
-        for name in (
-            "venus_evcharger_service.py",
-            "venus_evcharger_auto_input_helper.py",
-            "venus_evcharger_dbus_adapter.py",
-        )
-        if (REPO / name).exists()
-    )
-    return sorted(paths)
-
-
-def _line_allowed_no_cover(relative_path: str, line: str) -> bool:
-    if "_protocol" in relative_path:
-        return True
-    return any(
-        marker in line
-        for marker in (
-            "TYPE_CHECKING",
-            "__main__",
-            "Protocol",
-            "...",
-            "Venus DBus/GLib",
-            "initialize_dbus_service",
-            "foreign DBus objects",
-            "from ",
-        )
-    )
-
-
-def _noqa_codes(line: str) -> set[str]:
-    _prefix, _sep, suffix = line.partition("# noqa:")
-    code_text = suffix.split("-", 1)[0].strip()
-    return {code.strip() for code in code_text.split(",") if code.strip()}
-
-
-def _line_allowed_noqa(line: str) -> bool:
-    codes = _noqa_codes(line)
-    return bool(codes) and codes <= ALLOWED_NOQA_CODES
-
-
-def _line_allowed_no_mutate(relative_path: str) -> bool:
-    return relative_path.startswith(NO_MUTATE_FILE_PREFIXES)
-
-
-def _suppression_failure(relative_path: str, line_number: int, comment: str, line: str) -> str | None:
-    for checker in (
-        _type_ignore_failure,
-        _noqa_failure,
-        _no_cover_failure,
-        _no_mutate_failure,
-    ):
-        failure = checker(relative_path, line_number, comment, line)
-        if failure is not None:
-            return failure
-    return None
-
-
-def _type_ignore_failure(relative_path: str, line_number: int, comment: str, _line: str) -> str | None:
-    if "type: ignore" in comment:
-        return f"{relative_path}:{line_number}: type ignore suppressions are forbidden"
-    return None
-
-
-def _noqa_failure(relative_path: str, line_number: int, comment: str, line: str) -> str | None:
-    if "# noqa" in comment and not _line_allowed_noqa(comment):
-        return f"{relative_path}:{line_number}: unapproved noqa suppression: {line.strip()}"
-    return None
-
-
-def _no_cover_failure(relative_path: str, line_number: int, comment: str, line: str) -> str | None:
-    if "pragma: no cover" in comment and not _line_allowed_no_cover(relative_path, line):
-        return f"{relative_path}:{line_number}: unapproved coverage suppression: {line.strip()}"
-    return None
-
-
-def _no_mutate_failure(relative_path: str, line_number: int, comment: str, _line: str) -> str | None:
-    if "pragma: no mutate" in comment and not _line_allowed_no_mutate(relative_path):
-        return f"{relative_path}:{line_number}: mutation suppression outside gateway/adapter boundary"
-    return None
-
-
-def _check_suppression_contracts() -> list[str]:
-    failures: list[str] = []
-    for path in _suppression_scan_paths():
-        relative_path = str(path.relative_to(REPO))
-        text = _repo_text(path)
-        lines = text.splitlines()
-        for token in tokenize.generate_tokens(StringIO(text).readline):
-            if token.type != tokenize.COMMENT:
-                continue
-            line_number = token.start[0]
-            line = lines[line_number - 1]
-            failure = _suppression_failure(relative_path, line_number, token.string, line)
-            if failure is not None:
-                failures.append(failure)
-    return failures
-
-
 def _check_gateway_surface_boundary() -> list[str]:
     failures: list[str] = []
     for path in sorted((REPO / "venus_evcharger").rglob("*.py")):
@@ -435,14 +415,24 @@ def _check_gateway_surface_boundary() -> list[str]:
     return failures
 
 
+def _check_dbus_adapter_layout() -> list[str]:
+    legacy_modules = sorted((REPO / "venus_evcharger").glob("dbus_adapter_*.py"))
+    return [
+        f"{path.relative_to(REPO)}: fragmented adapter modules belong under venus_evcharger/dbus_adapter/"
+        for path in legacy_modules
+    ]
+
+
 def main() -> int:
     failures = [
         *_check_forbidden_substrings(),
         *_check_forbidden_patterns(),
+        *_check_retired_state_modules(),
         *_check_expected_class_bases(),
         *_check_multiple_inheritance_contract(),
-        *_check_suppression_contracts(),
+        *check_suppression_contracts(REPO),
         *_check_gateway_surface_boundary(),
+        *_check_dbus_adapter_layout(),
         *check_gateway_read_contracts(REPO),
     ]
     if failures:

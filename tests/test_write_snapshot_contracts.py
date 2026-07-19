@@ -194,7 +194,7 @@ class TestWriteSnapshotRestoreContracts(unittest.TestCase):
     def test_queue_restore_uses_service_time_and_reports_success(self) -> None:
         enqueue = MagicMock()
         now = MagicMock(return_value=25.0)
-        svc = SimpleNamespace(_enqueue_dbus_publish_values=enqueue, _time_now=now)
+        svc = SimpleNamespace(_enqueue_dbus_publish_values=enqueue, time_now=now)
         self.assertTrue(snapshot_module._restore_dbus_paths_via_queue(svc, {"/A": 1, "/B": 2}))
         now.assert_called_once_with()
         enqueue.assert_called_once_with([("/A", 1), ("/B", 2)], 25.0)

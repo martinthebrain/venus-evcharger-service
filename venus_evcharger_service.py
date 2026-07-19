@@ -2,21 +2,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Expose a Shelly relay meter as a Venus OS EV charger tile.
 
-This is the public entry point of the wallbox service. The module mainly
-assembles the service class from smaller controllers/roles and then delegates
- startup and main-loop setup to the bootstrap helpers.
+This is the public composition root of the wallbox service. Runtime behavior
+is owned by explicit components; the service itself has no role inheritance.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sys
-import threading
 import time
 from collections.abc import Callable
-from os import stat_result
-from typing import TYPE_CHECKING, Any
 
 from gi.repository import GLib as gobject  # pylint: disable=import-error
 
@@ -28,7 +23,7 @@ sys.path.insert(
     ),
 )
 
-from venus_evcharger.bootstrap.controller import ServiceBootstrapController, run_service_main
+from venus_evcharger.bootstrap.controller import run_service_main
 from venus_evcharger.core.common import (
     _a,
     _age_seconds,
@@ -46,13 +41,12 @@ from venus_evcharger.core.common import (
     phase_values,
     read_version,
 )
-from venus_evcharger.service.control import (
-    ControlApi,
-)
-from venus_evcharger.controllers.state import ServiceStateController
-
-if TYPE_CHECKING:
-    FormatterMap = dict[str, Callable[[Any, Any], str] | None]
+from venus_evcharger.service.auto_facade import ServiceAutoFacade
+from venus_evcharger.service.control import ServiceControlFacade
+from venus_evcharger.service.controller_owner import ServiceControllerOwner, ServiceFunctionBundle
+from venus_evcharger.service.runtime_facade import ServiceRuntimeFacade
+from venus_evcharger.service.state_facade import ServiceStateFacade
+from venus_evcharger.service.update_facade import ServiceUpdateFacade
 
 __all__ = [
     "ShellyWallboxService",
@@ -68,98 +62,65 @@ __all__ = [
 ]
 
 
-class ShellyWallboxService(ControlApi):
+class ShellyWallboxService:
     """Expose a Shelly relay meter as a Venus OS EV charger tile."""
-    _normalize_mode_func = staticmethod(normalize_mode)
-    _mode_uses_auto_logic_func = staticmethod(mode_uses_auto_logic)
-    _normalize_phase_func = staticmethod(normalize_phase)
-    _month_window_func = staticmethod(month_window)
-    _age_seconds_func = staticmethod(_age_seconds)
-    _health_code_func = staticmethod(_health_code)
-    _phase_values_func = staticmethod(phase_values)
-    _read_version_func = staticmethod(read_version)
-    _gobject_module = gobject
-    _script_path_value = __file__
-    _formatter_bundle: "FormatterMap" = {
+    _formatter_bundle: dict[str, Callable[[object, object], str] | None] = {
         "kwh": _kwh,
         "a": _a,
         "w": _w,
         "v": _v,
         "status": _status_label,
     }
-    _state_controller: ServiceStateController
-    _bootstrap_controller: ServiceBootstrapController
-    _system_bus_state: threading.local
-    _system_bus_generation: int
+    controllers: ServiceControllerOwner
+    runtime: ServiceRuntimeFacade
+    state: ServiceStateFacade
+    update: ServiceUpdateFacade
+    control: ServiceControlFacade
+    auto: ServiceAutoFacade
+    _control_command_async_enabled: bool
 
     @staticmethod
-    def _safe_float(value: Any, default: float = 0.0) -> float:
-        """Convert values defensively to float."""
-        try:
-            if value is None:
-                return float(default)
-            return float(value)
-        except (TypeError, ValueError):
-            return float(default)
-
-    @staticmethod
-    def _time_now() -> float:
-        """Return the current wall-clock time.
-
-        This wrapper keeps time-based tests stable even when helper logic is
-        delegated into support modules.
-        """
+    def time_now() -> float:
+        """Return the current wall-clock time."""
         return time.time()
 
     def __init__(self) -> None:
         """Initialize configuration, DBus service, and runtime state."""
-        self._state_controller = ServiceStateController(self, normalize_mode)
-        self._bootstrap_controller = ServiceBootstrapController(
-            self,
-            normalize_phase_func=normalize_phase,
-            normalize_mode_func=normalize_mode,
-            mode_uses_auto_logic_func=mode_uses_auto_logic,
-            month_window_func=month_window,
-            age_seconds_func=_age_seconds,
-            health_code_func=_health_code,
-            phase_values_func=phase_values,
-            read_version_func=read_version,
-            gobject_module=gobject,
+        functions = ServiceFunctionBundle(
+            normalize_phase=normalize_phase,
+            normalize_mode=normalize_mode,
+            mode_uses_auto_logic=mode_uses_auto_logic,
+            month_window=month_window,
+            age_seconds=_age_seconds,
+            health_code=_health_code,
+            phase_values=phase_values,
+            read_version=read_version,
+            gobject=gobject,
             script_path=__file__,
+            config_path=ServiceStateFacade.config_path(),
+            auto_input_helper_path=os.path.join(
+                os.path.dirname(os.path.realpath(__file__)),
+                "venus_evcharger_auto_input_helper.py",
+            ),
             formatters=self._formatter_bundle,
         )
-        self._bootstrap_controller.initialize_service()
-
-    @staticmethod
-    def _auto_input_helper_path() -> str:
-        """Return the helper script path used for Auto input collection."""
-        return os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            "venus_evcharger_auto_input_helper.py",
+        self.controllers = ServiceControllerOwner(self, functions)
+        self.runtime = ServiceRuntimeFacade(self.controllers)
+        self.state = ServiceStateFacade(self.controllers, self.runtime)
+        self.update = ServiceUpdateFacade(self.controllers)
+        self.control = ServiceControlFacade(self)
+        self.auto = ServiceAutoFacade(
+            lambda: self._control_command_async_enabled,
+            self.controllers,
+            self.runtime,
+            self.control.publish_command_event,
         )
-
-    @staticmethod
-    def _stat_path(path: str) -> stat_result:
-        """Return `os.stat(path)`.
-
-        Kept as a wrapper so tests can continue patching the main module.
-        """
-        return os.stat(path)
-
-    @staticmethod
-    def _load_json_file(path: str) -> Any:
-        """Load a JSON file using the main module's patched `open` when needed."""
-        with open(path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    def _get_system_bus(self) -> Any:
-        """Direct DBus access is isolated in the gateway adapter."""
-        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
+        self.controllers.bootstrap.initialize_service()
 
 
 def main() -> None:
     """Entrypoint for running as a service."""
-    run_service_main(ShellyWallboxService, ShellyWallboxService._config_path(), gobject)
+    run_service_main(ShellyWallboxService, ServiceStateFacade.config_path(), gobject)
 
 
 if __name__ == "__main__":

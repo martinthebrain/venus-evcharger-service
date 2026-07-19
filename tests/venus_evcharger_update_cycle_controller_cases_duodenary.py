@@ -22,7 +22,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -34,7 +34,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
         self.assertEqual(service._contactor_suspected_welded_since, 100.0)
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -69,7 +69,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -81,8 +81,9 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
         self.assertEqual(service._contactor_suspected_open_since, 100.0)
         service._last_charger_state_at = 110.0
+        sync_readback_test_service(service)
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -124,7 +125,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -135,7 +136,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
             )
         )
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -149,7 +150,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         self.assertEqual(service._contactor_fault_counts, {"contactor-suspected-welded": 1})
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -161,7 +162,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
         self.assertIsNone(service._contactor_fault_active_reason)
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -173,7 +174,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -223,7 +224,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -234,8 +235,9 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
             )
         )
         service._last_charger_state_at = 110.0
+        sync_readback_test_service(service)
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -249,8 +251,9 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         self.assertEqual(service._contactor_fault_counts, {"contactor-suspected-open": 1})
 
         service._last_charger_state_at = 126.0
+        sync_readback_test_service(service)
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -288,7 +291,7 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -301,8 +304,9 @@ class TestUpdateCycleControllerDuodenary(UpdateCycleControllerTestBase):
         self.assertIsNone(service._contactor_suspected_open_since)
 
         service._last_charger_state_at = 110.0
+        sync_readback_test_service(service)
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,

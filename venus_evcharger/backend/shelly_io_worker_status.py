@@ -3,15 +3,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TypeGuard
 
-from venus_evcharger.backend.shelly_io_types import ShellyEnergyData, ShellyPmStatus
+from venus_evcharger.backend.shelly_io_types import (
+    ShellyEnergyData,
+    ShellyPmStatus,
+    is_object_dict,
+    is_object_sequence,
+)
 
 
 def normalized_energy_payload(value: object) -> ShellyEnergyData:
     payload: ShellyEnergyData = {}
-    if isinstance(value, dict):
+    if is_object_dict(value):
         total = value.get("total")
         if _numeric_value(total):
             payload["total"] = float(total)
@@ -19,7 +24,7 @@ def normalized_energy_payload(value: object) -> ShellyEnergyData:
     return payload
 
 
-def local_pm_status_payload(raw_status: dict[object, object]) -> ShellyPmStatus:
+def local_pm_status_payload(raw_status: Mapping[str, object]) -> ShellyPmStatus:
     """Return a typed local PM payload seeded from the last known status."""
     pm_status: ShellyPmStatus = {}
     _copy_known_status_scalars(raw_status, pm_status)
@@ -28,7 +33,7 @@ def local_pm_status_payload(raw_status: dict[object, object]) -> ShellyPmStatus:
     return pm_status
 
 
-def _copy_known_status_scalars(raw_status: dict[object, object], pm_status: ShellyPmStatus) -> None:
+def _copy_known_status_scalars(raw_status: Mapping[str, object], pm_status: ShellyPmStatus) -> None:
     output = raw_status.get("output")
     if output is not None:
         pm_status["output"] = bool(output)
@@ -40,13 +45,13 @@ def _copy_known_status_scalars(raw_status: dict[object, object], pm_status: Shel
         pm_status["_pm_confirmed"] = bool(confirmed)
 
 
-def _copy_known_status_energy(raw_status: dict[object, object], pm_status: ShellyPmStatus) -> None:
+def _copy_known_status_energy(raw_status: Mapping[str, object], pm_status: ShellyPmStatus) -> None:
     energy = raw_status.get("aenergy")
-    if isinstance(energy, dict):
+    if is_object_dict(energy):
         pm_status["aenergy"] = normalized_energy_payload(energy)
 
 
-def _copy_known_status_phase_fields(raw_status: dict[object, object], pm_status: ShellyPmStatus) -> None:
+def _copy_known_status_phase_fields(raw_status: Mapping[str, object], pm_status: ShellyPmStatus) -> None:
     phase_selection = raw_status.get("_phase_selection")
     if phase_selection is not None:
         pm_status["_phase_selection"] = str(phase_selection)
@@ -58,7 +63,7 @@ def _copy_known_status_phase_fields(raw_status: dict[object, object], pm_status:
         pm_status["_phase_currents_a"] = currents
 
 
-def _copy_float_field(raw_status: dict[object, object], pm_status: ShellyPmStatus, key: str) -> None:
+def _copy_float_field(raw_status: Mapping[str, object], pm_status: ShellyPmStatus, key: str) -> None:
     value = raw_status.get(key)
     setter = _FLOAT_FIELD_SETTERS.get(key)
     if setter is not None and _numeric_value(value):
@@ -93,7 +98,7 @@ def _phase_tuple_items(value: object) -> tuple[int | float, int | float, int | f
 
 
 def _phase_tuple_candidate(value: object) -> tuple[object, object, object] | None:
-    if not isinstance(value, (tuple, list)):
+    if not is_object_sequence(value):
         return None
     if len(value) != 3:
         return None

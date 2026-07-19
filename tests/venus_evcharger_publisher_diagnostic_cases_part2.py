@@ -2,7 +2,10 @@
 from tests.venus_evcharger_publisher_diagnostic_cases_support import *  # noqa: F401,F403
 from unittest.mock import patch
 
+from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticSnapshot
 from venus_evcharger.publish.dbus_diagnostics_introspection import _introspection_finding_unusable
+from venus_evcharger.publish.dbus_diagnostics_runtime import DbusDiagnosticsRuntime
+from venus_evcharger.publish.dbus_diagnostics_sources import DbusDiagnosticsSources
 
 
 def _diagnostic_contract_service(test_case, current_time: float):
@@ -49,7 +52,7 @@ def _diagnostic_contract_service(test_case, current_time: float):
         _contactor_lockout_reason="contactor-suspected-open",
         _contactor_lockout_source="count-threshold",
         _contactor_lockout_at=current_time - 23.0,
-        _is_update_stale=test_case._never_stale,
+        _runtime_update_is_stale=test_case._never_stale,
         _recovery_attempts=4,
         _last_confirmed_pm_status_at=current_time - 10.0,
         _last_pm_status_at=current_time - 11.0,
@@ -104,7 +107,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         }
 
         with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", return_value=snapshot):
-            values = controller._dbus_introspection_counter_values(100.0)
+            values = controller.diagnostics.introspection.counter_values(100.0)
 
         self.assertEqual(values["auto_dbus_introspection_state"], "running")
         self.assertEqual(values["auto_dbus_introspection_queue_depth"], 3)
@@ -112,7 +115,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         self.assertEqual(values["auto_dbus_introspection_unusable_path_count"], 2)
 
         with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", return_value={"services": []}):
-            odd_values = controller._dbus_introspection_counter_values(101.0)
+            odd_values = controller.diagnostics.introspection.counter_values(101.0)
 
         self.assertEqual(odd_values["auto_dbus_introspection_service_count"], 0)
         self.assertEqual(odd_values["auto_dbus_introspection_unusable_path_count"], 0)
@@ -120,22 +123,22 @@ class _TestDbusPublishControllerDiagnosticsPart2:
     def test_dbus_introspection_counter_helpers_reject_malformed_payload_shapes(self) -> None:
         controller = DbusPublishController(SimpleNamespace(), self._real_age_seconds)
 
-        self.assertEqual(controller._dbus_introspection_state([]), "missing")
-        self.assertEqual(controller._dbus_introspection_state({}), "missing")
-        self.assertEqual(controller._dbus_introspection_state({"worker_state": ""}), "missing")
-        self.assertEqual(controller._dbus_introspection_state({"worker_state": "running"}), "running")
-        self.assertEqual(controller._dbus_introspection_queue_depth([]), 0)
-        self.assertEqual(controller._dbus_introspection_queue_depth({"queue_depth": None}), 0)
-        self.assertEqual(controller._dbus_introspection_queue_depth({"queue_depth": -2}), 0)
-        self.assertEqual(controller._dbus_introspection_queue_depth({"queue_depth": "bad"}), 0)
-        self.assertEqual(controller._dbus_introspection_queue_depth({"queue_depth": "4"}), 4)
-        self.assertEqual(controller._dbus_introspection_service_count([]), 0)
-        self.assertEqual(controller._dbus_introspection_service_count({"svc": {}}), 1)
-        self.assertEqual(controller._dbus_introspection_unusable_count([]), 0)
-        self.assertEqual(controller._dbus_introspection_unusable_paths([]), 0)
-        self.assertEqual(controller._dbus_introspection_unusable_paths({"paths": []}), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_state([]), "missing")
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_state({}), "missing")
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_state({"worker_state": ""}), "missing")
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_state({"worker_state": "running"}), "running")
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_queue_depth([]), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_queue_depth({"queue_depth": None}), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_queue_depth({"queue_depth": -2}), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_queue_depth({"queue_depth": "bad"}), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_queue_depth({"queue_depth": "4"}), 4)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_service_count([]), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_service_count({"svc": {}}), 1)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_unusable_count([]), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_unusable_paths([]), 0)
+        self.assertEqual(controller.diagnostics.introspection._dbus_introspection_unusable_paths({"paths": []}), 0)
         self.assertEqual(
-            controller._dbus_introspection_unusable_paths(
+            controller.diagnostics.introspection._dbus_introspection_unusable_paths(
                 {
                     "paths": {
                         "/Missing": {"status": "known-missing"},
@@ -157,14 +160,14 @@ class _TestDbusPublishControllerDiagnosticsPart2:
 
         snapshot_loader = MagicMock(return_value={"heartbeat_at": 90.0})
         with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", snapshot_loader):
-            self.assertEqual(controller._dbus_introspection_snapshot_age(100.0), 10.0)
-        snapshot_loader.assert_called_once_with(controller.service, now=100.0)
+            self.assertEqual(controller.diagnostics.introspection.snapshot_age(100.0), 10.0)
+        snapshot_loader.assert_called_once_with(controller.diagnostics.introspection.service, now=100.0)
 
         with patch(
             "venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot",
             return_value={},
         ):
-            self.assertEqual(controller._dbus_introspection_snapshot_age(100.0), -1.0)
+            self.assertEqual(controller.diagnostics.introspection.snapshot_age(100.0), -1.0)
 
     def test_diagnostic_values_keep_fault_and_recovery_visible_while_scheduled_and_retry_are_also_active(self) -> None:
         current_time = 1776718800.0
@@ -207,7 +210,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             _contactor_lockout_reason="contactor-suspected-open",
             _contactor_lockout_source="count-threshold",
             _contactor_lockout_at=current_time - 4.0,
-            _is_update_stale=self._never_stale,
+            _runtime_update_is_stale=self._never_stale,
             _recovery_attempts=1,
             _last_confirmed_pm_status_at=current_time - 2.0,
             _last_pm_status_at=current_time - 2.0,
@@ -221,7 +224,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         ), mode="split", meter_type="template_meter", switch_type="switch_group", charger_type="simpleevse_charger")
         controller = DbusPublishController(service, self._real_age_seconds)
 
-        counter_values = controller._diagnostic_counter_values(current_time)
+        counter_values = controller.diagnostics.counter_values(current_time)
 
         self.assertEqual(counter_values["status"], 0)
         self.assertEqual(counter_values["auto_recovery_active"], 1)
@@ -276,7 +279,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             _contactor_lockout_reason="",
             _contactor_lockout_source="",
             _contactor_lockout_at=None,
-            _is_update_stale=self._never_stale,
+            _runtime_update_is_stale=self._never_stale,
             _recovery_attempts=0,
             _last_confirmed_pm_status_at=199.0,
             _last_pm_status_at=199.0,
@@ -290,8 +293,8 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         ), mode="split", meter_type="template_meter", switch_type="switch_group", charger_type="smartevse_charger")
         controller = DbusPublishController(service, self._real_age_seconds)
 
-        counter_values = controller._diagnostic_counter_values(current_time)
-        age_values = controller._diagnostic_age_values(current_time)
+        counter_values = controller.diagnostics.counter_values(current_time)
+        age_values = controller.diagnostics.age_values(current_time)
 
         self.assertEqual(counter_values["status"], 6)
         self.assertEqual(counter_values["auto_fault_active"], 0)
@@ -341,7 +344,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             _contactor_lockout_reason="",
             _contactor_lockout_source="",
             _contactor_lockout_at=None,
-            _is_update_stale=self._never_stale,
+            _runtime_update_is_stale=self._never_stale,
             _recovery_attempts=0,
             _last_pv_at=199.0,
             _last_battery_soc_at=199.0,
@@ -352,7 +355,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         ), mode="split", meter_type="template_meter", switch_type="switch_group", charger_type="smartevse_charger")
         controller = DbusPublishController(service, self._real_age_seconds)
 
-        counter_values = controller._diagnostic_counter_values(current_time)
+        counter_values = controller.diagnostics.counter_values(current_time)
 
         self.assertEqual(counter_values["status"], 2)
         self.assertEqual(counter_values["auto_status_source"], "charger-status-charging")
@@ -370,8 +373,8 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             "heartbeat_at": current_time - 29.0,
             "services": {"svc": {"paths": {"/Missing": {"status": "known-missing"}}}},
         }):
-            counter_values = controller._diagnostic_counter_values(current_time)
-            age_values = controller._diagnostic_age_values(current_time)
+            counter_values = controller.diagnostics.counter_values(current_time)
+            age_values = controller.diagnostics.age_values(current_time)
 
         self.assertEqual(
             set(counter_values),
@@ -493,7 +496,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         self.assertEqual(counter_values["auto_health"], "running")
         self.assertEqual(counter_values["auto_stale"], 0)
         self.assertEqual(
-            controller._runtime_timing_values(current_time),
+            controller.diagnostics.runtime.runtime_timing_values(current_time),
             {
                 "auto_update_worker_duration_seconds": 0.31,
                 "auto_update_worker_pending": 1,
@@ -519,7 +522,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         self.assertEqual(counter_values["auto_contactor_lockout_reason"], "contactor-suspected-open")
         self.assertEqual(counter_values["auto_contactor_lockout_source"], "count-threshold")
         self.assertEqual(
-            controller._phase_counter_values(current_time),
+            controller.diagnostics.phase.phase_values(current_time),
             {
                 "auto_phase_current": "",
                 "auto_phase_observed": "P1_P2",
@@ -538,12 +541,12 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         )
         service._phase_switch_lockout_until = current_time - 1.0
         self.assertEqual(
-            controller._phase_counter_values(current_time)["auto_phase_supported_effective"],
+            controller.diagnostics.phase.phase_values(current_time)["auto_phase_supported_effective"],
             "P1,P1_P2",
         )
         service._phase_switch_lockout_until = current_time + 50.0
         self.assertEqual(
-            controller._contactor_counter_values(),
+            controller.diagnostics.phase.contactor_values(),
             {
                 "auto_switch_feedback_closed": 1,
                 "auto_switch_interlock_ok": 0,
@@ -558,7 +561,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         )
         service._last_switch_feedback_closed = False
         service._last_confirmed_pm_status = {"output": True}
-        self.assertEqual(controller._contactor_counter_values()["auto_switch_feedback_mismatch"], 1)
+        self.assertEqual(controller.diagnostics.phase.contactor_values()["auto_switch_feedback_mismatch"], 1)
 
         self.assertEqual(
             set(age_values),
@@ -601,12 +604,12 @@ class _TestDbusPublishControllerDiagnosticsPart2:
     def test_diagnostic_runtime_error_state_accepts_only_mappings(self) -> None:
         controller = DbusPublishController(SimpleNamespace(), self._real_age_seconds)
 
-        self.assertEqual(controller._runtime_error_state(SimpleNamespace(_error_state={"dbus": 1})), {"dbus": 1})
-        self.assertEqual(controller._runtime_error_state(SimpleNamespace(_error_state=[])), {})
-        self.assertEqual(controller._runtime_error_state(SimpleNamespace()), {})
+        self.assertEqual(controller.diagnostics._runtime_error_state(SimpleNamespace(_error_state={"dbus": 1})), {"dbus": 1})
+        self.assertEqual(controller.diagnostics._runtime_error_state(SimpleNamespace(_error_state=[])), {})
+        self.assertEqual(controller.diagnostics._runtime_error_state(SimpleNamespace()), {})
 
     def test_diagnostic_error_counter_values_normalize_runtime_error_state(self) -> None:
-        values = DbusPublishController._error_counter_values(
+        values = DbusDiagnosticsSources.error_values(
             {
                 "dbus": "2",
                 "shelly": None,
@@ -632,7 +635,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             },
         )
         self.assertEqual(
-            DbusPublishController._error_counter_values({}),
+            DbusDiagnosticsSources.error_values({}),
             {
                 "auto_error_count": 0,
                 "auto_dbus_read_errors": 0,
@@ -648,7 +651,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
     def test_diagnostic_backend_counter_values_cover_defaults_and_split_topology(self) -> None:
         default_controller = DbusPublishController(SimpleNamespace(), self._real_age_seconds)
         self.assertEqual(
-            default_controller._backend_counter_values(),
+            default_controller.diagnostics.sources.backend_values(),
             {
                 "auto_backend_mode": "combined",
                 "auto_meter_backend": "shelly_meter",
@@ -668,7 +671,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         )
         split_controller = DbusPublishController(split_service, self._real_age_seconds)
         self.assertEqual(
-            split_controller._backend_counter_values(),
+            split_controller.diagnostics.sources.backend_values(),
             {
                 "auto_backend_mode": "split",
                 "auto_meter_backend": "template_meter",
@@ -699,7 +702,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         controller = DbusPublishController(service, self._real_age_seconds)
 
         self.assertEqual(
-            controller._charger_counter_values(100.0),
+            controller.diagnostics.sources.charger_values(100.0),
             {
                 "auto_charger_status": "",
                 "auto_charger_fault": "fault",
@@ -719,7 +722,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
 
         service._last_charger_transport_at = 1.0
         service._charger_retry_until = 1.0
-        stale_values = controller._charger_counter_values(100.0)
+        stale_values = controller.diagnostics.sources.charger_values(100.0)
         self.assertEqual(stale_values["auto_charger_transport_active"], 0)
         self.assertEqual(stale_values["auto_charger_transport_reason"], "")
         self.assertEqual(stale_values["auto_charger_transport_source"], "")
@@ -728,7 +731,9 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         self.assertEqual(stale_values["auto_charger_retry_reason"], "")
         self.assertEqual(stale_values["auto_charger_retry_source"], "")
 
-        missing_values = DbusPublishController(SimpleNamespace(), self._real_age_seconds)._charger_counter_values(100.0)
+        missing_values = DbusPublishController(
+            SimpleNamespace(), self._real_age_seconds
+        ).diagnostics.sources.charger_values(100.0)
         self.assertEqual(missing_values["auto_charger_status"], "")
         self.assertEqual(missing_values["auto_charger_fault"], "")
         self.assertEqual(missing_values["auto_charger_fault_active"], 0)
@@ -738,14 +743,14 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             SimpleNamespace(
                 _shelly_state="offline",
                 _shelly_last_error_reason="timeout",
-                _source_retry_remaining=MagicMock(return_value="-4"),
+                _runtime_source_retry_remaining=MagicMock(return_value="-4"),
                 _shelly_consecutive_errors=-3,
             ),
             self._real_age_seconds,
         )
 
         self.assertEqual(
-            controller._shelly_counter_values(50.0),
+            controller.diagnostics.sources.shelly_values(50.0),
             {
                 "auto_shelly_state": "offline",
                 "auto_shelly_last_error": "timeout",
@@ -753,59 +758,61 @@ class _TestDbusPublishControllerDiagnosticsPart2:
                 "auto_shelly_consecutive_errors": 0,
             },
         )
-        controller.service._source_retry_remaining.assert_called_once_with("shelly", 50.0)
+        controller.diagnostics.sources.service._runtime_source_retry_remaining.assert_called_once_with("shelly", 50.0)
 
         fallback = DbusPublishController(
             SimpleNamespace(
                 _shelly_state="",
                 _shelly_last_error_reason=None,
-                _shelly_retry_after=61.9,
+                _source_retry_after={"shelly": 61.9},
                 _shelly_consecutive_errors="4",
             ),
             self._real_age_seconds,
         )
-        self.assertEqual(fallback._shelly_counter_values(50.0)["auto_shelly_retry_remaining"], 11)
-        self.assertEqual(fallback._shelly_counter_values(50.0)["auto_shelly_consecutive_errors"], 4)
-        self.assertEqual(fallback._shelly_counter_values(50.0)["auto_shelly_state"], "unknown")
-        self.assertEqual(fallback._shelly_counter_values(50.0)["auto_shelly_last_error"], "")
+        self.assertEqual(fallback.diagnostics.sources.shelly_values(50.0)["auto_shelly_retry_remaining"], 11)
+        self.assertEqual(fallback.diagnostics.sources.shelly_values(50.0)["auto_shelly_consecutive_errors"], 4)
+        self.assertEqual(fallback.diagnostics.sources.shelly_values(50.0)["auto_shelly_state"], "unknown")
+        self.assertEqual(fallback.diagnostics.sources.shelly_values(50.0)["auto_shelly_last_error"], "")
 
-        missing_values = DbusPublishController(SimpleNamespace(), self._real_age_seconds)._shelly_counter_values(0.0)
+        missing_values = DbusPublishController(
+            SimpleNamespace(), self._real_age_seconds
+        ).diagnostics.sources.shelly_values(0.0)
         self.assertEqual(missing_values["auto_shelly_retry_remaining"], 0)
         self.assertEqual(missing_values["auto_shelly_consecutive_errors"], 0)
         self.assertEqual(missing_values["auto_shelly_state"], "unknown")
         self.assertEqual(missing_values["auto_shelly_last_error"], "")
 
         self.assertEqual(
-            DbusPublishController._shelly_retry_remaining_value(SimpleNamespace(_shelly_retry_after=True), 50.0),
+            DbusDiagnosticsSources._shelly_retry_remaining_value(SimpleNamespace(_shelly_retry_after=True), 50.0),
             0,
         )
         self.assertEqual(
-            DbusPublishController._shelly_retry_remaining_value(SimpleNamespace(_shelly_retry_after="bad"), 50.0),
+            DbusDiagnosticsSources._shelly_retry_remaining_value(SimpleNamespace(_shelly_retry_after="bad"), 50.0),
             0,
         )
         self.assertEqual(
-            DbusPublishController._shelly_retry_remaining_value(SimpleNamespace(_shelly_retry_after=49.0), 50.0),
+            DbusDiagnosticsSources._shelly_retry_remaining_value(SimpleNamespace(_shelly_retry_after=49.0), 50.0),
             0,
         )
-        self.assertEqual(DbusPublishController._shelly_retry_remaining_value(SimpleNamespace(), 0.0), 0)
+        self.assertEqual(DbusDiagnosticsSources._shelly_retry_remaining_value(SimpleNamespace(), 0.0), 0)
 
     def test_diagnostic_auto_decision_helper_contracts(self) -> None:
         metrics = {"good": "12.5", "bad": "x", "text": "  profile  ", "relay_intent": False}
 
-        self.assertEqual(DbusPublishController._auto_decision_metric_float(metrics, "good"), 12.5)
-        self.assertEqual(DbusPublishController._auto_decision_metric_float(metrics, "bad"), -1.0)
-        self.assertEqual(DbusPublishController._auto_decision_metric_float(metrics, "missing"), -1.0)
-        self.assertEqual(DbusPublishController._auto_decision_metric_text(metrics, "text"), "profile")
-        self.assertEqual(DbusPublishController._auto_decision_metric_text(metrics, "missing"), "")
-        self.assertEqual(DbusPublishController._auto_decision_relay_intent(metrics), 0)
-        self.assertEqual(DbusPublishController._auto_decision_relay_intent({"relay_intent": True}), 1)
-        self.assertEqual(DbusPublishController._auto_decision_relay_intent({}), -1)
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_metric_float(metrics, "good"), 12.5)
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_metric_float(metrics, "bad"), -1.0)
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_metric_float(metrics, "missing"), -1.0)
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_metric_text(metrics, "text"), "profile")
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_metric_text(metrics, "missing"), "")
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_relay_intent(metrics), 0)
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_relay_intent({"relay_intent": True}), 1)
+        self.assertEqual(DbusDiagnosticsRuntime._auto_decision_relay_intent({}), -1)
 
     def test_diagnostic_runtime_timing_values_default_to_neutral_when_missing(self) -> None:
         controller = DbusPublishController(SimpleNamespace(), self._real_age_seconds)
 
         self.assertEqual(
-            controller._runtime_timing_values(500.0),
+            controller.diagnostics.runtime.runtime_timing_values(500.0),
             {
                 "auto_update_worker_duration_seconds": 0.0,
                 "auto_update_worker_pending": 0,
@@ -822,8 +829,8 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             SimpleNamespace(_mainloop_heartbeat_at=501.0, _update_worker_pending=False),
             self._real_age_seconds,
         )
-        self.assertEqual(controller._runtime_timing_values(500.0)["auto_mainloop_heartbeat_age"], 0.0)
-        self.assertEqual(controller._runtime_timing_values(500.0)["auto_update_worker_pending"], 0)
+        self.assertEqual(controller.diagnostics.runtime.runtime_timing_values(500.0)["auto_mainloop_heartbeat_age"], 0.0)
+        self.assertEqual(controller.diagnostics.runtime.runtime_timing_values(500.0)["auto_update_worker_pending"], 0)
 
     def test_diagnostic_last_shelly_read_age_uses_confirmed_then_confirmed_pm_fallback(self) -> None:
         current_time = 500.0
@@ -834,46 +841,46 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             service._last_confirmed_pm_status_at = current_time - 30.0
             service._last_pm_status_at = current_time - 11.0
             service._last_pm_status_confirmed = True
-            self.assertEqual(controller._diagnostic_age_values(current_time)["auto_last_shelly_read_age"], 30.0)
+            self.assertEqual(controller.diagnostics.age_values(current_time)["auto_last_shelly_read_age"], 30.0)
 
             service._last_confirmed_pm_status_at = None
-            self.assertEqual(controller._diagnostic_age_values(current_time)["auto_last_shelly_read_age"], 11.0)
+            self.assertEqual(controller.diagnostics.age_values(current_time)["auto_last_shelly_read_age"], 11.0)
 
             service._last_pm_status_confirmed = False
-            self.assertEqual(controller._diagnostic_age_values(current_time)["auto_last_shelly_read_age"], -1.0)
+            self.assertEqual(controller.diagnostics.age_values(current_time)["auto_last_shelly_read_age"], -1.0)
 
             delattr(service, "_last_pm_status_confirmed")
-            self.assertEqual(controller._diagnostic_age_values(current_time)["auto_last_shelly_read_age"], -1.0)
+            self.assertEqual(controller.diagnostics.age_values(current_time)["auto_last_shelly_read_age"], -1.0)
 
             service._last_confirmed_pm_status_at = current_time + 10.0
             service._last_pm_status_at = current_time - 11.0
             service._last_pm_status_confirmed = False
-            self.assertEqual(controller._diagnostic_age_values(current_time)["auto_last_shelly_read_age"], -1.0)
+            self.assertEqual(controller.diagnostics.age_values(current_time)["auto_last_shelly_read_age"], -1.0)
 
     def test_diagnostic_counter_values_use_normalized_missing_state_and_current_stale_time(self) -> None:
         current_time = 500.0
         service = _diagnostic_contract_service(self, current_time)
         delattr(service, "_last_auto_state")
         delattr(service, "_last_status_source")
-        service._is_update_stale = MagicMock(side_effect=lambda timestamp: timestamp == current_time)
+        service._runtime_update_is_stale = MagicMock(side_effect=lambda timestamp: timestamp == current_time)
         controller = DbusPublishController(service, self._real_age_seconds)
         snapshot_loader = MagicMock(return_value={})
 
         with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", snapshot_loader):
-            values = controller._diagnostic_counter_values(current_time)
+            values = controller.diagnostics.counter_values(current_time)
 
         self.assertEqual(values["auto_state"], "idle")
         self.assertEqual(values["auto_state_code"], 0)
         self.assertEqual(values["auto_status_source"], "unknown")
         self.assertEqual(values["auto_stale"], 1)
-        service._is_update_stale.assert_called_once_with(current_time)
+        service._runtime_update_is_stale.assert_called_once_with(current_time)
         snapshot_loader.assert_called_with(service, now=current_time)
 
     def test_scheduled_counter_values_normalize_disabled_and_active_snapshots(self) -> None:
         controller = DbusPublishController(SimpleNamespace(), self._real_age_seconds)
 
         self.assertEqual(
-            controller._scheduled_counter_values_from_snapshot(None),
+            controller.diagnostics.schedule.scheduled_values(None),
             {
                 "auto_scheduled_state": "disabled",
                 "auto_scheduled_state_code": 0,
@@ -901,7 +908,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             boost_until_text="06:30",
         )
         self.assertEqual(
-            controller._scheduled_counter_values_from_snapshot(active),
+            controller.diagnostics.schedule.scheduled_values(active),
             {
                 "auto_scheduled_state": "night-boost",
                 "auto_scheduled_state_code": 4,
@@ -928,9 +935,9 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             fallback_start_text="",
             boost_until_text="",
         )
-        self.assertEqual(controller._scheduled_counter_values_from_snapshot(invalid)["auto_scheduled_state"], "disabled")
+        self.assertEqual(controller.diagnostics.schedule.scheduled_values(invalid)["auto_scheduled_state"], "disabled")
         self.assertEqual(
-            controller._scheduled_counter_values_from_snapshot(invalid)["auto_scheduled_night_boost_active"],
+            controller.diagnostics.schedule.scheduled_values(invalid)["auto_scheduled_night_boost_active"],
             0,
         )
 
@@ -940,7 +947,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             night_boost_active=False,
             target_day_enabled=False,
         )
-        missing_values = controller._scheduled_counter_values_from_snapshot(missing_text)
+        missing_values = controller.diagnostics.schedule.scheduled_values(missing_text)
         self.assertEqual(missing_values["auto_scheduled_target_day_enabled"], 0)
         self.assertEqual(missing_values["auto_scheduled_target_day"], "")
         self.assertEqual(missing_values["auto_scheduled_target_date"], "")
@@ -961,7 +968,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         )
 
         self.assertEqual(
-            controller._software_update_counter_values(),
+            controller.diagnostics.schedule.software_update_values(),
             {
                 "auto_software_update_available": 1,
                 "auto_software_update_state": "available-blocked",
@@ -974,12 +981,12 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         )
 
         fallback = DbusPublishController(SimpleNamespace(_software_update_state="nonsense"), self._real_age_seconds)
-        self.assertEqual(fallback._software_update_counter_values()["auto_software_update_state"], "idle")
-        self.assertEqual(fallback._software_update_counter_values()["auto_software_update_available"], 0)
+        self.assertEqual(fallback.diagnostics.schedule.software_update_values()["auto_software_update_state"], "idle")
+        self.assertEqual(fallback.diagnostics.schedule.software_update_values()["auto_software_update_available"], 0)
 
         missing = DbusPublishController(SimpleNamespace(), self._real_age_seconds)
         self.assertEqual(
-            missing._software_update_counter_values(),
+            missing.diagnostics.schedule.software_update_values(),
             {
                 "auto_software_update_available": 0,
                 "auto_software_update_state": "idle",
@@ -999,8 +1006,8 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             ),
             self._real_age_seconds,
         )
-        self.assertEqual(unblocked._software_update_counter_values()["auto_software_update_state"], "up-to-date")
-        self.assertEqual(unblocked._software_update_counter_values()["auto_software_update_state_code"], 2)
+        self.assertEqual(unblocked.diagnostics.schedule.software_update_values()["auto_software_update_state"], "up-to-date")
+        self.assertEqual(unblocked.diagnostics.schedule.software_update_values()["auto_software_update_state_code"], 2)
 
     def test_diagnostic_age_values_tolerate_missing_optional_timestamps(self) -> None:
         current_time = 500.0
@@ -1017,7 +1024,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         controller = DbusPublishController(service, self._real_age_seconds)
 
         with patch("venus_evcharger.publish.dbus_diagnostics_introspection.load_owner_introspection_snapshot", return_value={}):
-            age_values = controller._diagnostic_age_values(current_time)
+            age_values = controller.diagnostics.age_values(current_time)
 
         self.assertEqual(age_values["auto_last_shelly_read_age"], -1.0)
         self.assertEqual(age_values["auto_phase_lockout_age"], -1.0)
@@ -1027,26 +1034,23 @@ class _TestDbusPublishControllerDiagnosticsPart2:
     def test_publish_diagnostic_paths_uses_distinct_transactions_and_or_result(self) -> None:
         service = SimpleNamespace(_dbus_slow_publish_interval_seconds=7.5)
         controller = DbusPublishController(service, self._real_age_seconds)
-        controller.ensure_state = MagicMock()
-        controller._diagnostic_counter_values = MagicMock(return_value={"status": 2})
-        controller._diagnostic_age_values = MagicMock(return_value={"auto_stale_seconds": 3.0})
-        controller._publish_fields_transactional = MagicMock(side_effect=[False, True])
+        snapshot = DiagnosticSnapshot(counters={"status": 2}, ages={"auto_stale_seconds": 3.0})
+        controller.diagnostics.snapshot = MagicMock(return_value=snapshot)
+        controller.core.publish_fields = MagicMock(side_effect=[False, True])
 
         self.assertTrue(controller.publish_diagnostic_paths(500.0))
 
-        controller.ensure_state.assert_called_once_with()
-        controller._diagnostic_counter_values.assert_called_once_with(500.0)
-        controller._diagnostic_age_values.assert_called_once_with(500.0)
-        self.assertEqual(controller._publish_fields_transactional.call_count, 2)
-        controller._publish_fields_transactional.assert_any_call("diagnostic-counters", {"status": 2}, 500.0)
-        controller._publish_fields_transactional.assert_any_call(
+        controller.diagnostics.snapshot.assert_called_once_with(500.0)
+        self.assertEqual(controller.core.publish_fields.call_count, 2)
+        controller.core.publish_fields.assert_any_call("diagnostic-counters", {"status": 2}, 500.0)
+        controller.core.publish_fields.assert_any_call(
             "diagnostic-ages",
             {"auto_stale_seconds": 3.0},
             500.0,
             interval_seconds=7.5,
         )
 
-        controller._publish_fields_transactional = MagicMock(side_effect=[True, False])
+        controller.core.publish_fields = MagicMock(side_effect=[True, False])
         self.assertTrue(controller.publish_diagnostic_paths(501.0))
-        controller._publish_fields_transactional = MagicMock(side_effect=[False, False])
+        controller.core.publish_fields = MagicMock(side_effect=[False, False])
         self.assertFalse(controller.publish_diagnostic_paths(502.0))

@@ -3,14 +3,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-
+from venus_evcharger.core.common import ScheduledModeSnapshot
 from venus_evcharger.core.contracts import (
     normalized_scheduled_state_values,
     normalized_software_update_state_fields,
 )
 from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue
-from venus_evcharger.publish.dbus_diagnostics_sources import _DbusDiagnosticsSources
+from venus_evcharger.publish.dbus_shared import DbusPublishContext, PublishServicePort, runtime_text_attribute
 
 
 _SCHEDULED_TEXT_FIELDS = (
@@ -37,9 +36,14 @@ _SOFTWARE_UPDATE_TEXT_FIELDS = (
     ("auto_software_update_available_version", "_software_update_available_version"),
 )
 
-class _DbusDiagnosticsSchedule(_DbusDiagnosticsSources):
+class DbusDiagnosticsSchedule:
+    """Build scheduled-mode and software-update diagnostics."""
+
+    def __init__(self, context: DbusPublishContext) -> None:
+        self.service: PublishServicePort = context.service
+
     @classmethod
-    def _scheduled_counter_values_from_snapshot(cls, scheduled_snapshot: Any) -> dict[str, str | int]:
+    def scheduled_values(cls, scheduled_snapshot: ScheduledModeSnapshot | None) -> dict[str, str | int]:
         """Return normalized outward scheduled-state diagnostics."""
         if scheduled_snapshot is None:
             return cls._disabled_scheduled_counter_values()
@@ -51,7 +55,7 @@ class _DbusDiagnosticsSchedule(_DbusDiagnosticsSources):
         return dict(_DISABLED_SCHEDULED_VALUES)
 
     @classmethod
-    def _active_scheduled_counter_values(cls, scheduled_snapshot: Any) -> dict[str, str | int]:
+    def _active_scheduled_counter_values(cls, scheduled_snapshot: ScheduledModeSnapshot) -> dict[str, str | int]:
         """Return outward scheduled-state diagnostics for one active snapshot."""
         scheduled_state, scheduled_state_code, scheduled_reason, scheduled_reason_code, scheduled_night_boost = (
             normalized_scheduled_state_values(
@@ -70,15 +74,15 @@ class _DbusDiagnosticsSchedule(_DbusDiagnosticsSources):
             "auto_scheduled_target_day_enabled": int(bool(scheduled_snapshot.target_day_enabled)),
         }
         for output_key, attribute_name in _SCHEDULED_TEXT_FIELDS:
-            values[output_key] = cls._text_attribute(scheduled_snapshot, attribute_name)
+            values[output_key] = runtime_text_attribute(scheduled_snapshot, attribute_name)
         return values
 
-    def _software_update_counter_values(self) -> dict[str, DiagnosticValue]:
+    def software_update_values(self) -> dict[str, DiagnosticValue]:
         """Return normalized outward software-update diagnostics."""
         state, state_code, available, no_update = normalized_software_update_state_fields(
-            self._raw_attribute(self.service, "_software_update_state"),
-            self._raw_attribute(self.service, "_software_update_available"),
-            self._raw_attribute(self.service, "_software_update_no_update_active"),
+            getattr(self.service, "_software_update_state", None),
+            getattr(self.service, "_software_update_available", None),
+            getattr(self.service, "_software_update_no_update_active", None),
         )
         values: dict[str, DiagnosticValue] = {
             "auto_software_update_state": state,
@@ -87,5 +91,5 @@ class _DbusDiagnosticsSchedule(_DbusDiagnosticsSources):
             "auto_software_update_no_update_active": no_update,
         }
         for output_key, attribute_name in _SOFTWARE_UPDATE_TEXT_FIELDS:
-            values[output_key] = self._text_attribute(self.service, attribute_name)
+            values[output_key] = runtime_text_attribute(self.service, attribute_name)
         return values

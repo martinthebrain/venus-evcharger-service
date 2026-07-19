@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import configparser
-import errno
 import termios
 import unittest
 from types import SimpleNamespace
@@ -8,11 +7,7 @@ from unittest.mock import patch
 
 from venus_evcharger.backend.modbus_transport import (
     ModbusPortOwnershipError,
-    ModbusRequest,
-    ModbusSerialRtuTransport,
     ModbusTransportSettings,
-    ModbusUdpTransport,
-    ModbusTcpTransport,
     _VenusSerialPortOwner,
     _configured_serial_attrs,
     _crc_frame,
@@ -41,7 +36,6 @@ from venus_evcharger.backend.modbus_transport import (
     _serial_baudrate_constant,
     _serial_port_owner,
     _transport_runtime_fields,
-    create_modbus_transport,
     load_modbus_transport_settings,
     modbus_transport_issue_reason,
     ModbusPortBusyError,

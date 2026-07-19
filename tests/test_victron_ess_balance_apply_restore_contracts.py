@@ -4,12 +4,16 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from tests.test_victron_ess_balance_apply_contracts import _service
-from venus_evcharger.update.victron_ess_balance_apply import _UpdateCycleVictronEssBalanceApply
+from venus_evcharger.update.victron_ess_balance_apply import VictronEssBalanceExecutor
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 class ApplyPreparationContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.subject = _UpdateCycleVictronEssBalanceApply()
+        components = build_victron_ess_components()
+        self.subject = components.executor
+        self.adaptive = components.adaptive
+        self.sources = components.sources
         self.svc = _service()
         self.metrics: dict[str, Any] = {}
 
@@ -73,44 +77,52 @@ class ApplyPreparationContracts(unittest.TestCase):
 
     def test_finalizer_auto_applies_before_merging(self) -> None:
         events: list[str] = []
-        self.subject._maybe_auto_apply_victron_ess_balance_recommendation = MagicMock(
+        self.adaptive._maybe_auto_apply_victron_ess_balance_recommendation = MagicMock(
             side_effect=lambda *_: events.append("auto")
         )
-        self.subject._merge_victron_ess_balance_metrics = MagicMock(side_effect=lambda *_: events.append("merge"))
+        self.sources._merge_victron_ess_balance_metrics = MagicMock(side_effect=lambda *_: events.append("merge"))
         self.subject._finalize_victron_ess_balance_metrics(self.svc, 6.0, self.metrics)
         self.assertEqual(events, ["auto", "merge"])
-        self.subject._maybe_auto_apply_victron_ess_balance_recommendation.assert_called_once_with(
+        self.adaptive._maybe_auto_apply_victron_ess_balance_recommendation.assert_called_once_with(
             self.svc, self.metrics, 6.0
         )
-        self.subject._merge_victron_ess_balance_metrics.assert_called_once_with(self.svc, self.metrics)
+        self.sources._merge_victron_ess_balance_metrics.assert_called_once_with(self.svc, self.metrics)
 
 
 class ApplyRestoreContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.subject = _UpdateCycleVictronEssBalanceApply()
+        components = build_victron_ess_components()
+        self.subject: VictronEssBalanceExecutor = components.executor
+        self.pid = components.pid
+        self.writer = components.writer
+        self.profiles = components.profiles
+        self.telemetry = components.telemetry
+        self.recommendation = components.recommendation
+        self.adaptive = components.adaptive
+        self.sources = components.sources
         self.svc = _service(_victron_ess_balance_last_setpoint_w=70.0)
         self.metrics: dict[str, Any] = {}
         self.events: list[str] = []
         self.subject._victron_ess_balance_base_setpoint_w = MagicMock(return_value=50.0)
-        self.subject._reset_victron_ess_balance_pid = MagicMock(side_effect=lambda *_: self.events.append("reset"))
-        self.subject._clear_victron_ess_balance_tracking_episode = MagicMock(
+        self.pid.reset = MagicMock(side_effect=lambda *_: self.events.append("reset"))
+        self.telemetry._clear_victron_ess_balance_tracking_episode = MagicMock(
             side_effect=lambda *_: self.events.append("clear-episode")
         )
-        self.subject._clear_victron_ess_balance_active_profile = MagicMock(
+        self.profiles._clear_victron_ess_balance_active_profile = MagicMock(
             side_effect=lambda *_: self.events.append("clear-profile")
         )
-        self.subject._populate_victron_ess_balance_telemetry_metrics = MagicMock(
+        self.recommendation._populate_victron_ess_balance_telemetry_metrics = MagicMock(
             side_effect=lambda *_: self.events.append("telemetry")
         )
-        self.subject._maybe_auto_apply_victron_ess_balance_recommendation = MagicMock(
+        self.adaptive._maybe_auto_apply_victron_ess_balance_recommendation = MagicMock(
             side_effect=lambda *_: self.events.append("auto")
         )
-        self.subject._merge_victron_ess_balance_metrics = MagicMock(
+        self.sources._merge_victron_ess_balance_metrics = MagicMock(
             side_effect=lambda *_: self.events.append("merge")
         )
-        self.subject._victron_ess_balance_last_setpoint = MagicMock(return_value=70.0)
-        self.subject._victron_ess_balance_should_write = MagicMock(return_value=True)
-        self.subject._victron_ess_balance_write_setpoint = MagicMock(return_value=True)
+        self.writer._victron_ess_balance_last_setpoint = MagicMock(return_value=70.0)
+        self.writer._victron_ess_balance_should_write = MagicMock(return_value=True)
+        self.writer._victron_ess_balance_write_setpoint = MagicMock(return_value=True)
 
     def _restore(self, reason: str = "blocked") -> None:
         self.subject._restore_victron_ess_balance_base_setpoint(self.svc, 20.0, self.metrics, reason)
@@ -118,45 +130,47 @@ class ApplyRestoreContracts(unittest.TestCase):
     def _assert_common_initialization(self, reason: str = "blocked") -> None:
         self.assertEqual(self.events[:3], ["reset", "clear-episode", "clear-profile"])
         self.subject._victron_ess_balance_base_setpoint_w.assert_called_once_with(self.svc)
-        self.subject._reset_victron_ess_balance_pid.assert_called_once_with(self.svc)
-        self.subject._clear_victron_ess_balance_tracking_episode.assert_called_once_with(self.svc)
-        self.subject._clear_victron_ess_balance_active_profile.assert_called_once_with(self.svc)
+        self.pid.reset.assert_called_once_with(self.svc)
+        self.telemetry._clear_victron_ess_balance_tracking_episode.assert_called_once_with(self.svc)
+        self.profiles._clear_victron_ess_balance_active_profile.assert_called_once_with(self.svc)
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_setpoint_w"], 50.0)
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_activation_gate_active"], 0)
         self.assertTrue(self.metrics["battery_discharge_balance_victron_bias_reason"].startswith(reason))
 
     def _assert_common_finalization(self) -> None:
         self.assertEqual(self.events[-3:], ["telemetry", "auto", "merge"])
-        self.subject._populate_victron_ess_balance_telemetry_metrics.assert_called_once_with(self.svc, self.metrics)
-        self.subject._maybe_auto_apply_victron_ess_balance_recommendation.assert_called_once_with(
+        self.recommendation._populate_victron_ess_balance_telemetry_metrics.assert_called_once_with(
+            self.svc, self.metrics
+        )
+        self.adaptive._maybe_auto_apply_victron_ess_balance_recommendation.assert_called_once_with(
             self.svc, self.metrics, 20.0
         )
-        self.subject._merge_victron_ess_balance_metrics.assert_called_once_with(self.svc, self.metrics)
+        self.sources._merge_victron_ess_balance_metrics.assert_called_once_with(self.svc, self.metrics)
 
     def test_no_previous_setpoint_finalizes_without_write_decision(self) -> None:
-        self.subject._victron_ess_balance_last_setpoint.return_value = None
+        self.writer._victron_ess_balance_last_setpoint.return_value = None
         self._restore()
         self._assert_common_initialization()
         self._assert_common_finalization()
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_reason"], "blocked")
-        self.subject._victron_ess_balance_should_write.assert_not_called()
-        self.subject._victron_ess_balance_write_setpoint.assert_not_called()
+        self.writer._victron_ess_balance_should_write.assert_not_called()
+        self.writer._victron_ess_balance_write_setpoint.assert_not_called()
 
     def test_rate_limited_restore_holds_active_state(self) -> None:
-        self.subject._victron_ess_balance_should_write.return_value = False
+        self.writer._victron_ess_balance_should_write.return_value = False
         self._restore("safety")
         self._assert_common_initialization("safety")
         self._assert_common_finalization()
-        self.subject._victron_ess_balance_should_write.assert_called_once_with(self.svc, 20.0, 50.0)
+        self.writer._victron_ess_balance_should_write.assert_called_once_with(self.svc, 20.0, 50.0)
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_active"], 1)
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_reason"], "safety-holding")
-        self.subject._victron_ess_balance_write_setpoint.assert_not_called()
+        self.writer._victron_ess_balance_write_setpoint.assert_not_called()
 
     def test_successful_restore_clears_last_setpoint_and_records_time(self) -> None:
         self._restore()
         self._assert_common_initialization()
         self._assert_common_finalization()
-        self.subject._victron_ess_balance_write_setpoint.assert_called_once_with(
+        self.writer._victron_ess_balance_write_setpoint.assert_called_once_with(
             self.svc, "settings-service", "/Setpoint", 50.0
         )
         self.assertEqual(self.svc._victron_ess_balance_last_write_at, 20.0)
@@ -167,10 +181,10 @@ class ApplyRestoreContracts(unittest.TestCase):
         del self.svc.auto_battery_discharge_balance_victron_bias_service
         del self.svc.auto_battery_discharge_balance_victron_bias_path
         self._restore()
-        self.subject._victron_ess_balance_write_setpoint.assert_called_once_with(self.svc, "", "", 50.0)
+        self.writer._victron_ess_balance_write_setpoint.assert_called_once_with(self.svc, "", "", 50.0)
 
     def test_failed_restore_remains_active_and_reports_exact_reason(self) -> None:
-        self.subject._victron_ess_balance_write_setpoint.return_value = False
+        self.writer._victron_ess_balance_write_setpoint.return_value = False
         self._restore("offline")
         self._assert_common_initialization("offline")
         self._assert_common_finalization()

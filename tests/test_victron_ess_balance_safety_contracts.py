@@ -7,18 +7,15 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from venus_evcharger.update.victron_ess_balance_safety import _UpdateCycleVictronEssBalanceSafety
-
-
-class _SafetyHarness(_UpdateCycleVictronEssBalanceSafety):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        return float(value) if isinstance(value, (int, float)) else None
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.safety = _SafetyHarness()
+        components = build_victron_ess_components()
+        self.safety = components.recovery
+        self.profiles = components.profiles
+        self.sources = components.sources
 
     def test_stable_tuning_threshold_contract_and_refresh(self) -> None:
         can_refresh = self.safety._victron_ess_balance_can_refresh_stable_tuning
@@ -37,7 +34,7 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
         snapshot = {"kp": 0.2}
         with (
             patch.object(self.safety, "_victron_ess_balance_ensure_conservative_tuning") as conservative,
-            patch.object(self.safety, "_victron_ess_balance_current_tuning_snapshot", return_value=snapshot) as current,
+            patch.object(self.profiles, "_victron_ess_balance_current_tuning_snapshot", return_value=snapshot) as current,
         ):
             self.safety._victron_ess_balance_refresh_stable_tuning(svc, metrics, 12.5)
         conservative.assert_called_once_with(svc)
@@ -52,7 +49,7 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
 
     def test_conservative_snapshot_is_initialized_once(self) -> None:
         svc = SimpleNamespace(_victron_ess_balance_conservative_tuning=None)
-        with patch.object(self.safety, "_victron_ess_balance_current_tuning_snapshot", return_value={"kp": 1.0}) as current:
+        with patch.object(self.profiles, "_victron_ess_balance_current_tuning_snapshot", return_value={"kp": 1.0}) as current:
             self.safety._victron_ess_balance_ensure_conservative_tuning(svc)
             self.safety._victron_ess_balance_ensure_conservative_tuning(svc)
         current.assert_called_once_with(svc)
@@ -101,10 +98,10 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
         )
         svc._victron_ess_balance_conservative_tuning = []
         self.assertEqual(self.safety._victron_ess_balance_restore_target(svc, "risk"), (None, ""))
-        with patch.object(self.safety, "_victron_ess_balance_activation_mode", return_value="export_only") as mode:
+        with patch.object(self.sources, "_victron_ess_balance_activation_mode", return_value="export_only") as mode:
             self.assertEqual(self.safety._victron_ess_balance_restored_activation_mode(svc, {}), "export_only")
         mode.assert_called_once_with(svc)
-        with patch.object(self.safety, "_victron_ess_balance_activation_mode") as mode:
+        with patch.object(self.sources, "_victron_ess_balance_activation_mode") as mode:
             self.assertEqual(self.safety._victron_ess_balance_restored_activation_mode(svc, {"activation_mode": ""}), "always")
         mode.assert_not_called()
 
@@ -153,23 +150,23 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
     def test_ev_power_sources_and_active_thresholds(self) -> None:
         for attr in ("_last_charger_state_power_w", "_charger_estimated_power_w", "_last_power", "ac_power"):
             svc = SimpleNamespace(**{attr: 123.0})
-            self.assertEqual(self.safety._victron_ess_balance_direct_ev_power_w(svc), 123.0)
-        self.assertIsNone(self.safety._victron_ess_balance_direct_ev_power_w(SimpleNamespace(ac_power="bad")))
+            self.assertEqual(self.sources._victron_ess_balance_direct_ev_power_w(svc), 123.0)
+        self.assertIsNone(self.sources._victron_ess_balance_direct_ev_power_w(SimpleNamespace(ac_power="bad")))
         self.assertEqual(
-            self.safety._victron_ess_balance_ev_power_w(
+            self.sources._victron_ess_balance_ev_power_w(
                 SimpleNamespace(learned_charge_power_watts=1800, virtual_startstop=1)
             ),
             1800.0,
         )
         self.assertIsNone(
-            self.safety._victron_ess_balance_ev_power_w(
+            self.sources._victron_ess_balance_ev_power_w(
                 SimpleNamespace(learned_charge_power_watts=1800, virtual_startstop=0)
             )
         )
-        self.assertTrue(self.safety._victron_ess_balance_ev_active(SimpleNamespace(ac_power=200.0)))
-        self.assertFalse(self.safety._victron_ess_balance_ev_active(SimpleNamespace(ac_power=199.9, virtual_startstop=0)))
-        self.assertTrue(self.safety._victron_ess_balance_ev_active(SimpleNamespace(charging_started_at=0)))
-        self.assertTrue(self.safety._victron_ess_balance_ev_active(SimpleNamespace(virtual_startstop=1)))
+        self.assertTrue(self.sources._victron_ess_balance_ev_active(SimpleNamespace(ac_power=200.0)))
+        self.assertFalse(self.sources._victron_ess_balance_ev_active(SimpleNamespace(ac_power=199.9, virtual_startstop=0)))
+        self.assertTrue(self.sources._victron_ess_balance_ev_active(SimpleNamespace(charging_started_at=0)))
+        self.assertTrue(self.sources._victron_ess_balance_ev_active(SimpleNamespace(virtual_startstop=1)))
 
     def test_cooldown_and_suspend_time_windows_are_exact(self) -> None:
         svc = SimpleNamespace(
@@ -200,7 +197,11 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
 
 class VictronEssBalanceSafetyContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.safety = _SafetyHarness()
+        components = build_victron_ess_components()
+        self.safety = components.safety
+        self.recovery = components.recovery
+        self.sources = components.sources
+        self.pid = components.pid
 
     def test_runtime_metric_groups_are_merged_exactly(self) -> None:
         svc = SimpleNamespace(_victron_ess_balance_oscillation_lockout_until=20.0)
@@ -231,8 +232,8 @@ class VictronEssBalanceSafetyContracts(unittest.TestCase):
         )
         with (
             patch.object(self.safety, "_victron_ess_balance_recent_direction_change_count", return_value=3) as count,
-            patch.object(self.safety, "_victron_ess_balance_overshoot_cooldown_active", return_value=True) as cooldown,
-            patch.object(self.safety, "_victron_ess_balance_auto_apply_suspended", return_value=True) as suspended,
+            patch.object(self.recovery, "_victron_ess_balance_overshoot_cooldown_active", return_value=True) as cooldown,
+            patch.object(self.recovery, "_victron_ess_balance_auto_apply_suspended", return_value=True) as suspended,
         ):
             self.assertEqual(
                 self.safety._victron_ess_balance_lockout_metrics(svc, 10.0, 20.0),
@@ -330,9 +331,9 @@ class VictronEssBalanceSafetyContracts(unittest.TestCase):
                 svc, {"battery_combined_ac_power_w": 900.0}
             )
         )
-        with patch.object(self.safety, "_victron_ess_balance_ev_power_w", return_value=500.1):
+        with patch.object(self.sources, "_victron_ess_balance_ev_power_w", return_value=500.1):
             self.assertEqual(self.safety._victron_ess_balance_ev_window_reason(svc), "ev_load_jump")
-        with patch.object(self.safety, "_victron_ess_balance_ev_power_w", return_value=500.0):
+        with patch.object(self.sources, "_victron_ess_balance_ev_power_w", return_value=500.0):
             self.assertIsNone(self.safety._victron_ess_balance_ev_window_reason(svc))
 
     def test_telemetry_clean_reason_has_strict_priority(self) -> None:
@@ -426,7 +427,7 @@ class VictronEssBalanceSafetyContracts(unittest.TestCase):
             _victron_ess_balance_recent_action_changes=[{"at": 9.0, "action_direction": "more_export"}],
             _victron_ess_balance_last_action_direction="more_export",
         )
-        with patch.object(self.safety, "_reset_victron_ess_balance_pid_integral") as reset:
+        with patch.object(self.pid, "reset_integral") as reset:
             count = self.safety._victron_ess_balance_note_action_direction(svc, " less_export ", 10.0)
         self.assertEqual(count, 1)
         self.assertEqual(svc._victron_ess_balance_oscillation_lockout_until, 40.0)
@@ -438,6 +439,13 @@ class VictronEssBalanceSafetyContracts(unittest.TestCase):
         with patch.object(self.safety, "_victron_ess_balance_recent_direction_change_count", return_value=7) as count_call:
             self.assertEqual(self.safety._victron_ess_balance_note_action_direction(svc, "invalid", 11.0), 7)
         count_call.assert_called_once_with(svc, 11.0)
+
+        unchanged = [{"at": 12.0, "action_direction": "more_export"}]
+        svc._victron_ess_balance_recent_action_changes = unchanged
+        svc._victron_ess_balance_last_action_direction = "more_export"
+        with patch.object(self.safety, "_victron_ess_balance_recent_direction_change_count", return_value=0):
+            self.safety._victron_ess_balance_note_action_direction(svc, "more_export", 13.0)
+        self.assertEqual(unchanged, [{"at": 12.0, "action_direction": "more_export"}])
 
 
 if __name__ == "__main__":

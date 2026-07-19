@@ -4,7 +4,6 @@ import inspect
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 

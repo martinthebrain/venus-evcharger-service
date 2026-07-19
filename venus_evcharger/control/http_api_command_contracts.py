@@ -1,16 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+"""Typed ports for the local Control API HTTP adapter."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Any, Protocol, TypeGuard
+from typing import Any, Protocol
 
 from venus_evcharger.control.models import ControlCommand, ControlCommandSource, ControlResult
 
 
-class ControlApiRateLimiterLike(Protocol):
-    """Rate-limiter contract used by the HTTP command endpoint."""
+JsonObject = dict[str, Any]
+AuditCommand = ControlCommand | Mapping[str, Any] | None
+AuditResult = ControlResult | Mapping[str, Any] | None
 
-    def allow_request(self, client_key: str, *, now: float | None = None) -> tuple[bool, float]: ...  # pragma: no cover
+
+class ControlApiRateLimiterPort(Protocol):
+    """Rate-limiter behavior required by the command endpoint."""
+
+    def allow_request(self, client_key: str, *, now: float | None = None) -> tuple[bool, float]: ...
 
     def allow_command(
         self,
@@ -18,84 +25,208 @@ class ControlApiRateLimiterLike(Protocol):
         command_name: str,
         *,
         now: float | None = None,
-    ) -> tuple[bool, float]: ...  # pragma: no cover
+    ) -> tuple[bool, float]: ...
 
 
-class ControlApiIdempotencyStoreLike(Protocol):
-    """Idempotency-store contract used by the HTTP command endpoint."""
+class ControlApiIdempotencyStorePort(Protocol):
+    """Idempotency storage required by the command endpoint."""
 
-    def get(self, key: str) -> tuple[str, int, dict[str, Any]] | None: ...  # pragma: no cover
+    def get(self, key: str) -> tuple[str, int, JsonObject] | None: ...
 
-    def put(self, key: str, fingerprint: str, status: int, response: dict[str, Any]) -> None: ...  # pragma: no cover
+    def put(self, key: str, fingerprint: str, status: int, response: JsonObject) -> None: ...
 
 
-class ControlApiEventBusLike(Protocol):
-    """Event-bus contract used by the HTTP event-stream endpoint."""
+class ControlApiEventBusPort(Protocol):
+    """Event-bus behavior required by the event endpoint."""
 
     def recent(
         self,
         *,
         limit: int,
         after_seq: int,
-    ) -> Iterable[Mapping[str, Any]]: ...  # pragma: no cover
+    ) -> Iterable[Mapping[str, Any]]: ...
 
     def wait_for_next(
         self,
         *,
         after_seq: int,
         timeout: float,
-    ) -> Mapping[str, Any] | None: ...  # pragma: no cover
+    ) -> Mapping[str, Any] | None: ...
+
+
+class ControlApiCommandPort(Protocol):
+    """Command parsing and execution boundary."""
+
+    def control_command_from_payload(
+        self,
+        payload: JsonObject,
+        source: ControlCommandSource = "http",
+    ) -> ControlCommand: ...
+
+    def handle_control_command(self, command: ControlCommand) -> ControlResult: ...
+
+    def publish_command_event(
+        self,
+        command: AuditCommand,
+        result: AuditResult,
+        *,
+        replayed: bool = False,
+    ) -> None: ...
+
+    def record_command_audit(
+        self,
+        *,
+        command: AuditCommand,
+        result: AuditResult,
+        error: JsonObject | None,
+        replayed: bool,
+        scope: str,
+        client_host: str,
+        status_code: int,
+        transport: str = "http",
+    ) -> JsonObject: ...
+
+
+class ControlApiRuntimePort(Protocol):
+    """Runtime-owned stores used by the HTTP adapter."""
+
+    def idempotency_store(self) -> ControlApiIdempotencyStorePort: ...
+
+    def rate_limiter(self) -> ControlApiRateLimiterPort: ...
+
+
+class ControlApiAuthorizationPort(Protocol):
+    """Command parsing and state-token behavior needed by authorization."""
+
+    def state_token(self) -> str: ...
+
+    def control_command_from_payload(
+        self,
+        payload: JsonObject,
+        source: ControlCommandSource = "http",
+    ) -> ControlCommand: ...
+
+
+class ControlApiStatePort(Protocol):
+    """Named state readers consumed by HTTP routing."""
+
+    def capabilities_payload(self) -> JsonObject: ...
+
+    def state_token(self) -> str: ...
+
+    def automation_payload(self) -> JsonObject: ...
+
+    def build_payload(self) -> JsonObject: ...
+
+    def config_effective_payload(self) -> JsonObject: ...
+
+    def contracts_payload(self) -> JsonObject: ...
+
+    def dbus_diagnostics_payload(self) -> JsonObject: ...
+
+    def health_payload(self) -> JsonObject: ...
+
+    def healthz_payload(self) -> JsonObject: ...
+
+    def operational_payload(self) -> JsonObject: ...
+
+    def runtime_payload(self) -> JsonObject: ...
+
+    def summary_payload(self) -> JsonObject: ...
+
+    def topology_payload(self) -> JsonObject: ...
+
+    def update_payload(self) -> JsonObject: ...
+
+    def version_payload(self) -> JsonObject: ...
+
+    def victron_bias_recommendation_payload(self) -> JsonObject: ...
+
+
+class ControlApiEventsPort(Protocol):
+    """Event stream boundary."""
+
+    def event_bus(self) -> ControlApiEventBusPort: ...
+
+    def event_snapshot_payload(self) -> JsonObject: ...
 
 
 class ControlApiHttpService(Protocol):
-    """Service boundary required by the local Control API HTTP adapter."""
+    """Complete, explicit service boundary accepted by the HTTP adapter."""
 
-    def _control_api_capabilities_payload(self) -> dict[str, Any]: ...  # pragma: no cover
+    def capabilities_payload(self) -> JsonObject: ...
 
-    def _control_api_event_bus(self) -> ControlApiEventBusLike: ...  # pragma: no cover
+    def event_bus(self) -> ControlApiEventBusPort: ...
 
-    def _control_command_from_payload(
+    def idempotency_store(self) -> ControlApiIdempotencyStorePort: ...
+
+    def rate_limiter(self) -> ControlApiRateLimiterPort: ...
+
+    def state_token(self) -> str: ...
+
+    def control_command_from_payload(
         self,
-        payload: Mapping[str, Any],
+        payload: JsonObject,
+        source: ControlCommandSource = "http",
+    ) -> ControlCommand: ...
+
+    def handle_control_command(self, command: ControlCommand) -> ControlResult: ...
+
+    def publish_command_event(
+        self,
+        command: AuditCommand,
+        result: AuditResult,
         *,
-        source: ControlCommandSource,
-    ) -> ControlCommand: ...  # pragma: no cover
+        replayed: bool = False,
+    ) -> None: ...
 
-    def _handle_control_command(self, command: ControlCommand) -> ControlResult: ...  # pragma: no cover
+    def record_command_audit(
+        self,
+        *,
+        command: AuditCommand,
+        result: AuditResult,
+        error: JsonObject | None,
+        replayed: bool,
+        scope: str,
+        client_host: str,
+        status_code: int,
+        transport: str = "http",
+    ) -> JsonObject: ...
 
-    def _state_api_event_snapshot_payload(self) -> dict[str, Any]: ...  # pragma: no cover
+    def automation_payload(self) -> JsonObject: ...
 
-    def __getattr__(self, name: str) -> Any: ...  # pragma: no cover
+    def build_payload(self) -> JsonObject: ...
+
+    def config_effective_payload(self) -> JsonObject: ...
+
+    def contracts_payload(self) -> JsonObject: ...
+
+    def dbus_diagnostics_payload(self) -> JsonObject: ...
+
+    def event_snapshot_payload(self) -> JsonObject: ...
+
+    def health_payload(self) -> JsonObject: ...
+
+    def healthz_payload(self) -> JsonObject: ...
+
+    def operational_payload(self) -> JsonObject: ...
+
+    def runtime_payload(self) -> JsonObject: ...
+
+    def summary_payload(self) -> JsonObject: ...
+
+    def topology_payload(self) -> JsonObject: ...
+
+    def update_payload(self) -> JsonObject: ...
+
+    def version_payload(self) -> JsonObject: ...
+
+    def victron_bias_recommendation_payload(self) -> JsonObject: ...
 
 
-def optional_error_payload(response_payload: dict[str, Any]) -> dict[str, Any] | None:
+def optional_error_payload(response_payload: Mapping[str, Any]) -> JsonObject | None:
     """Return the nested error object from one API response payload."""
     error = response_payload.get("error")
-    return {str(key): value for key, value in error.items()} if isinstance(error, dict) else None
-
-
-def require_rate_limiter(value: object) -> ControlApiRateLimiterLike:
-    """Return a validated Control API rate limiter from a service factory."""
-    if not _rate_limiter_like(value):
-        raise TypeError(
-            f"_control_api_rate_limiter must return an object with allow_request/allow_command, "
-            f"got {type(value).__name__}"
-        )
-    return value
-
-
-def require_idempotency_store(value: object) -> ControlApiIdempotencyStoreLike:
-    """Return a validated Control API idempotency store from a service factory."""
-    if not _idempotency_store_like(value):
-        raise TypeError(
-            f"_control_api_idempotency_store must return an object with get/put, got {type(value).__name__}"
-        )
-    return value
-
-
-def _rate_limiter_like(value: object) -> TypeGuard[ControlApiRateLimiterLike]:
-    return callable(getattr(value, "allow_request", None)) and callable(getattr(value, "allow_command", None))
-
-
-def _idempotency_store_like(value: object) -> TypeGuard[ControlApiIdempotencyStoreLike]:
-    return callable(getattr(value, "get", None)) and callable(getattr(value, "put", None))
+    if not isinstance(error, Mapping):
+        return None
+    return {str(key): value for key, value in error.items()}

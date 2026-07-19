@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from venus_evcharger.dbus_adapter_health_backpressure import (
+from venus_evcharger.dbus_adapter.health.backpressure import (
     backpressure_reasons,
     backpressure_slo_reasons,
     backpressure_snapshot,

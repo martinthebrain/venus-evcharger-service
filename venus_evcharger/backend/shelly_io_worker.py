@@ -3,52 +3,45 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from venus_evcharger.backend.errors import BACKEND_IO_ERRORS
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
+from venus_evcharger.backend.shelly_io_capabilities import ShellyCapabilities
+from venus_evcharger.backend.shelly_io_ports import ShellyWorkerHost
+from venus_evcharger.backend.shelly_io_requests import ShellyRequestClient
+from venus_evcharger.backend.shelly_io_runtime import ShellyChargerRuntime
 from venus_evcharger.backend.shelly_io_worker_status import local_pm_status_payload, normalized_energy_payload
+from venus_evcharger.backend.shelly_io_worker_transport import ShellyWorkerTransport
 from venus_evcharger.backend.shelly_io_types import (
-    _EnableBackendLike,
     JsonObject,
     PendingRelayCommand,
     ShellyEnergyData,
-    ShellyIoHost,
     ShellyPmStatus,
+    optional_json_object,
 )
-from venus_evcharger.backend.shelly_io_worker_lifecycle import ShellyIoWorkerLifecycle
 
 
-class ShellyIoWorker(ShellyIoWorkerLifecycle):
+class ShellyWorker:
     """Handle optimistic PM publishing, queued relay writes, and the worker loop."""
 
-    if TYPE_CHECKING:
-
-        def _runtime_now(self) -> float: ...
-
-        def _warn_if_direct_switching_under_load(self, relay_on: bool) -> None: ...
-
-        def _split_enable_source_key(self) -> str: ...
-
-        def _split_enable_source_label(self) -> str: ...
-
-        def _split_enable_backend(self) -> _EnableBackendLike | None: ...
-
-        def _charger_retry_active(self, now: float | None = None) -> bool: ...
-
-        def _remember_charger_transport_issue(
-            self,
-            reason: str,
-            source: str,
-            error: BaseException,
-            now: float | None = None,
-        ) -> None: ...
-
-        def _remember_charger_retry(self, reason: str, source: str, now: float | None = None) -> None: ...
-
-        def _clear_charger_transport_issue(self) -> None: ...
-
-        def _clear_charger_retry(self) -> None: ...
+    def __init__(
+        self,
+        service: ShellyWorkerHost,
+        requests: ShellyRequestClient,
+        capabilities: ShellyCapabilities,
+        runtime: ShellyChargerRuntime,
+        transport: ShellyWorkerTransport,
+        clock: Callable[[], float],
+        fetch_pm_status: Callable[[], JsonObject],
+    ) -> None:
+        self.service = service
+        self.requests = requests
+        self.capabilities = capabilities
+        self.runtime = runtime
+        self.transport = transport
+        self._clock = clock
+        self._fetch_pm_status = fetch_pm_status
 
     @staticmethod
     def _normalized_energy_payload(value: object) -> ShellyEnergyData:
@@ -57,7 +50,7 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
     def build_local_pm_status(self, relay_on: bool) -> ShellyPmStatus:
         svc = self.service
         source = getattr(svc, "_last_pm_status", None)
-        raw_status = dict(source) if isinstance(source, dict) else {}
+        raw_status = optional_json_object(source) or {}
         pm_status = local_pm_status_payload(raw_status)
         last_voltage = getattr(svc, "_last_voltage", None)
         voltage = (
@@ -75,13 +68,13 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
 
     def publish_local_pm_status(self, relay_on: bool, now: float | None = None) -> ShellyPmStatus:
         svc = self.service
-        current = svc._time_now() if now is None else float(now)
-        pm_status = svc._build_local_pm_status(relay_on)
+        current = svc.time_now() if now is None else float(now)
+        pm_status = self.build_local_pm_status(relay_on)
         pm_status["_pm_confirmed"] = False
         svc._last_pm_status = dict(pm_status)
         svc._last_pm_status_at = current
         svc._last_pm_status_confirmed = False
-        svc._update_worker_snapshot(
+        svc.runtime.update_worker_snapshot(
             captured_at=current,
             pm_captured_at=current,
             pm_status=pm_status,
@@ -91,9 +84,9 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
 
     def queue_relay_command(self, relay_on: bool, now: float | None = None) -> None:
         svc = self.service
-        svc._ensure_worker_state()
-        current = svc._time_now() if now is None else float(now)
-        self._warn_if_direct_switching_under_load(bool(relay_on))
+        svc.runtime.ensure_worker_state()
+        current = svc.time_now() if now is None else float(now)
+        self.capabilities.warn_if_direct_switching_under_load(bool(relay_on))
         with svc._relay_command_lock:
             svc._pending_relay_state = bool(relay_on)
             svc._pending_relay_requested_at = current
@@ -104,13 +97,13 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
 
     def peek_pending_relay_command(self) -> PendingRelayCommand:
         svc = self.service
-        svc._ensure_worker_state()
+        svc.runtime.ensure_worker_state()
         with svc._relay_command_lock:
             return svc._pending_relay_state, svc._pending_relay_requested_at
 
     def clear_pending_relay_command(self, relay_on: bool) -> None:
         svc = self.service
-        svc._ensure_worker_state()
+        svc.runtime.ensure_worker_state()
         with svc._relay_command_lock:
             if svc._pending_relay_state == bool(relay_on):
                 svc._pending_relay_state = None
@@ -128,40 +121,40 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
             return
         self._finalize_pending_relay_command(svc, bool(target_on), source_key, source_label)
 
-    def _pending_relay_command_context(self) -> tuple[ShellyIoHost, bool, str, str, float] | None:
+    def _pending_relay_command_context(self) -> tuple[ShellyWorkerHost, bool, str, str, float] | None:
         svc = self.service
-        target_on, _requested_at = svc._peek_pending_relay_command()
+        target_on, _requested_at = self.peek_pending_relay_command()
         if target_on is None:
             return None
-        source_key = self._split_enable_source_key()
-        current = self._runtime_now()
+        source_key = self.capabilities.split_enable_source_key()
+        current = self._clock()
         if self._source_retry_blocks_pending_relay(source_key, current):
             return None
-        return svc, bool(target_on), source_key, self._split_enable_source_label(), current
+        return svc, bool(target_on), source_key, self.capabilities.split_enable_source_label(), current
 
     def _source_retry_blocks_pending_relay(self, source_key: str, current: float) -> bool:
         """Return whether source backoff should defer the pending relay command."""
         if source_key == "charger":
-            return bool(self._charger_retry_active(current))
+            return bool(self.runtime.charger_retry_active(current))
         if source_key == "shelly":
-            return bool(self._shelly_retry_active(current))
+            return bool(self.transport.retry_active(current))
         return False
 
-    def _apply_pending_relay_target(self, svc: ShellyIoHost, target_on: bool) -> None:
-        backend = self._split_enable_backend()
+    def _apply_pending_relay_target(self, svc: ShellyWorkerHost, target_on: bool) -> None:
+        backend = self.capabilities.split_enable_backend()
         if backend is not None:
             backend.set_enabled(bool(target_on))
             return
-        svc._rpc_call_with_session(
+        self.requests.rpc_call_with_session(
             svc._worker_session,
             "Switch.Set",
-            id=svc.pm_id,
+            id=self.requests.service.pm_id,
             on=bool(target_on),
         )
 
     def _handle_pending_relay_command_error(
         self,
-        svc: ShellyIoHost,
+        svc: ShellyWorkerHost,
         source_key: str,
         source_label: str,
         current: float,
@@ -179,124 +172,121 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
         if source_key == "charger":
             transport_reason = modbus_transport_issue_reason(error)
             if transport_reason is not None:
-                self._remember_charger_transport_issue(transport_reason, "enable", error, current)
-                self._remember_charger_retry(transport_reason, "enable", current)
+                self.runtime.remember_charger_transport_issue(transport_reason, "enable", error, current)
+                self.runtime.remember_charger_retry(transport_reason, "enable", current)
             return "error"
         if source_key == "shelly":
-            shelly_reason = self._classify_shelly_error(error)
-            self._remember_shelly_failure(shelly_reason, "relay", error, current)
+            shelly_reason = self.transport.classify_error(error)
+            self.transport.remember_failure(shelly_reason, "relay", error, current)
             return shelly_reason
         return "error"
 
     def _warn_pending_relay_command_error(
         self,
-        svc: ShellyIoHost,
+        svc: ShellyWorkerHost,
         source_key: str,
         source_label: str,
         current: float,
         reason: str,
         error: BaseException,
     ) -> None:
-        svc._mark_failure(source_key)
-        svc._warning_throttled(
+        svc.runtime.mark_failure(source_key)
+        svc.runtime.warning_throttled(
             f"worker-{source_key}-switch-failed-{reason}",
             svc.auto_shelly_soft_fail_seconds,
             "%s switch failed (%s, consecutive=%s, retry=%ss): %s",
             source_label,
             reason,
-            self._pending_relay_shelly_error_count(svc, source_key),
-            self._pending_relay_shelly_retry_remaining(svc, source_key, current),
+            self._pending_relay_shelly_error_count(source_key),
+            self._pending_relay_shelly_retry_remaining(source_key, current),
             error,
             exc_info=self._pending_relay_error_exc_info(source_key, error),
         )
 
-    def _pending_relay_shelly_error_count(self, svc: ShellyIoHost, source_key: str) -> int:
+    def _pending_relay_shelly_error_count(self, source_key: str) -> int:
         """Return Shelly consecutive error count only for Shelly-backed commands."""
         if source_key != "shelly":
             return 0
-        return int(getattr(svc, "_shelly_consecutive_errors", 0))
+        return self.transport.consecutive_errors()
 
-    def _pending_relay_shelly_retry_remaining(self, svc: ShellyIoHost, source_key: str, current: float) -> float:
+    def _pending_relay_shelly_retry_remaining(self, source_key: str, current: float) -> float:
         """Return Shelly retry time remaining when the helper exists."""
         if source_key != "shelly":
             return 0.0
-        source_retry_remaining = getattr(svc, "_source_retry_remaining", None)
-        if not callable(source_retry_remaining):
-            return 0.0
-        return float(source_retry_remaining("shelly", current))
+        return self.transport.retry_remaining(current)
 
     def _pending_relay_error_exc_info(self, source_key: str, error: BaseException) -> BaseException | None:
         """Suppress noisy tracebacks for common Shelly network failures."""
-        if source_key == "shelly" and self._is_shelly_common_network_error(error):
+        if source_key == "shelly" and self.transport.is_common_network_error(error):
             return None
         return error
 
     def _finalize_pending_relay_command(
         self,
-        svc: ShellyIoHost,
+        svc: ShellyWorkerHost,
         target_on: bool,
         source_key: str,
         source_label: str,
     ) -> None:
-        completed_at = svc._time_now()
-        svc._clear_pending_relay_command(bool(target_on))
-        svc._mark_relay_changed(bool(target_on), completed_at)
+        completed_at = svc.time_now()
+        self.clear_pending_relay_command(bool(target_on))
+        svc.auto.mark_relay_changed(bool(target_on), completed_at)
         if source_key == "shelly":
-            self._remember_shelly_success(svc._time_now(), "Shelly relay writes recovered")
+            self.transport.remember_success(svc.time_now(), "Shelly relay writes recovered")
         else:
-            self._clear_charger_transport_issue()
-            self._clear_charger_retry()
-            svc._mark_recovery(source_key, "%s writes recovered", source_label)
-        svc._publish_local_pm_status(bool(target_on), completed_at)
+            self.runtime.clear_charger_transport_issue()
+            self.runtime.clear_charger_retry()
+            svc.runtime.mark_recovery(source_key, "%s writes recovered", source_label)
+        self.publish_local_pm_status(bool(target_on), completed_at)
 
     def io_worker_once(self) -> None:
         svc = self.service
-        svc._ensure_worker_state()
-        now = svc._time_now()
+        svc.runtime.ensure_worker_state()
+        now = svc.time_now()
         auto_mode_active = self._worker_auto_mode_active(svc)
         self._update_worker_tick_snapshot(svc, now, auto_mode_active)
-        svc._worker_apply_pending_relay_command()
+        self.worker_apply_pending_relay_command()
 
-        if self._shelly_retry_active(now):
+        if self.transport.retry_active(now):
             self._update_worker_unconfirmed_snapshot(svc, now, auto_mode_active)
             return
 
         try:
-            pm_status = svc._worker_fetch_pm_status()
-            read_at = svc._time_now()
-            self._remember_shelly_success(read_at, "Shelly status reads recovered")
+            pm_status = self._fetch_pm_status()
+            read_at = svc.time_now()
+            self.transport.remember_success(read_at, "Shelly status reads recovered")
             self._update_worker_confirmed_snapshot(svc, read_at, auto_mode_active, pm_status)
         except BACKEND_IO_ERRORS as error:
-            reason = self._classify_shelly_error(error)
-            self._remember_shelly_failure(reason, "read", error, now)
-            svc._mark_failure("shelly")
-            exc_info = None if self._is_shelly_common_network_error(error) else error
-            svc._warning_throttled(
+            reason = self.transport.classify_error(error)
+            self.transport.remember_failure(reason, "read", error, now)
+            svc.runtime.mark_failure("shelly")
+            exc_info = None if self.transport.is_common_network_error(error) else error
+            svc.runtime.warning_throttled(
                 f"worker-shelly-read-failed-{reason}",
-            svc.auto_shelly_soft_fail_seconds,
-            "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
-            reason,
-            self._pending_relay_shelly_error_count(svc, "shelly"),
-            self._pending_relay_shelly_retry_remaining(svc, "shelly", now),
-            error,
+                svc.auto_shelly_soft_fail_seconds,
+                "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
+                reason,
+                self._pending_relay_shelly_error_count("shelly"),
+                self._pending_relay_shelly_retry_remaining("shelly", now),
+                error,
                 exc_info=exc_info,
             )
             self._update_worker_unconfirmed_snapshot(svc, now, auto_mode_active)
 
     @staticmethod
-    def _worker_auto_mode_active(svc: ShellyIoHost) -> bool:
-        return bool(svc._mode_uses_auto_logic(getattr(svc, "virtual_mode", 0)))
+    def _worker_auto_mode_active(svc: ShellyWorkerHost) -> bool:
+        return svc.auto.mode_uses_auto_logic(getattr(svc, "virtual_mode", 0))
 
     @staticmethod
-    def _update_worker_tick_snapshot(svc: ShellyIoHost, captured_at: float, auto_mode_active: bool) -> None:
-        svc._update_worker_snapshot(
+    def _update_worker_tick_snapshot(svc: ShellyWorkerHost, captured_at: float, auto_mode_active: bool) -> None:
+        svc.runtime.update_worker_snapshot(
             captured_at=captured_at,
             auto_mode_active=auto_mode_active,
         )
 
     @staticmethod
-    def _update_worker_unconfirmed_snapshot(svc: ShellyIoHost, captured_at: float, auto_mode_active: bool) -> None:
-        svc._update_worker_snapshot(
+    def _update_worker_unconfirmed_snapshot(svc: ShellyWorkerHost, captured_at: float, auto_mode_active: bool) -> None:
+        svc.runtime.update_worker_snapshot(
             captured_at=captured_at,
             auto_mode_active=auto_mode_active,
             pm_status=None,
@@ -306,12 +296,12 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
 
     @staticmethod
     def _update_worker_confirmed_snapshot(
-        svc: ShellyIoHost,
+        svc: ShellyWorkerHost,
         captured_at: float,
         auto_mode_active: bool,
         pm_status: JsonObject,
     ) -> None:
-        svc._update_worker_snapshot(
+        svc.runtime.update_worker_snapshot(
             captured_at=captured_at,
             pm_captured_at=captured_at,
             auto_mode_active=auto_mode_active,
@@ -321,14 +311,14 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
 
     def io_worker_loop(self) -> None:
         svc = self.service
-        svc._ensure_worker_state()
+        svc.runtime.ensure_worker_state()
         stop_event = svc._worker_stop_event
         while not stop_event.is_set():
-            cycle_started = svc._time_now()
+            cycle_started = svc.time_now()
             try:
                 self.io_worker_once()
             except Exception as error:
-                svc._warning_throttled(
+                svc.runtime.warning_throttled(
                     "io-worker-cycle-failed",
                     max(1.0, svc._worker_poll_interval_seconds),
                     "Background I/O worker cycle failed: %s",
@@ -341,6 +331,9 @@ class ShellyIoWorker(ShellyIoWorkerLifecycle):
                 return
 
     @staticmethod
-    def _worker_loop_wait_seconds(svc: ShellyIoHost, cycle_started: float) -> float:
-        elapsed = svc._time_now() - cycle_started
+    def _worker_loop_wait_seconds(svc: ShellyWorkerHost, cycle_started: float) -> float:
+        elapsed = svc.time_now() - cycle_started
         return max(0.05, svc._worker_poll_interval_seconds - elapsed)
+
+
+__all__ = ["ShellyWorker"]

@@ -3,141 +3,319 @@
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
-
 from venus_evcharger.backend.models import PhaseSelection
 from venus_evcharger.core.contracts import non_negative_float_or_none, non_negative_int
-from venus_evcharger.core.shared import write_text_atomically
-from venus_evcharger.controllers.errors import RUNTIME_PERSISTENCE_WRITE_ERRORS
-from .state_restore_support import (
-    _StateRuntimeRestoreVictronEss,
-    _victron_ess_balance_energy_ids,
-    _victron_ess_balance_runtime_string,
-)
+from venus_evcharger.controllers.state_contracts import ModeNormalizer, StateAttributes, is_object_dict
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
+from venus_evcharger.controllers.state_restore_victron_ess import VictronEssRuntimeRestorer
 
 
-class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
-    if TYPE_CHECKING:  # pragma: no cover
-        _normalize_mode: Callable[[object], int]
+class RuntimeStateRestorer:
+    """Apply one validated runtime-state payload to the live service."""
 
-        def state_summary(self) -> str: ...
+    def __init__(
+        self,
+        service: object,
+        normalize_mode: ModeNormalizer,
+        normalizer: RuntimeStateNormalizer,
+        victron_ess: VictronEssRuntimeRestorer,
+    ) -> None:
+        self.service = service
+        self.normalize_mode = normalize_mode
+        self.normalizer = normalizer
+        self.victron_ess = victron_ess
 
-    def _restore_basic_runtime_state(self, svc: Any, state: dict[str, object]) -> None:
-        svc.virtual_mode = self._normalize_mode(state.get("mode", svc.virtual_mode))
-        svc.virtual_autostart = self.coerce_runtime_int(state.get("autostart"), svc.virtual_autostart)
-        svc.virtual_enable = self.coerce_runtime_int(state.get("enable"), svc.virtual_enable)
-        svc.virtual_startstop = self.coerce_runtime_int(state.get("startstop"), svc.virtual_startstop)
-        svc.manual_override_until = self.coerce_runtime_float(state.get("manual_override_until"), svc.manual_override_until)
-        svc._auto_mode_cutover_pending = bool(
-            self.coerce_runtime_int(state.get("auto_mode_cutover_pending"), svc._auto_mode_cutover_pending)
+    def _restore_basic_runtime_state(self, svc: object, state: dict[str, object]) -> None:
+        attributes = StateAttributes(svc)
+        attributes.set(
+            "virtual_mode",
+            self.normalize_mode(state.get("mode", attributes.get("virtual_mode"))),
         )
-        svc._ignore_min_offtime_once = False
+        attributes.set(
+            "virtual_autostart",
+            self.normalizer.coerce_runtime_int(
+                state.get("autostart"),
+                self.normalizer.coerce_runtime_int(attributes.get("virtual_autostart")),
+            ),
+        )
+        attributes.set(
+            "virtual_enable",
+            self.normalizer.coerce_runtime_int(
+                state.get("enable"),
+                self.normalizer.coerce_runtime_int(attributes.get("virtual_enable")),
+            ),
+        )
+        attributes.set(
+            "virtual_startstop",
+            self.normalizer.coerce_runtime_int(
+                state.get("startstop"),
+                self.normalizer.coerce_runtime_int(attributes.get("virtual_startstop")),
+            ),
+        )
+        attributes.set(
+            "manual_override_until",
+            self.normalizer.coerce_runtime_float(
+                state.get("manual_override_until"),
+                self.normalizer.coerce_runtime_float(attributes.get("manual_override_until")),
+            ),
+        )
+        attributes.set(
+            "_auto_mode_cutover_pending",
+            bool(
+                self.normalizer.coerce_runtime_int(
+                    state.get("auto_mode_cutover_pending"),
+                    int(bool(attributes.get("_auto_mode_cutover_pending"))),
+                )
+            ),
+        )
+        attributes.set("_ignore_min_offtime_once", False)
 
-    def _restore_learned_charge_power_state(self, svc: Any, state: dict[str, object], current_time: float) -> None:
-        svc.learned_charge_power_watts = non_negative_float_or_none(
-            state.get("learned_charge_power_watts", getattr(svc, "learned_charge_power_watts", None))
+    def _restore_learned_charge_power_state(
+        self,
+        svc: object,
+        state: dict[str, object],
+        current_time: float,
+    ) -> None:
+        attributes = StateAttributes(svc)
+        attributes.set(
+            "learned_charge_power_watts",
+            non_negative_float_or_none(
+                state.get(
+                    "learned_charge_power_watts",
+                    attributes.get("learned_charge_power_watts", None),
+                )
+            ),
         )
-        svc.learned_charge_power_updated_at = self._coerce_optional_runtime_past_time(
-            state.get("learned_charge_power_updated_at", getattr(svc, "learned_charge_power_updated_at", None)),
-            current_time,
+        attributes.set(
+            "learned_charge_power_updated_at",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "learned_charge_power_updated_at",
+                    attributes.get("learned_charge_power_updated_at", None),
+                ),
+                current_time,
+            ),
         )
-        svc.learned_charge_power_state = self._normalize_learned_charge_power_state(
-            state.get("learned_charge_power_state", getattr(svc, "learned_charge_power_state", None))
+        attributes.set(
+            "learned_charge_power_state",
+            self.normalizer.learned_charge_power_state(
+                state.get(
+                    "learned_charge_power_state",
+                    attributes.get("learned_charge_power_state", None),
+                )
+            ),
         )
-        svc.learned_charge_power_learning_since = self._coerce_optional_runtime_past_time(
-            state.get("learned_charge_power_learning_since", getattr(svc, "learned_charge_power_learning_since", None)),
-            current_time,
+        attributes.set(
+            "learned_charge_power_learning_since",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "learned_charge_power_learning_since",
+                    attributes.get("learned_charge_power_learning_since", None),
+                ),
+                current_time,
+            ),
         )
-        svc.learned_charge_power_sample_count = non_negative_int(
-            state.get("learned_charge_power_sample_count", getattr(svc, "learned_charge_power_sample_count", None))
+        attributes.set(
+            "learned_charge_power_sample_count",
+            non_negative_int(
+                state.get(
+                    "learned_charge_power_sample_count",
+                    attributes.get("learned_charge_power_sample_count", None),
+                )
+            ),
         )
-        svc.learned_charge_power_phase = self._normalize_learned_charge_power_phase(
-            state.get("learned_charge_power_phase", getattr(svc, "learned_charge_power_phase", None))
+        attributes.set(
+            "learned_charge_power_phase",
+            self.normalizer.learned_charge_power_phase(
+                state.get(
+                    "learned_charge_power_phase",
+                    attributes.get("learned_charge_power_phase", None),
+                )
+            ),
         )
-        svc.learned_charge_power_voltage = non_negative_float_or_none(
-            state.get("learned_charge_power_voltage", getattr(svc, "learned_charge_power_voltage", None))
+        attributes.set(
+            "learned_charge_power_voltage",
+            non_negative_float_or_none(
+                state.get(
+                    "learned_charge_power_voltage",
+                    attributes.get("learned_charge_power_voltage", None),
+                )
+            ),
         )
-        svc.learned_charge_power_signature_mismatch_sessions = non_negative_int(
+        attributes.set(
+            "learned_charge_power_signature_mismatch_sessions",
+            non_negative_int(
+                state.get(
+                    "learned_charge_power_signature_mismatch_sessions",
+                    attributes.get("learned_charge_power_signature_mismatch_sessions", None),
+                )
+            ),
+        )
+        attributes.set(
+            "learned_charge_power_signature_checked_session_started_at",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "learned_charge_power_signature_checked_session_started_at",
+                    attributes.get(
+                        "learned_charge_power_signature_checked_session_started_at",
+                        None,
+                    ),
+                ),
+                current_time,
+            ),
+        )
+
+    def _restore_phase_switch_runtime_state(
+        self,
+        svc: object,
+        state: dict[str, object],
+        current_time: float,
+    ) -> None:
+        attributes = StateAttributes(svc)
+        supported_phase_selections = self.normalizer.supported_phase_selections(
             state.get(
-                "learned_charge_power_signature_mismatch_sessions",
-                getattr(svc, "learned_charge_power_signature_mismatch_sessions", None),
+                "supported_phase_selections",
+                attributes.get("supported_phase_selections", None),
             )
         )
-        svc.learned_charge_power_signature_checked_session_started_at = self._coerce_optional_runtime_past_time(
-            state.get(
-                "learned_charge_power_signature_checked_session_started_at",
-                getattr(svc, "learned_charge_power_signature_checked_session_started_at", None),
-            ),
-            current_time,
-        )
-
-    def _restore_phase_switch_runtime_state(self, svc: Any, state: dict[str, object], current_time: float) -> None:
-        supported_phase_selections = self._normalize_runtime_supported_phase_selections(
-            state.get("supported_phase_selections", getattr(svc, "supported_phase_selections", None))
-        )
-        svc.supported_phase_selections = supported_phase_selections
+        attributes.set("supported_phase_selections", supported_phase_selections)
         default_phase_selection = supported_phase_selections[0]
-        svc.requested_phase_selection = self._normalize_runtime_phase_selection(
-            state.get("requested_phase_selection", getattr(svc, "requested_phase_selection", None)),
+        requested_phase_selection = self.normalizer.phase_selection(
+            state.get(
+                "requested_phase_selection",
+                attributes.get("requested_phase_selection", None),
+            ),
             default_phase_selection,
         )
-        svc.active_phase_selection = self._normalize_runtime_phase_selection(
-            state.get("active_phase_selection", getattr(svc, "active_phase_selection", None)),
-            svc.requested_phase_selection,
+        attributes.set("requested_phase_selection", requested_phase_selection)
+        attributes.set(
+            "active_phase_selection",
+            self.normalizer.phase_selection(
+                state.get(
+                    "active_phase_selection",
+                    attributes.get("active_phase_selection", None),
+                ),
+                requested_phase_selection,
+            ),
         )
-        svc._phase_switch_pending_selection = self._normalized_optional_runtime_phase_selection(
-            state.get("phase_switch_pending_selection", getattr(svc, "_phase_switch_pending_selection", None)),
-            svc.requested_phase_selection,
+        pending_selection = self.normalizer.optional_phase_selection(
+            state.get(
+                "phase_switch_pending_selection",
+                attributes.get("_phase_switch_pending_selection", None),
+            ),
+            requested_phase_selection,
         )
-        svc._phase_switch_state = self._normalize_phase_switch_state(
-            state.get("phase_switch_state", getattr(svc, "_phase_switch_state", None))
+        phase_switch_state = self.normalizer.phase_switch_state(
+            state.get(
+                "phase_switch_state",
+                attributes.get("_phase_switch_state", None),
+            )
         )
-        svc._phase_switch_requested_at = self._coerce_optional_runtime_past_time(
-            state.get("phase_switch_requested_at", getattr(svc, "_phase_switch_requested_at", None)),
-            current_time,
+        attributes.set("_phase_switch_pending_selection", pending_selection)
+        attributes.set("_phase_switch_state", phase_switch_state)
+        attributes.set(
+            "_phase_switch_requested_at",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "phase_switch_requested_at",
+                    attributes.get("_phase_switch_requested_at", None),
+                ),
+                current_time,
+            ),
         )
-        svc._phase_switch_stable_until = self._coerce_optional_runtime_float(
-            state.get("phase_switch_stable_until", getattr(svc, "_phase_switch_stable_until", None))
+        attributes.set(
+            "_phase_switch_stable_until",
+            self.normalizer.optional_float(
+                state.get(
+                    "phase_switch_stable_until",
+                    attributes.get("_phase_switch_stable_until", None),
+                )
+            ),
         )
-        previous_resume_relay = bool(getattr(svc, "_phase_switch_resume_relay", None))
+        previous_resume_relay = bool(attributes.get("_phase_switch_resume_relay", None))
         raw_resume_relay = state.get("phase_switch_resume_relay")
-        svc._phase_switch_resume_relay = bool(
-            self.coerce_runtime_int(raw_resume_relay, int(previous_resume_relay))
+        attributes.set(
+            "_phase_switch_resume_relay",
+            bool(self.normalizer.coerce_runtime_int(raw_resume_relay, int(previous_resume_relay))),
         )
-        svc._phase_switch_mismatch_counts = self._normalized_phase_switch_mismatch_counts(
-            state.get("phase_switch_mismatch_counts", getattr(svc, "_phase_switch_mismatch_counts", None)),
-            svc.requested_phase_selection,
+        attributes.set(
+            "_phase_switch_mismatch_counts",
+            self._normalized_phase_switch_mismatch_counts(
+                state.get(
+                    "phase_switch_mismatch_counts",
+                    attributes.get("_phase_switch_mismatch_counts", None),
+                ),
+                requested_phase_selection,
+            ),
         )
-        svc._phase_switch_last_mismatch_selection = self._normalized_optional_runtime_phase_selection(
-            state.get("phase_switch_last_mismatch_selection", getattr(svc, "_phase_switch_last_mismatch_selection", None)),
-            svc.requested_phase_selection,
+        attributes.set(
+            "_phase_switch_last_mismatch_selection",
+            self.normalizer.optional_phase_selection(
+                state.get(
+                    "phase_switch_last_mismatch_selection",
+                    attributes.get("_phase_switch_last_mismatch_selection", None),
+                ),
+                requested_phase_selection,
+            ),
         )
-        svc._phase_switch_last_mismatch_at = self._coerce_optional_runtime_past_time(
-            state.get("phase_switch_last_mismatch_at", getattr(svc, "_phase_switch_last_mismatch_at", None)),
-            current_time,
+        attributes.set(
+            "_phase_switch_last_mismatch_at",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "phase_switch_last_mismatch_at",
+                    attributes.get("_phase_switch_last_mismatch_at", None),
+                ),
+                current_time,
+            ),
         )
-        svc._phase_switch_lockout_selection = self._normalized_optional_runtime_phase_selection(
-            state.get("phase_switch_lockout_selection", getattr(svc, "_phase_switch_lockout_selection", None)),
-            svc.requested_phase_selection,
+        attributes.set(
+            "_phase_switch_lockout_selection",
+            self.normalizer.optional_phase_selection(
+                state.get(
+                    "phase_switch_lockout_selection",
+                    attributes.get("_phase_switch_lockout_selection", None),
+                ),
+                requested_phase_selection,
+            ),
         )
-        svc._phase_switch_lockout_reason = str(
-            state.get("phase_switch_lockout_reason", getattr(svc, "_phase_switch_lockout_reason", None)) or ""
+        attributes.set(
+            "_phase_switch_lockout_reason",
+            str(
+                state.get(
+                    "phase_switch_lockout_reason",
+                    attributes.get("_phase_switch_lockout_reason", None),
+                )
+                or ""
+            ),
         )
-        svc._phase_switch_lockout_at = self._coerce_optional_runtime_past_time(
-            state.get("phase_switch_lockout_at", getattr(svc, "_phase_switch_lockout_at", None)),
-            current_time,
+        attributes.set(
+            "_phase_switch_lockout_at",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "phase_switch_lockout_at",
+                    attributes.get("_phase_switch_lockout_at", None),
+                ),
+                current_time,
+            ),
         )
-        svc._phase_switch_lockout_until = self._coerce_optional_runtime_float(
-            state.get("phase_switch_lockout_until", getattr(svc, "_phase_switch_lockout_until", None))
+        attributes.set(
+            "_phase_switch_lockout_until",
+            self.normalizer.optional_float(
+                state.get(
+                    "phase_switch_lockout_until",
+                    attributes.get("_phase_switch_lockout_until", None),
+                )
+            ),
         )
-        if svc._phase_switch_state is None or svc._phase_switch_pending_selection is None:
-            svc._phase_switch_pending_selection = None
-            svc._phase_switch_state = None
-            svc._phase_switch_requested_at = None
-            svc._phase_switch_stable_until = None
-            svc._phase_switch_resume_relay = False
+        if phase_switch_state is None or pending_selection is None:
+            for attr_name in (
+                "_phase_switch_pending_selection",
+                "_phase_switch_state",
+                "_phase_switch_requested_at",
+                "_phase_switch_stable_until",
+            ):
+                attributes.set(attr_name, None)
+            attributes.set("_phase_switch_resume_relay", False)
 
     def _normalized_phase_switch_mismatch_counts(
         self,
@@ -145,53 +323,106 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
         default_selection: PhaseSelection,
     ) -> dict[str, int]:
         normalized_counts: dict[str, int] = {}
-        if not isinstance(raw_counts, dict):
+        if not is_object_dict(raw_counts):
             return normalized_counts
         for raw_selection, raw_count in raw_counts.items():
-            normalized_selection = self._normalize_runtime_phase_selection(raw_selection, default_selection)
+            normalized_selection = self.normalizer.phase_selection(raw_selection, default_selection)
             normalized_counts[normalized_selection] = non_negative_int(raw_count)
         return normalized_counts
 
-    def _restore_relay_runtime_state(self, svc: Any, state: dict[str, object], current_time: float) -> None:
-        svc.relay_last_changed_at = self._coerce_optional_runtime_past_time(
-            state.get("relay_last_changed_at", svc.relay_last_changed_at),
-            current_time,
+    def _restore_relay_runtime_state(
+        self,
+        svc: object,
+        state: dict[str, object],
+        current_time: float,
+    ) -> None:
+        attributes = StateAttributes(svc)
+        attributes.set(
+            "relay_last_changed_at",
+            self.normalizer.optional_past_time(
+                state.get("relay_last_changed_at", attributes.get("relay_last_changed_at")),
+                current_time,
+            ),
         )
-        svc.relay_last_off_at = self._coerce_optional_runtime_past_time(
-            state.get("relay_last_off_at", svc.relay_last_off_at),
-            current_time,
+        attributes.set(
+            "relay_last_off_at",
+            self.normalizer.optional_past_time(
+                state.get("relay_last_off_at", attributes.get("relay_last_off_at")),
+                current_time,
+            ),
         )
 
-    def _restore_contactor_runtime_state(self, svc: Any, state: dict[str, object], current_time: float) -> None:
-        svc._contactor_fault_counts = self._normalized_contactor_fault_counts(
-            state.get("contactor_fault_counts", getattr(svc, "_contactor_fault_counts", None))
+    def _restore_contactor_runtime_state(
+        self,
+        svc: object,
+        state: dict[str, object],
+        current_time: float,
+    ) -> None:
+        attributes = StateAttributes(svc)
+        attributes.set(
+            "_contactor_fault_counts",
+            self._normalized_contactor_fault_counts(
+                state.get(
+                    "contactor_fault_counts",
+                    attributes.get("_contactor_fault_counts", None),
+                )
+            ),
         )
-        svc._contactor_fault_active_reason = self._normalized_contactor_fault_reason(
-            state.get("contactor_fault_active_reason", getattr(svc, "_contactor_fault_active_reason", None))
-        )
-        svc._contactor_fault_active_since = self._coerce_optional_runtime_past_time(
-            state.get("contactor_fault_active_since", getattr(svc, "_contactor_fault_active_since", None)),
-            current_time,
-        )
-        svc._contactor_lockout_reason = (
+        attributes.set(
+            "_contactor_fault_active_reason",
             self._normalized_contactor_fault_reason(
-                state.get("contactor_lockout_reason", getattr(svc, "_contactor_lockout_reason", None))
+                state.get(
+                    "contactor_fault_active_reason",
+                    attributes.get("_contactor_fault_active_reason", None),
+                )
+            ),
+        )
+        attributes.set(
+            "_contactor_fault_active_since",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "contactor_fault_active_since",
+                    attributes.get("_contactor_fault_active_since", None),
+                ),
+                current_time,
+            ),
+        )
+        attributes.set(
+            "_contactor_lockout_reason",
+            self._normalized_contactor_fault_reason(
+                state.get(
+                    "contactor_lockout_reason",
+                    attributes.get("_contactor_lockout_reason", None),
+                )
             )
-            or ""
+            or "",
         )
-        svc._contactor_lockout_source = str(
-            state.get("contactor_lockout_source", getattr(svc, "_contactor_lockout_source", None)) or ""
+        attributes.set(
+            "_contactor_lockout_source",
+            str(
+                state.get(
+                    "contactor_lockout_source",
+                    attributes.get("_contactor_lockout_source", None),
+                )
+                or ""
+            ),
         )
-        svc._contactor_lockout_at = self._coerce_optional_runtime_past_time(
-            state.get("contactor_lockout_at", getattr(svc, "_contactor_lockout_at", None)),
-            current_time,
+        attributes.set(
+            "_contactor_lockout_at",
+            self.normalizer.optional_past_time(
+                state.get(
+                    "contactor_lockout_at",
+                    attributes.get("_contactor_lockout_at", None),
+                ),
+                current_time,
+            ),
         )
 
     @staticmethod
     def _normalized_contactor_fault_counts(raw_counts: object) -> dict[str, int]:
         allowed_reasons = {"contactor-suspected-open", "contactor-suspected-welded"}
         normalized_counts: dict[str, int] = {}
-        if not isinstance(raw_counts, dict):
+        if not is_object_dict(raw_counts):
             return normalized_counts
         for raw_reason, raw_count in raw_counts.items():
             reason = str(raw_reason).strip()
@@ -208,35 +439,11 @@ class _StateRuntimeRestore(_StateRuntimeRestoreVictronEss):
             return None
         return reason
 
-    def load_runtime_state(self) -> None:
+    def restore(self, state: dict[str, object], current_time: float) -> None:
         svc = self.service
-        path = getattr(svc, "runtime_state_path", "").strip()
-        if not path:
-            return
-        state = self._read_runtime_state_payload(path)
-        if state is None:
-            return
-        current_time = self._runtime_load_time(svc)
         self._restore_basic_runtime_state(svc, state)
         self._restore_learned_charge_power_state(svc, state, current_time)
         self._restore_phase_switch_runtime_state(svc, state, current_time)
         self._restore_contactor_runtime_state(svc, state, current_time)
         self._restore_relay_runtime_state(svc, state, current_time)
-        self._restore_victron_ess_balance_runtime_state(svc, state)
-        svc._runtime_state_serialized = self._serialized_runtime_state()
-        logging.info("Restored runtime state from %s: %s", path, self.state_summary())
-
-    def save_runtime_state(self) -> None:
-        svc = self.service
-        path = getattr(svc, "runtime_state_path", "").strip()
-        if not path:
-            return
-        payload = self._serialized_runtime_state()
-        if payload == getattr(svc, "_runtime_state_serialized", None):
-            return
-        try:
-            write_text_atomically(path, payload)
-            svc._runtime_state_serialized = payload
-            logging.debug("Saved runtime state to %s: %s", path, self.state_summary())
-        except RUNTIME_PERSISTENCE_WRITE_ERRORS as error:
-            logging.warning("Unable to write runtime state to %s: %s", path, error)
+        self.victron_ess.restore_runtime_state(svc, state)

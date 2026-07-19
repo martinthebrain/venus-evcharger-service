@@ -4,98 +4,94 @@
 import inspect
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from venus_evcharger.ports.auto import AutoDecisionPort, _require_pending_relay_command
 
 
 class AutoDecisionPortContractTests(unittest.TestCase):
     def test_pending_command_errors_name_the_actual_invalid_type(self) -> None:
-        with self.assertRaisesRegex(
-            TypeError,
-            r"^peek_pending_relay_command must return tuple, got list$",
-        ):
-            _require_pending_relay_command([])
-        with self.assertRaisesRegex(
-            TypeError,
-            r"^peek_pending_relay_command state must be bool\|None, got int$",
-        ):
-            _require_pending_relay_command((1, 2.0))
-        with self.assertRaisesRegex(
-            TypeError,
-            r"^peek_pending_relay_command timestamp must be int\|float\|None, got bool$",
-        ):
-            _require_pending_relay_command((True, False))
+        invalid_values: tuple[tuple[object, str], ...] = (
+            ([], r"^peek_pending_relay_command must return tuple, got list$"),
+            ((1, 2.0), r"^peek_pending_relay_command state must be bool\|None, got int$"),
+            ((True, False), r"^peek_pending_relay_command timestamp must be int\|float\|None, got bool$"),
+        )
+        for value, pattern in invalid_values:
+            with self.subTest(value=value), self.assertRaisesRegex(TypeError, pattern):
+                _require_pending_relay_command(value)
 
-    def test_optional_argument_defaults_are_public_contracts(self) -> None:
-        expectations = {
-            AutoDecisionPort.set_health: {"cached": False, "relay_intent": None},
-            AutoDecisionPort.write_auto_audit_event: {"cached": False},
-            AutoDecisionPort.is_within_auto_daytime_window: {"current_dt": None},
-        }
-        for method, defaults in expectations.items():
-            signature = inspect.signature(method)
-            for name, expected in defaults.items():
-                self.assertEqual(signature.parameters[name].default, expected)
+    def test_pending_command_requires_exact_pair(self) -> None:
+        with self.assertRaisesRegex(TypeError, r"tuple length 2, got 1"):
+            _require_pending_relay_command((True,))
+        self.assertEqual(_require_pending_relay_command((False, 2)), (False, 2.0))
+        self.assertEqual(_require_pending_relay_command((None, None)), (None, None))
 
-    def test_service_overrides_receive_exact_arguments(self) -> None:
+    def test_audit_default_is_part_of_the_port_contract(self) -> None:
+        signature = inspect.signature(AutoDecisionPort.write_auto_audit_event)
+        self.assertIs(signature.parameters["cached"].default, False)
+
+    def test_side_effects_delegate_once_with_exact_arguments(self) -> None:
+        state = SimpleNamespace(save_runtime_state=MagicMock(return_value="saved"))
+        runtime = SimpleNamespace(
+            write_auto_audit_event=MagicMock(return_value="audited"),
+            pending_relay_command=MagicMock(return_value=(True, 123)),
+        )
         service = SimpleNamespace(
-            _clear_auto_samples=MagicMock(return_value="cleared"),
-            _set_health=MagicMock(return_value="healthy"),
-            _write_auto_audit_event=MagicMock(return_value="audited"),
-            _is_within_auto_daytime_window=MagicMock(side_effect=[1, 0]),
-            _get_available_surplus_watts=MagicMock(return_value="12.5"),
-            _add_auto_sample=MagicMock(return_value="sampled"),
-            _average_auto_metric=MagicMock(side_effect=[None, "4.5"]),
+            state=state,
+            runtime=runtime,
         )
         port = AutoDecisionPort(service)
-        marker = object()
 
-        self.assertEqual(port.clear_auto_samples(), "cleared")
-        self.assertEqual(port.set_health("reason", True, relay_intent=False), "healthy")
-        self.assertEqual(port.write_auto_audit_event("event", True), "audited")
-        self.assertTrue(port.is_within_auto_daytime_window())
-        self.assertFalse(port.is_within_auto_daytime_window(marker))
-        self.assertEqual(port.get_available_surplus_watts(10.0, -2.5), 12.5)
-        self.assertEqual(port.add_auto_sample(1.0, 2.0, 3.0), "sampled")
-        self.assertIsNone(port.average_auto_metric(0))
-        self.assertEqual(port.average_auto_metric(1), 4.5)
+        self.assertIs(port.service, service)
+        self.assertEqual(port.save_runtime_state(), "saved")
+        self.assertEqual(port.write_auto_audit_event("running", True), "audited")
+        self.assertEqual(port.peek_pending_relay_command(), (True, 123.0))
 
-        service._clear_auto_samples.assert_called_once_with()
-        service._set_health.assert_called_once_with("reason", True, relay_intent=False)
-        service._write_auto_audit_event.assert_called_once_with("event", True)
-        self.assertEqual(service._is_within_auto_daytime_window.call_args_list, [call(), call(marker)])
-        service._get_available_surplus_watts.assert_called_once_with(10.0, -2.5)
-        service._add_auto_sample.assert_called_once_with(1.0, 2.0, 3.0)
-        self.assertEqual(service._average_auto_metric.call_args_list, [call(0), call(1)])
+        state.save_runtime_state.assert_called_once_with()
+        runtime.write_auto_audit_event.assert_called_once_with("running", True)
+        runtime.pending_relay_command.assert_called_once_with()
 
-    def test_controller_fallback_uses_public_method_names_and_arguments(self) -> None:
-        service = SimpleNamespace()
-        controller = SimpleNamespace(
-            clear_auto_samples=MagicMock(return_value="cleared"),
-            set_health=MagicMock(return_value="healthy"),
-            is_within_auto_daytime_window=MagicMock(return_value=True),
-            get_available_surplus_watts=MagicMock(return_value=7),
-            add_auto_sample=MagicMock(return_value="sampled"),
-            average_auto_metric=MagicMock(return_value=8),
+    def test_control_state_is_normalized_and_cutover_updates_are_atomic(self) -> None:
+        service = SimpleNamespace(
+            virtual_mode="invalid",
+            virtual_enable="0",
+            virtual_autostart="2",
+            _auto_mode_cutover_pending=True,
+            _ignore_min_offtime_once=True,
         )
         port = AutoDecisionPort(service)
-        port.bind_controller(controller)
-        marker = object()
 
-        self.assertEqual(port.clear_auto_samples(), "cleared")
-        self.assertEqual(port.set_health("reason", True, relay_intent=None), "healthy")
-        self.assertTrue(port.is_within_auto_daytime_window(marker))
-        self.assertEqual(port.get_available_surplus_watts(5.0, -2.0), 7.0)
-        self.assertEqual(port.add_auto_sample(1.0, 2.0, 3.0), "sampled")
-        self.assertEqual(port.average_auto_metric(2), 8.0)
+        self.assertEqual(port.mode(), 0)
+        self.assertFalse(port.controller_enabled())
+        self.assertTrue(port.autostart_enabled())
+        self.assertTrue(port.mode_cutover_pending())
+        self.assertTrue(port.minimum_offtime_bypass_active())
 
-        controller.clear_auto_samples.assert_called_once_with()
-        controller.set_health.assert_called_once_with("reason", True, relay_intent=None)
-        controller.is_within_auto_daytime_window.assert_called_once_with(marker)
-        controller.get_available_surplus_watts.assert_called_once_with(5.0, -2.0)
-        controller.add_auto_sample.assert_called_once_with(1.0, 2.0, 3.0)
-        controller.average_auto_metric.assert_called_once_with(2)
+        service._auto_mode_cutover_pending = 1
+        service._ignore_min_offtime_once = 1
+        self.assertFalse(port.mode_cutover_pending())
+        self.assertFalse(port.minimum_offtime_bypass_active())
+
+        port.reset_mode_cutover()
+        self.assertIs(service._auto_mode_cutover_pending, False)
+        self.assertIs(service._ignore_min_offtime_once, False)
+
+        port.complete_mode_cutover()
+        self.assertIs(service._auto_mode_cutover_pending, False)
+        self.assertIs(service._ignore_min_offtime_once, True)
+
+        port.clear_minimum_offtime_bypass()
+        self.assertIs(service._ignore_min_offtime_once, False)
+
+    def test_port_has_no_controller_binding_or_dynamic_forwarding(self) -> None:
+        port = AutoDecisionPort(SimpleNamespace())
+
+        self.assertFalse(hasattr(port, "bind_controller"))
+        self.assertNotIn("__getattr__", AutoDecisionPort.__dict__)
+        with self.assertRaises(AttributeError):
+            getattr(port, "virtual_mode")
+        with self.assertRaises(AttributeError):
+            getattr(port, "clear_auto_samples")()
 
 
 if __name__ == "__main__":

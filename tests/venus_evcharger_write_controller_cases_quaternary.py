@@ -24,7 +24,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                 "/PhaseSelectionActive": "P1",
                 "/SupportedPhaseSelections": "P1,P1_P2,P1_P2_P3",
             },
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _phase_selection_requires_pause=MagicMock(return_value=False),
@@ -39,7 +39,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertFalse(controller.handle_write("/PhaseSelection", "P1_P2_P3"))
         service._apply_phase_selection.assert_not_called()
@@ -80,7 +80,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                 "/Auto/PhaseLockoutAge": 4,
                 "/Auto/PhaseLockoutReset": 0,
             },
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _publish_dbus_field=MagicMock(),
@@ -89,7 +89,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Auto/PhaseLockoutReset", 1))
         self.assertFalse(service._phase_switch_mismatch_active)
@@ -133,7 +133,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                 "/Auto/ContactorLockoutAge": 4,
                 "/Auto/ContactorLockoutReset": 0,
             },
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _publish_dbus_field=MagicMock(),
@@ -142,7 +142,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Auto/ContactorLockoutReset", 1))
         self.assertEqual(service._contactor_fault_counts, {})
@@ -166,7 +166,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                 "/Auto/ContactorLockoutReset": 1,
                 "/Auto/SoftwareUpdateRun": 1,
             },
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
@@ -175,7 +175,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Auto/PhaseLockoutReset", 0))
         self.assertTrue(controller.handle_write("/Auto/ContactorLockoutReset", 0))
@@ -193,7 +193,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                 min_current=6.0,
                 max_current=16.0,
                 _dbusservice={"/SetCurrent": 8.0, "/MinCurrent": 6.0, "/MaxCurrent": 16.0},
-                _time_now=MagicMock(return_value=42.0),
+                time_now=MagicMock(return_value=42.0),
                 _publish_dbus_field=MagicMock(),
                 _save_runtime_state=MagicMock(),
                 _save_runtime_overrides=MagicMock(),
@@ -203,19 +203,19 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
             return service
 
         service = build_service()
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
         self.assertTrue(controller.handle_write("/SetCurrent", 12.5))
         self.assertEqual(service.virtual_set_current, 12.5)
         self.assertEqual(service._dbusservice["/SetCurrent"], 12.5)
 
         service = build_service()
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
         self.assertTrue(controller.handle_write("/MinCurrent", 7.0))
         self.assertEqual(service.min_current, 7.0)
         self.assertEqual(service._dbusservice["/MinCurrent"], 7.0)
 
         service = build_service()
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
         self.assertTrue(controller.handle_write("/MaxCurrent", 20.0))
         self.assertEqual(service.max_current, 20.0)
         self.assertEqual(service._dbusservice["/MaxCurrent"], 20.0)
@@ -228,7 +228,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
             max_current=16.0,
             _charger_backend=backend,
             _dbusservice={"/SetCurrent": 8.0},
-            _time_now=MagicMock(return_value=42.0),
+            time_now=MagicMock(return_value=42.0),
             _publish_dbus_field=MagicMock(),
             _save_runtime_state=MagicMock(),
             _save_runtime_overrides=MagicMock(),
@@ -236,7 +236,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/SetCurrent", 10.0))
 
@@ -246,18 +246,18 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
 
     def test_auto_runtime_setting_write_covers_phase_tuning_paths(self) -> None:
         runtime_cases = (
-            ("/Auto/PhaseSwitching", "auto_phase_switching_enabled", 0, 0),
-            ("/Auto/PhasePreferLowestWhenIdle", "auto_phase_prefer_lowest_when_idle", 0, 0),
-            ("/Auto/PhaseUpshiftDelaySeconds", "auto_phase_upshift_delay_seconds", 12.0, 12.0),
-            ("/Auto/PhaseDownshiftDelaySeconds", "auto_phase_downshift_delay_seconds", 14.0, 14.0),
-            ("/Auto/PhaseUpshiftHeadroomWatts", "auto_phase_upshift_headroom_watts", 900.0, 900.0),
-            ("/Auto/PhaseDownshiftMarginWatts", "auto_phase_downshift_margin_watts", 450.0, 450.0),
-            ("/Auto/PhaseMismatchRetrySeconds", "auto_phase_mismatch_retry_seconds", 30.0, 30.0),
-            ("/Auto/PhaseMismatchLockoutCount", "auto_phase_mismatch_lockout_count", 4, 4),
-            ("/Auto/PhaseMismatchLockoutSeconds", "auto_phase_mismatch_lockout_seconds", 600.0, 600.0),
+            ("/Auto/PhaseSwitching", 0, 0),
+            ("/Auto/PhasePreferLowestWhenIdle", 0, 0),
+            ("/Auto/PhaseUpshiftDelaySeconds", 12.0, 12.0),
+            ("/Auto/PhaseDownshiftDelaySeconds", 14.0, 14.0),
+            ("/Auto/PhaseUpshiftHeadroomWatts", 900.0, 900.0),
+            ("/Auto/PhaseDownshiftMarginWatts", 450.0, 450.0),
+            ("/Auto/PhaseMismatchRetrySeconds", 30.0, 30.0),
+            ("/Auto/PhaseMismatchLockoutCount", 4, 4),
+            ("/Auto/PhaseMismatchLockoutSeconds", 600.0, 600.0),
         )
 
-        for path, attr, new_value, expected_dbus in runtime_cases:
+        for path, new_value, expected_dbus in runtime_cases:
             with self.subTest(path=path):
                 service = SimpleNamespace(
                     virtual_mode=1,
@@ -265,33 +265,24 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                     virtual_startstop=0,
                     virtual_enable=1,
                     _dbusservice={path: 0},
-                    _time_now=MagicMock(return_value=42.0),
+                    time_now=MagicMock(return_value=42.0),
                     _publish_dbus_field=MagicMock(),
                     _state_summary=self._state_summary,
                     _save_runtime_state=MagicMock(),
                     _save_runtime_overrides=MagicMock(),
                     _validate_runtime_config=MagicMock(),
-                    auto_phase_switching_enabled=1,
-                    auto_phase_prefer_lowest_when_idle=1,
-                    auto_phase_upshift_delay_seconds=1.0,
-                    auto_phase_downshift_delay_seconds=1.0,
-                    auto_phase_upshift_headroom_watts=1.0,
-                    auto_phase_downshift_margin_watts=1.0,
-                    auto_phase_mismatch_retry_seconds=1.0,
-                    auto_phase_mismatch_lockout_count=1,
-                    auto_phase_mismatch_lockout_seconds=1.0,
+                    auto_policy=AutoPolicy(),
                 )
                 service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-                controller = DbusWriteController(WriteControllerPort(service))
+                controller = write_controller(service)
 
-                with patch("venus_evcharger.controllers.write.AutoPolicy.from_service", return_value=SimpleNamespace()), patch(
-                    "venus_evcharger.controllers.write.validate_auto_policy"
-                ) as validate_policy:
-                    self.assertTrue(controller.handle_write(path, new_value))
+                self.assertTrue(controller.handle_write(path, new_value))
 
-                self.assertEqual(getattr(service, attr), expected_dbus)
+                self.assertEqual(
+                    AUTO_POLICY_SETTING_BY_PATH[path].read(service.auto_policy),
+                    expected_dbus,
+                )
                 self.assertEqual(service._dbusservice[path], expected_dbus)
-                validate_policy.assert_called_once()
                 service._validate_runtime_config.assert_called_once()
 
     def test_auto_runtime_setting_write_covers_remaining_policy_and_delay_paths(self) -> None:
@@ -315,12 +306,6 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
             ("/Auto/LearnChargePowerMaxAgeSeconds", "auto_learn_charge_power_max_age_seconds", 1800.0),
         )
 
-        no_policy_rebuild = {
-            "/Auto/StartDelaySeconds",
-            "/Auto/StopDelaySeconds",
-            "/Auto/DbusBackoffMaxSeconds",
-        }
-
         for path, attr, new_value in runtime_cases:
             with self.subTest(path=path):
                 service = SimpleNamespace(
@@ -329,42 +314,27 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                     virtual_startstop=0,
                     virtual_enable=1,
                     _dbusservice={path: 0},
-                    _time_now=MagicMock(return_value=42.0),
+                    time_now=MagicMock(return_value=42.0),
                     _publish_dbus_field=MagicMock(),
                     _state_summary=self._state_summary,
                     _save_runtime_state=MagicMock(),
                     _save_runtime_overrides=MagicMock(),
                     _validate_runtime_config=MagicMock(),
-                    auto_start_surplus_watts=1.0,
-                    auto_stop_surplus_watts=1.0,
-                    auto_min_soc=1.0,
-                    auto_resume_soc=1.0,
+                    auto_policy=AutoPolicy(),
                     auto_start_delay_seconds=1.0,
                     auto_stop_delay_seconds=1.0,
                     auto_dbus_backoff_max_seconds=1.0,
-                    auto_grid_recovery_start_seconds=1.0,
-                    auto_stop_surplus_delay_seconds=1.0,
-                    auto_stop_surplus_volatility_low_watts=1.0,
-                    auto_stop_surplus_volatility_high_watts=1.0,
-                    auto_reference_charge_power_watts=1.0,
-                    auto_learn_charge_power_min_watts=1.0,
-                    auto_learn_charge_power_alpha=0.2,
-                    auto_learn_charge_power_start_delay_seconds=1.0,
-                    auto_learn_charge_power_window_seconds=1.0,
-                    auto_learn_charge_power_max_age_seconds=1.0,
                 )
                 service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-                controller = DbusWriteController(WriteControllerPort(service))
+                controller = write_controller(service)
 
-                with patch("venus_evcharger.controllers.write.AutoPolicy.from_service", return_value=SimpleNamespace()), patch(
-                    "venus_evcharger.controllers.write.validate_auto_policy"
-                ) as validate_policy:
-                    self.assertTrue(controller.handle_write(path, new_value))
+                self.assertTrue(controller.handle_write(path, new_value))
 
-                self.assertEqual(getattr(service, attr), new_value)
-                self.assertEqual(service._dbusservice[path], new_value)
-                if path in no_policy_rebuild:
-                    validate_policy.assert_not_called()
+                policy_setting = AUTO_POLICY_SETTING_BY_PATH.get(path)
+                if policy_setting is None:
+                    self.assertEqual(getattr(service, attr), new_value)
                 else:
-                    validate_policy.assert_called_once()
+                    self.assertEqual(policy_setting.read(service.auto_policy), new_value)
+                    self.assertFalse(hasattr(service, attr))
+                self.assertEqual(service._dbusservice[path], new_value)
                 service._validate_runtime_config.assert_called_once()

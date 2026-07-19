@@ -21,7 +21,6 @@ from venus_evcharger.core.common import (
     _fresh_charger_retry_until,
     _fresh_charger_transport_detail,
     _fresh_charger_transport_source,
-    _derive_auto_state,
     _fresh_charger_transport_timestamp,
     _health_code,
     _normalize_auto_state,
@@ -29,7 +28,6 @@ from venus_evcharger.core.common import (
     _positive_service_float,
     _reason_auto_state,
     _status_label,
-    _confirmed_relay_state_max_age_seconds,
     _fresh_confirmed_relay_output,
     normalize_scheduled_enabled_days,
     read_version,
@@ -43,7 +41,6 @@ from venus_evcharger.core.contracts import (
     finite_float_or_none,
     non_negative_float_or_none,
     non_negative_int,
-    normalized_auto_decision_trace,
     normalized_auto_state_pair,
     normalized_fault_state,
     normalized_scheduled_state_fields,
@@ -167,7 +164,7 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
         self.assertEqual(_age_seconds(100.0, 105.9), 5)
 
     def test_charger_transport_and_scheduled_helpers_cover_remaining_policy_paths(self):
-        transport_service = type("TransportService", (), {"_worker_poll_interval_seconds": 3.0, "_dbus_live_publish_interval_seconds": 2.0, "auto_shelly_soft_fail_seconds": 12.0, "_last_charger_transport_at": "bad", "_time_now": staticmethod(lambda: "bad"), "auto_dbus_backoff_base_seconds": 4.0})()
+        transport_service = type("TransportService", (), {"_worker_poll_interval_seconds": 3.0, "_dbus_live_publish_interval_seconds": 2.0, "auto_shelly_soft_fail_seconds": 12.0, "_last_charger_transport_at": "bad", "time_now": staticmethod(lambda: "bad"), "auto_dbus_backoff_base_seconds": 4.0})()
         self.assertEqual(_charger_transport_max_age_seconds(transport_service), 2.0)
         with patch("venus_evcharger.core.common.time.time", return_value=123.0):
             self.assertEqual(_charger_transport_now(transport_service), 123.0)
@@ -204,7 +201,7 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
                 "_last_charger_transport_reason": "response",
                 "_last_charger_transport_source": "poll",
                 "_last_charger_transport_detail": "retry later",
-                "_time_now": staticmethod(lambda: 100.0),
+                "time_now": staticmethod(lambda: 100.0),
                 "auto_dbus_backoff_base_seconds": 4.0,
                 "_charger_retry_until": 101.2,
                 "_charger_retry_reason": "busy",
@@ -232,6 +229,9 @@ class TestShellyWallboxCommonContracts(unittest.TestCase):
         self.assertEqual(_fresh_charger_retry_source(service, 100.0), "native")
         self.assertEqual(_charger_retry_remaining_seconds(service, 100.0), 2)
         self.assertEqual(_charger_transport_retry_delay_seconds(service, "unknown"), 8.0)
+        self.assertIsNone(_fresh_confirmed_relay_output(service, 100.0))
+        service._last_confirmed_pm_status = {"output": True}
+        service._last_confirmed_pm_status_at = 99.0
         self.assertTrue(_fresh_confirmed_relay_output(service, 100.0))
 
     def test_outward_and_snapshot_contract_helpers_cover_remaining_normalization_paths(self):

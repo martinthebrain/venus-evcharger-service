@@ -158,10 +158,10 @@ class TestCoreCommonAutoContracts(unittest.TestCase):
 
     def test_transport_now_contract(self) -> None:
         self.assertEqual(_charger_transport_now(SimpleNamespace(), 0), 0.0)
-        self.assertEqual(_charger_transport_now(SimpleNamespace(_time_now=lambda: 12), None), 12.0)
+        self.assertEqual(_charger_transport_now(SimpleNamespace(time_now=lambda: 12), None), 12.0)
         with patch("venus_evcharger.core.common_auto.time.time", return_value=14.5):
-            self.assertEqual(_charger_transport_now(SimpleNamespace(_time_now=lambda: True)), 14.5)
-            self.assertEqual(_charger_transport_now(SimpleNamespace(_time_now=lambda: "bad")), 14.5)
+            self.assertEqual(_charger_transport_now(SimpleNamespace(time_now=lambda: True)), 14.5)
+            self.assertEqual(_charger_transport_now(SimpleNamespace(time_now=lambda: "bad")), 14.5)
             self.assertEqual(_charger_transport_now(SimpleNamespace()), 14.5)
 
     def test_transport_timestamp_freshness_boundaries(self) -> None:
@@ -189,7 +189,7 @@ class TestCoreCommonAutoContracts(unittest.TestCase):
         self.assertIsNone(_fresh_charger_transport_timestamp(SimpleNamespace(), 100.0))
         service_clock = SimpleNamespace(
             _last_charger_transport_at=99.0,
-            _time_now=lambda: 100.0,
+            time_now=lambda: 100.0,
             _worker_poll_interval_seconds=0.75,
         )
         self.assertEqual(_fresh_charger_transport_timestamp(service_clock), 99.0)
@@ -276,7 +276,7 @@ class TestCoreCommonAutoContracts(unittest.TestCase):
         service_clock = SimpleNamespace(
             _charger_retry_until=102.0,
             _charger_retry_reason=None,
-            _time_now=lambda: 100.0,
+            time_now=lambda: 100.0,
         )
         self.assertEqual(_fresh_charger_retry_until(service_clock), 102.0)
         self.assertIsNone(_fresh_charger_retry_reason(service_clock))
@@ -311,7 +311,7 @@ class TestCoreCommonAutoContracts(unittest.TestCase):
             2.5,
         )
 
-    def test_confirmed_relay_sample_precedence_and_copy_contract(self) -> None:
+    def test_confirmed_relay_sample_uses_only_canonical_snapshot_and_copies_payload(self) -> None:
         confirmed = {"output": True, 1: "value"}
         service = SimpleNamespace(
             _last_confirmed_pm_status=confirmed,
@@ -324,33 +324,21 @@ class TestCoreCommonAutoContracts(unittest.TestCase):
         self.assertEqual(sample, {"output": True, "1": "value"})
         self.assertEqual(captured_at, 9.0)
         self.assertIsNot(sample, confirmed)
-        fallback = SimpleNamespace(
+        obsolete_fields_only = SimpleNamespace(
             _last_confirmed_pm_status=None,
             _last_confirmed_pm_status_at=None,
             _last_pm_status_confirmed=True,
             _last_pm_status={"output": False},
             _last_pm_status_at=8.0,
         )
-        self.assertEqual(_confirmed_relay_sample(fallback), ({"output": False}, 8.0))
-        fallback._last_pm_status_confirmed = False
-        self.assertEqual(_confirmed_relay_sample(fallback), (None, None))
-        fallback._last_confirmed_pm_status = []
-        self.assertEqual(_confirmed_relay_sample(fallback), (None, None))
+        self.assertEqual(_confirmed_relay_sample(obsolete_fields_only), (None, None))
+        obsolete_fields_only._last_confirmed_pm_status = []
+        self.assertEqual(_confirmed_relay_sample(obsolete_fields_only), (None, None))
         self.assertEqual(_confirmed_relay_sample(SimpleNamespace()), (None, None))
-        missing_legacy_status = SimpleNamespace(
-            _last_confirmed_pm_status=None,
-            _last_confirmed_pm_status_at=None,
-            _last_pm_status_confirmed=True,
-            _last_pm_status_at=8.0,
+        self.assertEqual(
+            _confirmed_relay_sample(SimpleNamespace(_last_confirmed_pm_status={"output": True})),
+            ({"output": True}, None),
         )
-        self.assertEqual(_confirmed_relay_sample(missing_legacy_status), (None, None))
-        missing_legacy_time = SimpleNamespace(
-            _last_confirmed_pm_status=None,
-            _last_confirmed_pm_status_at=None,
-            _last_pm_status_confirmed=True,
-            _last_pm_status={"output": True},
-        )
-        self.assertEqual(_confirmed_relay_sample(missing_legacy_time), ({"output": True}, None))
 
     def test_confirmed_relay_validation_and_freshness_contract(self) -> None:
         self.assertTrue(_confirmed_relay_sample_valid({"output": False}, 0.0))

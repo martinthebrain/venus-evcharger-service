@@ -36,11 +36,11 @@ class _BranchCoverageVictronTelemetryCasesPart1:
         }
         metrics: dict[str, object] = {}
 
-        harness._victron_ess_balance_mark_overshoot(service, 101.0, "profile")
+        harness.telemetry._victron_ess_balance_mark_overshoot(service, 101.0, "profile")
         self.assertEqual(service._victron_ess_balance_telemetry_overshoot_count, 1)
         self.assertEqual(harness.cooldowns[-1][1], "overshoot_detected")
 
-        harness._update_victron_ess_balance_telemetry(service, 105.0, cluster, -10.0, metrics, "profile")
+        harness.telemetry._update_victron_ess_balance_telemetry(service, 105.0, cluster, -10.0, metrics, "profile")
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_telemetry_clean"], 1)
         self.assertTrue(metrics["telemetry_metrics_populated"])
         self.assertEqual(harness.refreshed_profiles[-1], "profile")
@@ -48,25 +48,25 @@ class _BranchCoverageVictronTelemetryCasesPart1:
         self.assertTrue(harness.gain_updates)
 
         service._victron_ess_balance_telemetry_last_command_profile_key = ""
-        harness._record_victron_ess_balance_command(service, 111.0, 62.0, -14.0, "fallback")
+        harness.telemetry._record_victron_ess_balance_command(service, 111.0, 62.0, -14.0, "fallback")
         self.assertEqual(service._victron_ess_balance_telemetry_last_command_setpoint_w, 62.0)
-        harness._clear_victron_ess_balance_tracking_episode(service)
+        harness.telemetry._clear_victron_ess_balance_tracking_episode(service)
         self.assertIsNone(service._victron_ess_balance_telemetry_last_command_at)
-        harness._reset_victron_ess_balance_pid(service)
+        harness.pid.reset(service)
         self.assertEqual(service._victron_ess_balance_pid_last_output_w, 0.0)
-        harness._reset_victron_ess_balance_pid_integral(service)
+        harness.pid.reset_integral(service)
         self.assertEqual(service._victron_ess_balance_pid_integral_output_w, 0.0)
-        self.assertAlmostEqual(harness._victron_ess_balance_stability_score_values(0, 0, None, None), 0.85)
+        self.assertAlmostEqual(harness.scorer.stability_score_values(0, 0, None, None), 0.85)
 
         no_gain_updates = len(harness.gain_updates)
-        harness._victron_ess_balance_maybe_record_gain(service, "profile", 0.0, 0.5)
+        harness.telemetry._victron_ess_balance_maybe_record_gain(service, "profile", 0.0, 0.5)
         self.assertEqual(len(harness.gain_updates), no_gain_updates)
 
         overshoot_state = {"command_overshoot_recorded": False}
-        harness._victron_ess_balance_maybe_mark_overshoot(service, 112.0, 12.0, overshoot_state, "profile", -8.0, 12.0, 2.0)
+        harness.telemetry._victron_ess_balance_maybe_mark_overshoot(
+            service, 112.0, 12.0, overshoot_state, "profile", -8.0, 12.0, 2.0
+        )
         self.assertTrue(overshoot_state["command_overshoot_recorded"])
 
-        command_state = harness._victron_ess_balance_telemetry_command_state(service, "fallback")
+        command_state = harness.telemetry._victron_ess_balance_telemetry_command_state(service, "fallback")
         self.assertEqual(command_state["command_profile_key"], "fallback")
-
-

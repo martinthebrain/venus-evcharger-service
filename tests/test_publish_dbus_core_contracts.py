@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from tests.support.publish_runtime import PublishServiceHarness as SimpleNamespace
 from venus_evcharger.dbus_gateway import EVCS_FIELD_TO_PATH
-from venus_evcharger.publish.dbus_core import _DbusPublishCore
+from venus_evcharger.publish.dbus_core import DbusPublishCore
+from venus_evcharger.publish.dbus_measurements import DbusMeasurementPublisher
+from venus_evcharger.publish.dbus_shared import DbusPublishContext
 
 
 class _FailingDbusService(dict[str, object]):
@@ -16,11 +18,12 @@ class _FailingDbusService(dict[str, object]):
         super().__setitem__(key, value)
 
 
-class _DbusCoreHarness(_DbusPublishCore):
-    PHASE_NAMES = ("L1", "L2", "L3")
+def _context(service: object) -> DbusPublishContext:
+    return DbusPublishContext(service=service, age_seconds=lambda _timestamp, _now: 0)
 
-    def __init__(self, service: object) -> None:
-        self.service = service
+
+def _core(service: object) -> DbusPublishCore:
+    return DbusPublishCore(_context(service))
 
 
 def _service(**overrides: object) -> SimpleNamespace:
@@ -37,7 +40,7 @@ def _service(**overrides: object) -> SimpleNamespace:
 class DbusPublishCoreContractTests(unittest.TestCase):
     def test_ensure_state_initializes_defaults_and_preserves_existing_values(self) -> None:
         service = SimpleNamespace()
-        _DbusCoreHarness(service).ensure_state()
+        _core(service).ensure_state()
 
         self.assertEqual(service._dbus_publish_state, {})
         self.assertEqual(service._dbus_live_publish_interval_seconds, 1.0)
@@ -48,29 +51,24 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             _dbus_live_publish_interval_seconds=2.5,
             _dbus_slow_publish_interval_seconds=9.5,
         )
-        _DbusCoreHarness(existing).ensure_state()
+        _core(existing).ensure_state()
 
         self.assertEqual(existing._dbus_publish_state, {"/A": {"value": 1}})
         self.assertEqual(existing._dbus_live_publish_interval_seconds, 2.5)
         self.assertEqual(existing._dbus_slow_publish_interval_seconds, 9.5)
 
-    def test_should_enqueue_publish_requires_mainloop_queue_and_disallows_direct_mode(self) -> None:
-        self.assertFalse(_DbusCoreHarness(_service(_dbus_publish_direct_allowed=None))._should_enqueue_publish())
+    def test_should_enqueue_publish_follows_runtime_direct_access_decision(self) -> None:
+        self.assertFalse(_core(_service(_dbus_publish_direct_allowed=None))._should_enqueue_publish())
         self.assertFalse(
-            _DbusCoreHarness(
+            _core(
                 _service(
                     _dbus_publish_direct_allowed=MagicMock(return_value=True),
                     _enqueue_dbus_publish_values=MagicMock(),
                 )
             )._should_enqueue_publish()
         )
-        self.assertFalse(
-            _DbusCoreHarness(
-                _service(_dbus_publish_direct_allowed=MagicMock(return_value=False))
-            )._should_enqueue_publish()
-        )
         self.assertTrue(
-            _DbusCoreHarness(
+            _core(
                 _service(
                     _dbus_publish_direct_allowed=MagicMock(return_value=False),
                     _enqueue_dbus_publish_values=MagicMock(),
@@ -78,7 +76,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             )._should_enqueue_publish()
         )
         self.assertTrue(
-            _DbusCoreHarness(
+            _core(
                 _service(
                     _dbus_publish_direct_allowed=MagicMock(return_value=False),
                     _enqueue_dbus_publish_fields=MagicMock(),
@@ -87,7 +85,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
         )
 
     def test_effective_publish_interval_uses_backpressure_unless_forced_or_unthrottled(self) -> None:
-        harness = _DbusCoreHarness(_service())
+        harness = _core(_service())
         policy = MagicMock()
         policy.publish_interval_seconds.return_value = 7.5
 
@@ -100,13 +98,21 @@ class DbusPublishCoreContractTests(unittest.TestCase):
         policy.publish_interval_seconds.assert_called_once_with(2.0, group="live")
 
     def test_publish_interval_elapsed_treats_missing_timestamp_as_due(self) -> None:
-        self.assertTrue(_DbusCoreHarness._publish_interval_elapsed(None, 10.0, 5.0))
-        self.assertFalse(_DbusCoreHarness._publish_interval_elapsed(8.0, 10.0, 5.0))
-        self.assertTrue(_DbusCoreHarness._publish_interval_elapsed(5.0, 10.0, 5.0))
+        self.assertTrue(DbusPublishCore._publish_interval_elapsed(None, 10.0, 5.0))
+        self.assertTrue(DbusPublishCore._publish_interval_elapsed("invalid", 10.0, 5.0))
+        self.assertFalse(DbusPublishCore._publish_interval_elapsed(8.0, 10.0, 5.0))
+        self.assertTrue(DbusPublishCore._publish_interval_elapsed(5.0, 10.0, 5.0))
+
+    def test_enqueue_values_and_update_index_reject_unavailable_or_invalid_boundaries(self) -> None:
+        harness = _core(_service())
+
+        self.assertFalse(harness._enqueue_publish_values([("/Mode", 2)], 10.0))
+        with self.assertRaisesRegex(TypeError, "UpdateIndex must be numeric"):
+            harness._next_update_index(object())
 
     def test_publish_path_throttles_changes_and_force_republishes_same_value(self) -> None:
         service = _service(_assert_dbus_mainloop_thread=MagicMock())
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
         self.assertTrue(harness.publish_path("/Ac/Power", 12.0, now=10.0, interval_seconds=5.0))
         self.assertFalse(harness.publish_path("/Ac/Power", 12.0, now=11.0, interval_seconds=5.0))
@@ -120,7 +126,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             _dbus_publish_direct_allowed=MagicMock(return_value=False),
             _enqueue_dbus_publish_values=MagicMock(return_value=True),
         )
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
         with patch.object(harness, "_effective_publish_interval", return_value=9.0) as interval, patch.object(
             harness, "_publish_decision", return_value=(True, None)
         ) as decision:
@@ -132,9 +138,9 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
     def test_publish_field_and_publish_values_preserve_group_contracts(self) -> None:
         service = _service()
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
-        with patch.object(harness, "_publish_fields_transactional", return_value=True) as publish_fields:
+        with patch.object(harness, "publish_fields", return_value=True) as publish_fields:
             self.assertTrue(harness.publish_field("mode", 2, now=15.0, interval_seconds=3.0, force=True))
         publish_fields.assert_called_once_with(
             "single-field",
@@ -143,7 +149,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             interval_seconds=3.0,
             force=True,
         )
-        with patch.object(harness, "_publish_fields_transactional", return_value=True) as publish_fields:
+        with patch.object(harness, "publish_fields", return_value=True) as publish_fields:
             self.assertTrue(harness.publish_field("mode", 2, now=15.5))
         publish_fields.assert_called_once_with(
             "single-field",
@@ -172,25 +178,25 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             force=False,
         )
 
-    def test_field_publish_enqueues_semantic_fields_or_falls_back_to_paths_with_timestamp(self) -> None:
+    def test_field_publish_enqueues_semantic_fields_with_timestamp(self) -> None:
         fields_queue = MagicMock(return_value=True)
         field_service = _service(
             _dbus_publish_direct_allowed=MagicMock(return_value=False),
             _enqueue_dbus_publish_fields=fields_queue,
         )
-        self.assertTrue(_DbusCoreHarness(field_service).publish_field("ac_power_w", 50.0, now=21.0, force=True))
+        self.assertTrue(_core(field_service).publish_field("ac_power_w", 50.0, now=21.0, force=True))
         fields_queue.assert_called_once_with([("ac_power_w", 50.0)], 21.0)
 
-        path_queue = MagicMock(return_value=True)
-        path_service = _service(
+        rejected_queue = MagicMock(return_value=False)
+        rejected_service = _service(
             _dbus_publish_direct_allowed=MagicMock(return_value=False),
-            _enqueue_dbus_publish_values=path_queue,
+            _enqueue_dbus_publish_fields=rejected_queue,
         )
-        self.assertTrue(_DbusCoreHarness(path_service).publish_field("ac_power_w", 51.0, now=22.0, force=True))
-        path_queue.assert_called_once_with([(EVCS_FIELD_TO_PATH["ac_power_w"], 51.0)], 22.0)
+        self.assertFalse(_core(rejected_service).publish_field("ac_power_w", 51.0, now=22.0, force=True))
+        rejected_queue.assert_called_once_with([("ac_power_w", 51.0)], 22.0)
 
     def test_transactional_publish_success_delegates_policy_staging_and_apply_steps(self) -> None:
-        harness = _DbusCoreHarness(_service())
+        harness = _core(_service())
         with patch.object(harness, "_effective_publish_interval", return_value=4.0) as interval, patch.object(
             harness,
             "_stage_publish_values",
@@ -212,13 +218,13 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
     def test_transactional_publish_default_force_does_not_republish_unchanged_throttled_values(self) -> None:
         service = _service(_dbus_publish_state={"/A": {"value": 1, "updated_at": 10.0}})
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
         self.assertFalse(harness._publish_values_transactional("default-force", {"/A": 1}, now=11.0, interval_seconds=5.0))
         self.assertEqual(service._dbusservice, {})
 
     def test_transactional_publish_enqueue_branch_preserves_values_current_interval_and_force(self) -> None:
-        harness = _DbusCoreHarness(_service())
+        harness = _core(_service())
         with patch.object(harness, "_should_enqueue_publish", return_value=True), patch.object(
             harness, "_effective_publish_interval", return_value=8.0
         ) as interval, patch.object(harness, "_enqueue_transactional_publish", return_value=True) as enqueue:
@@ -237,7 +243,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
     def test_enqueue_transactional_publish_queues_only_due_values(self) -> None:
         service = _service(_enqueue_dbus_publish_values=MagicMock(return_value=True))
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
         with patch.object(harness, "_staged_values_for_enqueue", return_value=[("/A", 1)]) as staged:
             self.assertTrue(harness._enqueue_transactional_publish({"/A": 1}, 30.0, 4.0, False))
         staged.assert_called_once_with({"/A": 1}, 30.0, 4.0, False)
@@ -248,7 +254,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
         staged.assert_called_once_with({"/A": 1}, 31.0, 4.0, False)
 
     def test_transactional_publish_failure_restores_and_reports_failed_path(self) -> None:
-        harness = _DbusCoreHarness(_service())
+        harness = _core(_service())
         staged_entries = {"/A": {"value": "old", "updated_at": 1.0}}
         original_values = {"/A": (True, "old")}
         with patch.object(
@@ -266,13 +272,13 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
         restore_values.assert_called_once_with(["/A"], original_values)
         restore_state.assert_called_once_with(staged_entries)
-        publish_failure.assert_called_once_with("group-b", ["/Fail"], 31.0)
+        publish_failure.assert_called_once_with("group-b", ["/Fail"])
 
-    def test_publish_fields_transactional_uses_semantic_paths_for_direct_publish(self) -> None:
-        harness = _DbusCoreHarness(_service())
+    def testpublish_fields_uses_semantic_paths_for_direct_publish(self) -> None:
+        harness = _core(_service())
         with patch.object(harness, "_publish_values_transactional", return_value=True) as publish_values:
             self.assertTrue(
-                harness._publish_fields_transactional(
+                harness.publish_fields(
                     "fields",
                     {"mode": 1, "ac_power_w": 50.0, "unknown": "ignored"},
                     now=33.0,
@@ -292,8 +298,8 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             force=True,
         )
 
-    def test_publish_fields_transactional_enqueue_branch_preserves_effective_interval(self) -> None:
-        harness = _DbusCoreHarness(_service())
+    def testpublish_fields_enqueue_branch_preserves_effective_interval(self) -> None:
+        harness = _core(_service())
         paths = {EVCS_FIELD_TO_PATH["mode"]: 2}
         with patch.object(harness, "_should_enqueue_publish", return_value=True), patch.object(
             harness, "_effective_publish_interval", return_value=9.0
@@ -304,7 +310,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             harness, "_staged_fields_for_enqueue", return_value=[("mode", 2)]
         ) as staged, patch.object(harness, "_enqueue_publish_fields", return_value=True) as enqueue:
             self.assertTrue(
-                harness._publish_fields_transactional(
+                harness.publish_fields(
                     "queued-fields",
                     {"mode": 2},
                     now=34.0,
@@ -319,7 +325,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
         enqueue.assert_called_once_with([("mode", 2)], 34.0)
 
     def test_stage_publish_values_collects_only_due_paths_with_original_snapshots(self) -> None:
-        harness = _DbusCoreHarness(_service())
+        harness = _core(_service())
         with patch.object(
             harness,
             "_publish_decision",
@@ -353,7 +359,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
                 EVCS_FIELD_TO_PATH["mode"]: {"value": 1, "updated_at": 10.0},
             }
         )
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
         self.assertEqual(
             harness._staged_values_for_enqueue({"/A": 1, "/B": 2}, 11.0, None, False),
@@ -378,7 +384,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
         )
 
     def test_staged_value_and_field_helpers_pass_exact_decision_arguments(self) -> None:
-        harness = _DbusCoreHarness(_service())
+        harness = _core(_service())
         with patch.object(harness, "_publish_decision", return_value=(True, None)) as decision:
             self.assertEqual(harness._staged_values_for_enqueue({"/A": 1}, 12.0, 3.0, True), [("/A", 1)])
         decision.assert_called_once_with("/A", 1, 12.0, 3.0, True)
@@ -398,7 +404,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
     def test_service_value_snapshot_reports_access_operation_and_missing_paths(self) -> None:
         service = _service(_dbusservice={"/A": 1}, _assert_dbus_mainloop_thread=MagicMock())
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
         self.assertEqual(harness._service_value_snapshot("/A"), (True, 1))
         self.assertEqual(harness._service_value_snapshot("/Missing"), (False, None))
@@ -407,7 +413,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
     def test_apply_staged_publish_values_stops_at_first_failed_path(self) -> None:
         service = _service(_dbusservice=_FailingDbusService(), _assert_dbus_mainloop_thread=MagicMock())
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
         changed, published, failed = harness._apply_staged_publish_values(
             [("/Ok", "yes"), ("/Fail", "bad"), ("/Later", "never")],
@@ -433,7 +439,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             },
             _assert_dbus_mainloop_thread=MagicMock(),
         )
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
         harness._restore_group_publish_state({"/Keep": {"value": "old"}, "/Remove": None})
         harness._restore_service_values(
@@ -451,9 +457,9 @@ class DbusPublishCoreContractTests(unittest.TestCase):
         harness._restore_group_publish_state({"/AlreadyMissing": None})
         self.assertNotIn("/AlreadyMissing", service._dbus_publish_state)
 
-    def test_publish_group_failure_uses_throttled_warning_or_logging_fallback(self) -> None:
+    def test_publish_group_failure_uses_runtime_health_port(self) -> None:
         service = _service(_mark_failure=MagicMock(), _warning_throttled=MagicMock())
-        _DbusCoreHarness(service)._publish_group_failure("diag", ["/A", "/B"], 66.0)
+        _core(service)._publish_group_failure("diag", ["/A", "/B"])
 
         service._mark_failure.assert_called_once_with("dbus")
         service._warning_throttled.assert_called_once_with(
@@ -463,14 +469,6 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             "diag",
             "/A,/B",
         )
-
-        with self.assertLogs(level="WARNING") as logs:
-            _DbusCoreHarness(_service())._publish_group_failure("plain", ["/C"], 67.0)
-        self.assertEqual(logs.output, ["WARNING:root:DBus publish group plain failed for paths /C at 67.000"])
-
-        with self.assertLogs(level="WARNING") as logs:
-            _DbusCoreHarness(_service())._publish_group_failure("plain", ["/C", "/D"], 68.0)
-        self.assertEqual(logs.output, ["WARNING:root:DBus publish group plain failed for paths /C,/D at 68.000"])
 
     def test_transactional_publish_rolls_back_service_values_and_publish_state_on_failure(self) -> None:
         service = _service(
@@ -482,7 +480,7 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             _mark_failure=MagicMock(),
             _warning_throttled=MagicMock(),
         )
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
 
         self.assertFalse(
             harness._publish_values_transactional(
@@ -501,15 +499,16 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
     def test_live_and_energy_publish_methods_use_semantic_gateway_contract(self) -> None:
         service = _service()
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
+        measurements = DbusMeasurementPublisher(_context(service), harness)
         phase_data = {
             "L1": {"power": 111.0, "current": 1.1, "voltage": 229.1},
             "L2": {"power": 222.0, "current": 2.2, "voltage": 229.2},
             "L3": {"power": 333.0, "current": 3.3, "voltage": 229.3},
         }
 
-        with patch.object(harness, "_publish_fields_transactional", return_value=True) as publish_fields:
-            self.assertTrue(harness.publish_live_measurements(666.0, 230.0, 6.6, phase_data, now=40.0))
+        with patch.object(harness, "publish_fields", return_value=True) as publish_fields:
+            self.assertTrue(measurements.publish_live_measurements(666.0, 230.0, 6.6, phase_data, now=40.0))
         publish_fields.assert_called_once_with(
             "live-measurements",
             {
@@ -531,9 +530,9 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             interval_seconds=1.0,
         )
 
-        with patch.object(harness, "_publish_fields_transactional", return_value=True) as publish_fields:
+        with patch.object(harness, "publish_fields", return_value=True) as publish_fields:
             self.assertTrue(
-                harness.publish_energy_time_measurements(
+                measurements.publish_energy_time_measurements(
                     12.5,
                     {"L1": 1.1, "L2": 2.2, "L3": 3.3},
                     45,
@@ -558,20 +557,21 @@ class DbusPublishCoreContractTests(unittest.TestCase):
 
     def test_live_and_energy_publish_write_expected_dbus_paths(self) -> None:
         service = _service()
-        harness = _DbusCoreHarness(service)
+        harness = _core(service)
+        measurements = DbusMeasurementPublisher(_context(service), harness)
         phase_data = {
             "L1": {"power": 111.0, "current": 1.1, "voltage": 229.1},
             "L2": {"power": 222.0, "current": 2.2, "voltage": 229.2},
             "L3": {"power": 333.0, "current": 3.3, "voltage": 229.3},
         }
 
-        self.assertTrue(harness.publish_live_measurements(666.0, 230.0, 6.6, phase_data, now=50.0))
+        self.assertTrue(measurements.publish_live_measurements(666.0, 230.0, 6.6, phase_data, now=50.0))
         self.assertEqual(service._dbusservice[EVCS_FIELD_TO_PATH["ac_power_w"]], 666.0)
         self.assertEqual(service._dbusservice[EVCS_FIELD_TO_PATH["l2_current_a"]], 2.2)
         self.assertEqual(service._dbusservice[EVCS_FIELD_TO_PATH["l3_voltage_v"]], 229.3)
 
         self.assertTrue(
-            harness.publish_energy_time_measurements(
+            measurements.publish_energy_time_measurements(
                 12.5,
                 {"L1": 1.1, "L2": 2.2, "L3": 3.3},
                 45,
@@ -590,14 +590,14 @@ class DbusPublishCoreContractTests(unittest.TestCase):
             _enqueue_dbus_publish_values=MagicMock(),
             _enqueue_dbus_update_index_bump=enqueue_bump,
         )
-        _DbusCoreHarness(queued_service).bump_update_index(70.0)
+        _core(queued_service).bump_update_index(70.0)
         enqueue_bump.assert_called_once_with(70.0)
 
         direct_service = _service(
             _dbusservice={EVCS_FIELD_TO_PATH["update_index"]: 254},
             _assert_dbus_mainloop_thread=MagicMock(),
         )
-        _DbusCoreHarness(direct_service).bump_update_index(71.0)
+        _core(direct_service).bump_update_index(71.0)
         self.assertEqual(direct_service._dbusservice[EVCS_FIELD_TO_PATH["update_index"]], 255)
         self.assertEqual(
             direct_service._dbus_publish_state[EVCS_FIELD_TO_PATH["update_index"]],
@@ -608,25 +608,8 @@ class DbusPublishCoreContractTests(unittest.TestCase):
         )
 
         wrap_service = _service(_dbusservice={EVCS_FIELD_TO_PATH["update_index"]: 255})
-        _DbusCoreHarness(wrap_service).bump_update_index(71.5)
+        _core(wrap_service).bump_update_index(71.5)
         self.assertEqual(wrap_service._dbusservice[EVCS_FIELD_TO_PATH["update_index"]], 0)
-
-        fallback_service = _service(
-            _dbusservice={EVCS_FIELD_TO_PATH["update_index"]: 7},
-            _dbus_publish_direct_allowed=MagicMock(return_value=False),
-            _enqueue_dbus_publish_values=MagicMock(),
-            _enqueue_dbus_update_index_bump=None,
-        )
-        _DbusCoreHarness(fallback_service).bump_update_index(72.0)
-        self.assertEqual(fallback_service._dbusservice[EVCS_FIELD_TO_PATH["update_index"]], 8)
-
-        missing_bump_service = _service(
-            _dbusservice={EVCS_FIELD_TO_PATH["update_index"]: 8},
-            _dbus_publish_direct_allowed=MagicMock(return_value=False),
-            _enqueue_dbus_publish_values=MagicMock(),
-        )
-        _DbusCoreHarness(missing_bump_service).bump_update_index(73.0)
-        self.assertEqual(missing_bump_service._dbusservice[EVCS_FIELD_TO_PATH["update_index"]], 9)
 
 
 if __name__ == "__main__":

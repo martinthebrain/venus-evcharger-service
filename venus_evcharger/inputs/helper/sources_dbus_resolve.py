@@ -1,148 +1,129 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Service-resolution helpers for auto-input DBus sources."""
+"""Energy-service resolution through the gateway service cache."""
 
 from __future__ import annotations
 
 import time
-from typing import Any
 
-from venus_evcharger.core.shared import coerce_dbus_numeric, discovery_cache_valid, first_matching_prefixed_service
+from venus_evcharger.core.shared import discovery_cache_valid, first_matching_prefixed_service
 from venus_evcharger.energy import EnergySourceDefinition
-from venus_evcharger.inputs.helper.sources_dbus_common import (
-    DBUS_SOURCE_READ_ERRORS,
-)
-from venus_evcharger.inputs.helper.sources_dbus_primary import _AutoInputHelperSourceDbusPrimary
+from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS
+from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
+from venus_evcharger.inputs.helper.contracts import EnergySourceCatalogPort, GatewayReaderPort
 
 
-def _service_name_or_none(value: object) -> str | None:
-    if value is None:
-        return None
-    service_name = str(value).strip()
-    return service_name or None
+class EnergyServiceResolver:
+    """Resolve configured or discovered services without direct DBus access."""
 
+    def __init__(
+        self,
+        settings: AutoInputHelperSettings,
+        gateway: GatewayReaderPort,
+        catalog: EnergySourceCatalogPort,
+    ) -> None:
+        self.settings = settings
+        self.gateway = gateway
+        self.catalog = catalog
+        self._resolved_primary: str | None = None
+        self._primary_scan_at = 0.0
+        self._resolved: dict[str, str] = {}
+        self._scanned_at: dict[str, float] = {}
 
-def _required_service_name(value: object, label: str) -> str:
-    service_name = _service_name_or_none(value)
-    if service_name is None:
-        raise ValueError(f"No DBus service resolved for {label}")
-    return service_name
-
-
-class _AutoInputHelperSourceDbusResolve(_AutoInputHelperSourceDbusPrimary):
-    def _resolve_auto_battery_service(self: Any) -> str:
+    def resolve(self, source: EnergySourceDefinition) -> str:
+        if source.source_id == self.catalog.primary_source().source_id:
+            return self._resolve_primary()
         now = time.time()
-        configured: object = self._configured_auto_battery_service(now)
-        if (service_name := _service_name_or_none(configured)) is not None:
-            return service_name
-        cached: object = self._cached_auto_battery_service(now)
-        if (service_name := _service_name_or_none(cached)) is not None:
-            return service_name
-        discovered: object = self._discovered_auto_battery_service(now)
-        return _required_service_name(discovered, "auto battery")
+        configured = self._configured_service(source, now)
+        if configured is not None:
+            return configured
+        cached = self._cached_service(source.source_id, now)
+        if cached is not None:
+            return cached
+        return self._discover_service(source, now)
 
-    def _configured_auto_battery_service(self: Any, now: float) -> str | None:
-        source = self._primary_energy_source()
-        if not source.service_name:
-            return None
-        if not self._dbus_service_name_available(source.service_name):
-            return None
-        try:
-            readable = self._energy_source_has_readable_data(source, source.service_name)
-        except DBUS_SOURCE_READ_ERRORS:
-            return None
-        if readable:
-            self._cache_energy_service(source.source_id, source.service_name, now, primary=True)
-            return str(self._resolved_auto_battery_service)
-        return None
+    def invalidate_primary(self) -> None:
+        source_id = self.catalog.primary_source().source_id
+        self._resolved_primary = None
+        self._primary_scan_at = 0.0
+        self._resolved.pop(source_id, None)
+        self._scanned_at.pop(source_id, None)
 
-    def _cached_auto_battery_service(self: Any, now: float) -> str | None:
+    def _resolve_primary(self) -> str:
+        now = time.time()
+        source = self.catalog.primary_source()
+        configured = self._configured_primary(source, now)
+        if configured is not None:
+            return configured
+        cached = self._cached_primary(now)
+        if cached is not None:
+            return cached
+        return self._discover_primary(source, now)
+
+    def _cached_primary(self, now: float) -> str | None:
         if discovery_cache_valid(
-            self._resolved_auto_battery_service,
-            self._auto_battery_last_scan,
-            self.auto_battery_scan_interval_seconds,
+            self._resolved_primary,
+            self._primary_scan_at,
+            self.settings.auto_battery_scan_interval_seconds,
             now,
         ):
-            return str(self._resolved_auto_battery_service)
+            return self._resolved_primary
         return None
 
-    def _discovered_auto_battery_service(self: Any, now: float) -> str:
-        source = self._primary_energy_source()
-        battery_service_prefix = self._primary_energy_service_prefix()
+    def _discover_primary(self, source: EnergySourceDefinition, now: float) -> str:
         service_name = first_matching_prefixed_service(
-            self._list_dbus_services(),
-            source.service_prefix or battery_service_prefix,
-            self._battery_service_has_soc,
+            self.gateway.service_names(),
+            source.service_prefix or self.catalog.primary_service_prefix(),
+            self.catalog.battery_service_has_soc,
         )
         if service_name is None:
-            raise ValueError(f"No DBus service found with prefix '{source.service_prefix or battery_service_prefix}'")
-        self._cache_energy_service(source.source_id, service_name, now, primary=True)
+            prefix = source.service_prefix or self.catalog.primary_service_prefix()
+            raise ValueError(f"No DBus service found with prefix '{prefix}'")
+        self._cache(source.source_id, service_name, now, primary=True)
         return service_name
 
-    def _cache_energy_service(self: Any, source_id: str, service_name: str, now: float, *, primary: bool = False) -> None:
-        if not isinstance(getattr(self, "_resolved_auto_energy_services", None), dict):
-            self._resolved_auto_energy_services = {}
-        if not isinstance(getattr(self, "_auto_energy_last_scan", None), dict):
-            self._auto_energy_last_scan = {}
-        self._resolved_auto_energy_services[source_id] = service_name
-        self._auto_energy_last_scan[source_id] = now
-        if primary:
-            self._resolved_auto_battery_service = service_name
-            self._auto_battery_last_scan = now
-
-    def _cached_energy_service(self: Any, source_id: str, now: float) -> str | None:
-        resolved = getattr(self, "_resolved_auto_energy_services", None)
-        scans = getattr(self, "_auto_energy_last_scan", None)
-        cached_service = resolved.get(source_id) if isinstance(resolved, dict) else None
-        cached_at = scans.get(source_id, 0.0) if isinstance(scans, dict) else 0.0
-        if discovery_cache_valid(cached_service, cached_at, self.auto_battery_scan_interval_seconds, now):
-            return _service_name_or_none(cached_service)
-        return None
-
-    def _configured_energy_source_service(self: Any, source: EnergySourceDefinition, now: float) -> str | None:
-        if not source.service_name or not self._dbus_service_name_available(source.service_name):
+    def _configured_primary(self, source: EnergySourceDefinition, now: float) -> str | None:
+        if not source.service_name or not self.gateway.service_available(source.service_name):
             return None
-        if not self._energy_source_has_readable_data(source, source.service_name):
+        try:
+            readable = self.catalog.source_has_readable_data(source, source.service_name)
+        except DBUS_INPUT_READ_ERRORS:
             return None
-        self._cache_energy_service(source.source_id, source.service_name, now)
+        if not readable:
+            return None
+        self._cache(source.source_id, source.service_name, now, primary=True)
         return source.service_name
 
-    def _discovered_energy_source_service(self: Any, source: EnergySourceDefinition, now: float) -> str:
+    def _configured_service(self, source: EnergySourceDefinition, now: float) -> str | None:
+        if not source.service_name or not self.gateway.service_available(source.service_name):
+            return None
+        if not self.catalog.source_has_readable_data(source, source.service_name):
+            return None
+        self._cache(source.source_id, source.service_name, now)
+        return source.service_name
+
+    def _cached_service(self, source_id: str, now: float) -> str | None:
+        cached = self._resolved.get(source_id)
+        cached_at = self._scanned_at.get(source_id, 0.0)
+        if discovery_cache_valid(cached, cached_at, self.settings.auto_battery_scan_interval_seconds, now):
+            return cached
+        return None
+
+    def _discover_service(self, source: EnergySourceDefinition, now: float) -> str:
         if not source.service_prefix:
             raise ValueError(f"No readable DBus service configured for energy source '{source.source_id}'")
         service_name = first_matching_prefixed_service(
-            self._list_dbus_services(),
+            self.gateway.service_names(),
             source.service_prefix,
-            lambda candidate: self._energy_source_has_readable_data(source, candidate),
+            lambda candidate: self.catalog.source_has_readable_data(source, candidate),
         )
         if service_name is None:
             raise ValueError(f"No DBus service found for energy source '{source.source_id}'")
-        self._cache_energy_service(source.source_id, service_name, now)
+        self._cache(source.source_id, service_name, now)
         return service_name
 
-    def _resolve_energy_source_service(self: Any, source: EnergySourceDefinition) -> str:
-        now = time.time()
-        if source.source_id == self._primary_energy_source().source_id:
-            primary_service: object = self._resolve_auto_battery_service()
-            return _required_service_name(primary_service, "primary energy source")
-        configured_service: object = self._configured_energy_source_service(source, now)
-        if (service_name := _service_name_or_none(configured_service)) is not None:
-            return service_name
-        cached_service: object = self._cached_energy_service(source.source_id, now)
-        if (service_name := _service_name_or_none(cached_service)) is not None:
-            return service_name
-        discovered_service: object = self._discovered_energy_source_service(source, now)
-        return _required_service_name(discovered_service, source.source_id)
-
-    def _read_optional_energy_value(self: Any, service_name: str, path: str) -> float | None:
-        if not path:
-            return None
-        numeric_value = coerce_dbus_numeric(self._get_dbus_value(service_name, path))
-        if isinstance(numeric_value, bool) or not isinstance(numeric_value, (int, float)):
-            return None
-        return float(numeric_value)
-
-    def _read_optional_energy_text(self: Any, service_name: str, path: str) -> str:
-        if not path:
-            return ""
-        value = self._get_dbus_value(service_name, path)
-        return "" if value is None else str(value).strip()
+    def _cache(self, source_id: str, service_name: str, now: float, *, primary: bool = False) -> None:
+        self._resolved[source_id] = service_name
+        self._scanned_at[source_id] = now
+        if primary:
+            self._resolved_primary = service_name
+            self._primary_scan_at = now

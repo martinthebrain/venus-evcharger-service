@@ -82,7 +82,7 @@ class TestShellyWallboxCommonRuntime(unittest.TestCase):
         self.assertEqual(_status_label(None, 99), "Unbekannt")
 
     def test_common_auto_now_helper_ignores_boolean_time_callback_values(self):
-        service = type("BoolTimeService", (), {"_time_now": staticmethod(lambda: True)})()
+        service = type("BoolTimeService", (), {"time_now": staticmethod(lambda: True)})()
         with patch("venus_evcharger.core.common_auto.time.time", return_value=123.0):
             self.assertEqual(_charger_transport_now(service), 123.0)
 

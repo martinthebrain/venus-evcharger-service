@@ -7,7 +7,7 @@ import unittest
 from dataclasses import replace
 from configparser import ConfigParser
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from venus_evcharger.backend.template_support import TemplateAuthSettings
 from venus_evcharger.energy import connectors_opendtu as opendtu

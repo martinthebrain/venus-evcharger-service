@@ -4,14 +4,31 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Protocol, runtime_checkable
 
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_tuple
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_learning_phase, normalize_learning_state
-from venus_evcharger.core.controller_contracts import ControllerAssemblyContract
 
 
-class _StateRuntimeNormalize(ControllerAssemblyContract):
+@runtime_checkable
+class RuntimeClock(Protocol):
+    """Clock boundary required while normalizing persisted runtime state."""
+
+    def time_now(self) -> float: ...
+
+
+def require_runtime_clock(value: object) -> RuntimeClock:
+    """Narrow the dynamic service boundary to the clock required by state code."""
+    if not isinstance(value, RuntimeClock):
+        raise AttributeError("state service must expose time_now()")
+    if not callable(value.time_now):
+        raise AttributeError("state service must expose time_now()")
+    return value
+
+
+class RuntimeStateNormalizer:
+    """Normalize untrusted values crossing the runtime-state boundary."""
+
     @staticmethod
     def coerce_runtime_int(value: object, default: int = 0) -> int:
         if isinstance(value, bool):
@@ -29,14 +46,14 @@ class _StateRuntimeNormalize(ControllerAssemblyContract):
         return float(default) if normalized is None else normalized
 
     @staticmethod
-    def _coerce_optional_runtime_float(value: object) -> float | None:
+    def optional_float(value: object) -> float | None:
         if value is None:
             return None
-        return _StateRuntimeNormalize.coerce_runtime_float(value)
+        return RuntimeStateNormalizer.coerce_runtime_float(value)
 
     @staticmethod
-    def _coerce_optional_runtime_past_time(value: object, now: float | None = None) -> float | None:
-        normalized = _StateRuntimeNormalize._coerce_optional_runtime_float(value)
+    def optional_past_time(value: object, now: float | None = None) -> float | None:
+        normalized = RuntimeStateNormalizer.optional_float(value)
         if normalized is None:
             return None
         current = time.time() if now is None else float(now)
@@ -45,19 +62,19 @@ class _StateRuntimeNormalize(ControllerAssemblyContract):
         return normalized
 
     @staticmethod
-    def _normalize_learned_charge_power_state(value: object) -> str:
+    def learned_charge_power_state(value: object) -> str:
         return normalize_learning_state(value)
 
     @staticmethod
-    def _normalize_learned_charge_power_phase(value: object) -> str | None:
+    def learned_charge_power_phase(value: object) -> str | None:
         return normalize_learning_phase(value)
 
     @staticmethod
-    def _normalize_runtime_phase_selection(value: object, default: PhaseSelection = "P1") -> PhaseSelection:
+    def phase_selection(value: object, default: PhaseSelection = "P1") -> PhaseSelection:
         return normalize_phase_selection(value, default)
 
     @staticmethod
-    def _normalize_runtime_supported_phase_selections(
+    def supported_phase_selections(
         value: object,
         default: tuple[PhaseSelection, ...] = ("P1",),
     ) -> tuple[PhaseSelection, ...]:
@@ -65,22 +82,22 @@ class _StateRuntimeNormalize(ControllerAssemblyContract):
         return normalized
 
     @classmethod
-    def _normalized_optional_runtime_phase_selection(
+    def optional_phase_selection(
         cls,
         value: object,
         default: PhaseSelection = "P1",
     ) -> PhaseSelection | None:
         if value is None:
             return None
-        return cls._normalize_runtime_phase_selection(value, default)
+        return cls.phase_selection(value, default)
 
     @staticmethod
-    def _normalized_optional_runtime_text(value: object) -> str | None:
+    def optional_text(value: object) -> str | None:
         text = str(value or "").strip()
         return text or None
 
     @staticmethod
-    def _normalize_phase_switch_state(value: object) -> str | None:
+    def phase_switch_state(value: object) -> str | None:
         if value is None:
             return None
         state = str(value).strip().lower()
@@ -89,7 +106,6 @@ class _StateRuntimeNormalize(ControllerAssemblyContract):
         return None
 
     @staticmethod
-    def _runtime_load_time(svc: Any) -> float:
-        time_now = getattr(svc, "_time_now", None)
-        raw_current_time: object = time_now() if callable(time_now) else time.time()
-        return _StateRuntimeNormalize.coerce_runtime_float(raw_current_time, time.time())
+    def load_time(service: RuntimeClock) -> float:
+        raw_current_time: object = service.time_now()
+        return RuntimeStateNormalizer.coerce_runtime_float(raw_current_time, time.time())

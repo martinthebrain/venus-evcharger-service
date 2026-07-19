@@ -1,74 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import os
 import sys
-import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
 sys.modules["vedbus"] = MagicMock()
 
-from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntime
-from venus_evcharger.backend.shelly_io_split import ShellyIoSplit
-from venus_evcharger.controllers.state_summary import _StateSummary
+from venus_evcharger.backend.shelly_io_split import ShellyBackendReadback
+from venus_evcharger.controllers.state_summary import StateSummaryBuilder
 from venus_evcharger.core.common_auto import _charger_transport_now
-from venus_evcharger.publish.dbus_core import _DbusPublishCore
-from venus_evcharger.runtime.audit_fields import _RuntimeAuditFields
-from venus_evcharger.update.input_cache import _UpdateCycleInputCache
-from venus_evcharger.update.offline_publish import _UpdateCycleOffline
-from venus_evcharger.update.software_update_support import _UpdateCycleSoftwareUpdate
-from venus_evcharger.update.state import _UpdateCycleState
-
-
-class _BootstrapRuntimeHarness(_ServiceBootstrapRuntime):
-    def __init__(self, service: object) -> None:
-        self.service = service
-        self._age_seconds = lambda *_args, **_kwargs: 0
-        self._health_code = lambda _reason: 0
-        self._normalize_mode = lambda value: int(value)
-        self._mode_uses_auto_logic = lambda mode: bool(mode)
-        self._phase_values = lambda *_args, **_kwargs: {}
-
-
-class _DbusCoreHarness(_DbusPublishCore):
-    def __init__(self, service: object) -> None:
-        self.service = service
-
-
-class _InputCacheHarness(_UpdateCycleInputCache):
-    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS = 5.0
+from venus_evcharger.publish.dbus_core import DbusPublishCore
+from venus_evcharger.publish.dbus_shared import DbusPublishContext
+from venus_evcharger.runtime.audit_fields import RuntimeAuditFields
+from venus_evcharger.update.input_cache import InputCacheResolver
+from venus_evcharger.update.offline_publish import OfflinePublisher
+from venus_evcharger.update.readback_resolver import ReadbackResolver
+from venus_evcharger.update.software_update_controller import SoftwareUpdateController
 
 
 class TestShellyWallboxBranchMisc(unittest.TestCase):
-    def test_bootstrap_runtime_reuses_existing_state_controller(self) -> None:
-        existing_state_controller = object()
-        service = SimpleNamespace(_state_controller=existing_state_controller)
-        resolved = SimpleNamespace(
-            runtime=SimpleNamespace(topology_configured=False, primary_rpc_configured=False),
-            selection="sel",
-            meter="meter",
-            switch="switch",
-            charger="charger",
-        )
-        harness = _BootstrapRuntimeHarness(service)
-
-        with (
-            patch("venus_evcharger.bootstrap.runtime_controllers.RuntimeSupportController") as runtime_controller,
-            patch("venus_evcharger.bootstrap.runtime_controllers.AutoDecisionController"),
-            patch("venus_evcharger.bootstrap.runtime_controllers.DbusPublishController"),
-            patch("venus_evcharger.bootstrap.runtime_controllers.ShellyIoController"),
-            patch("venus_evcharger.bootstrap.runtime_controllers.build_service_backends", return_value=resolved),
-            patch("venus_evcharger.bootstrap.runtime_controllers.ServiceStateController") as state_controller_cls,
-            patch("venus_evcharger.bootstrap.runtime_controllers.DbusWriteController"),
-            patch("venus_evcharger.bootstrap.runtime_controllers.AutoInputSupervisor"),
-            patch("venus_evcharger.bootstrap.runtime_controllers.UpdateCycleController"),
-        ):
-            runtime_controller.return_value.initialize_runtime_support = MagicMock()
-            harness.initialize_controllers()
-
-        self.assertIs(service._state_controller, existing_state_controller)
-        state_controller_cls.assert_not_called()
-
     def test_summary_and_audit_helpers_cover_confirmed_phase_fallbacks(self) -> None:
         service = SimpleNamespace(
             _last_confirmed_pm_status={"_phase_selection": "   "},
@@ -78,40 +28,51 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _contactor_fault_counts={"contactor-suspected-open": 2},
         )
 
-        self.assertEqual(_StateSummary._summary_observed_phase(service), "P1_P2")
-        self.assertEqual(_RuntimeAuditFields._observed_phase_for_audit(service), "P1_P2")
-        self.assertEqual(_RuntimeAuditFields._contactor_fault_count_for_audit(service), 2)
+        self.assertEqual(StateSummaryBuilder._summary_observed_phase(service), "P1_P2")
+        self.assertEqual(RuntimeAuditFields.observed_phase(service), "P1_P2")
+        self.assertEqual(RuntimeAuditFields.contactor_fault_count(service), 2)
         service._contactor_lockout_reason = "contactor-suspected-open"
-        self.assertEqual(_RuntimeAuditFields._contactor_fault_count_for_audit(service), 2)
+        self.assertEqual(RuntimeAuditFields.contactor_fault_count(service), 2)
 
     def test_common_auto_and_update_state_helpers_cover_fallback_time_and_soft_fail_edges(self) -> None:
-        service = SimpleNamespace(_time_now=lambda: "bad")
+        service = SimpleNamespace(time_now=lambda: "bad")
         self.assertIsInstance(_charger_transport_now(service), float)
 
         update_service = SimpleNamespace(
             _worker_poll_interval_seconds=None,
             auto_shelly_soft_fail_seconds=0.0,
         )
-        self.assertEqual(_UpdateCycleState._charger_state_max_age_seconds(update_service), 2.0)
+        self.assertEqual(ReadbackResolver(SimpleNamespace(snapshot=MagicMock()), update_service).max_age_seconds(), 2.0)
 
-    def test_dbus_core_group_failure_logs_without_mark_failure_hook(self) -> None:
+    def test_dbus_core_group_failure_uses_runtime_port(self) -> None:
+        runtime = SimpleNamespace(
+            mark_failure=MagicMock(),
+            warning_throttled=MagicMock(),
+        )
         service = SimpleNamespace(
             _dbusservice={},
             _dbus_publish_state={},
             _dbus_live_publish_interval_seconds=1.0,
             _dbus_slow_publish_interval_seconds=5.0,
-            _warning_throttled=MagicMock(),
+            runtime=runtime,
         )
-        harness = _DbusCoreHarness(service)
+        harness = DbusPublishCore(DbusPublishContext(service=service, age_seconds=lambda *_args: 0))
 
-        harness._publish_group_failure("diag", ["/Path"], 100.0)
+        harness._publish_group_failure("diag", ["/Path"])
 
-        service._warning_throttled.assert_called_once()
+        runtime.mark_failure.assert_called_once_with("dbus")
+        runtime.warning_throttled.assert_called_once_with(
+            "dbus-publish-diag-failed",
+            1.0,
+            "DBus publish group %s failed for paths %s",
+            "diag",
+            "/Path",
+        )
 
     def test_input_cache_and_offline_publish_cover_remaining_age_fallbacks(self) -> None:
-        self.assertFalse(_InputCacheHarness._snapshot_input_too_old(10.0, 20.0, None))
+        self.assertFalse(InputCacheResolver._snapshot_input_too_old(10.0, 20.0, None))
         self.assertEqual(
-            _InputCacheHarness._discard_invalid_snapshot_input(5.0, 10.0, 20.0, None),
+            InputCacheResolver._discard_invalid_snapshot_input(5.0, 10.0, 20.0, None),
             (5.0, 10.0),
         )
         cached_service = SimpleNamespace(
@@ -120,7 +81,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _last_at=None,
         )
         self.assertEqual(
-            _InputCacheHarness.resolve_cached_input_value(
+            InputCacheResolver.resolve_cached_input_value(
                 cached_service,
                 7.5,
                 10.0,
@@ -135,7 +96,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _worker_poll_interval_seconds=0.0,
             relay_sync_timeout_seconds=0.0,
         )
-        self.assertEqual(_UpdateCycleOffline._offline_confirmed_relay_max_age_seconds(service), 2.0)
+        self.assertEqual(OfflinePublisher._offline_confirmed_relay_max_age_seconds(service), 2.0)
 
         service_for_cache = SimpleNamespace(
             auto_input_cache_seconds=30.0,
@@ -156,13 +117,11 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _last_combined_battery_net_power_at=None,
             _last_combined_battery_ac_power_w=None,
             _last_combined_battery_ac_power_at=None,
+            _last_energy_learning_profiles={"old": 1},
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
         )
-        cache_owner = SimpleNamespace(service=service_for_cache)
-        service_for_cache._service = SimpleNamespace(_last_energy_learning_profiles={"old": 1})
-        harness = _InputCacheHarness()
-        harness.service = service_for_cache
+        harness = InputCacheResolver(service_for_cache)
         harness.resolve_auto_inputs(
             {
                 "pv_power": 7.5,
@@ -176,10 +135,10 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             now=20.0,
             auto_mode_active=True,
         )
-        self.assertEqual(service_for_cache._service._last_energy_learning_profiles, {"old": 1})
+        self.assertEqual(service_for_cache._last_energy_learning_profiles, {"old": 1})
 
         pm_status = {"apower": 1000.0}
-        ShellyIoSplit._apply_optional_pm_voltage(pm_status, None)
+        ShellyBackendReadback._apply_optional_pm_voltage(pm_status, None)
         self.assertEqual(pm_status, {"apower": 1000.0})
 
     def test_software_update_log_handle_skips_directory_creation_for_flat_path(self) -> None:
@@ -188,7 +147,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             patch("builtins.open", opener),
             patch("venus_evcharger.update.software_update_run.os.makedirs") as makedirs,
         ):
-            handle = _UpdateCycleSoftwareUpdate._software_update_log_handle("software-update.log")
+            handle = SoftwareUpdateController._software_update_log_handle("software-update.log")
 
         makedirs.assert_not_called()
         opener.assert_called_once_with("software-update.log", "ab")

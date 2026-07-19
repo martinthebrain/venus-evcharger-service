@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import mock_open, patch
 
-from venus_evcharger.dbus_adapter_components_resource import (
+from venus_evcharger.dbus_adapter.resources import (
     BUSY_CPU_PERCENT,
     BUSY_LOAD_PER_CPU,
     BUSY_MEM_AVAILABLE_KB,
@@ -86,7 +86,7 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
         )
         monitor = ResourceMonitor(pid=123)
         with patch.object(monitor, "_open_fd_count", return_value=0), patch(
-            "venus_evcharger.dbus_adapter_components_resource.os.cpu_count", return_value=None
+            "venus_evcharger.dbus_adapter.resources.os.cpu_count", return_value=None
         ):
             payload = monitor._snapshot_payload(
                 load=(0.0, 0.0, 0.0),
@@ -110,7 +110,7 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
                 "cpu_pct_one_core": 0.0,
             },
         )
-        with patch("venus_evcharger.dbus_adapter_components_resource.os.cpu_count", return_value=None):
+        with patch("venus_evcharger.dbus_adapter.resources.os.cpu_count", return_value=None):
             one_cpu = monitor._snapshot_payload(
                 load=(1.0, 0.0, 0.0),
                 meminfo={"MemTotal": 200000.0, "MemAvailable": 100000.0},
@@ -124,7 +124,7 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
     def test_resource_snapshot_payload_is_exact(self) -> None:
         monitor = ResourceMonitor(pid=123)
         with patch.object(monitor, "_open_fd_count", return_value=7), patch(
-            "venus_evcharger.dbus_adapter_components_resource.os.cpu_count", return_value=4
+            "venus_evcharger.dbus_adapter.resources.os.cpu_count", return_value=4
         ):
             payload = monitor._snapshot_payload(
                 load=(2.0, 3.0, 4.0),
@@ -156,7 +156,7 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
                 },
             },
         )
-        with patch("venus_evcharger.dbus_adapter_components_resource.os.cpu_count", return_value=4):
+        with patch("venus_evcharger.dbus_adapter.resources.os.cpu_count", return_value=4):
             load_scaled = monitor._snapshot_payload(
                 load=(2.0, 0.0, 0.0),
                 meminfo={"MemTotal": 200000.0, "MemAvailable": 100000.0},
@@ -176,7 +176,7 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
         ), patch.object(monitor, "_read_process_status", return_value={"Threads": 2.0}), patch.object(
             monitor, "_loadavg", return_value=(0.1, 0.2, 0.3)
         ), patch.object(monitor, "_snapshot_payload", return_value={"state": "ok"}) as snapshot_payload, patch(
-            "venus_evcharger.dbus_adapter_components_resource.time.monotonic", return_value=10.0
+            "venus_evcharger.dbus_adapter.resources.time.monotonic", return_value=10.0
         ):
             self.assertEqual(monitor.snapshot(), {"state": "ok"})
         cpu_percentages.assert_called_once_with(10.0, 100, 40, 1.5)
@@ -214,7 +214,7 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
         stat_parts[13], stat_parts[14] = "10", "20"
         process_open = mock_open(read_data=" ".join(stat_parts))
         with patch("builtins.open", process_open), patch(
-            "venus_evcharger.dbus_adapter_components_resource.os.sysconf", return_value=100
+            "venus_evcharger.dbus_adapter.resources.os.sysconf", return_value=100
         ) as sysconf:
             self.assertEqual(monitor._read_process_cpu_seconds(), 0.3)
         process_open.assert_called_once_with("/proc/123/stat", encoding="utf-8")
@@ -227,7 +227,7 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
         with patch("builtins.open", status_open):
             self.assertEqual(monitor._read_process_status(), {"VmRSS": 10.0, "Threads": 3.0})
         status_open.assert_called_once_with("/proc/123/status", encoding="utf-8")
-        with patch("venus_evcharger.dbus_adapter_components_resource.os.listdir", return_value=["0", "1", "2"]):
+        with patch("venus_evcharger.dbus_adapter.resources.os.listdir", return_value=["0", "1", "2"]):
             self.assertEqual(monitor._open_fd_count(), 3)
 
     def test_procfs_short_and_malformed_inputs_fail_closed(self) -> None:
@@ -253,11 +253,11 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
             self.assertEqual(_read_proc_numeric_mapping("/proc/test"), {"Value": 1.5, "Count": 2.0})
         with patch("builtins.open", mock_open(read_data="Value: 1.5 kB\nCount: 2\n")):
             self.assertEqual(_read_proc_numeric_mapping("/proc/test", digits_only=True), {"Count": 2.0})
-        with patch("venus_evcharger.dbus_adapter_components_resource.os.getloadavg", return_value=(1, 2, 3)):
+        with patch("venus_evcharger.dbus_adapter.resources.os.getloadavg", return_value=(1, 2, 3)):
             self.assertEqual(ResourceMonitor._loadavg(), (1.0, 2.0, 3.0))
-        with patch("venus_evcharger.dbus_adapter_components_resource.os.getloadavg", side_effect=OSError):
+        with patch("venus_evcharger.dbus_adapter.resources.os.getloadavg", side_effect=OSError):
             self.assertEqual(ResourceMonitor._loadavg(), (0.0, 0.0, 0.0))
-        with patch("venus_evcharger.dbus_adapter_components_resource.os.listdir", side_effect=OSError):
+        with patch("venus_evcharger.dbus_adapter.resources.os.listdir", side_effect=OSError):
             self.assertEqual(ResourceMonitor(pid=123)._open_fd_count(), 0)
 
     def test_helpers_and_resource_thresholds_are_exact(self) -> None:

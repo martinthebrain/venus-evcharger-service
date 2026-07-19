@@ -24,17 +24,28 @@ _FOCUSED_TEST_SELECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     *FOCUSED_TEST_SELECTIONS_BOOTSTRAP,
     *FOCUSED_TEST_SELECTIONS_TAIL,
 )
+_TOOL_MUTMUT_SECTION = re.compile(r"(?ms)^\[tool\.mutmut\]\n.*?(?=^\[|\Z)")
 
 
 @contextlib.contextmanager
 def mutmut_config_for_target(repo: Path, target_path: str) -> Iterator[None]:
     pyproject = repo / "pyproject.toml"
     original = pyproject.read_text(encoding="utf-8")
-    pyproject.write_text(pyproject_with_mutmut_config(original, target_path), encoding="utf-8")
+    _write_text_atomically(pyproject, pyproject_with_mutmut_config(original, target_path))
     try:
         yield
     finally:
-        pyproject.write_text(original, encoding="utf-8")
+        current = pyproject.read_text(encoding="utf-8")
+        _write_text_atomically(pyproject, restore_tool_mutmut_section(current, original))
+
+
+def _write_text_atomically(path: Path, content: str) -> None:
+    temporary = path.with_name(f".{path.name}.mutation-audit.tmp")
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def pyproject_with_mutmut_config(original: str, target_path: str) -> str:
@@ -42,7 +53,16 @@ def pyproject_with_mutmut_config(original: str, target_path: str) -> str:
 
 
 def strip_tool_mutmut_section(content: str) -> str:
-    return re.sub(r"(?ms)^\[tool\.mutmut\]\n.*?(?=^\[|\Z)", "", content).strip() + "\n"
+    return _TOOL_MUTMUT_SECTION.sub("", content).strip() + "\n"
+
+
+def restore_tool_mutmut_section(current: str, original: str) -> str:
+    """Restore the owned mutmut section while preserving concurrent edits elsewhere."""
+    restored = strip_tool_mutmut_section(current)
+    original_match = _TOOL_MUTMUT_SECTION.search(original)
+    if original_match is None:
+        return restored
+    return f"{restored}\n{original_match.group(0).rstrip()}\n"
 
 
 def mutmut_config_toml(target_path: str) -> str:
@@ -77,3 +97,8 @@ def test_selection_for_target(target_path: str) -> tuple[str, ...]:
         if target_path.startswith(prefix):
             return selection
     return DEFAULT_TEST_SELECTION
+
+
+def focused_test_selections() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Return the immutable target-to-test map for repository contract checks."""
+    return _FOCUSED_TEST_SELECTIONS

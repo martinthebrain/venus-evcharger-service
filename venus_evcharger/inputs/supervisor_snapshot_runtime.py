@@ -3,41 +3,45 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
 
 from venus_evcharger.core.contracts import timestamp_not_future
 from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
-from venus_evcharger.inputs.supervisor_snapshot_validation import _AutoInputSupervisorSnapshotValidation
+from venus_evcharger.inputs.supervisor_contracts import (
+    AutoInputSupervisorService,
+    SnapshotPayload,
+    SnapshotSchema,
+)
+from venus_evcharger.inputs.supervisor_snapshot_validation import AutoInputSnapshotValidator
+from venus_evcharger.inputs.supervisor_snapshot_values import snapshot_int, snapshot_timestamp
 
 
-class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation):
-    if TYPE_CHECKING:  # pragma: no cover
-        service: Any
-        SNAPSHOT_SOURCE_KEYS: tuple[str, ...]
-        FUTURE_TIMESTAMP_TOLERANCE_SECONDS: float
+class AutoInputSnapshotRuntime:
+    """Load, freshness-check, and apply validated helper snapshots."""
 
-        @classmethod
-        def _coerce_snapshot_timestamp(cls, value: Any) -> float | None: ...
-
-        def _validate_snapshot_dict(self, path: str, snapshot: Any) -> dict[str, Any] | None: ...
+    def __init__(
+        self,
+        service: AutoInputSupervisorService,
+        schema: SnapshotSchema,
+        validator: AutoInputSnapshotValidator,
+    ) -> None:
+        self._service = service
+        self._schema = schema
+        self._validator = validator
 
     def _snapshot_mtime_ns(self, path: str) -> int | None:
-        svc = self.service
         try:
-            stat_path = getattr(svc, "_stat_path", None)
-            if stat_path is None:
-                stat_path = os.stat
-            stat_result = stat_path(path)
-        except (AttributeError, OSError):
+            stat_result = os.stat(path)
+        except OSError:
             return None
-        return getattr(stat_result, "st_mtime_ns", int(stat_result.st_mtime * 1_000_000_000))
+        return stat_result.st_mtime_ns
 
-    def _load_snapshot_dict(self, path: str) -> dict[str, Any] | None:
-        svc = self.service
+    def _load_snapshot_dict(self, path: str) -> SnapshotPayload | None:
+        svc = self._service
         try:
-            snapshot = svc._load_json_file(path)
+            loaded: object = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as error:
-            svc._warning_throttled(
+            svc.runtime.warning_throttled(
                 "auto-input-helper-read-failed",
                 max(1.0, svc.auto_input_helper_restart_seconds),
                 "Unable to read auto input helper snapshot %s: %s",
@@ -46,12 +50,12 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
                 exc_info=error,
             )
             return None
-        return self._validate_snapshot_dict(path, snapshot)
+        return self._validator.validate(path, loaded)
 
-    def _snapshot_freshness(self, snapshot: dict[str, Any], current: float) -> tuple[float | None, float | None, bool]:
-        svc = self.service
-        captured_at = self._coerce_snapshot_timestamp(snapshot.get("captured_at"))
-        heartbeat_at = self._coerce_snapshot_timestamp(snapshot.get("heartbeat_at"))
+    def _snapshot_freshness(self, snapshot: SnapshotPayload, current: float) -> tuple[float | None, float | None, bool]:
+        svc = self._service
+        captured_at = snapshot_timestamp(snapshot.get("captured_at"))
+        heartbeat_at = snapshot_timestamp(snapshot.get("heartbeat_at"))
         freshness_timestamp = heartbeat_at if heartbeat_at is not None else captured_at
         snapshot_age = None if freshness_timestamp is None else max(0.0, current - freshness_timestamp)
         stale_after = service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
@@ -60,44 +64,39 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
         stale = snapshot_age is not None and snapshot_age > stale_after
         return captured_at, freshness_timestamp, stale
 
-    @classmethod
-    def _empty_snapshot_fields(cls) -> dict[str, Any]:
-        fields: dict[str, Any] = {}
-        for source_key in cls.SNAPSHOT_SOURCE_KEYS:
+    def _empty_snapshot_fields(self) -> SnapshotPayload:
+        fields: SnapshotPayload = {}
+        for source_key in self._schema.source_keys:
             fields[f"{source_key}_captured_at"] = None
             value_key = "battery_soc" if source_key == "battery" else f"{source_key}_power"
             fields[value_key] = None
         return fields
 
-    @classmethod
-    def _snapshot_value_fields(cls, snapshot: dict[str, Any]) -> dict[str, Any]:
-        fields: dict[str, Any] = {}
-        for source_key in cls.SNAPSHOT_SOURCE_KEYS:
+    def _snapshot_value_fields(self, snapshot: SnapshotPayload) -> SnapshotPayload:
+        fields: SnapshotPayload = {}
+        for source_key in self._schema.source_keys:
             fields[f"{source_key}_captured_at"] = snapshot.get(f"{source_key}_captured_at")
             value_key = "battery_soc" if source_key == "battery" else f"{source_key}_power"
             fields[value_key] = snapshot.get(value_key)
         return fields
 
-    @classmethod
-    def _normalize_source_timestamps(cls, fields: dict[str, Any]) -> dict[str, Any]:
-        for source_key in cls.SNAPSHOT_SOURCE_KEYS:
+    def _normalize_source_timestamps(self, fields: SnapshotPayload) -> SnapshotPayload:
+        for source_key in self._schema.source_keys:
             timestamp_key = f"{source_key}_captured_at"
-            fields[timestamp_key] = cls._coerce_snapshot_timestamp(fields[timestamp_key])
+            fields[timestamp_key] = snapshot_timestamp(fields[timestamp_key])
         return fields
 
     def _build_snapshot_fields(
         self,
-        snapshot: dict[str, Any],
+        snapshot: SnapshotPayload,
         current: float,
         captured_at: float | None,
         stale: bool,
-    ) -> dict[str, Any]:
-        svc = self.service
-        raw_mode = getattr(svc, "virtual_mode", None)
-        virtual_mode = 0 if raw_mode is None else raw_mode
-        fields = {
+    ) -> SnapshotPayload:
+        svc = self._service
+        fields: SnapshotPayload = {
             "captured_at": captured_at if captured_at is not None else current,
-            "auto_mode_active": svc._mode_uses_auto_logic(virtual_mode),
+            "auto_mode_active": svc.auto.mode_uses_auto_logic(svc.virtual_mode),
         }
         source_fields = self._empty_snapshot_fields() if stale else self._snapshot_value_fields(snapshot)
         fields.update(self._normalize_source_timestamps(source_fields))
@@ -108,29 +107,38 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
         mtime_ns: int | None,
         freshness_timestamp: float | None,
         current: float,
-        fields: dict[str, Any],
+        fields: SnapshotPayload,
         seen_for_current_helper: bool,
     ) -> None:
-        svc = self.service
+        svc = self._service
         svc._auto_input_snapshot_mtime_ns = mtime_ns
-        if seen_for_current_helper:
-            svc._auto_input_snapshot_last_seen = freshness_timestamp if freshness_timestamp is not None else current
-        else:
-            raw_previously_seen = getattr(svc, "_auto_input_snapshot_seen_for_current_helper", None)
-            previously_seen = False if raw_previously_seen is None else bool(raw_previously_seen)
-            if not previously_seen:
-                svc._auto_input_snapshot_last_seen = None
+        self._apply_snapshot_last_seen(freshness_timestamp, seen_for_current_helper)
         svc._auto_input_snapshot_seen_for_current_helper = bool(seen_for_current_helper)
-        svc._auto_input_snapshot_last_captured_at = fields.get("captured_at")
-        svc._auto_input_snapshot_version = fields.get("snapshot_version")
-        svc._auto_input_snapshot_writer_pid = fields.get("writer_pid")
-        svc._auto_input_snapshot_generation = fields.get("helper_generation")
-        svc._auto_input_snapshot_runtime_instance_id = fields.get("runtime_instance_id")
-        svc._update_worker_snapshot(**fields)
+        svc._auto_input_snapshot_last_captured_at = snapshot_timestamp(fields.get("captured_at"))
+        svc._auto_input_snapshot_version = snapshot_int(fields.get("snapshot_version"))
+        svc._auto_input_snapshot_writer_pid = snapshot_int(fields.get("writer_pid"))
+        svc._auto_input_snapshot_generation = snapshot_int(fields.get("helper_generation"))
+        runtime_instance_id = fields.get("runtime_instance_id")
+        svc._auto_input_snapshot_runtime_instance_id = (
+            str(runtime_instance_id) if runtime_instance_id is not None else None
+        )
+        svc.runtime.update_worker_snapshot(**fields)
+
+    def _apply_snapshot_last_seen(
+        self,
+        freshness_timestamp: float | None,
+        seen_for_current_helper: bool,
+    ) -> None:
+        svc = self._service
+        if seen_for_current_helper:
+            svc._auto_input_snapshot_last_seen = freshness_timestamp
+            return
+        if not svc._auto_input_snapshot_seen_for_current_helper:
+            svc._auto_input_snapshot_last_seen = None
 
     def _snapshot_seen_for_current_helper(
         self,
-        snapshot: dict[str, Any],
+        snapshot: SnapshotPayload,
         freshness_timestamp: float | None,
         stale: bool,
     ) -> bool:
@@ -138,8 +146,8 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
             return False
         return self._snapshot_matches_current_helper(snapshot, freshness_timestamp)
 
-    def _snapshot_matches_current_helper(self, snapshot: dict[str, Any], freshness_timestamp: float) -> bool:
-        svc = self.service
+    def _snapshot_matches_current_helper(self, snapshot: SnapshotPayload, freshness_timestamp: float) -> bool:
+        svc = self._service
         return (
             self._snapshot_after_current_helper_start(svc, freshness_timestamp)
             and self._snapshot_runtime_instance_matches_current_service(svc, snapshot)
@@ -148,32 +156,37 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
         )
 
     @staticmethod
-    def _snapshot_after_current_helper_start(svc: Any, freshness_timestamp: float) -> bool:
+    def _snapshot_after_current_helper_start(svc: AutoInputSupervisorService, freshness_timestamp: float) -> bool:
         """Return whether snapshot freshness is newer than the helper start."""
-        raw_helper_start = getattr(svc, "_auto_input_helper_last_start_at", None)
-        helper_start = 0.0 if raw_helper_start is None else float(raw_helper_start)
+        helper_start = float(svc._auto_input_helper_last_start_at)
         return helper_start <= 0.0 or freshness_timestamp >= helper_start
 
-    def _snapshot_generation_matches_current_helper(self, svc: Any, snapshot: dict[str, Any]) -> bool:
+    def _snapshot_generation_matches_current_helper(
+        self,
+        svc: AutoInputSupervisorService,
+        snapshot: SnapshotPayload,
+    ) -> bool:
         """Return whether snapshot generation matches the current helper."""
-        expected = self._coerce_snapshot_int(getattr(svc, "_auto_input_helper_generation", None))
+        expected = snapshot_int(svc._auto_input_helper_generation)
         if expected is None or expected <= 0:
             return True
-        return bool(self._coerce_snapshot_int(snapshot.get("helper_generation")) == expected)
+        return bool(snapshot_int(snapshot.get("helper_generation")) == expected)
 
     @staticmethod
-    def _snapshot_runtime_instance_matches_current_service(svc: Any, snapshot: dict[str, Any]) -> bool:
-        raw_expected = getattr(svc, "_auto_input_runtime_instance_id", None)
-        expected = "" if raw_expected is None else str(raw_expected).strip()
+    def _snapshot_runtime_instance_matches_current_service(
+        svc: AutoInputSupervisorService,
+        snapshot: SnapshotPayload,
+    ) -> bool:
+        expected = svc._auto_input_runtime_instance_id.strip()
         raw_actual = snapshot.get("runtime_instance_id")
         actual = "" if raw_actual is None else str(raw_actual).strip()
         return bool(expected and actual == expected)
 
-    def _snapshot_pid_matches_current_helper(self, svc: Any, snapshot: dict[str, Any]) -> bool:
+    def _snapshot_pid_matches_current_helper(self, svc: AutoInputSupervisorService, snapshot: SnapshotPayload) -> bool:
         """Return whether snapshot writer pid matches the current helper process."""
-        process = getattr(svc, "_auto_input_helper_process", None)
-        expected = self._coerce_snapshot_int(getattr(process, "pid", None))
-        snapshot_pid = self._coerce_snapshot_int(snapshot.get("writer_pid"))
+        process = svc._auto_input_helper_process
+        expected = snapshot_int(None if process is None else process.pid)
+        snapshot_pid = snapshot_int(snapshot.get("writer_pid"))
         return expected is None or snapshot_pid is None or snapshot_pid == expected
 
     def _snapshot_timestamps_valid(
@@ -190,11 +203,11 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
         )
 
     def _snapshot_captured_at_monotonic(self, path: str, captured_at: float | None) -> bool:
-        svc = self.service
-        last_captured_at = getattr(svc, "_auto_input_snapshot_last_captured_at", None)
+        svc = self._service
+        last_captured_at = svc._auto_input_snapshot_last_captured_at
         if captured_at is None or last_captured_at is None or float(captured_at) >= float(last_captured_at):
             return True
-        svc._warning_throttled(
+        svc.runtime.warning_throttled(
             "auto-input-helper-captured-at-regressed",
             max(1.0, svc.auto_input_helper_restart_seconds),
             "Auto input helper snapshot %s moved captured_at backwards from %.3f to %.3f",
@@ -207,10 +220,10 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
     def _snapshot_freshness_not_future(self, path: str, freshness_timestamp: float | None, current: float) -> bool:
         if freshness_timestamp is None:
             return True
-        svc = self.service
-        if timestamp_not_future(freshness_timestamp, current, self.FUTURE_TIMESTAMP_TOLERANCE_SECONDS):
+        svc = self._service
+        if timestamp_not_future(freshness_timestamp, current, self._schema.future_timestamp_tolerance_seconds):
             return True
-        svc._warning_throttled(
+        svc.runtime.warning_throttled(
             "auto-input-helper-future-timestamp",
             max(1.0, svc.auto_input_helper_restart_seconds),
             "Auto input helper snapshot %s moved freshness timestamp into the future: %.3f > %.3f",
@@ -228,8 +241,8 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
         self,
         path: str,
         current: float,
-    ) -> tuple[int | None, float | None, bool, dict[str, Any]] | None:
-        svc = self.service
+    ) -> tuple[int | None, float | None, bool, SnapshotPayload] | None:
+        svc = self._service
         mtime_ns = self._snapshot_mtime_ns(path)
         if not self._snapshot_path_changed(path, mtime_ns, svc._auto_input_snapshot_mtime_ns):
             return None
@@ -245,25 +258,24 @@ class _AutoInputSupervisorSnapshotRuntime(_AutoInputSupervisorSnapshotValidation
         seen_for_current_helper = self._snapshot_seen_for_current_helper(snapshot, freshness_timestamp, stale)
         return mtime_ns, freshness_timestamp, seen_for_current_helper, fields
 
-    def _copy_snapshot_identity_fields(self, fields: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    def _copy_snapshot_identity_fields(self, fields: SnapshotPayload, snapshot: SnapshotPayload) -> None:
         fields["snapshot_version"] = snapshot["snapshot_version"]
-        fields["writer_pid"] = self._coerce_snapshot_int(snapshot.get("writer_pid"))
-        fields["helper_generation"] = self._coerce_snapshot_int(snapshot.get("helper_generation"))
+        fields["writer_pid"] = snapshot_int(snapshot.get("writer_pid"))
+        fields["helper_generation"] = snapshot_int(snapshot.get("helper_generation"))
         raw_runtime_instance_id = snapshot.get("runtime_instance_id")
         fields["runtime_instance_id"] = "" if raw_runtime_instance_id is None else str(raw_runtime_instance_id)
 
-    def _copy_snapshot_diagnostic_fields(self, fields: dict[str, Any], snapshot: dict[str, Any]) -> None:
-        for source_key in self.SNAPSHOT_SOURCE_KEYS:
+    def _copy_snapshot_diagnostic_fields(self, fields: SnapshotPayload, snapshot: SnapshotPayload) -> None:
+        for source_key in self._schema.source_keys:
             fields[f"{source_key}_status"] = snapshot.get(f"{source_key}_status")
         fields["helper_state"] = snapshot.get("helper_state")
         fields["helper_status"] = snapshot.get("helper_status")
 
     def refresh_snapshot(self, now: float | None = None) -> None:
-        svc = self.service
-        svc._ensure_worker_state()
-        current = svc._time_now() if now is None else float(now)
-        raw_path = getattr(svc, "auto_input_snapshot_path", None)
-        path = "" if raw_path is None else str(raw_path).strip()
+        svc = self._service
+        svc.runtime.ensure_worker_state()
+        current = svc.time_now() if now is None else float(now)
+        path = svc.auto_input_snapshot_path.strip()
         payload = self._refresh_snapshot_payload(path, current)
         if payload is None:
             return

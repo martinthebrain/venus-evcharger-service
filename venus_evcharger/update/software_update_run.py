@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import os
-from typing import Any, TYPE_CHECKING
+from abc import abstractmethod
+from typing import Any, BinaryIO
 
 from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_PROCESS_ERRORS
@@ -23,15 +24,15 @@ from venus_evcharger.update.software_update_state import _SoftwareUpdateState
 
 
 class _SoftwareUpdateRun(_SoftwareUpdateState):
-    if TYPE_CHECKING:  # pragma: no cover
-
-        @classmethod
-        def _spawn_software_update_process(
-            cls,
-            log_path: str,
-            repo_root: str,
-            restart_script: str,
-        ) -> tuple[Any, Any]: ...
+    @classmethod
+    @abstractmethod
+    def _spawn_software_update_process(
+        cls,
+        log_path: str,
+        repo_root: str,
+        restart_script: str,
+    ) -> tuple[Any, BinaryIO]:
+        """Start the detached installer process."""
 
     @classmethod
     def _start_software_update_run(cls, svc: Any, now: float, source: str) -> bool:

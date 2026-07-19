@@ -5,6 +5,7 @@ from typing import Any, cast
 from unittest.mock import call, patch
 
 from venus_evcharger.backend.models import SwitchCapabilities, SwitchState
+from venus_evcharger.backend.registry import create_switch_backend
 from venus_evcharger.backend.shelly_contactor_switch import ShellyContactorSwitchBackend
 from venus_evcharger.backend.switch_group import (
     SwitchGroupBackend,
@@ -40,7 +41,11 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
                 _FakeResponse({"output": True}),
                 _FakeResponse({"enabled": False}),
             ]
-            backend = SwitchGroupBackend(self._service(session), config_path=config_path)
+            backend = SwitchGroupBackend(
+                self._service(session),
+                config_path=config_path,
+                child_backend_factory=create_switch_backend,
+            )
             state = backend.read_switch_state()
             self.assertTrue(state.enabled)
             self.assertEqual(state.phase_selection, "P1_P2")
@@ -70,7 +75,11 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
                 _FakeResponse({"data": {"enabled": True, "feedback_closed": True, "interlock_ok": True}}),
                 _FakeResponse({"data": {"enabled": False, "feedback_closed": False, "interlock_ok": True}}),
             ]
-            backend = SwitchGroupBackend(self._service(session), config_path=str(path))
+            backend = SwitchGroupBackend(
+                self._service(session),
+                config_path=str(path),
+                child_backend_factory=create_switch_backend,
+            )
             state = backend.read_switch_state()
             self.assertTrue(state.feedback_closed)
             self.assertTrue(state.interlock_ok)
@@ -97,7 +106,11 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
                 _FakeResponse({"data": {"enabled": True, "feedback_closed": True, "interlock_ok": True}}),
                 _FakeResponse({"data": {"enabled": False}}),
             ]
-            backend = SwitchGroupBackend(self._service(session), config_path=str(path))
+            backend = SwitchGroupBackend(
+                self._service(session),
+                config_path=str(path),
+                child_backend_factory=create_switch_backend,
+            )
             state = backend.read_switch_state()
             self.assertIsNone(state.feedback_closed)
             self.assertIsNone(state.interlock_ok)
@@ -106,7 +119,11 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
         absolute = _resolved_member_path("/tmp/group.ini", "/tmp/child.ini")
         self.assertEqual(str(absolute), "/tmp/child.ini")
         with self.assertRaises(FileNotFoundError):
-            load_switch_group_settings(self._service(MagicMock()), "/definitely/missing.ini")
+            load_switch_group_settings(
+                self._service(MagicMock()),
+                "/definitely/missing.ini",
+                child_backend_factory=create_switch_backend,
+            )
         backend = SwitchGroupBackend.__new__(SwitchGroupBackend)
         backend._selected_phase_selection = "P1"
         backend.settings = SwitchGroupSettings(
@@ -130,9 +147,9 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
         with self.assertRaisesRegex(ValueError, "Unsupported phase selection"):
             backend.set_phase_selection(cast(Any, "P1_P2_P3"))
         member = SwitchGroupMember("P1", "bad_switch", Path("/tmp/bad-switch.ini"))
-        with patch.dict("venus_evcharger.backend.registry.SWITCH_BACKENDS", {"bad_switch": lambda *_args, **_kwargs: object()}):
-            with self.assertRaisesRegex(TypeError, "does not implement SwitchBackend"):
-                _child_switch_backend(self._service(MagicMock()), member)
+        bad_factory = MagicMock(return_value=object())
+        with self.assertRaisesRegex(TypeError, "does not implement SwitchBackend"):
+            _child_switch_backend(self._service(MagicMock()), member, bad_factory)
 
     def test_contactor_mode_has_no_direct_switch_power_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -244,11 +261,16 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
                 _child_switch_backend(
                     self._service(MagicMock()),
                     SwitchGroupMember("P1", "switch_group", child),
+                    create_switch_backend,
                 )
             with self.assertRaisesRegex(ValueError, "Unsupported switch-group child backend"):
+                unsupported_factory = MagicMock(
+                    side_effect=ValueError("Unsupported switch-group child backend 'missing_backend'")
+                )
                 _child_switch_backend(
                     self._service(MagicMock()),
                     SwitchGroupMember("P1", "missing_backend", child),
+                    unsupported_factory,
                 )
 
             bad_backend = SimpleNamespace(
@@ -265,9 +287,17 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
                 _validated_member_capabilities(phase_members["P1"], bad_backend)
 
             with self.assertRaisesRegex(ValueError, "^Switch group backend requires a config path$"):
-                load_switch_group_settings(self._service(MagicMock()), "")
+                load_switch_group_settings(
+                    self._service(MagicMock()),
+                    "",
+                    child_backend_factory=create_switch_backend,
+                )
             with self.assertRaisesRegex(ValueError, "^Switch group backend requires a config path$"):
-                load_switch_group_settings(self._service(MagicMock()))
+                load_switch_group_settings(
+                    self._service(MagicMock()),
+                    "",
+                    child_backend_factory=create_switch_backend,
+                )
 
     def test_switch_group_helper_contracts_for_config_phase_and_capability_aggregation(self) -> None:
         parser = configparser.ConfigParser()
@@ -385,16 +415,20 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
             "venus_evcharger.backend.switch_group._child_switch_backend",
             side_effect=[child_p1, child_p2, child_p3],
         ) as child_backend:
-            settings = load_switch_group_settings(service, " /tmp/switch-group.ini ")
+            settings = load_switch_group_settings(
+                service,
+                " /tmp/switch-group.ini ",
+                child_backend_factory=create_switch_backend,
+            )
 
         load_config.assert_called_once_with("/tmp/switch-group.ini")
         phase_members.assert_called_once_with("/tmp/switch-group.ini", parser["Members"])
         self.assertEqual(
             child_backend.call_args_list,
             [
-                call(service, member_p1),
-                call(service, member_p2),
-                call(service, member_p3),
+                call(service, member_p1, create_switch_backend),
+                call(service, member_p2, create_switch_backend),
+                call(service, member_p3, create_switch_backend),
             ],
         )
         self.assertEqual(settings.supported_phase_selections, ("P1", "P1_P2"))
@@ -418,7 +452,11 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
             side_effect=[child_p1, invalid_child],
         ):
             with self.assertRaisesRegex(ValueError, "^Switch group member P2 must expose single-phase support only$"):
-                load_switch_group_settings(service, "/tmp/switch-group.ini")
+                load_switch_group_settings(
+                    service,
+                    "/tmp/switch-group.ini",
+                    child_backend_factory=create_switch_backend,
+                )
 
         contactor_child = MagicMock()
         contactor_child.capabilities.return_value = SwitchCapabilities(
@@ -434,7 +472,11 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
             "venus_evcharger.backend.switch_group._child_switch_backend",
             side_effect=[child_p1, contactor_child],
         ):
-            contactor_settings = load_switch_group_settings(service, "/tmp/switch-group.ini")
+            contactor_settings = load_switch_group_settings(
+                service,
+                "/tmp/switch-group.ini",
+                child_backend_factory=create_switch_backend,
+            )
         self.assertEqual(contactor_settings.switching_mode, "contactor")
         self.assertIsNone(contactor_settings.max_direct_switch_power_w)
 
@@ -453,25 +495,32 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
             "venus_evcharger.backend.switch_group._child_switch_backend",
             side_effect=[child_p1, child_p2, child_p1, child_p2],
         ) as init_child_backend:
-            backend = SwitchGroupBackend(service, config_path=" /tmp/switch-group.ini ")
-            default_backend = SwitchGroupBackend(service)
+            backend = SwitchGroupBackend(
+                service,
+                config_path=" /tmp/switch-group.ini ",
+                child_backend_factory=create_switch_backend,
+            )
+            default_backend = SwitchGroupBackend(
+                service,
+                child_backend_factory=create_switch_backend,
+            )
 
         self.assertIs(backend.service, service)
         self.assertEqual(backend.config_path, "/tmp/switch-group.ini")
         self.assertEqual(
             load_settings.call_args_list,
             [
-                call(service, "/tmp/switch-group.ini"),
-                call(service, ""),
+                call(service, "/tmp/switch-group.ini", child_backend_factory=create_switch_backend),
+                call(service, "", child_backend_factory=create_switch_backend),
             ],
         )
         self.assertEqual(
             init_child_backend.call_args_list,
             [
-                call(service, member_p1),
-                call(service, member_p2),
-                call(service, member_p1),
-                call(service, member_p2),
+                call(service, member_p1, create_switch_backend),
+                call(service, member_p2, create_switch_backend),
+                call(service, member_p1, create_switch_backend),
+                call(service, member_p2, create_switch_backend),
             ],
         )
         self.assertEqual(backend._selected_phase_selection, "P1")

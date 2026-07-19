@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import configparser
+import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import Any, Iterator
@@ -20,6 +22,7 @@ from venus_evcharger.control import (
     ControlResult,
     LocalControlApiHttpServer,
 )
+from venus_evcharger.control.models import ControlCommandSource
 
 
 def _auto_runtime_setting_paths() -> set[str]:
@@ -49,14 +52,14 @@ class LiveControlApiTestService:
         self.config = configparser.ConfigParser()
         self.config.read_string(
             """
-[DEFAULT]
-Host=
+[Topology]
+Type=simple_relay
 
-[Backends]
-Mode=combined
-MeterType=na
-SwitchType=na
-ChargerType=na
+[Actuator]
+Type=shelly_contactor_switch
+
+[Measurement]
+Type=actuator_native
 """
         )
         self.supported_phase_selections = ("P1", "P1_P2", "P1_P2_P3")
@@ -78,13 +81,17 @@ ChargerType=na
         self._software_update_state = "idle"
         self._revision = 0
 
-    def _control_command_from_payload(self, payload: dict[str, Any], source: str = "http") -> ControlCommand:
+    def control_command_from_payload(
+        self,
+        payload: dict[str, Any],
+        source: ControlCommandSource = "http",
+    ) -> ControlCommand:
         return self._mapper.command_from_payload(payload, source=source)
 
-    def _handle_control_command(self, command: ControlCommand) -> ControlResult:
+    def handle_control_command(self, command: ControlCommand) -> ControlResult:
         result = self._command_result(command)
         self._revision += 1
-        self._publish_control_api_command_event(command, result)
+        self.publish_command_event(command, result)
         self._publish_control_api_state_event()
         return result
 
@@ -129,10 +136,10 @@ ChargerType=na
         self._software_update_state = "running"
         return ControlResult.accepted_in_flight_result(command, detail="update started")
 
-    def _state_api_summary_payload(self) -> dict[str, Any]:
+    def summary_payload(self) -> dict[str, Any]:
         return {"ok": True, "api_version": "v1", "kind": "summary", "summary": f"mode={self.virtual_mode}"}
 
-    def _state_api_runtime_payload(self) -> dict[str, Any]:
+    def runtime_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -144,7 +151,7 @@ ChargerType=na
             },
         }
 
-    def _state_api_operational_payload(self) -> dict[str, Any]:
+    def operational_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -159,17 +166,25 @@ ChargerType=na
             },
         }
 
-    def _state_api_dbus_diagnostics_payload(self) -> dict[str, Any]:
+    def dbus_diagnostics_payload(self) -> dict[str, Any]:
         return {"ok": True, "api_version": "v1", "kind": "dbus-diagnostics", "state": {"writes": self._revision}}
 
-    def _state_api_automation_payload(self) -> dict[str, Any]:
-        operational = self._state_api_operational_payload()
+    def victron_bias_recommendation_payload(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "api_version": "v1",
+            "kind": "victron-bias-recommendation",
+            "state": {"available": False},
+        }
+
+    def automation_payload(self) -> dict[str, Any]:
+        operational = self.operational_payload()
         return {
             "ok": True,
             "api_version": "v1",
             "kind": "automation",
             "state": {
-                "state_token": self._control_api_state_token(),
+                "state_token": self.state_token(),
                 "command_endpoint": "/v1/control/command",
                 "events_endpoint": "/v1/events",
                 "safe_write": {
@@ -183,13 +198,13 @@ ChargerType=na
                 },
                 "operational": dict(operational["state"]),
                 "auto_decision": {},
-                "health": dict(self._state_api_health_payload()["state"]),
-                "topology": dict(self._state_api_topology_payload()["state"]),
-                "diagnostics": dict(self._state_api_dbus_diagnostics_payload()["state"]),
+                "health": dict(self.health_payload()["state"]),
+                "topology": dict(self.topology_payload()["state"]),
+                "diagnostics": dict(self.dbus_diagnostics_payload()["state"]),
             },
         }
 
-    def _state_api_topology_payload(self) -> dict[str, Any]:
+    def topology_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -203,7 +218,7 @@ ChargerType=na
             },
         }
 
-    def _state_api_update_payload(self) -> dict[str, Any]:
+    def update_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -211,7 +226,7 @@ ChargerType=na
             "state": {"state": self._software_update_state, "available": False},
         }
 
-    def _state_api_config_effective_payload(self) -> dict[str, Any]:
+    def config_effective_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -224,10 +239,10 @@ ChargerType=na
             },
         }
 
-    def _state_api_healthz_payload(self) -> dict[str, Any]:
+    def healthz_payload(self) -> dict[str, Any]:
         return {"ok": True, "api_version": "v1", "kind": "healthz", "state": {"alive": True}}
 
-    def _state_api_version_payload(self) -> dict[str, Any]:
+    def version_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -235,10 +250,10 @@ ChargerType=na
             "state": {"service_version": "test", "api_version": "v1"},
         }
 
-    def _state_api_build_payload(self) -> dict[str, Any]:
+    def build_payload(self) -> dict[str, Any]:
         return {"ok": True, "api_version": "v1", "kind": "build", "state": {"product_name": self.product_name}}
 
-    def _state_api_contracts_payload(self) -> dict[str, Any]:
+    def contracts_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -246,7 +261,7 @@ ChargerType=na
             "state": {"active_api_version": "v1", "openapi_endpoint": "/v1/openapi.json"},
         }
 
-    def _state_api_health_payload(self) -> dict[str, Any]:
+    def health_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -262,16 +277,16 @@ ChargerType=na
             },
         }
 
-    def _state_api_event_snapshot_payload(self) -> dict[str, Any]:
+    def event_snapshot_payload(self) -> dict[str, Any]:
         return {
-            "summary": self._state_api_summary_payload(),
-            "operational": self._state_api_operational_payload(),
-            "health": self._state_api_health_payload(),
-            "update": self._state_api_update_payload(),
-            "topology": self._state_api_topology_payload(),
+            "summary": self.summary_payload(),
+            "operational": self.operational_payload(),
+            "health": self.health_payload(),
+            "update": self.update_payload(),
+            "topology": self.topology_payload(),
         }
 
-    def _control_api_capabilities_payload(self) -> dict[str, Any]:
+    def capabilities_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
@@ -295,22 +310,22 @@ ChargerType=na
             "versioning": {"stable_endpoints": ["/v1/control/command"], "experimental_endpoints": ["/v1/events"]},
         }
 
-    def _control_api_state_token(self) -> str:
+    def state_token(self) -> str:
         return f"rev-{self._revision}"
 
-    def _control_api_event_bus(self) -> ControlApiEventBus:
+    def event_bus(self) -> ControlApiEventBus:
         return self._event_bus
 
     def _control_api_audit_trail(self) -> ControlApiAuditTrail:
         return self._audit_trail
 
-    def _control_api_idempotency_store(self) -> ControlApiIdempotencyStore:
+    def idempotency_store(self) -> ControlApiIdempotencyStore:
         return self._idempotency_store
 
-    def _control_api_rate_limiter(self) -> ControlApiRateLimiter:
+    def rate_limiter(self) -> ControlApiRateLimiter:
         return self._rate_limiter
 
-    def _publish_control_api_command_event(self, command: ControlCommand, result: ControlResult, *, replayed: bool = False) -> None:
+    def publish_command_event(self, command: ControlCommand, result: ControlResult, *, replayed: bool = False) -> None:
         self._event_bus.publish(
             "command",
             {
@@ -336,8 +351,66 @@ ChargerType=na
             },
         )
 
+    def record_command_audit(
+        self,
+        *,
+        command: ControlCommand | Mapping[str, Any] | None,
+        result: ControlResult | Mapping[str, Any] | None,
+        error: dict[str, Any] | None,
+        replayed: bool,
+        scope: str,
+        client_host: str,
+        status_code: int,
+        transport: str = "http",
+    ) -> dict[str, Any]:
+        return self._audit_trail.append(
+            {
+                "timestamp": time.time(),
+                "transport": transport,
+                "scope": scope,
+                "client_host": client_host,
+                "status_code": status_code,
+                "replayed": replayed,
+                "command": self._command_payload(command),
+                "result": self._result_payload(result),
+                "error": dict(error or {}),
+            }
+        )
+
+    @staticmethod
+    def _command_payload(command: ControlCommand | Mapping[str, Any] | None) -> dict[str, Any]:
+        if isinstance(command, Mapping):
+            return dict(command)
+        if command is None:
+            return {}
+        return {
+            "name": command.name,
+            "path": command.path,
+            "value": command.value,
+            "source": command.source,
+            "detail": command.detail,
+            "command_id": command.command_id,
+            "idempotency_key": command.idempotency_key,
+        }
+
+    @staticmethod
+    def _result_payload(result: ControlResult | Mapping[str, Any] | None) -> dict[str, Any]:
+        if isinstance(result, Mapping):
+            return dict(result)
+        if result is None:
+            return {}
+        return {
+            "status": result.status,
+            "accepted": result.accepted,
+            "applied": result.applied,
+            "persisted": result.persisted,
+            "reversible_failure": result.reversible_failure,
+            "external_side_effect_started": result.external_side_effect_started,
+            "detail": result.detail,
+        }
+
     def _publish_control_api_state_event(self) -> None:
-        self._event_bus.publish("state", self._state_api_event_snapshot_payload())
+        self._event_bus.publish("state", self.event_snapshot_payload())
 
 
 @contextmanager
@@ -366,3 +439,6 @@ def started_control_api_server(*, unix_socket: bool = False) -> Iterator[tuple[L
             yield service, server
         finally:
             server.stop()
+
+
+__all__ = [name for name in globals() if not name.startswith("__")]

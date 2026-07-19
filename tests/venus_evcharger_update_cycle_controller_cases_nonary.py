@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_update_cycle_controller_support import *
-from venus_evcharger.update.offline_publish import _UpdateCycleOffline
+from venus_evcharger.update.offline_publish import OfflinePublisher
 
 
 class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
@@ -8,7 +8,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         service = SimpleNamespace(_auto_cached_inputs_used=True)
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertEqual(controller.resolve_auto_inputs({"captured_at": 100.0}, 100.0, False), (None, None, None))
+        self.assertEqual(controller.components.inputs.resolve_auto_inputs({"captured_at": 100.0}, 100.0, False), (None, None, None))
         self.assertIs(service._auto_cached_inputs_used, False)
 
     def test_extract_pm_measurements_normalizes_all_shelly_fields(self):
@@ -16,7 +16,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             _safe_float=MagicMock(side_effect=lambda value, default: float(value) if value is not None else default)
         )
 
-        measurements = UpdateCycleController.extract_pm_measurements(
+        measurements = InputCacheResolver.extract_pm_measurements(
             service,
             {
                 "output": 1,
@@ -28,29 +28,23 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(measurements, (True, 1234.5, 229.7, 5.38, 4.321))
-        self.assertEqual(
-            [args for args, _kwargs in service._safe_float.call_args_list],
-            [("1234.5", 0.0), ("229.7", 0.0), ("5.38", 0.0), ("4321.0", 0.0)],
-        )
+        service._safe_float.assert_not_called()
 
     def test_extract_pm_measurements_uses_zero_defaults_for_missing_numeric_fields(self):
         service = SimpleNamespace(
             _safe_float=MagicMock(side_effect=lambda value, default: default if value is None else float(value))
         )
 
-        measurements = UpdateCycleController.extract_pm_measurements(service, {})
+        measurements = InputCacheResolver.extract_pm_measurements(service, {})
 
         self.assertEqual(measurements, (False, 0.0, 0.0, 0.0, 0.0))
-        self.assertEqual(
-            [args for args, _kwargs in service._safe_float.call_args_list],
-            [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)],
-        )
+        service._safe_float.assert_not_called()
 
     def test_resolve_cached_input_value_stores_fresh_values_on_service_owner(self):
         owner = SimpleNamespace()
         service = SimpleNamespace(_service=owner, auto_input_cache_seconds=60.0)
 
-        value, cached = UpdateCycleController.resolve_cached_input_value(
+        value, cached = InputCacheResolver.resolve_cached_input_value(
             service,
             12.5,
             None,
@@ -61,15 +55,15 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
         self.assertEqual(value, 12.5)
         self.assertFalse(cached)
-        self.assertEqual(owner._last_value, 12.5)
-        self.assertEqual(owner._last_at, 20.0)
-        self.assertFalse(hasattr(service, "_last_value"))
+        self.assertEqual(service._last_value, 12.5)
+        self.assertEqual(service._last_at, 20.0)
+        self.assertFalse(hasattr(owner, "_last_value"))
 
     def test_resolve_cached_input_value_accepts_fresh_source_at_future_tolerance_boundary(self):
         owner = SimpleNamespace()
         service = SimpleNamespace(_service=owner, auto_input_cache_seconds=60.0)
 
-        value, cached = UpdateCycleController.resolve_cached_input_value(
+        value, cached = InputCacheResolver.resolve_cached_input_value(
             service,
             12.5,
             101.0,
@@ -80,11 +74,12 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
         self.assertEqual(value, 12.5)
         self.assertFalse(cached)
-        self.assertEqual(owner._last_value, 12.5)
-        self.assertEqual(owner._last_at, 101.0)
+        self.assertEqual(service._last_value, 12.5)
+        self.assertEqual(service._last_at, 101.0)
+        self.assertFalse(hasattr(owner, "_last_value"))
 
     def test_snapshot_input_from_future_honors_subclass_tolerance(self):
-        class WideToleranceController(UpdateCycleController):
+        class WideToleranceController(InputCacheResolver):
             FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS = 5.0
 
         self.assertFalse(WideToleranceController._snapshot_input_from_future(105.0, 100.0))
@@ -94,7 +89,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         owner = SimpleNamespace(_last_value=33.0, _last_at=101.0)
 
         self.assertEqual(
-            UpdateCycleController._cached_input_from_service(
+            InputCacheResolver._cached_input_from_service(
                 owner,
                 "_last_value",
                 "_last_at",
@@ -108,7 +103,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         owner = SimpleNamespace(_last_value=33.0, _last_at=90.0)
 
         self.assertEqual(
-            UpdateCycleController._cached_input_from_service(
+            InputCacheResolver._cached_input_from_service(
                 owner,
                 "_last_value",
                 "_last_at",
@@ -120,56 +115,56 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
     def test_auto_input_source_max_age_clamps_poll_budget_and_validation_budget(self):
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_pv_poll_interval_seconds=0.0, auto_input_validation_poll_seconds=12.0),
                 "auto_pv_poll_interval_seconds",
             ),
             12.0,
         )
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_pv_poll_interval_seconds=-3.0, auto_input_validation_poll_seconds=12.0),
                 "auto_pv_poll_interval_seconds",
             ),
             12.0,
         )
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_pv_poll_interval_seconds=0.1, auto_input_validation_poll_seconds=0.5),
                 "auto_pv_poll_interval_seconds",
             ),
             1.0,
         )
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_input_validation_poll_seconds=0.5),
                 "missing_poll_interval_seconds",
             ),
             1.0,
         )
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_input_validation_poll_seconds=12.0),
                 "missing_poll_interval_seconds",
             ),
             12.0,
         )
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_pv_poll_interval_seconds=1.0, auto_input_validation_poll_seconds=0.0),
                 "auto_pv_poll_interval_seconds",
             ),
             2.0,
         )
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_pv_poll_interval_seconds=0.0),
                 "auto_pv_poll_interval_seconds",
             ),
             30.0,
         )
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(
+            InputCacheResolver._auto_input_source_max_age_seconds(
                 SimpleNamespace(auto_pv_poll_interval_seconds=0.0, auto_input_validation_poll_seconds=0.0),
                 "auto_pv_poll_interval_seconds",
             ),
@@ -232,24 +227,24 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         }
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertEqual(controller.resolve_auto_inputs(snapshot, 100.0, True), (2500.0, 63.5, -1500.0))
+        self.assertEqual(controller.components.inputs.resolve_auto_inputs(snapshot, 100.0, True), (2500.0, 63.5, -1500.0))
 
-        self.assertEqual(owner._last_pv_value, 2500.0)
-        self.assertEqual(owner._last_pv_at, 99.0)
-        self.assertEqual(owner._last_grid_value, -1500.0)
-        self.assertEqual(owner._last_grid_at, 98.0)
-        self.assertEqual(owner._last_battery_soc_value, 63.5)
-        self.assertEqual(owner._last_battery_soc_at, 97.0)
-        self.assertEqual(owner._last_combined_battery_charge_power_w, 111.0)
-        self.assertEqual(owner._last_combined_battery_charge_power_at, 97.0)
-        self.assertEqual(owner._last_combined_battery_discharge_power_w, 222.0)
-        self.assertEqual(owner._last_combined_battery_discharge_power_at, 97.0)
-        self.assertEqual(owner._last_combined_battery_net_power_w, -333.0)
-        self.assertEqual(owner._last_combined_battery_net_power_at, 97.0)
-        self.assertEqual(owner._last_combined_battery_ac_power_w, 444.0)
-        self.assertEqual(owner._last_combined_battery_ac_power_at, 97.0)
+        self.assertEqual(service._last_pv_value, 2500.0)
+        self.assertEqual(service._last_pv_at, 99.0)
+        self.assertEqual(service._last_grid_value, -1500.0)
+        self.assertEqual(service._last_grid_at, 98.0)
+        self.assertEqual(service._last_battery_soc_value, 63.5)
+        self.assertEqual(service._last_battery_soc_at, 97.0)
+        self.assertEqual(service._last_combined_battery_charge_power_w, 111.0)
+        self.assertEqual(service._last_combined_battery_charge_power_at, 97.0)
+        self.assertEqual(service._last_combined_battery_discharge_power_w, 222.0)
+        self.assertEqual(service._last_combined_battery_discharge_power_at, 97.0)
+        self.assertEqual(service._last_combined_battery_net_power_w, -333.0)
+        self.assertEqual(service._last_combined_battery_net_power_at, 97.0)
+        self.assertEqual(service._last_combined_battery_ac_power_w, 444.0)
+        self.assertEqual(service._last_combined_battery_ac_power_at, 97.0)
         self.assertEqual(
-            owner._last_energy_cluster,
+            service._last_energy_cluster,
             {
                 "battery_combined_soc": 64.1,
                 "battery_combined_usable_capacity_wh": 9600.0,
@@ -282,13 +277,13 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
                 "battery_sources": [{"source_id": "battery"}, {"source_id": "hybrid"}],
             },
         )
-        self.assertEqual(owner._last_energy_learning_profiles, learning_profiles)
-        self.assertIsNot(owner._last_energy_cluster["battery_sources"], battery_sources)
-        self.assertIsNot(owner._last_energy_learning_profiles, learning_profiles)
+        self.assertEqual(service._last_energy_learning_profiles, learning_profiles)
+        self.assertIsNot(service._last_energy_cluster["battery_sources"], battery_sources)
+        self.assertIsNot(service._last_energy_learning_profiles, learning_profiles)
         battery_sources.append({"source_id": "late"})
         learning_profiles["late"] = {"power_w": 1.0}
-        self.assertEqual(owner._last_energy_cluster["battery_sources"], [{"source_id": "battery"}, {"source_id": "hybrid"}])
-        self.assertEqual(owner._last_energy_learning_profiles, {"battery": {"power_w": 1400.0}})
+        self.assertEqual(service._last_energy_cluster["battery_sources"], [{"source_id": "battery"}, {"source_id": "hybrid"}])
+        self.assertEqual(service._last_energy_learning_profiles, {"battery": {"power_w": 1400.0}})
 
     def test_resolve_auto_inputs_rejects_all_over_age_sources_by_their_own_poll_budget(self):
         service = SimpleNamespace(
@@ -316,7 +311,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        result = controller.resolve_auto_inputs(
+        result = controller.components.inputs.resolve_auto_inputs(
             {
                 "captured_at": 100.0,
                 "pv_power": 2500.0,
@@ -361,7 +356,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertEqual(
-            controller.resolve_auto_inputs(
+            controller.components.inputs.resolve_auto_inputs(
                 {
                     "captured_at": 99.0,
                     "pv_power": 2500.0,
@@ -403,7 +398,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertEqual(controller.resolve_auto_inputs({"captured_at": 100.0}, 100.0, True), (None, None, -1500.0))
+        self.assertEqual(controller.components.inputs.resolve_auto_inputs({"captured_at": 100.0}, 100.0, True), (None, None, -1500.0))
         self.assertTrue(service._auto_cached_inputs_used)
         self.assertEqual(service._error_state["cache_hits"], 6)
 
@@ -434,7 +429,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller.resolve_auto_inputs({"captured_at": 100.0}, 100.0, True)
+        controller.components.inputs.resolve_auto_inputs({"captured_at": 100.0}, 100.0, True)
 
         self.assertEqual(service._last_energy_cluster["battery_combined_charge_power_w"], 111.0)
         self.assertEqual(service._last_energy_cluster["battery_combined_discharge_power_w"], 222.0)
@@ -468,7 +463,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller.resolve_auto_inputs(
+        controller.components.inputs.resolve_auto_inputs(
             {
                 "captured_at": 100.0,
                 "battery_captured_at": 91.0,
@@ -512,7 +507,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller.resolve_auto_inputs({"captured_at": 100.0}, 100.0, True)
+        controller.components.inputs.resolve_auto_inputs({"captured_at": 100.0}, 100.0, True)
 
         self.assertEqual(
             service._last_energy_cluster,
@@ -552,7 +547,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
     @staticmethod
     def _offline_service(**overrides):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _last_voltage=230.0,
             _last_confirmed_pm_status={"output": True},
             _last_confirmed_pm_status_at=199.0,
@@ -614,7 +609,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        pv_power, battery_soc, grid_power = controller.resolve_auto_inputs(
+        pv_power, battery_soc, grid_power = controller.components.inputs.resolve_auto_inputs(
             {
                 "captured_at": 100.0,
                 "pv_power": 2300.0,
@@ -650,7 +645,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        pv_power, battery_soc, grid_power = controller.resolve_auto_inputs(
+        pv_power, battery_soc, grid_power = controller.components.inputs.resolve_auto_inputs(
             {
                 "captured_at": 100.0,
                 "pv_power": 2300.0,
@@ -677,9 +672,9 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_input_validation_poll_seconds=30.0,
         )
 
-        self.assertEqual(UpdateCycleController._auto_input_source_max_age_seconds(service, "auto_pv_poll_interval_seconds"), 4.0)
+        self.assertEqual(InputCacheResolver._auto_input_source_max_age_seconds(service, "auto_pv_poll_interval_seconds"), 4.0)
         self.assertEqual(
-            UpdateCycleController._auto_input_source_max_age_seconds(service, "auto_battery_poll_interval_seconds"),
+            InputCacheResolver._auto_input_source_max_age_seconds(service, "auto_battery_poll_interval_seconds"),
             20.0,
         )
 
@@ -694,7 +689,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertEqual(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"pm_status": {"output": False}, "pm_confirmed": True, "pm_captured_at": 80.0},
                 100.0,
@@ -715,7 +710,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertIsNone(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"pm_status": {"output": True}, "pm_confirmed": False, "pm_captured_at": 99.0},
                 100.0,
@@ -734,7 +729,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertEqual(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"pm_status": {"output": True}, "pm_confirmed": False, "pm_captured_at": 99.0},
                 100.0,
@@ -753,7 +748,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertEqual(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"pm_status": {"output": False}, "pm_confirmed": True, "pm_captured_at": 102.5},
                 100.0,
@@ -772,7 +767,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertIsNone(controller.resolve_pm_status_for_update(service, {}, 100.0))
+        self.assertIsNone(controller.components.pm_snapshots.resolve_pm_status_for_update(service, {}, 100.0))
 
     def test_resolve_pm_status_for_update_accepts_fresh_direct_snapshot_when_soft_fail_budget_is_zero(self):
         service = SimpleNamespace(
@@ -786,7 +781,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertEqual(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"pm_status": {"output": False}, "pm_confirmed": True, "pm_captured_at": 99.6},
                 100.0,
@@ -808,7 +803,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertEqual(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"captured_at": 100.0, "pm_status": {"apower": 1800.0}, "pm_confirmed": True, "pm_captured_at": 99.5},
                 100.0,
@@ -818,7 +813,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         self.assertEqual(service._last_pm_status, {"output": True})
 
     def test_pm_snapshot_contracts_normalize_worker_payload_timestamp_and_confirmation(self):
-        pm_snapshot = UpdateCycleController
+        pm_snapshot = PmSnapshotResolver
 
         self.assertIs(pm_snapshot.CLAMP_WORKER_PM_FUTURE_TIMESTAMPS, False)
         self.assertEqual(pm_snapshot._worker_pm_snapshot_data({}, 100.0), (None, False, 100.0))
@@ -869,9 +864,12 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         self.assertEqual(pm_snapshot._worker_pm_snapshot_timestamp(normalized), 90.0)
         normalized["pm_captured_at"] = 91.0
         self.assertEqual(pm_snapshot._worker_pm_snapshot_timestamp(normalized), 91.0)
+        normalized["pm_captured_at"] = "invalid"
+        normalized["captured_at"] = "invalid"
+        self.assertEqual(pm_snapshot._worker_pm_snapshot_timestamp(normalized), 0.0)
 
     def test_pm_snapshot_contracts_remember_only_confirmed_cache_as_confirmed(self):
-        pm_snapshot = UpdateCycleController
+        pm_snapshot = PmSnapshotResolver
         service = SimpleNamespace()
         source_status = {"output": True, "apower": 1800.0}
 
@@ -902,38 +900,38 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(
-            UpdateCycleController._cached_pm_status_for_soft_fail(service, 100.0, 10.0),
+            PmSnapshotResolver._cached_pm_status_for_soft_fail(service, 100.0, 10.0),
             {"output": False, "source": "confirmed", "_pm_confirmed": True},
         )
 
         service._last_confirmed_pm_status_at = 80.0
         self.assertEqual(
-            UpdateCycleController._cached_pm_status_for_soft_fail(service, 100.0, 10.0),
+            PmSnapshotResolver._cached_pm_status_for_soft_fail(service, 100.0, 10.0),
             {"output": True, "source": "legacy", "_pm_confirmed": True},
         )
 
         service._last_pm_status_confirmed = False
-        self.assertIsNone(UpdateCycleController._cached_pm_status_for_soft_fail(service, 100.0, 10.0))
+        self.assertIsNone(PmSnapshotResolver._cached_pm_status_for_soft_fail(service, 100.0, 10.0))
         self.assertIsNone(
-            UpdateCycleController._cached_pm_status_for_soft_fail(
+            PmSnapshotResolver._cached_pm_status_for_soft_fail(
                 SimpleNamespace(_last_pm_status_confirmed=True),
                 100.0,
                 10.0,
             )
         )
         self.assertIsNone(
-            UpdateCycleController._cached_pm_status_for_soft_fail(
+            PmSnapshotResolver._cached_pm_status_for_soft_fail(
                 SimpleNamespace(_last_pm_status_confirmed=True, _last_pm_status={"output": True}),
                 100.0,
                 10.0,
             )
         )
-        self.assertFalse(UpdateCycleController._last_pm_status_marked_confirmed(SimpleNamespace()))
-        self.assertFalse(UpdateCycleController._last_pm_status_marked_confirmed(SimpleNamespace(_last_pm_status_confirmed=0)))
-        self.assertTrue(UpdateCycleController._last_pm_status_marked_confirmed(SimpleNamespace(_last_pm_status_confirmed=1)))
+        self.assertFalse(PmSnapshotResolver._last_pm_status_marked_confirmed(SimpleNamespace()))
+        self.assertFalse(PmSnapshotResolver._last_pm_status_marked_confirmed(SimpleNamespace(_last_pm_status_confirmed=0)))
+        self.assertTrue(PmSnapshotResolver._last_pm_status_marked_confirmed(SimpleNamespace(_last_pm_status_confirmed=1)))
 
     def test_pm_snapshot_contracts_fresh_confirmed_cache_requires_dict_timestamp_and_budget(self):
-        pm_snapshot = UpdateCycleController
+        pm_snapshot = PmSnapshotResolver
 
         self.assertIsNone(pm_snapshot._fresh_confirmed_pm_status(None, 95.0, 100.0, 10.0))
         self.assertIsNone(pm_snapshot._fresh_confirmed_pm_status([], 95.0, 100.0, 10.0))
@@ -950,7 +948,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         self.assertIsNone(pm_snapshot._fresh_confirmed_pm_status({"output": False}, 101.01, 100.0, 10.0))
 
     def test_pm_snapshot_contracts_worker_poll_window_and_storage_decision_edges(self):
-        pm_snapshot = UpdateCycleController
+        pm_snapshot = PmSnapshotResolver
 
         self.assertEqual(pm_snapshot._direct_pm_snapshot_max_age_seconds(SimpleNamespace()), 1.0)
         self.assertEqual(pm_snapshot._direct_pm_snapshot_max_age_seconds(SimpleNamespace(_worker_poll_interval_seconds=0.0)), 1.0)
@@ -984,7 +982,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         self.assertTrue(pm_snapshot._pm_snapshot_from_future(101.01, 100.0))
         wide_tolerance = type(
             "WideTolerancePmSnapshot",
-            (UpdateCycleController,),
+            (PmSnapshotResolver,),
             {"FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS": 2.0},
         )
         self.assertFalse(wide_tolerance._pm_snapshot_from_future(102.0, 100.0))
@@ -1007,7 +1005,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertEqual(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"pm_status": {"output": False, "source": "worker"}, "pm_confirmed": False, "pm_captured_at": 99.0},
                 100.0,
@@ -1017,7 +1015,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         self.assertFalse(hasattr(service, "_last_pm_status_confirmed") and service._last_pm_status_confirmed)
 
         self.assertEqual(
-            controller.resolve_pm_status_for_update(
+            controller.components.pm_snapshots.resolve_pm_status_for_update(
                 service,
                 {"pm_status": {"output": False, "source": "old-worker"}, "pm_confirmed": True, "pm_captured_at": 80.0},
                 100.0,
@@ -1043,7 +1041,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            short_soft_fail_controller.resolve_pm_status_for_update(
+            short_soft_fail_controller.components.pm_snapshots.resolve_pm_status_for_update(
                 short_soft_fail_service,
                 {"pm_status": {"output": False}, "pm_confirmed": False, "pm_captured_at": 99.0},
                 100.0,
@@ -1064,7 +1062,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            default_soft_fail_controller.resolve_pm_status_for_update(
+            default_soft_fail_controller.components.pm_snapshots.resolve_pm_status_for_update(
                 default_soft_fail_service,
                 {"pm_status": {"output": False}, "pm_confirmed": False, "pm_captured_at": 99.0},
                 100.0,
@@ -1073,7 +1071,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
     def test_short_network_gap_uses_confirmed_pm_cache_without_offline_panic(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _state_summary=lambda: "state",
             _watchdog_recover=MagicMock(),
             _ensure_auto_input_helper_process=MagicMock(),
@@ -1089,9 +1087,9 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         with (
-            patch.object(controller, "_run_online_update_cycle") as online_update,
-            patch.object(controller, "publish_offline_update") as offline_update,
-            patch.object(controller, "_software_update_housekeeping") as housekeeping,
+            patch.object(controller.components.runtime_cycle, "_run_online_update_cycle") as online_update,
+            patch.object(controller.components.offline, "publish_offline_update") as offline_update,
+            patch.object(controller.components.software_update, "housekeeping") as housekeeping,
         ):
             result = controller.update()
 
@@ -1104,7 +1102,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
     def test_update_offline_path_publishes_disconnected_state(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _state_summary=lambda: "state",
             _watchdog_recover=MagicMock(),
             _ensure_auto_input_helper_process=MagicMock(),
@@ -1115,6 +1113,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             _last_confirmed_pm_status=None,
             _last_confirmed_pm_status_at=None,
             auto_shelly_soft_fail_seconds=10.0,
+            topology_configured=True,
             _last_voltage=230.0,
             virtual_startstop=1,
             phase="L1",
@@ -1163,7 +1162,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
     def test_publish_offline_update_uses_recent_confirmed_relay_state_only(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _last_voltage=230.0,
             _last_confirmed_pm_status={"output": True},
             _last_confirmed_pm_status_at=199.0,
@@ -1198,16 +1197,16 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertTrue(controller.publish_offline_update(200.0))
+        self.assertTrue(controller.components.offline.publish_offline_update(200.0))
         self.assertEqual(service.virtual_startstop, 1)
 
         service._last_confirmed_pm_status_at = 195.0
-        self.assertTrue(controller.publish_offline_update(200.0))
+        self.assertTrue(controller.components.offline.publish_offline_update(200.0))
         self.assertEqual(service.virtual_startstop, 0)
 
     def test_publish_offline_update_rejects_future_confirmed_relay_timestamp(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _last_voltage=230.0,
             _last_confirmed_pm_status={"output": True},
             _last_confirmed_pm_status_at=202.5,
@@ -1242,12 +1241,12 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertTrue(controller.publish_offline_update(200.0))
+        self.assertTrue(controller.components.offline.publish_offline_update(200.0))
         self.assertEqual(service.virtual_startstop, 0)
 
     def test_publish_offline_update_marks_unconfigured_service_without_shelly_offline(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _last_voltage=230.0,
             _last_confirmed_pm_status=None,
             _last_confirmed_pm_status_at=None,
@@ -1285,13 +1284,13 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0, "not-configured": 41}.get(reason, 99))
 
-        self.assertTrue(controller.publish_offline_update(200.0))
+        self.assertTrue(controller.components.offline.publish_offline_update(200.0))
         service._set_health.assert_called_once_with("not-configured", cached=False)
         self.assertEqual(service._last_status_source, "not-configured")
 
     def test_publish_offline_update_marks_configured_split_service_offline_even_without_legacy_host(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _last_voltage=230.0,
             _last_confirmed_pm_status=None,
             _last_confirmed_pm_status_at=None,
@@ -1329,7 +1328,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0, "shelly-offline": 11}.get(reason, 99))
 
-        self.assertTrue(controller.publish_offline_update(200.0))
+        self.assertTrue(controller.components.offline.publish_offline_update(200.0))
         service._set_health.assert_called_once_with("shelly-offline", cached=False)
         self.assertEqual(service._last_status_source, "shelly-offline")
 
@@ -1337,45 +1336,58 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         service = self._offline_service(host_configured=False)
         delattr(service, "topology_configured")
 
-        self.assertEqual(_UpdateCycleOffline._offline_health_reason(service), "not-configured")
+        self.assertEqual(OfflinePublisher._offline_health_reason(service), "not-configured")
 
         service.host_configured = True
-        self.assertEqual(_UpdateCycleOffline._offline_health_reason(service), "shelly-offline")
+        self.assertEqual(OfflinePublisher._offline_health_reason(service), "shelly-offline")
 
     def test_offline_confirmed_relay_age_budget_uses_smallest_positive_source(self):
         service = SimpleNamespace()
-        self.assertEqual(_UpdateCycleOffline._offline_confirmed_relay_max_age_seconds(service), 2.0)
+        self.assertEqual(OfflinePublisher._offline_confirmed_relay_max_age_seconds(service), 2.0)
 
         service._worker_poll_interval_seconds = 0.75
-        self.assertEqual(_UpdateCycleOffline._offline_confirmed_relay_max_age_seconds(service), 1.5)
+        self.assertEqual(OfflinePublisher._offline_confirmed_relay_max_age_seconds(service), 1.5)
 
         service.relay_sync_timeout_seconds = 1.25
-        self.assertEqual(_UpdateCycleOffline._offline_confirmed_relay_max_age_seconds(service), 1.25)
+        self.assertEqual(OfflinePublisher._offline_confirmed_relay_max_age_seconds(service), 1.25)
 
         service._worker_poll_interval_seconds = 5.0
         service.relay_sync_timeout_seconds = 0.75
-        self.assertEqual(_UpdateCycleOffline._offline_confirmed_relay_max_age_seconds(service), 1.0)
+        self.assertEqual(OfflinePublisher._offline_confirmed_relay_max_age_seconds(service), 1.0)
 
         service._worker_poll_interval_seconds = 0.0
         service.relay_sync_timeout_seconds = 0.0
-        self.assertEqual(_UpdateCycleOffline._offline_confirmed_relay_max_age_seconds(service), 2.0)
+        self.assertEqual(OfflinePublisher._offline_confirmed_relay_max_age_seconds(service), 2.0)
 
     def test_offline_confirmed_relay_sample_contracts_are_strict(self):
-        self.assertTrue(_UpdateCycleOffline._offline_confirmed_relay_sample_present({"output": False}, 10.0))
-        self.assertFalse(_UpdateCycleOffline._offline_confirmed_relay_sample_present({"power": 0.0}, 10.0))
-        self.assertFalse(_UpdateCycleOffline._offline_confirmed_relay_sample_present({"output": False}, None))
-        self.assertFalse(_UpdateCycleOffline._offline_confirmed_relay_sample_present(None, 10.0))
+        sample_service = SimpleNamespace(
+            _last_confirmed_pm_status={"output": False},
+            _last_confirmed_pm_status_at=10.0,
+        )
+        self.assertEqual(
+            OfflinePublisher._offline_confirmed_pm_sample(sample_service),
+            ({"output": False}, 10.0),
+        )
+
+        sample_service._last_confirmed_pm_status = {"power": 0.0}
+        self.assertIsNone(OfflinePublisher._offline_confirmed_pm_sample(sample_service))
+        sample_service._last_confirmed_pm_status = {"output": False}
+        sample_service._last_confirmed_pm_status_at = None
+        self.assertIsNone(OfflinePublisher._offline_confirmed_pm_sample(sample_service))
+        sample_service._last_confirmed_pm_status = None
+        sample_service._last_confirmed_pm_status_at = 10.0
+        self.assertIsNone(OfflinePublisher._offline_confirmed_pm_sample(sample_service))
 
         service = self._offline_service(_worker_poll_interval_seconds=1.0, relay_sync_timeout_seconds=2.0)
-        self.assertTrue(UpdateCycleController._offline_confirmed_relay_sample_fresh(service, 200.0, 201.0))
-        self.assertFalse(UpdateCycleController._offline_confirmed_relay_sample_fresh(service, 200.0, 201.1))
-        self.assertFalse(UpdateCycleController._offline_confirmed_relay_sample_fresh(service, 200.0, 197.9))
+        self.assertTrue(OfflinePublisher._offline_confirmed_relay_sample_fresh(service, 200.0, 201.0))
+        self.assertFalse(OfflinePublisher._offline_confirmed_relay_sample_fresh(service, 200.0, 201.1))
+        self.assertFalse(OfflinePublisher._offline_confirmed_relay_sample_fresh(service, 200.0, 197.9))
 
         tight_service = self._offline_service(_worker_poll_interval_seconds=0.75, relay_sync_timeout_seconds=5.0)
-        self.assertFalse(UpdateCycleController._offline_confirmed_relay_sample_fresh(tight_service, 200.0, 198.4))
-        self.assertTrue(UpdateCycleController._offline_confirmed_relay_sample_fresh(tight_service, 200.0, 200.5))
+        self.assertFalse(OfflinePublisher._offline_confirmed_relay_sample_fresh(tight_service, 200.0, 198.4))
+        self.assertTrue(OfflinePublisher._offline_confirmed_relay_sample_fresh(tight_service, 200.0, 200.5))
 
-        class TightFutureTolerance(UpdateCycleController):
+        class TightFutureTolerance(OfflinePublisher):
             FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS = 0.25
 
         self.assertTrue(TightFutureTolerance._offline_confirmed_relay_sample_fresh(service, 200.0, 200.25))
@@ -1386,43 +1398,40 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             _last_confirmed_pm_status={"output": False, "_phase_selection": "P1_P2"},
             _last_confirmed_pm_status_at=199.0,
         )
-        self.assertEqual(UpdateCycleController._fresh_offline_pm_status(service, 200.0), service._last_confirmed_pm_status)
+        self.assertEqual(OfflinePublisher._fresh_offline_pm_status(service, 200.0), service._last_confirmed_pm_status)
 
         service._last_confirmed_pm_status = {"power": 0.0}
-        self.assertIsNone(UpdateCycleController._fresh_offline_pm_status(service, 200.0))
+        self.assertIsNone(OfflinePublisher._fresh_offline_pm_status(service, 200.0))
 
         service._last_confirmed_pm_status = {"output": True}
         service._last_confirmed_pm_status_at = True
-        self.assertIsNone(UpdateCycleController._fresh_offline_pm_status(service, 200.0))
+        self.assertIsNone(OfflinePublisher._fresh_offline_pm_status(service, 200.0))
 
         service._last_confirmed_pm_status_at = 201.1
-        self.assertIsNone(UpdateCycleController._fresh_offline_pm_status(service, 200.0))
+        self.assertIsNone(OfflinePublisher._fresh_offline_pm_status(service, 200.0))
 
     def test_offline_relay_state_and_fresh_status_tolerate_missing_cache_attrs(self):
         service = self._offline_service(_worker_poll_interval_seconds=0.75, relay_sync_timeout_seconds=5.0)
         delattr(service, "_last_confirmed_pm_status")
         delattr(service, "_last_confirmed_pm_status_at")
 
-        self.assertFalse(UpdateCycleController._offline_confirmed_relay_state(service, 200.0))
-        self.assertIsNone(UpdateCycleController._fresh_offline_pm_status(service, 200.0))
+        self.assertFalse(OfflinePublisher._offline_confirmed_relay_state(service, 200.0))
+        self.assertIsNone(OfflinePublisher._fresh_offline_pm_status(service, 200.0))
 
         service._last_confirmed_pm_status = {"output": True}
         service._last_confirmed_pm_status_at = 198.4
-        self.assertFalse(UpdateCycleController._offline_confirmed_relay_state(service, 200.0))
-        self.assertIsNone(UpdateCycleController._fresh_offline_pm_status(service, 200.0))
+        self.assertFalse(OfflinePublisher._offline_confirmed_relay_state(service, 200.0))
+        self.assertIsNone(OfflinePublisher._fresh_offline_pm_status(service, 200.0))
 
     def test_offline_voltage_and_status_state_contracts(self):
         service = self._offline_service(_last_voltage=0.0)
-        self.assertEqual(_UpdateCycleOffline._offline_voltage(service), 230.0)
-
-        delattr(service, "_last_voltage")
-        self.assertEqual(_UpdateCycleOffline._offline_voltage(service), 230.0)
+        self.assertEqual(OfflinePublisher._offline_voltage(service), 230.0)
 
         service._last_voltage = 229.5
-        self.assertEqual(_UpdateCycleOffline._offline_voltage(service), 229.5)
+        self.assertEqual(OfflinePublisher._offline_voltage(service), 229.5)
 
         service._last_charger_fault_active = 1
-        _UpdateCycleOffline._mark_offline_status_state(service)
+        OfflinePublisher._mark_offline_status_state(service)
         self.assertEqual(service._last_status_source, "shelly-offline")
         self.assertEqual(service._last_charger_fault_active, 0)
 
@@ -1439,7 +1448,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         )
         controller = self._offline_controller(service)
 
-        self.assertTrue(controller.publish_offline_update(200.0))
+        self.assertTrue(controller.components.offline.publish_offline_update(200.0))
 
         power, voltage, current, phase_data, now = service._publish_live_measurements.call_args.args
         self.assertEqual(power, 0.0)
@@ -1474,7 +1483,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         service.phase = 0.0
         service.voltage_mode = 0.0
 
-        self.assertTrue(controller.publish_offline_update(200.0))
+        self.assertTrue(controller.components.offline.publish_offline_update(200.0))
 
         self.assertEqual(
             service._publish_live_measurements.call_args.args[3],
@@ -1492,9 +1501,10 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             _publish_live_measurements=MagicMock(return_value=False),
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        controller.update_virtual_state = MagicMock(return_value=False)
+        controller.components.state.update_virtual_state = MagicMock(return_value=False)
 
-        changed = controller.publish_online_update(
+        changed = controller.components.relay.status.publish_online_update(
+            service,
             {
                 "output": True,
                 "_phase_selection": "P1_P2",

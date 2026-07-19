@@ -8,7 +8,7 @@ class _AutoControllerPrimaryCoreCases:
 
         self.assertIsNone(controller.average_auto_metric(1))
 
-        with patch("venus_evcharger.auto.workflow.time.time", return_value=123.0):
+        with patch("venus_evcharger.auto.logic_samples.time.time", return_value=123.0):
             controller.mark_relay_changed(False)
 
         self.assertEqual(service.relay_last_changed_at, 123.0)
@@ -16,12 +16,12 @@ class _AutoControllerPrimaryCoreCases:
 
     def test_auto_decide_relay_uses_service_time_source(self):
         controller, service = self._make_controller()
-        service._time_now = lambda: 150.0
+        service.time_now = lambda: 150.0
         service.relay_last_off_at = 140.0
         service.auto_min_offtime_seconds = 20.0
         service.auto_samples = deque([(149.0, 2500.0, -2500.0)])
 
-        with patch("venus_evcharger.auto.workflow.time.time", return_value=999.0):
+        with patch("venus_evcharger.auto.logic_learning.time.time", return_value=999.0):
             self.assertFalse(controller.auto_decide_relay(False, 2500.0, 60.0, -2500.0))
 
         self.assertEqual(service._last_health_reason, "waiting-offtime")
@@ -45,7 +45,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: utc_timestamp(2026, 4, 20, 20, 45)
+        service.time_now = lambda: utc_timestamp(2026, 4, 20, 20, 45)
 
         self.assertFalse(controller.auto_decide_relay(False, None, None, None))
         self.assertNotEqual(service._last_health_reason, "scheduled-night-charge")
@@ -59,7 +59,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: utc_timestamp(2026, 4, 20, 20, 45)
+        service.time_now = lambda: utc_timestamp(2026, 4, 20, 20, 45)
 
         self.assertTrue(controller.auto_decide_relay(False, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
@@ -73,7 +73,7 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: utc_timestamp(2026, 4, 21, 3, 0)
+        service.time_now = lambda: utc_timestamp(2026, 4, 21, 3, 0)
 
         self.assertTrue(controller.auto_decide_relay(True, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
@@ -87,9 +87,9 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: utc_timestamp(2026, 4, 17, 21, 0)
+        service.time_now = lambda: utc_timestamp(2026, 4, 17, 21, 0)
 
-        self.assertFalse(controller._scheduled_night_charge_active())
+        self.assertFalse(controller.samples.scheduled_night_charge_active())
         self.assertFalse(controller.auto_decide_relay(False, None, None, None))
         self.assertNotEqual(service._last_health_reason, "scheduled-night-charge")
 
@@ -101,27 +101,27 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_scheduled_enabled_days = "Mon,Tue,Wed,Thu,Fri"
         service.auto_scheduled_night_start_delay_seconds = 3600.0
         service.auto_scheduled_latest_end_time = "06:30"
-        service._time_now = lambda: utc_timestamp(2026, 4, 21, 6, 45)
+        service.time_now = lambda: utc_timestamp(2026, 4, 21, 6, 45)
 
-        self.assertFalse(controller._scheduled_night_charge_active())
+        self.assertFalse(controller.samples.scheduled_night_charge_active())
 
-    def test_scheduled_night_decision_covers_gate_autostart_and_waiting_offtime_edges(self):
+    def testscheduled_night_decision_covers_gate_autostart_and_waiting_offtime_edges(self):
         controller, service = self._make_controller()
 
-        with patch.object(controller, "_handle_common_runtime_gates", return_value=True):
-            self.assertTrue(controller._scheduled_night_decision(False, 100.0, False))
+        with patch.object(controller.gates, "handle_common_runtime_gates", return_value=True):
+            self.assertTrue(controller.relay.scheduled_night_decision(False, 100.0, False))
 
         service.virtual_autostart = 0
-        with patch.object(controller, "_handle_common_runtime_gates", return_value=controller._NO_DECISION):
-            self.assertFalse(controller._scheduled_night_decision(False, 100.0, False))
+        with patch.object(controller.gates, "handle_common_runtime_gates", return_value=NO_RELAY_DECISION):
+            self.assertFalse(controller.relay.scheduled_night_decision(False, 100.0, False))
         self.assertEqual(service._last_health_reason, "autostart-disabled")
 
         service.virtual_autostart = 1
         with (
-            patch.object(controller, "_handle_common_runtime_gates", return_value=controller._NO_DECISION),
-            patch.object(controller, "_minimum_offtime_elapsed", return_value=False),
+            patch.object(controller.gates, "handle_common_runtime_gates", return_value=NO_RELAY_DECISION),
+            patch.object(controller.gates, "_minimum_offtime_elapsed", return_value=False),
         ):
-            self.assertFalse(controller._scheduled_night_decision(False, 100.0, False))
+            self.assertFalse(controller.relay.scheduled_night_decision(False, 100.0, False))
         self.assertEqual(service._last_health_reason, "waiting-offtime")
 
     def test_relay_on_helpers_cover_auto_stop_grid_reporting_and_nonnumeric_time_source(self):
@@ -129,29 +129,29 @@ class _AutoControllerPrimaryCoreCases:
         service.auto_stop_delay_seconds = 30.0
 
         with (
-            patch.object(controller, "_minimum_runtime_elapsed", return_value=True),
-            patch.object(controller, "_relay_on_stop_reason", return_value="auto-stop-grid"),
-            patch.object(controller, "_pending_stop_or_running", return_value=False) as pending_stop,
+            patch.object(controller.gates, "_minimum_runtime_elapsed", return_value=True),
+            patch.object(controller.relay, "_relay_on_stop_reason", return_value="auto-stop-grid"),
+            patch.object(controller.gates, "_pending_stop_or_running", return_value=False) as pending_stop,
         ):
-            self.assertFalse(controller._handle_relay_on(1000.0, 200.0, 60.0, True, 100.0, False))
+            self.assertFalse(controller.relay.handle_relay_on(1000.0, 200.0, 60.0, True, 100.0, False))
 
         self.assertEqual(pending_stop.call_args.kwargs["stop_key"], "auto-stop-grid")
         self.assertEqual(pending_stop.call_args.args[1], "auto-stop")
 
-        service._time_now = lambda: "bad"
+        service.time_now = lambda: "bad"
         with patch("venus_evcharger.auto.logic_learning.time.time", return_value=123.0):
-            self.assertEqual(controller._learning_policy_now(), 123.0)
+            self.assertEqual(controller.learning.learning_policy_now(), 123.0)
 
     def test_relay_on_helpers_keep_custom_stop_reason_reporting_outside_grid_and_soc(self):
         controller, service = self._make_controller()
         service.auto_stop_delay_seconds = 45.0
 
         with (
-            patch.object(controller, "_minimum_runtime_elapsed", return_value=True),
-            patch.object(controller, "_relay_on_stop_reason", return_value="custom-stop"),
-            patch.object(controller, "_pending_stop_or_running", return_value=False) as pending_stop,
+            patch.object(controller.gates, "_minimum_runtime_elapsed", return_value=True),
+            patch.object(controller.relay, "_relay_on_stop_reason", return_value="custom-stop"),
+            patch.object(controller.gates, "_pending_stop_or_running", return_value=False) as pending_stop,
         ):
-            self.assertFalse(controller._handle_relay_on(1000.0, 200.0, 60.0, True, 100.0, False))
+            self.assertFalse(controller.relay.handle_relay_on(1000.0, 200.0, 60.0, True, 100.0, False))
 
         self.assertEqual(pending_stop.call_args.args[1], "custom-stop")
         self.assertEqual(pending_stop.call_args.kwargs["stop_key"], "custom-stop")
@@ -166,7 +166,7 @@ class _AutoControllerPrimaryCoreCases:
         self.assertEqual(service._last_health_code, 101)
         self.assertEqual(service._last_auto_state, "recovery")
         self.assertEqual(service._last_auto_state_code, 5)
-        service._write_auto_audit_event.assert_called_once_with("grid-missing", True)
+        service.runtime.write_auto_audit_event.assert_called_once_with("grid-missing", True)
 
     def test_set_health_uses_explicit_learning_state_while_running(self):
         controller, service = self._make_controller()
@@ -208,7 +208,7 @@ class _AutoControllerPrimaryCoreCases:
         service._last_confirmed_pm_status_at = 980.0
         service.virtual_startstop = 1
 
-        self.assertFalse(controller._observed_relay_state())
+        self.assertFalse(controller.samples._observed_relay_state())
 
     def test_derive_auto_state_uses_observed_relay_hint_and_learning_state(self):
         controller, service = self._make_controller()
@@ -216,12 +216,12 @@ class _AutoControllerPrimaryCoreCases:
         service._last_confirmed_pm_status_at = 999.0
         service.learned_charge_power_state = "learning"
 
-        self.assertEqual(controller._derive_auto_state("custom-reason"), "learning")
+        self.assertEqual(controller.samples._derive_auto_state("custom-reason"), "learning")
 
     def test_battery_soc_missing_without_override_returns_terminal_decision(self):
         controller, service = self._make_controller()
 
-        battery_soc, decision = controller._resolve_battery_soc(None, True, 100.0, False)
+        battery_soc, decision = controller.gates.resolve_battery_soc(None, True, 100.0, False)
 
         self.assertIsNone(battery_soc)
         self.assertTrue(decision)
@@ -229,63 +229,63 @@ class _AutoControllerPrimaryCoreCases:
 
     def test_out_of_range_battery_soc_is_treated_as_missing(self):
         controller, service = self._make_controller()
-        service._warning_throttled = MagicMock()
+        service.runtime.warning_throttled = MagicMock()
 
-        battery_soc, decision = controller._resolve_battery_soc(150.0, True, 100.0, False)
+        battery_soc, decision = controller.gates.resolve_battery_soc(150.0, True, 100.0, False)
 
         self.assertIsNone(battery_soc)
         self.assertTrue(decision)
         self.assertEqual(service._last_health_reason, "battery-soc-missing")
-        service._warning_throttled.assert_called_once()
+        service.runtime.warning_throttled.assert_called_once()
 
     def test_stop_and_missing_input_helpers_cover_running_idle_and_none_reason(self):
         controller, service = self._make_controller()
         service.auto_stop_condition_since = 50.0
-        self.assertIs(controller._arm_or_fire_stop(60.0, "grid-missing", False), controller._NO_DECISION)
+        self.assertIs(controller.gates._arm_or_fire_stop(60.0, "grid-missing", False), NO_RELAY_DECISION)
 
         service.relay_last_changed_at = 90.0
-        self.assertTrue(controller._handle_grid_missing(True, 100.0, False))
+        self.assertTrue(controller.gates.handle_grid_missing(True, 100.0, False))
         self.assertEqual(service._last_health_reason, "grid-missing")
 
         service.auto_night_lock_stop = True
-        self.assertEqual(controller._known_missing_input_stop_reason(60.0, None, False), "night-lock")
+        self.assertEqual(controller.gates._known_missing_input_stop_reason(60.0, None, False), "night-lock")
         service.auto_night_lock_stop = False
-        self.assertIsNone(controller._known_missing_input_stop_reason(60.0, None, True))
+        self.assertIsNone(controller.gates._known_missing_input_stop_reason(60.0, None, True))
 
-        self.assertFalse(controller._handle_missing_inputs(False, 60.0, None, 100.0, False))
+        self.assertFalse(controller.gates.handle_missing_inputs(False, 60.0, None, 100.0, False))
         self.assertEqual(service._last_health_reason, "inputs-missing")
-        self.assertTrue(controller._handle_missing_inputs(True, 60.0, None, 100.0, False))
+        self.assertTrue(controller.gates.handle_missing_inputs(True, 60.0, None, 100.0, False))
         self.assertEqual(service._last_health_reason, "inputs-missing")
 
     def test_average_metrics_and_relay_on_helpers_cover_none_night_lock_and_delayed_start(self):
         controller, service = self._make_controller()
-        service._add_auto_sample = MagicMock()
-        service._average_auto_metric = MagicMock(side_effect=[None, -100.0])
+        controller.samples.add_auto_sample = MagicMock()
+        controller.samples.average_auto_metric = MagicMock(side_effect=[None, -100.0])
 
-        self.assertEqual(controller._update_average_metrics(100.0, 2500.0, -2000.0, 60.0, False), (None, None))
+        self.assertEqual(controller.metrics.update_average_metrics(100.0, 2500.0, -2000.0, 60.0, False), (None, None))
         service.auto_night_lock_stop = True
-        self.assertEqual(controller._relay_on_stop_reason(1500.0, -2000.0, 60.0, False, True), "night-lock")
+        self.assertEqual(controller.relay._relay_on_stop_reason(1500.0, -2000.0, 60.0, False, True), "night-lock")
         service.auto_night_lock_stop = False
-        self.assertEqual(controller._relay_on_stop_reason(1500.0, -2000.0, 44.0, True, True), "auto-stop-surplus")
-        self.assertEqual(controller._relay_on_stop_reason(1700.0, 400.0, 60.0, True, True), "auto-stop-grid")
-        self.assertEqual(controller._relay_on_stop_reason(1700.0, 0.0, 20.0, True, True), "auto-stop-soc")
+        self.assertEqual(controller.relay._relay_on_stop_reason(1500.0, -2000.0, 44.0, True, True), "auto-stop-surplus")
+        self.assertEqual(controller.relay._relay_on_stop_reason(1700.0, 400.0, 60.0, True, True), "auto-stop-grid")
+        self.assertEqual(controller.relay._relay_on_stop_reason(1700.0, 0.0, 20.0, True, True), "auto-stop-soc")
         service.auto_start_condition_since = 100.0
-        self.assertFalse(controller._arm_or_fire_start(105.0, False))
+        self.assertFalse(controller.relay._arm_or_fire_start(105.0, False))
 
     def test_adaptive_stop_smoothing_applies_only_while_running(self):
         controller, service = self._make_controller()
-        service._add_auto_sample = MagicMock()
-        service._average_auto_metric = MagicMock(side_effect=[1200.0, 400.0, 1200.0, 400.0])
+        controller.samples.add_auto_sample = MagicMock()
+        controller.samples.average_auto_metric = MagicMock(side_effect=[1200.0, 400.0, 1200.0, 400.0])
         service._stop_smoothed_surplus_power = 2000.0
         service._stop_smoothed_grid_power = -200.0
 
-        smoothed_surplus, smoothed_grid = controller._update_average_metrics(100.0, 2200.0, 400.0, 60.0, True)
+        smoothed_surplus, smoothed_grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, True)
         self.assertEqual(smoothed_surplus, 1800.0)
         self.assertEqual(smoothed_grid, -50.0)
         self.assertEqual(service._last_auto_metrics["raw_surplus"], 1200.0)
         self.assertEqual(service._last_auto_metrics["raw_grid"], 400.0)
 
-        raw_surplus, raw_grid = controller._update_average_metrics(101.0, 2200.0, 400.0, 60.0, False)
+        raw_surplus, raw_grid = controller.metrics.update_average_metrics(101.0, 2200.0, 400.0, 60.0, False)
         self.assertEqual(raw_surplus, 1200.0)
         self.assertEqual(raw_grid, 400.0)
         self.assertIsNone(service._stop_smoothed_surplus_power)

@@ -33,7 +33,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -46,7 +46,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         self.assertEqual(service._contactor_suspected_welded_since, 100.0)
 
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -60,7 +60,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         self.assertEqual(service._contactor_fault_counts, {"contactor-suspected-welded": 1})
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -72,7 +72,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -84,7 +84,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,
@@ -132,7 +132,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         )
 
         self.assertIsNone(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -145,8 +145,9 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         self.assertEqual(service._contactor_suspected_open_since, 100.0)
 
         service._last_charger_state_at = 110.0
+        sync_readback_test_service(service)
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -160,8 +161,9 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         self.assertEqual(service._contactor_fault_counts, {"contactor-suspected-open": 1})
 
         service._last_charger_state_at = 126.0
+        sync_readback_test_service(service)
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -193,13 +195,13 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=230.0,
             phase="L1",
             voltage_mode="phase",
-            auto_learn_charge_power_max_age_seconds=21600.0,
+            auto_policy=_learning_policy(),
             _charger_target_current_amps=None,
             _charger_target_current_applied_at=None,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        applied = controller.apply_charger_current_target(service, True, 100.0, True)
+        applied = controller.components.relay.foundation.targets.apply_current_target(service, True, 100.0, True)
 
         self.assertEqual(applied, 13.0)
         charger_backend.set_current.assert_called_once_with(13.0)
@@ -224,14 +226,14 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=230.0,
             phase="L1",
             voltage_mode="phase",
-            auto_learn_charge_power_max_age_seconds=21600.0,
+            auto_policy=_learning_policy(),
             _charger_target_current_amps=None,
             _charger_target_current_applied_at=None,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        first = controller.apply_charger_current_target(service, True, 100.0, True)
-        second = controller.apply_charger_current_target(service, True, 101.0, True)
+        first = controller.components.relay.foundation.targets.apply_current_target(service, True, 100.0, True)
+        second = controller.components.relay.foundation.targets.apply_current_target(service, True, 101.0, True)
 
         self.assertEqual(first, 11.0)
         self.assertEqual(second, 11.0)
@@ -262,13 +264,13 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=230.0,
             phase="L1",
             voltage_mode="phase",
-            auto_learn_charge_power_max_age_seconds=21600.0,
+            auto_policy=_learning_policy(),
             _charger_target_current_amps=None,
             _charger_target_current_applied_at=None,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        applied = controller.apply_charger_current_target(
+        applied = controller.components.relay.foundation.targets.apply_current_target(
             service,
             True,
             utc_timestamp(2026, 4, 20, 21, 0),
@@ -301,13 +303,13 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
             phase="L1",
             voltage_mode="phase",
             auto_dbus_backoff_base_seconds=5.0,
-            auto_learn_charge_power_max_age_seconds=21600.0,
+            auto_policy=_learning_policy(),
             _charger_target_current_amps=None,
             _charger_target_current_applied_at=None,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        applied = controller.apply_charger_current_target(service, True, 100.0, True)
+        applied = controller.components.relay.foundation.targets.apply_current_target(service, True, 100.0, True)
 
         self.assertIsNone(applied)
         service._mark_failure.assert_called_once_with("charger")
@@ -336,7 +338,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=230.0,
             phase="L1",
             voltage_mode="phase",
-            auto_learn_charge_power_max_age_seconds=21600.0,
+            auto_policy=_learning_policy(),
             _charger_target_current_amps=9.0,
             _charger_target_current_applied_at=95.0,
             _charger_retry_reason="offline",
@@ -345,7 +347,7 @@ class TestUpdateCycleControllerTrecenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        applied = controller.apply_charger_current_target(service, True, 100.0, True)
+        applied = controller.components.relay.foundation.targets.apply_current_target(service, True, 100.0, True)
 
         self.assertEqual(applied, 9.0)
         charger_backend.set_current.assert_not_called()

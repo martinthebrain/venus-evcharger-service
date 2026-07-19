@@ -6,8 +6,12 @@ from __future__ import annotations
 from typing import Any
 
 from .victron_ess_balance_recommendation_support import (
-    _UpdateCycleVictronEssBalanceRecommendationSupport,
+    VictronEssRecommendationPolicy,
 )
+from .victron_ess_balance_apply_sources import VictronEssSourceResolver
+from .victron_ess_balance_learning_profiles import VictronEssLearningProfiles
+from .victron_ess_balance_safety import VictronEssSafetyController
+from .victron_ess_balance_safety_support import VictronEssSafetyRecovery
 
 _OBSERVATION_FLOAT_FIELDS = (
     ("response_delay_seconds", "_victron_ess_balance_telemetry_response_delay_seconds"),
@@ -37,17 +41,31 @@ _TELEMETRY_COUNT_FIELDS = (
 )
 
 
-class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceRecommendationSupport):
+class VictronEssRecommendationEngine:
+    def __init__(
+        self,
+        policy: VictronEssRecommendationPolicy,
+        sources: VictronEssSourceResolver,
+        profiles: VictronEssLearningProfiles,
+        safety: VictronEssSafetyController,
+        recovery: VictronEssSafetyRecovery,
+    ) -> None:
+        self._policy = policy
+        self._sources = sources
+        self._profiles = profiles
+        self._safety = safety
+        self._recovery = recovery
+
 
     def _victron_ess_balance_recommendation_source(
         self,
         svc: Any,
     ) -> tuple[str, dict[str, Any], bool]:
-        active_profile_key = self._normalized_text(
+        active_profile_key = self._sources._normalized_text(
             getattr(svc, "_victron_ess_balance_active_learning_profile_key", None)
         )
-        active_profile = self._victron_ess_balance_learning_profile_state(svc, active_profile_key)
-        use_profile = self._victron_ess_balance_profile_sample_count(active_profile) > 0
+        active_profile = self._profiles._victron_ess_balance_learning_profile_state(svc, active_profile_key)
+        use_profile = self._profiles._victron_ess_balance_profile_sample_count(active_profile) > 0
         return active_profile_key, active_profile, use_profile
 
     def _victron_ess_balance_recommendation_observations(
@@ -57,7 +75,7 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
         use_profile: bool,
     ) -> dict[str, Any]:
         observations = {
-            key: self._optional_float(
+            key: self._sources._optional_float(
                 self._victron_ess_balance_observation_value(svc, active_profile, use_profile, key, service_attr)
             )
             for key, service_attr in _OBSERVATION_FLOAT_FIELDS
@@ -72,7 +90,7 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
         )
         observations.update(
             {
-                key: self._optional_float(active_profile.get(key) if use_profile else None)
+                key: self._sources._optional_float(active_profile.get(key) if use_profile else None)
                 for key in _PROFILE_SCORE_FIELDS
             }
         )
@@ -107,19 +125,19 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
         observations: dict[str, Any],
         confidence: float,
     ) -> str:
-        if self._victron_ess_balance_has_insufficient_telemetry(observations, confidence):
+        if self._policy._victron_ess_balance_has_insufficient_telemetry(observations, confidence):
             return "insufficient_telemetry"
-        if self._victron_ess_balance_has_overshoot_risk(observations):
+        if self._policy._victron_ess_balance_has_overshoot_risk(observations):
             return "overshoot_risk"
-        if self._victron_ess_balance_has_slow_response(observations):
+        if self._policy._victron_ess_balance_has_slow_response(observations):
             return "slow_response"
-        if self._victron_ess_balance_can_relax_conservatism(observations):
+        if self._policy._victron_ess_balance_can_relax_conservatism(observations):
             return "can_relax_conservatism"
         return "telemetry_nominal"
 
     @staticmethod
     def _victron_ess_balance_adjusted_tuning(current: dict[str, float], reason: str) -> dict[str, float]:
-        return _UpdateCycleVictronEssBalanceRecommendationSupport._victron_ess_balance_adjusted_tuning(
+        return VictronEssRecommendationPolicy._victron_ess_balance_adjusted_tuning(
             current,
             reason,
         )
@@ -133,11 +151,11 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
         observations: dict[str, Any],
         confidence: float,
     ) -> dict[str, Any]:
-        current = self._victron_ess_balance_current_tuning_values(svc)
+        current = self._policy._victron_ess_balance_current_tuning_values(svc)
         reason = self._victron_ess_balance_recommendation_reason(observations, confidence)
         adjusted = self._victron_ess_balance_adjusted_tuning(current, reason)
         activation_mode = self._victron_ess_balance_recommended_activation_mode(active_profile if use_profile else {}, svc)
-        ini_snippet = self._victron_ess_balance_recommendation_ini_snippet(
+        ini_snippet = self._policy._victron_ess_balance_recommendation_ini_snippet(
             adjusted["kp"],
             adjusted["ki"],
             adjusted["kd"],
@@ -171,20 +189,20 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
             "battery_discharge_balance_victron_bias_recommendation_reason": reason,
             "battery_discharge_balance_victron_bias_recommendation_profile_key": active_profile_key if use_profile else "",
             "battery_discharge_balance_victron_bias_recommendation_ini_snippet": ini_snippet,
-            "battery_discharge_balance_victron_bias_recommendation_hint": self._victron_ess_balance_recommendation_hint(
+            "battery_discharge_balance_victron_bias_recommendation_hint": self._policy._victron_ess_balance_recommendation_hint(
                 reason,
                 confidence,
             ),
         }
 
     def _populate_victron_ess_balance_telemetry_metrics(self, svc: Any, metrics: dict[str, Any]) -> None:
-        observed = self._optional_float(getattr(svc, "_victron_ess_balance_telemetry_last_observed_at", None))
+        observed = self._sources._optional_float(getattr(svc, "_victron_ess_balance_telemetry_last_observed_at", None))
         observed_at = 0.0 if observed is None else observed
         self._populate_victron_ess_balance_recommendation_telemetry_metrics(svc, metrics, observed_at)
-        active_profile_key = self._normalized_text(
+        active_profile_key = self._sources._normalized_text(
             getattr(svc, "_victron_ess_balance_active_learning_profile_key", None)
         )
-        self._merge_victron_ess_balance_learning_profile_metrics(svc, metrics, active_profile_key)
+        self._profiles._merge_victron_ess_balance_learning_profile_metrics(svc, metrics, active_profile_key)
         metrics.update(self._victron_ess_balance_recommendation_metrics(svc))
 
     def _populate_victron_ess_balance_recommendation_telemetry_metrics(
@@ -197,16 +215,16 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
         metrics.update(self._victron_ess_balance_telemetry_bool_metrics(svc))
         metrics.update(self._victron_ess_balance_telemetry_count_metrics(svc))
         metrics["battery_discharge_balance_victron_bias_overshoot_cooldown_active"] = int(
-            self._victron_ess_balance_overshoot_cooldown_active(svc, observed_at)
+            self._recovery._victron_ess_balance_overshoot_cooldown_active(svc, observed_at)
         )
         metrics["battery_discharge_balance_victron_bias_overshoot_cooldown_reason"] = str(
             getattr(svc, "_victron_ess_balance_overshoot_cooldown_reason", None) or ""
         )
-        self._populate_victron_ess_balance_runtime_safety_metrics(svc, observed_at, metrics)
+        self._safety._populate_victron_ess_balance_runtime_safety_metrics(svc, observed_at, metrics)
 
     def _victron_ess_balance_telemetry_float_metrics(self, svc: Any) -> dict[str, float | None]:
         return {
-            metric: self._optional_float(getattr(svc, service_attr, None))
+            metric: self._sources._optional_float(getattr(svc, service_attr, None))
             for metric, service_attr in _TELEMETRY_FLOAT_FIELDS
         }
 
@@ -226,10 +244,10 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
 
     def _victron_ess_balance_recommendation_metrics(self, svc: Any) -> dict[str, Any]:
         if not bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_enabled", None)):
-            return self._victron_ess_balance_disabled_recommendation_metrics()
+            return self._policy._victron_ess_balance_disabled_recommendation_metrics()
         active_profile_key, active_profile, use_profile = self._victron_ess_balance_recommendation_source(svc)
         observations = self._victron_ess_balance_recommendation_observations(svc, active_profile, use_profile)
-        confidence = self._victron_ess_balance_recommendation_confidence(
+        confidence = self._policy._victron_ess_balance_recommendation_confidence(
             observations["delay_samples"],
             observations["gain_samples"],
             observations["stability_score"],
@@ -251,13 +269,13 @@ class _UpdateCycleVictronEssBalanceRecommendation(_UpdateCycleVictronEssBalanceR
         active_profile: dict[str, Any],
         svc: Any,
     ) -> str:
-        reserve_phase = self._normalized_text(active_profile.get("reserve_phase"))
-        site_regime = self._normalized_text(active_profile.get("site_regime"))
+        reserve_phase = self._sources._normalized_text(active_profile.get("reserve_phase"))
+        site_regime = self._sources._normalized_text(active_profile.get("site_regime"))
         if site_regime == "export":
             return self._victron_ess_balance_export_activation_mode(reserve_phase)
         if reserve_phase == "above_reserve_band":
             return "above_reserve_band"
-        return self._victron_ess_balance_activation_mode(svc)
+        return self._sources._victron_ess_balance_activation_mode(svc)
 
     @staticmethod
     def _victron_ess_balance_export_activation_mode(reserve_phase: str) -> str:

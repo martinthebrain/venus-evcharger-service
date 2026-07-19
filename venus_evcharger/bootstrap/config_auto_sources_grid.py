@@ -14,10 +14,6 @@ AUTO_GRID_L2_PATH_KEY = "AutoGridL2Path"
 AUTO_GRID_L3_PATH_KEY = "AutoGridL3Path"
 AUTO_GRID_REQUIRE_ALL_PHASES_KEY = "AutoGridRequireAllPhases"
 AUTO_GRID_MISSING_STOP_KEY = "AutoGridMissingStopSeconds"
-AUTO_GRID_RECOVERY_START_KEY = "AutoGridRecoveryStartSeconds"
-AUTO_START_DELAY_KEY = "AutoStartDelaySeconds"
-
-
 def load_auto_grid_source_config(svc: Any, defaults: configparser.SectionProxy) -> None:
     """Load grid service, phase paths, and recovery timing settings."""
     svc.auto_grid_service = defaults.get(AUTO_GRID_SERVICE_KEY, "com.victronenergy.system").strip()
@@ -29,6 +25,3 @@ def load_auto_grid_source_config(svc: Any, defaults: configparser.SectionProxy) 
         "1",
     ).strip().lower() in ("1", "true", "yes", "on")
     svc.auto_grid_missing_stop_seconds = float(_config_value(defaults, AUTO_GRID_MISSING_STOP_KEY, 60))
-    svc.auto_grid_recovery_start_seconds = float(
-        _config_value(defaults, AUTO_GRID_RECOVERY_START_KEY, _config_value(defaults, AUTO_START_DELAY_KEY, 10))
-    )

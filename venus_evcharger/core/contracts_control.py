@@ -5,9 +5,12 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
-from venus_evcharger.core.contracts_basic import non_negative_int, normalize_binary_flag
-from venus_evcharger.core.contracts_basic import non_negative_float_or_none
+from venus_evcharger.core.contracts_basic import non_negative_float_or_none, non_negative_int, normalize_binary_flag
+from venus_evcharger.core.contracts_control_surface import CONTROL_API_STATE_ENDPOINTS as _CONTROL_API_STATE_ENDPOINTS
+from venus_evcharger.core.contracts_control_surface import CONTROL_COMMAND_NAMES as _CONTROL_COMMAND_NAMES
 
+CONTROL_API_STATE_ENDPOINTS = _CONTROL_API_STATE_ENDPOINTS
+CONTROL_COMMAND_NAMES = _CONTROL_COMMAND_NAMES
 CONTROL_API_VERSIONS = frozenset({"v1"})
 CONTROL_API_TRANSPORTS = frozenset({"http"})
 CONTROL_API_AUTH_SCOPES = frozenset({"read", "control_basic", "control_admin", "update_admin"})
@@ -34,24 +37,6 @@ CONTROL_API_ERROR_CODES = frozenset(
         "validation_error",
     }
 )
-CONTROL_API_STATE_ENDPOINTS = frozenset(
-    {
-        "/v1/state/automation",
-        "/v1/state/build",
-        "/v1/state/config-effective",
-        "/v1/state/contracts",
-        "/v1/state/dbus-diagnostics",
-        "/v1/state/health",
-        "/v1/state/healthz",
-        "/v1/state/operational",
-        "/v1/state/runtime",
-        "/v1/state/summary",
-        "/v1/state/topology",
-        "/v1/state/update",
-        "/v1/state/version",
-        "/v1/state/victron-bias-recommendation",
-    }
-)
 CONTROL_API_ENDPOINTS = frozenset(
     {
         "/v1/capabilities",
@@ -64,21 +49,6 @@ CONTROL_API_ENDPOINTS = frozenset(
 )
 CONTROL_API_EXPERIMENTAL_ENDPOINTS = frozenset({"/v1/events"})
 CONTROL_API_STABLE_ENDPOINTS = frozenset(endpoint for endpoint in CONTROL_API_ENDPOINTS if endpoint not in CONTROL_API_EXPERIMENTAL_ENDPOINTS)
-CONTROL_COMMAND_NAMES = frozenset(
-    {
-        "legacy_unknown_write",
-        "reset_contactor_lockout",
-        "reset_phase_lockout",
-        "set_auto_runtime_setting",
-        "set_auto_start",
-        "set_current_setting",
-        "set_enable",
-        "set_mode",
-        "set_phase_selection",
-        "set_start_stop",
-        "trigger_software_update",
-    }
-)
 CONTROL_COMMAND_SOURCES = frozenset({"dbus", "http", "internal", "mqtt"})
 CONTROL_COMMAND_STATUSES = frozenset({"accepted_in_flight", "applied", "rejected"})
 CONTROL_API_EVENT_KINDS = frozenset({"snapshot", "command", "state", "heartbeat"})
@@ -116,9 +86,17 @@ def normalized_control_api_auth_scope(value: Any, *, default: str | None = None)
     return scope if scope in CONTROL_API_AUTH_SCOPES else normalized_default
 
 
-def normalized_control_command_name(value: Any) -> str:
+def _supported_control_command_name(value: Any) -> str | None:
     name = _normalized_text(value)
-    return name if name in CONTROL_COMMAND_NAMES else "legacy_unknown_write"
+    return name if name in CONTROL_COMMAND_NAMES else None
+
+
+def normalized_control_command_name(value: Any) -> str:
+    """Return a registered command name or reject the invalid boundary value."""
+    name = _supported_control_command_name(value)
+    if name is None:
+        raise ValueError(f"Unsupported control command '{_normalized_text(value)}'.")
+    return name
 
 
 def normalized_control_command_source(value: Any, *, default: str | None = None) -> str:
@@ -241,7 +219,13 @@ def _normalized_phase_selections(value: Any) -> list[str]:
 
 
 def _normalized_command_names(value: Any) -> list[str]:
-    return sorted({normalized_control_command_name(item) for item in _normalized_items(value, CONTROL_COMMAND_NAMES)})
+    return sorted(
+        {
+            name
+            for item in _normalized_items(value, CONTROL_COMMAND_NAMES)
+            if (name := _supported_control_command_name(item)) is not None
+        }
+    )
 
 
 def _normalized_command_sources(value: Any) -> list[str]:
@@ -295,7 +279,10 @@ def _normalized_command_scope_requirements(value: Any) -> dict[str, str]:
     normalized: dict[str, str] = {}
     if isinstance(value, Mapping):
         for command_name, scope in value.items():
-            normalized[normalized_control_command_name(command_name)] = normalized_control_api_auth_scope(
+            normalized_name = _supported_control_command_name(command_name)
+            if normalized_name is None:
+                continue
+            normalized[normalized_name] = normalized_control_api_auth_scope(
                 scope,
                 default="control_basic",
             )

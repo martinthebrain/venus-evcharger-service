@@ -3,16 +3,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
-from venus_evcharger.backend.models import ChargerState, MeterReading, PhaseSelection
-from venus_evcharger.backend.shelly_io_runtime import ShellyIoRuntime
+from venus_evcharger.backend.models import ChargerState, MeterReading, PhaseSelection, SwitchState
+from venus_evcharger.backend.shelly_io_capabilities import ShellyCapabilities
+from venus_evcharger.backend.shelly_io_ports import ShellyReadbackHost
+from venus_evcharger.backend.shelly_io_runtime import ShellyChargerRuntime
+from venus_evcharger.backend.shelly_io_runtime_cache import ShellyRuntimeCache
 from venus_evcharger.backend.shelly_io_types import (
     JsonObject,
-    ShellyIoHost,
     ShellyPmStatus,
-    _EnableBackendLike,
     _MeterBackendLike,
     _SwitchStateBackendLike,
     is_switch_state_backend,
@@ -23,70 +24,34 @@ from venus_evcharger.backend.shelly_io_types import (
 from venus_evcharger.core.contracts import finite_float_or_none
 
 
-class ShellyIoSplit(ShellyIoRuntime):
+class ShellyBackendReadback:
     """Synthesize PM status from split meter, switch, and charger backends."""
 
-    if TYPE_CHECKING:
-        service: ShellyIoHost
-
-        def _runtime_now(self) -> float: ...
-
-        def _split_switch_backend(self) -> _EnableBackendLike | None: ...
-
-        def _split_meter_backend(self) -> _MeterBackendLike | None: ...
-
-        def _split_switch_supported_phase_selections(self) -> tuple[PhaseSelection, ...]: ...
-
-        def _store_runtime_switch_snapshot(self, switch_state: object | None, now: float | None = None) -> None: ...
-
-        @staticmethod
-        def _optional_bool(value: object) -> bool | None: ...
-
-        @classmethod
-        def _resolved_pm_charger_current(cls, state: ChargerState) -> float | None: ...
-
-        def _estimated_charger_power_w(
-            self,
-            current_a: float | None,
-            phase_selection: PhaseSelection,
-        ) -> float | None: ...
-
-        def _sync_estimated_charger_energy_cache(self, energy_kwh: float, power_w: float, now: float) -> None: ...
-
-        def _integrated_estimated_charger_energy_kwh(self, power_w: float, now: float) -> float: ...
-
-        def _remember_charger_estimate(self, source: str, now: float | None = None) -> None: ...
-
-        def _clear_charger_estimate(self) -> None: ...
-
-        def _estimated_phase_voltage_v(self, selection: PhaseSelection) -> float: ...
-
-        def _remember_phase_selection_state(
-            self,
-            *,
-            active: object | None = None,
-            requested: object | None = None,
-            supported: object | None = None,
-        ) -> None: ...
-
-        def _runtime_cached_charger_state(
-            self,
-            *,
-            now: float | None = None,
-            max_age_seconds: float | None = None,
-        ) -> ChargerState | None: ...
+    def __init__(
+        self,
+        service: ShellyReadbackHost,
+        capabilities: ShellyCapabilities,
+        runtime: ShellyChargerRuntime,
+        cache: ShellyRuntimeCache,
+        clock: Callable[[], float],
+    ) -> None:
+        self.service = service
+        self.capabilities = capabilities
+        self.runtime = runtime
+        self.cache = cache
+        self._clock = clock
 
     def _split_switch_state_backend(self) -> _SwitchStateBackendLike | None:
-        backend = self._split_switch_backend()
+        backend = self.capabilities.split_switch_backend()
         return backend if is_switch_state_backend(backend) else None
 
-    def _split_switch_state(self) -> object | None:
+    def _split_switch_state(self) -> SwitchState | None:
         backend = self._split_switch_state_backend()
         if backend is None:
-            self._store_runtime_switch_snapshot(None)
+            self.capabilities.store_runtime_switch_snapshot(None)
             return None
         switch_state = backend.read_switch_state()
-        self._store_runtime_switch_snapshot(switch_state)
+        self.capabilities.store_runtime_switch_snapshot(switch_state)
         return switch_state
 
     @staticmethod
@@ -103,8 +68,8 @@ class ShellyIoSplit(ShellyIoRuntime):
         if reading.current_a is not None:
             pm_status["current"] = float(reading.current_a)
         resolved_relay = reading.relay_on if relay_on is None else relay_on
-        ShellyIoSplit._apply_meter_output(pm_status, resolved_relay)
-        ShellyIoSplit._apply_meter_phase_fields(pm_status, reading)
+        ShellyBackendReadback._apply_meter_output(pm_status, resolved_relay)
+        ShellyBackendReadback._apply_meter_phase_fields(pm_status, reading)
         return pm_status
 
     @staticmethod
@@ -138,9 +103,9 @@ class ShellyIoSplit(ShellyIoRuntime):
         active_phase_selection: object | None = None,
     ) -> ShellyPmStatus:
         svc = self.service
-        current_time = self._runtime_now()
+        current_time = self._clock()
         phase_selection = self._resolved_pm_phase_selection(state, active_phase_selection)
-        current_a = self._resolved_pm_charger_current(state)
+        current_a = self.runtime.resolved_pm_charger_current(state)
         power_w, power_estimated = self._resolved_pm_power(state, current_a, phase_selection)
         energy_kwh, energy_estimated = self._resolved_pm_energy(state, power_w, current_time)
         voltage_v = self._resolved_pm_voltage(svc, phase_selection, power_estimated, energy_estimated)
@@ -161,19 +126,19 @@ class ShellyIoSplit(ShellyIoRuntime):
         power_w = finite_float_or_none(state.power_w)
         if power_w is not None:
             return power_w, False
-        estimated_power = self._estimated_charger_power_w(current_a, phase_selection)
+        estimated_power = self.runtime.estimated_charger_power_w(current_a, phase_selection)
         return (0.0 if estimated_power is None else estimated_power), estimated_power is not None
 
     def _resolved_pm_energy(self, state: ChargerState, power_w: float, current_time: float) -> tuple[float, bool]:
         energy_kwh = finite_float_or_none(state.energy_kwh)
         if energy_kwh is not None:
-            self._sync_estimated_charger_energy_cache(energy_kwh, power_w, current_time)
+            self.runtime.sync_estimated_charger_energy_cache(energy_kwh, power_w, current_time)
             return energy_kwh, False
-        return self._integrated_estimated_charger_energy_kwh(power_w, current_time), True
+        return self.runtime.integrated_estimated_charger_energy_kwh(power_w, current_time), True
 
     def _resolved_pm_voltage(
         self,
-        svc: ShellyIoHost,
+        svc: ShellyReadbackHost,
         phase_selection: PhaseSelection,
         power_estimated: bool,
         energy_estimated: bool,
@@ -181,14 +146,14 @@ class ShellyIoSplit(ShellyIoRuntime):
         voltage_v = finite_float_or_none(getattr(svc, "_last_voltage", None))
         if voltage_v is not None or not (power_estimated or energy_estimated):
             return voltage_v
-        return float(self._estimated_phase_voltage_v(phase_selection))
+        return float(self.runtime.estimated_phase_voltage_v(phase_selection))
 
     def _sync_pm_estimate_marker(self, power_estimated: bool, energy_estimated: bool, current_time: float) -> None:
         if power_estimated or energy_estimated:
             source = "current-voltage-phase" if power_estimated else "power-time"
-            self._remember_charger_estimate(source, current_time)
+            self.runtime.remember_charger_estimate(source, current_time)
             return
-        self._clear_charger_estimate()
+        self.runtime.clear_charger_estimate()
 
     def _apply_phase_projection(
         self,
@@ -254,13 +219,13 @@ class ShellyIoSplit(ShellyIoRuntime):
         try:
             return self._split_switch_state()
         except BACKEND_OPTIONAL_CAPABILITY_ERRORS:
-            self._store_runtime_switch_snapshot(None)
+            self.capabilities.store_runtime_switch_snapshot(None)
             return None
 
     def _runtime_cached_charger_state_for_split(self, now: float | None) -> ChargerState | None:
         configured_age = finite_float_or_none(getattr(self.service, "auto_shelly_soft_fail_seconds", None))
         max_age_seconds = 0.0 if configured_age is None else max(0.0, configured_age)
-        return self._runtime_cached_charger_state(now=now, max_age_seconds=max_age_seconds)
+        return self.cache.cached_charger_state(now=now, max_age_seconds=max_age_seconds)
 
     def _resolved_switch_overrides(
         self,
@@ -291,7 +256,7 @@ class ShellyIoSplit(ShellyIoRuntime):
             recent_charger_state.enabled,
             recent_charger_state.phase_selection,
         )
-        self._remember_phase_selection_state(
+        self.capabilities.remember_phase_selection_state(
             supported=supported_phase_selections,
             requested=getattr(
                 svc,
@@ -320,21 +285,21 @@ class ShellyIoSplit(ShellyIoRuntime):
             reading.relay_on,
             reading.phase_selection,
         )
-        self._remember_phase_selection_state(
+        self.capabilities.remember_phase_selection_state(
             supported=supported_phase_selections,
             requested=getattr(self.service, "requested_phase_selection", reading.phase_selection),
             active=active_phase_selection,
         )
         return dict(self._pm_status_from_meter_reading(reading, relay_on=relay_on))
 
-    def _read_split_pm_status(
+    def read_pm_status(
         self,
         charger_state: ChargerState | None = None,
         *,
         now: float | None = None,
     ) -> JsonObject:
-        backend = self._split_meter_backend()
-        supported_phase_selections = self._split_switch_supported_phase_selections()
+        backend = self.capabilities.split_meter_backend()
+        supported_phase_selections = self.capabilities.split_switch_supported_phase_selections()
         switch_state = self._safe_split_switch_state()
         if backend is None:
             return self._read_split_pm_status_without_meter(
@@ -354,3 +319,6 @@ def _phase_triplet(values: tuple[float, float, float]) -> tuple[float, float, fl
     """Return one normalized three-phase float vector."""
     first, second, third = values
     return float(first), float(second), float(third)
+
+
+__all__ = ["ShellyBackendReadback"]

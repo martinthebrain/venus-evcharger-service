@@ -7,9 +7,9 @@ health, retry visibility, contactor suspicion, and feedback mismatch state.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Protocol, TypeGuard
 
-from venus_evcharger.backend.models import switch_feedback_mismatch
+from venus_evcharger.backend.models import ChargerState, SwitchState, switch_feedback_mismatch
 from venus_evcharger.core.common import (
     _charger_transport_health_reason,
     _fresh_charger_retry_reason,
@@ -17,7 +17,9 @@ from venus_evcharger.core.common import (
 )
 
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.update.relay_charger_current import _RelayChargerCurrent
+from venus_evcharger.update.readback_resolver import FreshReadbacks
+from venus_evcharger.update.relay_charger_readback import ChargerBackendAccess
+from venus_evcharger.update.relay_charger_transport import ChargerTransportTracker
 
 # Safety invariants for charger health:
 # - Direct switch feedback and interlock faults override heuristic contactor guesses.
@@ -32,119 +34,124 @@ from venus_evcharger.update.relay_charger_current import _RelayChargerCurrent
 # - Backend enable state is preferred over relay state when fresh readback exists.
 
 
-class _RelayChargerHealth(_RelayChargerCurrent):
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+class ReadbackResolverPort(Protocol):
+    def resolve(self, now: float | None = None) -> FreshReadbacks: ...
+
+
+class ChargerHealthService(Protocol):
+    @property
+    def _readback_resolver(self) -> ReadbackResolverPort: ...
+
+
+class ChargerHealthMonitor:
     """Combine charger transport, contactor heuristics, and status overrides."""
 
-    if TYPE_CHECKING:
-        CHARGER_STATUS_CHARGING_HINT_TOKENS: frozenset[str]
-        CHARGER_STATUS_READY_HINT_TOKENS: frozenset[str]
-        CHARGER_STATUS_WAITING_HINT_TOKENS: frozenset[str]
-        CHARGER_STATUS_FINISHED_HINT_TOKENS: frozenset[str]
+    def __init__(
+        self,
+        backends: ChargerBackendAccess,
+        transport: ChargerTransportTracker,
+        *,
+        charging_tokens: frozenset[str],
+        ready_tokens: frozenset[str],
+        waiting_tokens: frozenset[str],
+        finished_tokens: frozenset[str],
+    ) -> None:
+        self._backends = backends
+        self._transport = transport
+        self._charging_tokens = charging_tokens
+        self._ready_tokens = ready_tokens
+        self._waiting_tokens = waiting_tokens
+        self._finished_tokens = finished_tokens
 
-        @staticmethod
-        def _contactor_heuristic_delay_seconds(svc: Any) -> float: ...
+    @staticmethod
+    def _contactor_heuristic_delay_seconds(svc: object) -> float:
+        return max(0.0, float(getattr(svc, "auto_shelly_soft_fail_seconds", 0.0)))
 
-        @staticmethod
-        def _contactor_lockout_threshold(svc: Any) -> int: ...
+    @staticmethod
+    def _contactor_lockout_threshold(svc: object) -> int:
+        return max(0, int(getattr(svc, "auto_contactor_fault_latch_count", 3)))
 
-        @staticmethod
-        def _contactor_lockout_persistence_seconds(svc: Any) -> float: ...
+    @staticmethod
+    def _contactor_lockout_persistence_seconds(svc: object) -> float:
+        return max(0.0, float(getattr(svc, "auto_contactor_fault_latch_seconds", 60.0)))
 
-        @staticmethod
-        def _contactor_power_threshold_w(svc: Any) -> float: ...
+    @staticmethod
+    def _contactor_power_threshold_w(svc: object) -> float:
+        configured = finite_float_or_none(getattr(svc, "charging_threshold_watts", None))
+        return 100.0 if configured is None else max(100.0, float(configured))
 
-        @staticmethod
-        def _contactor_current_threshold_a(svc: Any) -> float: ...
+    @staticmethod
+    def _contactor_current_threshold_a(svc: object) -> float:
+        configured = finite_float_or_none(getattr(svc, "min_current", None))
+        return 1.0 if configured is None else max(1.0, float(configured) / 4.0)
 
-        @staticmethod
-        def _charger_enable_backend(svc: Any) -> Any | None: ...
-
-        @classmethod
-        def _fresh_charger_power_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
-
-        @classmethod
-        def _fresh_charger_actual_current_readback(cls, svc: Any, now: float | None = None) -> float | None: ...
-
-        @classmethod
-        def _fresh_charger_text_readback(
-            cls,
-            svc: Any,
-            attribute_name: str,
-            now: float | None = None,
-        ) -> str | None: ...
-
-        @classmethod
-        def _charger_text_tokens(cls, value: str | None) -> set[str]: ...
-
-        @classmethod
-        def _charger_text_indicates_fault(cls, value: str | None) -> bool: ...
-
-        @classmethod
-        def _fresh_switch_interlock_ok(cls, svc: Any, now: float | None = None) -> bool | None: ...
-
-        @classmethod
-        def _fresh_switch_feedback_closed(cls, svc: Any, now: float | None = None) -> bool | None: ...
-
-        @classmethod
-        def _fresh_charger_enabled_readback(cls, svc: Any, now: float | None = None) -> bool | None: ...
-
-    @classmethod
     def _pm_load_active(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         power: float | None,
         current: float | None,
         pm_confirmed: bool,
     ) -> bool:
         if not pm_confirmed:
             return False
-        if power is not None and float(power) >= cls._contactor_power_threshold_w(svc):
+        if power is not None and float(power) >= self._contactor_power_threshold_w(svc):
             return True
-        return current is not None and float(current) >= cls._contactor_current_threshold_a(svc)
+        return current is not None and float(current) >= self._contactor_current_threshold_a(svc)
 
-    @classmethod
-    def _charger_load_active(cls, svc: Any, now: float | None = None) -> bool:
-        power = cls._fresh_charger_power_readback(svc, now)
-        if power is not None and float(power) >= cls._contactor_power_threshold_w(svc):
+    def _charger_load_active(self, svc: ChargerHealthService, now: float | None = None) -> bool:
+        readback = svc._readback_resolver.resolve(now).charger
+        return False if readback is None else self._charger_state_load_active(svc, readback.state)
+
+    def _charger_state_load_active(self, svc: ChargerHealthService, state: ChargerState) -> bool:
+        power = state.power_w
+        if power is not None and float(power) >= self._contactor_power_threshold_w(svc):
             return True
-        current = cls._fresh_charger_actual_current_readback(svc, now)
-        return current is not None and float(current) >= cls._contactor_current_threshold_a(svc)
+        current = state.actual_current_amps
+        return current is not None and float(current) >= self._contactor_current_threshold_a(svc)
 
-    @classmethod
-    def _charger_requests_load(cls, svc: Any, now: float | None = None) -> bool:
-        if cls._charger_load_active(svc, now):
+    def _charger_requests_load(self, svc: ChargerHealthService, now: float | None = None) -> bool:
+        readback = svc._readback_resolver.resolve(now).charger
+        if readback is None:
+            return False
+        return self._charger_state_requests_load(svc, readback.state)
+
+    def _charger_state_requests_load(self, svc: ChargerHealthService, state: ChargerState) -> bool:
+        if self._charger_state_load_active(svc, state):
             return True
-        tokens = cls._charger_text_tokens(cls._fresh_charger_text_readback(svc, "_last_charger_state_status", now))
-        return bool(tokens & set(cls.CHARGER_STATUS_CHARGING_HINT_TOKENS))
+        tokens = self._backends.text_tokens(state.status_text)
+        return bool(tokens & set(self._charging_tokens))
 
-    @classmethod
     def _observed_load_active(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         power: float | None,
         current: float | None,
         pm_confirmed: bool,
         now: float | None = None,
     ) -> bool:
-        if cls._pm_load_active(svc, power, current, pm_confirmed):
+        if self._pm_load_active(svc, power, current, pm_confirmed):
             return True
-        return cls._charger_load_active(svc, now)
+        readback = svc._readback_resolver.resolve(now).charger
+        return readback is not None and self._charger_state_load_active(svc, readback.state)
 
-    @classmethod
     def _heuristic_condition_age(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         attribute_name: str,
         condition_active: bool,
         now: float | None,
     ) -> float | None:
-        current = cls._charger_readback_now(svc, now)
+        current = self._transport.now(svc, now)
         if not condition_active:
-            cls._set_runtime_attr(svc, attribute_name, None)
+            self._transport.set_runtime_attr(svc, attribute_name, None)
             return None
         started_at = finite_float_or_none(getattr(svc, attribute_name, None))
         if started_at is None:
-            cls._set_runtime_attr(svc, attribute_name, current)
+            self._transport.set_runtime_attr(svc, attribute_name, current)
             return 0.0
         return float(max(0.0, current - float(started_at)))
 
@@ -157,28 +164,26 @@ class _RelayChargerHealth(_RelayChargerCurrent):
             return normalized
         return None
 
-    @classmethod
-    def _contactor_lockout_health_reason(cls, base_reason: object) -> str | None:
-        normalized = cls._base_contactor_fault_reason(base_reason)
+    def _contactor_lockout_health_reason(self, base_reason: object) -> str | None:
+        normalized = self._base_contactor_fault_reason(base_reason)
         if normalized == "contactor-suspected-open":
             return "contactor-lockout-open"
         if normalized == "contactor-suspected-welded":
             return "contactor-lockout-welded"
         return None
 
-    @staticmethod
-    def _contactor_fault_counts(svc: Any) -> dict[str, int]:
+    def _contactor_fault_counts(self, svc: ChargerHealthService) -> dict[str, int]:
         counts = getattr(svc, "_contactor_fault_counts", None)
-        if isinstance(counts, dict):
-            normalized = _RelayChargerHealth._normalized_contactor_fault_counts(counts)
-            _RelayChargerHealth._set_runtime_attr(svc, "_contactor_fault_counts", normalized)
+        if _is_object_dict(counts):
+            normalized = self._normalized_contactor_fault_counts(counts)
+            self._transport.set_runtime_attr(svc, "_contactor_fault_counts", normalized)
             return normalized
         empty_counts: dict[str, int] = {}
-        _RelayChargerHealth._set_runtime_attr(svc, "_contactor_fault_counts", empty_counts)
+        self._transport.set_runtime_attr(svc, "_contactor_fault_counts", empty_counts)
         return empty_counts
 
     @staticmethod
-    def _normalized_contactor_fault_counts(counts: dict[Any, Any]) -> dict[str, int]:
+    def _normalized_contactor_fault_counts(counts: dict[object, object]) -> dict[str, int]:
         normalized: dict[str, int] = {}
         for reason, count in counts.items():
             if reason not in {"contactor-suspected-open", "contactor-suspected-welded"}:
@@ -188,108 +193,105 @@ class _RelayChargerHealth(_RelayChargerCurrent):
             normalized[str(reason)] = max(0, count)
         return normalized
 
-    @classmethod
-    def _contactor_fault_count(cls, svc: Any, reason: object) -> int:
-        normalized = cls._base_contactor_fault_reason(reason)
+    def _contactor_fault_count(self, svc: ChargerHealthService, reason: object) -> int:
+        normalized = self._base_contactor_fault_reason(reason)
         if normalized is None:
             return 0
-        return max(0, int(cls._contactor_fault_counts(svc).get(normalized, 0)))
+        return max(0, int(self._contactor_fault_counts(svc).get(normalized, 0)))
 
-    @classmethod
-    def _clear_contactor_fault_active_state(cls, svc: Any) -> None:
-        cls._set_runtime_attr(svc, "_contactor_fault_active_reason", None)
-        cls._set_runtime_attr(svc, "_contactor_fault_active_since", None)
+    def _clear_contactor_fault_active_state(self, svc: ChargerHealthService) -> None:
+        self._transport.set_runtime_attr(svc, "_contactor_fault_active_reason", None)
+        self._transport.set_runtime_attr(svc, "_contactor_fault_active_since", None)
 
-    @classmethod
-    def _clear_contactor_lockout(cls, svc: Any) -> None:
-        cls._set_runtime_attr(svc, "_contactor_lockout_reason", "")
-        cls._set_runtime_attr(svc, "_contactor_lockout_source", "")
-        cls._set_runtime_attr(svc, "_contactor_lockout_at", None)
+    def _clear_contactor_lockout(self, svc: ChargerHealthService) -> None:
+        self._transport.set_runtime_attr(svc, "_contactor_lockout_reason", "")
+        self._transport.set_runtime_attr(svc, "_contactor_lockout_source", "")
+        self._transport.set_runtime_attr(svc, "_contactor_lockout_at", None)
 
-    @classmethod
-    def _clear_contactor_fault_tracking(cls, svc: Any) -> None:
-        cls._set_runtime_attr(svc, "_contactor_fault_counts", {})
-        cls._clear_contactor_fault_active_state(svc)
-        cls._clear_contactor_lockout(svc)
-        cls._set_runtime_attr(svc, "_contactor_suspected_open_since", None)
-        cls._set_runtime_attr(svc, "_contactor_suspected_welded_since", None)
+    def _clear_contactor_fault_tracking(self, svc: ChargerHealthService) -> None:
+        self._transport.set_runtime_attr(svc, "_contactor_fault_counts", {})
+        self._clear_contactor_fault_active_state(svc)
+        self._clear_contactor_lockout(svc)
+        self._transport.set_runtime_attr(svc, "_contactor_suspected_open_since", None)
+        self._transport.set_runtime_attr(svc, "_contactor_suspected_welded_since", None)
 
-    @classmethod
     def _engage_contactor_lockout(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         base_reason: object,
         now: float | None,
         source: str,
     ) -> None:
-        normalized = cls._base_contactor_fault_reason(base_reason)
+        normalized = self._base_contactor_fault_reason(base_reason)
         if normalized is None:
-            cls._clear_contactor_lockout(svc)
+            self._clear_contactor_lockout(svc)
             return
-        current = cls._charger_readback_now(svc, now)
-        cls._set_runtime_attr(svc, "_contactor_lockout_reason", normalized)
-        cls._set_runtime_attr(svc, "_contactor_lockout_source", str(source).strip() or "count-threshold")
-        cls._set_runtime_attr(svc, "_contactor_lockout_at", current)
+        current = self._transport.now(svc, now)
+        self._transport.set_runtime_attr(svc, "_contactor_lockout_reason", normalized)
+        self._transport.set_runtime_attr(svc, "_contactor_lockout_source", str(source).strip() or "count-threshold")
+        self._transport.set_runtime_attr(svc, "_contactor_lockout_at", current)
 
-    @classmethod
-    def _active_contactor_lockout_health(cls, svc: Any) -> str | None:
+    def _active_contactor_lockout_health(self, svc: ChargerHealthService) -> str | None:
         if not hasattr(svc, "_contactor_lockout_reason"):
             return None
-        return cls._contactor_lockout_health_reason(getattr(svc, "_contactor_lockout_reason"))
+        return self._contactor_lockout_health_reason(getattr(svc, "_contactor_lockout_reason"))
 
-    @classmethod
-    def _remember_contactor_fault(cls, svc: Any, reason: object, now: float | None) -> str | None:
-        normalized = cls._base_contactor_fault_reason(reason)
+    def _remember_contactor_fault(self, svc: ChargerHealthService, reason: object, now: float | None) -> str | None:
+        normalized = self._base_contactor_fault_reason(reason)
         if normalized is None:
-            cls._clear_contactor_fault_active_state(svc)
+            self._clear_contactor_fault_active_state(svc)
             return None
-        current = cls._charger_readback_now(svc, now)
-        active_since = cls._activate_contactor_fault_reason(svc, normalized, current)
-        current_count = cls._contactor_fault_count(svc, normalized)
-        if cls._contactor_fault_exceeds_count_threshold(svc, current_count):
-            cls._engage_contactor_lockout(svc, normalized, current, "count-threshold")
-            return cls._active_contactor_lockout_health(svc)
-        persistence_seconds = cls._contactor_lockout_persistence_seconds(svc)
+        current = self._transport.now(svc, now)
+        active_since = self._activate_contactor_fault_reason(svc, normalized, current)
+        current_count = self._contactor_fault_count(svc, normalized)
+        if self._contactor_fault_exceeds_count_threshold(svc, current_count):
+            self._engage_contactor_lockout(svc, normalized, current, "count-threshold")
+            return self._active_contactor_lockout_health(svc)
+        persistence_seconds = self._contactor_lockout_persistence_seconds(svc)
         if persistence_seconds > 0.0 and (current - active_since) >= persistence_seconds:
-            cls._engage_contactor_lockout(svc, normalized, current, "persistent")
-            return cls._active_contactor_lockout_health(svc)
+            self._engage_contactor_lockout(svc, normalized, current, "persistent")
+            return self._active_contactor_lockout_health(svc)
         return normalized
 
-    @classmethod
-    def _activate_contactor_fault_reason(cls, svc: Any, normalized: str, current: float) -> float:
-        active_reason = cls._base_contactor_fault_reason(getattr(svc, "_contactor_fault_active_reason", None))
+    def _activate_contactor_fault_reason(self, svc: ChargerHealthService, normalized: str, current: float) -> float:
+        active_reason = self._base_contactor_fault_reason(getattr(svc, "_contactor_fault_active_reason", None))
         active_since = finite_float_or_none(getattr(svc, "_contactor_fault_active_since", None))
         if active_reason == normalized and active_since is not None:
             return active_since
-        counts = cls._contactor_fault_counts(svc)
+        counts = self._contactor_fault_counts(svc)
         counts[normalized] = max(0, int(counts.get(normalized, 0))) + 1
-        cls._set_runtime_attr(svc, "_contactor_fault_active_reason", normalized)
-        cls._set_runtime_attr(svc, "_contactor_fault_active_since", current)
+        self._transport.set_runtime_attr(svc, "_contactor_fault_active_reason", normalized)
+        self._transport.set_runtime_attr(svc, "_contactor_fault_active_since", current)
         return current
 
-    @classmethod
-    def _contactor_fault_exceeds_count_threshold(cls, svc: Any, current_count: int) -> bool:
-        threshold = cls._contactor_lockout_threshold(svc)
+    def _contactor_fault_exceeds_count_threshold(self, svc: ChargerHealthService, current_count: int) -> bool:
+        threshold = self._contactor_lockout_threshold(svc)
         return bool(threshold > 0 and current_count >= threshold)
 
-    @classmethod
-    def charger_health_override(cls, svc: Any, now: float | None = None) -> str | None:
+    def charger_health_override(self, svc: ChargerHealthService, now: float | None = None) -> str | None:
+        transport_health = self._active_charger_transport_health(svc, now)
+        if transport_health is not None:
+            return transport_health
+        readback = svc._readback_resolver.resolve(now).charger
+        return None if readback is None else self._charger_state_health(readback.state)
+
+    @staticmethod
+    def _active_charger_transport_health(svc: ChargerHealthService, now: float | None) -> str | None:
         transport_reason = _fresh_charger_transport_reason(svc, now)
         if transport_reason is not None:
             return _charger_transport_health_reason(transport_reason)
         retry_reason = _fresh_charger_retry_reason(svc, now)
-        if retry_reason is not None:
-            return _charger_transport_health_reason(retry_reason)
-        if cls._charger_text_indicates_fault(cls._fresh_charger_text_readback(svc, "_last_charger_state_fault", now)):
-            return "charger-fault"
-        if cls._charger_text_indicates_fault(cls._fresh_charger_text_readback(svc, "_last_charger_state_status", now)):
-            return "charger-fault"
-        return None
+        return None if retry_reason is None else _charger_transport_health_reason(retry_reason)
 
-    @classmethod
+    def _charger_state_health(self, state: ChargerState) -> str | None:
+        fault_detected = self._backends.text_indicates_fault(state.fault_text) or self._backends.text_indicates_fault(
+            state.status_text
+        )
+        return "charger-fault" if fault_detected else None
+
     def switch_feedback_health_override(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         desired_relay: bool,
         relay_on: bool,
         now: float | None = None,
@@ -298,43 +300,51 @@ class _RelayChargerHealth(_RelayChargerCurrent):
         current: float | None = None,
         pm_confirmed: bool = False,
     ) -> str | None:
-        safety_override = cls._switch_feedback_safety_override(svc, desired_relay, relay_on, now)
+        safety_override = self._switch_feedback_safety_override(svc, desired_relay, relay_on, now)
         if safety_override is not None:
             return safety_override
-        latched_lockout = cls._active_contactor_lockout_health(svc)
+        latched_lockout = self._active_contactor_lockout_health(svc)
         if latched_lockout is not None:
             return latched_lockout
-        return cls._switch_feedback_heuristic_override(svc, relay_on, power, current, pm_confirmed, now)
+        return self._switch_feedback_heuristic_override(svc, relay_on, power, current, pm_confirmed, now)
 
-    @classmethod
     def _switch_feedback_safety_override(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         desired_relay: bool,
         relay_on: bool,
         now: float | None,
     ) -> str | None:
-        interlock_ok = cls._fresh_switch_interlock_ok(svc, now)
-        if interlock_ok is False and (bool(desired_relay) or bool(relay_on)):
-            cls._clear_contactor_suspicions(svc)
+        readback = svc._readback_resolver.resolve(now).switch
+        if readback is None:
+            return None
+        override = self._switch_state_safety_override(readback.state, desired_relay, relay_on)
+        if override is not None:
+            self._clear_contactor_suspicions(svc)
+        return override
+
+    @staticmethod
+    def _switch_state_safety_override(
+        state: SwitchState,
+        desired_relay: bool,
+        relay_on: bool,
+    ) -> str | None:
+        if state.interlock_ok is False and any((desired_relay, relay_on)):
             return "contactor-interlock"
-        feedback_closed = cls._fresh_switch_feedback_closed(svc, now)
-        if switch_feedback_mismatch(relay_on, feedback_closed):
-            cls._clear_contactor_suspicions(svc)
+        if switch_feedback_mismatch(relay_on, state.feedback_closed):
             return "contactor-feedback-mismatch"
         return None
 
-    @classmethod
     def _switch_feedback_heuristic_override(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         relay_on: bool,
         power: float | None,
         current: float | None,
         pm_confirmed: bool,
         now: float | None,
     ) -> str | None:
-        suspected_open_age, suspected_welded_age = cls._contactor_suspected_ages(
+        suspected_open_age, suspected_welded_age = self._contactor_suspected_ages(
             svc,
             relay_on,
             power,
@@ -342,94 +352,116 @@ class _RelayChargerHealth(_RelayChargerCurrent):
             pm_confirmed,
             now,
         )
-        delay_seconds = cls._contactor_heuristic_delay_seconds(svc)
+        delay_seconds = self._contactor_heuristic_delay_seconds(svc)
         if suspected_welded_age is not None and suspected_welded_age >= delay_seconds:
-            return cls._remember_contactor_fault(svc, "contactor-suspected-welded", now)
+            return self._remember_contactor_fault(svc, "contactor-suspected-welded", now)
         if suspected_open_age is not None and suspected_open_age >= delay_seconds:
-            return cls._remember_contactor_fault(svc, "contactor-suspected-open", now)
-        cls._clear_contactor_fault_active_state(svc)
+            return self._remember_contactor_fault(svc, "contactor-suspected-open", now)
+        self._clear_contactor_fault_active_state(svc)
         return None
 
-    @classmethod
     def _contactor_suspected_ages(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         relay_on: bool,
         power: float | None,
         current: float | None,
         pm_confirmed: bool,
         now: float | None,
     ) -> tuple[float | None, float | None]:
-        observed_load = cls._observed_load_active(svc, power, current, pm_confirmed, now)
-        demand_active = cls._charger_requests_load(svc, now)
+        readback = svc._readback_resolver.resolve(now).charger
+        state = None if readback is None else readback.state
+        observed_load = self._combined_load_active(svc, power, current, pm_confirmed, state)
+        demand_active = self._charger_state_requests_load_if_present(svc, state)
         return (
-            cls._heuristic_condition_age(
+            self._heuristic_condition_age(
                 svc,
                 "_contactor_suspected_open_since",
-                bool(relay_on) and demand_active and not observed_load,
+                self._suspected_open_condition(relay_on, demand_active, observed_load),
                 now,
             ),
-            cls._heuristic_condition_age(
+            self._heuristic_condition_age(
                 svc,
                 "_contactor_suspected_welded_since",
-                not bool(relay_on) and observed_load,
+                self._suspected_welded_condition(relay_on, observed_load),
                 now,
             ),
         )
 
-    @classmethod
-    def _clear_contactor_suspicions(cls, svc: Any) -> None:
-        cls._clear_contactor_fault_active_state(svc)
-        cls._set_runtime_attr(svc, "_contactor_suspected_open_since", None)
-        cls._set_runtime_attr(svc, "_contactor_suspected_welded_since", None)
+    def _combined_load_active(
+        self,
+        svc: ChargerHealthService,
+        power: float | None,
+        current: float | None,
+        pm_confirmed: bool,
+        state: ChargerState | None,
+    ) -> bool:
+        if self._pm_load_active(svc, power, current, pm_confirmed):
+            return True
+        return state is not None and self._charger_state_load_active(svc, state)
 
-    @classmethod
+    def _charger_state_requests_load_if_present(self, svc: ChargerHealthService, state: ChargerState | None) -> bool:
+        return state is not None and self._charger_state_requests_load(svc, state)
+
+    @staticmethod
+    def _suspected_open_condition(relay_on: bool, demand_active: bool, observed_load: bool) -> bool:
+        return all((relay_on, demand_active, not observed_load))
+
+    @staticmethod
+    def _suspected_welded_condition(relay_on: bool, observed_load: bool) -> bool:
+        return not relay_on and observed_load
+
+    def _clear_contactor_suspicions(self, svc: ChargerHealthService) -> None:
+        self._clear_contactor_fault_active_state(svc)
+        self._transport.set_runtime_attr(svc, "_contactor_suspected_open_since", None)
+        self._transport.set_runtime_attr(svc, "_contactor_suspected_welded_since", None)
+
     def _charger_status_override(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         auto_mode_active: bool,
         now: float | None = None,
     ) -> tuple[int, str] | None:
-        status_text = cls._fresh_charger_text_readback(svc, "_last_charger_state_status", now)
-        tokens = cls._charger_text_tokens(status_text)
+        readback = svc._readback_resolver.resolve(now).charger
+        status_text = None if readback is None else readback.state.status_text
+        tokens = self._backends.text_tokens(status_text)
         if not tokens:
             return None
-        return cls._charger_status_override_from_tokens(svc, tokens, auto_mode_active)
+        return self._charger_status_override_from_tokens(svc, tokens, auto_mode_active)
 
-    @classmethod
     def _charger_status_override_from_tokens(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         tokens: set[str],
         auto_mode_active: bool,
     ) -> tuple[int, str] | None:
-        for hint_tokens, status_code, status_source in cls._charger_status_token_rules(svc, auto_mode_active):
+        for hint_tokens, status_code, status_source in self._charger_status_token_rules(svc, auto_mode_active):
             if tokens & hint_tokens:
                 return status_code, status_source
         return None
 
-    @classmethod
     def _charger_status_token_rules(
-        cls,
-        svc: Any,
+        self,
+        svc: ChargerHealthService,
         auto_mode_active: bool,
     ) -> tuple[tuple[set[str], int, str], ...]:
         return (
-            (set(cls.CHARGER_STATUS_FINISHED_HINT_TOKENS), 3, "charger-status-finished"),
-            (set(cls.CHARGER_STATUS_WAITING_HINT_TOKENS), 4 if auto_mode_active else 6, "charger-status-waiting"),
-            (set(cls.CHARGER_STATUS_CHARGING_HINT_TOKENS), 2, "charger-status-charging"),
-            (set(cls.CHARGER_STATUS_READY_HINT_TOKENS), int(getattr(svc, "idle_status", 1)), "charger-status-ready"),
+            (set(self._finished_tokens), 3, "charger-status-finished"),
+            (set(self._waiting_tokens), 4 if auto_mode_active else 6, "charger-status-waiting"),
+            (set(self._charging_tokens), 2, "charger-status-charging"),
+            (set(self._ready_tokens), int(getattr(svc, "idle_status", 1)), "charger-status-ready"),
         )
 
-    @classmethod
-    def _effective_enabled_state(cls, svc: Any, relay_on: bool, now: float | None = None) -> bool:
-        charger_enabled = cls._fresh_charger_enabled_readback(svc, now)
+    def _effective_enabled_state(self, svc: ChargerHealthService, relay_on: bool, now: float | None = None) -> bool:
+        readback = svc._readback_resolver.resolve(now).charger
+        charger_enabled = None if readback is None else readback.state.enabled
         return bool(relay_on) if charger_enabled is None else bool(charger_enabled)
 
-    @classmethod
-    def _enable_control_source_key(cls, svc: Any) -> str:
-        return "charger" if cls._charger_enable_backend(svc) is not None else "shelly"
+    def _enable_control_source_key(self, svc: ChargerHealthService) -> str:
+        return "charger" if self._backends.enable_backend(svc) is not None else "shelly"
 
-    @classmethod
-    def _enable_control_label(cls, svc: Any) -> str:
-        return "charger backend" if cls._charger_enable_backend(svc) is not None else "Shelly relay"
+    def _enable_control_label(self, svc: ChargerHealthService) -> str:
+        return "charger backend" if self._backends.enable_backend(svc) is not None else "Shelly relay"
+
+
+__all__ = ["ChargerHealthMonitor", "ChargerHealthService", "ReadbackResolverPort"]

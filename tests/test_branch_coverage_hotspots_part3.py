@@ -4,7 +4,17 @@ from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths
 
 class _BranchCoverageVictronApplyCasesPart1:
     def test_victron_apply_helper_branches(self) -> None:
-        controller = _controller()
+        components = _components()
+        controller = components.executor
+        sources = components.sources
+        writer = components.writer
+        pid = components.pid
+        profiles = components.profiles
+        recovery = components.recovery
+        safety = components.safety
+        telemetry = components.telemetry
+        recommendation = components.recommendation
+        adaptive = components.adaptive
         gateway_temp = tempfile.TemporaryDirectory()
         self.addCleanup(gateway_temp.cleanup)
         service = SimpleNamespace(
@@ -22,8 +32,7 @@ class _BranchCoverageVictronApplyCasesPart1:
             auto_battery_discharge_balance_victron_bias_service="",
             auto_battery_discharge_balance_victron_bias_path="",
             dbus_method_timeout_seconds=1.0,
-            _warning_throttled=MagicMock(),
-            _reset_system_bus=MagicMock(),
+            runtime=SimpleNamespace(warning_throttled=MagicMock()),
             _last_auto_metrics=None,
             _victron_ess_balance_last_write_at=100.0,
             _victron_ess_balance_last_setpoint_w=75.0,
@@ -42,20 +51,20 @@ class _BranchCoverageVictronApplyCasesPart1:
             (service._last_energy_cluster, "insufficient-eligible-sources"),
         )
 
-        with patch.object(controller, "_victron_ess_balance_source", return_value=(None, "missing")):
+        with patch.object(sources, "_victron_ess_balance_source", return_value=(None, "missing")):
             self.assertEqual(
                 controller._victron_ess_balance_source_state({}, service, {}),
                 (None, None, "missing"),
             )
 
-        with patch.object(controller, "_victron_ess_balance_source", return_value=({"source_id": "a", "online": False}, "")):
+        with patch.object(sources, "_victron_ess_balance_source", return_value=({"source_id": "a", "online": False}, "")):
             self.assertEqual(
                 controller._victron_ess_balance_source_state({}, service, {}),
                 (None, None, "victron-source-offline"),
             )
 
         with patch.object(
-            controller,
+            sources,
             "_victron_ess_balance_source",
             return_value=({"source_id": "a", "online": True, "discharge_balance_error_w": None}, ""),
         ):
@@ -65,59 +74,58 @@ class _BranchCoverageVictronApplyCasesPart1:
             )
 
         with patch.object(
-            controller,
+            sources,
             "_victron_ess_balance_source",
             return_value=({"source_id": "a", "online": True, "discharge_balance_error_w": 10.0}, ""),
-        ), patch.object(controller, "_victron_ess_balance_source_support_allowed", return_value=False):
+        ), patch.object(sources, "_victron_ess_balance_source_support_allowed", return_value=False):
             self.assertEqual(
                 controller._victron_ess_balance_source_state({}, service, {}),
                 (None, None, "victron-source-support-blocked"),
             )
 
-        self.assertEqual(controller._victron_ess_balance_support_mode(service), "allow_experimental")
-        self.assertEqual(controller._victron_ess_balance_activation_mode(service), "always")
+        self.assertEqual(sources._victron_ess_balance_support_mode(service), "allow_experimental")
+        self.assertEqual(sources._victron_ess_balance_activation_mode(service), "always")
         self.assertFalse(
-            controller._victron_ess_balance_activation_allowed(
+            sources._victron_ess_balance_activation_allowed(
                 {"site_regime": "import", "reserve_phase": "reserve_band"},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_activation_mode="export_and_above_reserve_band"),
             )
         )
-        self.assertTrue(controller._victron_ess_balance_activation_site_regime_matches("above_reserve_band", "import"))
-        self.assertTrue(controller._victron_ess_balance_activation_reserve_phase_matches("export_only", "reserve_band"))
+        self.assertTrue(sources._victron_ess_balance_activation_site_regime_matches("above_reserve_band", "import"))
+        self.assertTrue(sources._victron_ess_balance_activation_reserve_phase_matches("export_only", "reserve_band"))
         self.assertTrue(
-            controller._victron_ess_balance_activation_allowed(
+            sources._victron_ess_balance_activation_allowed(
                 {"site_regime": "import", "reserve_phase": "reserve_band"},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_activation_mode="always"),
             )
         )
 
-        self.assertFalse(controller._victron_ess_balance_should_write(service, 105.0, 80.0))
-        self.assertFalse(controller._victron_ess_balance_write_setpoint(service, "", "", 10.0))
-        self.assertEqual(controller._victron_ess_balance_write_target(None, None), ("", ""))
-        self.assertEqual(controller._victron_ess_balance_write_payload(object(), 12.5), 12.5)
+        self.assertFalse(writer._victron_ess_balance_should_write(service, 105.0, 80.0))
+        self.assertFalse(writer._victron_ess_balance_write_setpoint(service, "", "", 10.0))
+        self.assertEqual(writer._victron_ess_balance_write_target(None, None), ("", ""))
+        self.assertEqual(writer._victron_ess_balance_write_payload(object(), 12.5), 12.5)
 
-        with patch.object(controller, "_victron_ess_balance_write_error", return_value=RuntimeError("boom")):
-            self.assertFalse(controller._victron_ess_balance_write_setpoint(service, "svc", "/path", 10.0))
-            service._warning_throttled.assert_called()
+        with patch.object(writer, "_victron_ess_balance_write_error", return_value=RuntimeError("boom")):
+            self.assertFalse(writer._victron_ess_balance_write_setpoint(service, "svc", "/path", 10.0))
+            service.runtime.warning_throttled.assert_called()
 
         with patch.object(
-            controller,
+            writer,
             "_victron_ess_balance_try_write_setpoint",
             side_effect=[RuntimeError("first"), None],
-        ), patch.object(controller, "_victron_ess_balance_log_write_retry") as log_retry:
-            self.assertIsNone(controller._victron_ess_balance_write_error(service, "svc", "/path", 10.0))
+        ), patch.object(writer, "_victron_ess_balance_log_write_retry") as log_retry:
+            self.assertIsNone(writer._victron_ess_balance_write_error(service, "svc", "/path", 10.0))
             log_retry.assert_called_once()
-            service._reset_system_bus.assert_not_called()
         with patch.object(
-            controller,
+            writer,
             "_victron_ess_balance_try_write_setpoint",
             side_effect=[RuntimeError("first"), RuntimeError("second")],
-        ), patch.object(controller, "_victron_ess_balance_log_write_retry") as log_retry:
-            last_error = controller._victron_ess_balance_write_error(service, "svc", "/path", 10.0)
+        ), patch.object(writer, "_victron_ess_balance_log_write_retry") as log_retry:
+            last_error = writer._victron_ess_balance_write_error(service, "svc", "/path", 10.0)
             self.assertEqual(str(last_error), "second")
             log_retry.assert_called_once()
 
-        controller._victron_ess_balance_try_write_setpoint(service, "svc", "/path", 12.0)
+        writer._victron_ess_balance_try_write_setpoint(service, "svc", "/path", 12.0)
         commands = DbusCommandInbox(gateway_paths(service.dbus_gateway_run_dir).command_dir).load_pending()
         self.assertTrue(
             any(
@@ -130,66 +138,66 @@ class _BranchCoverageVictronApplyCasesPart1:
         )
 
         with patch("venus_evcharger.update.victron_ess_balance_apply.logging.debug") as debug_log:
-            controller._victron_ess_balance_log_write_retry("svc", "/path", RuntimeError("boom"))
+            writer._victron_ess_balance_log_write_retry("svc", "/path", RuntimeError("boom"))
             debug_log.assert_called_once()
 
-        self.assertEqual(controller._victron_ess_balance_pid_output(service, 150.0, 101.0), 10.0)
-        self.assertEqual(controller._victron_ess_balance_pid_output(service, 0.0, 102.0), 0.0)
+        self.assertEqual(pid._victron_ess_balance_pid_output(service, 150.0, 101.0), 10.0)
+        self.assertEqual(pid._victron_ess_balance_pid_output(service, 0.0, 102.0), 0.0)
 
-        with patch.object(controller, "_victron_ess_balance_should_write", return_value=False):
+        with patch.object(writer, "_victron_ess_balance_should_write", return_value=False):
             controller._victron_ess_balance_tracking_write_state(service, 110.0, 75.0, 25.0, "profile", metrics)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "holding")
         service._victron_ess_balance_last_setpoint_w = None
         metrics = {}
-        with patch.object(controller, "_victron_ess_balance_should_write", return_value=False):
+        with patch.object(writer, "_victron_ess_balance_should_write", return_value=False):
             controller._victron_ess_balance_tracking_write_state(service, 110.5, 75.0, 25.0, "profile", metrics)
         self.assertEqual(metrics, {})
-        with patch.object(controller, "_victron_ess_balance_should_write", return_value=True), patch.object(
+        with patch.object(writer, "_victron_ess_balance_should_write", return_value=True), patch.object(
             controller, "_victron_ess_balance_apply_write_outcome"
         ) as apply_outcome:
             controller._victron_ess_balance_tracking_write_state(service, 111.0, 75.0, 25.0, "profile", {})
             apply_outcome.assert_called_once()
 
-        with patch.object(controller, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
-            controller, "_maybe_auto_apply_victron_ess_balance_recommendation"
-        ), patch.object(controller, "_merge_victron_ess_balance_metrics"):
+        with patch.object(recommendation, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
+            adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation"
+        ), patch.object(sources, "_merge_victron_ess_balance_metrics"):
             service._victron_ess_balance_last_setpoint_w = None
             metrics = {}
             controller._restore_victron_ess_balance_base_setpoint(service, 120.0, metrics, "blocked")
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "blocked")
 
-        with patch.object(controller, "_victron_ess_balance_should_write", return_value=False), patch.object(
-            controller, "_populate_victron_ess_balance_telemetry_metrics"
-        ), patch.object(controller, "_maybe_auto_apply_victron_ess_balance_recommendation"), patch.object(
-            controller, "_merge_victron_ess_balance_metrics"
+        with patch.object(writer, "_victron_ess_balance_should_write", return_value=False), patch.object(
+            recommendation, "_populate_victron_ess_balance_telemetry_metrics"
+        ), patch.object(adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation"), patch.object(
+            sources, "_merge_victron_ess_balance_metrics"
         ):
             service._victron_ess_balance_last_setpoint_w = 70.0
             metrics = {}
             controller._restore_victron_ess_balance_base_setpoint(service, 121.0, metrics, "blocked")
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "blocked-holding")
 
-        with patch.object(controller, "_victron_ess_balance_should_write", return_value=True), patch.object(
-            controller, "_victron_ess_balance_write_setpoint", return_value=False
-        ), patch.object(controller, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
-            controller, "_maybe_auto_apply_victron_ess_balance_recommendation"
-        ), patch.object(controller, "_merge_victron_ess_balance_metrics"):
+        with patch.object(writer, "_victron_ess_balance_should_write", return_value=True), patch.object(
+            writer, "_victron_ess_balance_write_setpoint", return_value=False
+        ), patch.object(recommendation, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
+            adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation"
+        ), patch.object(sources, "_merge_victron_ess_balance_metrics"):
             metrics = {}
             controller._restore_victron_ess_balance_base_setpoint(service, 122.0, metrics, "blocked")
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "blocked-restore-failed")
 
         self.assertEqual(
-            controller._victron_ess_balance_source(
+            sources._victron_ess_balance_source(
                 {"battery_sources": [{"source_id": "x", "discharge_balance_control_connector_type": "dbus"}]},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_source_id="missing"),
             ),
             (None, "victron-source-not-found"),
         )
         self.assertEqual(
-            controller._victron_ess_balance_source({"battery_sources": []}, SimpleNamespace(auto_battery_discharge_balance_victron_bias_source_id="")),
+            sources._victron_ess_balance_source({"battery_sources": []}, SimpleNamespace(auto_battery_discharge_balance_victron_bias_source_id="")),
             (None, "victron-source-not-detected"),
         )
         self.assertEqual(
-            controller._victron_ess_balance_source(
+            sources._victron_ess_balance_source(
                 {
                     "battery_sources": [
                         {"source_id": "a", "discharge_balance_control_connector_type": "dbus"},
@@ -202,58 +210,58 @@ class _BranchCoverageVictronApplyCasesPart1:
         )
 
         self.assertFalse(
-            controller._victron_ess_balance_source_support_allowed(
+            sources._victron_ess_balance_source_support_allowed(
                 {"discharge_balance_control_support": "experimental"},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_support_mode="supported_only"),
             )
         )
         self.assertTrue(
-            controller._victron_ess_balance_source_support_allowed(
+            sources._victron_ess_balance_source_support_allowed(
                 {"discharge_balance_control_support": "experimental"},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental"),
             )
         )
         self.assertEqual(controller._victron_ess_balance_cluster_state(SimpleNamespace(_last_energy_cluster={"battery_discharge_balance_eligible_source_count": 2}), True)[1], "")
         self.assertEqual(
-            controller._victron_ess_balance_matching_source([{"source_id": "a"}], "a"),
+            sources._victron_ess_balance_matching_source([{"source_id": "a"}], "a"),
             {"source_id": "a"},
         )
         self.assertEqual(
-            controller._victron_ess_balance_source(
+            sources._victron_ess_balance_source(
                 {"battery_sources": [{"source_id": "a", "discharge_balance_control_connector_type": "dbus"}]},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_source_id="a"),
             ),
             ({"source_id": "a", "discharge_balance_control_connector_type": "dbus"}, "configured-source"),
         )
         self.assertEqual(
-            controller._victron_ess_balance_source(
+            sources._victron_ess_balance_source(
                 {"battery_sources": [{"source_id": "a", "discharge_balance_control_connector_type": "dbus"}]},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_source_id=""),
             ),
             ({"source_id": "a", "discharge_balance_control_connector_type": "dbus"}, "auto-detected-dbus-source"),
         )
-        controller._reset_victron_ess_balance_pid_integral(service)
+        pid.reset_integral(service)
         self.assertEqual(service._victron_ess_balance_pid_integral_output_w, 0.0)
         self.assertTrue(
-            controller._victron_ess_balance_activation_allowed(
+            sources._victron_ess_balance_activation_allowed(
                 {"site_regime": "export", "reserve_phase": "above_reserve_band"},
                 SimpleNamespace(auto_battery_discharge_balance_victron_bias_activation_mode="export_and_above_reserve_band"),
             )
         )
-        self.assertEqual(controller._victron_ess_balance_pid_clamped_output_w(12.0, 0.0), 12.0)
-        self.assertEqual(controller._victron_ess_balance_pid_ramped_output_w(1.0, 5.0, 0.0, 10.0), 5.0)
+        self.assertEqual(pid._victron_ess_balance_pid_clamped_output_w(12.0, 0.0), 12.0)
+        self.assertEqual(pid._victron_ess_balance_pid_ramped_output_w(1.0, 5.0, 0.0, 10.0), 5.0)
         service._victron_ess_balance_last_setpoint_w = None
-        self.assertTrue(controller._victron_ess_balance_should_write(service, 120.0, 80.0))
+        self.assertTrue(writer._victron_ess_balance_should_write(service, 120.0, 80.0))
         service._victron_ess_balance_last_setpoint_w = 75.0
         service._victron_ess_balance_last_write_at = 100.0
-        self.assertTrue(controller._victron_ess_balance_should_write(service, 120.0, 90.0))
+        self.assertTrue(writer._victron_ess_balance_should_write(service, 120.0, 90.0))
 
         metrics = {}
         with patch.object(
-            controller,
+            sources,
             "_victron_ess_balance_source",
             return_value=({"source_id": "a", "online": True, "discharge_balance_error_w": 10.0}, ""),
-        ), patch.object(controller, "_victron_ess_balance_source_support_allowed", return_value=True):
+        ), patch.object(sources, "_victron_ess_balance_source_support_allowed", return_value=True):
             source_state = controller._victron_ess_balance_source_state({}, service, metrics)
             self.assertEqual(source_state[2], "")
             self.assertEqual(source_state[1], 10.0)
@@ -317,44 +325,44 @@ class _BranchCoverageVictronApplyCasesPart1:
             "pv_phase": "pv_active",
             "battery_limit_phase": "unconstrained",
         }
-        with patch.object(controller, "_victron_ess_balance_learning_profile", return_value=learning_profile), patch.object(
-            controller, "_merge_victron_ess_balance_learning_profile_metrics"
-        ), patch.object(controller, "_victron_ess_balance_refresh_stable_tuning"), patch.object(
-            controller, "_victron_ess_balance_note_action_direction", return_value=0
-        ), patch.object(controller, "_populate_victron_ess_balance_runtime_safety_metrics"), patch.object(
+        with patch.object(profiles, "_victron_ess_balance_learning_profile", return_value=learning_profile), patch.object(
+            profiles, "_merge_victron_ess_balance_learning_profile_metrics"
+        ), patch.object(recovery, "_victron_ess_balance_refresh_stable_tuning"), patch.object(
+            safety, "_victron_ess_balance_note_action_direction", return_value=0
+        ), patch.object(safety, "_populate_victron_ess_balance_runtime_safety_metrics"), patch.object(
             controller, "_victron_ess_balance_safety_block_reason", return_value=""
-        ), patch.object(controller, "_victron_ess_balance_activation_allowed", return_value=True):
+        ), patch.object(sources, "_victron_ess_balance_activation_allowed", return_value=True):
             self.assertEqual(
                 controller._prepare_victron_ess_balance_tracking_profile(service, 100.0, {}, {"source_id": "a"}, 10.0, {}),
                 ("profile", ""),
             )
 
-        with patch.object(controller, "_victron_ess_balance_overshoot_cooldown_active", return_value=True), patch.object(
-            controller, "_maybe_restore_victron_ess_balance_stable_tuning"
+        with patch.object(recovery, "_victron_ess_balance_overshoot_cooldown_active", return_value=True), patch.object(
+            recovery, "_maybe_restore_victron_ess_balance_stable_tuning"
         ) as restore_tuning:
             self.assertEqual(controller._victron_ess_balance_safety_block_reason(service, 130.0, {}), "overshoot-cooldown-active")
             restore_tuning.assert_called_once()
-        with patch.object(controller, "_victron_ess_balance_overshoot_cooldown_active", return_value=False), patch.object(
-            controller, "_victron_ess_balance_oscillation_lockout_active", return_value=True
-        ), patch.object(controller, "_maybe_restore_victron_ess_balance_stable_tuning") as restore_tuning:
+        with patch.object(recovery, "_victron_ess_balance_overshoot_cooldown_active", return_value=False), patch.object(
+            safety, "_victron_ess_balance_oscillation_lockout_active", return_value=True
+        ), patch.object(recovery, "_maybe_restore_victron_ess_balance_stable_tuning") as restore_tuning:
             self.assertEqual(controller._victron_ess_balance_safety_block_reason(service, 131.0, {}), "oscillation-lockout-active")
             restore_tuning.assert_called_once()
-        with patch.object(controller, "_victron_ess_balance_overshoot_cooldown_active", return_value=False), patch.object(
-            controller, "_victron_ess_balance_oscillation_lockout_active", return_value=False
+        with patch.object(recovery, "_victron_ess_balance_overshoot_cooldown_active", return_value=False), patch.object(
+            safety, "_victron_ess_balance_oscillation_lockout_active", return_value=False
         ):
             service._victron_ess_balance_safe_state_active = True
             service._victron_ess_balance_safe_state_reason = "old"
             self.assertEqual(controller._victron_ess_balance_safety_block_reason(service, 130.0, {}), "")
             self.assertFalse(service._victron_ess_balance_safe_state_active)
-        with patch.object(controller, "_update_victron_ess_balance_telemetry") as update_telemetry:
+        with patch.object(telemetry, "_update_victron_ess_balance_telemetry") as update_telemetry:
             controller._victron_ess_balance_update_tracking_telemetry(service, 132.0, {"cluster": 1}, -10.0, "profile", {})
             update_telemetry.assert_called_once()
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=False):
+        with patch.object(writer, "_victron_ess_balance_write_setpoint", return_value=False):
             metrics = {}
             controller._victron_ess_balance_apply_write_outcome(service, 133.0, 70.0, -20.0, "profile", metrics)
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "write-failed")
-        with patch.object(controller, "_victron_ess_balance_write_error", return_value=None):
-            self.assertTrue(controller._victron_ess_balance_write_setpoint(service, "svc", "/path", 10.0))
+        with patch.object(writer, "_victron_ess_balance_write_error", return_value=None):
+            self.assertTrue(writer._victron_ess_balance_write_setpoint(service, "svc", "/path", 10.0))
 
-        controller._merge_victron_ess_balance_metrics(service, {"x": 1})
+        sources._merge_victron_ess_balance_metrics(service, {"x": 1})
         self.assertEqual(service._last_auto_metrics, {"x": 1})

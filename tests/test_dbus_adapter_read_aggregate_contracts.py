@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import unittest
 
-from venus_evcharger.dbus_adapter_read_aggregate import AggregateState, AggregateStore
+from venus_evcharger.dbus_adapter.read.aggregate import AggregateState, AggregateStore
 
 
 class AggregateStateContractTests(unittest.TestCase):

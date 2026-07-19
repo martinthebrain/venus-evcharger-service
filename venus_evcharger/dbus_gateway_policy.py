@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from venus_evcharger.dbus_gateway_command_types import CommandMapping
-from venus_evcharger.dbus_gateway_core import FAST_READ_KEYS, GUI_CRITICAL_PUBLISH_PATHS
+from venus_evcharger.dbus_gateway_core import (
+    FAST_READ_KEYS,
+    GUI_CRITICAL_PUBLISH_PATHS,
+    is_object_mapping,
+    normalized_object_mapping,
+)
 from venus_evcharger.dbus_gateway_surface import evcs_fields_to_paths
 
 _STATIC_QUEUE_CLASSES = {
@@ -87,14 +90,14 @@ def _single_publish_path_is_gui_critical(command: CommandMapping) -> bool:
 
 def _publish_paths_are_gui_critical(command: CommandMapping) -> bool:
     paths = command.get("paths")
-    return isinstance(paths, Mapping) and any(str(item) in GUI_CRITICAL_PUBLISH_PATHS for item in paths)
+    return is_object_mapping(paths) and any(str(item) in GUI_CRITICAL_PUBLISH_PATHS for item in paths)
 
 
 def _publish_fields_are_gui_critical(command: CommandMapping) -> bool:
-    fields = command.get("fields")
-    if not isinstance(fields, Mapping):
+    fields = normalized_object_mapping(command.get("fields"))
+    if fields is None:
         return False
-    mapped_paths = evcs_fields_to_paths({str(field): value for field, value in fields.items()})
+    mapped_paths = evcs_fields_to_paths(fields)
     return any(path in GUI_CRITICAL_PUBLISH_PATHS for path in mapped_paths)
 
 

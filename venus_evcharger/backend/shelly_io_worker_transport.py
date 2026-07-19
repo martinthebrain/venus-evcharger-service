@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TypeGuard
 
 import requests
 from requests import exceptions as requests_exceptions
 
-from venus_evcharger.backend.shelly_io_split import ShellyIoSplit
-from venus_evcharger.backend.shelly_io_types import ShellyIoHost, is_transport_session_reset_backend
+from venus_evcharger.backend.shelly_io_ports import ShellyTransportHost
+from venus_evcharger.backend.shelly_io_types import (
+    is_closeable,
+    is_object_dict,
+    is_transport_session_reset_backend,
+)
 
 _SHELLY_TRANSPORT_ERROR_REASONS = frozenset(
     {
@@ -46,25 +50,18 @@ _SHELLY_RETRY_MINIMUMS = {
 }
 
 
-class ShellyIoWorkerTransport(ShellyIoSplit):
+class ShellyWorkerTransport:
     """Classify Shelly transport failures and maintain RAM-only retry state."""
 
-    if TYPE_CHECKING:
-        service: ShellyIoHost
+    def __init__(self, service: ShellyTransportHost) -> None:
+        self.service = service
 
-        @staticmethod
-        def _close_object(candidate: object) -> None: ...
-
-    def _shelly_retry_active(self, now: float) -> bool:
+    def retry_active(self, now: float) -> bool:
         svc = self.service
-        source_retry_ready = getattr(svc, "_source_retry_ready", None)
-        if callable(source_retry_ready):
-            return not bool(source_retry_ready("shelly", now))
-        retry_after = self._shelly_retry_after_value(svc)
-        return retry_after > float(now)
+        return not svc.runtime.source_retry_ready("shelly", now)
 
     @staticmethod
-    def _shelly_retry_after_value(svc: ShellyIoHost) -> float:
+    def _shelly_retry_after_value(svc: ShellyTransportHost) -> float:
         if hasattr(svc, "_shelly_retry_after"):
             retry_after = svc._shelly_retry_after
             if _shelly_numeric(retry_after):
@@ -73,7 +70,7 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         return _shelly_source_retry_after_value(source_retry_after)
 
     @staticmethod
-    def _classify_shelly_error(error: BaseException) -> str:
+    def classify_error(error: BaseException) -> str:
         for classifier in _SHELLY_ERROR_CLASSIFIERS:
             reason = classifier(error)
             if reason is not None:
@@ -85,8 +82,8 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         return reason in _SHELLY_TRANSPORT_ERROR_REASONS
 
     @classmethod
-    def _is_shelly_common_network_error(cls, error: BaseException) -> bool:
-        return cls._is_shelly_transport_error_reason(cls._classify_shelly_error(error))
+    def is_common_network_error(cls, error: BaseException) -> bool:
+        return cls._is_shelly_transport_error_reason(cls.classify_error(error))
 
     @staticmethod
     def _shelly_retry_delay_seconds(reason: str, consecutive_errors: int) -> float:
@@ -97,7 +94,7 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         base = float(2 ** max(0, min(4, int(consecutive_errors) - 1)))
         return max(_SHELLY_RETRY_MINIMUMS.get(reason, 1.0), base)
 
-    def _remember_shelly_failure(
+    def remember_failure(
         self,
         reason: str,
         source: str,
@@ -113,13 +110,13 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         delay_seconds = self._shelly_retry_delay_seconds(reason, consecutive_errors)
         retry_after = float(now) + delay_seconds
         self._record_shelly_failure_state(svc, reason, source, error, now, consecutive_errors, delay_seconds, retry_after)
-        self._record_shelly_retry_after(svc, now, delay_seconds, retry_after)
+        self._record_shelly_retry_after(svc, now, delay_seconds)
         if self._is_shelly_transport_error_reason(reason):
             self._reset_shelly_worker_session()
 
     def _record_shelly_failure_state(
         self,
-        svc: ShellyIoHost,
+        svc: ShellyTransportHost,
         reason: str,
         source: str,
         error: BaseException,
@@ -141,7 +138,7 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         self._record_shelly_offline_since(svc, now)
 
     @staticmethod
-    def _record_shelly_offline_since(svc: ShellyIoHost, now: float) -> None:
+    def _record_shelly_offline_since(svc: ShellyTransportHost, now: float) -> None:
         """Remember when Shelly became offline for the current incident."""
         if svc._shelly_state != "offline":
             return
@@ -151,21 +148,14 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
 
     @staticmethod
     def _record_shelly_retry_after(
-        svc: ShellyIoHost,
+        svc: ShellyTransportHost,
         now: float,
         delay_seconds: float,
-        retry_after: float,
     ) -> None:
         """Update source-level Shelly retry state."""
-        delay_source_retry = getattr(svc, "_delay_source_retry", None)
-        if callable(delay_source_retry):
-            delay_source_retry("shelly", now, delay_seconds)
-            return
-        source_retry_after = getattr(svc, "_source_retry_after", None)
-        if isinstance(source_retry_after, dict):
-            source_retry_after["shelly"] = retry_after
+        svc.runtime.delay_source_retry("shelly", now, delay_seconds)
 
-    def _remember_shelly_success(self, now: float, recovery_message: str) -> None:
+    def remember_success(self, now: float, recovery_message: str) -> None:
         svc = self.service
         svc._shelly_state = "online"
         svc._shelly_consecutive_errors = 0
@@ -175,11 +165,11 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         source_retry_after = getattr(svc, "_source_retry_after", None)
         if isinstance(source_retry_after, dict):
             source_retry_after["shelly"] = 0.0
-        svc._mark_recovery("shelly", recovery_message)
+        svc.runtime.mark_recovery("shelly", recovery_message)
 
     def _reset_shelly_worker_session(self) -> None:
         svc = self.service
-        self._close_object(getattr(svc, "_worker_session", None))
+        self.close_object(getattr(svc, "_worker_session", None))
         svc._worker_session = requests.Session()
         self._reset_shelly_shared_session(svc)
         self._reset_shelly_backend_sessions(svc)
@@ -189,20 +179,17 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
         except (TypeError, ValueError):
             svc._shelly_session_reset_count = 1
 
-    def _reset_shelly_shared_session(self, svc: ShellyIoHost) -> None:
-        if not hasattr(svc, "session"):
-            return
-        self._close_object(svc.session)
+    def _reset_shelly_shared_session(self, svc: ShellyTransportHost) -> None:
+        self.close_object(svc.session)
         svc.session = requests.Session()
 
-    def _reset_shelly_backend_sessions(self, svc: ShellyIoHost) -> None:
-        shared_session = getattr(svc, "session", None)
+    def _reset_shelly_backend_sessions(self, svc: ShellyTransportHost) -> None:
         for backend in self._shelly_transport_backends(svc):
             if is_transport_session_reset_backend(backend):
-                backend.reset_transport_session(shared_session)
+                backend.reset_transport_session(svc.session)
 
     @staticmethod
-    def _shelly_transport_backends(svc: ShellyIoHost) -> tuple[object, ...]:
+    def _shelly_transport_backends(svc: ShellyTransportHost) -> tuple[object, ...]:
         backends: list[object] = []
         seen: set[int] = set()
         for attr_name in ("_meter_backend", "_switch_backend", "_charger_backend"):
@@ -213,18 +200,36 @@ class ShellyIoWorkerTransport(ShellyIoSplit):
             backends.append(backend)
         return tuple(backends)
 
+    @staticmethod
+    def close_object(candidate: object) -> None:
+        """Close one session-like object when supported."""
+        if is_closeable(candidate):
+            candidate.close()
 
-__all__ = ["ShellyIoWorkerTransport"]
+    def consecutive_errors(self) -> int:
+        """Return the normalized current transport error count."""
+        candidate = getattr(self.service, "_shelly_consecutive_errors", 0)
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            return 0
+
+    def retry_remaining(self, now: float) -> float:
+        """Return source-level retry time remaining without mutating state."""
+        return float(self.service.runtime.source_retry_remaining("shelly", now))
 
 
-def _shelly_numeric(value: object) -> bool:
+__all__ = ["ShellyWorkerTransport"]
+
+
+def _shelly_numeric(value: object) -> TypeGuard[int | float]:
     """Return whether a value is numeric but not bool-like."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _shelly_source_retry_after_value(source_retry_after: object) -> float:
     """Return retry-after value from the shared source-retry mapping."""
-    if not isinstance(source_retry_after, dict):
+    if not is_object_dict(source_retry_after):
         return 0.0
     if "shelly" not in source_retry_after:
         return 0.0

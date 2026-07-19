@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 ControlCommandName = Literal[
-    "legacy_unknown_write",
     "reset_contactor_lockout",
     "reset_phase_lockout",
     "set_auto_runtime_setting",

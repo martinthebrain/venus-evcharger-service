@@ -15,7 +15,7 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
             service = SimpleNamespace(
                 backend_mode="split",
                 meter_backend_type="none",
-                switch_backend_type="shelly_combined",
+                switch_backend_type="none",
                 charger_backend_type="smartevse_charger",
                 meter_backend_config_path="",
                 switch_backend_config_path="",
@@ -46,9 +46,10 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
             )
 
             with patch(
-                "venus_evcharger.backend.smartevse_charger.create_modbus_transport",
+                "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                 return_value=fake_transport,
             ):
+                sync_backend_runtime_test_service(service)
                 resolved = build_service_backends(service)
                 service._backend_bundle = resolved
                 service._meter_backend = resolved.meter
@@ -57,7 +58,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
 
                 controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-                relay_on, power, current, confirmed = controller.apply_relay_decision(
+                relay_on, power, current, confirmed = controller.components.relay.status.apply_relay_decision(
+                    service,
                     True,
                     False,
                     {"output": False, "_pm_confirmed": True},
@@ -72,7 +74,7 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
                 service._queue_relay_command.assert_not_called()
                 service._publish_local_pm_status.assert_called_once_with(True, 100.0)
 
-                updated = controller.apply_startup_manual_target(
+                updated = controller.components.state.apply_startup_manual_target(
                     {"output": True, "apower": 1200.0, "current": 5.2},
                     123.0,
                 )
@@ -101,7 +103,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+        relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1_P2"},
             False,
             0.0,
@@ -136,7 +139,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+        relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1_P2"},
             False,
             0.0,
@@ -175,7 +179,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+        relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1"},
             False,
             0.0,
@@ -220,7 +225,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+        relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1"},
             False,
             0.0,
@@ -260,8 +266,10 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
             requested_phase_selection="P1_P2",
             active_phase_selection="P1",
             auto_shelly_soft_fail_seconds=10.0,
-            auto_phase_mismatch_lockout_count=3,
-            auto_phase_mismatch_lockout_seconds=60.0,
+            auto_policy=_phase_policy(
+                mismatch_lockout_count=3,
+                mismatch_lockout_seconds=60.0,
+            ),
             _phase_switch_mismatch_counts={"P1_P2": 2},
             _phase_switch_lockout_selection=None,
             _phase_switch_lockout_reason="",
@@ -277,7 +285,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed, desired_override = controller.orchestrate_pending_phase_switch(
+        relay_on, power, current, confirmed, desired_override = controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1"},
             False,
             0.0,
@@ -310,8 +319,10 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
             requested_phase_selection="P1_P2",
             active_phase_selection="P1",
             auto_shelly_soft_fail_seconds=10.0,
-            auto_phase_mismatch_lockout_count=2,
-            auto_phase_mismatch_lockout_seconds=60.0,
+            auto_policy=_phase_policy(
+                mismatch_lockout_count=2,
+                mismatch_lockout_seconds=60.0,
+            ),
             _phase_switch_mismatch_counts={},
             _phase_switch_lockout_selection=None,
             _phase_switch_lockout_reason="",
@@ -327,7 +338,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller.orchestrate_pending_phase_switch(
+        controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1"},
             False,
             0.0,
@@ -346,7 +358,8 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
         service._phase_switch_resume_relay = True
         service.requested_phase_selection = "P1_P2"
 
-        controller.orchestrate_pending_phase_switch(
+        controller.components.relay.foundation.phase_switch.orchestrate_pending_phase_switch(
+            service,
             {"output": False, "_phase_selection": "P1"},
             False,
             0.0,

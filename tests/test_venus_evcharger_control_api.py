@@ -13,13 +13,12 @@ class TestControlApiV1(DbusWriteControllerTestBase):
         mode_command = api.command_for_dbus_write("/Mode", 1)
         current_command = api.command_for_dbus_write("/SetCurrent", 12.5)
         auto_command = api.command_for_dbus_write("/Auto/StartSurplusWatts", 1800.0)
-        unknown_command = api.command_for_dbus_write("/UnknownPath", 1)
 
         self.assertEqual(mode_command.name, "set_mode")
         self.assertEqual(current_command.name, "set_current_setting")
         self.assertEqual(auto_command.name, "set_auto_runtime_setting")
-        self.assertEqual(unknown_command.name, "legacy_unknown_write")
-        self.assertEqual(unknown_command.source, "dbus")
+        with self.assertRaisesRegex(ValueError, "Unsupported control path '/UnknownPath'"):
+            api.command_for_dbus_write("/UnknownPath", 1)
 
     def test_command_for_write_preserves_transport_source(self) -> None:
         api = ControlApiV1Service(
@@ -197,10 +196,6 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             "generic",
         )
         self.assertEqual(
-            ControlApiV1Service._command_value_error("legacy_unknown_write", "/Unknown"),
-            "Control command 'legacy_unknown_write' received an invalid value for path '/Unknown'.",
-        )
-        self.assertEqual(
             ControlApiV1Service._auto_runtime_value_error("/Auto/Unknown"),
             "Control command 'set_auto_runtime_setting' received an invalid value for path '/Auto/Unknown'.",
         )
@@ -236,7 +231,7 @@ class TestControlApiV1(DbusWriteControllerTestBase):
         service = SimpleNamespace(
             virtual_autostart=0,
             _dbusservice={"/AutoStart": 0},
-            _time_now=MagicMock(return_value=10.0),
+            time_now=MagicMock(return_value=10.0),
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
@@ -251,16 +246,20 @@ class TestControlApiV1(DbusWriteControllerTestBase):
         self.assertEqual(command.source, "http")
 
     def test_handle_control_command_returns_applied_result(self) -> None:
+        state = SimpleNamespace(
+            publish_field=MagicMock(),
+            summary=MagicMock(side_effect=self._state_summary),
+            save_runtime_state=MagicMock(),
+            save_runtime_overrides=MagicMock(),
+        )
         service = SimpleNamespace(
             virtual_autostart=0,
             _dbusservice={"/AutoStart": 0},
-            _time_now=MagicMock(return_value=10.0),
-            _publish_dbus_field=MagicMock(),
-            _state_summary=self._state_summary,
-            _save_runtime_state=MagicMock(),
-            _save_runtime_overrides=MagicMock(),
+            time_now=MagicMock(return_value=10.0),
+            state=state,
+            auto=SimpleNamespace(normalize_mode=self._normalize_mode),
         )
-        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
+        state.publish_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
         command = ControlCommand(name="set_auto_start", path="/AutoStart", value=1)
 
@@ -273,19 +272,24 @@ class TestControlApiV1(DbusWriteControllerTestBase):
         self.assertFalse(result.external_side_effect_started)
         self.assertEqual(service.virtual_autostart, 1)
         self.assertEqual(service._dbusservice["/AutoStart"], 1)
-        service._save_runtime_state.assert_called_once()
-        service._save_runtime_overrides.assert_called_once()
+        state.save_runtime_state.assert_called_once()
+        state.save_runtime_overrides.assert_called_once()
 
     def test_handle_control_command_returns_rejected_result_for_reversible_failures(self) -> None:
+        state = SimpleNamespace(
+            publish_field=MagicMock(),
+            summary=MagicMock(side_effect=self._state_summary),
+            save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
+            save_runtime_overrides=MagicMock(),
+        )
         service = SimpleNamespace(
             virtual_autostart=0,
             _dbusservice={"/AutoStart": 0},
-            _time_now=MagicMock(return_value=10.0),
-            _publish_dbus_field=MagicMock(),
-            _state_summary=self._state_summary,
-            _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
+            time_now=MagicMock(return_value=10.0),
+            state=state,
+            auto=SimpleNamespace(normalize_mode=self._normalize_mode),
         )
-        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
+        state.publish_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
         command = ControlCommand(name="set_auto_start", path="/AutoStart", value=1)
 
@@ -302,16 +306,21 @@ class TestControlApiV1(DbusWriteControllerTestBase):
 
     def test_handle_control_command_returns_in_flight_result_after_external_side_effects(self) -> None:
         backend = SimpleNamespace(set_current=MagicMock())
+        state = SimpleNamespace(
+            publish_field=MagicMock(),
+            summary=MagicMock(side_effect=self._state_summary),
+            save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
+            save_runtime_overrides=MagicMock(),
+        )
         service = SimpleNamespace(
             virtual_set_current=6.0,
             _charger_backend=backend,
             _dbusservice={"/SetCurrent": 6.0},
-            _time_now=MagicMock(return_value=10.0),
-            _publish_dbus_field=MagicMock(),
-            _state_summary=self._state_summary,
-            _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
+            time_now=MagicMock(return_value=10.0),
+            state=state,
+            auto=SimpleNamespace(normalize_mode=self._normalize_mode),
         )
-        service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
+        state.publish_field.side_effect = self._publish_field_side_effect(service)
         controller = DbusWriteController(WriteControllerPort(service))
         command = ControlCommand(name="set_current_setting", path="/SetCurrent", value=12.5)
 

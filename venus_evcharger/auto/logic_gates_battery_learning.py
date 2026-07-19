@@ -4,10 +4,15 @@ from __future__ import annotations
 import time
 from typing import Any, Mapping
 
-from .logic_gates_battery_balance_support import _AutoDecisionBatteryBalanceSupport
+from .component_context import AutoDecisionContext
 
 
-class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
+class AutoBatteryLearning:
+    """Interpret observed battery activity and learned battery profiles."""
+
+    def __init__(self, context: AutoDecisionContext) -> None:
+        self.service = context.service
+
     def _battery_activity_inputs(self) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         svc = self.service
         raw_cluster = svc._last_energy_cluster if hasattr(svc, "_last_energy_cluster") else None
@@ -137,9 +142,9 @@ class _AutoDecisionBatteryLearning(_AutoDecisionBatteryBalanceSupport):
         return default_bias
 
     def _current_learning_period(self) -> str | None:
-        if not hasattr(self.service, "_time_now"):
+        if not hasattr(self.service, "time_now"):
             return None
-        service_now = self.service._time_now
+        service_now = self.service.time_now
         raw_now = service_now() if callable(service_now) else None
         if not isinstance(raw_now, (int, float)):
             return None

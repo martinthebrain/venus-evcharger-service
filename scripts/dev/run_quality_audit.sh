@@ -8,10 +8,10 @@ MAX_LOC=${QUALITY_MAX_LOC:-500}
 
 cd "$REPO_DIR"
 
-if python3 -m radon --version >/dev/null 2>&1; then
-	RADON=(python3 -m radon)
-elif [ -x "$REPO_DIR/.venv-ruff/bin/python" ]; then
+if [ -x "$REPO_DIR/.venv-ruff/bin/python" ] && "$REPO_DIR/.venv-ruff/bin/python" -m radon --version >/dev/null 2>&1; then
 	RADON=("$REPO_DIR/.venv-ruff/bin/python" -m radon)
+elif python3 -m radon --version >/dev/null 2>&1; then
+	RADON=(python3 -m radon)
 else
 	echo "radon is required for quality audits. Install it in .venv-ruff with: .venv-ruff/bin/python -m pip install radon" >&2
 	exit 1

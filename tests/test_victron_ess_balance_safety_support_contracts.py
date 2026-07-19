@@ -8,19 +8,17 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from venus_evcharger.update.victron_ess_balance_safety_support import (
-    _UpdateCycleVictronEssBalanceSafetySupport,
+    VictronEssSafetyRecovery,
 )
-
-
-class _SupportHarness(_UpdateCycleVictronEssBalanceSafetySupport):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        return float(value) if isinstance(value, (int, float)) else None
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.support = _SupportHarness()
+        components = build_victron_ess_components()
+        self.support: VictronEssSafetyRecovery = components.recovery
+        self.profiles = components.profiles
+        self.sources = components.sources
 
     def test_refresh_defaults_and_negative_overshoot_are_well_defined(self) -> None:
         metrics = {
@@ -32,7 +30,7 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
         svc = SimpleNamespace()
         with (
             patch.object(self.support, "_victron_ess_balance_ensure_conservative_tuning") as conservative,
-            patch.object(self.support, "_victron_ess_balance_current_tuning_snapshot", return_value={"kp": 1.0}),
+            patch.object(self.profiles, "_victron_ess_balance_current_tuning_snapshot", return_value={"kp": 1.0}),
         ):
             self.support._victron_ess_balance_refresh_stable_tuning(svc, metrics, 5.0)
         conservative.assert_called_once_with(svc)
@@ -150,7 +148,7 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
             ),
             (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         )
-        with patch.object(self.support, "_victron_ess_balance_activation_mode", return_value=""):
+        with patch.object(self.sources, "_victron_ess_balance_activation_mode", return_value=""):
             self.assertEqual(self.support._victron_ess_balance_restored_activation_mode(svc, {}), "always")
         with (
             patch.object(self.support, "_apply_victron_ess_balance_restored_pid_terms") as pid,
@@ -162,6 +160,11 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
         limits.assert_called_once_with(svc, {"kp": 1.0})
         mode.assert_called_once_with(svc, {"kp": 1.0})
         self.assertEqual(svc.auto_battery_discharge_balance_victron_bias_activation_mode, "mode")
+
+        untouched = SimpleNamespace(auto_battery_discharge_balance_victron_bias_activation_mode="keep")
+        with patch.object(self.support, "_victron_ess_balance_restored_activation_mode", return_value=""):
+            self.support._apply_victron_ess_balance_restored_tuning(untouched, {})
+        self.assertEqual(untouched.auto_battery_discharge_balance_victron_bias_activation_mode, "keep")
 
     def test_cooldown_clamps_delay_and_suspend_uses_each_time_source(self) -> None:
         for delay, expected in ((1.0, 20.0), (20.0, 80.0), (100.0, 180.0), (None, 40.0)):
@@ -186,12 +189,12 @@ class VictronEssBalanceSafetySupportContracts(unittest.TestCase):
             learned_charge_power_watts=200.0,
             virtual_startstop=1,
         )
-        self.assertEqual(self.support._victron_ess_balance_ev_power_w(svc), 100.0)
-        self.assertTrue(self.support._victron_ess_balance_ev_active(SimpleNamespace(charging_started_at=0)))
+        self.assertEqual(self.sources._victron_ess_balance_ev_power_w(svc), 100.0)
+        self.assertTrue(self.sources._victron_ess_balance_ev_active(SimpleNamespace(charging_started_at=0)))
         self.assertIsNone(
-            self.support._victron_ess_balance_ev_power_w(SimpleNamespace(learned_charge_power_watts=200.0))
+            self.sources._victron_ess_balance_ev_power_w(SimpleNamespace(learned_charge_power_watts=200.0))
         )
-        self.assertFalse(self.support._victron_ess_balance_ev_active(SimpleNamespace()))
+        self.assertFalse(self.sources._victron_ess_balance_ev_active(SimpleNamespace()))
         self.assertFalse(self.support._victron_ess_balance_overshoot_cooldown_active(SimpleNamespace(), 1.0))
         self.assertFalse(self.support._victron_ess_balance_auto_apply_suspended(SimpleNamespace(), 1.0))
 

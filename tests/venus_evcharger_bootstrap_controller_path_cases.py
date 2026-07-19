@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from tests.venus_evcharger_bootstrap_controller_path_cases_support import *  # noqa: F401,F403
-from tests.venus_evcharger_bootstrap_controller_path_cases_part1 import _TestServiceBootstrapControllerPathsPart1
-from tests.venus_evcharger_bootstrap_controller_path_cases_part2 import _TestServiceBootstrapControllerPathsPart2
+from tests.venus_evcharger_bootstrap_controller_path_cases_part1 import TestServiceBootstrapPathRegistration
+from tests.venus_evcharger_bootstrap_controller_path_cases_part2 import TestServiceBootstrapPathComposition
 
-class TestServiceBootstrapControllerPaths(_TestServiceBootstrapControllerPathsPart1, _TestServiceBootstrapControllerPathsPart2, ServiceBootstrapControllerTestCase):
-    pass
+__all__ = ["TestServiceBootstrapPathComposition", "TestServiceBootstrapPathRegistration"]

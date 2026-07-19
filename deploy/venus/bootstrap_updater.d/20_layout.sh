@@ -13,6 +13,7 @@ cleanup_unwanted_paths() {
 	rm -f "${cleanup_root}/pyrightconfig.json"
 	rm -f "${cleanup_root}/DBUS_INTROSPECTION_WORKER.md"
 	rm -f "${cleanup_root}/dbus_adapter_write.py"
+	rm -f "${cleanup_root}"/venus_evcharger/dbus_adapter_*.py
 	rm -f "${cleanup_root}/venus_evcharger_dbus_introspection_worker.py"
 }
 

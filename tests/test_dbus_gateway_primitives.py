@@ -713,6 +713,12 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         )
         self.assertFalse(
             dbus_gateway_commands._same_publish_desired_payload(
+                [],
+                {"kind": "publish_desired", "priority": "publish"},
+            )
+        )
+        self.assertFalse(
+            dbus_gateway_commands._same_publish_desired_payload(
                 {"kind": "publish_desired", "priority": "publish"},
                 {"kind": "publish_desired", "priority": "diagnostic"},
             )

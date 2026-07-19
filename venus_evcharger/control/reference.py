@@ -18,7 +18,6 @@ class ControlApiCommandReference:
 
 
 CONTROL_API_COMMAND_SCOPE_REQUIREMENTS: dict[str, str] = {
-    "legacy_unknown_write": "control_admin",
     "reset_contactor_lockout": "control_admin",
     "reset_phase_lockout": "control_admin",
     "set_auto_runtime_setting": "control_admin",
@@ -91,12 +90,6 @@ CONTROL_API_COMMAND_REFERENCE: tuple[ControlApiCommandReference, ...] = (
         idempotent_shape="no",
         accepted_in_flight="possible",
         typical_restrictions="update policy, availability, current update state",
-    ),
-    ControlApiCommandReference(
-        name="legacy_unknown_write",
-        idempotent_shape="compatibility-only",
-        accepted_in_flight="implementation-defined",
-        typical_restrictions="not for new clients",
     ),
 )
 

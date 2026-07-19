@@ -14,7 +14,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             idle_status=6,
         )
 
-        status = UpdateCycleController.derive_status_code(
+        status = relay_components_for_test(service).status.derive_status_code(
             service,
             True,
             0.0,
@@ -35,8 +35,9 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             charging_threshold_watts=1500.0,
             idle_status=6,
         )
+        sync_readback_test_service(service)
 
-        status = UpdateCycleController.derive_status_code(service, False, 0.0, False, 100.0)
+        status = relay_components_for_test(service).status.derive_status_code(service, False, 0.0, False, 100.0)
 
         self.assertEqual(status, 2)
         self.assertEqual(service._last_status_source, "charger-status-charging")
@@ -51,8 +52,9 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             charging_threshold_watts=1500.0,
             idle_status=6,
         )
+        sync_readback_test_service(service)
 
-        status = UpdateCycleController.derive_status_code(service, True, 0.0, True, 100.0)
+        status = relay_components_for_test(service).status.derive_status_code(service, True, 0.0, True, 100.0)
 
         self.assertEqual(status, 2)
         self.assertEqual(service._last_status_source, "charger-status-charging")
@@ -66,8 +68,9 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             charging_threshold_watts=1500.0,
             idle_status=6,
         )
+        sync_readback_test_service(service)
 
-        status = UpdateCycleController.derive_status_code(service, False, 0.0, False, 100.0)
+        status = relay_components_for_test(service).status.derive_status_code(service, False, 0.0, False, 100.0)
 
         self.assertEqual(status, 6)
         self.assertEqual(service._last_status_source, "charger-status-ready")
@@ -82,8 +85,9 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             charging_threshold_watts=1500.0,
             idle_status=1,
         )
+        sync_readback_test_service(service)
 
-        status = UpdateCycleController.derive_status_code(service, True, 0.0, True, 100.0)
+        status = relay_components_for_test(service).status.derive_status_code(service, True, 0.0, True, 100.0)
 
         self.assertEqual(status, 4)
         self.assertEqual(service._last_status_source, "charger-status-waiting")
@@ -98,8 +102,9 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             charging_threshold_watts=1500.0,
             idle_status=1,
         )
+        sync_readback_test_service(service)
 
-        status = UpdateCycleController.derive_status_code(service, True, 0.0, False, 100.0)
+        status = relay_components_for_test(service).status.derive_status_code(service, True, 0.0, False, 100.0)
 
         self.assertEqual(status, 6)
         self.assertEqual(service._last_status_source, "charger-status-waiting")
@@ -114,8 +119,9 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             charging_threshold_watts=1500.0,
             idle_status=1,
         )
+        sync_readback_test_service(service)
 
-        status = UpdateCycleController.derive_status_code(service, True, 0.0, False, 100.0)
+        status = relay_components_for_test(service).status.derive_status_code(service, True, 0.0, False, 100.0)
 
         self.assertEqual(status, 3)
         self.assertEqual(service._last_status_source, "charger-status-finished")
@@ -132,7 +138,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        charging_time, session_energy = controller.session_state_from_status(service, 1, 2.0, False, 100.0)
+        charging_time, session_energy = controller.components.state.session_state_from_status(service, 1, 2.0, False, 100.0)
 
         self.assertEqual((charging_time, session_energy), (0, 0.0))
         self.assertIsNone(service.charging_started_at)
@@ -158,7 +164,8 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        relay_on, power, current, confirmed = controller.apply_relay_decision(
+        relay_on, power, current, confirmed = controller.components.relay.status.apply_relay_decision(
+            service,
             True,
             False,
             {"output": False, "_pm_confirmed": True},
@@ -183,7 +190,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"charger-fault": 26}.get(reason, 99))
 
-        self.assertEqual(controller.charger_health_override(service, 100.0), "charger-fault")
+        self.assertEqual(controller.components.relay.foundation.health.charger_health_override(service, 100.0), "charger-fault")
 
     def test_charger_health_override_ignores_benign_readback_text(self):
         service = SimpleNamespace(
@@ -195,7 +202,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"charger-fault": 26}.get(reason, 99))
 
-        self.assertIsNone(controller.charger_health_override(service, 100.0))
+        self.assertIsNone(controller.components.relay.foundation.health.charger_health_override(service, 100.0))
 
     def test_charger_health_override_prefers_fresh_transport_issue(self):
         service = SimpleNamespace(
@@ -218,7 +225,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             }.get(reason, 99),
         )
 
-        self.assertEqual(controller.charger_health_override(service, 100.0), "charger-transport-offline")
+        self.assertEqual(controller.components.relay.foundation.health.charger_health_override(service, 100.0), "charger-transport-offline")
 
     def test_charger_health_override_falls_back_to_active_retry_reason(self):
         service = SimpleNamespace(
@@ -244,7 +251,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             }.get(reason, 99),
         )
 
-        self.assertEqual(controller.charger_health_override(service, 100.0), "charger-transport-offline")
+        self.assertEqual(controller.components.relay.foundation.health.charger_health_override(service, 100.0), "charger-transport-offline")
 
     def test_switch_feedback_health_override_detects_interlock_block(self):
         service = SimpleNamespace(
@@ -259,7 +266,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
             lambda reason: {"contactor-interlock": 28, "contactor-feedback-mismatch": 29}.get(reason, 99),
         )
 
-        self.assertEqual(controller.switch_feedback_health_override(service, True, False, 100.0), "contactor-interlock")
+        self.assertEqual(controller.components.relay.foundation.health.switch_feedback_health_override(service, True, False, 100.0), "contactor-interlock")
 
     def test_switch_feedback_health_override_detects_feedback_mismatch(self):
         service = SimpleNamespace(
@@ -275,7 +282,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(
-            controller.switch_feedback_health_override(service, True, True, 100.0),
+            controller.components.relay.foundation.health.switch_feedback_health_override(service, True, True, 100.0),
             "contactor-feedback-mismatch",
         )
 
@@ -295,7 +302,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -330,7 +337,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 True,
                 True,
@@ -359,7 +366,7 @@ class TestUpdateCycleControllerUndenary(UpdateCycleControllerTestBase):
         )
 
         self.assertEqual(
-            controller.switch_feedback_health_override(
+            controller.components.relay.foundation.health.switch_feedback_health_override(
                 service,
                 False,
                 False,

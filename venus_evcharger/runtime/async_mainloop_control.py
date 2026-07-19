@@ -4,23 +4,26 @@
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from typing import Any
 
 from venus_evcharger.control import ControlCommand
-from venus_evcharger.runtime.async_mainloop_executor import _RuntimeAsyncMainloopExecutor
 from venus_evcharger.runtime.async_mainloop_types import require_control_command_queue
 
 ASYNC_CONTROL_COMMAND_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
-    def enqueue_control_command(self: Any, command: ControlCommand) -> bool:
+class ControlCommandQueue:
+    """Coalesce and execute control commands for one runtime service."""
+
+    def __init__(self, service: Any) -> None:
+        self.service = service
+
+    def enqueue(self, command: ControlCommand) -> bool:
         """Coalesce DBus control commands for a background worker."""
         svc = self.service
         if not svc._control_command_async_enabled:
-            result = svc._handle_control_command(command)
+            result = svc.auto.handle_command(command)
             return bool(result.accepted)
         queued_at = time.time()
         with svc._control_command_lock:
@@ -38,13 +41,7 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
             svc._runtime_executor_event.set()
         return True
 
-    def start_control_command_worker(self: Any) -> None:
-        """Enable DBus command execution in the serialized runtime executor."""
-        svc = self.service
-        svc._control_command_async_enabled = True
-        self._start_runtime_executor()
-
-    def _drain_control_commands_once(self: Any) -> bool:
+    def drain_once(self) -> bool:
         svc = self.service
         with svc._control_command_lock:
             pending = require_control_command_queue(svc._control_command_pending, "_control_command_pending")
@@ -56,13 +53,13 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
             started = time.monotonic()
             svc._last_write_command_queue_lag_seconds = max(0.0, time.time() - queued_at)
             try:
-                svc._handle_control_command(command)
+                svc.auto.handle_command(command)
             except ASYNC_CONTROL_COMMAND_ERRORS:
                 logging.exception("Async control command failed path=%s", command.path)
             finally:
                 duration = time.monotonic() - started
                 svc._last_write_command_duration_seconds = duration
-                budget = self._float_attr(getattr(svc, "_write_command_budget_seconds", None), 2.0)
+                budget = _float_attr(getattr(svc, "_write_command_budget_seconds", None), 2.0)
                 if duration > budget:
                     logging.warning(
                         "Control command path=%s exceeded budget: %.3fs",
@@ -70,3 +67,10 @@ class _RuntimeAsyncMainloopControl(_RuntimeAsyncMainloopExecutor):
                         duration,
                     )
         return True
+
+
+def _float_attr(value: Any, default: float = 0.0) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else float(default)
+
+
+__all__ = ["ControlCommandQueue"]

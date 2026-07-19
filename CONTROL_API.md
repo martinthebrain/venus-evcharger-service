@@ -353,7 +353,6 @@ machine-readable validation rules, treat `GET /v1/openapi.json` as normative.
 | `reset_phase_lockout` | `name`, `path`, `value` | boolean or `0/1` | binary | no | uncommon | `control_admin` | only meaningful when lockout exists |
 | `reset_contactor_lockout` | `name`, `path`, `value` | boolean or `0/1` | binary | no | uncommon | `control_admin` | only meaningful when lockout exists |
 | `trigger_software_update` | `name`, `path`, `value` | boolean or `0/1` | binary | no | possible | `update_admin` | update policy, availability, current update state |
-| `legacy_unknown_write` | `name`, `path`, `value` | implementation-defined | implementation-defined | compatibility-only | implementation-defined | `control_admin` | not for new clients |
 <!-- END:CONTROL_API_COMMAND_MATRIX -->
 
 Notes:

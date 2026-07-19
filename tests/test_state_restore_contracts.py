@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
-from venus_evcharger.controllers.state import ServiceStateController
+from venus_evcharger.controllers.state_restore import RuntimeStateRestorer
+from venus_evcharger.controllers.state_restore_victron_ess import VictronEssRuntimeRestorer
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
 
 from tests.venus_evcharger_test_fixtures import make_runtime_state_service
 
@@ -14,12 +15,21 @@ def _normalize_mode(value: object) -> int:
     return int(value) if isinstance(value, (int, float, str)) else 0
 
 
+def _restorer(service: object) -> RuntimeStateRestorer:
+    return RuntimeStateRestorer(
+        service,
+        _normalize_mode,
+        RuntimeStateNormalizer(),
+        VictronEssRuntimeRestorer(),
+    )
+
+
 class StateRestoreContractTests(unittest.TestCase):
     def test_victron_activation_mode_uses_payload_then_service_fallback(self) -> None:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_activation_mode="export_only"
         )
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = VictronEssRuntimeRestorer()
 
         for raw_value, expected in (
             (" ALWAYS ", "always"),
@@ -60,7 +70,7 @@ class StateRestoreContractTests(unittest.TestCase):
             _auto_mode_cutover_pending=False,
             _ignore_min_offtime_once=True,
         )
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_basic_runtime_state(
             service,
@@ -101,7 +111,7 @@ class StateRestoreContractTests(unittest.TestCase):
             _auto_mode_cutover_pending=True,
             _ignore_min_offtime_once=True,
         )
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_basic_runtime_state(service, {})
 
@@ -115,7 +125,7 @@ class StateRestoreContractTests(unittest.TestCase):
 
     def test_learned_charge_power_restore_normalizes_every_persisted_field(self) -> None:
         service = make_runtime_state_service()
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_learned_charge_power_state(
             service,
@@ -155,7 +165,7 @@ class StateRestoreContractTests(unittest.TestCase):
             learned_charge_power_signature_mismatch_sessions=4,
             learned_charge_power_signature_checked_session_started_at=810.0,
         )
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_learned_charge_power_state(service, {}, 1000.0)
 
@@ -183,7 +193,7 @@ class StateRestoreContractTests(unittest.TestCase):
 
     def test_phase_switch_restore_preserves_complete_pending_transition(self) -> None:
         service = make_runtime_state_service()
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
         state: dict[str, object] = {
             "supported_phase_selections": ["P1", "P1_P2"],
             "requested_phase_selection": "P1_P2",
@@ -238,7 +248,7 @@ class StateRestoreContractTests(unittest.TestCase):
             _phase_switch_lockout_at=720.0,
             _phase_switch_lockout_until=1300.0,
         )
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_phase_switch_runtime_state(service, {}, 1000.0)
 
@@ -270,7 +280,7 @@ class StateRestoreContractTests(unittest.TestCase):
 
     def test_invalid_phase_switch_selections_fall_back_to_requested_selection(self) -> None:
         service = make_runtime_state_service()
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_phase_switch_runtime_state(
             service,
@@ -306,7 +316,7 @@ class StateRestoreContractTests(unittest.TestCase):
 
     def test_restore_rejects_timestamps_beyond_supplied_runtime_clock(self) -> None:
         service = make_runtime_state_service()
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_phase_switch_runtime_state(
             service,
@@ -336,7 +346,7 @@ class StateRestoreContractTests(unittest.TestCase):
 
     def test_incomplete_phase_switch_restore_clears_transient_transition(self) -> None:
         service = make_runtime_state_service()
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_phase_switch_runtime_state(
             service,
@@ -362,7 +372,7 @@ class StateRestoreContractTests(unittest.TestCase):
             requested_phase_selection="P1",
             active_phase_selection="P1",
         )
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_phase_switch_runtime_state(
             service,
@@ -377,7 +387,7 @@ class StateRestoreContractTests(unittest.TestCase):
 
     def test_relay_and_contactor_restore_normalize_exact_payload_contract(self) -> None:
         service = make_runtime_state_service()
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
         state: dict[str, object] = {
             "relay_last_changed_at": 930.0,
             "relay_last_off_at": 940.0,
@@ -419,7 +429,7 @@ class StateRestoreContractTests(unittest.TestCase):
             _contactor_lockout_source="existing-source",
             _contactor_lockout_at=630.0,
         )
-        controller = ServiceStateController(service, _normalize_mode)
+        controller = _restorer(service)
 
         controller._restore_relay_runtime_state(service, {}, 1000.0)
         controller._restore_contactor_runtime_state(service, {}, 1000.0)
@@ -443,7 +453,7 @@ class StateRestoreContractTests(unittest.TestCase):
         self.assertIsNone(minimal_service._contactor_lockout_at)
 
     def test_contactor_normalizers_reject_wrong_shapes_and_reasons(self) -> None:
-        controller = ServiceStateController(make_runtime_state_service(), _normalize_mode)
+        controller = _restorer(make_runtime_state_service())
 
         self.assertEqual(controller._normalized_contactor_fault_counts(None), {})
         self.assertEqual(
@@ -467,109 +477,6 @@ class StateRestoreContractTests(unittest.TestCase):
         self.assertEqual(controller._normalized_contactor_fault_reason(" contactor-suspected-welded "), "contactor-suspected-welded")
         self.assertIsNone(controller._normalized_contactor_fault_reason("other"))
         self.assertIsNone(controller._normalized_contactor_fault_reason(None))
-
-    def test_load_runtime_state_calls_each_restore_role_in_order(self) -> None:
-        service = make_runtime_state_service(runtime_state_path=" /run/evcharger-state.json ")
-        controller = ServiceStateController(service, _normalize_mode)
-        payload: dict[str, object] = {"mode": 2}
-        controller._read_runtime_state_payload = MagicMock(return_value=payload)
-        controller._runtime_load_time = MagicMock(return_value=1234.0)
-        controller._restore_basic_runtime_state = MagicMock()
-        controller._restore_learned_charge_power_state = MagicMock()
-        controller._restore_phase_switch_runtime_state = MagicMock()
-        controller._restore_contactor_runtime_state = MagicMock()
-        controller._restore_relay_runtime_state = MagicMock()
-        controller._restore_victron_ess_balance_runtime_state = MagicMock()
-        controller._serialized_runtime_state = MagicMock(return_value='{"mode":2}')
-        controller.state_summary = MagicMock(return_value="mode=2")
-
-        with patch("venus_evcharger.controllers.state_restore.logging.info") as info:
-            controller.load_runtime_state()
-
-        controller._read_runtime_state_payload.assert_called_once_with("/run/evcharger-state.json")
-        controller._runtime_load_time.assert_called_once_with(service)
-        controller._restore_basic_runtime_state.assert_called_once_with(service, payload)
-        controller._restore_learned_charge_power_state.assert_called_once_with(service, payload, 1234.0)
-        controller._restore_phase_switch_runtime_state.assert_called_once_with(service, payload, 1234.0)
-        controller._restore_contactor_runtime_state.assert_called_once_with(service, payload, 1234.0)
-        controller._restore_relay_runtime_state.assert_called_once_with(service, payload, 1234.0)
-        controller._restore_victron_ess_balance_runtime_state.assert_called_once_with(service, payload)
-        self.assertEqual(service._runtime_state_serialized, '{"mode":2}')
-        info.assert_called_once_with(
-            "Restored runtime state from %s: %s",
-            "/run/evcharger-state.json",
-            "mode=2",
-        )
-
-    def test_load_and_save_ignore_service_without_runtime_state_path(self) -> None:
-        service = SimpleNamespace()
-        controller = ServiceStateController(service, _normalize_mode)
-        controller._read_runtime_state_payload = MagicMock()
-        controller._serialized_runtime_state = MagicMock()
-
-        controller.load_runtime_state()
-        controller.save_runtime_state()
-
-        controller._read_runtime_state_payload.assert_not_called()
-        controller._serialized_runtime_state.assert_not_called()
-
-    def test_save_runtime_state_writes_once_and_records_exact_payload(self) -> None:
-        service = make_runtime_state_service(runtime_state_path=" /run/evcharger-state.json ")
-        controller = ServiceStateController(service, _normalize_mode)
-        controller._serialized_runtime_state = MagicMock(return_value='{"mode":2}')
-        controller.state_summary = MagicMock(return_value="mode=2")
-
-        with (
-            patch("venus_evcharger.controllers.state_restore.write_text_atomically") as write,
-            patch("venus_evcharger.controllers.state_restore.logging.debug") as debug,
-        ):
-            controller.save_runtime_state()
-            controller.save_runtime_state()
-
-        write.assert_called_once_with("/run/evcharger-state.json", '{"mode":2}')
-        self.assertEqual(service._runtime_state_serialized, '{"mode":2}')
-        debug.assert_called_once_with(
-            "Saved runtime state to %s: %s",
-            "/run/evcharger-state.json",
-            "mode=2",
-        )
-
-    def test_save_runtime_state_logs_exact_write_failure_and_keeps_cache(self) -> None:
-        service = make_runtime_state_service(
-            runtime_state_path="/run/evcharger-state.json",
-            _runtime_state_serialized="old-payload",
-        )
-        controller = ServiceStateController(service, _normalize_mode)
-        controller._serialized_runtime_state = MagicMock(return_value="new-payload")
-
-        with (
-            patch(
-                "venus_evcharger.controllers.state_restore.write_text_atomically",
-                side_effect=OSError("read-only"),
-            ),
-            patch("venus_evcharger.controllers.state_restore.logging.warning") as warning,
-        ):
-            controller.save_runtime_state()
-
-        self.assertEqual(service._runtime_state_serialized, "old-payload")
-        warning.assert_called_once()
-        message, path, error = warning.call_args.args
-        self.assertEqual(message, "Unable to write runtime state to %s: %s")
-        self.assertEqual(path, "/run/evcharger-state.json")
-        self.assertEqual(str(error), "read-only")
-
-    def test_save_runtime_state_accepts_service_without_serialized_cache(self) -> None:
-        service = SimpleNamespace(runtime_state_path="/run/evcharger-state.json")
-        controller = ServiceStateController(service, _normalize_mode)
-        controller._serialized_runtime_state = MagicMock(return_value="new-payload")
-        controller.state_summary = MagicMock(return_value="state")
-
-        with patch("venus_evcharger.controllers.state_restore.write_text_atomically") as write:
-            controller.save_runtime_state()
-
-        write.assert_called_once_with("/run/evcharger-state.json", "new-payload")
-        self.assertEqual(service._runtime_state_serialized, "new-payload")
-
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

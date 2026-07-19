@@ -1,63 +1,83 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+"""Authentication, locality, and concurrency policy for Control API HTTP."""
+
 from __future__ import annotations
 
 import ipaddress
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
-from typing import TYPE_CHECKING, Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
-from venus_evcharger.control.http_api_command_contracts import ControlApiHttpService
-from venus_evcharger.control.http_api_response import _LocalControlApiResponse
+from venus_evcharger.control.http_api_command_contracts import ControlApiAuthorizationPort
+from venus_evcharger.control.http_api_command_payloads import optimistic_concurrency_payload
+from venus_evcharger.control.reference import CONTROL_API_COMMAND_SCOPE_REQUIREMENTS
 
 
-class _LocalControlApiAuth(_LocalControlApiResponse):
-    if TYPE_CHECKING:
-        _auth_token: str
-        _admin_token: str
-        _control_token: str
-        _localhost_only: bool
-        _read_token: str
-        _service: ControlApiHttpService
-        _unix_socket_path: str
-        _update_token: str
-        _COMMAND_SCOPE_REQUIREMENTS: dict[str, str]
-        _INSUFFICIENT_SCOPE_ERROR: tuple[HTTPStatus, str, str]
-        _LOCALITY_FORBIDDEN: tuple[HTTPStatus, str, str]
-        _SCOPE_ORDER: dict[str, int]
-        _STATE_TOKEN_HEADER: str
-        _UNAUTHORIZED_ERROR: tuple[HTTPStatus, str, str]
+AccessError = tuple[HTTPStatus, str, str]
+ConcurrencyError = tuple[HTTPStatus, dict[str, Any], dict[str, str]]
 
-    def _command_post_auth_error(
-        self,
-        handler: BaseHTTPRequestHandler,
-        payload: dict[str, Any],
-    ) -> tuple[HTTPStatus, str, str] | None:
-        return self._auth_error(
-            handler,
-            required_scope=self._required_scope_for_command_payload(payload),
-        )
+LOCALITY_FORBIDDEN: AccessError = (
+    HTTPStatus.FORBIDDEN,
+    "forbidden_remote_client",
+    "Remote clients are not allowed for this API.",
+)
+UNAUTHORIZED_ERROR: AccessError = (HTTPStatus.UNAUTHORIZED, "unauthorized", "Unauthorized.")
+INSUFFICIENT_SCOPE_ERROR: AccessError = (
+    HTTPStatus.FORBIDDEN,
+    "insufficient_scope",
+    "The supplied token does not grant the required scope for this endpoint.",
+)
+SCOPE_ORDER: dict[str, int] = {
+    "read": 0,
+    "control_basic": 1,
+    "control_admin": 2,
+    "update_admin": 3,
+}
+STATE_TOKEN_HEADER = "X-State-Token"
+
+
+@dataclass(frozen=True)
+class ControlApiAuthConfig:
+    """Normalized authentication and locality settings."""
+
+    auth_token: str = ""
+    read_token: str = ""
+    control_token: str = ""
+    admin_token: str = ""
+    update_token: str = ""
+    localhost_only: bool = True
+    unix_socket_path: str = ""
+
+
+class ControlApiHttpAuthenticator:
+    """Apply the Control API token hierarchy and optimistic concurrency rules."""
+
+    def __init__(self, service: ControlApiAuthorizationPort, config: ControlApiAuthConfig) -> None:
+        self._service = service
+        self._config = config
 
     @staticmethod
-    def _parsed_request_target(target: str) -> tuple[str, dict[str, list[str]]]:
+    def parse_request_target(target: str) -> tuple[str, dict[str, list[str]]]:
         parts = urlsplit(target)
         return parts.path, parse_qs(parts.query, keep_blank_values=True)
 
-    def _locality_error(self, handler: BaseHTTPRequestHandler) -> tuple[HTTPStatus, str, str] | None:
-        if not self._localhost_only or self._unix_socket_path:
+    def locality_error(self, handler: BaseHTTPRequestHandler) -> AccessError | None:
+        if not self._config.localhost_only or self._config.unix_socket_path:
             return None
-        host = self._client_host(handler)
-        return None if self._is_loopback_host(host) else self._LOCALITY_FORBIDDEN
+        return None if self.is_loopback_host(self.client_host(handler)) else LOCALITY_FORBIDDEN
 
     @staticmethod
-    def _client_host(handler: BaseHTTPRequestHandler) -> str:
-        client_address = getattr(handler, "client_address", None)
+    def client_host(handler: BaseHTTPRequestHandler) -> str:
+        client_address: object = getattr(handler, "client_address", None)
         if isinstance(client_address, tuple) and client_address:
-            return str(client_address[0])
+            host = cast(object, client_address[0])
+            return str(host)
         return "127.0.0.1"
 
     @staticmethod
-    def _is_loopback_host(host: str) -> bool:
+    def is_loopback_host(host: str) -> bool:
         if host == "localhost":
             return True
         try:
@@ -65,110 +85,120 @@ class _LocalControlApiAuth(_LocalControlApiResponse):
         except ValueError:
             return False
 
-    def _auth_error(self, handler: BaseHTTPRequestHandler, *, required_scope: str) -> tuple[HTTPStatus, str, str] | None:
-        scope = self._authorization_scope(handler)
-        if self._scope_satisfies_requirement(scope, required_scope):
+    def auth_error(self, handler: BaseHTTPRequestHandler, *, required_scope: str) -> AccessError | None:
+        scope = self.authorization_scope(handler)
+        if self.scope_satisfies_requirement(scope, required_scope):
             return None
         if scope is not None and required_scope != "read":
-            return self._INSUFFICIENT_SCOPE_ERROR
-        return self._UNAUTHORIZED_ERROR
-
-    def _scope_satisfies_requirement(self, scope: str | None, required_scope: str) -> bool:
-        if scope not in self._SCOPE_ORDER or required_scope not in self._SCOPE_ORDER:
-            return False
-        return self._SCOPE_ORDER[scope] >= self._SCOPE_ORDER[required_scope]
-
-    def _authorization_scope(self, handler: BaseHTTPRequestHandler) -> str | None:
-        scope_tokens = self._scope_tokens()
-        if not self._has_configured_scope_token(scope_tokens):
-            return "update_admin"
-        return self._scope_from_authorization_header(handler.headers.get("Authorization"), scope_tokens)
+            return INSUFFICIENT_SCOPE_ERROR
+        return UNAUTHORIZED_ERROR
 
     @staticmethod
-    def _has_configured_scope_token(scope_tokens: tuple[tuple[str, str], ...]) -> bool:
-        return any(token for _scope_name, token in scope_tokens)
+    def scope_satisfies_requirement(scope: str | None, required_scope: str) -> bool:
+        if scope not in SCOPE_ORDER or required_scope not in SCOPE_ORDER:
+            return False
+        return SCOPE_ORDER[scope] >= SCOPE_ORDER[required_scope]
 
-    def _scope_from_authorization_header(
-        self,
+    def authorization_scope(self, handler: BaseHTTPRequestHandler) -> str | None:
+        scope_tokens = self.scope_tokens()
+        if not any(token for _scope_name, token in scope_tokens):
+            return "update_admin"
+        return self._scope_for_header(handler.headers.get("Authorization"), scope_tokens)
+
+    @staticmethod
+    def _scope_for_header(
         header_value: str | None,
         scope_tokens: tuple[tuple[str, str], ...],
     ) -> str | None:
         if not header_value:
             return None
         header = header_value.strip()
-        for scope_name, token in scope_tokens:
-            if self._matches_bearer_token(header, token):
-                return scope_name
-        return None
+        return next(
+            (
+                scope_name
+                for scope_name, token in scope_tokens
+                if ControlApiHttpAuthenticator.matches_bearer_token(header, token)
+            ),
+            None,
+        )
 
-    def _scope_tokens(self) -> tuple[tuple[str, str], ...]:
+    def scope_tokens(self) -> tuple[tuple[str, str], ...]:
         return (
-            ("update_admin", self._effective_update_token()),
-            ("control_admin", self._effective_admin_token()),
-            ("control_basic", self._effective_control_token()),
-            ("read", self._effective_read_token()),
+            ("update_admin", self.effective_update_token),
+            ("control_admin", self.effective_admin_token),
+            ("control_basic", self.effective_control_token),
+            ("read", self.effective_read_token),
         )
 
     @staticmethod
-    def _matches_bearer_token(header: str, token: str) -> bool:
+    def matches_bearer_token(header: str, token: str) -> bool:
         return bool(token) and header == f"Bearer {token}"
 
     @staticmethod
-    def _first_configured_token(*tokens: str) -> str:
+    def first_configured_token(*tokens: str) -> str:
         return next((str(token) for token in tokens if token), "")
 
-    def _effective_read_token(self) -> str:
-        return self._first_configured_token(
-            self._read_token,
-            self._control_token,
-            self._admin_token,
-            self._update_token,
-            self._auth_token,
+    @property
+    def effective_read_token(self) -> str:
+        config = self._config
+        return self.first_configured_token(
+            config.read_token,
+            config.control_token,
+            config.admin_token,
+            config.update_token,
+            config.auth_token,
         )
 
-    def _effective_control_token(self) -> str:
-        return self._first_configured_token(self._control_token, self._auth_token)
+    @property
+    def effective_control_token(self) -> str:
+        return self.first_configured_token(self._config.control_token, self._config.auth_token)
 
-    def _effective_admin_token(self) -> str:
-        return self._first_configured_token(self._admin_token, self._control_token, self._auth_token)
+    @property
+    def effective_admin_token(self) -> str:
+        config = self._config
+        return self.first_configured_token(config.admin_token, config.control_token, config.auth_token)
 
-    def _effective_update_token(self) -> str:
-        return self._first_configured_token(
-            self._update_token,
-            self._admin_token,
-            self._control_token,
-            self._auth_token,
+    @property
+    def effective_update_token(self) -> str:
+        config = self._config
+        return self.first_configured_token(
+            config.update_token,
+            config.admin_token,
+            config.control_token,
+            config.auth_token,
         )
 
-    def _required_scope_for_command_payload(self, payload: dict[str, Any]) -> str:
+    def command_auth_error(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> AccessError | None:
+        return self.auth_error(handler, required_scope=self.required_scope_for_command(payload))
+
+    def required_scope_for_command(self, payload: dict[str, Any]) -> str:
         command_name = str(payload.get("name", "")).strip()
         if not command_name and "path" in payload:
             try:
-                command_name = self._service._control_command_from_payload(
+                command_name = self._service.control_command_from_payload(
                     {**payload, "command_id": "", "idempotency_key": ""},
                     source="http",
                 ).name
             except ValueError:
                 return "control_admin"
-        return self._COMMAND_SCOPE_REQUIREMENTS.get(command_name, "control_admin")
+        return CONTROL_API_COMMAND_SCOPE_REQUIREMENTS.get(command_name, "control_admin")
 
-    def _request_state_tokens(self, handler: BaseHTTPRequestHandler) -> set[str]:
+    @staticmethod
+    def request_state_tokens(handler: BaseHTTPRequestHandler) -> set[str]:
         tokens: set[str] = set()
-        header_values = [
+        header_values = (
             handler.headers.get("If-Match", "").strip(),
-            handler.headers.get(self._STATE_TOKEN_HEADER, "").strip(),
-        ]
+            handler.headers.get(STATE_TOKEN_HEADER, "").strip(),
+        )
         for raw_value in header_values:
-            if not raw_value:
-                continue
-            for item in raw_value.split(","):
-                normalized = self._normalized_token(item)
+            for item in raw_value.split(",") if raw_value else ():
+                normalized = ControlApiHttpAuthenticator.normalized_token(item)
                 if normalized:
                     tokens.add(normalized)
         return tokens
 
     @staticmethod
-    def _normalized_token(raw_value: str) -> str:
+    def normalized_token(raw_value: str) -> str:
         token = raw_value.strip()
         if token.startswith("W/"):
             token = token[2:].strip()
@@ -176,14 +206,26 @@ class _LocalControlApiAuth(_LocalControlApiResponse):
             token = token[1:-1].strip()
         return token
 
-    def _state_token(self) -> str:
-        state_token_factory = getattr(self._service, "_control_api_state_token", None)
-        if callable(state_token_factory):
-            return str(state_token_factory()).strip()
-        return ""
+    @property
+    def state_token(self) -> str:
+        return str(self._service.state_token()).strip()
 
-    def _state_token_headers(self) -> dict[str, str]:
-        token = self._state_token()
+    @property
+    def state_token_headers(self) -> dict[str, str]:
+        token = self.state_token
         if not token:
             return {}
-        return {"ETag": f'"{token}"', self._STATE_TOKEN_HEADER: token}
+        return {"ETag": f'"{token}"', STATE_TOKEN_HEADER: token}
+
+    def concurrency_error(self, handler: BaseHTTPRequestHandler) -> ConcurrencyError | None:
+        expected_tokens = self.request_state_tokens(handler)
+        if not expected_tokens or "*" in expected_tokens:
+            return None
+        current_token = self.state_token
+        if current_token in expected_tokens:
+            return None
+        return (
+            HTTPStatus.CONFLICT,
+            optimistic_concurrency_payload(expected_tokens, current_token),
+            self.state_token_headers,
+        )

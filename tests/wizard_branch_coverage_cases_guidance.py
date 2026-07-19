@@ -20,7 +20,6 @@ from tests.wizard_branch_coverage_cases_common import (
     prompt_transport_inputs,
     relevant_charger_presets,
     relevant_role_hosts,
-    render_charger_preset_config,
     resolved_primary_host,
     role_prompt_intro,
     role_prompt_label,

@@ -6,7 +6,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, mock_open, patch
 
-from venus_evcharger.runtime.audit import _RuntimeAudit
+from venus_evcharger.runtime.audit import RuntimeAuditLogger
+from venus_evcharger.runtime.audit_fields import RuntimeAuditFields
+from venus_evcharger.runtime.state_store import RuntimeStateStore
 
 
 DISPLAY_FIELDS = (
@@ -53,10 +55,9 @@ DISPLAY_FIELDS = (
 )
 
 
-def _audit(service: SimpleNamespace) -> _RuntimeAudit:
-    audit = _RuntimeAudit()
-    audit.service = service
-    return audit
+def _audit(service: SimpleNamespace) -> RuntimeAuditLogger:
+    state_store = RuntimeStateStore(service)
+    return RuntimeAuditLogger(service, RuntimeAuditFields(), state_store)
 
 
 class RuntimeAuditContractTests(unittest.TestCase):
@@ -94,25 +95,25 @@ class RuntimeAuditContractTests(unittest.TestCase):
             side_effect=lambda _svc, attribute, default: f"{attribute}:{default}"
         )
         with (
-            patch.object(_RuntimeAudit, "_normalized_auto_audit_metrics", return_value=metrics) as normalized,
+            patch.object(RuntimeAuditLogger, "_normalized_auto_audit_metrics", return_value=metrics) as normalized,
             patch("venus_evcharger.runtime.audit.normalized_auto_state_pair", return_value=("auto-state", 7)) as state,
-            patch.object(_RuntimeAudit, "_auto_audit_reason_detail", return_value="detail") as detail,
-            patch.object(_RuntimeAudit, "_relay_state_for_audit", return_value=1) as relay,
-            patch.object(_RuntimeAudit, "_bucket_metric", bucket),
-            patch.object(_RuntimeAudit, "_backend_value", backend),
-            patch.object(_RuntimeAudit, "_charger_target_for_audit", return_value=13.0) as charger_target,
-            patch.object(_RuntimeAudit, "_charger_transport_reason_for_audit", return_value="transport-reason") as transport_reason,
-            patch.object(_RuntimeAudit, "_charger_transport_source_for_audit", return_value="transport-source") as transport_source,
-            patch.object(_RuntimeAudit, "_charger_retry_reason_for_audit", return_value="retry-reason") as retry_reason,
-            patch.object(_RuntimeAudit, "_charger_retry_source_for_audit", return_value="retry-source") as retry_source,
-            patch.object(_RuntimeAudit, "_observed_phase_for_audit", return_value="P1_P2") as observed_phase,
-            patch.object(_RuntimeAudit, "_phase_mismatch_active_for_audit", return_value=True) as mismatch,
-            patch.object(_RuntimeAudit, "_phase_lockout_target_for_audit", return_value="P1") as lockout_target,
-            patch.object(_RuntimeAudit, "_phase_lockout_active_for_audit", return_value=True) as lockout,
-            patch.object(_RuntimeAudit, "_phase_supported_effective_for_audit", return_value="P1,P1_P2") as effective,
-            patch.object(_RuntimeAudit, "_phase_degraded_active_for_audit", return_value=False) as degraded,
+            patch.object(RuntimeAuditLogger, "_auto_audit_reason_detail", return_value="detail") as detail,
+            patch.object(RuntimeAuditLogger, "_relay_state_for_audit", return_value=1) as relay,
+            patch.object(RuntimeAuditLogger, "_bucket_metric", bucket),
+            patch.object(RuntimeAuditFields, "backend_value", backend),
+            patch.object(RuntimeAuditFields, "charger_target", return_value=13.0) as charger_target,
+            patch.object(RuntimeAuditFields, "charger_transport_reason", return_value="transport-reason") as transport_reason,
+            patch.object(RuntimeAuditFields, "charger_transport_source", return_value="transport-source") as transport_source,
+            patch.object(RuntimeAuditFields, "charger_retry_reason", return_value="retry-reason") as retry_reason,
+            patch.object(RuntimeAuditFields, "charger_retry_source", return_value="retry-source") as retry_source,
+            patch.object(RuntimeAuditFields, "observed_phase", return_value="P1_P2") as observed_phase,
+            patch.object(RuntimeAuditFields, "phase_mismatch_active", return_value=True) as mismatch,
+            patch.object(RuntimeAuditFields, "phase_lockout_target", return_value="P1") as lockout_target,
+            patch.object(RuntimeAuditFields, "phase_lockout_active", return_value=True) as lockout,
+            patch.object(RuntimeAuditFields, "phase_supported_effective", return_value="P1,P1_P2") as effective,
+            patch.object(RuntimeAuditFields, "phase_degraded_active", return_value=False) as degraded,
         ):
-            result = _RuntimeAudit._auto_audit_key(service, "reason", True)
+            result = _audit(service)._auto_audit_key(service, "reason", True)
 
         self.assertEqual(
             result,
@@ -198,24 +199,24 @@ class RuntimeAuditContractTests(unittest.TestCase):
             _last_auto_state_code=0,
         )
         with (
-            patch.object(_RuntimeAudit, "_normalized_auto_audit_metrics", return_value={}),
+            patch.object(RuntimeAuditLogger, "_normalized_auto_audit_metrics", return_value={}),
             patch("venus_evcharger.runtime.audit.normalized_auto_state_pair", return_value=("idle", 0)),
-            patch.object(_RuntimeAudit, "_auto_audit_reason_detail", return_value=None),
-            patch.object(_RuntimeAudit, "_relay_state_for_audit", return_value=0),
-            patch.object(_RuntimeAudit, "_backend_value", return_value="backend"),
-            patch.object(_RuntimeAudit, "_charger_target_for_audit", return_value=None),
-            patch.object(_RuntimeAudit, "_charger_transport_reason_for_audit", return_value=None),
-            patch.object(_RuntimeAudit, "_charger_transport_source_for_audit", return_value=None),
-            patch.object(_RuntimeAudit, "_charger_retry_reason_for_audit", return_value=None),
-            patch.object(_RuntimeAudit, "_charger_retry_source_for_audit", return_value=None),
-            patch.object(_RuntimeAudit, "_observed_phase_for_audit", return_value=None),
-            patch.object(_RuntimeAudit, "_phase_mismatch_active_for_audit", return_value=False),
-            patch.object(_RuntimeAudit, "_phase_lockout_target_for_audit", return_value=None),
-            patch.object(_RuntimeAudit, "_phase_lockout_active_for_audit", return_value=False),
-            patch.object(_RuntimeAudit, "_phase_supported_effective_for_audit", return_value="P1"),
-            patch.object(_RuntimeAudit, "_phase_degraded_active_for_audit", return_value=False),
+            patch.object(RuntimeAuditLogger, "_auto_audit_reason_detail", return_value=None),
+            patch.object(RuntimeAuditLogger, "_relay_state_for_audit", return_value=0),
+            patch.object(RuntimeAuditFields, "backend_value", return_value="backend"),
+            patch.object(RuntimeAuditFields, "charger_target", return_value=None),
+            patch.object(RuntimeAuditFields, "charger_transport_reason", return_value=None),
+            patch.object(RuntimeAuditFields, "charger_transport_source", return_value=None),
+            patch.object(RuntimeAuditFields, "charger_retry_reason", return_value=None),
+            patch.object(RuntimeAuditFields, "charger_retry_source", return_value=None),
+            patch.object(RuntimeAuditFields, "observed_phase", return_value=None),
+            patch.object(RuntimeAuditFields, "phase_mismatch_active", return_value=False),
+            patch.object(RuntimeAuditFields, "phase_lockout_target", return_value=None),
+            patch.object(RuntimeAuditFields, "phase_lockout_active", return_value=False),
+            patch.object(RuntimeAuditFields, "phase_supported_effective", return_value="P1"),
+            patch.object(RuntimeAuditFields, "phase_degraded_active", return_value=False),
         ):
-            result = _RuntimeAudit._auto_audit_key(service, "reason", False)
+            result = _audit(service)._auto_audit_key(service, "reason", False)
 
         self.assertEqual(result[4:7], (0, 0, 0))
         self.assertEqual(result[33:42], (None, None, 0, 0, None, 0, 0, None, 0))
@@ -223,26 +224,26 @@ class RuntimeAuditContractTests(unittest.TestCase):
     def test_normalized_metrics_have_exact_outward_schema(self) -> None:
         service = SimpleNamespace(_last_auto_metrics={"base": "value"})
         helper_values: dict[str, object] = {
-            "_charger_target_for_audit": 11.0,
-            "_charger_transport_reason_for_audit": "transport-reason",
-            "_charger_transport_source_for_audit": "transport-source",
-            "_charger_retry_reason_for_audit": "retry-reason",
-            "_charger_retry_source_for_audit": "retry-source",
-            "_observed_phase_for_audit": "P1",
-            "_phase_mismatch_active_for_audit": True,
-            "_phase_lockout_target_for_audit": "P1_P2",
-            "_phase_lockout_active_for_audit": False,
-            "_phase_supported_effective_for_audit": "P1,P1_P2",
-            "_phase_degraded_active_for_audit": True,
-            "_switch_feedback_closed_for_audit": True,
-            "_switch_interlock_ok_for_audit": False,
-            "_switch_feedback_mismatch_for_audit": True,
-            "_contactor_fault_count_for_audit": 4,
-            "_contactor_lockout_reason_for_audit": "locked",
-            "_contactor_lockout_active_for_audit": True,
-            "_evse_fault_active_for_audit": True,
-            "_evse_fault_reason_for_audit": "faulted",
-            "_recovery_active_for_audit": False,
+            "charger_target": 11.0,
+            "charger_transport_reason": "transport-reason",
+            "charger_transport_source": "transport-source",
+            "charger_retry_reason": "retry-reason",
+            "charger_retry_source": "retry-source",
+            "observed_phase": "P1",
+            "phase_mismatch_active": True,
+            "phase_lockout_target": "P1_P2",
+            "phase_lockout_active": False,
+            "phase_supported_effective": "P1,P1_P2",
+            "phase_degraded_active": True,
+            "switch_feedback_closed": True,
+            "switch_interlock_ok": False,
+            "switch_feedback_mismatch": True,
+            "contactor_fault_count": 4,
+            "contactor_lockout_reason": "locked",
+            "contactor_lockout_active": True,
+            "evse_fault_active": True,
+            "evse_fault_reason": "faulted",
+            "recovery_active": False,
         }
         backend_values = iter(("combined", "meter", "switch", "charger"))
         helper_mocks: dict[str, MagicMock] = {}
@@ -251,11 +252,11 @@ class RuntimeAuditContractTests(unittest.TestCase):
                 patch("venus_evcharger.runtime.audit.sanitized_auto_metrics", return_value={"base": "value"})
             )
             backend = stack.enter_context(
-                patch.object(_RuntimeAudit, "_backend_value", side_effect=lambda *_args: next(backend_values))
+                patch.object(RuntimeAuditFields, "backend_value", side_effect=lambda *_args: next(backend_values))
             )
             for name, value in helper_values.items():
-                helper_mocks[name] = stack.enter_context(patch.object(_RuntimeAudit, name, return_value=value))
-            result = _RuntimeAudit._normalized_auto_audit_metrics(service)
+                helper_mocks[name] = stack.enter_context(patch.object(RuntimeAuditFields, name, return_value=value))
+            result = _audit(service)._normalized_auto_audit_metrics(service)
 
         sanitize.assert_called_once_with({"base": "value"})
         self.assertEqual(
@@ -306,35 +307,35 @@ class RuntimeAuditContractTests(unittest.TestCase):
     def test_normalized_metrics_default_to_empty_input_payload(self) -> None:
         service = SimpleNamespace(_last_auto_metrics={})
         helper_values: dict[str, object] = {
-            "_charger_target_for_audit": None,
-            "_charger_transport_reason_for_audit": None,
-            "_charger_transport_source_for_audit": None,
-            "_charger_retry_reason_for_audit": None,
-            "_charger_retry_source_for_audit": None,
-            "_observed_phase_for_audit": None,
-            "_phase_mismatch_active_for_audit": False,
-            "_phase_lockout_target_for_audit": None,
-            "_phase_lockout_active_for_audit": False,
-            "_phase_supported_effective_for_audit": "P1",
-            "_phase_degraded_active_for_audit": False,
-            "_switch_feedback_closed_for_audit": None,
-            "_switch_interlock_ok_for_audit": None,
-            "_switch_feedback_mismatch_for_audit": False,
-            "_contactor_fault_count_for_audit": 0,
-            "_contactor_lockout_reason_for_audit": None,
-            "_contactor_lockout_active_for_audit": False,
-            "_evse_fault_active_for_audit": False,
-            "_evse_fault_reason_for_audit": None,
-            "_recovery_active_for_audit": False,
+            "charger_target": None,
+            "charger_transport_reason": None,
+            "charger_transport_source": None,
+            "charger_retry_reason": None,
+            "charger_retry_source": None,
+            "observed_phase": None,
+            "phase_mismatch_active": False,
+            "phase_lockout_target": None,
+            "phase_lockout_active": False,
+            "phase_supported_effective": "P1",
+            "phase_degraded_active": False,
+            "switch_feedback_closed": None,
+            "switch_interlock_ok": None,
+            "switch_feedback_mismatch": False,
+            "contactor_fault_count": 0,
+            "contactor_lockout_reason": None,
+            "contactor_lockout_active": False,
+            "evse_fault_active": False,
+            "evse_fault_reason": None,
+            "recovery_active": False,
         }
         with ExitStack() as stack:
             sanitize = stack.enter_context(
                 patch("venus_evcharger.runtime.audit.sanitized_auto_metrics", return_value={})
             )
-            stack.enter_context(patch.object(_RuntimeAudit, "_backend_value", return_value="backend"))
+            stack.enter_context(patch.object(RuntimeAuditFields, "backend_value", return_value="backend"))
             for name, value in helper_values.items():
-                stack.enter_context(patch.object(_RuntimeAudit, name, return_value=value))
-            _RuntimeAudit._normalized_auto_audit_metrics(service)
+                stack.enter_context(patch.object(RuntimeAuditFields, name, return_value=value))
+            _audit(service)._normalized_auto_audit_metrics(service)
         sanitize.assert_called_once_with({})
 
     def test_display_fields_have_exact_names_sources_and_formatting(self) -> None:
@@ -380,8 +381,9 @@ class RuntimeAuditContractTests(unittest.TestCase):
             "stop_alpha_stage": "calm",
             "surplus_volatility": 501.2,
         }
-        with patch.object(_RuntimeAudit, "_normalized_auto_audit_metrics", return_value=metrics):
-            result = _RuntimeAudit._auto_audit_display_fields(SimpleNamespace())
+        with patch.object(RuntimeAuditLogger, "_normalized_auto_audit_metrics", return_value=metrics):
+            service = SimpleNamespace()
+            result = _audit(service)._auto_audit_display_fields(service)
 
         self.assertEqual(set(result), set(DISPLAY_FIELDS))
         self.assertEqual(
@@ -446,8 +448,9 @@ class RuntimeAuditContractTests(unittest.TestCase):
             "surplus_volatility",
         }
         metrics = {key: float("inf") for key in numeric_keys}
-        with patch.object(_RuntimeAudit, "_normalized_auto_audit_metrics", return_value=metrics):
-            result = _RuntimeAudit._auto_audit_display_fields(SimpleNamespace())
+        with patch.object(RuntimeAuditLogger, "_normalized_auto_audit_metrics", return_value=metrics):
+            service = SimpleNamespace()
+            result = _audit(service)._auto_audit_display_fields(service)
         formatted_names = (
             "surplus",
             "grid",
@@ -476,14 +479,14 @@ class RuntimeAuditContractTests(unittest.TestCase):
         )
         fields = {name: f"<{name}>" for name in DISPLAY_FIELDS}
         with (
-            patch.object(_RuntimeAudit, "_auto_audit_display_fields", return_value=fields) as display,
-            patch.object(_RuntimeAudit, "_auto_audit_reason_detail", return_value="detail") as detail,
-            patch.object(_RuntimeAudit, "_relay_state_for_audit", return_value=1) as relay,
+            patch.object(RuntimeAuditLogger, "_auto_audit_display_fields", return_value=fields) as display,
+            patch.object(RuntimeAuditLogger, "_auto_audit_reason_detail", return_value="detail") as detail,
+            patch.object(RuntimeAuditLogger, "_relay_state_for_audit", return_value=1) as relay,
             patch("venus_evcharger.runtime.audit.normalized_auto_state_pair", return_value=("scheduled", 2)) as state,
             patch("venus_evcharger.runtime.audit.time.localtime", return_value=object()) as localtime,
             patch("venus_evcharger.runtime.audit.time.strftime", return_value="LOCAL") as strftime,
         ):
-            result = _RuntimeAudit._format_auto_audit_line(service, "reason", True, 123.75)
+            result = _audit(service)._format_auto_audit_line(service, "reason", True, 123.75)
 
         localtime.assert_called_once_with(123.75)
         strftime.assert_called_once_with("%Y-%m-%d %H:%M:%S", localtime.return_value)
@@ -520,9 +523,9 @@ class RuntimeAuditContractTests(unittest.TestCase):
     def test_formatted_line_uses_explicit_zero_value_contracts(self) -> None:
         fields = {name: "value" for name in DISPLAY_FIELDS}
         with (
-            patch.object(_RuntimeAudit, "_auto_audit_display_fields", return_value=fields),
-            patch.object(_RuntimeAudit, "_auto_audit_reason_detail", return_value=None),
-            patch.object(_RuntimeAudit, "_relay_state_for_audit", return_value=0),
+            patch.object(RuntimeAuditLogger, "_auto_audit_display_fields", return_value=fields),
+            patch.object(RuntimeAuditLogger, "_auto_audit_reason_detail", return_value=None),
+            patch.object(RuntimeAuditLogger, "_relay_state_for_audit", return_value=0),
             patch("venus_evcharger.runtime.audit.normalized_auto_state_pair", return_value=("idle", 0)) as state,
             patch("venus_evcharger.runtime.audit.time.strftime", return_value="LOCAL"),
             patch("venus_evcharger.runtime.audit.time.localtime"),
@@ -534,7 +537,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
                 _last_auto_state="idle",
                 _last_auto_state_code=0,
             )
-            result = _RuntimeAudit._format_auto_audit_line(service, "reason", False, 10.0)
+            result = _audit(service)._format_auto_audit_line(service, "reason", False, 10.0)
         state.assert_called_once_with("idle", 0)
         self.assertIn("\tdetail=na\t", result)
         self.assertIn("\tmode=0\t", result)
@@ -543,23 +546,23 @@ class RuntimeAuditContractTests(unittest.TestCase):
 
     def test_scalar_and_retention_helpers_enforce_boundaries(self) -> None:
         service = SimpleNamespace(auto_stop_condition_reason="auto-stop-grid")
-        self.assertEqual(_RuntimeAudit._auto_audit_reason_detail(service, "auto-stop"), "grid")
+        self.assertEqual(RuntimeAuditLogger._auto_audit_reason_detail(service, "auto-stop"), "grid")
         service.auto_stop_condition_reason = "auto-stop-soc"
-        self.assertEqual(_RuntimeAudit._auto_audit_reason_detail(service, "auto-stop"), "soc")
+        self.assertEqual(RuntimeAuditLogger._auto_audit_reason_detail(service, "auto-stop"), "soc")
         service.auto_stop_condition_reason = "auto-stop-surplus"
-        self.assertEqual(_RuntimeAudit._auto_audit_reason_detail(service, "auto-stop"), "surplus")
-        self.assertIsNone(_RuntimeAudit._auto_audit_reason_detail(service, "other"))
-        self.assertIsNone(_RuntimeAudit._auto_audit_reason_detail(SimpleNamespace(), "auto-stop"))
+        self.assertEqual(RuntimeAuditLogger._auto_audit_reason_detail(service, "auto-stop"), "surplus")
+        self.assertIsNone(RuntimeAuditLogger._auto_audit_reason_detail(service, "other"))
+        self.assertIsNone(RuntimeAuditLogger._auto_audit_reason_detail(SimpleNamespace(), "auto-stop"))
 
-        self.assertEqual(_RuntimeAudit._bucket_metric(1.24, step=0.5), 1.0)
-        self.assertEqual(_RuntimeAudit._bucket_metric(1.26, step=0.5), 1.5)
-        self.assertEqual(_RuntimeAudit._bucket_metric(1.25, step=0.0), 1.25)
-        self.assertIsNone(_RuntimeAudit._bucket_metric(None, step=0.5))
-        self.assertIsNone(_RuntimeAudit._string_metric(None))
-        self.assertEqual(_RuntimeAudit._string_metric(0), "0")
-        self.assertEqual(_RuntimeAudit._auto_audit_value_text(None, "{:.1f}"), "na")
-        self.assertEqual(_RuntimeAudit._auto_audit_value_text("raw", None), "raw")
-        self.assertEqual(_RuntimeAudit._auto_audit_value_text(1.25, "{:.1f}"), "1.2")
+        self.assertEqual(RuntimeAuditLogger._bucket_metric(1.24, step=0.5), 1.0)
+        self.assertEqual(RuntimeAuditLogger._bucket_metric(1.26, step=0.5), 1.5)
+        self.assertEqual(RuntimeAuditLogger._bucket_metric(1.25, step=0.0), 1.25)
+        self.assertIsNone(RuntimeAuditLogger._bucket_metric(None, step=0.5))
+        self.assertIsNone(RuntimeAuditLogger._string_metric(None))
+        self.assertEqual(RuntimeAuditLogger._string_metric(0), "0")
+        self.assertEqual(RuntimeAuditLogger._auto_audit_value_text(None, "{:.1f}"), "na")
+        self.assertEqual(RuntimeAuditLogger._auto_audit_value_text("raw", None), "raw")
+        self.assertEqual(RuntimeAuditLogger._auto_audit_value_text(1.25, "{:.1f}"), "1.2")
 
         lines = [
             "\n",
@@ -571,37 +574,37 @@ class RuntimeAuditContractTests(unittest.TestCase):
             "101\tnew\n",
         ]
         self.assertEqual(
-            _RuntimeAudit._prune_auto_audit_payload(lines, 100.0),
+            RuntimeAuditLogger._prune_auto_audit_payload(lines, 100.0),
             ["99 separated-by-space\n", "100\tboundary\n", "invalid\n", "101\tnew\n"],
         )
 
     def test_relay_state_uses_normalized_service_clock_and_confirmed_output(self) -> None:
-        service = SimpleNamespace(_time_now=lambda: 12.0)
+        service = SimpleNamespace(time_now=lambda: 12.0)
         with (
-            patch.object(_RuntimeAudit, "_callable_time_or_none", return_value=12.0) as normalize,
+            patch.object(RuntimeAuditFields, "callable_time_or_none", return_value=12.0) as normalize,
             patch("venus_evcharger.runtime.audit._fresh_confirmed_relay_output", return_value=True) as relay,
         ):
-            self.assertEqual(_RuntimeAudit._relay_state_for_audit(service), 1)
-        normalize.assert_called_once_with(service._time_now)
+            self.assertEqual(_audit(service)._relay_state_for_audit(service), 1)
+        normalize.assert_called_once_with(service.time_now)
         relay.assert_called_once_with(service, 12.0)
 
         service = SimpleNamespace()
         with (
-            patch.object(_RuntimeAudit, "_callable_time_or_none", return_value=None) as normalize,
+            patch.object(RuntimeAuditFields, "callable_time_or_none", return_value=None) as normalize,
             patch("venus_evcharger.runtime.audit._fresh_confirmed_relay_output", return_value=False) as relay,
         ):
-            self.assertEqual(_RuntimeAudit._relay_state_for_audit(service), 0)
+            self.assertEqual(_audit(service)._relay_state_for_audit(service), 0)
         normalize.assert_called_once_with(None)
         relay.assert_called_once_with(service, None)
 
     def test_file_helpers_use_exact_io_contracts(self) -> None:
         opened = mock_open(read_data="a\nb\n")
         with patch("venus_evcharger.runtime.audit.open", opened):
-            self.assertEqual(_RuntimeAudit._load_auto_audit_lines("audit.log"), ["a\n", "b\n"])
+            self.assertEqual(RuntimeAuditLogger._load_auto_audit_lines("audit.log"), ["a\n", "b\n"])
         opened.assert_called_once_with("audit.log", "r", encoding="utf-8")
 
         with patch("venus_evcharger.runtime.audit.write_text_atomically") as write:
-            _RuntimeAudit._write_pruned_auto_audit_lines("audit.log", ["a\n", "b\n"])
+            RuntimeAuditLogger._write_pruned_auto_audit_lines("audit.log", ["a\n", "b\n"])
         write.assert_called_once_with("audit.log", "a\nb\n")
 
         opened = mock_open()
@@ -609,7 +612,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
             patch("venus_evcharger.runtime.audit.os.makedirs") as makedirs,
             patch("venus_evcharger.runtime.audit.open", opened),
         ):
-            _RuntimeAudit._write_auto_audit_line("logs/audit.log", "payload\n")
+            RuntimeAuditLogger._write_auto_audit_line("logs/audit.log", "payload\n")
         makedirs.assert_called_once_with("logs", exist_ok=True)
         opened.assert_called_once_with("logs/audit.log", "a", encoding="utf-8")
         opened().write.assert_called_once_with("payload\n")
@@ -621,7 +624,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
                 patch("venus_evcharger.runtime.audit.open", side_effect=error),
                 patch("venus_evcharger.runtime.audit.logging.debug") as debug,
             ):
-                self.assertIsNone(_RuntimeAudit._load_auto_audit_lines("audit.log"))
+                self.assertIsNone(RuntimeAuditLogger._load_auto_audit_lines("audit.log"))
                 debug.assert_called_once_with("Auto audit cleanup skipped for %s: %s", "audit.log", error)
 
         error = TypeError("write")
@@ -629,7 +632,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
             patch("venus_evcharger.runtime.audit.write_text_atomically", side_effect=error),
             patch("venus_evcharger.runtime.audit.logging.debug") as debug,
         ):
-            _RuntimeAudit._write_pruned_auto_audit_lines("audit.log", ["payload\n"])
+            RuntimeAuditLogger._write_pruned_auto_audit_lines("audit.log", ["payload\n"])
         debug.assert_called_once_with("Unable to prune auto audit log %s: %s", "audit.log", error)
 
     def test_cleanup_due_and_cutoff_obey_exact_defaults_and_boundaries(self) -> None:
@@ -680,25 +683,25 @@ class RuntimeAuditContractTests(unittest.TestCase):
 
     def test_repeat_suppression_has_exact_time_boundaries(self) -> None:
         key = ("same",)
-        self.assertFalse(_RuntimeAudit._auto_audit_repeat_suppressed(key, ("other",), 10.0, 99.0, 100.0))
-        self.assertTrue(_RuntimeAudit._auto_audit_repeat_suppressed(key, key, 0.0, None, 100.0))
-        self.assertTrue(_RuntimeAudit._auto_audit_repeat_suppressed(key, key, -1.0, None, 100.0))
-        self.assertFalse(_RuntimeAudit._auto_audit_repeat_suppressed(key, key, 0.5, 0.0, 100.0))
-        self.assertFalse(_RuntimeAudit._auto_audit_repeat_suppressed(key, key, 10.0, None, 100.0))
-        self.assertTrue(_RuntimeAudit._auto_audit_repeat_suppressed(key, key, 10.0, 90.01, 100.0))
-        self.assertFalse(_RuntimeAudit._auto_audit_repeat_suppressed(key, key, 10.0, 90.0, 100.0))
+        self.assertFalse(RuntimeAuditLogger._auto_audit_repeat_suppressed(key, ("other",), 10.0, 99.0, 100.0))
+        self.assertTrue(RuntimeAuditLogger._auto_audit_repeat_suppressed(key, key, 0.0, None, 100.0))
+        self.assertTrue(RuntimeAuditLogger._auto_audit_repeat_suppressed(key, key, -1.0, None, 100.0))
+        self.assertFalse(RuntimeAuditLogger._auto_audit_repeat_suppressed(key, key, 0.5, 0.0, 100.0))
+        self.assertFalse(RuntimeAuditLogger._auto_audit_repeat_suppressed(key, key, 10.0, None, 100.0))
+        self.assertTrue(RuntimeAuditLogger._auto_audit_repeat_suppressed(key, key, 10.0, 90.01, 100.0))
+        self.assertFalse(RuntimeAuditLogger._auto_audit_repeat_suppressed(key, key, 10.0, 90.0, 100.0))
 
     def test_write_event_orchestrates_policy_cleanup_write_and_commit(self) -> None:
         service = SimpleNamespace(
             auto_audit_log=True,
             auto_audit_log_path=" audit.log ",
             auto_audit_log_repeat_seconds=31.0,
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _last_auto_audit_key=("old",),
             _last_auto_audit_event_at=80.0,
         )
         audit = _audit(service)
-        audit.ensure_observability_state = MagicMock()
+        audit.state_store.ensure_observability_state = MagicMock()
         audit._auto_audit_key = MagicMock(return_value=("new",))
         audit._auto_audit_repeat_suppressed = MagicMock(return_value=False)
         audit._cleanup_auto_audit_log = MagicMock()
@@ -709,8 +712,8 @@ class RuntimeAuditContractTests(unittest.TestCase):
         with patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy", return_value=policy) as resolve:
             audit.write_auto_audit_event("reason", cached=True)
 
-        audit.ensure_observability_state.assert_called_once_with()
-        service._time_now.assert_called_once_with()
+        audit.state_store.ensure_observability_state.assert_called_once_with()
+        service.time_now.assert_called_once_with()
         audit._auto_audit_key.assert_called_once_with(service, "reason", True)
         resolve.assert_called_once_with(service)
         policy.audit_repeat_seconds.assert_called_once_with(31.0)
@@ -731,12 +734,12 @@ class RuntimeAuditContractTests(unittest.TestCase):
         service = SimpleNamespace(
             auto_audit_log=True,
             auto_audit_log_repeat_seconds=30.0,
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _last_auto_audit_key=None,
             _last_auto_audit_event_at=None,
         )
         audit = _audit(service)
-        audit.ensure_observability_state = MagicMock()
+        audit.state_store.ensure_observability_state = MagicMock()
         audit._auto_audit_key = MagicMock(return_value=("key",))
         audit._auto_audit_repeat_suppressed = MagicMock(return_value=True)
         audit._cleanup_auto_audit_log = MagicMock()
@@ -750,13 +753,13 @@ class RuntimeAuditContractTests(unittest.TestCase):
         audit._write_auto_audit_line.assert_not_called()
 
     def test_write_event_disabled_returns_before_clock_and_policy(self) -> None:
-        service = SimpleNamespace(auto_audit_log=False, _time_now=MagicMock())
+        service = SimpleNamespace(auto_audit_log=False, time_now=MagicMock())
         audit = _audit(service)
-        audit.ensure_observability_state = MagicMock()
+        audit.state_store.ensure_observability_state = MagicMock()
         with patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy") as policy:
             audit.write_auto_audit_event("reason")
-        audit.ensure_observability_state.assert_called_once_with()
-        service._time_now.assert_not_called()
+        audit.state_store.ensure_observability_state.assert_called_once_with()
+        service.time_now.assert_not_called()
         policy.assert_not_called()
 
     def test_write_event_empty_path_uses_initialized_runtime_state(self) -> None:
@@ -764,12 +767,12 @@ class RuntimeAuditContractTests(unittest.TestCase):
             auto_audit_log=True,
             auto_audit_log_path="",
             auto_audit_log_repeat_seconds=30.0,
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _last_auto_audit_key=None,
             _last_auto_audit_event_at=None,
         )
         audit = _audit(service)
-        audit.ensure_observability_state = MagicMock()
+        audit.state_store.ensure_observability_state = MagicMock()
         audit._auto_audit_key = MagicMock(return_value=("key",))
         audit._auto_audit_repeat_suppressed = MagicMock(return_value=False)
         audit._cleanup_auto_audit_log = MagicMock()
@@ -794,12 +797,12 @@ class RuntimeAuditContractTests(unittest.TestCase):
             auto_audit_log=True,
             auto_audit_log_path="audit.log",
             auto_audit_log_repeat_seconds=30.0,
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _last_auto_audit_key=None,
             _last_auto_audit_event_at=None,
         )
         audit = _audit(service)
-        audit.ensure_observability_state = MagicMock()
+        audit.state_store.ensure_observability_state = MagicMock()
         audit._auto_audit_key = MagicMock(return_value=("key",))
         audit._auto_audit_repeat_suppressed = MagicMock(return_value=False)
         audit._cleanup_auto_audit_log = MagicMock()

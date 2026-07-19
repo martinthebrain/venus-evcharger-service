@@ -4,17 +4,43 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 from venus_evcharger.controllers import state_summary as summary_module
-from venus_evcharger.controllers.state import ServiceStateController
+from venus_evcharger.controllers.state_summary import StateSummaryBuilder
+from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS
+from venus_evcharger.core.common_types import ScheduledModeSnapshot
+
+
+def _scheduled_snapshot(
+    *,
+    state: str = "",
+    reason: str = "",
+    target_day_label: str = "",
+    night_boost_active: bool = False,
+    boost_until_text: str = "",
+) -> ScheduledModeSnapshot:
+    return ScheduledModeSnapshot(
+        state=state,
+        state_code=0,
+        reason=reason,
+        reason_code=0,
+        night_boost_active=night_boost_active,
+        target_day_index=0,
+        target_day_label=target_day_label,
+        target_date_text="",
+        target_day_enabled=False,
+        fallback_start_text="",
+        boost_until_text=boost_until_text,
+    )
 
 
 class TestStateSummaryContracts(unittest.TestCase):
     def setUp(self) -> None:
         self.service = SimpleNamespace()
-        self.controller = ServiceStateController(self.service, int)
+        self.controller = StateSummaryBuilder(self.service)
 
     def test_scalar_formatters_preserve_boolean_text_and_finite_float_contracts(self) -> None:
         self.assertEqual(self.controller._summary_flag(0), "0")
@@ -65,10 +91,10 @@ class TestStateSummaryContracts(unittest.TestCase):
         self.assertEqual(self.controller._summary_phase_mismatch_active(SimpleNamespace()), "0")
 
         svc = SimpleNamespace(_phase_switch_lockout_selection="P1_P2", _phase_switch_lockout_until=101.0)
-        with patch.object(summary_module.time, "time", return_value=100.0):
+        with patch("venus_evcharger.controllers.state_summary.time.time", return_value=100.0):
             self.assertEqual(self.controller._summary_phase_lockout_active(svc), "1")
             self.assertEqual(self.controller._summary_phase_lockout_target(svc), "P1_P2")
-        with patch.object(summary_module.time, "time", return_value=101.0):
+        with patch("venus_evcharger.controllers.state_summary.time.time", return_value=101.0):
             self.assertEqual(self.controller._summary_phase_lockout_active(svc), "0")
             self.assertEqual(self.controller._summary_phase_lockout_target(svc), "na")
         self.assertEqual(
@@ -81,24 +107,24 @@ class TestStateSummaryContracts(unittest.TestCase):
             _phase_switch_lockout_selection="P1_P2",
             _phase_switch_lockout_until=110.0,
         )
-        with patch.object(summary_module.time, "time", return_value=100.0):
+        with patch("venus_evcharger.controllers.state_summary.time.time", return_value=100.0):
             self.assertEqual(self.controller._summary_phase_supported_effective(phase_svc), "P1")
             self.assertEqual(self.controller._summary_phase_degraded_active(phase_svc), "1")
         phase_svc._phase_switch_lockout_until = 90.0
-        with patch.object(summary_module.time, "time", return_value=100.0):
+        with patch("venus_evcharger.controllers.state_summary.time.time", return_value=100.0):
             self.assertEqual(self.controller._summary_phase_supported_effective(phase_svc), "P1,P1_P2")
             self.assertEqual(self.controller._summary_phase_degraded_active(phase_svc), "0")
 
         empty = SimpleNamespace()
         with (
-            patch.object(summary_module.time, "time", return_value=123.0),
+            patch("venus_evcharger.controllers.state_summary.time.time", return_value=123.0),
             patch.object(summary_module, "effective_supported_phase_selections", return_value=("P1",)) as effective,
         ):
             self.assertEqual(self.controller._summary_phase_supported_effective(empty), "P1")
         effective.assert_called_once_with(None, lockout_selection=None, lockout_until=None, now=123.0)
 
         with (
-            patch.object(summary_module.time, "time", return_value=124.0),
+            patch("venus_evcharger.controllers.state_summary.time.time", return_value=124.0),
             patch.object(summary_module, "normalize_phase_selection_tuple", return_value=("P1", "P1_P2")) as normalize,
             patch.object(summary_module, "effective_supported_phase_selections", return_value=("P1",)) as effective,
         ):
@@ -189,13 +215,13 @@ class TestStateSummaryContracts(unittest.TestCase):
         for imported_name, method_name in helpers:
             with self.subTest(method=method_name):
                 with (
-                    patch.object(summary_module.time, "time", return_value=50.0),
+                    patch("venus_evcharger.controllers.state_summary.time.time", return_value=50.0),
                     patch.object(summary_module, imported_name, return_value=" value ") as helper,
                 ):
                     self.assertEqual(getattr(self.controller, method_name)(svc), "value")
                 helper.assert_called_once_with(svc, 50.0)
                 with (
-                    patch.object(summary_module.time, "time", return_value=51.0),
+                    patch("venus_evcharger.controllers.state_summary.time.time", return_value=51.0),
                     patch.object(summary_module, imported_name, return_value=None),
                 ):
                     self.assertEqual(getattr(self.controller, method_name)(svc), "na")
@@ -218,7 +244,7 @@ class TestStateSummaryContracts(unittest.TestCase):
             self.assertEqual(self.controller._scheduled_snapshot(svc, 100.0), "snapshot")
         uses.assert_called_once_with(2)
         scheduled.assert_called_once_with(
-            summary_module.datetime.fromtimestamp(100.0),
+            datetime.fromtimestamp(100.0),
             {7: ("20:00", "06:00")},
             (0, 2),
             delay_seconds=123.0,
@@ -232,9 +258,9 @@ class TestStateSummaryContracts(unittest.TestCase):
         ):
             self.assertEqual(self.controller._scheduled_snapshot(empty, 200.0), "default")
         scheduled.assert_called_once_with(
-            summary_module.datetime.fromtimestamp(200.0),
+            datetime.fromtimestamp(200.0),
             {},
-            summary_module.DEFAULT_SCHEDULED_ENABLED_DAYS,
+            DEFAULT_SCHEDULED_ENABLED_DAYS,
             delay_seconds=3600.0,
             latest_end_time="06:30",
         )
@@ -256,12 +282,12 @@ class TestStateSummaryContracts(unittest.TestCase):
             self.controller._summary_mode_parts(SimpleNamespace()),
             ("mode=na", "enable=na", "startstop=na", "autostart=na", "cutover=0", "ignore_offtime=0"),
         )
-        with patch.object(ServiceStateController, "_summary_flag", side_effect=("cutover", "offtime")) as flag:
+        with patch.object(StateSummaryBuilder, "_summary_flag", side_effect=("cutover", "offtime")) as flag:
             mode_parts = self.controller._summary_mode_parts(svc)
         self.assertEqual(mode_parts[-2:], ("cutover=cutover", "ignore_offtime=offtime"))
         self.assertEqual(
             flag.call_args_list,
-            [unittest.mock.call(True), unittest.mock.call(False)],
+            [call(True), call(False)],
         )
 
         helper_values = {
@@ -273,11 +299,13 @@ class TestStateSummaryContracts(unittest.TestCase):
             "_summary_phase_degraded_active": "degraded",
         }
         phase_svc = SimpleNamespace(active_phase_selection="P1", requested_phase_selection="P1_P2", _phase_switch_state="stable")
-        patchers = [patch.object(ServiceStateController, name, return_value=value) for name, value in helper_values.items()]
-        helper_mocks = []
-        for item in patchers:
-            helper_mocks.append(item.start())
-            self.addCleanup(item.stop)
+        helper_mocks: list[MagicMock] = []
+        for name, value in helper_values.items():
+            helper = MagicMock(return_value=value)
+            patcher = patch.object(StateSummaryBuilder, name, new=helper)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+            helper_mocks.append(helper)
         self.assertEqual(
             self.controller._summary_phase_parts(phase_svc),
             (
@@ -320,10 +348,10 @@ class TestStateSummaryContracts(unittest.TestCase):
         with (
             patch.object(summary_module, "backend_mode_for_service", return_value="split") as backend_mode,
             patch.object(summary_module, "backend_type_for_service", side_effect=("meter", "switch", "charger")) as backend_type,
-            patch.object(ServiceStateController, "_summary_charger_transport_reason", return_value="transport") as transport,
-            patch.object(ServiceStateController, "_summary_charger_transport_source", return_value="transport-source") as transport_source,
-            patch.object(ServiceStateController, "_summary_charger_retry_reason", return_value="retry") as retry,
-            patch.object(ServiceStateController, "_summary_charger_retry_source", return_value="retry-source") as retry_source,
+            patch.object(StateSummaryBuilder, "_summary_charger_transport_reason", return_value="transport") as transport,
+            patch.object(StateSummaryBuilder, "_summary_charger_transport_source", return_value="transport-source") as transport_source,
+            patch.object(StateSummaryBuilder, "_summary_charger_retry_reason", return_value="retry") as retry,
+            patch.object(StateSummaryBuilder, "_summary_charger_retry_source", return_value="retry-source") as retry_source,
             patch.object(summary_module, "_charger_retry_remaining_seconds", return_value=12) as remaining,
         ):
             self.assertEqual(
@@ -347,9 +375,9 @@ class TestStateSummaryContracts(unittest.TestCase):
         self.assertEqual(
             backend_type.call_args_list,
             [
-                unittest.mock.call(svc, "meter", "shelly_meter"),
-                unittest.mock.call(svc, "switch", "shelly_contactor_switch"),
-                unittest.mock.call(svc, "charger", ""),
+                call(svc, "meter", "shelly_meter"),
+                call(svc, "switch", "shelly_contactor_switch"),
+                call(svc, "charger", ""),
             ],
         )
         remaining.assert_called_once_with(svc, 100.0)
@@ -361,10 +389,10 @@ class TestStateSummaryContracts(unittest.TestCase):
         with (
             patch.object(summary_module, "backend_mode_for_service", return_value="combined"),
             patch.object(summary_module, "backend_type_for_service", side_effect=("meter", "switch", "")),
-            patch.object(ServiceStateController, "_summary_charger_transport_reason", return_value="na"),
-            patch.object(ServiceStateController, "_summary_charger_transport_source", return_value="na"),
-            patch.object(ServiceStateController, "_summary_charger_retry_reason", return_value="na"),
-            patch.object(ServiceStateController, "_summary_charger_retry_source", return_value="na"),
+            patch.object(StateSummaryBuilder, "_summary_charger_transport_reason", return_value="na"),
+            patch.object(StateSummaryBuilder, "_summary_charger_transport_source", return_value="na"),
+            patch.object(StateSummaryBuilder, "_summary_charger_retry_reason", return_value="na"),
+            patch.object(StateSummaryBuilder, "_summary_charger_retry_source", return_value="na"),
             patch.object(summary_module, "_charger_retry_remaining_seconds", return_value=0),
         ):
             empty_backend = self.controller._summary_backend_parts(SimpleNamespace(), 0.0)
@@ -387,8 +415,8 @@ class TestStateSummaryContracts(unittest.TestCase):
         )
 
         with (
-            patch.object(ServiceStateController, "_summary_fault_active", return_value="1"),
-            patch.object(ServiceStateController, "_summary_fault_reason", return_value="fault"),
+            patch.object(StateSummaryBuilder, "_summary_fault_active", return_value="1"),
+            patch.object(StateSummaryBuilder, "_summary_fault_reason", return_value="fault"),
         ):
             self.assertEqual(
                 self.controller._summary_status_parts(svc),
@@ -408,18 +436,22 @@ class TestStateSummaryContracts(unittest.TestCase):
             "_summary_scheduled_parts",
             "_summary_tail_parts",
         )
-        patchers = [patch.object(ServiceStateController, name, return_value=(str(index),)) for index, name in enumerate(builder_names)]
-        mocks = [item.start() for item in patchers]
-        for item in patchers:
-            self.addCleanup(item.stop)
-        self.assertEqual(self.controller._summary_parts(svc, "scheduled", 100.0), tuple(str(i) for i in range(7)))
+        mocks: list[MagicMock] = []
+        for index, name in enumerate(builder_names):
+            mock = MagicMock(return_value=(str(index),))
+            patcher = patch.object(StateSummaryBuilder, name, new=mock)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+            mocks.append(mock)
+        scheduled = _scheduled_snapshot(state="scheduled")
+        self.assertEqual(self.controller._summary_parts(svc, scheduled, 100.0), tuple(str(i) for i in range(7)))
         expected_args = (
             (svc,),
             (svc,),
             (svc,),
             (svc, 100.0),
             (svc,),
-            ("scheduled",),
+            (scheduled,),
             (svc,),
         )
         for mock, args in zip(mocks, expected_args):
@@ -430,18 +462,12 @@ class TestStateSummaryContracts(unittest.TestCase):
             self.controller._summary_scheduled_snapshot_values(None),
             ("na", "na", "na", "0", "na"),
         )
-        empty_snapshot = SimpleNamespace(
-            state=None,
-            reason="",
-            target_day_label=None,
-            night_boost_active=False,
-            boost_until_text="",
-        )
+        empty_snapshot = _scheduled_snapshot()
         self.assertEqual(
             self.controller._summary_scheduled_snapshot_values(empty_snapshot),
             ("na", "na", "na", "0", "na"),
         )
-        snapshot = SimpleNamespace(
+        snapshot = _scheduled_snapshot(
             state="active",
             reason="window",
             target_day_label="Monday",
@@ -467,11 +493,11 @@ class TestStateSummaryContracts(unittest.TestCase):
             ("recovery=0", "health=na"),
         )
         with (
-            patch.object(summary_module.time, "time", return_value=100.0),
+            patch("venus_evcharger.controllers.state_summary.time.time", return_value=100.0),
             patch.object(self.controller, "_scheduled_snapshot", return_value="scheduled") as scheduled,
             patch.object(self.controller, "_summary_parts", return_value=("a=1", "b=2")) as parts,
         ):
-            self.assertEqual(self.controller.state_summary(), "a=1 b=2")
+            self.assertEqual(self.controller.build(), "a=1 b=2")
         scheduled.assert_called_once_with(self.service, 100.0)
         parts.assert_called_once_with(self.service, "scheduled", 100.0)
 

@@ -9,19 +9,14 @@ from unittest.mock import MagicMock, call, patch
 
 from venus_evcharger.update import victron_ess_balance_apply_write as write_module
 from venus_evcharger.update.victron_ess_balance_apply_write import (
-    _UpdateCycleVictronEssBalanceApplyWrite,
+    VictronEssSetpointWriter,
 )
-
-
-class _WriteHarness(_UpdateCycleVictronEssBalanceApplyWrite):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        return float(value) if isinstance(value, (str, int, float)) else None
+from venus_evcharger.update.victron_ess_balance_apply_sources import VictronEssSourceResolver
 
 
 class VictronEssBalanceApplyWriteContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.writer = _WriteHarness()
+        self.writer = VictronEssSetpointWriter(VictronEssSourceResolver())
 
     def test_should_write_enforces_interval_and_one_watt_delta_boundaries(self) -> None:
         svc = SimpleNamespace(auto_battery_discharge_balance_victron_bias_min_update_seconds=3.0)
@@ -44,7 +39,7 @@ class VictronEssBalanceApplyWriteContractTests(unittest.TestCase):
         self.assertIsNone(self.writer._victron_ess_balance_last_setpoint(SimpleNamespace()))
         self.assertEqual(
             self.writer._victron_ess_balance_last_setpoint(
-                SimpleNamespace(_victron_ess_balance_last_setpoint_w="12.5")
+                SimpleNamespace(_victron_ess_balance_last_setpoint_w=12.5)
             ),
             12.5,
         )
@@ -110,8 +105,16 @@ class VictronEssBalanceApplyWriteContractTests(unittest.TestCase):
         self.assertEqual(attempt.call_args_list, [call(svc, "service", "/Path", 2.0), call(svc, "service", "/Path", 2.0)])
         retry.assert_called_once_with("service", "/Path", error)
 
+        with patch.object(
+            self.writer,
+            "_victron_ess_balance_try_write_setpoint",
+            side_effect=(error, None),
+        ):
+            self.assertIsNone(self.writer._victron_ess_balance_write_error(svc, "service", "/Path", 2.0))
+
     def test_write_setpoint_rejects_invalid_target_and_reports_failures(self) -> None:
-        svc = SimpleNamespace(_warning_throttled=MagicMock())
+        warning = MagicMock()
+        svc = SimpleNamespace(runtime=SimpleNamespace(warning_throttled=warning))
         with patch.object(self.writer, "_victron_ess_balance_write_error") as write_error:
             self.assertIs(self.writer._victron_ess_balance_write_setpoint(svc, "", "/Path", 1.0), False)
             self.assertIs(self.writer._victron_ess_balance_write_setpoint(svc, "service", "", 1.0), False)
@@ -120,7 +123,7 @@ class VictronEssBalanceApplyWriteContractTests(unittest.TestCase):
         with patch.object(self.writer, "_victron_ess_balance_write_error", return_value=None) as write_error:
             self.assertIs(self.writer._victron_ess_balance_write_setpoint(svc, " service ", " /Path ", 3.0), True)
         write_error.assert_called_once_with(svc, "service", "/Path", 3.0)
-        svc._warning_throttled.assert_not_called()
+        warning.assert_not_called()
 
         error = OSError("failed")
         with (
@@ -129,7 +132,7 @@ class VictronEssBalanceApplyWriteContractTests(unittest.TestCase):
         ):
             self.assertIs(self.writer._victron_ess_balance_write_setpoint(svc, "service", "/Path", 4.0), False)
         interval.assert_called_once_with(svc)
-        svc._warning_throttled.assert_called_once_with(
+        warning.assert_called_once_with(
             "victron-ess-balance-write-failed",
             8.0,
             "Victron ESS balance-bias write to %s %s failed: %s",
