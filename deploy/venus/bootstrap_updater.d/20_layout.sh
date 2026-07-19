@@ -46,6 +46,7 @@ write_managed_layout() {
 	chmod 755 "${destination_root}/venus_evchargerctl.py" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/install_venus_evcharger_service.sh" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/boot_venus_evcharger_service.sh" 2>/dev/null || true
+	chmod 755 "${destination_root}/deploy/venus/service_lifecycle.sh" 2>/dev/null || true
 	chmod 744 "${destination_root}/deploy/venus/restart_venus_evcharger_service.sh" 2>/dev/null || true
 	chmod 744 "${destination_root}/deploy/venus/uninstall_venus_evcharger_service.sh" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/service_venus_evcharger/run" 2>/dev/null || true
@@ -68,6 +69,13 @@ promote_release_layout() {
 	release_version="${MANIFEST_VERSION:-bundle}"
 	mkdir -p "$RELEASES_DIR"
 	final_release_dir="${RELEASES_DIR}/${release_version}"
+	if [ -e "$final_release_dir" ] || [ -L "$final_release_dir" ]; then
+		release_suffix=$(printf '%s' "${RUN_NEW_BUNDLE_SHA256:-$$}" | awk '{print substr($0, 1, 12)}')
+		final_release_dir="${RELEASES_DIR}/${release_version}-${release_suffix}"
+		if [ -e "$final_release_dir" ] || [ -L "$final_release_dir" ]; then
+			final_release_dir="${final_release_dir}-$$"
+		fi
+	fi
 	staging_release_dir="${RELEASES_DIR}/.${release_version}.staging.$$"
 	rm -rf "$staging_release_dir"
 	if ! write_managed_layout "$src_dir" "$staging_release_dir"; then
@@ -88,6 +96,43 @@ promote_release_layout() {
 	fi
 	ln -sfn "$final_release_dir" "$CURRENT_LINK"
 	PROMOTED_RELEASE="$final_release_dir"
+}
+
+resolve_bootstrap_entrypoint() {
+	if [ -n "$BOOTSTRAP_ENTRYPOINT" ]; then
+		printf '%s\n' "$BOOTSTRAP_ENTRYPOINT"
+		return 0
+	fi
+	inferred_path="$(dirname "$TARGET_DIR")/install.sh"
+	if [ -f "$inferred_path" ] && grep -q "Minimal GX bootstrap installer" "$inferred_path"; then
+		printf '%s\n' "$inferred_path"
+		return 0
+	fi
+	return 1
+}
+
+refresh_bootstrap_entrypoint() {
+	active_root=$(current_codebase_dir)
+	source_path="${active_root}/install.sh"
+	destination_path=$(resolve_bootstrap_entrypoint || true)
+	[ -n "$destination_path" ] || return 0
+	[ -f "$source_path" ] || return 0
+	BOOTSTRAP_ENTRYPOINT="$destination_path"
+	export BOOTSTRAP_ENTRYPOINT
+	if [ "$(cd -- "$(dirname "$source_path")" && pwd)/$(basename "$source_path")" = \
+		"$(cd -- "$(dirname "$destination_path")" && pwd)/$(basename "$destination_path")" ]; then
+		BOOTSTRAP_REFRESHED=1
+		export BOOTSTRAP_REFRESHED
+		return 0
+	fi
+	temporary_path="${destination_path}.tmp.$$"
+	if ! cp "$source_path" "$temporary_path" || ! chmod 755 "$temporary_path" || ! mv "$temporary_path" "$destination_path"; then
+		rm -f "$temporary_path"
+		log "Could not refresh outer bootstrap at $destination_path"
+		return 0
+	fi
+	BOOTSTRAP_REFRESHED=1
+	export BOOTSTRAP_REFRESHED
 }
 
 record_install_state() {
@@ -115,12 +160,14 @@ atomic_write_line() {
 
 deployment_sentinel_paths() {
 	printf '%s\n' \
+		install.sh \
 		venus_evcharger_service.py \
 		venus_evcharger_dbus_adapter.py \
 		venus_evcharger_auto_input_helper.py \
 		venus_evcharger/dbus_adapter/process/adapter.py \
 		venus_evcharger/core/contracts_bootstrap.py \
 		deploy/venus/bootstrap_updater.sh \
+		deploy/venus/service_lifecycle.sh \
 		deploy/venus/install_venus_evcharger_service.sh
 }
 

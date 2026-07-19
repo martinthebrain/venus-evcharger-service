@@ -11,6 +11,20 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             root = Path(temp_dir)
             source_dir = root / "source"
             target_dir = root / "target"
+            outer_bootstrap = root / "install.sh"
+            outer_bootstrap.write_text("#!/bin/bash\n# Minimal GX bootstrap installer\n# old\n", encoding="utf-8")
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            nice_log = root / "nice.log"
+            fake_nice = fake_bin / "nice"
+            fake_nice.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' \"$*\" >> \"$NICE_LOG\"\n"
+                "if [ \"$1\" = '-n' ]; then shift 2; fi\n"
+                "exec \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_nice.chmod(0o755)
 
             (source_dir / "deploy/venus/service_venus_evcharger/log").mkdir(parents=True, exist_ok=True)
             (source_dir / "venus_evcharger").mkdir(parents=True, exist_ok=True)
@@ -26,11 +40,16 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "venus_evcharger_service.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "venus_evcharger_auto_input_helper.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "deploy/venus/install_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_lifecycle.sh").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/boot_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/restart_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/uninstall_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_observer").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/config.venus_evcharger.ini").write_text(
                 "[DEFAULT]\n"
                 "ConfigSchemaVersion=1\n"
@@ -49,6 +68,11 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "docs/should_not_ship.txt").write_text("omit\n", encoding="utf-8")
 
             (target_dir / "deploy/venus").mkdir(parents=True, exist_ok=True)
+            live_service_dir = target_dir / "deploy/venus/service_venus_evcharger"
+            (live_service_dir / "log").mkdir(parents=True)
+            (live_service_dir / "run").write_text("stale run\n", encoding="utf-8")
+            (live_service_dir / "stale.txt").write_text("remove\n", encoding="utf-8")
+            service_inode = live_service_dir.stat().st_ino
             original_config = (
                 "[DEFAULT]\n"
                 "# keep this local host comment\n"
@@ -94,11 +118,22 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             subprocess.run(
                 ["bash", str(UPDATER_SCRIPT), str(target_dir)],
                 check=True,
-                env={**os.environ, "VENUS_EVCHARGER_SOURCE_DIR": str(source_dir)},
+                env={
+                    **os.environ,
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                    "NICE_LOG": str(nice_log),
+                    "VENUS_EVCHARGER_RESOURCE_PRIORITY_APPLIED": "0",
+                    "VENUS_EVCHARGER_SOURCE_DIR": str(source_dir),
+                },
             )
 
             self.assertTrue((target_dir / "venus_evcharger_service.py").is_file())
+            self.assertEqual(outer_bootstrap.read_text(encoding="utf-8"), "#!/bin/bash\n")
+            self.assertEqual(nice_log.read_text(encoding="utf-8").splitlines(), ["-n 10 " + str(UPDATER_SCRIPT) + " " + str(target_dir)])
             self.assertTrue((target_dir / "deploy/venus/install_venus_evcharger_service.sh").is_file())
+            self.assertEqual(live_service_dir.stat().st_ino, service_inode)
+            self.assertEqual((live_service_dir / "run").read_text(encoding="utf-8"), "#!/bin/sh\n")
+            self.assertFalse((live_service_dir / "stale.txt").exists())
             self.assertTrue((target_dir / "venus_evcharger/__init__.py").is_file())
             merged_config = (target_dir / "deploy/venus/config.venus_evcharger.ini").read_text(encoding="utf-8")
             self.assertIn("# keep this local host comment\n", merged_config)
@@ -143,6 +178,8 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             self.assertEqual(status["config_schema_before"], "0")
             self.assertEqual(status["config_schema_target"], "1")
             self.assertEqual(status["new_version"], "1.2.3")
+            self.assertTrue(status["bootstrap_refreshed"])
+            self.assertEqual(status["bootstrap_entrypoint_path"], str(outer_bootstrap))
             self.assertIn("DEFAULT.ConfigSchemaVersion", status["config_merge_added_keys"])
             self.assertIn("DEFAULT.NewToggle", status["config_merge_added_keys"])
             self.assertIn("Backend.ExtraSetting", status["config_merge_added_keys"])
@@ -174,11 +211,16 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "venus_evcharger_service.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "venus_evcharger_auto_input_helper.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "deploy/venus/install_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_lifecycle.sh").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/boot_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/restart_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/uninstall_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_observer").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/config.venus_evcharger.ini").write_text(
                 "[DEFAULT]\nHost=template-host\nNewToggle=1\n",
                 encoding="utf-8",
@@ -224,11 +266,16 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "venus_evcharger_service.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "venus_evcharger_auto_input_helper.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "deploy/venus/install_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_lifecycle.sh").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/boot_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/restart_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/uninstall_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_observer").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/config.venus_evcharger.ini").write_text(
                 "[DEFAULT]\nConfigSchemaVersion=1\nHost=template-host\nNewToggle=1\n",
                 encoding="utf-8",

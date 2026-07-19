@@ -372,11 +372,11 @@ run_existing_installer() {
 
 run_resource_conscious_updater() {
 	if command -v ionice >/dev/null 2>&1 && command -v nice >/dev/null 2>&1 && ionice -c 3 true >/dev/null 2>&1; then
-		ionice -c 3 nice -n "$UPDATER_NICE_LEVEL" "$UPDATER_PATH" "$TARGET_DIR"
+		VENUS_EVCHARGER_RESOURCE_PRIORITY_APPLIED=1 ionice -c 3 nice -n "$UPDATER_NICE_LEVEL" "$UPDATER_PATH" "$TARGET_DIR"
 		return $?
 	fi
 	if command -v nice >/dev/null 2>&1; then
-		nice -n "$UPDATER_NICE_LEVEL" "$UPDATER_PATH" "$TARGET_DIR"
+		VENUS_EVCHARGER_RESOURCE_PRIORITY_APPLIED=1 nice -n "$UPDATER_NICE_LEVEL" "$UPDATER_PATH" "$TARGET_DIR"
 		return $?
 	fi
 	"$UPDATER_PATH" "$TARGET_DIR"
@@ -397,6 +397,7 @@ export VENUS_EVCHARGER_MANIFEST_SIG_SOURCE="$MANIFEST_SIG_SOURCE"
 VENUS_EVCHARGER_BOOTSTRAP_PUBKEY="$(resolve_pubkey_path)"
 export VENUS_EVCHARGER_BOOTSTRAP_PUBKEY
 export VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST="$REQUIRE_SIGNED_MANIFEST"
+export VENUS_EVCHARGER_BOOTSTRAP_ENTRYPOINT="$SCRIPT_DIR/install.sh"
 set +e
 run_resource_conscious_updater
 updater_status=$?

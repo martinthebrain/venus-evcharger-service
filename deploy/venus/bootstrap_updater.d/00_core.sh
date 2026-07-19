@@ -77,9 +77,14 @@ download_to() {
 
 require_source_layout() {
 	src_dir="$1"
+	[ -f "${src_dir}/install.sh" ] || return 1
 	[ -f "${src_dir}/venus_evcharger_service.py" ] || return 1
 	[ -f "${src_dir}/venus_evcharger_auto_input_helper.py" ] || return 1
 	[ -f "${src_dir}/deploy/venus/install_venus_evcharger_service.sh" ] || return 1
+	[ -f "${src_dir}/deploy/venus/service_lifecycle.sh" ] || return 1
+	[ -f "${src_dir}/deploy/venus/service_venus_evcharger/run" ] || return 1
+	[ -f "${src_dir}/deploy/venus/service_venus_evcharger_dbus_adapter/run" ] || return 1
+	[ -f "${src_dir}/deploy/venus/service_venus_evcharger_observer/run" ] || return 1
 	[ -d "${src_dir}/venus_evcharger" ] || return 1
 	return 0
 }
@@ -311,13 +316,52 @@ copy_item() {
 		return 0
 	fi
 
-	rm -rf "$dst_path"
 	mkdir -p "$(dirname "$dst_path")"
+	if [ "$rel_path" = "deploy/venus" ] && [ -d "$dst_path" ]; then
+		copy_venus_layout_in_place "$src_path" "$dst_path"
+		return
+	fi
+
+	rm -rf "$dst_path"
 	if [ -d "$src_path" ]; then
 		cp -R "$src_path" "$dst_path"
 	else
 		cp "$src_path" "$dst_path"
 	fi
+}
+
+copy_service_layout_in_place() {
+	src_path="$1"
+	dst_path="$2"
+	mkdir -p "$dst_path" "$dst_path/log"
+	find "$dst_path" -mindepth 1 -maxdepth 1 ! -name log -exec rm -rf {} \;
+	find "$dst_path/log" -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
+	find "$src_path" -mindepth 1 -maxdepth 1 ! -name log -exec cp -R {} "$dst_path" \;
+	if [ -d "$src_path/log" ]; then
+		find "$src_path/log" -mindepth 1 -maxdepth 1 -exec cp -R {} "$dst_path/log" \;
+	fi
+}
+
+copy_venus_layout_in_place() {
+	src_path="$1"
+	dst_path="$2"
+	service_dirs="service_venus_evcharger service_venus_evcharger_dbus_adapter service_venus_evcharger_observer"
+
+	find "$dst_path" -mindepth 1 -maxdepth 1 \
+		! -name service_venus_evcharger \
+		! -name service_venus_evcharger_dbus_adapter \
+		! -name service_venus_evcharger_observer \
+		-exec rm -rf {} \;
+	find "$src_path" -mindepth 1 -maxdepth 1 \
+		! -name service_venus_evcharger \
+		! -name service_venus_evcharger_dbus_adapter \
+		! -name service_venus_evcharger_observer \
+		-exec cp -R {} "$dst_path" \;
+	for service_dir in $service_dirs; do
+		if [ -d "$src_path/$service_dir" ]; then
+			copy_service_layout_in_place "$src_path/$service_dir" "$dst_path/$service_dir"
+		fi
+	done
 }
 
 managed_layout_paths() {

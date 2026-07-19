@@ -52,10 +52,13 @@ class _BootstrapInstallScriptsInstallerCases(_BootstrapInstallScriptsBase):
                 ("venus_evcharger_service.py", "#!/usr/bin/env python3\n"),
                 ("venus_evcharger_auto_input_helper.py", "#!/usr/bin/env python3\n"),
                 ("deploy/venus/boot_venus_evcharger_service.sh", "#!/bin/bash\n"),
+                ("deploy/venus/service_lifecycle.sh", "#!/bin/sh\n"),
                 ("deploy/venus/restart_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/uninstall_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/service_venus_evcharger/run", "#!/bin/sh\n"),
                 ("deploy/venus/service_venus_evcharger/log/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_dbus_adapter/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_observer/run", "#!/bin/sh\n"),
                 ("deploy/venus/config.venus_evcharger.ini", "[DEFAULT]\nHost=template-host\n"),
                 ("venus_evcharger/__init__.py", "# pkg\n"),
                 ("scripts/ops/example.sh", "#!/bin/bash\n"),
@@ -99,6 +102,10 @@ class _BootstrapInstallScriptsInstallerCases(_BootstrapInstallScriptsBase):
             self._assert_cached_updater_libs(bootstrap_dir)
             self.assertTrue((target_dir / "installed.txt").is_file())
             self.assertEqual((target_dir / "installed.txt").read_text(encoding="utf-8"), "installed-without-manifest\n")
+            self.assertEqual(bootstrap_copy.read_text(encoding="utf-8"), "#!/bin/bash\n")
+            status = self._read_normalized_status(target_dir)
+            self.assertTrue(status["bootstrap_refreshed"])
+            self.assertEqual(status["bootstrap_entrypoint_path"], str(bootstrap_copy))
 
     def test_bootstrap_installer_refreshes_local_updater_and_runs_target_installer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -121,10 +128,13 @@ class _BootstrapInstallScriptsInstallerCases(_BootstrapInstallScriptsBase):
                 ("venus_evcharger_service.py", "#!/usr/bin/env python3\n"),
                 ("venus_evcharger_auto_input_helper.py", "#!/usr/bin/env python3\n"),
                 ("deploy/venus/boot_venus_evcharger_service.sh", "#!/bin/bash\n"),
+                ("deploy/venus/service_lifecycle.sh", "#!/bin/sh\n"),
                 ("deploy/venus/restart_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/uninstall_venus_evcharger_service.sh", "#!/bin/bash\n"),
                 ("deploy/venus/service_venus_evcharger/run", "#!/bin/sh\n"),
                 ("deploy/venus/service_venus_evcharger/log/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_dbus_adapter/run", "#!/bin/sh\n"),
+                ("deploy/venus/service_venus_evcharger_observer/run", "#!/bin/sh\n"),
                 ("deploy/venus/config.venus_evcharger.ini", "[DEFAULT]\nHost=template-host\n"),
                 ("venus_evcharger/__init__.py", "# pkg\n"),
                 ("scripts/ops/example.sh", "#!/bin/bash\n"),
@@ -173,6 +183,10 @@ class _BootstrapInstallScriptsInstallerCases(_BootstrapInstallScriptsBase):
             self.assertTrue((target_dir / "installed.txt").is_file())
             self.assertEqual((target_dir / "installed.txt").read_text(encoding="utf-8"), "installed\n")
             self.assertTrue((target_dir / "deploy/venus/install_venus_evcharger_service.sh").is_file())
+            self.assertEqual(bootstrap_copy.read_text(encoding="utf-8"), "#!/bin/bash\n")
+            status = self._read_normalized_status(target_dir)
+            self.assertTrue(status["bootstrap_refreshed"])
+            self.assertEqual(status["bootstrap_entrypoint_path"], str(bootstrap_copy))
 
     def test_bootstrap_reports_updater_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

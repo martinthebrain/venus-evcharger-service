@@ -33,6 +33,8 @@ payload = {
     "source_repo": os.environ.get("REPO_SLUG", ""),
     "source_channel": os.environ.get("CHANNEL", ""),
     "deployment_receipt_path": os.environ.get("DEPLOYMENT_RECEIPT_FILE", ""),
+    "bootstrap_entrypoint_path": os.environ.get("BOOTSTRAP_ENTRYPOINT", ""),
+    "bootstrap_refreshed": os.environ.get("BOOTSTRAP_REFRESHED", "0") == "1",
     "current_preserved": os.environ.get("CURRENT_PRESERVED", "0") == "1",
     "already_current": os.environ.get("CURRENT_ALREADY_MATCHED", "0") == "1",
     "promoted_release": os.environ.get("PROMOTED_RELEASE", ""),
@@ -96,6 +98,8 @@ payload = {
     "source_repo": os.environ.get("REPO_SLUG", ""),
     "source_channel": os.environ.get("CHANNEL", ""),
     "deployment_receipt_path": os.environ.get("DEPLOYMENT_RECEIPT_FILE", ""),
+    "bootstrap_entrypoint_path": os.environ.get("BOOTSTRAP_ENTRYPOINT", ""),
+    "bootstrap_refreshed": os.environ.get("BOOTSTRAP_REFRESHED", "0") == "1",
     "already_current": os.environ.get("CURRENT_ALREADY_MATCHED", "0") == "1",
     "config_merge_changed": os.environ.get("CONFIG_MERGE_CHANGED", "0") == "1",
     "config_merge_comment_preserved": os.environ.get("CONFIG_MERGE_COMMENT_PRESERVED", "1") == "1",
@@ -161,6 +165,7 @@ main() {
 			if [ "$DRY_RUN" != "1" ]; then
 				record_install_state
 				write_deployment_receipt
+				refresh_bootstrap_entrypoint
 			fi
 			log "Target already matches manifest${MANIFEST_VERSION:+ version $MANIFEST_VERSION}; skipping refresh"
 			if [ "$DRY_RUN" = "1" ]; then
@@ -231,6 +236,7 @@ main() {
 
 	record_install_state
 	write_deployment_receipt
+	refresh_bootstrap_entrypoint
 	RUN_RESULT="success"
 	log "Codebase refreshed in $TARGET_DIR"
 }
