@@ -28,6 +28,11 @@ payload = {
     "new_version": os.environ.get("RUN_NEW_VERSION", ""),
     "old_bundle_sha256": os.environ.get("RUN_OLD_BUNDLE_SHA256", ""),
     "new_bundle_sha256": os.environ.get("RUN_NEW_BUNDLE_SHA256", ""),
+    "old_source_commit": os.environ.get("RUN_OLD_SOURCE_COMMIT", ""),
+    "new_source_commit": os.environ.get("RUN_NEW_SOURCE_COMMIT", ""),
+    "source_repo": os.environ.get("REPO_SLUG", ""),
+    "source_channel": os.environ.get("CHANNEL", ""),
+    "deployment_receipt_path": os.environ.get("DEPLOYMENT_RECEIPT_FILE", ""),
     "current_preserved": os.environ.get("CURRENT_PRESERVED", "0") == "1",
     "already_current": os.environ.get("CURRENT_ALREADY_MATCHED", "0") == "1",
     "promoted_release": os.environ.get("PROMOTED_RELEASE", ""),
@@ -47,9 +52,13 @@ payload = {
     "config_validation_mode": os.environ.get("CONFIG_VALIDATION_MODE", ""),
 }
 
-with open(status_path, "w", encoding="utf-8") as handle:
+temporary_status_path = f"{status_path}.tmp.{os.getpid()}"
+with open(temporary_status_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
     handle.write("\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+os.replace(temporary_status_path, status_path)
 
 with open(audit_path, "a", encoding="utf-8") as handle:
     handle.write(json.dumps(payload, sort_keys=True))
@@ -82,6 +91,11 @@ payload = {
     "new_version": os.environ.get("RUN_NEW_VERSION", ""),
     "old_bundle_sha256": os.environ.get("RUN_OLD_BUNDLE_SHA256", ""),
     "new_bundle_sha256": os.environ.get("RUN_NEW_BUNDLE_SHA256", ""),
+    "old_source_commit": os.environ.get("RUN_OLD_SOURCE_COMMIT", ""),
+    "new_source_commit": os.environ.get("RUN_NEW_SOURCE_COMMIT", ""),
+    "source_repo": os.environ.get("REPO_SLUG", ""),
+    "source_channel": os.environ.get("CHANNEL", ""),
+    "deployment_receipt_path": os.environ.get("DEPLOYMENT_RECEIPT_FILE", ""),
     "already_current": os.environ.get("CURRENT_ALREADY_MATCHED", "0") == "1",
     "config_merge_changed": os.environ.get("CONFIG_MERGE_CHANGED", "0") == "1",
     "config_merge_comment_preserved": os.environ.get("CONFIG_MERGE_COMMENT_PRESERVED", "1") == "1",
@@ -119,22 +133,35 @@ main() {
 
 	RUN_OLD_VERSION=$(detect_current_version || true)
 	RUN_OLD_BUNDLE_SHA256=$(detect_current_bundle_hash || true)
+	RUN_OLD_SOURCE_COMMIT=$(detect_current_source_commit || true)
 
 	if [ -n "$SOURCE_DIR_OVERRIDE" ]; then
 		SOURCE_DIR="$SOURCE_DIR_OVERRIDE"
+		RUN_NEW_SOURCE_COMMIT="$SOURCE_COMMIT_OVERRIDE"
+		if [ -n "$RUN_NEW_SOURCE_COMMIT" ] && ! valid_source_commit "$RUN_NEW_SOURCE_COMMIT"; then
+			set_failure_reason_once "invalid-source-commit"
+			exit 1
+		fi
 		if ! require_source_layout "$SOURCE_DIR"; then
 			log "Local source directory is incomplete: $SOURCE_DIR"
 			set_failure_reason_once "incomplete-local-source"
 			exit 1
 		fi
 	elif load_manifest "${TMP_DIR}/bootstrap_manifest.json"; then
+		CHANNEL="${MANIFEST_CHANNEL:-$CHANNEL}"
+		REPO_SLUG="${MANIFEST_SOURCE_REPO:-$REPO_SLUG}"
 		RUN_NEW_BUNDLE_SHA256="${MANIFEST_BUNDLE_SHA256:-}"
+		RUN_NEW_SOURCE_COMMIT="${MANIFEST_SOURCE_COMMIT:-}"
 		if target_is_current_for_manifest; then
 			CURRENT_ALREADY_MATCHED=1
 			RUN_NEW_VERSION="${MANIFEST_VERSION:-$RUN_OLD_VERSION}"
 			VALIDATION_PASSED=1
 			CONFIG_VALIDATION_MODE="current-state"
 			RUN_RESULT="success"
+			if [ "$DRY_RUN" != "1" ]; then
+				record_install_state
+				write_deployment_receipt
+			fi
 			log "Target already matches manifest${MANIFEST_VERSION:+ version $MANIFEST_VERSION}; skipping refresh"
 			if [ "$DRY_RUN" = "1" ]; then
 				RUN_RESULT="preview"
@@ -149,8 +176,21 @@ main() {
 		archive_path="${TMP_DIR}/bundle.tar.gz"
 		extract_dir="${TMP_DIR}/extract"
 		mkdir -p "$extract_dir"
+		if [ -z "$ARCHIVE_URL_OVERRIDE" ]; then
+			resolve_github_source_commit "${TMP_DIR}/source_commit.json"
+		elif [ -n "$SOURCE_COMMIT_OVERRIDE" ]; then
+			RUN_NEW_SOURCE_COMMIT="$SOURCE_COMMIT_OVERRIDE"
+			if ! valid_source_commit "$RUN_NEW_SOURCE_COMMIT"; then
+				set_failure_reason_once "invalid-source-commit"
+				exit 1
+			fi
+		fi
 		log "Downloading code bundle for ${REPO_SLUG}:${CHANNEL}"
-		download_to "$ARCHIVE_URL" "$archive_path"
+		if ! download_to "$ARCHIVE_URL" "$archive_path"; then
+			set_failure_reason_once "bundle-download-failed"
+			exit 1
+		fi
+		RUN_NEW_BUNDLE_SHA256=$(sha256sum "$archive_path" | awk '{print $1}')
 		tar -xzf "$archive_path" -C "$extract_dir"
 		SOURCE_DIR=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 		if [ -z "$SOURCE_DIR" ] || ! require_source_layout "$SOURCE_DIR"; then
@@ -190,6 +230,7 @@ main() {
 	fi
 
 	record_install_state
+	write_deployment_receipt
 	RUN_RESULT="success"
 	log "Codebase refreshed in $TARGET_DIR"
 }

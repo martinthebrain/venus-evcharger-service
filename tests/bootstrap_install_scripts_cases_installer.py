@@ -214,6 +214,53 @@ class _BootstrapInstallScriptsInstallerCases(_BootstrapInstallScriptsBase):
             self.assertEqual(result.returncode, 23)
             self.assertIn("Updater failed with exit code 23; target left unchanged", result.stdout)
 
+    def test_bootstrap_runs_updater_with_reduced_cpu_priority(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            bootstrap_dir = root / "bootstrap"
+            bootstrap_dir.mkdir()
+            target_dir = root / "target"
+            updater_dir = root / "updater"
+            updater_lib_dir = updater_dir / "bootstrap_updater.d"
+            updater_lib_dir.mkdir(parents=True)
+
+            updater_copy = updater_dir / "bootstrap_updater.sh"
+            updater_copy.write_text(
+                "#!/bin/sh\n"
+                "mkdir -p \"$1/deploy/venus\"\n"
+                "awk '{print $19}' /proc/$$/stat > \"$1/updater_nice.txt\"\n"
+                "printf '#!/bin/sh\\n' > \"$1/deploy/venus/install_venus_evcharger_service.sh\"\n"
+                "chmod 755 \"$1/deploy/venus/install_venus_evcharger_service.sh\"\n",
+                encoding="utf-8",
+            )
+            updater_copy.chmod(0o755)
+            updater_hash = hashlib.sha256(updater_copy.read_bytes()).hexdigest()
+            (updater_dir / "bootstrap_updater.sh.sha256").write_text(
+                f"{updater_hash}  bootstrap_updater.sh\n",
+                encoding="utf-8",
+            )
+            for lib_name in ("00_core.sh", "10_config_merge.sh", "20_layout.sh", "30_status_main.sh"):
+                (updater_lib_dir / lib_name).write_text("#!/bin/sh\n", encoding="utf-8")
+
+            bootstrap_copy = bootstrap_dir / "install.sh"
+            bootstrap_copy.write_text(BOOTSTRAP_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            bootstrap_copy.chmod(0o755)
+            parent_nice = os.getpriority(os.PRIO_PROCESS, 0)
+
+            subprocess.run(
+                ["bash", str(bootstrap_copy)],
+                check=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_TARGET_DIR": str(target_dir),
+                    "VENUS_EVCHARGER_UPDATER_SOURCE": str(updater_copy),
+                    "VENUS_EVCHARGER_UPDATER_NICE_LEVEL": "7",
+                },
+            )
+
+            updater_nice = int((target_dir / "updater_nice.txt").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(updater_nice, min(19, parent_nice + 7))
+
     def test_bootstrap_rolls_back_to_previous_release_when_current_installer_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

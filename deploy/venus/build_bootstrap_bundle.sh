@@ -69,12 +69,19 @@ version="dev"
 if [ -f "${SOURCE_DIR}/version.txt" ]; then
 	version=$(head -n 1 "${SOURCE_DIR}/version.txt" | tr -d '\r')
 fi
+source_commit="${VENUS_EVCHARGER_SOURCE_COMMIT:-}"
+source_repo="${VENUS_EVCHARGER_REPO_SLUG:-martinthebrain/venus-evcharger-service}"
+if [ -z "$source_commit" ] && command -v git >/dev/null 2>&1; then
+	source_commit=$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)
+fi
 
 cat >"$MANIFEST_PATH" <<EOF
 {
   "format": 1,
   "channel": "release",
   "version": "${version}",
+  "source_repo": "${source_repo}",
+  "source_commit": "${source_commit}",
   "bundle_url": "${BUNDLE_URL}",
   "bundle_sha256": "${bundle_sha}",
   "updater_url": "bootstrap_updater.sh",

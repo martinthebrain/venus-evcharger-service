@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import json
 
-from tests.bootstrap_install_scripts_cases_common import Path, _BootstrapInstallScriptsBase, os, subprocess, tempfile, UPDATER_SCRIPT
+from tests.bootstrap_install_scripts_cases_common import Path, _BootstrapInstallScriptsBase, hashlib, os, subprocess, tempfile, UPDATER_SCRIPT
 from venus_evcharger.core.contracts import normalized_bootstrap_update_status_fields
 
 
@@ -150,6 +150,11 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             self.assertTrue((target_dir / ".bootstrap-state/update_audit.log").is_file())
             self.assertEqual(self._read_normalized_latest_audit(target_dir), status)
             self.assertEqual((target_dir / ".bootstrap-state/installed_version").read_text(encoding="utf-8"), "1.2.3\n")
+            receipt = json.loads((target_dir / ".bootstrap-state/deployment_receipt.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["schema_version"], 1)
+            self.assertEqual(receipt["version"], "1.2.3")
+            self.assertEqual(receipt["critical_files"]["venus_evcharger_service.py"], hashlib.sha256(b"#!/usr/bin/env python3\n").hexdigest())
+            self.assertIn("venus_evcharger_dbus_adapter.py", receipt["missing_critical_files"])
 
     def test_bootstrap_updater_rejects_invalid_preserved_config_when_validation_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

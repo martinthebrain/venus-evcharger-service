@@ -46,6 +46,9 @@ INSTALLER_OVERRIDE="${VENUS_EVCHARGER_INSTALLER_PATH:-}"
 MANIFEST_UPDATER_URL=""
 MANIFEST_UPDATER_SHA256=""
 MANIFEST_VERSION=""
+DOWNLOAD_TIMEOUT_SECONDS="${VENUS_EVCHARGER_DOWNLOAD_TIMEOUT_SECONDS:-60}"
+DOWNLOAD_ATTEMPTS="${VENUS_EVCHARGER_DOWNLOAD_ATTEMPTS:-2}"
+UPDATER_NICE_LEVEL="${VENUS_EVCHARGER_UPDATER_NICE_LEVEL:-10}"
 
 log() {
 	printf '%s\n' "[bootstrap] $*"
@@ -91,12 +94,19 @@ download_to() {
 		return 0
 	fi
 	if command -v wget >/dev/null 2>&1; then
-		wget -q -O "$dst" "$src"
-		return 0
+		if wget -q -T "$DOWNLOAD_TIMEOUT_SECONDS" -t "$DOWNLOAD_ATTEMPTS" -O "$dst" "$src"; then
+			return 0
+		fi
+		log "Download failed or timed out: $src"
+		return 1
 	fi
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL -o "$dst" "$src"
-		return 0
+		if curl -fsSL --connect-timeout "$DOWNLOAD_TIMEOUT_SECONDS" --max-time "$DOWNLOAD_TIMEOUT_SECONDS" \
+			--retry "$DOWNLOAD_ATTEMPTS" -o "$dst" "$src"; then
+			return 0
+		fi
+		log "Download failed or timed out: $src"
+		return 1
 	fi
 	log "Neither wget nor curl is available to fetch $src"
 	return 1
@@ -360,6 +370,18 @@ run_existing_installer() {
 	return 1
 }
 
+run_resource_conscious_updater() {
+	if command -v ionice >/dev/null 2>&1 && command -v nice >/dev/null 2>&1 && ionice -c 3 true >/dev/null 2>&1; then
+		ionice -c 3 nice -n "$UPDATER_NICE_LEVEL" "$UPDATER_PATH" "$TARGET_DIR"
+		return $?
+	fi
+	if command -v nice >/dev/null 2>&1; then
+		nice -n "$UPDATER_NICE_LEVEL" "$UPDATER_PATH" "$TARGET_DIR"
+		return $?
+	fi
+	"$UPDATER_PATH" "$TARGET_DIR"
+}
+
 ensure_bootstrap_prereqs
 
 if [ -f "$NO_UPDATE_FILE" ]; then
@@ -376,7 +398,7 @@ VENUS_EVCHARGER_BOOTSTRAP_PUBKEY="$(resolve_pubkey_path)"
 export VENUS_EVCHARGER_BOOTSTRAP_PUBKEY
 export VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST="$REQUIRE_SIGNED_MANIFEST"
 set +e
-"$UPDATER_PATH" "$TARGET_DIR"
+run_resource_conscious_updater
 updater_status=$?
 set -e
 if [ "$updater_status" -ne 0 ]; then
