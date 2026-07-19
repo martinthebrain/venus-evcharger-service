@@ -68,8 +68,8 @@ def remote_compile(pi: PiSession, remote_dir: str) -> None:
         ]
     )
     pi.ssh(
-        f"cd {remote_dir!r} && python3 -m compileall -q venus_evcharger/dbus_adapter "
-        f"&& python3 -m py_compile {modules}",
+        f"cd {remote_dir!r} && python3 scripts/dev/check_python_syntax_venus.py "
+        f"venus_evcharger/dbus_adapter {modules}",
         timeout=60.0,
     )
 
