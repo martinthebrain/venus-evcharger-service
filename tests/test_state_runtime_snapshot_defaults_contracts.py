@@ -5,16 +5,17 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from venus_evcharger.controllers import state_runtime_snapshot as snapshot_module
-from venus_evcharger.controllers.state import ServiceStateController
-from venus_evcharger.controllers.state_runtime_snapshot import _StateRuntimeSnapshot
+from venus_evcharger.controllers import state_runtime_snapshot_victron as snapshot_victron
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
+from venus_evcharger.controllers.state_runtime_snapshot import RuntimeStateSnapshotBuilder
 
 
 class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.controller = ServiceStateController(SimpleNamespace(), int)
+        self.controller = RuntimeStateSnapshotBuilder(SimpleNamespace(), RuntimeStateNormalizer())
         self.empty = SimpleNamespace()
 
     def test_adaptive_payload_group_defaults_are_complete(self) -> None:
@@ -135,7 +136,7 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
         )
 
     def test_empty_energy_snapshot_has_exact_defaults(self) -> None:
-        expected = {
+        expected: dict[str, object] = {
             "combined_battery_soc": None,
             "combined_battery_usable_capacity_wh": None,
             "combined_battery_charge_power_w": None,
@@ -178,7 +179,7 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
     def test_topology_and_adaptive_state_defaults_are_exact(self) -> None:
         topology = "victron-bias-learning/v2/source=/service=/path=/energy="
         self.assertEqual(
-            _StateRuntimeSnapshot._victron_ess_balance_runtime_topology_key(self.empty, ""),
+            RuntimeStateSnapshotBuilder._victron_ess_balance_runtime_topology_key(self.empty, ""),
             topology,
         )
         self.assertEqual(
@@ -233,30 +234,33 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
             self.controller._victron_ess_balance_runtime_profile_snapshot("profile-a", None),
             expected,
         )
-        fallback_profile = {"response_delay_seconds": 2.5, "estimated_gain": 3.5}
-        learning = snapshot_module._victron_ess_balance_runtime_profile_learning_metrics(fallback_profile)
+        fallback_profile: dict[str, object] = {
+            "response_delay_seconds": 2.5,
+            "estimated_gain": 3.5,
+        }
+        learning = snapshot_victron._victron_ess_balance_runtime_profile_learning_metrics(fallback_profile)
         self.assertEqual(learning["typical_response_delay_seconds"], 2.5)
         self.assertEqual(learning["effective_gain"], 3.5)
 
     def test_text_helpers_distinguish_missing_blank_and_lowercase_modes(self) -> None:
         svc = SimpleNamespace(blank="", mixed=" MiXeD ")
         self.assertEqual(
-            snapshot_module._victron_ess_balance_runtime_attr_text(svc, "missing", fallback="fallback"),
+            snapshot_victron._victron_ess_balance_runtime_attr_text(svc, "missing", fallback="fallback"),
             "fallback",
         )
         self.assertEqual(
-            snapshot_module._victron_ess_balance_runtime_attr_text(svc, "blank", fallback="fallback"),
+            snapshot_victron._victron_ess_balance_runtime_attr_text(svc, "blank", fallback="fallback"),
             "fallback",
         )
         self.assertEqual(
-            snapshot_module._victron_ess_balance_runtime_attr_text(svc, "mixed", normalize_lower=True),
+            snapshot_victron._victron_ess_balance_runtime_attr_text(svc, "mixed", normalize_lower=True),
             "mixed",
         )
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_attr_text(svc, "mixed"), "MiXeD")
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_attr_text(svc, "missing"), "")
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_profile_text({}, "missing"), "")
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_attr_text(svc, "mixed"), "MiXeD")
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_attr_text(svc, "missing"), "")
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_profile_text({}, "missing"), "")
         self.assertEqual(
-            snapshot_module._victron_ess_balance_runtime_profile_text({}, "missing", fallback="fallback"),
+            snapshot_victron._victron_ess_balance_runtime_profile_text({}, "missing", fallback="fallback"),
             "fallback",
         )
 
@@ -278,7 +282,7 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
             patch.object(snapshot_module, "_victron_ess_balance_energy_ids", return_value=["z", "a"]) as energy_ids,
             patch.object(snapshot_module, "_victron_ess_balance_runtime_string", side_effect=("service", "/path")) as text,
         ):
-            result = _StateRuntimeSnapshot._victron_ess_balance_runtime_topology_key(svc, " source ")
+            result = RuntimeStateSnapshotBuilder._victron_ess_balance_runtime_topology_key(svc, " source ")
         self.assertEqual(
             result,
             "victron-bias-learning/v2/source=source/service=service/path=/path/energy=a,z",
@@ -287,8 +291,8 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
         self.assertEqual(
             text.call_args_list,
             [
-                unittest.mock.call(svc, "auto_battery_discharge_balance_victron_bias_service"),
-                unittest.mock.call(svc, "auto_battery_discharge_balance_victron_bias_path"),
+                call(svc, "auto_battery_discharge_balance_victron_bias_service"),
+                call(svc, "auto_battery_discharge_balance_victron_bias_path"),
             ],
         )
 
@@ -298,10 +302,10 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
             _victron_ess_balance_learning_profiles={7: object()},
         )
         with (
-            patch.object(_StateRuntimeSnapshot, "_victron_ess_balance_runtime_topology_key", return_value="topology") as topology,
-            patch.object(_StateRuntimeSnapshot, "_victron_ess_balance_runtime_profile_snapshot", return_value={"profile": 1}) as profile,
+            patch.object(RuntimeStateSnapshotBuilder, "_victron_ess_balance_runtime_topology_key", return_value="topology") as topology,
+            patch.object(RuntimeStateSnapshotBuilder, "_victron_ess_balance_runtime_profile_snapshot", return_value={"profile": 1}) as profile,
         ):
-            learning = _StateRuntimeSnapshot._victron_ess_balance_runtime_learning_state(svc)
+            learning = RuntimeStateSnapshotBuilder._victron_ess_balance_runtime_learning_state(svc)
         self.assertEqual(
             learning,
             {
@@ -315,10 +319,10 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
         profile.assert_called_once_with("7", svc._victron_ess_balance_learning_profiles[7])
 
         with (
-            patch.object(_StateRuntimeSnapshot, "_victron_ess_balance_runtime_topology_key", return_value="topology") as topology,
-            patch.object(_StateRuntimeSnapshot, "_victron_ess_balance_runtime_adaptive_scalar_payload", return_value={"kp": 1.0}) as scalar,
+            patch.object(RuntimeStateSnapshotBuilder, "_victron_ess_balance_runtime_topology_key", return_value="topology") as topology,
+            patch.object(RuntimeStateSnapshotBuilder, "_victron_ess_balance_runtime_adaptive_scalar_payload", return_value={"kp": 1.0}) as scalar,
         ):
-            adaptive = _StateRuntimeSnapshot._victron_ess_balance_runtime_adaptive_tuning_state(svc)
+            adaptive = RuntimeStateSnapshotBuilder._victron_ess_balance_runtime_adaptive_tuning_state(svc)
         self.assertEqual(
             adaptive,
             {"schema_version": 2, "topology_key": "topology", "source_id": "source", "kp": 1.0},

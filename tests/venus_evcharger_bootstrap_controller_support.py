@@ -5,24 +5,22 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 sys.modules["vedbus"] = MagicMock()
 
 from venus_evcharger.bootstrap.controller import (
-    MONTH_WINDOW_DEFAULTS,
     ServiceBootstrapController,
     _enable_fault_diagnostics,
     _install_signal_logging,
     _logging_level_from_config,
     _request_mainloop_quit,
     _run_service_loop,
-    _seasonal_month_windows,
     run_service_main,
 )
+from venus_evcharger.bootstrap.config_shared import MONTH_WINDOW_DEFAULTS, _seasonal_month_windows
 from venus_evcharger.dbus_gateway import venus_path_writeable
-from venus_evcharger.ports import AutoDecisionPort, UpdateCyclePort, WriteControllerPort
 
 
 class _FakeDbusService:
@@ -38,6 +36,16 @@ class _FakeDbusService:
         self.register_called = True
 
 
+class _FakeGobjectTimers:
+    def __init__(self) -> None:
+        self.timeout_calls: list[tuple[int, object]] = []
+
+    def timeout_add(self, interval: int, callback: object) -> object:
+        call = (interval, callback)
+        self.timeout_calls.append(call)
+        return call
+
+
 class ServiceBootstrapControllerTestCase(unittest.TestCase):
     @staticmethod
     def _controller(service: object) -> ServiceBootstrapController:
@@ -47,11 +55,8 @@ class ServiceBootstrapControllerTestCase(unittest.TestCase):
             normalize_mode_func=lambda value: int(value),
             mode_uses_auto_logic_func=lambda mode: int(mode) in (1, 2),
             month_window_func=lambda *_args, **_kwargs: ((8, 0), (18, 0)),
-            age_seconds_func=lambda *_args, **_kwargs: 0,
-            health_code_func=lambda reason: {"init": 0}.get(reason, 99),
-            phase_values_func=lambda *_args, **_kwargs: {},
             read_version_func=lambda _name: "1.0",
-            gobject_module=MagicMock(),
+            gobject_module=_FakeGobjectTimers(),
             script_path="/tmp/venus_evcharger_service.py",
             formatters={
                 "kwh": None,
@@ -64,17 +69,14 @@ class ServiceBootstrapControllerTestCase(unittest.TestCase):
 
 
 __all__ = [
-    "AutoDecisionPort",
     "MONTH_WINDOW_DEFAULTS",
     "MagicMock",
-    "ModuleType",
     "Path",
     "ServiceBootstrapController",
     "ServiceBootstrapControllerTestCase",
     "SimpleNamespace",
-    "UpdateCyclePort",
-    "WriteControllerPort",
     "_FakeDbusService",
+    "_FakeGobjectTimers",
     "_enable_fault_diagnostics",
     "_install_signal_logging",
     "_logging_level_from_config",
@@ -85,6 +87,5 @@ __all__ = [
     "datetime",
     "patch",
     "run_service_main",
-    "sys",
     "tempfile",
 ]

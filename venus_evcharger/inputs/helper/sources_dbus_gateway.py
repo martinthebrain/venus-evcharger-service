@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Gateway/cache access helpers for auto-input DBus sources."""
+"""Gateway-only cache access for auto-input sources."""
 
 from __future__ import annotations
 
 import logging
 import time
-import xml.etree.ElementTree as xml_et
 from collections.abc import Mapping
-from typing import Any
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_gateway import (
@@ -19,66 +17,68 @@ from venus_evcharger.dbus_gateway import (
     gateway_read_value,
     require_gateway_read_key,
 )
-from venus_evcharger.dbus_introspection import owner_path_children, owner_path_unusable
-from venus_evcharger.inputs.helper.sources_dbus_common import (
-    DBUS_SOURCE_READ_ERRORS,
-    _ResolvedAutoBatteryServiceState,
-    _is_expected_missing_dbus_error,
-)
+from venus_evcharger.dbus_introspection import load_introspection_snapshot, path_children, path_unusable_until
+from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
+from venus_evcharger.inputs.helper.contracts import GatewayCommandClientPort
+from venus_evcharger.inputs.helper.payload_types import is_object_mapping
 
 _CACHE_VALUE_MISSING = object()
 
 
-class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
-    @staticmethod
-    def _dbus_module() -> Any:
-        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
+class GatewayCacheReader:
+    """Own gateway IPC, cache freshness, retries, and service discovery state."""
 
-    def _get_dbus_value(self: Any, service_name: str, path: str) -> float | int | None:
-        if self._dbus_introspection_says_skip(service_name, path):
-            self._request_dbus_introspection(service_name, path, priority=80, reason="helper skipped known-unusable path")
+    def __init__(self, settings: AutoInputHelperSettings, client: GatewayCommandClientPort | None = None) -> None:
+        self.settings = settings
+        self._client = client
+        self._list_backoff_until = 0.0
+        self._list_failures = 0
+        self._source_retry_after: dict[str, float] = {}
+        self._introspection_snapshot: dict[str, object] = {}
+        self._introspection_loaded_at = 0.0
+
+    def cached_value(self, service_name: str, path: str) -> float | int | None:
+        if self._introspection_says_skip(service_name, path):
+            self.request_introspection(service_name, path, priority=80, reason="helper skipped known-unusable path")
             return None
-        cache_key = dbus_path_key(service_name, path)
-        snapshot = self._gateway_cache_snapshot()
-        entry = DbusCacheStore.value_entry(snapshot, cache_key)
-        has_cached_value, cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_numeric_value(entry)
-        if has_cached_value:
-            return cached_value
-        if self._cached_gateway_error_recent(entry):
+        entry = DbusCacheStore.value_entry(self.cache_snapshot(), dbus_path_key(service_name, path))
+        has_value, value = self._cached_numeric_value(entry)
+        if has_value:
+            return value
+        if self._cached_error_recent(entry):
             logging.debug("Auto helper suppressing fresh DBus cache error for %s %s", service_name, path)
             return None
-        self._request_gateway_value(service_name, path, priority=90, reason="helper DBus cache miss")
+        self.request_value(service_name, path, priority=90, reason="helper DBus cache miss")
         return None
 
-    def _get_gateway_read_value(self: Any, key: object, *, reason: str) -> float | int | None:
+    def semantic_value(self, key: GatewayReadKey, *, reason: str) -> float | int | None:
         read_key = require_gateway_read_key(key)
-        snapshot = self._gateway_cache_snapshot()
-        cached_value = gateway_read_value(snapshot, read_key, max_age_seconds=self._gateway_cache_max_age_seconds())
-        numeric_value = _AutoInputHelperSourceDbusGateway._gateway_numeric_or_none(coerce_dbus_numeric(cached_value))
-        if numeric_value is not None:
-            return numeric_value
+        snapshot = self.cache_snapshot()
+        cached = gateway_read_value(snapshot, read_key, max_age_seconds=self.cache_max_age_seconds())
+        value = self._numeric_or_none(coerce_dbus_numeric(cached))
+        if value is not None:
+            return value
         entry = DbusCacheStore.value_entry(snapshot, read_key)
-        if self._cached_gateway_error_recent(entry):
+        if self._cached_error_recent(entry):
             logging.debug("Auto helper suppressing fresh DBus cache error for read key %s", read_key)
             return None
-        self._request_gateway_read_key(read_key, reason=reason)
+        self.request_read_key(read_key, reason=reason)
         return None
 
-    def _get_dbus_child_nodes(self: Any, service_name: str, path: str) -> list[str]:
-        children = owner_path_children(self, service_name, path)
+    def child_nodes(self, service_name: str, path: str) -> list[str]:
+        children = path_children(self._fresh_introspection_snapshot(), service_name, path)
         if children:
             return children
-        self._request_dbus_introspection(service_name, path, priority=60, reason="helper child-node discovery requested")
+        self.request_introspection(
+            service_name,
+            path,
+            priority=60,
+            reason="helper child-node discovery requested",
+        )
         return []
 
-    def _dbus_introspection_says_skip(self: Any, service_name: str, path: str) -> bool:
-        skip, reason = owner_path_unusable(self, service_name, path)
-        if skip:
-            logging.debug("Auto helper skipping %s %s from DBus introspection cache: %s", service_name, path, reason)
-        return bool(skip)
-
-    def _request_dbus_introspection(
-        self: Any,
+    def request_introspection(
+        self,
         service_name: str,
         path: str,
         *,
@@ -86,7 +86,7 @@ class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
         reason: str,
     ) -> None:
         try:
-            self._gateway_client().enqueue_command(
+            self._command_client().enqueue_command(
                 {
                     "kind": "introspect",
                     "source": "auto-input-helper",
@@ -100,9 +100,9 @@ class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
         except OSError:
             return
 
-    def _request_gateway_value(self: Any, service_name: str, path: str, *, priority: int, reason: str) -> None:
+    def request_value(self, service_name: str, path: str, *, priority: int, reason: str) -> None:
         try:
-            self._gateway_client().enqueue_command(
+            self._command_client().enqueue_command(
                 {
                     "kind": "refresh_value",
                     "source": "auto-input-helper",
@@ -116,9 +116,9 @@ class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
         except OSError:
             return
 
-    def _request_gateway_read_key(self: Any, key: GatewayReadKey, *, reason: str) -> None:
+    def request_read_key(self, key: GatewayReadKey, *, reason: str) -> None:
         try:
-            self._gateway_client().request_read_key(
+            self._command_client().request_read_key(
                 key,
                 priority="read",
                 source="auto-input-helper",
@@ -127,137 +127,100 @@ class _AutoInputHelperSourceDbusGateway(_ResolvedAutoBatteryServiceState):
         except OSError:
             return
 
-    def _gateway_client(self: Any) -> GatewayClient:
-        client = getattr(self, "_gateway_client_instance", None)
-        if not isinstance(client, GatewayClient):
-            run_dir = str(self.dbus_gateway_run_dir or "")
-            client = GatewayClient(gateway_paths(run_dir))
-            self._gateway_client_instance = client
-        return client
+    def request_service_refresh(self) -> bool:
+        try:
+            self._command_client().enqueue_command(
+                {
+                    "kind": "refresh_services",
+                    "source": "auto-input-helper",
+                    "priority": "discovery",
+                    "coalesce_key": "refresh-services",
+                }
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            logging.debug("Gateway service refresh request failed: %s", error)
+            return False
+        return True
 
-    def _gateway_cache_snapshot(self: Any) -> dict[str, Any]:
-        cache_path = str(self.dbus_gateway_cache_path or "")
-        if not cache_path:
-            cache_path = self._gateway_client().paths.cache_path
-        return DbusCacheStore.load_snapshot(
-            cache_path,
-            max_age_seconds=self._gateway_cache_max_age_seconds(),
-        )
+    def _command_client(self) -> GatewayCommandClientPort:
+        if self._client is None:
+            self._client = GatewayClient(gateway_paths(self.settings.dbus_gateway_run_dir))
+        return self._client
 
-    def _gateway_cache_max_age_seconds(self: Any) -> float:
-        return max(0.0, float(self.dbus_gateway_max_age_seconds or 10.0))
+    def cache_snapshot(self) -> dict[str, object]:
+        cache_path = self.settings.dbus_gateway_cache_path or self._command_client().paths.cache_path
+        return DbusCacheStore.load_snapshot(cache_path, max_age_seconds=self.cache_max_age_seconds())
+
+    def cache_max_age_seconds(self) -> float:
+        return max(0.0, self.settings.dbus_gateway_max_age_seconds)
+
+    def service_names(self) -> list[str]:
+        now = time.time()
+        if now < self._list_backoff_until:
+            return []
+        services_value: object = self.cache_snapshot().get("services")
+        if is_object_mapping(services_value):
+            self._list_failures = 0
+            self._list_backoff_until = 0.0
+            return [str(name) for name in services_value]
+        self.request_service_refresh()
+        self._list_failures += 1
+        delay = self.settings.auto_dbus_backoff_base_seconds * (2 ** max(0, self._list_failures - 1))
+        if self.settings.auto_dbus_backoff_max_seconds > 0.0:
+            delay = min(delay, self.settings.auto_dbus_backoff_max_seconds)
+        self._list_backoff_until = now + max(0.0, delay)
+        return []
+
+    def service_available(self, service_name: str) -> bool:
+        return bool(service_name and service_name in self.service_names())
+
+    def source_retry_ready(self, key: str) -> bool:
+        return time.time() >= self._source_retry_after.get(key, 0.0)
+
+    def delay_source_retry(self, key: str) -> None:
+        delay = max(1.0, self.settings.auto_dbus_backoff_base_seconds or 5.0)
+        self._source_retry_after[key] = time.time() + delay
+
+    def _fresh_introspection_snapshot(self) -> dict[str, object]:
+        current = time.time()
+        if current - self._introspection_loaded_at > 5.0:
+            self._introspection_snapshot = load_introspection_snapshot(
+                self.settings.dbus_introspection_snapshot_path,
+                max_age_seconds=self.settings.dbus_introspection_max_age_seconds,
+                now=current,
+            )
+            self._introspection_loaded_at = current
+        return self._introspection_snapshot
+
+    def _introspection_says_skip(self, service_name: str, path: str) -> bool:
+        skip, reason = path_unusable_until(self._fresh_introspection_snapshot(), service_name, path)
+        if skip:
+            logging.debug("Auto helper skipping %s %s from DBus introspection cache: %s", service_name, path, reason)
+        return skip
+
+    def _cached_error_recent(self, entry: Mapping[str, object] | None) -> bool:
+        if entry is None or str(entry.get("status")) != "error":
+            return False
+        raw_error_at = coerce_dbus_numeric(entry.get("error_at"))
+        error_at = float(raw_error_at) if isinstance(raw_error_at, (int, float)) else 0.0
+        retry = max(1.0, min(300.0, self.settings.dbus_gateway_error_retry_seconds))
+        return error_at > 0.0 and time.time() - error_at < retry
+
+    @classmethod
+    def _cached_numeric_value(cls, entry: Mapping[str, object] | None) -> tuple[bool, float | int | None]:
+        value = cls._cached_value(entry)
+        if value is _CACHE_VALUE_MISSING:
+            return False, None
+        return True, cls._numeric_or_none(value)
 
     @staticmethod
-    def _cached_gateway_value(entry: Mapping[str, Any] | None) -> object:
+    def _cached_value(entry: Mapping[str, object] | None) -> object:
         if entry is None or str(entry.get("status")) != "fresh":
             return _CACHE_VALUE_MISSING
         return coerce_dbus_numeric(entry.get("value"))
 
     @staticmethod
-    def _cached_gateway_numeric_value(entry: Mapping[str, Any] | None) -> tuple[bool, float | int | None]:
-        cached_value = _AutoInputHelperSourceDbusGateway._cached_gateway_value(entry)
-        if cached_value is _CACHE_VALUE_MISSING:
-            return False, None
-        return True, _AutoInputHelperSourceDbusGateway._gateway_numeric_or_none(cached_value)
-
-    @staticmethod
-    def _gateway_numeric_or_none(value: object) -> float | int | None:
+    def _numeric_or_none(value: object) -> float | int | None:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
         return value
-
-    def _cached_gateway_error_recent(self: Any, entry: Mapping[str, Any] | None) -> bool:
-        return bool(entry is not None and self._gateway_error_recent(entry))
-
-    def _gateway_error_recent(self: Any, entry: Mapping[str, Any]) -> bool:
-        if str(entry.get("status")) != "error":
-            return False
-        error_at = float(entry.get("error_at") or 0.0)
-        return error_at > 0.0 and time.time() - error_at < self._gateway_error_retry_seconds()
-
-    def _gateway_error_retry_seconds(self: Any) -> float:
-        configured = float(self.dbus_gateway_error_retry_seconds or 30.0)
-        return max(1.0, min(300.0, configured))
-
-    def _dbus_retry_read(self: Any, service_name: str, path: str, label: str, read: Any) -> Any:
-        try:
-            return read()
-        except DBUS_SOURCE_READ_ERRORS as error:
-            self._handle_dbus_read_error(0, label, service_name, path, error)
-        try:
-            return read()
-        except DBUS_SOURCE_READ_ERRORS as error:
-            self._handle_dbus_read_error(1, label, service_name, path, error)
-            raise
-
-    def _handle_dbus_read_error(
-        self: Any,
-        attempt: int,
-        label: str,
-        service_name: str,
-        path: str,
-        error: BaseException,
-    ) -> None:
-        if _is_expected_missing_dbus_error(error):
-            logging.debug("DBus value missing for %s %s: %s", service_name, path, error)
-            raise error
-        self._reset_system_bus_after_retryable_error(attempt, label, service_name, path, error)
-
-    def _reset_system_bus_after_retryable_error(
-        self: Any,
-        attempt: int,
-        label: str,
-        service_name: str,
-        path: str,
-        error: BaseException,
-    ) -> None:
-        self._reset_system_bus()
-        if attempt == 0:
-            logging.debug("%s retry for %s %s after error: %s", label, service_name, path, error)
-
-    @staticmethod
-    def _child_nodes_from_introspection(xml_data: object) -> list[str]:
-        root = xml_et.fromstring(str(xml_data))
-        return [str(name) for node in root.findall("node") if (name := node.attrib.get("name"))]
-
-    def _list_dbus_services(self: Any) -> list[str]:
-        now = time.time()
-        if now < self._dbus_list_backoff_until:
-            return []
-        snapshot = self._gateway_cache_snapshot()
-        services = snapshot.get("services")
-        if isinstance(services, dict):
-            self._dbus_list_failures = 0
-            self._dbus_list_backoff_until = 0.0
-            return [str(name) for name in services]
-        self._gateway_client().enqueue_command(
-            {
-                "kind": "refresh_services",
-                "source": "auto-input-helper",
-                "priority": "discovery",
-                "coalesce_key": "refresh-services",
-            }
-        )
-        self._dbus_list_failures += 1
-        delay = self.auto_dbus_backoff_base_seconds * (2 ** max(0, self._dbus_list_failures - 1))
-        if self.auto_dbus_backoff_max_seconds > 0:
-            delay = min(delay, self.auto_dbus_backoff_max_seconds)
-        self._dbus_list_backoff_until = now + max(0.0, delay)
-        return []
-
-    def _dbus_service_name_available(self: Any, service_name: str) -> bool:
-        return bool(service_name and service_name in self._list_dbus_services())
-
-    def _source_retry_ready(self: Any, key: str) -> bool:
-        return time.time() >= float(self._source_retry_after.get(key, 0.0))
-
-    def _delay_source_retry(self: Any, key: str) -> None:
-        self._source_retry_after[key] = time.time() + max(1.0, self.auto_dbus_backoff_base_seconds or 5.0)
-
-    def _invalidate_auto_battery_service(self: Any) -> None:
-        self._resolved_auto_battery_service = None
-        self._auto_battery_last_scan = 0.0
-        if isinstance(getattr(self, "_resolved_auto_energy_services", None), dict):
-            self._resolved_auto_energy_services.pop("primary_battery", None)
-        if isinstance(getattr(self, "_auto_energy_last_scan", None), dict):
-            self._auto_energy_last_scan.pop("primary_battery", None)

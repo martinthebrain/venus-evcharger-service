@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, TypeGuard
+from typing import Protocol, TypeGuard
 
 from .models import (
     ChargerState,
@@ -42,12 +42,6 @@ class ChargerBackend(Protocol):
     def set_current(self, amps: float) -> None: ...  # pragma: no cover
 
     def set_phase_selection(self, selection: PhaseSelection) -> None: ...  # pragma: no cover
-
-
-class BackendConstructor(Protocol):
-    """Constructor signature used by the backend registry/factory."""
-
-    def __call__(self, service: Any, config_path: str) -> Any: ...  # pragma: no cover
 
 
 def is_switch_backend(value: object) -> TypeGuard[SwitchBackend]:

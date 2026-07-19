@@ -7,11 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from tests.venus_evcharger_update_cycle_controller_support import (
-    UpdateCycleController,
-    _phase_values,
-    initialize_victron_test_service,
-)
+from tests.venus_evcharger_update_cycle_controller_support import initialize_victron_test_service
 from venus_evcharger.bootstrap.wizard_energy import (
     _config_auto_energy_sources_value,
     _structured_energy_source_line,
@@ -48,64 +44,55 @@ from venus_evcharger.bootstrap.wizard_render import (
 from venus_evcharger.update.victron_ess_balance_learning_profiles import (
     _victron_ess_balance_profile_identity,
 )
-from venus_evcharger.update.victron_ess_balance_learning_telemetry import (
-    _UpdateCycleVictronEssBalanceLearningTelemetry,
-)
+from tests.support.victron_ess_balance import VictronEssComponentGraph, build_victron_ess_components
+from venus_evcharger.update.victron_ess_balance_apply import VictronEssBalanceExecutor
 
 
-def _controller() -> UpdateCycleController:
-    return UpdateCycleController(SimpleNamespace(), _phase_values, lambda _reason: 0)
+def _components() -> VictronEssComponentGraph:
+    return build_victron_ess_components()
 
 
-class _TelemetryHarness(_UpdateCycleVictronEssBalanceLearningTelemetry):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        if not isinstance(value, (int, float)):
-            return None
-        return float(value)
+def _controller() -> VictronEssBalanceExecutor:
+    return _components().executor
 
-    _ewma_learned_value = staticmethod(_UpdateCycleVictronEssBalanceLearningTelemetry._ewma_learned_value)
 
+class _TelemetryHarness:
     def __init__(self) -> None:
+        components = _components()
+        self.telemetry = components.telemetry
+        self.pid = components.pid
+        self.scorer = components.scorer
         self.delay_updates: list[tuple[str, float]] = []
         self.gain_updates: list[tuple[str, float]] = []
         self.counter_updates: list[tuple[str, str]] = []
         self.cooldowns: list[tuple[float, str]] = []
         self.metrics_calls = 0
         self.refreshed_profiles: list[str] = []
+        components.profiles._victron_ess_balance_update_profile_delay = MagicMock(
+            side_effect=lambda _svc, key, sample: self.delay_updates.append((key, sample))
+        )
+        components.profiles._victron_ess_balance_update_profile_gain = MagicMock(
+            side_effect=lambda _svc, key, sample: self.gain_updates.append((key, sample))
+        )
+        components.profiles._victron_ess_balance_increment_profile_counter = MagicMock(
+            side_effect=lambda _svc, key, field: self.counter_updates.append((key, field))
+        )
+        components.recovery._enter_victron_ess_balance_overshoot_cooldown = MagicMock(
+            side_effect=lambda _svc, now, reason: self.cooldowns.append((now, reason))
+        )
+        components.safety._victron_ess_balance_telemetry_is_clean = MagicMock(return_value=(True, "clean"))
+        components.sources._victron_ess_balance_ev_power_w = MagicMock(return_value=0.0)
+        components.profiles._victron_ess_balance_refresh_profile_stability = MagicMock(
+            side_effect=lambda _svc, key: self.refreshed_profiles.append(key)
+        )
 
-    def _victron_ess_balance_update_profile_delay(self, svc: object, profile_key: str, sample: float) -> None:
-        self.delay_updates.append((profile_key, sample))
+        def populate_metrics(_svc: object, metrics: dict[str, object]) -> None:
+            self.metrics_calls += 1
+            metrics["telemetry_metrics_populated"] = True
 
-    def _victron_ess_balance_update_profile_gain(self, svc: object, profile_key: str, sample: float) -> None:
-        self.gain_updates.append((profile_key, sample))
-
-    def _victron_ess_balance_increment_profile_counter(self, svc: object, profile_key: str, field: str) -> None:
-        self.counter_updates.append((profile_key, field))
-
-    def _enter_victron_ess_balance_overshoot_cooldown(self, svc: object, now: float, reason: str) -> None:
-        self.cooldowns.append((now, reason))
-
-    def _victron_ess_balance_profile_sample_count(self, profile: dict[str, object]) -> int:
-        return max(0, int(profile.get("delay_samples", 0) or 0))
-
-    def _victron_ess_balance_telemetry_is_clean(
-        self,
-        svc: object,
-        cluster: dict[str, object],
-        source_error_w: float,
-    ) -> tuple[bool, str]:
-        return True, "clean"
-
-    def _victron_ess_balance_ev_power_w(self, svc: object) -> float:
-        return 0.0
-
-    def _victron_ess_balance_refresh_profile_stability(self, svc: object, profile_key: str) -> None:
-        self.refreshed_profiles.append(profile_key)
-
-    def _populate_victron_ess_balance_telemetry_metrics(self, svc: object, metrics: dict[str, object]) -> None:
-        self.metrics_calls += 1
-        metrics["telemetry_metrics_populated"] = True
+        components.recommendation._populate_victron_ess_balance_telemetry_metrics = MagicMock(
+            side_effect=populate_metrics
+        )
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

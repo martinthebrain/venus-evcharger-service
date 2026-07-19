@@ -9,10 +9,23 @@ state back to Venus OS.
 
 from __future__ import annotations
 
+from .learning_runtime import _LearningRuntimeService
 from .learning_support import _UpdateCycleLearningSupport
 
 
-class _UpdateCycleLearning(_UpdateCycleLearningSupport):
+class LearningController(_UpdateCycleLearningSupport):
+    """Own charging-power learning and signature reconciliation."""
+
+    LEARNED_POWER_STABLE_MIN_SAMPLES = 3
+    LEARNED_POWER_STABLE_MIN_SECONDS = 15.0
+    LEARNED_POWER_STABLE_TOLERANCE_WATTS = 150.0
+    LEARNED_POWER_STABLE_TOLERANCE_RATIO = 0.08
+    LEARNED_POWER_SIGNATURE_MISMATCH_SESSIONS = 2
+    LEARNED_POWER_VOLTAGE_TOLERANCE_VOLTS = 10.0
+
+    def __init__(self, service: _LearningRuntimeService) -> None:
+        self.service = service
+
     def refresh_learned_charge_power_state(self, now: float) -> bool:
         """Refresh the coarse learned-power state outside active learning samples."""
         learned_power = self._stored_positive_learned_charge_power()
@@ -38,7 +51,7 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
         learned_power: float,
         current_state: str,
         stored_phase_signature: str | None,
-        current_phase_signature: str,
+        current_phase_signature: str | None,
     ) -> bool:
         """Refresh learning state once the stored/current phase signatures already agree."""
         if self._is_learned_charge_power_stale(now):
@@ -114,7 +127,7 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
         current_phase_signature = self._current_learning_phase_signature()
         current_voltage_signature = self._current_learning_voltage_signature(voltage)
         charging_started_at, decision = self._learning_session_result(
-            bool(getattr(self.service, "auto_learn_charge_power_enabled", True)),
+            bool(self.service.auto_policy.learn_charge_power.enabled),
             pm_confirmed,
             relay_on,
             status,
@@ -147,8 +160,8 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
     def _resolved_learning_phase_signature(
         self,
         stored_phase_signature: str | None,
-        current_phase_signature: str,
-    ) -> str:
+        current_phase_signature: str | None,
+    ) -> str | None:
         """Return the phase signature that should remain stored."""
         return stored_phase_signature if stored_phase_signature is not None else current_phase_signature
 
@@ -183,7 +196,7 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
         self,
         learned_power: float,
         stored_phase_signature: str | None,
-        current_phase_signature: str,
+        current_phase_signature: str | None,
     ) -> bool:
         """Restore one stored learned power to the stable state."""
         voltage_signature, signature_mismatch_sessions, checked_session_started_at = self._learning_signature_context()
@@ -205,7 +218,7 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
         learned_power: float,
         current_state: str,
         stored_phase_signature: str | None,
-        current_phase_signature: str,
+        current_phase_signature: str | None,
     ) -> bool:
         """Keep the current learned-power tracking state unchanged."""
         svc = self.service
@@ -224,3 +237,6 @@ class _UpdateCycleLearning(_UpdateCycleLearningSupport):
                 checked_session_started_at=checked_session_started_at,
             )
         )
+
+
+__all__ = ["LearningController"]

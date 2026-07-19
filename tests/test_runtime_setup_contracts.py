@@ -8,23 +8,19 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
-from venus_evcharger.runtime.setup import _RuntimeSetup
+from venus_evcharger.runtime.setup import RuntimeSetup
 from venus_evcharger.runtime.setup_support import empty_worker_snapshot
+from venus_evcharger.runtime.state_store import RuntimeStateStore
 
 
-class _SetupHarness(_RuntimeSetup):
-    def __init__(self, service: object) -> None:
-        self.service = service
-        self._health_code = MagicMock(return_value=17)
-        self.initialize_async_runtime_state = MagicMock()
-
-    @staticmethod
-    def new_error_state() -> dict[str, int]:
-        return {"error": 3}
-
-    @staticmethod
-    def new_failure_state() -> dict[str, bool]:
-        return {"failure": True}
+def _setup(service: object) -> RuntimeSetup:
+    health_code = MagicMock(return_value=17)
+    state_store = MagicMock()
+    state_store.observability_defaults.return_value = {
+        "_error_state": lambda: {"error": 3},
+        "_failure_active": lambda: {"failure": True},
+    }
+    return RuntimeSetup(service, health_code, state_store, MagicMock())
 
 
 def _assert_attributes(
@@ -41,50 +37,50 @@ class RuntimeSetupContractTests(unittest.TestCase):
         class ClassPathService:
             _script_path_value = "/opt/evcharger/main.py"
 
-        self.assertEqual(_RuntimeSetup._service_repo_root(ClassPathService()), "/opt/evcharger")
+        self.assertEqual(RuntimeSetup._service_repo_root(ClassPathService()), "/opt/evcharger")
         self.assertEqual(
-            _RuntimeSetup._service_repo_root(
+            RuntimeSetup._service_repo_root(
                 SimpleNamespace(_script_path_value="/data/evcharger/service.py")
             ),
             "/data/evcharger",
         )
-        self.assertEqual(_RuntimeSetup._service_repo_root(SimpleNamespace()), "")
+        self.assertEqual(RuntimeSetup._service_repo_root(SimpleNamespace()), "")
 
     def test_system_uptime_parses_clamps_and_rejects_invalid_input(self) -> None:
         with patch("builtins.open", side_effect=OSError("missing")):
-            self.assertIsNone(_RuntimeSetup._system_uptime_seconds())
+            self.assertIsNone(RuntimeSetup._system_uptime_seconds())
         with patch("builtins.open", mock_open(read_data="invalid 2.0\n")):
-            self.assertIsNone(_RuntimeSetup._system_uptime_seconds())
+            self.assertIsNone(RuntimeSetup._system_uptime_seconds())
         with patch("builtins.open", mock_open(read_data="-2.5 2.0\n")):
-            self.assertEqual(_RuntimeSetup._system_uptime_seconds(), 0.0)
+            self.assertEqual(RuntimeSetup._system_uptime_seconds(), 0.0)
         opener = mock_open(read_data="12.5 3.0\n")
         with patch("builtins.open", opener):
-            self.assertEqual(_RuntimeSetup._system_uptime_seconds(), 12.5)
+            self.assertEqual(RuntimeSetup._system_uptime_seconds(), 12.5)
         opener.assert_called_once_with("/proc/uptime", "r", encoding="utf-8")
 
     def test_boot_delayed_update_due_contract(self) -> None:
-        with patch.object(_RuntimeSetup, "_system_uptime_seconds", return_value=None):
-            self.assertIsNone(_RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0))
-        with patch.object(_RuntimeSetup, "_system_uptime_seconds", return_value=10.0):
-            self.assertIsNone(_RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0))
-        with patch.object(_RuntimeSetup, "_system_uptime_seconds", return_value=3.0):
-            self.assertEqual(_RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0), 107.0)
-        with patch.object(_RuntimeSetup, "_system_uptime_seconds", return_value=9.5):
-            self.assertEqual(_RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0), 100.5)
+        with patch.object(RuntimeSetup, "_system_uptime_seconds", return_value=None):
+            self.assertIsNone(RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0))
+        with patch.object(RuntimeSetup, "_system_uptime_seconds", return_value=10.0):
+            self.assertIsNone(RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0))
+        with patch.object(RuntimeSetup, "_system_uptime_seconds", return_value=3.0):
+            self.assertEqual(RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0), 107.0)
+        with patch.object(RuntimeSetup, "_system_uptime_seconds", return_value=9.5):
+            self.assertEqual(RuntimeSetup._boot_delayed_update_due_at(100.0, 10.0), 100.5)
 
     def test_read_local_version_uses_ordered_repository_candidates(self) -> None:
         with patch(
             "venus_evcharger.runtime.setup._first_existing_version_line",
             return_value="2.4.1",
         ) as read_version:
-            self.assertEqual(_RuntimeSetup._read_local_version("/repo"), "2.4.1")
+            self.assertEqual(RuntimeSetup._read_local_version("/repo"), "2.4.1")
         read_version.assert_called_once_with(
             ("/repo/.bootstrap-state/installed_version", "/repo/version.txt")
         )
 
     def test_initialize_runtime_support_owns_exact_initial_state(self) -> None:
         service = SimpleNamespace()
-        setup = _SetupHarness(service)
+        setup = _setup(service)
         paths = SimpleNamespace(core_command_dir="/run/gateway/core")
         inbox = object()
         session = object()
@@ -118,7 +114,7 @@ class RuntimeSetupContractTests(unittest.TestCase):
             current_version="2.4.1",
             boot_auto_due_at=456.0,
         )
-        setup.initialize_async_runtime_state.assert_called_once_with()
+        setup.async_state.initialize.assert_called_once_with()
         setup._health_code.assert_called_once_with("init")
         self.assertIs(service.session, session)
         self.assertIs(service._gateway_paths, paths)
@@ -194,7 +190,7 @@ class RuntimeSetupContractTests(unittest.TestCase):
 
     def test_initialize_runtime_support_uses_configured_gateway_directory(self) -> None:
         service = SimpleNamespace(dbus_gateway_run_dir="/run/configured")
-        setup = _SetupHarness(service)
+        setup = _setup(service)
         paths = SimpleNamespace(core_command_dir="/run/configured/core")
         with (
             patch("venus_evcharger.runtime.setup.gateway_paths", return_value=paths) as paths_for,
@@ -211,7 +207,7 @@ class RuntimeSetupContractTests(unittest.TestCase):
 
     def test_system_bus_state_reset_cache_and_direct_access_guard(self) -> None:
         service = SimpleNamespace()
-        setup = _SetupHarness(service)
+        setup = _setup(service)
         setup.ensure_system_bus_state()
         original_state = service._system_bus_state
         original_lock = service._system_bus_generation_lock
@@ -222,12 +218,10 @@ class RuntimeSetupContractTests(unittest.TestCase):
         self.assertIs(service._system_bus_generation_lock, original_lock)
         self.assertEqual(service._system_bus_generation, 7)
 
-        service._ensure_system_bus_state = MagicMock()
         service._system_bus = "legacy"
         service._system_bus_state.bus = "cached"
         service._system_bus_state.generation = 0
         setup.reset_system_bus()
-        service._ensure_system_bus_state.assert_called_once_with()
         self.assertEqual(service._system_bus_generation, 8)
         self.assertIsNone(service._system_bus)
         self.assertIsNone(service._system_bus_state.bus)
@@ -240,51 +234,6 @@ class RuntimeSetupContractTests(unittest.TestCase):
             ("Direct DBus access is disabled; use the DBus gateway adapter",),
         )
 
-    def test_get_system_bus_reuses_generation_cache_and_refreshes_mismatch(self) -> None:
-        state = SimpleNamespace(bus=None, generation=-1)
-        service = SimpleNamespace(
-            _ensure_system_bus_state=MagicMock(),
-            _system_bus_state=state,
-            _system_bus_generation=2,
-        )
-        setup = _SetupHarness(service)
-        with patch.object(setup, "create_system_bus", side_effect=("bus-a", "bus-b")) as create:
-            self.assertEqual(setup.get_system_bus(), "bus-a")
-            self.assertEqual(setup.get_system_bus(), "bus-a")
-            service._system_bus_generation = 3
-            self.assertEqual(setup.get_system_bus(), "bus-b")
-        self.assertEqual(create.call_count, 2)
-        self.assertEqual(state.generation, 3)
-        self.assertEqual(state.bus, "bus-b")
-        self.assertEqual(service._ensure_system_bus_state.call_count, 3)
-
-    def test_get_system_bus_accepts_empty_thread_local_state_after_ensure(self) -> None:
-        service = SimpleNamespace(
-            _ensure_system_bus_state=MagicMock(),
-            _system_bus_state=SimpleNamespace(),
-        )
-        setup = _SetupHarness(service)
-        with patch.object(setup, "create_system_bus", return_value="bus") as create:
-            self.assertEqual(setup.get_system_bus(), "bus")
-        create.assert_called_once_with()
-        self.assertEqual(service._system_bus_state.bus, "bus")
-        self.assertEqual(service._system_bus_state.generation, 0)
-
-    def test_get_system_bus_does_not_reuse_cache_without_generation_marker(self) -> None:
-        for generation in (1, -2):
-            with self.subTest(generation=generation):
-                state = SimpleNamespace(bus="stale")
-                service = SimpleNamespace(
-                    _ensure_system_bus_state=MagicMock(),
-                    _system_bus_state=state,
-                    _system_bus_generation=generation,
-                )
-                setup = _SetupHarness(service)
-                with patch.object(setup, "create_system_bus", return_value="fresh") as create:
-                    self.assertEqual(setup.get_system_bus(), "fresh")
-                create.assert_called_once_with()
-                self.assertEqual(state.generation, generation)
-
     def test_worker_snapshot_is_deep_copied_at_mutable_payload_boundaries(self) -> None:
         status = {"output": True}
         source = {"id": "battery"}
@@ -294,7 +243,7 @@ class RuntimeSetupContractTests(unittest.TestCase):
             "battery_sources": [source, "sentinel"],
             "battery_learning_profiles": {"profile": profile},
         }
-        cloned = _RuntimeSetup.clone_worker_snapshot(snapshot)
+        cloned = RuntimeStateStore.clone_snapshot(snapshot)
         self.assertEqual(cloned, snapshot)
         self.assertIsNot(cloned, snapshot)
         self.assertIsNot(cloned["pm_status"], status)
@@ -302,20 +251,20 @@ class RuntimeSetupContractTests(unittest.TestCase):
         self.assertIsNot(cloned["battery_sources"][0], source)
         self.assertIsNot(cloned["battery_learning_profiles"], snapshot["battery_learning_profiles"])
         self.assertIsNot(cloned["battery_learning_profiles"]["profile"], profile)
-        self.assertEqual(_RuntimeSetup.empty_worker_snapshot(), empty_worker_snapshot())
+        self.assertEqual(RuntimeStateStore.empty_snapshot(), empty_worker_snapshot())
 
     def test_init_worker_state_owns_exact_defaults(self) -> None:
         service = SimpleNamespace(poll_interval_ms=1000)
-        setup = _SetupHarness(service)
+        setup = RuntimeStateStore(service)
         snapshot = {"snapshot": True}
         session = object()
         with (
-            patch.object(setup, "empty_worker_snapshot", return_value=snapshot) as empty,
-            patch("venus_evcharger.runtime.setup.requests.Session", return_value=session),
-            patch("venus_evcharger.runtime.setup.uuid.uuid4") as uuid4,
+            patch.object(setup, "empty_snapshot", return_value=snapshot) as empty,
+            patch("venus_evcharger.runtime.state_store.requests.Session", return_value=session),
+            patch("venus_evcharger.runtime.state_store.uuid.uuid4") as uuid4,
         ):
             uuid4.return_value.hex = "runtime-id"
-            setup.init_worker_state()
+            setup.initialize_worker_state()
         empty.assert_called_once_with()
         uuid4.assert_called_once_with()
         self.assertIs(service._worker_snapshot, snapshot)
@@ -353,10 +302,10 @@ class RuntimeSetupContractTests(unittest.TestCase):
         )
 
         short_poll_service = SimpleNamespace(poll_interval_ms=500)
-        short_poll_setup = _SetupHarness(short_poll_service)
-        with patch("venus_evcharger.runtime.setup.uuid.uuid4") as short_uuid:
+        short_poll_setup = RuntimeStateStore(short_poll_service)
+        with patch("venus_evcharger.runtime.state_store.uuid.uuid4") as short_uuid:
             short_uuid.return_value.hex = "short-id"
-            short_poll_setup.init_worker_state()
+            short_poll_setup.initialize_worker_state()
         self.assertEqual(short_poll_service._worker_poll_interval_seconds, 0.5)
         self.assertEqual(short_poll_service.relay_sync_timeout_seconds, 2.0)
 

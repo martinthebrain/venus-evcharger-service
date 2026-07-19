@@ -14,7 +14,8 @@ class TestAutoLogicTypes(unittest.TestCase):
 
         self.assertIsNone(pending.relay_on)
         self.assertTrue(pending.is_pending)
-        self.assertFalse(bool(pending))
+        with self.assertRaisesRegex(RelayDecisionTypeError, "pending relay decision has no resolved value"):
+            pending.resolved_value()
 
         resolved_true = RelayDecisionState.resolved(True)
         resolved_false = RelayDecisionState.resolved(False)
@@ -23,8 +24,6 @@ class TestAutoLogicTypes(unittest.TestCase):
         self.assertFalse(resolved_false.is_pending)
         self.assertTrue(resolved_true.resolved_value())
         self.assertFalse(resolved_false.resolved_value())
-        self.assertTrue(bool(resolved_true))
-        self.assertFalse(bool(resolved_false))
 
     def test_require_relay_bool_accepts_plain_bool_values(self) -> None:
         self.assertIs(require_relay_bool(True), True)

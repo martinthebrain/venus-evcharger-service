@@ -6,6 +6,7 @@ from unittest.mock import call
 
 from venus_evcharger.backend.shelly_contactor_switch import ShellyContactorSwitchBackend
 from venus_evcharger.backend.shelly_meter import ShellyMeterBackend
+from venus_evcharger.backend.registry import create_switch_backend
 from venus_evcharger.backend.shelly_support import phase_currents_for_selection, phase_powers_for_selection
 from venus_evcharger.backend.shelly_switch import ShellySwitchBackend
 from venus_evcharger.backend.switch_group import SwitchGroupBackend
@@ -315,7 +316,11 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
             session = MagicMock()
             session.get.return_value = _FakeResponse({})
             session.post.return_value = _FakeResponse({})
-            backend = SwitchGroupBackend(self._service(session), config_path=config_path)
+            backend = SwitchGroupBackend(
+                self._service(session),
+                config_path=config_path,
+                child_backend_factory=create_switch_backend,
+            )
 
             backend.set_phase_selection("P1_P2")
             backend.set_enabled(True)

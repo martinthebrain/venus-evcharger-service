@@ -6,7 +6,7 @@ from __future__ import annotations
 import configparser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 
 from .base import SwitchBackend, is_switch_backend
 from .config_file import config_section, load_required_backend_config
@@ -17,6 +17,7 @@ from .models import (
     SwitchingMode,
     normalize_phase_selection_tuple,
 )
+from .registry_contracts import SwitchBackendFactory
 
 _PHASE_LABELS: tuple[str, ...] = ("P1", "P2", "P3")
 _PHASE_SELECTION_MEMBERS: dict[PhaseSelection, tuple[str, ...]] = {
@@ -161,16 +162,15 @@ def _phase_switch_targets(
     }
 
 
-def _child_switch_backend(service: Any, member: SwitchGroupMember) -> SwitchBackend:
-    """Instantiate one concrete child switch backend from the shared registry."""
+def _child_switch_backend(
+    service: object,
+    member: SwitchGroupMember,
+    child_backend_factory: SwitchBackendFactory,
+) -> SwitchBackend:
+    """Instantiate one concrete child through the injected switch factory."""
     if member.backend_type == "switch_group":
         raise ValueError("Switch group members may not themselves be switch_group backends")
-    from .registry import SWITCH_BACKENDS
-
-    constructor = SWITCH_BACKENDS.get(member.backend_type)
-    if constructor is None:
-        raise ValueError(f"Unsupported switch-group child backend '{member.backend_type}'")
-    backend = constructor(service, config_path=str(member.config_path))
+    backend = child_backend_factory(member.backend_type, service, str(member.config_path))
     if not is_switch_backend(backend):
         raise TypeError(f"Switch-group child backend '{member.backend_type}' does not implement SwitchBackend")
     return backend
@@ -221,7 +221,12 @@ def _direct_switch_power_limits(capabilities: Mapping[str, SwitchCapabilities]) 
     ]
 
 
-def load_switch_group_settings(service: Any, config_path: str = "") -> SwitchGroupSettings:
+def load_switch_group_settings(
+    service: object,
+    config_path: str = "",
+    *,
+    child_backend_factory: SwitchBackendFactory,
+) -> SwitchGroupSettings:
     """Return normalized switch-group settings, including aggregated child capabilities."""
     normalized_path = str(config_path).strip()
     if not normalized_path:
@@ -231,7 +236,7 @@ def load_switch_group_settings(service: Any, config_path: str = "") -> SwitchGro
     members = config_section(parser, "Members")
     phase_members = _phase_members(normalized_path, members)
     child_backends = {
-        label: _child_switch_backend(service, member)
+        label: _child_switch_backend(service, member, child_backend_factory)
         for label, member in phase_members.items()
     }
     child_capabilities = {
@@ -253,12 +258,22 @@ def load_switch_group_settings(service: Any, config_path: str = "") -> SwitchGro
 class SwitchGroupBackend:
     """Coordinate a set of single-phase child switch backends as one logical switch."""
 
-    def __init__(self, service: Any, config_path: str = "") -> None:
+    def __init__(
+        self,
+        service: object,
+        config_path: str = "",
+        *,
+        child_backend_factory: SwitchBackendFactory,
+    ) -> None:
         self.service = service
         self.config_path = str(config_path).strip()
-        self.settings = load_switch_group_settings(service, self.config_path)
+        self.settings = load_switch_group_settings(
+            service,
+            self.config_path,
+            child_backend_factory=child_backend_factory,
+        )
         self._members: dict[str, SwitchBackend] = {
-            label: _child_switch_backend(service, member)
+            label: _child_switch_backend(service, member, child_backend_factory)
             for label, member in self.settings.phase_members.items()
         }
         self._selected_phase_selection: PhaseSelection = self.settings.supported_phase_selections[0]
@@ -352,7 +367,11 @@ class SwitchGroupBackend:
 
     def set_enabled(self, enabled: bool) -> None:
         """Apply one logical switch command across all configured child members."""
-        desired_labels = frozenset(self._labels_for_selection(self._selected_phase_selection)) if enabled else frozenset()
+        desired_labels: frozenset[str] = (
+            frozenset(self._labels_for_selection(self._selected_phase_selection))
+            if enabled
+            else frozenset()
+        )
         for label in self._phase_labels():
             self._members[label].set_enabled(label in desired_labels)
 

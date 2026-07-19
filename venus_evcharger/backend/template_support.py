@@ -4,14 +4,15 @@
 from __future__ import annotations
 
 import configparser
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import json
 from string import Template
-from typing import Any
+from typing import Protocol, TypeGuard, TypedDict, runtime_checkable
 from urllib.parse import urljoin
 
 import requests
-from requests.auth import HTTPDigestAuth
+from requests.auth import AuthBase, HTTPDigestAuth
 
 from .config_file import config_section, load_required_backend_config
 from .template_support_contract import (
@@ -41,6 +42,153 @@ class TemplateAuthSettings:
     use_digest_auth: bool
     auth_header_name: str | None
     auth_header_value: str | None
+
+
+RequestAuth = tuple[str, str] | AuthBase
+
+
+class _RequiredRequestKwargs(TypedDict):
+    url: str
+    timeout: float
+
+
+class TemplateRequestKwargs(_RequiredRequestKwargs, total=False):
+    """Keyword arguments accepted by one template HTTP request."""
+
+    json: object
+    auth: RequestAuth
+    headers: dict[str, str]
+
+
+@runtime_checkable
+class HttpResponse(Protocol):
+    """Minimal response contract required by HTTP-backed adapters."""
+
+    def raise_for_status(self) -> None:
+        """Raise when the HTTP request was unsuccessful."""
+
+    def json(self) -> object:
+        """Return the decoded JSON boundary value."""
+
+
+class HttpRequestCallable(Protocol):
+    """Callable contract shared by supported HTTP verbs."""
+
+    def __call__(
+        self,
+        *,
+        url: str,
+        timeout: float,
+        json: object = ...,
+        params: dict[str, str] = ...,
+        auth: RequestAuth = ...,
+        headers: dict[str, str] = ...,
+    ) -> HttpResponse:
+        """Execute one HTTP request."""
+        ...
+
+
+@runtime_checkable
+class HttpGetSession(Protocol):
+    """Session surface for HTTP GET requests."""
+
+    def get(
+        self,
+        *,
+        url: str,
+        timeout: float,
+        json: object = ...,
+        params: dict[str, str] = ...,
+        auth: RequestAuth = ...,
+        headers: dict[str, str] = ...,
+    ) -> HttpResponse: ...
+
+
+@runtime_checkable
+class HttpPostSession(Protocol):
+    """Session surface for HTTP POST requests."""
+
+    def post(
+        self,
+        *,
+        url: str,
+        timeout: float,
+        json: object = ...,
+        params: dict[str, str] = ...,
+        auth: RequestAuth = ...,
+        headers: dict[str, str] = ...,
+    ) -> HttpResponse: ...
+
+
+@runtime_checkable
+class HttpPutSession(Protocol):
+    """Session surface for HTTP PUT requests."""
+
+    def put(
+        self,
+        *,
+        url: str,
+        timeout: float,
+        json: object = ...,
+        params: dict[str, str] = ...,
+        auth: RequestAuth = ...,
+        headers: dict[str, str] = ...,
+    ) -> HttpResponse: ...
+
+
+@runtime_checkable
+class HttpPatchSession(Protocol):
+    """Session surface for HTTP PATCH requests."""
+
+    def patch(
+        self,
+        *,
+        url: str,
+        timeout: float,
+        json: object = ...,
+        params: dict[str, str] = ...,
+        auth: RequestAuth = ...,
+        headers: dict[str, str] = ...,
+    ) -> HttpResponse: ...
+
+
+@runtime_checkable
+class DynamicHttpSession(Protocol):
+    """Dynamic session surface used by injected proxy and test clients."""
+
+    def __getattr__(self, name: str) -> object: ...  # pragma: no cover - structural protocol declaration
+
+
+def object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Narrow one dynamic JSON value to an object-keyed mapping."""
+    return isinstance(value, Mapping)
+
+
+def object_list(value: object) -> TypeGuard[list[object]]:
+    """Narrow one dynamic JSON value to a list with object elements."""
+    return isinstance(value, list)
+
+
+def http_request_callable(value: object) -> TypeGuard[HttpRequestCallable]:
+    """Narrow a dynamically supplied session member to a request callable."""
+    return callable(value)
+
+
+def normalized_object_mapping(value: object) -> dict[str, object] | None:
+    """Normalize one dynamic mapping to the string-key JSON object contract."""
+    if not object_mapping(value):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
+def http_session(value: object | None) -> object:
+    """Return an injected session or a new requests session as a dynamic boundary value."""
+    return _new_requests_session() if value is None else value
+
+
+def _new_requests_session() -> object:
+    """Construct a requests session behind the dynamic adapter boundary."""
+    return requests.Session()
 
 
 def load_template_auth_settings(
@@ -159,24 +307,26 @@ def _relative_url_path(url: str) -> str:
     return normalized
 
 
-def json_path_value(payload: dict[str, object], path: str) -> object:
+def json_path_value(payload: Mapping[str, object], path: str) -> object:
     """Return one nested JSON value addressed by a dotted path."""
     current: object = payload
     for part in str(path).split("."):
         token = part.strip()
         if not token:
             continue
-        if not isinstance(current, dict) or token not in current:
+        mapping = normalized_object_mapping(current)
+        if mapping is None or token not in mapping:
             raise ValueError(f"Missing response path '{path}'")
-        current = current[token]
+        current = mapping[token]
     return current
 
 
 def payload_object(payload: object) -> dict[str, object]:
     """Return one typed JSON object payload for dotted-path lookups."""
-    if not isinstance(payload, dict):
+    normalized = normalized_object_mapping(payload)
+    if normalized is None:
         raise ValueError("Template backend response must be a JSON object")
-    return {str(key): value for key, value in payload.items()}
+    return normalized
 
 
 def enabled_state_from_text(text: str) -> bool | None:
@@ -204,9 +354,9 @@ def _request_kwargs(
     timeout_seconds: float,
     payload: object | None,
     auth_settings: TemplateAuthSettings,
-) -> dict[str, object]:
+) -> TemplateRequestKwargs:
     """Return requests kwargs for one template backend HTTP call."""
-    kwargs: dict[str, object] = {
+    kwargs: TemplateRequestKwargs = {
         "url": str(url),
         "timeout": float(timeout_seconds),
     }
@@ -221,13 +371,12 @@ def _request_kwargs(
     return kwargs
 
 
-def _request_auth(auth_settings: TemplateAuthSettings) -> object | None:
+def _request_auth(auth_settings: TemplateAuthSettings) -> RequestAuth | None:
     """Return one optional requests-compatible auth object."""
     if not auth_settings.username:
         return None
     if auth_settings.use_digest_auth:
-        auth: object = HTTPDigestAuth(auth_settings.username, auth_settings.password)
-        return auth
+        return HTTPDigestAuth(auth_settings.username, auth_settings.password)
     return (auth_settings.username, auth_settings.password)
 
 
@@ -240,24 +389,59 @@ def _request_headers(auth_settings: TemplateAuthSettings) -> dict[str, str] | No
     }
 
 
-def _request_method_callable(session: Any, method: str) -> Any:
+def _request_method_callable(session: object, method: str) -> HttpRequestCallable:
     """Return the bound requests-session method for one normalized HTTP verb."""
     normalized_method = str(method).strip().upper()
-    if normalized_method == "GET":
+    resolver = _HTTP_METHOD_RESOLVERS.get(normalized_method)
+    if resolver is None:
+        raise ValueError(f"Unsupported template backend HTTP method '{method}'")
+    return resolver(session)
+
+
+def _get_request_callable(session: object) -> HttpRequestCallable:
+    if isinstance(session, HttpGetSession):
         return session.get
-    if normalized_method == "POST":
+    return _dynamic_request_callable(session, "get", "GET")
+
+
+def _post_request_callable(session: object) -> HttpRequestCallable:
+    if isinstance(session, HttpPostSession):
         return session.post
-    if normalized_method == "PUT":
+    return _dynamic_request_callable(session, "post", "POST")
+
+
+def _put_request_callable(session: object) -> HttpRequestCallable:
+    if isinstance(session, HttpPutSession):
         return session.put
-    if normalized_method == "PATCH":
+    return _dynamic_request_callable(session, "put", "PUT")
+
+
+def _patch_request_callable(session: object) -> HttpRequestCallable:
+    if isinstance(session, HttpPatchSession):
         return session.patch
-    raise ValueError(f"Unsupported template backend HTTP method '{method}'")
+    return _dynamic_request_callable(session, "patch", "PATCH")
 
 
-def _response_payload_dict(response: Any) -> dict[str, object]:
+def _dynamic_request_callable(session: object, member_name: str, method: str) -> HttpRequestCallable:
+    if not isinstance(session, DynamicHttpSession):
+        raise TypeError(f"Template backend session does not implement HTTP {method}")
+    candidate = session.__getattr__(member_name)
+    if not http_request_callable(candidate):
+        raise TypeError(f"Template backend session does not implement HTTP {method}")
+    return candidate
+
+
+_HTTP_METHOD_RESOLVERS: dict[str, Callable[[object], HttpRequestCallable]] = {
+    "GET": _get_request_callable,
+    "POST": _post_request_callable,
+    "PUT": _put_request_callable,
+    "PATCH": _patch_request_callable,
+}
+
+
+def _response_payload_dict(response: HttpResponse) -> dict[str, object]:
     """Return a dict payload from one HTTP response, or an empty dict otherwise."""
-    response_payload = response.json()
-    return {str(key): value for key, value in response_payload.items()} if isinstance(response_payload, dict) else {}
+    return normalized_object_mapping(response.json()) or {}
 
 
 class TemplateHttpBackendBase:
@@ -280,7 +464,7 @@ class TemplateHttpBackendBase:
             auth_header_value=None,
         )
         session = getattr(service, "session", None)
-        self._session = session if session is not None else requests.Session()
+        self._session = http_session(session)
 
     def _perform_request(
         self,

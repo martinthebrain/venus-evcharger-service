@@ -5,62 +5,79 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Protocol, runtime_checkable
 
 from venus_evcharger.bootstrap.runtime_metadata import topology_configured
 
-OPTIONAL_RUNTIME_HOOKS = (
-    "_start_update_worker",
-    "_start_control_command_worker",
-    "_start_mainloop_watchdog",
-    "_start_companion_dbus_bridge",
-)
+class _RuntimeFacade(Protocol):
+    def mark_mainloop_thread(self) -> None: ...
+    def start_io_worker(self) -> None: ...
+    def start_update_worker(self) -> None: ...
+    def start_control_command_worker(self) -> None: ...
+    def start_mainloop_watchdog(self) -> None: ...
+    def schedule_update_cycle(self) -> bool: ...
+    def flush_dbus_publish_queue(self) -> bool: ...
+    def mainloop_heartbeat_tick(self) -> bool: ...
 
 
-def call_runtime_hook(svc: Any, name: str) -> bool:
-    """Call one optional runtime hook when present."""
-    hook = getattr(svc, name, None)
-    if not callable(hook):
-        return False
-    hook()
-    return True
+class _StateFacade(Protocol):
+    def start_companion_bridge(self) -> None: ...
+    def summary(self) -> str: ...
 
 
-def start_runtime_optional_hooks(svc: Any) -> None:
-    """Start optional runtime workers and companions."""
-    for name in OPTIONAL_RUNTIME_HOOKS:
-        call_runtime_hook(svc, name)
+class _UpdateFacade(Protocol):
+    def update(self) -> bool: ...
+    def sign_of_life(self) -> bool: ...
 
 
-def register_runtime_timers(svc: Any, gobject_module: Any) -> None:
+class _ControlFacade(Protocol):
+    def start_server(self) -> None: ...
+
+
+@runtime_checkable
+class RuntimeLoopService(Protocol):
+    runtime: _RuntimeFacade
+    state: _StateFacade
+    update: _UpdateFacade
+    control: _ControlFacade
+    poll_interval_ms: int
+    sign_of_life_minutes: int
+    runtime_state_path: str
+    topology_configured: bool
+    _dbus_publish_flush_interval_ms: int
+
+
+class _GobjectTimers(Protocol):
+    def timeout_add(self, interval: int, callback: object) -> object: ...
+
+
+def register_runtime_timers(svc: RuntimeLoopService, gobject_module: _GobjectTimers) -> None:
     """Register runtime GLib timers."""
-    schedule_update_cycle = getattr(svc, "_schedule_update_cycle", None)
     gobject_module.timeout_add(
         svc.poll_interval_ms,
-        schedule_update_cycle if callable(schedule_update_cycle) else svc._update,
+        svc.runtime.schedule_update_cycle,
     )
-    flush_dbus_publish_queue = getattr(svc, "_flush_dbus_publish_queue", None)
-    if callable(flush_dbus_publish_queue):
-        gobject_module.timeout_add(int(getattr(svc, "_dbus_publish_flush_interval_ms", 200)), flush_dbus_publish_queue)
-    mainloop_heartbeat_tick = getattr(svc, "_mainloop_heartbeat_tick", None)
-    if callable(mainloop_heartbeat_tick):
-        gobject_module.timeout_add(1000, mainloop_heartbeat_tick)
+    gobject_module.timeout_add(svc._dbus_publish_flush_interval_ms, svc.runtime.flush_dbus_publish_queue)
+    gobject_module.timeout_add(1000, svc.runtime.mainloop_heartbeat_tick)
 
 
-def start_runtime_loops(svc: Any, gobject_module: Any) -> None:
+def start_runtime_loops(svc: RuntimeLoopService, gobject_module: _GobjectTimers) -> None:
     """Register DBus paths, start background workers, and arm timers."""
-    call_runtime_hook(svc, "_mark_mainloop_thread")
+    svc.runtime.mark_mainloop_thread()
     if topology_configured(svc):
-        svc._start_io_worker()
+        svc.runtime.start_io_worker()
     else:
         logging.info("No load topology is configured yet; skipping runtime I/O worker startup")
-    svc._start_control_api_server()
-    start_runtime_optional_hooks(svc)
+    svc.control.start_server()
+    svc.runtime.start_update_worker()
+    svc.runtime.start_control_command_worker()
+    svc.runtime.start_mainloop_watchdog()
+    svc.state.start_companion_bridge()
     logging.info(
         "Initialized Venus EV charger service pid=%s runtime_state=%s %s",
         os.getpid(),
         svc.runtime_state_path,
-        svc._state_summary(),
+        svc.state.summary(),
     )
     register_runtime_timers(svc, gobject_module)
-    gobject_module.timeout_add(svc.sign_of_life_minutes * 60 * 1000, svc._sign_of_life)
+    gobject_module.timeout_add(svc.sign_of_life_minutes * 60 * 1000, svc.update.sign_of_life)

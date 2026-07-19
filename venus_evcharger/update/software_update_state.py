@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import os
-from typing import Any, ClassVar, TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import Any, ClassVar
 
 from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_CHECK_ERRORS
 from venus_evcharger.update.software_update_contracts import (
@@ -17,28 +18,29 @@ from venus_evcharger.update.software_update_contracts import (
     UPDATE_STATE_IDLE,
     UPDATE_STATE_UP_TO_DATE,
 )
-from venus_evcharger.update.pm_snapshot import _UpdateCyclePmSnapshot
 
 
-class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
-    SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS: ClassVar[float]
+class _SoftwareUpdateState(ABC):
+    CHECK_INTERVAL_SECONDS: ClassVar[float]
 
-    if TYPE_CHECKING:  # pragma: no cover
+    @classmethod
+    @abstractmethod
+    def _software_update_manifest_result(
+        cls,
+        manifest_source: str,
+        current_version: str,
+        installed_bundle_hash: str,
+    ) -> tuple[str, bool, str]:
+        """Fetch and evaluate one manifest source."""
 
-        @classmethod
-        def _software_update_manifest_result(
-            cls,
-            manifest_source: str,
-            current_version: str,
-            installed_bundle_hash: str,
-        ) -> tuple[str, bool, str]: ...
-
-        @classmethod
-        def _software_update_version_result(
-            cls,
-            version_source: str,
-            current_version: str,
-        ) -> tuple[str, bool, str]: ...
+    @classmethod
+    @abstractmethod
+    def _software_update_version_result(
+        cls,
+        version_source: str,
+        current_version: str,
+    ) -> tuple[str, bool, str]:
+        """Fetch and evaluate one version-text source."""
 
     @staticmethod
     def _software_update_install_script_missing(install_script: str, repo_root: str) -> bool:
@@ -221,7 +223,7 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
                     current_version,
                 )
             svc._software_update_last_check_at = now
-            svc._software_update_next_check_at = now + cls.SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS
+            svc._software_update_next_check_at = now + cls.CHECK_INTERVAL_SECONDS
             cls._set_software_update_state(
                 svc,
                 cls._software_update_availability_state(svc, available),
@@ -231,7 +233,7 @@ class _SoftwareUpdateState(_UpdateCyclePmSnapshot):
             )
         except SOFTWARE_UPDATE_CHECK_ERRORS as error:
             svc._software_update_last_check_at = now
-            svc._software_update_next_check_at = now + cls.SOFTWARE_UPDATE_CHECK_INTERVAL_SECONDS
+            svc._software_update_next_check_at = now + cls.CHECK_INTERVAL_SECONDS
             cls._set_software_update_state(
                 svc,
                 UPDATE_STATE_CHECK_FAILED,

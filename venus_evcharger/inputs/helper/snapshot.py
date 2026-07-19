@@ -1,292 +1,296 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Collect PV, battery, and grid inputs for the Venus EV charger service in a helper process.
+"""Thread-safe RAM snapshot ownership for the auto-input helper."""
 
-The helper exists so DBus discovery and polling cannot stall the main wallbox
-service. It periodically writes a compact JSON snapshot that the main process
-can consume safely, even if DBus becomes slow or temporarily inconsistent.
-"""
+from __future__ import annotations
 
 import os
+import threading
 import time
-from typing import Any
+from collections.abc import Callable, Mapping
 
+from venus_evcharger.core.shared import AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION, compact_json, write_text_atomically
 from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
-from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig
+from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
+from venus_evcharger.inputs.helper.contracts import Snapshot, SnapshotWriterPort, SourceReaderPort
 from venus_evcharger.inputs.helper.grid_fusion_snapshot import apply_grid_fusion
-from venus_evcharger.inputs.helper.subscriptions import _AutoInputHelperSubscription
+from venus_evcharger.inputs.helper.payload_types import is_object_mapping
 
 
-class _AutoInputHelperSnapshot(_AutoInputHelperSubscription):
-    @staticmethod
-    def _default_source_poll_schedule() -> dict[str, float]:
-        return {
-            "pv": 0.0,
-            "battery": 0.0,
-            "grid": 0.0,
-        }
+class AtomicSnapshotWriter:
+    """Atomically persist changed snapshots in the configured RAM path."""
 
-    @staticmethod
-    def _battery_snapshot_field_names() -> tuple[str, ...]:
-        return (
-            "battery_soc",
-            "battery_combined_soc",
-            "battery_combined_usable_capacity_wh",
-            "battery_combined_charge_power_w",
-            "battery_combined_discharge_power_w",
-            "battery_combined_net_power_w",
-            "battery_combined_ac_power_w",
-            "battery_combined_pv_input_power_w",
-            "battery_combined_grid_interaction_w",
-            "battery_headroom_charge_w",
-            "battery_headroom_discharge_w",
-            "expected_near_term_export_w",
-            "expected_near_term_import_w",
-            "battery_discharge_balance_mode",
-            "battery_discharge_balance_target_distribution_mode",
-            "battery_discharge_balance_error_w",
-            "battery_discharge_balance_max_abs_error_w",
-            "battery_discharge_balance_total_discharge_w",
-            "battery_discharge_balance_eligible_source_count",
-            "battery_discharge_balance_active_source_count",
-            "battery_discharge_balance_control_candidate_count",
-            "battery_discharge_balance_control_ready_count",
-            "battery_discharge_balance_supported_control_source_count",
-            "battery_discharge_balance_experimental_control_source_count",
-            "battery_average_confidence",
-            "battery_source_count",
-            "battery_online_source_count",
-            "battery_valid_soc_source_count",
-            "battery_battery_source_count",
-            "battery_hybrid_inverter_source_count",
-            "battery_inverter_source_count",
-            "battery_sources",
-            "battery_learning_profiles",
-        )
+    def __init__(self, settings: AutoInputHelperSettings) -> None:
+        self.settings = settings
+        self._last_payload: str | None = None
 
-    def _ensure_poll_state(self: Any) -> None:
-        """Initialize runtime state for tests or partially constructed instances."""
-        self._ensure_source_poll_intervals()
-        self._ensure_poll_defaults()
-
-    def _ensure_source_poll_intervals(self: Any) -> None:
-        """Populate per-source poll intervals and derive the shared interval when missing."""
-        base_poll_interval = max(0.2, getattr(self, "poll_interval_seconds", 1.0))
-        for attr_name in self._source_poll_interval_attrs():
-            if not hasattr(self, attr_name):
-                setattr(self, attr_name, base_poll_interval)
-        if not hasattr(self, "poll_interval_seconds"):
-            self.poll_interval_seconds = min(
-                self.auto_pv_poll_interval_seconds,
-                self.auto_grid_poll_interval_seconds,
-                self.auto_battery_poll_interval_seconds,
-            )
-
-    @staticmethod
-    def _source_poll_interval_attrs() -> tuple[str, str, str]:
-        """Return attribute names for per-source polling intervals."""
-        return (
-            "auto_pv_poll_interval_seconds",
-            "auto_grid_poll_interval_seconds",
-            "auto_battery_poll_interval_seconds",
-        )
-
-    def _ensure_poll_defaults(self: Any) -> None:
-        """Populate remaining runtime attributes needed by the helper process."""
-        default_values = {
-            "_last_snapshot_state": self._empty_snapshot,
-            "_next_source_poll_at": self._default_source_poll_schedule,
-            "_system_bus": None,
-            "_dbus_generation": 0,
-            "_system_bus_generation": 0,
-            "_name_owner_match": None,
-            "_dbus_subscription_backoff_until": 0.0,
-            "_signal_matches": dict,
-            "_monitored_specs": dict,
-            "_auto_battery_capacity_estimates": dict,
-            "_auto_battery_capacity_startup_recheck_at": 0.0,
-            "_auto_battery_capacity_startup_rechecked": dict,
-            "_refresh_scheduled": False,
-            "subscription_refresh_seconds": 60.0,
-            "validation_poll_seconds": 30.0,
-            "_main_loop": None,
-            "_stop_requested": False,
-            "helper_generation": 0,
-            "runtime_instance_id": "",
-            "_grid_measurement_fusion": lambda: GridMeasurementFusion(GridFusionConfig()),
-        }
-        for attr_name, default in default_values.items():
-            self._ensure_default_attr(attr_name, default)
-
-    def _ensure_default_attr(self: Any, attr_name: str, default: object) -> None:
-        """Populate one runtime attribute when it has not been initialized yet."""
-        if hasattr(self, attr_name):
+    def write(self, payload: Mapping[str, object]) -> None:
+        normalized = dict(payload)
+        normalized.setdefault("snapshot_version", AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION)
+        normalized["writer_pid"] = os.getpid()
+        normalized["helper_generation"] = self.settings.helper_generation
+        normalized["runtime_instance_id"] = self.settings.runtime_instance_id
+        serialized = compact_json(normalized)
+        if serialized == self._last_payload:
             return
-        value = default() if callable(default) else default
-        setattr(self, attr_name, value)
+        write_text_atomically(self.settings.snapshot_path, serialized)
+        self._last_payload = serialized
 
-    def _collect_snapshot(self: Any, now: float | None = None) -> dict[str, object]:
-        """Collect only the due Auto inputs and keep the last snapshot state for the others."""
-        self._ensure_poll_state()
+
+class SnapshotStore:
+    """Schedule source reads and own all snapshot freshness metadata."""
+
+    def __init__(
+        self,
+        settings: AutoInputHelperSettings,
+        sources: SourceReaderPort,
+        writer: SnapshotWriterPort,
+        stop_requested: Callable[[], bool],
+    ) -> None:
+        self.settings = settings
+        self.sources = sources
+        self.writer = writer
+        self.stop_requested = stop_requested
+        self._state = empty_snapshot()
+        self._next_poll_at = {"pv": 0.0, "battery": 0.0, "grid": 0.0}
+        self._lock = threading.RLock()
+        self._grid_fusion = GridMeasurementFusion(settings.grid_fusion_config)
+
+    def collect(self, now: float | None = None) -> Snapshot:
         current = time.time() if now is None else float(now)
-        timestamp_after_work = time.time if now is None else lambda: current
-        with self._snapshot_guard():
-            snapshot = dict(self._last_snapshot_state)
-            due_sources = self._due_snapshot_sources(current)
-
-        for source_name, interval_seconds, getter, value_key, captured_key in due_sources:
+        timestamp_after_work: Callable[[], float] = time.time if now is None else lambda: current
+        with self._lock:
+            snapshot = dict(self._state)
+            due_sources = self._due_sources(current)
+        for source_name, interval, getter, value_key, captured_key in due_sources:
             value = getter()
             source_current = timestamp_after_work()
-            with self._snapshot_guard():
-                self._apply_source_snapshot_value(snapshot, source_name, value_key, captured_key, value, source_current)
-                self._next_source_poll_at[source_name] = source_current + float(interval_seconds)
-
-        with self._snapshot_guard():
+            with self._lock:
+                self._apply_source(snapshot, source_name, value_key, captured_key, value, source_current)
+                self._next_poll_at[source_name] = source_current + interval
+        with self._lock:
             final_current = timestamp_after_work()
-            apply_grid_fusion(self._grid_measurement_fusion, snapshot, final_current)
-            snapshot["captured_at"] = final_current
-            snapshot["heartbeat_at"] = final_current
-            snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
-            self._stamp_snapshot_metadata(snapshot)
-            self._last_snapshot_state = dict(snapshot)
+            self._finalize(snapshot, final_current)
+            self._state = dict(snapshot)
         return snapshot
 
-    def _due_snapshot_sources(self: Any, current: float) -> tuple[tuple[str, float, Any, str, str], ...]:
-        source_specs = (
-            ("pv", self.auto_pv_poll_interval_seconds, self._get_pv_power, "pv_power", "pv_captured_at"),
-            ("battery", self.auto_battery_poll_interval_seconds, self._get_battery_snapshot, "battery_soc", "battery_captured_at"),
+    def refresh_source(self, source_name: str, now: float | None = None) -> None:
+        current = time.time() if now is None else float(now)
+        source = self._source_read(source_name)
+        if source is None:
+            return
+        value, value_key, captured_key = source
+        with self._lock:
+            snapshot = dict(self._state)
+            self._apply_source(snapshot, source_name, value_key, captured_key, value, current)
+            if source_name in {"battery", "grid"}:
+                apply_grid_fusion(self._grid_fusion, snapshot, current)
+            self._stamp(snapshot, current)
+            self._state = snapshot
+            self.writer.write(snapshot)
+
+    def refresh_all(self, now: float | None = None) -> None:
+        current = time.time() if now is None else float(now)
+        for source_name in ("pv", "battery", "grid"):
+            self.refresh_source(source_name, current)
+
+    def validation_poll(self) -> bool:
+        self.refresh_all()
+        return not self.stop_requested()
+
+    def heartbeat(self) -> bool:
+        current = time.time()
+        with self._lock:
+            snapshot = dict(self._state)
+            snapshot["heartbeat_at"] = current
+            snapshot.setdefault("helper_state", "running")
+            snapshot.setdefault("helper_status", snapshot["helper_state"])
+            self._stamp_identity(snapshot)
+            self._state = snapshot
+            self.writer.write(snapshot)
+        return not self.stop_requested()
+
+    def write_lifecycle(self, state: str, now: float | None = None) -> None:
+        current = time.time() if now is None else float(now)
+        with self._lock:
+            snapshot = dict(self._state)
+            snapshot["captured_at"] = current
+            snapshot["heartbeat_at"] = current
+            snapshot["helper_state"] = state
+            snapshot["helper_status"] = state
+            self._stamp_identity(snapshot)
+            self._state = snapshot
+            self.writer.write(snapshot)
+
+    def current(self) -> Snapshot:
+        with self._lock:
+            return dict(self._state)
+
+    def _due_sources(
+        self,
+        current: float,
+    ) -> tuple[tuple[str, float, Callable[[], object], str, str], ...]:
+        specs: tuple[tuple[str, float, Callable[[], object], str, str], ...] = (
+            ("pv", self.settings.auto_pv_poll_interval_seconds, self.sources.pv_power, "pv_power", "pv_captured_at"),
+            (
+                "battery",
+                self.settings.auto_battery_poll_interval_seconds,
+                self.sources.battery_snapshot,
+                "battery_soc",
+                "battery_captured_at",
+            ),
             (
                 "grid",
-                self.auto_grid_poll_interval_seconds,
-                self._get_grid_power,
+                self.settings.auto_grid_poll_interval_seconds,
+                self.sources.grid_power,
                 "grid_gateway_power",
                 "grid_gateway_captured_at",
             ),
         )
-        return tuple(
-            source_spec
-            for source_spec in source_specs
-            if current >= float(self._next_source_poll_at.get(source_spec[0], 0.0))
-        )
+        return tuple(spec for spec in specs if current >= self._next_poll_at[spec[0]])
 
-    def _set_source_value(self: Any, source_name: str, value: object, now: float | None = None) -> None:
-        """Update one source in the snapshot and write it to RAM."""
-        self._ensure_poll_state()
-        current = time.time() if now is None else float(now)
-        with self._snapshot_guard():
-            snapshot = dict(self._last_snapshot_state)
-            snapshot_keys = self._source_snapshot_keys(source_name)
-            if snapshot_keys is None:
-                return
-            value_key, captured_key = snapshot_keys
-            self._apply_source_snapshot_value(snapshot, source_name, value_key, captured_key, value, current)
-            if source_name in {"battery", "grid"}:
-                apply_grid_fusion(self._grid_measurement_fusion, snapshot, current)
-            snapshot["captured_at"] = current
-            snapshot["heartbeat_at"] = current
-            snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
-            self._stamp_snapshot_metadata(snapshot)
-            self._last_snapshot_state = snapshot
-            self._write_snapshot(snapshot)
+    def _source_read(self, source_name: str) -> tuple[object, str, str] | None:
+        if source_name == "pv":
+            return self.sources.pv_power(), "pv_power", "pv_captured_at"
+        if source_name == "battery":
+            return self.sources.battery_snapshot(), "battery_soc", "battery_captured_at"
+        if source_name == "grid":
+            return self.sources.grid_power(), "grid_gateway_power", "grid_gateway_captured_at"
+        return None
 
-    def _apply_source_snapshot_value(
-        self: Any,
-        snapshot: dict[str, object],
+    def _finalize(self, snapshot: Snapshot, current: float) -> None:
+        apply_grid_fusion(self._grid_fusion, snapshot, current)
+        self._stamp(snapshot, current)
+
+    def _stamp(self, snapshot: Snapshot, current: float) -> None:
+        snapshot["captured_at"] = current
+        snapshot["heartbeat_at"] = current
+        self._stamp_identity(snapshot)
+
+    def _stamp_identity(self, snapshot: Snapshot) -> None:
+        snapshot["snapshot_version"] = AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION
+        snapshot["writer_pid"] = os.getpid()
+        snapshot["helper_generation"] = self.settings.helper_generation
+        snapshot["runtime_instance_id"] = self.settings.runtime_instance_id
+
+    @staticmethod
+    def _apply_source(
+        snapshot: Snapshot,
         source_name: str,
         value_key: str,
         captured_key: str,
         value: object,
         current: float,
     ) -> None:
-        if source_name == "battery" and isinstance(value, dict):
-            self._apply_battery_snapshot_value(snapshot, value, captured_key, current)
-            self._set_source_status(snapshot, source_name, snapshot.get("battery_soc") is not None)
+        if source_name == "battery" and is_object_mapping(value):
+            SnapshotStore._apply_battery(snapshot, value, captured_key, current)
             return
         snapshot[value_key] = value
         snapshot[captured_key] = None if value is None else current
-        self._set_source_status(snapshot, source_name, value is not None)
+        _set_source_status(snapshot, source_name, value is not None)
 
     @staticmethod
-    def _set_source_status(snapshot: dict[str, object], source_name: str, available: bool) -> None:
-        snapshot[f"{source_name}_status"] = "ok" if available else "missing"
-        snapshot["helper_state"] = "running"
-        snapshot["helper_status"] = snapshot["helper_state"]
-
-    def _apply_battery_snapshot_value(
-        self: Any,
-        snapshot: dict[str, object],
-        value: dict[str, object],
+    def _apply_battery(
+        snapshot: Snapshot,
+        value: Mapping[object, object],
         captured_key: str,
         current: float,
     ) -> None:
         battery_soc = value.get("battery_soc")
         snapshot["battery_soc"] = battery_soc
         snapshot[captured_key] = None if battery_soc is None else current
-        for field_name in self._battery_snapshot_field_names()[1:]:
+        for field_name in BATTERY_SNAPSHOT_FIELDS[1:]:
             snapshot[field_name] = value.get(field_name)
-
-    @staticmethod
-    def _source_snapshot_keys(source_name: str) -> tuple[str, str] | None:
-        """Return snapshot value/captured-at keys for one logical source."""
-        return {
-            "pv": ("pv_power", "pv_captured_at"),
-            "battery": ("battery_soc", "battery_captured_at"),
-            "grid": ("grid_gateway_power", "grid_gateway_captured_at"),
-        }.get(source_name)
-
-    def _heartbeat_snapshot(self: Any) -> bool:
-        """Keep the RAM snapshot fresh without re-reading DBus values."""
-        self._ensure_poll_state()
-        current = time.time()
-        with self._snapshot_guard():
-            snapshot = dict(self._last_snapshot_state)
-            snapshot["heartbeat_at"] = current
-            snapshot.setdefault("helper_state", "running")
-            snapshot.setdefault("helper_status", snapshot["helper_state"])
-            snapshot["snapshot_version"] = self.SNAPSHOT_SCHEMA_VERSION
-            self._stamp_snapshot_metadata(snapshot)
-            self._last_snapshot_state = snapshot
-            self._write_snapshot(snapshot)
-        return not self._stop_requested
-
-    def _snapshot_guard(self: Any) -> Any:
-        return getattr(self, "_snapshot_lock", _NullContext())
-
-    def _stamp_snapshot_metadata(self: Any, snapshot: dict[str, object]) -> None:
-        """Attach helper identity metadata used for supervisor liveness checks."""
-        self._ensure_poll_defaults()
-        snapshot["writer_pid"] = os.getpid()
-        snapshot["helper_generation"] = int(self.helper_generation or 0)
-        snapshot["runtime_instance_id"] = str(self.runtime_instance_id or "")
-
-    def _refresh_source(self: Any, source_name: str, now: float | None = None) -> None:
-        """Refresh exactly one source on startup or when its DBus signal fires."""
-        current = time.time() if now is None else float(now)
-        if source_name == "pv":
-            value = self._get_pv_power()
-        elif source_name == "battery":
-            value = self._get_battery_snapshot()
-        elif source_name == "grid":
-            value = self._get_grid_power()
-        else:
-            return
-        self._set_source_value(source_name, value, current)
-
-    def _refresh_all_sources(self: Any, now: float | None = None) -> None:
-        """Refresh all Auto inputs once, for startup or service topology changes."""
-        current = time.time() if now is None else float(now)
-        for source_name in ("pv", "battery", "grid"):
-            self._refresh_source(source_name, current)
-
-    def _validation_poll(self: Any) -> bool:
-        """Fallback poll to recover from silent subscription failures."""
-        self._refresh_all_sources()
-        return not self._stop_requested
+        _set_source_status(snapshot, "battery", battery_soc is not None)
 
 
-class _NullContext:
-    def __enter__(self) -> "_NullContext":
-        return self
+BATTERY_SNAPSHOT_FIELDS = (
+    "battery_soc",
+    "battery_combined_soc",
+    "battery_combined_usable_capacity_wh",
+    "battery_combined_charge_power_w",
+    "battery_combined_discharge_power_w",
+    "battery_combined_net_power_w",
+    "battery_combined_ac_power_w",
+    "battery_combined_pv_input_power_w",
+    "battery_combined_grid_interaction_w",
+    "battery_headroom_charge_w",
+    "battery_headroom_discharge_w",
+    "expected_near_term_export_w",
+    "expected_near_term_import_w",
+    "battery_discharge_balance_mode",
+    "battery_discharge_balance_target_distribution_mode",
+    "battery_discharge_balance_error_w",
+    "battery_discharge_balance_max_abs_error_w",
+    "battery_discharge_balance_total_discharge_w",
+    "battery_discharge_balance_eligible_source_count",
+    "battery_discharge_balance_active_source_count",
+    "battery_discharge_balance_control_candidate_count",
+    "battery_discharge_balance_control_ready_count",
+    "battery_discharge_balance_supported_control_source_count",
+    "battery_discharge_balance_experimental_control_source_count",
+    "battery_average_confidence",
+    "battery_source_count",
+    "battery_online_source_count",
+    "battery_valid_soc_source_count",
+    "battery_battery_source_count",
+    "battery_hybrid_inverter_source_count",
+    "battery_inverter_source_count",
+    "battery_sources",
+    "battery_learning_profiles",
+)
 
-    def __exit__(self, *_args: object) -> None:
-        return None
+
+def _set_source_status(snapshot: Snapshot, source_name: str, available: bool) -> None:
+    snapshot[f"{source_name}_status"] = "ok" if available else "missing"
+    snapshot["helper_state"] = "running"
+    snapshot["helper_status"] = "running"
+
+
+def empty_snapshot(captured_at: float | None = None) -> Snapshot:
+    return {
+        "snapshot_version": AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION,
+        "captured_at": captured_at,
+        "heartbeat_at": captured_at,
+        "writer_pid": os.getpid(),
+        "helper_state": "starting",
+        "helper_status": "starting",
+        "pv_status": "missing",
+        "pv_captured_at": None,
+        "pv_power": None,
+        "battery_status": "missing",
+        "battery_captured_at": None,
+        "battery_soc": None,
+        "battery_combined_soc": None,
+        "battery_combined_usable_capacity_wh": None,
+        "battery_combined_charge_power_w": None,
+        "battery_combined_discharge_power_w": None,
+        "battery_combined_net_power_w": None,
+        "battery_combined_ac_power_w": None,
+        "battery_source_count": 0,
+        "battery_online_source_count": 0,
+        "battery_valid_soc_source_count": 0,
+        "battery_sources": [],
+        "battery_learning_profiles": {},
+        "grid_status": "missing",
+        "grid_captured_at": None,
+        "grid_power": None,
+        "grid_gateway_captured_at": None,
+        "grid_gateway_power": None,
+        "grid_primary_captured_at": None,
+        "grid_primary_power": None,
+        "grid_fusion_enabled": False,
+        "grid_fusion_primary_source_id": "",
+        "grid_fusion_backup_source_id": "victron",
+        "grid_selected_source_id": "",
+        "grid_fusion_state": "unavailable",
+        "grid_fusion_confidence": 0.0,
+        "grid_fusion_primary_valid": False,
+        "grid_fusion_backup_valid": False,
+        "grid_fusion_primary_age_seconds": None,
+        "grid_fusion_backup_age_seconds": None,
+        "grid_fusion_difference_watts": None,
+        "grid_fusion_tolerance_watts": None,
+        "grid_fusion_primary_invalid_samples": 0,
+        "grid_fusion_primary_recovery_samples": 0,
+        "grid_fusion_mismatch_samples": 0,
+    }

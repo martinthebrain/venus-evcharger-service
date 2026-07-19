@@ -5,21 +5,33 @@ from __future__ import annotations
 
 from typing import Any
 
-from .victron_ess_balance_safety_support import _UpdateCycleVictronEssBalanceSafetySupport
+from .victron_ess_balance_apply_pid import VictronEssPidController
+from .victron_ess_balance_apply_sources import VictronEssSourceResolver
+from .victron_ess_balance_safety_support import VictronEssSafetyRecovery
 
 
 def _optional_numeric_float(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySupport):
+class VictronEssSafetyController:
+    def __init__(
+        self,
+        sources: VictronEssSourceResolver,
+        pid: VictronEssPidController,
+        recovery: VictronEssSafetyRecovery,
+    ) -> None:
+        self._sources = sources
+        self._pid = pid
+        self._recovery = recovery
+
     def _populate_victron_ess_balance_runtime_safety_metrics(
         self,
         svc: Any,
         now: float,
         metrics: dict[str, Any],
     ) -> None:
-        lockout_until = self._optional_float(svc._victron_ess_balance_oscillation_lockout_until)
+        lockout_until = self._sources._optional_float(svc._victron_ess_balance_oscillation_lockout_until)
         metrics.update(self._victron_ess_balance_lockout_metrics(svc, now, lockout_until))
         metrics.update(self._victron_ess_balance_cooldown_metrics(svc, now))
         metrics.update(self._victron_ess_balance_auto_apply_suspend_metrics(svc, now))
@@ -50,12 +62,12 @@ class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySup
     def _victron_ess_balance_cooldown_metrics(self, svc: Any, now: float) -> dict[str, Any]:
         return {
             "battery_discharge_balance_victron_bias_overshoot_cooldown_active": int(
-                self._victron_ess_balance_overshoot_cooldown_active(svc, now)
+                self._recovery._victron_ess_balance_overshoot_cooldown_active(svc, now)
             ),
             "battery_discharge_balance_victron_bias_overshoot_cooldown_reason": str(
                 getattr(svc, "_victron_ess_balance_overshoot_cooldown_reason", None) or ""
             ),
-            "battery_discharge_balance_victron_bias_overshoot_cooldown_until": self._optional_float(
+            "battery_discharge_balance_victron_bias_overshoot_cooldown_until": self._sources._optional_float(
                 getattr(svc, "_victron_ess_balance_overshoot_cooldown_until", None)
             ),
         }
@@ -63,12 +75,12 @@ class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySup
     def _victron_ess_balance_auto_apply_suspend_metrics(self, svc: Any, now: float) -> dict[str, Any]:
         return {
             "battery_discharge_balance_victron_bias_auto_apply_suspend_active": int(
-                self._victron_ess_balance_auto_apply_suspended(svc, now)
+                self._recovery._victron_ess_balance_auto_apply_suspended(svc, now)
             ),
             "battery_discharge_balance_victron_bias_auto_apply_suspend_reason": str(
                 getattr(svc, "_victron_ess_balance_auto_apply_suspend_reason", None) or ""
             ),
-            "battery_discharge_balance_victron_bias_auto_apply_suspend_until": self._optional_float(
+            "battery_discharge_balance_victron_bias_auto_apply_suspend_until": self._sources._optional_float(
                 getattr(svc, "_victron_ess_balance_auto_apply_suspend_until", None)
             ),
         }
@@ -118,10 +130,12 @@ class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySup
         svc: Any,
         cluster: dict[str, Any],
     ) -> str | None:
-        grid_interaction_w = self._optional_float(cluster.get("battery_combined_grid_interaction_w"))
+        grid_interaction_w = self._sources._optional_float(cluster.get("battery_combined_grid_interaction_w"))
         if grid_interaction_w is None:
             return "grid_interaction_missing"
-        last_grid_interaction_w = self._optional_float(svc._victron_ess_balance_telemetry_last_grid_interaction_w)
+        last_grid_interaction_w = self._sources._optional_float(
+            svc._victron_ess_balance_telemetry_last_grid_interaction_w
+        )
         if self._victron_ess_balance_grid_interaction_unstable(grid_interaction_w, last_grid_interaction_w):
             return "grid_unstable"
         return None
@@ -131,30 +145,30 @@ class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySup
         svc: Any,
         cluster: dict[str, Any],
     ) -> str | None:
-        ac_power_w = self._optional_float(cluster.get("battery_combined_ac_power_w"))
-        last_ac_power_w = self._optional_float(svc._victron_ess_balance_telemetry_last_ac_power_w)
+        ac_power_w = self._sources._optional_float(cluster.get("battery_combined_ac_power_w"))
+        last_ac_power_w = self._sources._optional_float(svc._victron_ess_balance_telemetry_last_ac_power_w)
         if self._victron_ess_balance_foreign_power_event(ac_power_w, last_ac_power_w):
             return "foreign_power_event"
         return None
 
     def _victron_ess_balance_ev_window_reason(self, svc: Any) -> str | None:
-        ev_power_w = self._victron_ess_balance_ev_power_w(svc)
-        last_ev_power_w = self._optional_float(svc._victron_ess_balance_telemetry_last_ev_power_w)
+        ev_power_w = self._sources._victron_ess_balance_ev_power_w(svc)
+        last_ev_power_w = self._sources._optional_float(svc._victron_ess_balance_telemetry_last_ev_power_w)
         if self._victron_ess_balance_ev_load_jump(ev_power_w, last_ev_power_w):
             return "ev_load_jump"
         return None
 
     @staticmethod
     def _victron_ess_balance_telemetry_precheck_reason(svc: Any) -> tuple[bool, str] | None:
-        if not _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_requires_clean_phases(svc):
+        if not VictronEssSafetyController._victron_ess_balance_requires_clean_phases(svc):
             return True, "clean_not_required"
-        cached_inputs_reason = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_cached_input_reason(svc)
+        cached_inputs_reason = VictronEssSafetyController._victron_ess_balance_cached_input_reason(svc)
         if cached_inputs_reason is not None:
             return False, cached_inputs_reason
-        phase_switch_reason = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_phase_switch_reason(svc)
+        phase_switch_reason = VictronEssSafetyController._victron_ess_balance_phase_switch_reason(svc)
         if phase_switch_reason is not None:
             return False, phase_switch_reason
-        contactor_reason = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_contactor_block_reason(svc)
+        contactor_reason = VictronEssSafetyController._victron_ess_balance_contactor_block_reason(svc)
         if contactor_reason is not None:
             return False, contactor_reason
         return None
@@ -223,11 +237,11 @@ class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySup
 
     @staticmethod
     def _victron_ess_balance_recent_direction_change_count(svc: Any, now: float) -> int:
-        window_seconds = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_direction_change_window_seconds(svc)
+        window_seconds = VictronEssSafetyController._victron_ess_balance_direction_change_window_seconds(svc)
         raw_entries = svc._victron_ess_balance_recent_action_changes
         entries = raw_entries if isinstance(raw_entries, list) else []
         cutoff = float(now) - window_seconds
-        kept = _UpdateCycleVictronEssBalanceSafety._victron_ess_balance_kept_action_changes(entries, cutoff)
+        kept = VictronEssSafetyController._victron_ess_balance_kept_action_changes(entries, cutoff)
         svc._victron_ess_balance_recent_action_changes = kept
         return max(0, len(kept) - 1)
 
@@ -272,7 +286,7 @@ class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySup
             duration_seconds = self._victron_ess_balance_oscillation_lockout_duration_seconds(svc)
             svc._victron_ess_balance_oscillation_lockout_until = float(now + duration_seconds)
             svc._victron_ess_balance_oscillation_lockout_reason = "direction_change_oscillation"
-            self._reset_victron_ess_balance_pid_integral(svc, aggressive=True)
+            self._pid.reset_integral(svc, aggressive=True)
         return direction_change_count
 
     @staticmethod
@@ -327,5 +341,5 @@ class _UpdateCycleVictronEssBalanceSafety(_UpdateCycleVictronEssBalanceSafetySup
         )
 
     def _victron_ess_balance_oscillation_lockout_active(self, svc: Any, now: float) -> bool:
-        lockout_until = self._optional_float(svc._victron_ess_balance_oscillation_lockout_until)
+        lockout_until = self._sources._optional_float(svc._victron_ess_balance_oscillation_lockout_until)
         return lockout_until is not None and float(now) < float(lockout_until)

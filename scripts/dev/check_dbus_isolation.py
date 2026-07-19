@@ -10,25 +10,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 ADAPTER = REPO / "venus_evcharger_dbus_adapter.py"
-ADAPTER_FILES = {
-    ADAPTER,
-    REPO / "venus_evcharger" / "dbus_adapter_process.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_health.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_identity.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_introspection.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_introspection_snapshot.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_io.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_loop.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_runtime.py",
-    REPO / "venus_evcharger" / "dbus_adapter_process_socket.py",
-    REPO / "venus_evcharger" / "dbus_adapter_components.py",
-    REPO / "venus_evcharger" / "dbus_adapter_components_rate.py",
-    REPO / "venus_evcharger" / "dbus_adapter_components_resource.py",
-    REPO / "venus_evcharger" / "dbus_adapter_components_scheduler.py",
-    REPO / "venus_evcharger" / "dbus_adapter_read.py",
-    REPO / "venus_evcharger" / "dbus_adapter_write.py",
-    REPO / "venus_evcharger" / "dbus_adapter_write_health.py",
-}
+ADAPTER_PACKAGE = REPO / "venus_evcharger" / "dbus_adapter"
 ROOT_FILES = (
     "venus_evcharger_service.py",
     "venus_evcharger_auto_input_helper.py",
@@ -52,7 +34,11 @@ FORBIDDEN_NAMES = {"VeDbusService"}
 
 def _production_files() -> list[Path]:
     files = _root_production_files() + _package_production_files()
-    return sorted(path for path in files if path not in ADAPTER_FILES and "__pycache__" not in path.parts)
+    return sorted(path for path in files if not _adapter_owned(path) and "__pycache__" not in path.parts)
+
+
+def _adapter_owned(path: Path) -> bool:
+    return path == ADAPTER or ADAPTER_PACKAGE in path.parents
 
 
 def _root_production_files() -> list[Path]:

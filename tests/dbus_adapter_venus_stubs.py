@@ -33,6 +33,6 @@ def install_venus_adapter_stubs() -> None:
     setattr(dbus_mainloop, "DBusGMainLoop", MagicMock())
     sys.modules["dbus.mainloop.glib"] = dbus_mainloop
 
-    loaded_identity = sys.modules.get("venus_evcharger.dbus_adapter_process_identity")
+    loaded_identity = sys.modules.get("venus_evcharger.dbus_adapter.process.identity")
     if loaded_identity is not None:
         setattr(loaded_identity, "VeDbusService", FakeVeDbusService)

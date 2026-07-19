@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import venus_evcharger.backend.cerbo_gx_relay_switch as cerbo_module
 from venus_evcharger.backend.cerbo_gx_relay_switch import (
@@ -174,6 +174,13 @@ class TestCerboGxRelaySwitchBackend(unittest.TestCase):
         with self.assertRaises(ValueError) as contact_mode_error:
             load_cerbo_gx_relay_switch_settings(self._config("[Adapter]\nContactMode=bad\n"))
         self.assertEqual(str(contact_mode_error.exception), "Cerbo GX relay backend requires ContactMode NO or NC")
+
+        with self.assertRaises(ValueError) as manual_function_error:
+            load_cerbo_gx_relay_switch_settings(self._config("[Adapter]\nManualFunctionValue=bad\n"))
+        self.assertEqual(
+            str(manual_function_error.exception),
+            "Cerbo GX relay backend requires ManualFunctionValue to be an integer",
+        )
 
         missing_path = "/tmp/venus-evcharger-missing-cerbo-relay.ini"
         with self.assertRaises(FileNotFoundError) as missing_config:
@@ -535,6 +542,21 @@ class TestCerboGxRelaySwitchBackend(unittest.TestCase):
             "reason": "cerbo gx relay cache miss",
             "source": "cerbo-gx-relay-switch",
         })])
+
+    def test_gateway_cache_miss_tolerates_unavailable_command_socket(self) -> None:
+        backend = CerboGxRelaySwitchBackend(SimpleNamespace(requested_phase_selection="P1"), "")
+        gateway_client = SimpleNamespace(request_raw_value=MagicMock(side_effect=OSError("socket unavailable")))
+
+        with patch.object(backend, "_gateway_client", return_value=gateway_client):
+            self.assertIsNone(backend._dbus_get_value("svc", "/path"))
+
+        gateway_client.request_raw_value.assert_called_once_with(
+            "svc",
+            "/path",
+            priority="read",
+            reason="cerbo gx relay cache miss",
+            source="cerbo-gx-relay-switch",
+        )
 
     def test_verify_relay_state_skips_retry_on_matching_or_unknown_readback(self) -> None:
         backend = CerboGxRelaySwitchBackend(SimpleNamespace(requested_phase_selection="P1"), "")

@@ -5,16 +5,19 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from venus_evcharger.controllers import state_runtime_snapshot as snapshot_module
-from venus_evcharger.controllers.state import ServiceStateController
+from venus_evcharger.controllers import state_runtime_snapshot_victron as snapshot_victron
+from venus_evcharger.controllers.state_contracts import string_key_items
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
+from venus_evcharger.controllers.state_runtime_snapshot import RuntimeStateSnapshotBuilder
 
 
 class TestStateRuntimeSnapshotContracts(unittest.TestCase):
     def setUp(self) -> None:
         self.service = SimpleNamespace()
-        self.controller = ServiceStateController(self.service, int)
+        self.controller = RuntimeStateSnapshotBuilder(self.service, RuntimeStateNormalizer())
 
     def test_profile_scalar_helpers_cover_explicit_derived_and_fallback_values(self) -> None:
         sample_count = self.controller._victron_ess_balance_runtime_profile_sample_count
@@ -248,7 +251,7 @@ class TestStateRuntimeSnapshotContracts(unittest.TestCase):
             "battery_hybrid_inverter_source_count",
             "battery_inverter_source_count",
         )
-        raw = {key: index + 1 for index, key in enumerate(source_keys)}
+        raw: dict[str, object] = {key: index + 1 for index, key in enumerate(source_keys)}
         raw["battery_sources"] = ["source-a"]
         raw["battery_learning_profiles"] = {"profile-a": {"count": 1}}
         state = self.controller._energy_runtime_state(SimpleNamespace(_get_worker_snapshot=lambda: raw))
@@ -333,7 +336,9 @@ class TestStateRuntimeSnapshotContracts(unittest.TestCase):
         self.assertEqual(learning["schema_version"], 2)
         self.assertEqual(learning["topology_key"], topology)
         self.assertEqual(learning["source_id"], "source")
-        self.assertEqual(learning["profiles"]["profile-a"]["sample_count"], 2)
+        profiles = string_key_items(learning["profiles"])
+        profile_snapshot = string_key_items(profiles["profile-a"])
+        self.assertEqual(profile_snapshot["sample_count"], 2)
 
     def test_orchestration_and_json_reader_delegate_exactly_once(self) -> None:
         controller = self.controller
@@ -351,10 +356,11 @@ class TestStateRuntimeSnapshotContracts(unittest.TestCase):
         adaptive = patch.object(controller, "_victron_ess_balance_runtime_adaptive_tuning_state", return_value={"adaptive": 2})
         learning_mock = learning.start()
         adaptive_mock = adaptive.start()
-        self.addCleanup(lambda: [item.stop() for item in patches])
+        for item in patches:
+            self.addCleanup(item.stop)
         self.addCleanup(learning.stop)
         self.addCleanup(adaptive.stop)
-        result = controller.current_runtime_state()
+        result = controller.build()
         for name, mock in zip(groups, mocks):
             mock.assert_called_once_with(self.service)
             self.assertEqual(result[name], name)
@@ -372,16 +378,16 @@ class TestStateRuntimeSnapshotContracts(unittest.TestCase):
             auto_energy_sources=(SimpleNamespace(source_id=" a "), SimpleNamespace(source_id=""), object()),
             text=" value ",
         )
-        self.assertEqual(snapshot_module._victron_ess_balance_energy_ids(svc), ["a"])
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_string(svc, "text"), "value")
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_string(svc, "missing"), "")
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_non_negative_int(True), 1)
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_non_negative_int(-2.9), 0)
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_non_negative_int(3.9), 3)
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_non_negative_int("3"), 0)
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_attr_text(svc, "text"), "value")
+        self.assertEqual(snapshot_victron._victron_ess_balance_energy_ids(svc), ["a"])
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_string(svc, "text"), "value")
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_string(svc, "missing"), "")
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_non_negative_int(True), 1)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_non_negative_int(-2.9), 0)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_non_negative_int(3.9), 3)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_non_negative_int("3"), 0)
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_attr_text(svc, "text"), "value")
         self.assertEqual(
-            snapshot_module._victron_ess_balance_runtime_attr_text(
+            snapshot_victron._victron_ess_balance_runtime_attr_text(
                 svc,
                 "missing",
                 fallback=" FALLBACK ",
@@ -389,10 +395,10 @@ class TestStateRuntimeSnapshotContracts(unittest.TestCase):
             ),
             "fallback",
         )
-        profile = {"text": "value", "empty": ""}
-        self.assertEqual(snapshot_module._victron_ess_balance_runtime_profile_text(profile, "text"), "value")
+        profile: dict[str, object] = {"text": "value", "empty": ""}
+        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_profile_text(profile, "text"), "value")
         self.assertEqual(
-            snapshot_module._victron_ess_balance_runtime_profile_text(profile, "empty", fallback="fallback"),
+            snapshot_victron._victron_ess_balance_runtime_profile_text(profile, "empty", fallback="fallback"),
             "fallback",
         )
 

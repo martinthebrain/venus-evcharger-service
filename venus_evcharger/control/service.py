@@ -12,44 +12,30 @@ phase-selection writes.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Callable
-from typing import TypeGuard
+from typing import Any, Callable, TypeGuard
 
 from venus_evcharger.control.models import ControlCommand, ControlCommandName, ControlCommandSource
+from venus_evcharger.core.contracts_control_surface import (
+    CONTROL_AUTO_RUNTIME_VALUE_KIND_BY_PATH,
+    CONTROL_BINARY_AUTO_RUNTIME_PATHS,
+    CONTROL_BINARY_COMMANDS,
+    CONTROL_COMMAND_DEFAULT_PATHS,
+    CONTROL_COMMAND_NAMES,
+    CONTROL_DIRECT_PATH_COMMANDS,
+    CONTROL_FLOAT_AUTO_RUNTIME_PATHS,
+    CONTROL_INTEGER_AUTO_RUNTIME_PATHS,
+    CONTROL_STRING_AUTO_RUNTIME_PATHS,
+)
 
 
 class ControlApiV1Service:
     """Map transport-level writes to canonical commands and dispatch them."""
 
-    _COMMAND_NAMES: frozenset[ControlCommandName] = frozenset(
-        {
-            "legacy_unknown_write",
-            "reset_contactor_lockout",
-            "reset_phase_lockout",
-            "set_auto_runtime_setting",
-            "set_auto_start",
-            "set_current_setting",
-            "set_enable",
-            "set_mode",
-            "set_phase_selection",
-            "set_start_stop",
-            "trigger_software_update",
-        }
-    )
+    _COMMAND_NAMES = CONTROL_COMMAND_NAMES
     _KNOWN_MODE_VALUES = frozenset({0, 1, 2})
     _KNOWN_PHASE_SELECTIONS = frozenset({"P1", "P1_P2", "P1_P2_P3"})
-    _DIRECT_PATH_COMMANDS: dict[str, ControlCommandName] = {
-        "/Mode": "set_mode",
-        "/AutoStart": "set_auto_start",
-        "/StartStop": "set_start_stop",
-        "/Enable": "set_enable",
-        "/PhaseSelection": "set_phase_selection",
-        "/Auto/PhaseLockoutReset": "reset_phase_lockout",
-        "/Auto/ContactorLockoutReset": "reset_contactor_lockout",
-        "/Auto/SoftwareUpdateRun": "trigger_software_update",
-    }
+    _DIRECT_PATH_COMMANDS = CONTROL_DIRECT_PATH_COMMANDS
     _HANDLER_SPECS = {
-        "legacy_unknown_write": ("_handle_unknown_write", True),
         "reset_contactor_lockout": ("_handle_contactor_lockout_reset_write", False),
         "reset_phase_lockout": ("_handle_phase_lockout_reset_write", False),
         "set_auto_runtime_setting": ("_handle_auto_runtime_setting_write", True),
@@ -61,67 +47,15 @@ class ControlApiV1Service:
         "set_start_stop": ("_handle_startstop_value_write", False),
         "trigger_software_update": ("_handle_software_update_run_write", False),
     }
-    _COMMAND_DEFAULT_PATHS: dict[ControlCommandName, str] = {
-        command_name: path
-        for path, command_name in _DIRECT_PATH_COMMANDS.items()
-    }
+    _COMMAND_DEFAULT_PATHS = CONTROL_COMMAND_DEFAULT_PATHS
     _TRACKING_KEYS = frozenset({"command_id", "detail", "idempotency_key"})
     _PATH_ONLY_PAYLOAD_KEYS = frozenset({"path", "value", *tuple(_TRACKING_KEYS)})
     _NAMED_PAYLOAD_KEYS = frozenset({"name", "path", "value", *tuple(_TRACKING_KEYS)})
-    _BINARY_COMMANDS: frozenset[ControlCommandName] = frozenset(
-        {
-            "reset_contactor_lockout",
-            "reset_phase_lockout",
-            "set_auto_start",
-            "set_enable",
-            "set_start_stop",
-            "trigger_software_update",
-        }
-    )
-    _FLOAT_AUTO_RUNTIME_PATHS = frozenset(
-        {
-            "/Auto/StartSurplusWatts",
-            "/Auto/StopSurplusWatts",
-            "/Auto/MinSoc",
-            "/Auto/ResumeSoc",
-            "/Auto/StartDelaySeconds",
-            "/Auto/StopDelaySeconds",
-            "/Auto/ScheduledFallbackDelaySeconds",
-            "/Auto/ScheduledNightCurrent",
-            "/Auto/DbusBackoffBaseSeconds",
-            "/Auto/DbusBackoffMaxSeconds",
-            "/Auto/GridRecoveryStartSeconds",
-            "/Auto/StopSurplusDelaySeconds",
-            "/Auto/StopSurplusVolatilityLowWatts",
-            "/Auto/StopSurplusVolatilityHighWatts",
-            "/Auto/ReferenceChargePowerWatts",
-            "/Auto/LearnChargePowerMinWatts",
-            "/Auto/LearnChargePowerAlpha",
-            "/Auto/LearnChargePowerStartDelaySeconds",
-            "/Auto/LearnChargePowerWindowSeconds",
-            "/Auto/LearnChargePowerMaxAgeSeconds",
-            "/Auto/PhaseUpshiftDelaySeconds",
-            "/Auto/PhaseDownshiftDelaySeconds",
-            "/Auto/PhaseUpshiftHeadroomWatts",
-            "/Auto/PhaseDownshiftMarginWatts",
-            "/Auto/PhaseMismatchRetrySeconds",
-            "/Auto/PhaseMismatchLockoutSeconds",
-        }
-    )
-    _STRING_AUTO_RUNTIME_PATHS = frozenset(
-        {
-            "/Auto/ScheduledEnabledDays",
-            "/Auto/ScheduledLatestEndTime",
-        }
-    )
-    _BINARY_AUTO_RUNTIME_PATHS = frozenset(
-        {
-            "/Auto/LearnChargePowerEnabled",
-            "/Auto/PhaseSwitching",
-            "/Auto/PhasePreferLowestWhenIdle",
-        }
-    )
-    _INTEGER_AUTO_RUNTIME_PATHS = frozenset({"/Auto/PhaseMismatchLockoutCount"})
+    _BINARY_COMMANDS = CONTROL_BINARY_COMMANDS
+    _FLOAT_AUTO_RUNTIME_PATHS = CONTROL_FLOAT_AUTO_RUNTIME_PATHS
+    _STRING_AUTO_RUNTIME_PATHS = CONTROL_STRING_AUTO_RUNTIME_PATHS
+    _BINARY_AUTO_RUNTIME_PATHS = CONTROL_BINARY_AUTO_RUNTIME_PATHS
+    _INTEGER_AUTO_RUNTIME_PATHS = CONTROL_INTEGER_AUTO_RUNTIME_PATHS
 
     @staticmethod
     def _always_valid_value(_value: Any) -> bool:
@@ -165,13 +99,7 @@ class ControlApiV1Service:
             return ControlCommand(name="set_current_setting", path=path, value=value, source=source)
         if path in self._auto_runtime_setting_paths:
             return ControlCommand(name="set_auto_runtime_setting", path=path, value=value, source=source)
-        return ControlCommand(
-            name="legacy_unknown_write",
-            path=path,
-            value=value,
-            source=source,
-            detail="No canonical Control API command is registered for this write path.",
-        )
+        raise ValueError(f"Unsupported control path '{path}'.")
 
     def command_for_dbus_write(self, path: str, value: Any) -> ControlCommand:
         """Translate one DBus write into one canonical Control API command."""
@@ -199,8 +127,6 @@ class ControlApiV1Service:
         self._reject_extra_keys(payload, self._PATH_ONLY_PAYLOAD_KEYS)
         path = self._validated_explicit_path(payload)
         command = self.command_for_write(path, payload.get("value"), source=source)
-        if command.name == "legacy_unknown_write":
-            raise ValueError(f"Unsupported control path '{path}'.")
         self._validate_command_value(command.name, path, payload.get("value"))
         return replace(
             command,
@@ -354,16 +280,7 @@ class ControlApiV1Service:
         return self._always_valid_value
 
     def _auto_runtime_value_kind(self, path: str) -> str:
-        kind_by_group = (
-            (self._FLOAT_AUTO_RUNTIME_PATHS, "float"),
-            (self._STRING_AUTO_RUNTIME_PATHS, "string"),
-            (self._BINARY_AUTO_RUNTIME_PATHS, "binary"),
-            (self._INTEGER_AUTO_RUNTIME_PATHS, "integer"),
-        )
-        for allowed_paths, kind in kind_by_group:
-            if path in allowed_paths:
-                return kind
-        return "any"
+        return CONTROL_AUTO_RUNTIME_VALUE_KIND_BY_PATH.get(path, "any")
 
     @classmethod
     def _within_auto_runtime_bounds(cls, path: str, value: float) -> bool:
@@ -405,13 +322,11 @@ class ControlApiV1Service:
         }
         if command_name in cls._BINARY_COMMANDS:
             return f"Control command '{command_name}' requires a boolean or binary integer value (0 or 1)."
-        if command_name in simple_errors:
-            return simple_errors[command_name]
-        if command_name == "set_current_setting":
-            return f"Control command '{command_name}' requires a non-negative numeric value for path '{path}'."
         if command_name == "set_auto_runtime_setting":
             return cls._auto_runtime_value_error(path)
-        return f"Control command '{command_name}' received an invalid value for path '{path}'."
+        if command_name == "set_current_setting":
+            return f"Control command '{command_name}' requires a non-negative numeric value for path '{path}'."
+        return simple_errors[command_name]
 
     @classmethod
     def _auto_runtime_value_error(cls, path: str) -> str:
@@ -460,7 +375,9 @@ class ControlApiV1Service:
 
     def execute(self, controller: Any, command: ControlCommand) -> None:
         """Dispatch one canonical command onto the existing write controller."""
-        handler_name, include_path = self._HANDLER_SPECS[command.name]
+        command_name = self._validated_command_name(str(command.name))
+        self._validate_command_path(command_name, command.path)
+        handler_name, include_path = self._HANDLER_SPECS[command_name]
         handler = getattr(controller, handler_name)
         if include_path:
             handler(command.path, command.value)

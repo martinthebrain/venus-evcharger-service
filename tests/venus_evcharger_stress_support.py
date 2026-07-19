@@ -5,6 +5,7 @@ import unittest
 
 from venus_evcharger.auto.policy import AutoStopEwmaPolicy, AutoThresholdProfile, AutoPolicy, validate_auto_policy
 from venus_evcharger.controllers.auto import AutoDecisionController
+from venus_evcharger.ports.auto import AutoDecisionPort
 from tests.venus_evcharger_test_fixtures import make_auto_controller_service
 
 
@@ -68,13 +69,7 @@ class StressTestCaseBase(unittest.TestCase):
             return int(mode) in (1, 2)
 
         service = make_auto_controller_service()
-        controller = AutoDecisionController(service, _health_code, _mode_uses_auto_logic)
-        service._clear_auto_samples = controller.clear_auto_samples
-        service._set_health = controller.set_health
-        service._get_available_surplus_watts = controller.get_available_surplus_watts
-        service._add_auto_sample = controller.add_auto_sample
-        service._average_auto_metric = controller.average_auto_metric
-        service._is_within_auto_daytime_window = lambda: True
+        controller = AutoDecisionController(AutoDecisionPort(service), _health_code, _mode_uses_auto_logic)
         return controller, service
 
 

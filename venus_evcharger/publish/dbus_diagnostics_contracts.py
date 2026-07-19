@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Type contracts shared by diagnostic publishing roles."""
+"""Typed values returned by the diagnostic publishing components."""
 
 from __future__ import annotations
 
-from typing import Any, Callable
-
-from venus_evcharger.publish.dbus_learned import _DbusPublishLearned
+from dataclasses import dataclass
 
 
 DiagnosticValue = str | int | float
 
 
-class _DbusDiagnosticsContracts(_DbusPublishLearned):
-    """Declare sibling-role helpers used by diagnostic publishers."""
+@dataclass(frozen=True)
+class DiagnosticSnapshot:
+    """Complete diagnostic data built for one publish cycle."""
 
-    service: Any
-    _age_seconds: Callable[[Any, float], float]
+    counters: dict[str, DiagnosticValue]
+    ages: dict[str, float]

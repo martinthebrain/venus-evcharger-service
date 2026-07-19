@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .logic_samples import _AutoDecisionSamples
+from .component_context import AutoDecisionContext
+from .logic_gates_battery_learning import AutoBatteryLearning
 
 _BIAS_MODES = {"always", "export_only", "above_reserve_band", "export_and_above_reserve_band"}
 _COORDINATION_SUPPORT_MODES = {"supported_only", "allow_experimental"}
@@ -39,7 +40,13 @@ def _mapping_count(values: Mapping[str, Any], key: str) -> int:
     return int(values[key] or 0)
 
 
-class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
+class AutoBatteryBalancePolicy:
+    """Evaluate discharge-balance warnings, gates, and penalties."""
+
+    def __init__(self, context: AutoDecisionContext, learning: AutoBatteryLearning) -> None:
+        self.service = context.service
+        self.learning = learning
+
     def _battery_discharge_balance_policy_context(
         self,
         cluster: Mapping[str, Any],
@@ -91,7 +98,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
         cluster: Mapping[str, Any],
     ) -> tuple[float, int, int]:
         return (
-            self._non_negative_optional_float(cluster.get("battery_discharge_balance_error_w")) or 0.0,
+            self.learning._non_negative_optional_float(cluster.get("battery_discharge_balance_error_w")) or 0.0,
             _mapping_count(cluster, "battery_discharge_balance_eligible_source_count"),
             _mapping_count(cluster, "battery_discharge_balance_active_source_count"),
         )
@@ -189,7 +196,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
         cluster: Mapping[str, Any],
     ) -> tuple[float, int]:
         return (
-            self._non_negative_optional_float(cluster.get("battery_discharge_balance_error_w")) or 0.0,
+            self.learning._non_negative_optional_float(cluster.get("battery_discharge_balance_error_w")) or 0.0,
             _mapping_count(cluster, "battery_discharge_balance_control_ready_count"),
         )
 
@@ -244,7 +251,7 @@ class _AutoDecisionBatteryBalanceSupport(_AutoDecisionSamples):
         reserve_floor_soc: float | None,
         reserve_margin_soc: float,
     ) -> bool:
-        combined_soc = self._non_negative_optional_float(cluster.get("battery_combined_soc"))
+        combined_soc = self.learning._non_negative_optional_float(cluster.get("battery_combined_soc"))
         return (
             combined_soc is not None
             and reserve_floor_soc is not None

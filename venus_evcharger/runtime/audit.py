@@ -1,41 +1,40 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Runtime, worker-state, and watchdog helpers for the Venus EV charger service.
-
-This controller owns the "glue" state that keeps the service robust in the
-field: cached worker snapshots, throttled warnings, watchdog recovery,
-auto-audit logging, and safe persistence of runtime-only state.
-"""
+"""Auto-mode audit formatting, deduplication, and retention."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import os
 import time
 from typing import Any
 
 from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
-from venus_evcharger.core.common import _fresh_confirmed_relay_output
-from venus_evcharger.core.contracts import normalized_auto_state_pair, sanitized_auto_metrics
+from venus_evcharger.core.common_auto import _fresh_confirmed_relay_output
+from venus_evcharger.core.contracts_basic import normalized_auto_state_pair
+from venus_evcharger.core.contracts_outward import sanitized_auto_metrics
 from venus_evcharger.core.shared import write_text_atomically
-from venus_evcharger.runtime.audit_fields import (
-    _RuntimeAuditFields,
-)
-
-ErrorState = dict[str, int]
-FailureState = dict[str, bool]
-DefaultFactory = Callable[[], Any]
+from venus_evcharger.runtime.contracts import AuditFieldsPort, RuntimeStateStorePort
 
 AUDIT_LOG_READ_ERRORS = (OSError, RuntimeError, UnicodeDecodeError)
 AUDIT_LOG_WRITE_ERRORS = (OSError, RuntimeError, TypeError, UnicodeEncodeError)
 
 
-class _RuntimeAudit(_RuntimeAuditFields):
+class RuntimeAuditLogger:
+    """Format, deduplicate, and retain Auto audit events."""
 
-    @staticmethod
-    def _relay_state_for_audit(svc: Any) -> int:
+    def __init__(
+        self,
+        service: Any,
+        fields: AuditFieldsPort,
+        state_store: RuntimeStateStorePort,
+    ) -> None:
+        self.service = service
+        self.fields = fields
+        self.state_store = state_store
+
+    def _relay_state_for_audit(self, svc: Any) -> int:
         """Return the best-known relay state for audit output."""
-        current_time = _RuntimeAudit._callable_time_or_none(getattr(svc, "_time_now", None))
+        current_time = self.fields.callable_time_or_none(getattr(svc, "time_now", None))
         relay_on = _fresh_confirmed_relay_output(svc, current_time)
         return int(bool(relay_on))
 
@@ -63,61 +62,60 @@ class _RuntimeAudit(_RuntimeAuditFields):
             return float(value)
         return round(float(value) / step) * step
 
-    @classmethod
     def _auto_audit_key(
-        cls,
+        self,
         svc: Any,
         reason: str,
         cached: bool,
     ) -> tuple[object, ...]:
         """Return a de-duplication key for audit entries."""
-        metrics = cls._normalized_auto_audit_metrics(svc)
+        metrics = self._normalized_auto_audit_metrics(svc)
         state, _state_code = normalized_auto_state_pair(
             svc._last_auto_state,
             svc._last_auto_state_code,
         )
         return (
             str(reason),
-            cls._auto_audit_reason_detail(svc, reason),
+            self._auto_audit_reason_detail(svc, reason),
             int(bool(cached)),
-            cls._relay_state_for_audit(svc),
+            self._relay_state_for_audit(svc),
             int(svc.virtual_mode),
             int(bool(svc.virtual_enable)),
             int(bool(svc.virtual_autostart)),
-            cls._string_metric(state),
-            cls._string_metric(metrics.get("profile")),
-            cls._string_metric(metrics.get("stop_alpha_stage")),
-            cls._string_metric(metrics.get("threshold_mode")),
-            cls._string_metric(metrics.get("learned_charge_power_state")),
-            cls._bucket_metric(metrics.get("learned_charge_power_confidence"), step=0.05),
-            cls._bucket_metric(metrics.get("learned_charge_power_stability_score"), step=0.05),
-            cls._string_metric(metrics.get("learned_charge_power_reason")),
-            cls._bucket_metric(metrics.get("start_threshold"), step=50.0),
-            cls._bucket_metric(metrics.get("stop_threshold"), step=50.0),
-            cls._bucket_metric(metrics.get("threshold_scale"), step=0.02),
-            cls._backend_value(svc, "backend_mode", "combined"),
-            cls._backend_value(svc, "meter_backend_type", "shelly_meter"),
-            cls._backend_value(svc, "switch_backend_type", "shelly_contactor_switch"),
-            cls._backend_value(svc, "charger_backend_type", "na"),
-            cls._bucket_metric(cls._charger_target_for_audit(svc), step=1.0),
-            cls._string_metric(cls._charger_transport_reason_for_audit(svc)),
-            cls._string_metric(cls._charger_transport_source_for_audit(svc)),
-            cls._string_metric(cls._charger_retry_reason_for_audit(svc)),
-            cls._string_metric(cls._charger_retry_source_for_audit(svc)),
-            cls._string_metric(cls._observed_phase_for_audit(svc)),
-            int(cls._phase_mismatch_active_for_audit(svc)),
-            cls._string_metric(cls._phase_lockout_target_for_audit(svc)),
-            int(cls._phase_lockout_active_for_audit(svc)),
-            cls._string_metric(cls._phase_supported_effective_for_audit(svc)),
-            int(cls._phase_degraded_active_for_audit(svc)),
+            self._string_metric(state),
+            self._string_metric(metrics.get("profile")),
+            self._string_metric(metrics.get("stop_alpha_stage")),
+            self._string_metric(metrics.get("threshold_mode")),
+            self._string_metric(metrics.get("learned_charge_power_state")),
+            self._bucket_metric(metrics.get("learned_charge_power_confidence"), step=0.05),
+            self._bucket_metric(metrics.get("learned_charge_power_stability_score"), step=0.05),
+            self._string_metric(metrics.get("learned_charge_power_reason")),
+            self._bucket_metric(metrics.get("start_threshold"), step=50.0),
+            self._bucket_metric(metrics.get("stop_threshold"), step=50.0),
+            self._bucket_metric(metrics.get("threshold_scale"), step=0.02),
+            self.fields.backend_value(svc, "backend_mode", "combined"),
+            self.fields.backend_value(svc, "meter_backend_type", "shelly_meter"),
+            self.fields.backend_value(svc, "switch_backend_type", "shelly_contactor_switch"),
+            self.fields.backend_value(svc, "charger_backend_type", "na"),
+            self._bucket_metric(self.fields.charger_target(svc), step=1.0),
+            self._string_metric(self.fields.charger_transport_reason(svc)),
+            self._string_metric(self.fields.charger_transport_source(svc)),
+            self._string_metric(self.fields.charger_retry_reason(svc)),
+            self._string_metric(self.fields.charger_retry_source(svc)),
+            self._string_metric(self.fields.observed_phase(svc)),
+            int(self.fields.phase_mismatch_active(svc)),
+            self._string_metric(self.fields.phase_lockout_target(svc)),
+            int(self.fields.phase_lockout_active(svc)),
+            self._string_metric(self.fields.phase_supported_effective(svc)),
+            int(self.fields.phase_degraded_active(svc)),
             metrics.get("switch_feedback"),
             metrics.get("switch_interlock"),
             int(metrics.get("switch_feedback_mismatch", 0)),
             int(metrics.get("contactor_fault_count", 0)),
-            cls._string_metric(metrics.get("contactor_lockout_reason")),
+            self._string_metric(metrics.get("contactor_lockout_reason")),
             int(metrics.get("contactor_lockout", 0)),
             int(metrics.get("fault", 0)),
-            cls._string_metric(metrics.get("fault_reason")),
+            self._string_metric(metrics.get("fault_reason")),
             int(metrics.get("recovery", 0)),
         )
 
@@ -126,10 +124,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
         """Return one optional metric value as normalized text."""
         return None if value is None else str(value)
 
-    @classmethod
-    def _format_auto_audit_line(cls, svc: Any, reason: str, cached: bool, now: float) -> str:
+    def _format_auto_audit_line(self, svc: Any, reason: str, cached: bool, now: float) -> str:
         """Return one human-readable audit line describing the current Auto state."""
-        fields = cls._auto_audit_display_fields(svc)
+        fields = self._auto_audit_display_fields(svc)
         state, _state_code = normalized_auto_state_pair(
             svc._last_auto_state,
             svc._last_auto_state_code,
@@ -138,10 +135,10 @@ class _RuntimeAudit(_RuntimeAuditFields):
         return (
             f"{int(now)}\t{local_time}\t"
             f"reason={reason}\t"
-            f"detail={cls._auto_audit_reason_detail(svc, reason) or 'na'}\t"
+            f"detail={self._auto_audit_reason_detail(svc, reason) or 'na'}\t"
             f"cached={int(bool(cached))}\t"
             f"state={state}\t"
-            f"relay={cls._relay_state_for_audit(svc)}\t"
+            f"relay={self._relay_state_for_audit(svc)}\t"
             f"mode={svc.virtual_mode}\t"
             f"enable={int(bool(svc.virtual_enable))}\t"
             f"autostart={int(bool(svc.virtual_autostart))}\t"
@@ -187,10 +184,9 @@ class _RuntimeAudit(_RuntimeAuditFields):
             f"soc={fields['soc']}\n"
         )
 
-    @classmethod
-    def _auto_audit_display_fields(cls, svc: Any) -> dict[str, str]:
+    def _auto_audit_display_fields(self, svc: Any) -> dict[str, str]:
         """Return the formatted metric values used in one audit line."""
-        metrics = cls._normalized_auto_audit_metrics(svc)
+        metrics = self._normalized_auto_audit_metrics(svc)
         specs = {
             "surplus": ("surplus", "{:.0f}W"),
             "grid": ("grid", "{:.0f}W"),
@@ -233,53 +229,53 @@ class _RuntimeAudit(_RuntimeAuditFields):
             "stop_alpha_stage": ("stop_alpha_stage", None),
             "surplus_volatility": ("surplus_volatility", "{:.0f}W"),
         }
-        return {name: cls._auto_audit_value_text(metrics.get(key), fmt) for name, (key, fmt) in specs.items()}
+        return {name: self._auto_audit_value_text(metrics.get(key), fmt) for name, (key, fmt) in specs.items()}
 
-    @staticmethod
-    def _normalized_auto_audit_metrics(svc: Any) -> dict[str, Any]:
+    def _normalized_auto_audit_metrics(self, svc: Any) -> dict[str, Any]:
         """Return one sanitized metric payload suitable for outward audit formatting."""
-        metrics = sanitized_auto_metrics(svc._last_auto_metrics or {})
-        metrics["backend_mode"] = _RuntimeAudit._backend_value(svc, "backend_mode", "combined")
-        metrics["meter_backend"] = _RuntimeAudit._backend_value(
+        sanitized = sanitized_auto_metrics(svc._last_auto_metrics or {})
+        metrics: dict[str, Any] = {str(key): value for key, value in sanitized.items()}
+        metrics["backend_mode"] = self.fields.backend_value(svc, "backend_mode", "combined")
+        metrics["meter_backend"] = self.fields.backend_value(
             svc,
             "meter_backend_type",
             "shelly_meter",
         )
-        metrics["switch_backend"] = _RuntimeAudit._backend_value(
+        metrics["switch_backend"] = self.fields.backend_value(
             svc,
             "switch_backend_type",
             "shelly_contactor_switch",
         )
-        metrics["charger_backend"] = _RuntimeAudit._backend_value(
+        metrics["charger_backend"] = self.fields.backend_value(
             svc,
             "charger_backend_type",
             "na",
         )
-        metrics["charger_target"] = _RuntimeAudit._charger_target_for_audit(svc)
-        metrics["charger_transport_reason"] = _RuntimeAudit._charger_transport_reason_for_audit(svc)
-        metrics["charger_transport_source"] = _RuntimeAudit._charger_transport_source_for_audit(svc)
-        metrics["charger_retry_reason"] = _RuntimeAudit._charger_retry_reason_for_audit(svc)
-        metrics["charger_retry_source"] = _RuntimeAudit._charger_retry_source_for_audit(svc)
+        metrics["charger_target"] = self.fields.charger_target(svc)
+        metrics["charger_transport_reason"] = self.fields.charger_transport_reason(svc)
+        metrics["charger_transport_source"] = self.fields.charger_transport_source(svc)
+        metrics["charger_retry_reason"] = self.fields.charger_retry_reason(svc)
+        metrics["charger_retry_source"] = self.fields.charger_retry_source(svc)
         metrics["learned_charge_power_confidence"] = getattr(svc, "learned_charge_power_confidence", None)
         metrics["learned_charge_power_stability_score"] = getattr(svc, "learned_charge_power_stability_score", None)
         metrics["learned_charge_power_reason"] = getattr(svc, "learned_charge_power_reason", None)
-        metrics["phase_observed"] = _RuntimeAudit._observed_phase_for_audit(svc)
-        metrics["phase_mismatch"] = int(_RuntimeAudit._phase_mismatch_active_for_audit(svc))
-        metrics["phase_lockout_target"] = _RuntimeAudit._phase_lockout_target_for_audit(svc)
-        metrics["phase_lockout"] = int(_RuntimeAudit._phase_lockout_active_for_audit(svc))
-        metrics["phase_effective"] = _RuntimeAudit._phase_supported_effective_for_audit(svc)
-        metrics["phase_degraded"] = int(_RuntimeAudit._phase_degraded_active_for_audit(svc))
-        switch_feedback = _RuntimeAudit._switch_feedback_closed_for_audit(svc)
-        switch_interlock = _RuntimeAudit._switch_interlock_ok_for_audit(svc)
+        metrics["phase_observed"] = self.fields.observed_phase(svc)
+        metrics["phase_mismatch"] = int(self.fields.phase_mismatch_active(svc))
+        metrics["phase_lockout_target"] = self.fields.phase_lockout_target(svc)
+        metrics["phase_lockout"] = int(self.fields.phase_lockout_active(svc))
+        metrics["phase_effective"] = self.fields.phase_supported_effective(svc)
+        metrics["phase_degraded"] = int(self.fields.phase_degraded_active(svc))
+        switch_feedback = self.fields.switch_feedback_closed(svc)
+        switch_interlock = self.fields.switch_interlock_ok(svc)
         metrics["switch_feedback"] = None if switch_feedback is None else int(switch_feedback)
         metrics["switch_interlock"] = None if switch_interlock is None else int(switch_interlock)
-        metrics["switch_feedback_mismatch"] = int(_RuntimeAudit._switch_feedback_mismatch_for_audit(svc))
-        metrics["contactor_fault_count"] = _RuntimeAudit._contactor_fault_count_for_audit(svc)
-        metrics["contactor_lockout_reason"] = _RuntimeAudit._contactor_lockout_reason_for_audit(svc)
-        metrics["contactor_lockout"] = int(_RuntimeAudit._contactor_lockout_active_for_audit(svc))
-        metrics["fault"] = int(_RuntimeAudit._evse_fault_active_for_audit(svc))
-        metrics["fault_reason"] = _RuntimeAudit._evse_fault_reason_for_audit(svc)
-        metrics["recovery"] = int(_RuntimeAudit._recovery_active_for_audit(svc))
+        metrics["switch_feedback_mismatch"] = int(self.fields.switch_feedback_mismatch(svc))
+        metrics["contactor_fault_count"] = self.fields.contactor_fault_count(svc)
+        metrics["contactor_lockout_reason"] = self.fields.contactor_lockout_reason(svc)
+        metrics["contactor_lockout"] = int(self.fields.contactor_lockout_active(svc))
+        metrics["fault"] = int(self.fields.evse_fault_active(svc))
+        metrics["fault_reason"] = self.fields.evse_fault_reason(svc)
+        metrics["recovery"] = int(self.fields.recovery_active(svc))
         return metrics
 
     @staticmethod
@@ -294,7 +290,7 @@ class _RuntimeAudit(_RuntimeAuditFields):
     @staticmethod
     def _prune_auto_audit_payload(lines: list[str], cutoff_epoch: float) -> list[str]:
         """Keep only audit entries newer than the supplied cutoff epoch."""
-        kept_lines = []
+        kept_lines: list[str] = []
         for line in lines:
             if not line.strip():
                 continue
@@ -329,7 +325,7 @@ class _RuntimeAudit(_RuntimeAuditFields):
         svc = self.service
         if not path:
             return False
-        cleanup_interval = service_dbus_backpressure_policy(svc).audit_cleanup_interval_seconds(300.0)
+        cleanup_interval = float(service_dbus_backpressure_policy(svc).audit_cleanup_interval_seconds(300.0))
         return (now - float(svc._last_auto_audit_cleanup_at)) >= cleanup_interval
 
     @staticmethod
@@ -387,10 +383,10 @@ class _RuntimeAudit(_RuntimeAuditFields):
     def write_auto_audit_event(self, reason: str, cached: bool = False) -> None:
         """Append one audit entry when the Auto reason changes or stays active for long."""
         svc = self.service
-        self.ensure_observability_state()
+        self.state_store.ensure_observability_state()
         if not svc.auto_audit_log:
             return
-        now = svc._time_now()
+        now = svc.time_now()
         audit_key = self._auto_audit_key(svc, reason, cached)
         repeat_seconds = service_dbus_backpressure_policy(svc).audit_repeat_seconds(
             float(svc.auto_audit_log_repeat_seconds)
@@ -416,4 +412,4 @@ class _RuntimeAudit(_RuntimeAuditFields):
             svc._last_auto_audit_event_at = now
         except AUDIT_LOG_WRITE_ERRORS as error:
             logging.debug("Unable to write auto audit log %s: %s", path, error)
-__all__ = ["_RuntimeAudit"]
+__all__ = ["RuntimeAuditLogger"]

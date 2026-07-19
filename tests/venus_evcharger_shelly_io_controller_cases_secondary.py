@@ -34,10 +34,7 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
             requested_phase_selection="P1",
             active_phase_selection="P1",
             auto_shelly_soft_fail_seconds=10.0,
-            _time_now=MagicMock(return_value=100.0),
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
-            _mark_recovery=MagicMock(),
+            time_now=MagicMock(return_value=100.0),
             virtual_mode=0,
             virtual_enable=1,
             virtual_startstop=1,
@@ -88,10 +85,7 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
             requested_phase_selection="P1",
             active_phase_selection="P1",
             auto_shelly_soft_fail_seconds=10.0,
-            _time_now=MagicMock(return_value=100.0),
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
-            _mark_recovery=MagicMock(),
+            time_now=MagicMock(return_value=100.0),
             virtual_mode=0,
             virtual_enable=1,
             virtual_startstop=1,
@@ -112,7 +106,7 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
         self.assertEqual(service._last_charger_estimate_source, "current-voltage-phase")
         self.assertEqual(service._last_charger_estimate_at, 100.0)
 
-        service._time_now.return_value = 160.0
+        service.time_now.return_value = 160.0
         second_pm_status = controller.fetch_pm_status()
 
         self.assertEqual(second_pm_status["apower"], 10350.0)
@@ -142,10 +136,7 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
             requested_phase_selection="P1",
             active_phase_selection="P1",
             auto_shelly_soft_fail_seconds=10.0,
-            _time_now=MagicMock(return_value=100.0),
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
-            _mark_recovery=MagicMock(),
+            time_now=MagicMock(return_value=100.0),
             virtual_mode=0,
             virtual_enable=1,
             virtual_startstop=1,
@@ -177,29 +168,32 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
             requested_phase_selection="P1",
             active_phase_selection="P1",
             auto_shelly_soft_fail_seconds=10.0,
-            _time_now=MagicMock(return_value=100.0),
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
-            _mark_recovery=MagicMock(),
-            _last_charger_state_enabled=True,
-            _last_charger_state_current_amps=16.0,
-            _last_charger_state_phase_selection="P1",
-            _last_charger_state_actual_current_amps=15.1,
-            _last_charger_state_power_w=3470.0,
-            _last_charger_state_energy_kwh=8.75,
-            _last_charger_state_at=95.0,
+            time_now=MagicMock(return_value=100.0),
             _last_voltage=230.0,
         )
 
         controller = ShellyIoController(service)
+        service._readback_store.replace_charger(
+            TimedChargerState(
+                state=ChargerState(
+                    enabled=True,
+                    current_amps=16.0,
+                    phase_selection="P1",
+                    actual_current_amps=15.1,
+                    power_w=3470.0,
+                    energy_kwh=8.75,
+                ),
+                captured_at=95.0,
+            )
+        )
         pm_status = controller.fetch_pm_status()
 
         self.assertTrue(pm_status["output"])
         self.assertEqual(pm_status["apower"], 3470.0)
         self.assertEqual(pm_status["current"], 15.1)
         self.assertEqual(pm_status["aenergy"]["total"], 8750.0)
-        service._mark_failure.assert_called_once_with("charger")
-        service._warning_throttled.assert_called_once()
+        service.runtime.mark_failure.assert_called_once_with("charger")
+        service.runtime.warning_throttled.assert_called_once()
 
     def test_set_relay_uses_split_switch_backend(self):
         switch_backend = SimpleNamespace(set_enabled=MagicMock())
@@ -315,7 +309,7 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
     def test_fetch_pm_status_syncs_native_charger_readback_into_runtime_state(self):
         charger_backend = SimpleNamespace(
             read_charger_state=MagicMock(
-                return_value=SimpleNamespace(
+                return_value=ChargerState(
                     enabled=False,
                     current_amps=12.5,
                     phase_selection="P1_P2",
@@ -329,15 +323,6 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
             host="192.168.178.76",
             pm_component="Switch",
             pm_id=0,
-            rpc_call=MagicMock(
-                return_value={
-                    "output": True,
-                    "apower": 1800.0,
-                    "voltage": 230.0,
-                    "current": 7.8,
-                    "aenergy": {"total": 1000.0},
-                }
-            ),
             _charger_backend=charger_backend,
             supported_phase_selections=("P1",),
             requested_phase_selection="P1",
@@ -346,13 +331,19 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
             virtual_enable=1,
             virtual_startstop=1,
             virtual_set_current=16.0,
-            _time_now=MagicMock(return_value=100.0),
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
-            _mark_recovery=MagicMock(),
+            time_now=MagicMock(return_value=100.0),
         )
 
         controller = ShellyIoController(service)
+        controller.requests.fetch_pm_status_rpc = MagicMock(
+            return_value={
+                "output": True,
+                "apower": 1800.0,
+                "voltage": 230.0,
+                "current": 7.8,
+                "aenergy": {"total": 1000.0},
+            }
+        )
         pm_status = controller.fetch_pm_status()
 
         self.assertTrue(pm_status["output"])
@@ -377,4 +368,4 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
         self.assertIsNone(service._charger_retry_source)
         self.assertIsNone(service._charger_retry_until)
         self.assertEqual(service.active_phase_selection, "P1_P2")
-        service._mark_recovery.assert_called_once_with("charger", "Charger state reads recovered")
+        service.runtime.mark_recovery.assert_called_once_with("charger", "Charger state reads recovered")

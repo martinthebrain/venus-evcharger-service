@@ -21,6 +21,13 @@ from .models import (
 )
 from .native_modbus_backend import initialize_native_modbus_backend, native_modbus_client
 
+__all__ = (
+    "SmartEvseChargerBackend",
+    "SmartEvseChargerSettings",
+    "create_modbus_transport",
+    "load_smartevse_charger_settings",
+)
+
 
 _SMARTEVSE_SUPPORTED_PHASE_SELECTIONS: tuple[PhaseSelection, ...] = ("P1",)
 _SMARTEVSE_STATE_REGISTER = 0x0000

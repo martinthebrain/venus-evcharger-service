@@ -17,6 +17,7 @@ from venus_evcharger.dbus_gateway_core import (
     _now,
     float_or_zero,
     gateway_paths,
+    is_object_mapping,
     require_gateway_read_key,
 )
 from venus_evcharger.dbus_gateway_policy import command_allowed_by_backpressure
@@ -43,8 +44,10 @@ class GatewayClient:
                 data = sock.recv(65536)
             if not data:
                 return {"ok": True}
-            response = json.loads(data)
-            return {str(key): value for key, value in response.items()} if isinstance(response, dict) else {"ok": False, "error": "invalid-response"}
+            response: object = json.loads(data)
+            if not is_object_mapping(response):
+                return {"ok": False, "error": "invalid-response"}
+            return {str(key): value for key, value in response.items()}
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError, TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
 
@@ -180,7 +183,7 @@ class GatewayClient:
     def load_health(self, *, max_age_seconds: float = 10.0) -> CommandPayload:
         payload = DbusCacheStore.load_snapshot(self.paths.health_path, max_age_seconds=max_age_seconds)
         health = payload.get("dbus_health")
-        return {str(key): value for key, value in health.items()} if isinstance(health, Mapping) else payload
+        return {str(key): value for key, value in health.items()} if is_object_mapping(health) else payload
 
     def backpressure_state(self, *, max_age_seconds: float = 10.0) -> str:
         cached_at, cached_state = self._backpressure_cache
@@ -251,7 +254,7 @@ class GatewayDbusServiceProxy:
         self._client.publish_fields({str(field): value for field, value in fields.items() if str(field)})
 
     def apply_gateway_write(self, path: str, value: object) -> bool:
-        """Compatibility hook for tests and future in-process gateway delivery."""
+        """Apply one gateway-delivered GUI write to the local value mirror."""
         callback = self._callbacks.get(str(path))
         if callback is None:
             self._values[str(path)] = value
@@ -281,7 +284,7 @@ def _backpressure_cache_fresh(cached_at: float, cached_state: str, now: float) -
 
 def _backpressure_state_from_health(health: CommandMapping) -> str:
     backpressure = health.get("backpressure")
-    if not isinstance(backpressure, Mapping):
+    if not is_object_mapping(backpressure):
         return "unknown"
     state = backpressure.get("state")
     return str(state) if state else "unknown"

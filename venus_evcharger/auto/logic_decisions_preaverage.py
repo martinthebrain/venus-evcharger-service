@@ -4,82 +4,116 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Protocol
 
-from .logic_gates import _AutoDecisionGates
+from .component_context import AutoDecisionContext
 from .logic_types import NO_RELAY_DECISION, RelayDecision, RelayDecisionState
 
 
-class _AutoDecisionPreAverage(_AutoDecisionGates):
-    if TYPE_CHECKING:  # pragma: no cover
-        _NO_DECISION: RelayDecisionState
-        _mode_uses_auto_logic: Callable[[Any], bool]
+class AutoWorkflowLearning(Protocol):
+    def learning_policy_now(self) -> float: ...
 
-        def _scheduled_night_charge_active(self, now: float | None = None) -> bool: ...
 
-        def _handle_non_auto_mode(self, relay_on: bool) -> bool: ...
+class AutoWorkflowSamples(Protocol):
+    def scheduled_night_charge_active(self, now: float | None = None) -> bool: ...
 
-        def _handle_disabled_mode(self, cached_inputs: bool) -> bool: ...
+    def is_within_auto_daytime_window(self) -> bool: ...
 
-        def _handle_cutover_pending(self, relay_on: bool, cached_inputs: bool) -> RelayDecision: ...
+    def set_health(self, reason: str, cached: bool, relay_intent: bool | None = None) -> None: ...
 
-        def _grid_recently_read(self, grid_power: float | None, now: float) -> bool: ...
 
-        def _handle_grid_missing(self, relay_on: bool, now: float, cached_inputs: bool) -> bool: ...
+class AutoWorkflowMetrics(Protocol):
+    def update_average_metrics(
+        self,
+        now: float,
+        pv_power: float,
+        grid_power: float,
+        battery_soc: float,
+        relay_on: bool,
+    ) -> tuple[float | None, float | None]: ...
 
-        def _handle_grid_recovery_start_gate(
-            self,
-            relay_on: bool,
-            now: float,
-            cached_inputs: bool,
-        ) -> RelayDecision: ...
 
-        def _resolve_battery_soc(
-            self,
-            battery_soc: float | int | None,
-            relay_on: bool,
-            now: float,
-            cached_inputs: bool,
-        ) -> tuple[float | None, RelayDecision]: ...
+class AutoWorkflowGates(Protocol):
+    def handle_non_auto_mode(self, relay_on: bool) -> bool: ...
 
-        def _handle_common_runtime_gates(self, relay_on: bool, now: float, cached_inputs: bool) -> RelayDecision: ...
+    def handle_disabled_mode(self, cached_inputs: bool) -> bool: ...
 
-        def is_within_auto_daytime_window(self, current_dt: Any | None = None) -> bool: ...
+    def handle_cutover_pending(self, relay_on: bool, cached_inputs: bool) -> RelayDecision: ...
 
-        def _update_average_metrics(
-            self,
-            now: float,
-            pv_power: float,
-            grid_power: float,
-            battery_soc: float,
-            relay_on: bool,
-        ) -> tuple[float | None, float | None]: ...
+    def grid_recently_read(self, grid_power: float | None, now: float) -> bool: ...
 
-        def set_health(self, reason: str, cached: bool = False, relay_intent: bool | None = None) -> None: ...
+    def handle_grid_missing(self, relay_on: bool, now: float, cached_inputs: bool) -> bool: ...
 
-        def _handle_relay_on(
-            self,
-            avg_surplus_power: float,
-            avg_grid_power: float,
-            battery_soc: float,
-            daytime_window_open: bool,
-            now: float,
-            cached_inputs: bool,
-        ) -> bool: ...
+    def handle_grid_recovery_start_gate(
+        self,
+        relay_on: bool,
+        now: float,
+        cached_inputs: bool,
+    ) -> RelayDecision: ...
 
-        def _handle_relay_off(
-            self,
-            avg_surplus_power: float,
-            avg_grid_power: float,
-            battery_soc: float,
-            daytime_window_open: bool,
-            now: float,
-            cached_inputs: bool,
-        ) -> bool: ...
+    def resolve_battery_soc(
+        self,
+        battery_soc: float | int | None,
+        relay_on: bool,
+        now: float,
+        cached_inputs: bool,
+    ) -> tuple[float | None, RelayDecision]: ...
 
-        def _learning_policy_now(self) -> float: ...
+    def handle_missing_inputs(
+        self,
+        relay_on: bool,
+        battery_soc: float,
+        grid_power: float | None,
+        now: float,
+        cached_inputs: bool,
+    ) -> bool: ...
 
-        def _scheduled_night_decision(self, relay_on: bool, now: float, cached_inputs: bool) -> bool: ...
+    def handle_common_runtime_gates(self, relay_on: bool, now: float, cached_inputs: bool) -> RelayDecision: ...
+
+
+class AutoWorkflowRelay(Protocol):
+    def handle_relay_on(
+        self,
+        avg_surplus_power: float,
+        avg_grid_power: float,
+        battery_soc: float,
+        daytime_window_open: bool,
+        now: float,
+        cached_inputs: bool,
+    ) -> bool: ...
+
+    def handle_relay_off(
+        self,
+        avg_surplus_power: float,
+        avg_grid_power: float,
+        battery_soc: float,
+        daytime_window_open: bool,
+        now: float,
+        cached_inputs: bool,
+    ) -> bool: ...
+
+    def scheduled_night_decision(self, relay_on: bool, now: float, cached_inputs: bool) -> bool: ...
+
+
+class AutoDecisionWorkflow:
+    """Coordinate composed Auto components into one relay decision workflow."""
+
+    def __init__(
+        self,
+        context: AutoDecisionContext,
+        learning: AutoWorkflowLearning,
+        samples: AutoWorkflowSamples,
+        metrics: AutoWorkflowMetrics,
+        gates: AutoWorkflowGates,
+        relay: AutoWorkflowRelay,
+    ) -> None:
+        self._context = context
+        self.service = context.service
+        self.learning = learning
+        self.samples = samples
+        self.metrics = metrics
+        self.gates = gates
+        self.relay = relay
 
     def _pre_average_decision(
         self,
@@ -90,11 +124,10 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
         now: float,
         cached_inputs: bool,
     ) -> tuple[RelayDecisionState, float | None]:
-        svc = self.service
-        early_decision = self._pre_average_gate_chain_result(svc, relay_on, grid_power, now, cached_inputs)
+        early_decision = self._pre_average_gate_chain_result(relay_on, grid_power, now, cached_inputs)
         if early_decision is not None:
             return early_decision
-        if self._scheduled_night_charge_active(now):
+        if self.samples.scheduled_night_charge_active(now):
             return NO_RELAY_DECISION, None
         battery_soc, early_decision = self._pre_average_battery_soc_result(
             battery_soc,
@@ -123,14 +156,13 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
 
     def _pre_average_gate_chain_result(
         self,
-        svc: Any,
         relay_on: bool,
         grid_power: float | None,
         now: float,
         cached_inputs: bool,
     ) -> tuple[RelayDecisionState, float | None] | None:
         decision_factories: tuple[Callable[[], RelayDecisionState], ...] = (
-            lambda: self._pre_average_mode_decision(svc, relay_on, cached_inputs),
+            lambda: self._pre_average_mode_decision(relay_on, cached_inputs),
             lambda: self._pre_average_input_gate_decision(relay_on, grid_power, now, cached_inputs),
         )
         for decision_factory in decision_factories:
@@ -167,21 +199,19 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
             return NO_RELAY_DECISION, battery_soc
         assert battery_soc is not None
         return RelayDecisionState.resolved(
-            self._handle_missing_inputs(relay_on, battery_soc, grid_power, now, cached_inputs)
+            self.gates.handle_missing_inputs(relay_on, battery_soc, grid_power, now, cached_inputs)
         ), None
 
     def _pre_average_mode_decision(
         self,
-        svc: Any,
         relay_on: bool,
         cached_inputs: bool,
     ) -> RelayDecisionState:
-        if not self._mode_uses_auto_logic(svc.virtual_mode):
-            return RelayDecisionState.resolved(self._handle_non_auto_mode(relay_on))
-        virtual_enable = svc.virtual_enable if hasattr(svc, "virtual_enable") else True
-        if not bool(virtual_enable):
-            return RelayDecisionState.resolved(self._handle_disabled_mode(cached_inputs))
-        return self._decision_state(self._handle_cutover_pending(relay_on, cached_inputs))
+        if not self._context.mode_uses_auto_logic(self._context.port.mode()):
+            return RelayDecisionState.resolved(self.gates.handle_non_auto_mode(relay_on))
+        if not self._context.port.controller_enabled():
+            return RelayDecisionState.resolved(self.gates.handle_disabled_mode(cached_inputs))
+        return self._decision_state(self.gates.handle_cutover_pending(relay_on, cached_inputs))
 
     def _pre_average_input_gate_decision(
         self,
@@ -190,11 +220,11 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
         now: float,
         cached_inputs: bool,
     ) -> RelayDecisionState:
-        if self._scheduled_night_charge_active(now):
+        if self.samples.scheduled_night_charge_active(now):
             return NO_RELAY_DECISION
-        if not self._grid_recently_read(grid_power, now):
-            return RelayDecisionState.resolved(self._handle_grid_missing(relay_on, now, cached_inputs))
-        return self._decision_state(self._handle_grid_recovery_start_gate(relay_on, now, cached_inputs))
+        if not self.gates.grid_recently_read(grid_power, now):
+            return RelayDecisionState.resolved(self.gates.handle_grid_missing(relay_on, now, cached_inputs))
+        return self._decision_state(self.gates.handle_grid_recovery_start_gate(relay_on, now, cached_inputs))
 
     def _resolved_battery_soc_decision(
         self,
@@ -203,7 +233,9 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
         now: float,
         cached_inputs: bool,
     ) -> tuple[float | None, RelayDecisionState]:
-        resolved_battery_soc, decision = self._resolve_battery_soc(battery_soc, relay_on, now, cached_inputs)
+        resolved_battery_soc, decision = self.gates.resolve_battery_soc(
+            battery_soc, relay_on, now, cached_inputs
+        )
         return resolved_battery_soc, self._decision_state(decision)
 
     def _post_average_decision(
@@ -215,15 +247,14 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
         now: float,
         cached_inputs: bool,
     ) -> tuple[RelayDecisionState, bool | None]:
-        decision = self._handle_common_runtime_gates(relay_on, now, cached_inputs)
-        if decision is not self._NO_DECISION:
+        decision = self.gates.handle_common_runtime_gates(relay_on, now, cached_inputs)
+        if decision is not NO_RELAY_DECISION:
             return self._decision_state(decision), None
-        return NO_RELAY_DECISION, self.is_within_auto_daytime_window()
+        return NO_RELAY_DECISION, self.samples.is_within_auto_daytime_window()
 
-    def _decision_state(self, decision: bool | object) -> RelayDecisionState:
-        if decision is self._NO_DECISION:
-            return NO_RELAY_DECISION
-        assert isinstance(decision, bool)
+    def _decision_state(self, decision: RelayDecision) -> RelayDecisionState:
+        if isinstance(decision, RelayDecisionState):
+            return decision
         return RelayDecisionState.resolved(decision)
 
     def _resolved_auto_decision(self, decision: RelayDecisionState) -> bool | None:
@@ -240,7 +271,7 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
         relay_on: bool,
         cached_inputs: bool,
     ) -> tuple[float, float] | None:
-        avg_surplus_power, avg_grid_power = self._update_average_metrics(
+        avg_surplus_power, avg_grid_power = self.metrics.update_average_metrics(
             now,
             pv_power,
             grid_power,
@@ -248,7 +279,7 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
             relay_on,
         )
         if avg_surplus_power is None or avg_grid_power is None:
-            self.set_health("averaging", cached_inputs, relay_intent=relay_on)
+            self.samples.set_health("averaging", cached_inputs, relay_intent=relay_on)
             return None
         return avg_surplus_power, avg_grid_power
 
@@ -274,7 +305,7 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
             return resolved
         assert daytime_window_open is not None
         if relay_on:
-            return self._handle_relay_on(
+            return self.relay.handle_relay_on(
                 avg_surplus_power,
                 avg_grid_power,
                 battery_soc,
@@ -282,7 +313,7 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
                 now,
                 cached_inputs,
             )
-        return self._handle_relay_off(
+        return self.relay.handle_relay_off(
             avg_surplus_power,
             avg_grid_power,
             battery_soc,
@@ -300,7 +331,7 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
     ) -> bool:
         svc = self.service
         cached_inputs = bool(svc._auto_cached_inputs_used) if hasattr(svc, "_auto_cached_inputs_used") else False
-        now = self._learning_policy_now()
+        now = self.learning.learning_policy_now()
         pre_average_decision, battery_soc = self._pre_average_decision(
             relay_on,
             pv_power,
@@ -332,8 +363,8 @@ class _AutoDecisionPreAverage(_AutoDecisionGates):
         resolved = self._resolved_auto_decision(pre_average_decision)
         if resolved is not None:
             return resolved
-        if self._scheduled_night_charge_active(now):
-            return self._scheduled_night_decision(relay_on, now, cached_inputs)
+        if self.samples.scheduled_night_charge_active(now):
+            return self.relay.scheduled_night_decision(relay_on, now, cached_inputs)
         pv_power, battery_soc, grid_power = self._required_average_inputs(pv_power, battery_soc, grid_power)
         averages = self._averaged_auto_metrics(
             now,

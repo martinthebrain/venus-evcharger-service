@@ -1,83 +1,80 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Bootstrap and service-registration helpers for the Venus EV charger service.
-
-This module is the place to look first when you want to understand how the
-service comes up:
-- read config
-- normalize and validate wallbox state
-- build controller objects
-- register DBus paths
-- start the helper/worker processes
-- hand control over to the GLib main loop
-"""
+"""DBus path-registration component for service bootstrap."""
 
 from __future__ import annotations
 
 import logging
 import platform
 import time
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
 
+from venus_evcharger.bootstrap.contracts import (
+    DbusServicePort,
+    Formatter,
+    require_dbus_service,
+    require_write_handler,
+)
 from venus_evcharger.bootstrap.errors import BOOTSTRAP_DBUS_REGISTRATION_ERRORS
-from venus_evcharger.bootstrap.path_groups import control_paths, management_paths, measurement_paths
 from venus_evcharger.bootstrap.path_defaults import (
+    PathMap,
     age_counter_diagnostic_defaults,
     backend_diagnostic_defaults,
     decision_diagnostic_defaults,
     phase_diagnostic_defaults,
+    runtime_timing_diagnostic_defaults,
     scheduled_diagnostic_defaults,
     software_update_diagnostic_defaults,
-    runtime_timing_diagnostic_defaults,
 )
-from venus_evcharger.bootstrap.runtime import _ServiceBootstrapRuntime
+from venus_evcharger.bootstrap.path_groups import control_paths, management_paths, measurement_paths
 from venus_evcharger.core.common import (
     DEFAULT_SCHEDULED_ENABLED_DAYS,
     mode_uses_scheduled_logic,
     scheduled_mode_snapshot,
 )
-from venus_evcharger.bootstrap.path_defaults import PathMap
 
 
-class _ServiceBootstrapPath(_ServiceBootstrapRuntime):
-    def register_paths(self) -> None:
-        """Register all DBus paths exposed by the emulated EV charger."""
-        svc = self.service
-        self._register_management_paths()
-        for path, (initial, formatter) in self._all_service_paths().items():
+class ServicePathRegistrar:
+    """Build and register the immutable, control, and diagnostic path sets."""
+
+    def __init__(self, service: object, *, script_path: str, formatters: Mapping[str, Formatter]) -> None:
+        self._service = service
+        self._script_path = script_path
+        self._formatters = formatters
+
+    def register(self) -> None:
+        """Register every DBus path exposed by the emulated EV charger."""
+        dbus_service = require_dbus_service(self._service)
+        write_handler = require_write_handler(self._service)
+        self._register_management_paths(dbus_service)
+        for path, (initial, formatter) in self.path_map().items():
             logging.debug("Registering path: %s initial=%r formatter=%r", path, initial, formatter)
             try:
-                svc._dbusservice.add_path(
+                dbus_service.add_path(
                     path,
                     initial,
                     gettextcallback=formatter,
-                    onchangecallback=svc._handle_write,
+                    onchangecallback=write_handler.handle_dbus_write,
                 )
             except BOOTSTRAP_DBUS_REGISTRATION_ERRORS as error:
                 logging.error("Failed to register path %s: %s", path, error, exc_info=error)
                 raise
 
-    def _register_management_paths(self) -> None:
-        """Register immutable management and identity DBus paths."""
-        svc = self.service
-        for path, initial in management_paths(svc, self._script_path, platform.python_version()).items():
-            svc._dbusservice.add_path(path, initial)
+    def path_map(self) -> PathMap:
+        """Return the complete dynamic EV charger path map."""
+        return {
+            **measurement_paths(self._formatters),
+            **control_paths(self._service, self._formatters),
+            **self.diagnostic_paths(),
+        }
 
-    def _measurement_paths(self) -> PathMap:
-        """Return measurement and energy paths shown on the EV charger tile."""
-        return measurement_paths(self._formatters)
-
-    def _control_paths(self) -> PathMap:
-        """Return writable and status-like EV charger control paths."""
-        return control_paths(self.service, self._formatters)
-
-    def _diagnostic_paths(self) -> PathMap:
-        """Return Auto-diagnostic DBus paths published by the service."""
-        svc = self.service
+    def diagnostic_paths(self) -> PathMap:
+        """Return initial Auto and runtime diagnostic path values."""
+        svc = self._service
         scheduled_snapshot = self._scheduled_snapshot()
         return {
-            "/Auto/Health": (svc._last_health_reason, None),
-            "/Auto/HealthCode": (svc._last_health_code, None),
+            "/Auto/Health": (getattr(svc, "_last_health_reason", "init"), None),
+            "/Auto/HealthCode": (getattr(svc, "_last_health_code", 0), None),
             "/Auto/State": (getattr(svc, "_last_auto_state", "idle"), None),
             "/Auto/StateCode": (getattr(svc, "_last_auto_state_code", 0), None),
             "/Auto/RecoveryActive": (0, None),
@@ -93,23 +90,24 @@ class _ServiceBootstrapPath(_ServiceBootstrapRuntime):
             **runtime_timing_diagnostic_defaults(),
         }
 
-    def _all_service_paths(self) -> PathMap:
-        """Return the complete dynamic EV charger DBus path map."""
-        return {
-            **self._measurement_paths(),
-            **self._control_paths(),
-            **self._diagnostic_paths(),
-        }
+    def _register_management_paths(self, dbus_service: DbusServicePort) -> None:
+        for path, initial in management_paths(
+            self._service,
+            self._script_path,
+            platform.python_version(),
+        ).items():
+            dbus_service.add_path(path, initial)
 
-    def _scheduled_snapshot(self) -> Any | None:
-        """Return one initial scheduled-mode diagnostic snapshot for path registration."""
-        svc = self.service
-        if not mode_uses_scheduled_logic(svc.virtual_mode):
+    def _scheduled_snapshot(self) -> object | None:
+        svc = self._service
+        virtual_mode = getattr(svc, "virtual_mode", 0)
+        if not mode_uses_scheduled_logic(virtual_mode):
             return None
-        return scheduled_mode_snapshot(
+        snapshot: object = scheduled_mode_snapshot(
             datetime.fromtimestamp(time.time()),
             getattr(svc, "auto_month_windows", {}),
             getattr(svc, "auto_scheduled_enabled_days", DEFAULT_SCHEDULED_ENABLED_DAYS),
             delay_seconds=float(getattr(svc, "auto_scheduled_night_start_delay_seconds", 3600.0)),
             latest_end_time=getattr(svc, "auto_scheduled_latest_end_time", "06:30"),
         )
+        return snapshot

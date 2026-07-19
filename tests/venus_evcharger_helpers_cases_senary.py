@@ -1,24 +1,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from venus_evcharger.backend.models import BackendRuntimeSummary
+
 from tests.venus_evcharger_helpers_support import *
 
 
 class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
     def test_auto_mode_scenario_grid_recovery_gate_holds_restart_until_fresh_grid_window_elapsed(self):
-        service = ShellyWallboxService.__new__(ShellyWallboxService)
+        service = make_helper_service()
         service.virtual_mode = 1
         service.virtual_autostart = 1
         service.virtual_enable = 1
         service.auto_allow_without_battery_soc = False
-        service.auto_min_soc = 30
-        service.auto_resume_soc = 33
-        service.auto_start_surplus_watts = 2000
-        service.auto_stop_surplus_watts = 1600
+        configure_auto_policy(service)
         service.auto_average_window_seconds = 30
         service.auto_min_runtime_seconds = 0
         service.auto_min_offtime_seconds = 0
-        service.auto_start_max_grid_import_watts = 50
-        service.auto_stop_grid_import_watts = 300
-        service.auto_grid_recovery_start_seconds = 10
         service.auto_start_delay_seconds = 0
         service.auto_stop_delay_seconds = 30
         service.auto_start_condition_since = None
@@ -34,39 +30,34 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._grid_recovery_since = None
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
-            self.assertFalse(service._auto_decide_relay(False, 2400.0, 45.0, -2200.0))
+            self.assertFalse(service.auto.decide_relay(False, 2400.0, 45.0, -2200.0))
         self.assertEqual(service._last_health_reason, "waiting-grid-recovery")
         self.assertEqual(service._grid_recovery_since, 100.0)
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=108.0):
-            self.assertFalse(service._auto_decide_relay(False, 2400.0, 45.0, -2200.0))
+            self.assertFalse(service.auto.decide_relay(False, 2400.0, 45.0, -2200.0))
         self.assertEqual(service._last_health_reason, "waiting-grid-recovery")
         self.assertTrue(service._grid_recovery_required)
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=111.0):
-            self.assertFalse(service._auto_decide_relay(False, 2400.0, 45.0, -2200.0))
+            self.assertFalse(service.auto.decide_relay(False, 2400.0, 45.0, -2200.0))
         self.assertEqual(service.auto_start_condition_since, 111.0)
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=112.0):
-            self.assertTrue(service._auto_decide_relay(False, 2400.0, 45.0, -2200.0))
+            self.assertTrue(service.auto.decide_relay(False, 2400.0, 45.0, -2200.0))
         self.assertEqual(service._last_health_reason, "auto-start")
         self.assertFalse(service._grid_recovery_required)
 
     def test_scheduled_mode_scenario_weekday_target_enters_night_boost_but_disabled_day_does_not(self):
-        service = ShellyWallboxService.__new__(ShellyWallboxService)
+        service = make_helper_service()
         service.virtual_mode = 2
         service.virtual_autostart = 1
         service.virtual_enable = 1
         service.auto_allow_without_battery_soc = False
-        service.auto_min_soc = 30
-        service.auto_resume_soc = 33
-        service.auto_start_surplus_watts = 2000
-        service.auto_stop_surplus_watts = 1600
+        configure_auto_policy(service)
         service.auto_average_window_seconds = 30
         service.auto_min_runtime_seconds = 0
         service.auto_min_offtime_seconds = 0
-        service.auto_start_max_grid_import_watts = 50
-        service.auto_stop_grid_import_watts = 300
         service.auto_start_delay_seconds = 10
         service.auto_stop_delay_seconds = 30
         service.auto_start_condition_since = None
@@ -84,28 +75,23 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service.auto_scheduled_latest_end_time = "06:30"
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 19, 21, 0)):
-            self.assertTrue(service._auto_decide_relay(False, None, None, None))
+            self.assertTrue(service.auto.decide_relay(False, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 17, 21, 0)):
-            self.assertFalse(service._auto_decide_relay(False, 0.0, 45.0, 0.0))
+            self.assertFalse(service.auto.decide_relay(False, 0.0, 45.0, 0.0))
         self.assertEqual(service._last_health_reason, "waiting-surplus")
 
     def test_scheduled_mode_scenario_latest_end_stops_night_boost_before_daytime_window_reopens(self):
-        service = ShellyWallboxService.__new__(ShellyWallboxService)
+        service = make_helper_service()
         service.virtual_mode = 2
         service.virtual_autostart = 1
         service.virtual_enable = 1
         service.auto_allow_without_battery_soc = False
-        service.auto_min_soc = 30
-        service.auto_resume_soc = 33
-        service.auto_start_surplus_watts = 2000
-        service.auto_stop_surplus_watts = 1600
+        configure_auto_policy(service)
         service.auto_average_window_seconds = 30
         service.auto_min_runtime_seconds = 0
         service.auto_min_offtime_seconds = 0
-        service.auto_start_max_grid_import_watts = 50
-        service.auto_stop_grid_import_watts = 300
         service.auto_start_delay_seconds = 10
         service.auto_stop_delay_seconds = 30
         service.auto_start_condition_since = None
@@ -123,27 +109,22 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service.auto_scheduled_latest_end_time = "06:30"
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 20, 6, 15)):
-            self.assertTrue(service._auto_decide_relay(False, None, None, None))
+            self.assertTrue(service.auto.decide_relay(False, None, None, None))
         self.assertEqual(service._last_health_reason, "scheduled-night-charge")
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=utc_timestamp(2026, 4, 20, 6, 45)):
-            self.assertFalse(service._auto_decide_relay(False, 0.0, 45.0, 0.0))
+            self.assertFalse(service.auto.decide_relay(False, 0.0, 45.0, 0.0))
         self.assertEqual(service._last_health_reason, "waiting-surplus")
 
     def test_auto_mode_sets_specific_waiting_reason_for_daytime(self):
-        service = ShellyWallboxService.__new__(ShellyWallboxService)
+        service = make_helper_service()
         service.virtual_mode = 1
         service.virtual_autostart = 1
         service.auto_allow_without_battery_soc = False
-        service.auto_min_soc = 30
-        service.auto_resume_soc = 33
-        service.auto_start_surplus_watts = 2000
-        service.auto_stop_surplus_watts = 1600
+        configure_auto_policy(service)
         service.auto_average_window_seconds = 30
         service.auto_min_runtime_seconds = 300
         service.auto_min_offtime_seconds = 120
-        service.auto_start_max_grid_import_watts = 50
-        service.auto_stop_grid_import_watts = 300
         service.auto_start_delay_seconds = 10
         service.auto_stop_delay_seconds = 30
         service.auto_start_condition_since = None
@@ -154,10 +135,10 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service.started_at = 0.0
         service.auto_startup_warmup_seconds = 0.0
         service.manual_override_until = 0.0
-        service._is_within_auto_daytime_window = MagicMock(return_value=False)
+        service.controllers.runtime.auto.samples.is_within_auto_daytime_window = MagicMock(return_value=False)
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=150.0):
-            self.assertFalse(service._auto_decide_relay(False, 2200, 45, -2200))
+            self.assertFalse(service.auto.decide_relay(False, 2200, 45, -2200))
         self.assertEqual(service._last_health_reason, "waiting-daytime")
 
     def test_update_uses_cached_inputs_and_updates_observability_paths(self):
@@ -169,7 +150,7 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
             "current": 0.0,
             "aenergy": {"total": 1000.0},
         })
-        service._auto_decide_relay = MagicMock(return_value=False)
+        service.controllers.runtime.auto.auto_decide_relay = MagicMock(return_value=False)
         service._last_pv_value = 2400.0
         service._last_pv_at = 90.0
         service._last_grid_value = -2100.0
@@ -179,9 +160,9 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._last_dbus_ok_at = 95.0
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
-            self.assertTrue(service._update())
+            self.assertTrue(service.update.update())
 
-        service._auto_decide_relay.assert_called_once_with(False, 2400.0, 56.0, -2100.0)
+        service.controllers.runtime.auto.auto_decide_relay.assert_called_once_with(False, 2400.0, 56.0, -2100.0)
         self.assertEqual(service._error_state["cache_hits"], 1)
         self.assertEqual(service._dbusservice["/Auto/InputCacheHits"], 1)
         self.assertEqual(service._dbusservice["/Auto/LastPvReadAge"], 10)
@@ -211,10 +192,10 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
             grid_captured_at=96.0,
             auto_mode_active=True,
         )
-        service._auto_decide_relay = MagicMock(return_value=False)
+        service.controllers.runtime.auto.auto_decide_relay = MagicMock(return_value=False)
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
-            self.assertTrue(service._update())
+            self.assertTrue(service.update.update())
 
         self.assertEqual(service._dbusservice["/Auto/LastShellyReadAge"], 5)
         self.assertEqual(service._dbusservice["/Auto/LastPvReadAge"], 2)
@@ -229,8 +210,8 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._last_pm_status_at = 95.0
         service._last_pm_status_confirmed = True
 
-        service._publish_local_pm_status(True, 100.0)
-        service._publish_diagnostic_paths(100.0)
+        service.runtime.publish_local_pm_status(True, 100.0)
+        service.state.publish_diagnostic_paths(100.0)
 
         self.assertFalse(service._last_pm_status_confirmed)
         self.assertEqual(service._dbusservice["/Auto/LastShellyReadAge"], 5)
@@ -243,7 +224,7 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._last_pm_status_at = 95.0
         service._last_pm_status_confirmed = True
 
-        service._publish_diagnostic_paths(100.0)
+        service.state.publish_diagnostic_paths(100.0)
 
         self.assertEqual(service._dbusservice["/Auto/LastShellyReadAge"], 5)
 
@@ -252,7 +233,7 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._last_auto_state = "mystery"
         service._last_auto_state_code = 99
 
-        service._publish_diagnostic_paths(100.0)
+        service.state.publish_diagnostic_paths(100.0)
 
         self.assertEqual(service._dbusservice["/Auto/State"], "idle")
         self.assertEqual(service._dbusservice["/Auto/StateCode"], 0)
@@ -265,16 +246,24 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._last_pm_status_at = 106.0
         service._last_pm_status_confirmed = True
 
-        service._publish_diagnostic_paths(100.0)
+        service.state.publish_diagnostic_paths(100.0)
 
         self.assertEqual(service._dbusservice["/Auto/LastShellyReadAge"], -1)
 
     def test_diagnostics_publish_backend_mode_and_charger_target_visibility(self):
         service = self._make_update_service()
-        service.config["Backends"]["Mode"] = "split"
-        service.config["Backends"]["MeterType"] = "template_meter"
-        service.config["Backends"]["SwitchType"] = "template_switch"
-        service.config["Backends"]["ChargerType"] = "template_charger"
+        del service._backend_bundle
+        service._backend_runtime_summary = BackendRuntimeSummary(
+            backend_mode="split",
+            meter_type="template_meter",
+            meter_config_path=None,
+            switch_type="template_switch",
+            switch_config_path=None,
+            charger_type="template_charger",
+            charger_config_path=None,
+            topology_configured=True,
+            primary_rpc_configured=False,
+        )
         service._error_state["charger"] = 2
         service._charger_target_current_amps = 13.0
         service._charger_target_current_applied_at = 96.0
@@ -285,7 +274,7 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._phase_switch_lockout_at = 91.0
         service._phase_switch_lockout_until = 150.0
 
-        service._publish_diagnostic_paths(100.0)
+        service.state.publish_diagnostic_paths(100.0)
 
         self.assertEqual(service._dbusservice["/Auto/BackendMode"], "split")
         self.assertEqual(service._dbusservice["/Auto/MeterBackend"], "template_meter")
@@ -322,7 +311,7 @@ class TestShellyWallboxHelpersSenary(ShellyWallboxHelpersTestBase):
         service._last_health_reason = "contactor-lockout-open"
         service._last_auto_state = "recovery"
         service._last_auto_state_code = 5
-        service._publish_diagnostic_paths(100.0)
+        service.state.publish_diagnostic_paths(100.0)
 
         self.assertEqual(service._dbusservice["/Auto/RecoveryActive"], 1)
         self.assertEqual(service._dbusservice["/Auto/FaultActive"], 1)

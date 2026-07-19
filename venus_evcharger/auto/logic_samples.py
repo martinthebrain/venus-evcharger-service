@@ -17,15 +17,16 @@ import time
 from datetime import datetime
 from typing import Any, Deque
 
-from .logic_learning import _AutoDecisionLearning
-from venus_evcharger.core.common import (
-    auto_state_code as _auto_state_code,
-    derive_auto_state as _derive_auto_state,
-    fresh_confirmed_relay_output as _fresh_confirmed_relay_output,
-    local_datetime_from_timestamp as _local_datetime_from_timestamp,
-    mode_uses_scheduled_logic as _mode_uses_scheduled_logic,
-    scheduled_mode_snapshot as _scheduled_mode_snapshot,
+from .component_context import AutoDecisionContext
+from .logic_learning import AutoLearningPolicy
+from venus_evcharger.core.common import local_datetime_from_timestamp as _local_datetime_from_timestamp
+from venus_evcharger.core.common_auto import (
+    _auto_state_code,
+    _derive_auto_state,
+    _fresh_confirmed_relay_output,
 )
+from venus_evcharger.core.common_schedule import scheduled_mode_snapshot as _scheduled_mode_snapshot
+from venus_evcharger.core.common_values import mode_uses_scheduled_logic as _mode_uses_scheduled_logic
 from venus_evcharger.core.contracts import normalized_auto_decision_trace
 
 AutoSample = tuple[float, float, float]
@@ -40,7 +41,14 @@ MINUTES_PER_DAY = 24 * 60
 
 
 
-class _AutoDecisionSamples(_AutoDecisionLearning):
+class AutoSampleTracker:
+    """Own rolling samples, schedule windows, and Auto health state."""
+
+    def __init__(self, context: AutoDecisionContext, learning: AutoLearningPolicy) -> None:
+        self._context = context
+        self.service = context.service
+        self.learning = learning
+
     @staticmethod
     def get_available_surplus_watts(pv_power: float | int, grid_power: float | int) -> float:
         """Compute PV-backed export as available charging surplus."""
@@ -89,7 +97,7 @@ class _AutoDecisionSamples(_AutoDecisionLearning):
     def _adaptive_stop_alpha(self) -> tuple[float, str, float | None]:
         """Return an adaptive EWMA alpha based on recent surplus volatility."""
         volatility = self._stop_surplus_volatility()
-        return self._auto_policy().ewma.adaptive_alpha(volatility)
+        return self.learning._auto_policy().ewma.adaptive_alpha(volatility)
 
     def mark_relay_changed(self, relay_on: bool, now: float | None = None) -> None:
         """Record the last relay state change for minimum on/off logic."""
@@ -108,11 +116,11 @@ class _AutoDecisionSamples(_AutoDecisionLearning):
         start_minutes, end_minutes = self._daytime_window_minutes_for_month(current_dt.month)
         return self._minutes_within_daytime_window(current_minutes, start_minutes, end_minutes)
 
-    def _scheduled_night_charge_active(self, now: float | None = None) -> bool:
+    def scheduled_night_charge_active(self, now: float | None = None) -> bool:
         """Return whether scheduled/plan mode should force nighttime charging."""
         if not _mode_uses_scheduled_logic(self._service_virtual_mode()):
             return False
-        current_time = self._learning_policy_now() if now is None else float(now)
+        current_time = self.learning.learning_policy_now() if now is None else float(now)
         return _scheduled_mode_snapshot(
             _local_datetime_from_timestamp(current_time, self._schedule_timezone()),
             self._auto_month_windows(),
@@ -136,10 +144,7 @@ class _AutoDecisionSamples(_AutoDecisionLearning):
 
     def _service_virtual_mode(self) -> int:
         """Return the service mode used for scheduled-mode decisions."""
-        if not hasattr(self.service, "virtual_mode"):
-            return 0
-        mode = self.service.virtual_mode
-        return 0 if mode is None else int(mode)
+        return self._context.port.mode()
 
     def _schedule_timezone(self) -> str:
         """Return the configured schedule timezone or its documented default."""
@@ -199,7 +204,7 @@ class _AutoDecisionSamples(_AutoDecisionLearning):
             relay_intent=relay_intent,
             learned_charge_power_state=getattr(svc, "learned_charge_power_state", "unknown"),
             metrics=self._last_auto_metrics_source(),
-            health_code_func=self._health_code,
+            health_code_func=self._context.health_code,
             derive_auto_state_func=_derive_auto_state,
         )
         svc._last_health_reason = trace["health_reason"]
@@ -218,7 +223,7 @@ class _AutoDecisionSamples(_AutoDecisionLearning):
         effective_relay_intent = self._observed_relay_state() if relay_intent is None else bool(relay_intent)
         self._apply_decision_trace_postconditions(base_reason, cached, effective_relay_intent)
         if self._auto_audit_log_enabled():
-            self.write_auto_audit_event(base_reason, cached)
+            self._context.port.write_auto_audit_event(base_reason, cached)
 
     def _last_auto_metrics_source(self) -> dict[str, Any]:
         """Return the current metrics dict passed into decision-trace normalization."""
@@ -235,7 +240,7 @@ class _AutoDecisionSamples(_AutoDecisionLearning):
 
     def _observed_relay_state(self) -> bool:
         """Return the best current relay state hint for broad Auto-state classification."""
-        return bool(_fresh_confirmed_relay_output(self.service, self._learning_policy_now()))
+        return bool(_fresh_confirmed_relay_output(self.service, self.learning.learning_policy_now()))
 
     def _derive_auto_state(self, reason: str) -> str:
         """Return the broad Auto state for one detailed health reason."""

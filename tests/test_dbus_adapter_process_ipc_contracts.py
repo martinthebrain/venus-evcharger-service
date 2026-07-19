@@ -14,8 +14,8 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 
 install_venus_adapter_stubs()
 
-from venus_evcharger.dbus_adapter_process import DbusAdapter
-from venus_evcharger import dbus_adapter_process_socket as socket_module
+from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter
+import venus_evcharger.dbus_adapter.process.socket as socket_module
 from venus_evcharger.dbus_gateway import gateway_paths
 
 

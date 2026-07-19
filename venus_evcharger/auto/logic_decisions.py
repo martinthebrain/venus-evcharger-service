@@ -15,14 +15,32 @@ from __future__ import annotations
 from typing import Any
 
 from venus_evcharger.auto.tracking import clear_auto_decision_tracking
-from venus_evcharger.auto.logic_types import require_relay_bool
+from venus_evcharger.auto.logic_types import NO_RELAY_DECISION, require_relay_bool
 
-from venus_evcharger.auto.logic_decisions_preaverage import _AutoDecisionPreAverage
+from .component_context import AutoDecisionContext
+from .logic_gates_runtime import AutoRuntimeGates
+from .logic_learning import AutoLearningPolicy
+from .logic_samples import AutoSampleTracker
+from .policy import AutoPolicy
 
 
+class AutoRelayDecision:
+    """Resolve start, stop, and scheduled-night relay decisions."""
 
-class _AutoDecisionDecision(_AutoDecisionPreAverage):
-    def _handle_relay_on(
+    def __init__(
+        self,
+        context: AutoDecisionContext,
+        learning: AutoLearningPolicy,
+        samples: AutoSampleTracker,
+        gates: AutoRuntimeGates,
+    ) -> None:
+        self._context = context
+        self.service = context.service
+        self.learning = learning
+        self.samples = samples
+        self.gates = gates
+
+    def handle_relay_on(
         self,
         avg_surplus_power: float,
         avg_grid_power: float,
@@ -34,7 +52,7 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         """Evaluate Auto stop conditions while the relay is already on."""
         svc = self.service
         svc.auto_start_condition_since = None
-        minimum_runtime_elapsed = self._minimum_runtime_elapsed(now)
+        minimum_runtime_elapsed = self.gates._minimum_runtime_elapsed(now)
 
         stop_reason = self._relay_on_stop_reason(
             avg_surplus_power,
@@ -45,16 +63,16 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         )
 
         if stop_reason is None:
-            return require_relay_bool(self._running_result_with_health("running", cached_inputs))
+            return require_relay_bool(self.samples._running_result_with_health("running", cached_inputs))
         stop_delay_seconds = None
         reported_reason = stop_reason
         if stop_reason == "auto-stop-surplus":
-            stop_delay_seconds = float(self._auto_policy().stop_surplus_delay_seconds)
+            stop_delay_seconds = float(self.learning._auto_policy().stop_surplus_delay_seconds)
             reported_reason = "auto-stop"
         elif stop_reason in ("auto-stop-grid", "auto-stop-soc"):
             reported_reason = "auto-stop"
         return require_relay_bool(
-            self._pending_stop_or_running(
+            self.gates._pending_stop_or_running(
                 now,
                 reported_reason,
                 cached_inputs,
@@ -92,8 +110,8 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         battery_soc: float,
     ) -> str | None:
         """Return the relay-on stop reason derived from policy thresholds."""
-        _, stop_surplus_watts, _ = self._surplus_thresholds_for_soc(battery_soc)
-        policy = self._auto_policy()
+        _, stop_surplus_watts, _ = self.learning._surplus_thresholds_for_soc(battery_soc)
+        policy = self.learning._auto_policy()
         if battery_soc < policy.min_soc:
             return "auto-stop-soc"
         if avg_grid_power >= policy.stop_grid_import_watts:
@@ -110,15 +128,15 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         avg_grid_power: float,
         battery_soc: float,
         start_surplus_watts: float,
-        svc: Any,
+        policy: AutoPolicy,
     ) -> bool:
         """Return whether all Auto start gates are satisfied."""
         return (
             minimum_offtime_elapsed
             and daytime_window_open
             and avg_surplus_power >= start_surplus_watts
-            and avg_grid_power <= svc.auto_start_max_grid_import_watts
-            and battery_soc >= svc.auto_resume_soc
+            and avg_grid_power <= policy.start_max_grid_import_watts
+            and battery_soc >= policy.resume_soc
         )
 
     def _arm_or_fire_start(self, now: float, cached_inputs: bool) -> bool:
@@ -128,9 +146,9 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
             svc.auto_start_condition_since = now
             return False
         if (now - svc.auto_start_condition_since) >= svc.auto_start_delay_seconds:
-            svc._ignore_min_offtime_once = False
-            self.save_runtime_state()
-            self.set_health("auto-start", cached_inputs, relay_intent=True)
+            self._context.port.clear_minimum_offtime_bypass()
+            self._context.port.save_runtime_state()
+            self.samples.set_health("auto-start", cached_inputs, relay_intent=True)
             return True
         return False
 
@@ -144,7 +162,7 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         cached_inputs: bool,
     ) -> None:
         """Set the most useful waiting reason while Auto is idle."""
-        self.set_health(
+        self.samples.set_health(
             self._waiting_health_reason(
                 minimum_offtime_elapsed,
                 daytime_window_open,
@@ -178,17 +196,17 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         battery_soc: float,
     ) -> str:
         """Return the waiting reason derived from start thresholds and SOC."""
-        svc = self.service
-        start_surplus_watts, _, _ = self._surplus_thresholds_for_soc(battery_soc)
+        policy = self.learning._auto_policy()
+        start_surplus_watts, _, _ = self.learning._surplus_thresholds_for_soc(battery_soc)
         if avg_surplus_power < start_surplus_watts:
             return "waiting-surplus"
-        if avg_grid_power > svc.auto_start_max_grid_import_watts:
+        if avg_grid_power > policy.start_max_grid_import_watts:
             return "waiting-grid"
-        if battery_soc < svc.auto_resume_soc:
+        if battery_soc < policy.resume_soc:
             return "waiting-soc"
         return "waiting"
 
-    def _handle_relay_off(
+    def handle_relay_off(
         self,
         avg_surplus_power: float,
         avg_grid_power: float,
@@ -199,12 +217,12 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
     ) -> bool:
         """Evaluate Auto start conditions while the relay is off."""
         svc = self.service
-        start_surplus_watts, _, _ = self._surplus_thresholds_for_soc(battery_soc)
+        start_surplus_watts, _, _ = self.learning._surplus_thresholds_for_soc(battery_soc)
         svc.auto_stop_condition_since = None
-        if not svc.virtual_autostart:
-            return require_relay_bool(self._idle_result_with_health("autostart-disabled", cached_inputs))
+        if not self._context.port.autostart_enabled():
+            return require_relay_bool(self.samples._idle_result_with_health("autostart-disabled", cached_inputs))
 
-        minimum_offtime_elapsed = self._minimum_offtime_elapsed(now)
+        minimum_offtime_elapsed = self.gates._minimum_offtime_elapsed(now)
         if self._relay_off_start_conditions_met(
             minimum_offtime_elapsed,
             daytime_window_open,
@@ -212,11 +230,11 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
             avg_grid_power,
             battery_soc,
             start_surplus_watts,
-            svc,
+            self.learning._auto_policy(),
         ):
             return self._arm_or_fire_start(now, cached_inputs)
 
-        self._clear_auto_start_tracking()
+        self.samples._clear_auto_start_tracking()
         self._set_waiting_health(
             minimum_offtime_elapsed,
             daytime_window_open,
@@ -227,7 +245,7 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
         )
         return False
 
-    def _scheduled_night_decision(
+    def scheduled_night_decision(
         self,
         relay_on: bool,
         now: float,
@@ -235,28 +253,28 @@ class _AutoDecisionDecision(_AutoDecisionPreAverage):
     ) -> bool:
         """Return the relay decision for scheduled/plan mode nighttime fallback."""
         svc = self.service
-        decision = self._handle_common_runtime_gates(relay_on, now, cached_inputs)
-        if decision is not self._NO_DECISION:
+        decision = self.gates.handle_common_runtime_gates(relay_on, now, cached_inputs)
+        if decision is not NO_RELAY_DECISION:
             assert isinstance(decision, bool)
             return decision
         if relay_on:
             self._clear_scheduled_night_stop_tracking(svc)
-            return require_relay_bool(self._running_result_with_health("scheduled-night-charge", cached_inputs))
+            return require_relay_bool(self.samples._running_result_with_health("scheduled-night-charge", cached_inputs))
         return self._scheduled_night_start_result(svc, now, cached_inputs)
 
     def _scheduled_night_start_result(self, svc: Any, now: float, cached_inputs: bool) -> bool:
         """Return the off-to-on decision while scheduled night charging is active."""
-        blocked_health = self._scheduled_night_blocked_health(svc, now)
+        blocked_health = self._scheduled_night_blocked_health(now)
         if blocked_health is not None:
-            return require_relay_bool(self._idle_result_with_health(blocked_health, cached_inputs))
+            return require_relay_bool(self.samples._idle_result_with_health(blocked_health, cached_inputs))
         self._clear_scheduled_night_stop_tracking(svc)
-        return require_relay_bool(self._running_result_with_health("scheduled-night-charge", cached_inputs))
+        return require_relay_bool(self.samples._running_result_with_health("scheduled-night-charge", cached_inputs))
 
-    def _scheduled_night_blocked_health(self, svc: Any, now: float) -> str | None:
+    def _scheduled_night_blocked_health(self, now: float) -> str | None:
         """Return the blocking health reason before scheduled night charging may start."""
-        if not svc.virtual_autostart:
+        if not self._context.port.autostart_enabled():
             return "autostart-disabled"
-        if not self._minimum_offtime_elapsed(now):
+        if not self.gates._minimum_offtime_elapsed(now):
             return "waiting-offtime"
         return None
 

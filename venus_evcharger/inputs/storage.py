@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-import logging
 import time
-from typing import Any
 
 from venus_evcharger.energy import (
     EnergyClusterSnapshot,
+    EnergyLearningProfile,
     EnergySourceDefinition,
     EnergySourceSnapshot,
     aggregate_energy_sources,
@@ -21,6 +20,8 @@ from venus_evcharger.energy import (
 )
 from venus_evcharger.inputs.dbus_errors import DBUS_INPUT_READ_ERRORS, DBUS_INPUT_SNAPSHOT_ERRORS
 from venus_evcharger.dbus_gateway import BATTERY_SOC_READ_KEY, GRID_POWER_READ_KEY
+from venus_evcharger.inputs.gateway_read import GatewayReadPort, SourceHealthPort, numeric_gateway_value
+from venus_evcharger.ports.dbus import DbusInputReaderPort
 from .energy_snapshot_contracts import (
     energy_source_definitions,
     learning_profile_payloads,
@@ -28,47 +29,124 @@ from .energy_snapshot_contracts import (
     nested_object_mappings,
     object_mapping,
 )
-from .storage_support import _DbusInputStorageSupport
+from .storage_support import EnergyServicePort
 
 
-class _DbusInputStorage(_DbusInputStorageSupport):
+_EnergySourceValues = tuple[
+    float | None,
+    float | None,
+    float | None,
+    float | None,
+    float | None,
+    str,
+]
+
+_EMPTY_ENERGY_SOURCE_VALUES: _EnergySourceValues = (None, None, None, None, None, "")
+
+
+class StorageInputReader:
+    """Read battery, storage, and grid state through gateway contracts."""
+
+    def __init__(
+        self,
+        port: DbusInputReaderPort,
+        gateway: GatewayReadPort,
+        health: SourceHealthPort,
+        resolver: EnergyServicePort,
+    ) -> None:
+        self._port = port
+        self._gateway = gateway
+        self._health = health
+        self._resolver = resolver
 
     def _read_optional_energy_value(self, service_name: str, path: str) -> float | None:
         if not path:
             return None
-        if self._introspection_says_skip(service_name, path, priority=85):
+        if self._resolver.introspection_says_skip(service_name, path, priority=85):
             return None
-        value = self.service.get_dbus_value(service_name, path)
+        value = self._gateway.get_dbus_value(service_name, path)
         return self._battery_soc_numeric(value)
 
     def _read_optional_energy_text(self, service_name: str, path: str) -> str:
         if not path:
             return ""
-        if self._introspection_says_skip(service_name, path, priority=85):
+        if self._resolver.introspection_says_skip(service_name, path, priority=85):
             return ""
-        value = self.service.get_dbus_value(service_name, path)
+        value = self._gateway.get_dbus_value(service_name, path)
         return "" if value is None else str(value).strip()
 
-    def _dbus_energy_source_snapshot(self, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
-        service_name = self._resolve_energy_source_service(source)
+    def _read_energy_source_values(
+        self,
+        service_name: str,
+        source: EnergySourceDefinition,
+    ) -> _EnergySourceValues:
+        return (
+            self._read_optional_energy_value(service_name, source.soc_path),
+            self._read_optional_energy_value(service_name, source.battery_power_path),
+            self._read_optional_energy_value(service_name, source.ac_power_path),
+            self._read_optional_energy_value(service_name, source.pv_power_path),
+            self._read_optional_energy_value(service_name, source.grid_interaction_path),
+            self._read_optional_energy_text(service_name, source.operating_mode_path),
+        )
+
+    def _try_read_energy_source_values(
+        self,
+        service_name: str,
+        source: EnergySourceDefinition,
+    ) -> _EnergySourceValues | None:
         try:
-            soc_value = self._read_optional_energy_value(service_name, source.soc_path)
-            net_battery_power = self._read_optional_energy_value(service_name, source.battery_power_path)
-            ac_power = self._read_optional_energy_value(service_name, source.ac_power_path)
-            pv_input_power = self._read_optional_energy_value(service_name, source.pv_power_path)
-            grid_interaction = self._read_optional_energy_value(service_name, source.grid_interaction_path)
-            operating_mode = self._read_optional_energy_text(service_name, source.operating_mode_path)
+            return self._read_energy_source_values(service_name, source)
         except DBUS_INPUT_READ_ERRORS:
-            if source.source_id != self._primary_energy_source().source_id:
-                raise
-            self.service.invalidate_auto_battery_service()
-            service_name = self._resolve_energy_source_service(source)
-            soc_value = self._read_optional_energy_value(service_name, source.soc_path)
-            net_battery_power = self._read_optional_energy_value(service_name, source.battery_power_path)
-            ac_power = self._read_optional_energy_value(service_name, source.ac_power_path)
-            pv_input_power = self._read_optional_energy_value(service_name, source.pv_power_path)
-            grid_interaction = self._read_optional_energy_value(service_name, source.grid_interaction_path)
-            operating_mode = self._read_optional_energy_text(service_name, source.operating_mode_path)
+            return None
+
+    def _usable_energy_source_values(
+        self,
+        source: EnergySourceDefinition,
+        values: _EnergySourceValues | None,
+    ) -> _EnergySourceValues | None:
+        if values is None:
+            return None
+        primary_source_id = self._resolver.primary_energy_source().source_id
+        if source.source_id == primary_source_id and values == _EMPTY_ENERGY_SOURCE_VALUES:
+            return None
+        return values
+
+    def _retry_energy_source_values(
+        self,
+        source: EnergySourceDefinition,
+        failed_service_name: str,
+    ) -> tuple[str, _EnergySourceValues | None]:
+        if source.source_id != self._resolver.primary_energy_source().source_id:
+            self._resolver.invalidate_energy_source_service(
+                source.source_id,
+                expected_service=failed_service_name,
+            )
+            return failed_service_name, None
+        self._resolver.invalidate_auto_battery_service()
+        service_name = self._resolver.resolve_energy_source_service(source)
+        values = self._try_read_energy_source_values(service_name, source)
+        return service_name, self._usable_energy_source_values(source, values)
+
+    def _dbus_energy_source_snapshot(self, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
+        service_name = self._resolver.resolve_energy_source_service(source)
+        values = self._usable_energy_source_values(
+            source,
+            self._try_read_energy_source_values(service_name, source),
+        )
+        if values is None:
+            service_name, values = self._retry_energy_source_values(source, service_name)
+        if values is None:
+            return self._offline_energy_source_snapshot(source, now, service_name)
+        return self._online_energy_source_snapshot(source, now, service_name, values)
+
+    @staticmethod
+    def _online_energy_source_snapshot(
+        source: EnergySourceDefinition,
+        now: float,
+        service_name: str,
+        values: _EnergySourceValues,
+    ) -> EnergySourceSnapshot:
+        soc_value, net_battery_power, ac_power, pv_input_power, grid_interaction, operating_mode = values
         if soc_value is not None and not 0.0 <= soc_value <= 100.0:
             soc_value = None
         return EnergySourceSnapshot(
@@ -88,45 +166,73 @@ class _DbusInputStorage(_DbusInputStorageSupport):
         )
 
     def _battery_snapshot_sources(self) -> tuple[EnergySourceDefinition, ...]:
-        configured = energy_source_definitions(getattr(self.service, "auto_energy_sources", None))
+        configured = energy_source_definitions(self._port.service.auto_energy_sources)
         if configured:
             return configured
-        return energy_source_definitions(self._primary_energy_source())
+        return energy_source_definitions(self._resolver.primary_energy_source())
 
     def _battery_snapshot_cluster(
         self,
         now: float,
-    ) -> tuple[EnergyClusterSnapshot, tuple[EnergySourceDefinition, ...], list[EnergySourceSnapshot]]:
+    ) -> tuple[EnergyClusterSnapshot, tuple[EnergySourceDefinition, ...]]:
         sources = self._battery_snapshot_sources()
-        source_snapshots = [read_energy_source_snapshot(self, source, now) for source in sources]
-        return aggregate_energy_sources(source_snapshots), sources, source_snapshots
+        source_snapshots = [self._battery_snapshot_source(source, now) for source in sources]
+        return aggregate_energy_sources(source_snapshots), sources
+
+    def _battery_snapshot_source(
+        self,
+        source: EnergySourceDefinition,
+        now: float,
+    ) -> EnergySourceSnapshot:
+        try:
+            return read_energy_source_snapshot(self, source, now)
+        except DBUS_INPUT_SNAPSHOT_ERRORS:
+            return self._offline_energy_source_snapshot(source, now)
+
+    @staticmethod
+    def _offline_energy_source_snapshot(
+        source: EnergySourceDefinition,
+        now: float,
+        service_name: str | None = None,
+    ) -> EnergySourceSnapshot:
+        return EnergySourceSnapshot(
+            source_id=source.source_id,
+            role=source.role,
+            service_name=service_name or source.service_name or source.service_prefix,
+            usable_capacity_wh=source.usable_capacity_wh,
+            battery_chemistry=source.battery_chemistry,
+            captured_at=now,
+        )
 
     def _battery_snapshot_effective_soc(self, cluster: EnergyClusterSnapshot) -> float | None:
         primary_soc = cluster.sources[0].soc if cluster.sources else None
-        return cluster.effective_soc if bool(getattr(self.service, "auto_use_combined_battery_soc", True)) else primary_soc
+        return (
+            cluster.effective_soc
+            if self._port.service.auto_use_combined_battery_soc
+            else primary_soc
+        )
 
     @staticmethod
-    def _battery_snapshot_validate_soc(effective_soc: float | None, cluster: EnergyClusterSnapshot) -> None:
-        if effective_soc is None and not any(source.soc is not None for source in cluster.sources):
+    def _battery_snapshot_validate_soc(effective_soc: float | None) -> None:
+        if effective_soc is None:
             raise TypeError("Battery SOC is not numeric")
-
-    def _battery_snapshot_cache_owner(self) -> Any:
-        svc = self.service
-        return getattr(svc, "_service", svc)
 
     def _battery_snapshot_learning_bundle(
         self,
-        cache_owner: Any,
         cluster: EnergyClusterSnapshot,
         now: float,
-    ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
-        existing_profiles = learning_profiles(getattr(cache_owner, "_last_energy_learning_profiles", None))
+    ) -> tuple[
+        dict[str, EnergyLearningProfile],
+        dict[str, object],
+        dict[str, object],
+        dict[str, object],
+    ]:
+        existing_profiles = learning_profiles(self._port.energy_learning_profiles())
         updated_profiles = update_energy_learning_profiles(
             existing_profiles,
             cluster.sources,
             now,
         )
-        cache_owner._last_energy_learning_profiles = updated_profiles
         learning_summary = summarize_energy_learning_profiles(
             updated_profiles
         )
@@ -144,7 +250,12 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             },
             learning_summary,
         )
-        return object_mapping(learning_summary), object_mapping(discharge_balance), object_mapping(forecast)
+        return (
+            updated_profiles,
+            object_mapping(learning_summary),
+            object_mapping(discharge_balance),
+            object_mapping(forecast),
+        )
 
     @staticmethod
     def _battery_snapshot_discharge_control(
@@ -172,14 +283,15 @@ class _DbusInputStorage(_DbusInputStorageSupport):
 
     def _battery_snapshot_payload(
         self,
-        cache_owner: Any,
         effective_soc: float | None,
         cluster: EnergyClusterSnapshot,
         forecast: dict[str, object],
         discharge_balance: dict[str, object],
         discharge_control: dict[str, object],
         source_payloads: list[dict[str, object]],
+        updated_profiles: dict[str, EnergyLearningProfile] | None = None,
     ) -> dict[str, object]:
+        profile_state = self._port.energy_learning_profiles() if updated_profiles is None else updated_profiles
         return {
             "battery_soc": effective_soc,
             "battery_combined_soc": cluster.combined_soc,
@@ -219,9 +331,7 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             "battery_hybrid_inverter_source_count": cluster.hybrid_inverter_source_count,
             "battery_inverter_source_count": cluster.inverter_source_count,
             "battery_sources": source_payloads,
-            "battery_learning_profiles": learning_profile_payloads(
-                getattr(cache_owner, "_last_energy_learning_profiles", None)
-            ),
+            "battery_learning_profiles": learning_profile_payloads(profile_state),
         }
 
     @staticmethod
@@ -262,46 +372,38 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             "battery_learning_profiles": {},
         }
 
-    @staticmethod
-    def _failure_soc_value(value: object) -> float | None:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return None
-        return float(value)
-
-    @staticmethod
-    def _optional_text_attr(owner: object, name: str) -> str:
-        try:
-            value = getattr(owner, name)
-        except AttributeError:
-            return ""
-        return str(value) if value else ""
-
     def _successful_battery_snapshot_payload(self, now: float) -> dict[str, object]:
-        cluster, sources, _ = self._battery_snapshot_cluster(now)
+        cluster, sources = self._battery_snapshot_cluster(now)
         effective_soc = self._battery_snapshot_effective_soc(cluster)
-        self._battery_snapshot_validate_soc(effective_soc, cluster)
-        cache_owner = self._battery_snapshot_cache_owner()
-        learning_summary, discharge_balance, forecast = self._battery_snapshot_learning_bundle(cache_owner, cluster, now)
+        self._battery_snapshot_validate_soc(effective_soc)
+        updated_profiles, _, discharge_balance, forecast = self._battery_snapshot_learning_bundle(cluster, now)
         discharge_control = self._battery_snapshot_discharge_control(cluster, sources)
         source_payloads = self._battery_snapshot_source_payloads(cluster, discharge_balance, discharge_control)
-        self._mark_source_recovery("battery", "Battery SOC readings recovered")
         battery_payload = self._battery_snapshot_payload(
-            cache_owner,
             effective_soc,
             cluster,
             forecast,
             discharge_balance,
             discharge_control,
             source_payloads,
+            updated_profiles,
         )
-        setattr(cache_owner, "_last_energy_cluster", dict(battery_payload))
+        self._port.store_energy_learning_profiles(updated_profiles)
+        self._port.store_energy_cluster(battery_payload)
+        self._health.recovered("battery", "Battery SOC readings recovered")
         return battery_payload
 
+    def _reset_battery_snapshot(self) -> dict[str, object]:
+        payload = self._empty_battery_snapshot_payload(None)
+        self._port.store_energy_cluster(payload)
+        return payload
+
     def _failed_battery_snapshot_payload(self, now: float, error: Exception) -> dict[str, object]:
-        svc = self.service
-        battery_service_name = self._optional_text_attr(svc, "auto_battery_service")
-        battery_service_prefix = self._optional_text_attr(svc, "auto_battery_service_prefix")
-        failure = self._handle_source_failure(
+        svc = self._port.service
+        battery_service_name = svc.auto_battery_service
+        battery_service_prefix = svc.auto_battery_service_prefix
+        payload = self._reset_battery_snapshot()
+        self._health.failed(
             "battery",
             now,
             "battery-missing",
@@ -311,13 +413,13 @@ class _DbusInputStorage(_DbusInputStorageSupport):
             svc.auto_battery_soc_path,
             error,
         )
-        return self._empty_battery_snapshot_payload(self._failure_soc_value(failure))
+        return payload
 
     def get_battery_snapshot(self) -> dict[str, object]:
         """Return aggregated battery and inverter source data for Auto mode."""
         now = time.time()
-        if not self._source_retry_ready("battery", now):
-            return {"battery_soc": None}
+        if not self._health.retry_ready("battery", now):
+            return self._reset_battery_snapshot()
         try:
             return self._successful_battery_snapshot_payload(now)
         except DBUS_INPUT_SNAPSHOT_ERRORS as error:
@@ -326,25 +428,25 @@ class _DbusInputStorage(_DbusInputStorageSupport):
     def get_battery_soc(self) -> float | None:
         """Read battery SOC from the gateway read contract."""
         now = time.time()
-        if not self._source_retry_ready("battery", now):
+        if not self._health.retry_ready("battery", now):
             return None
-        battery_soc = self.get_gateway_read_value(BATTERY_SOC_READ_KEY, reason="main semantic battery SOC read")
+        battery_soc = self._gateway.read_semantic_value(BATTERY_SOC_READ_KEY, reason="main semantic battery SOC read")
         numeric_soc = self._gateway_numeric_value(battery_soc)
         if numeric_soc is not None and 0.0 <= numeric_soc <= 100.0:
-            self._mark_source_recovery("battery", "Battery SOC readings recovered")
+            self._health.recovered("battery", "Battery SOC readings recovered")
             return numeric_soc
-        self._handle_source_failure(
+        self._health.failed(
             "battery",
             now,
             "battery-missing",
-            self.service.auto_battery_scan_interval_seconds,
+            self._port.service.auto_battery_scan_interval_seconds,
             "Auto mode could not read battery SOC from the DBus gateway read contract.",
         )
         return None
 
     def _battery_soc_numeric(self, value: object) -> float | None:
         """Return one numeric battery SOC value after DBus coercion."""
-        return self._gateway_numeric_value(self._coerce_dbus_value(value))
+        return self._gateway_numeric_value(numeric_gateway_value(value))
 
     @staticmethod
     def _gateway_numeric_value(value: object) -> float | None:
@@ -355,11 +457,22 @@ class _DbusInputStorage(_DbusInputStorageSupport):
     def get_grid_power(self) -> float | None:
         """Read grid power from the gateway read contract."""
         now = time.time()
-        if not self._source_retry_ready("grid", now):
+        if not self._health.retry_ready("grid", now):
             return None
-        grid_power = self.get_gateway_read_value(GRID_POWER_READ_KEY, reason="main semantic grid power read")
+        grid_power = self._gateway.read_semantic_value(GRID_POWER_READ_KEY, reason="main semantic grid power read")
         numeric_grid_power = self._gateway_numeric_value(grid_power)
         if numeric_grid_power is not None:
-            self._mark_source_recovery("grid", "Grid readings recovered")
+            self._health.recovered("grid", "Grid readings recovered")
             return numeric_grid_power
-        return self._handle_missing_grid_values(False, [], now)
+        self._handle_missing_grid_value(now)
+        return None
+
+    def _handle_missing_grid_value(self, now: float) -> None:
+        self._health.failed(
+            "grid",
+            now,
+            "grid-missing",
+            self._port.service.auto_pv_scan_interval_seconds,
+            "Auto mode could not read grid power from %s.",
+            self._port.service.auto_grid_service,
+        )

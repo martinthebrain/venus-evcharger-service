@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import TracebackType
 from typing import Protocol, TypeGuard, TypedDict
 
@@ -31,6 +32,35 @@ EncodedRpcScalar = str | int | float
 PendingRelayCommand = tuple[bool | None, float | None]
 
 
+def is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    """Return whether one dynamic value is a plain JSON-style object."""
+    return isinstance(value, dict)
+
+
+def is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    """Return whether one dynamic value exposes an object-keyed mapping."""
+    return isinstance(value, Mapping)
+
+
+def is_object_sequence(value: object) -> TypeGuard[tuple[object, ...] | list[object]]:
+    """Return whether one dynamic value is a tuple/list of boundary objects."""
+    return isinstance(value, (tuple, list))
+
+
+def normalized_json_object(value: object, *, error_message: str) -> JsonObject:
+    """Normalize one dynamic JSON object or reject the boundary value."""
+    if not is_object_dict(value):
+        raise ValueError(error_message)
+    return {str(key): item for key, item in value.items()}
+
+
+def optional_json_object(value: object) -> JsonObject | None:
+    """Normalize one optional dynamic JSON object without accepting scalars."""
+    if not is_object_dict(value):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
 class ShellyEnergyData(TypedDict, total=False):
     """Known Shelly energy counters used by the wallbox service."""
 
@@ -51,18 +81,24 @@ class ShellyPmStatus(TypedDict, total=False):
     _phase_currents_a: tuple[float, float, float]
 
 
-class _ResponseLike(Protocol):
-    """Small protocol for requests-like responses used in tests and runtime."""
+class ShellyHttpResponse(Protocol):
+    """Response surface consumed by Shelly HTTP/RPC requests."""
 
     def raise_for_status(self) -> None: ...  # pragma: no cover
 
     def json(self) -> object: ...  # pragma: no cover
 
 
-class _SessionLike(Protocol):
-    """Requests-session subset used by the Shelly I/O controller."""
+class ShellyHttpSession(Protocol):
+    """Structurally requests-compatible HTTP session used by Shelly adapters."""
 
-    def get(self, **kwargs: object) -> _ResponseLike: ...  # pragma: no cover
+    def get(
+        self,
+        *,
+        url: str,
+        timeout: float,
+        auth: HTTPDigestAuth | tuple[str, str] | None = None,
+    ) -> ShellyHttpResponse: ...  # pragma: no cover
 
 
 class _WorkerStopEventLike(Protocol):
@@ -145,7 +181,7 @@ class _ChargerStateBackendLike(Protocol):
 class _TransportSessionResetBackendLike(Protocol):
     """Backend subset that accepts a new shared transport session."""
 
-    def reset_transport_session(self, session: object) -> None: ...  # pragma: no cover
+    def reset_transport_session(self, session: ShellyHttpSession) -> None: ...  # pragma: no cover
 
 
 def is_meter_backend(value: object) -> TypeGuard[_MeterBackendLike]:
@@ -193,30 +229,16 @@ def is_settable_event(value: object) -> TypeGuard[_SettableEventLike]:
     return callable(getattr(value, "set", None))
 
 
-_SHELLY_IO_HOST_REQUIRED_METHODS = (
-    "_time_now",
-    "_request",
-    "rpc_call",
-    "_peek_pending_relay_command",
-    "_clear_pending_relay_command",
-)
+def is_session_like(value: object) -> TypeGuard[ShellyHttpSession]:
+    """Return whether one dynamic object exposes the requests-session subset."""
+    return callable(getattr(value, "get", None))
 
 
-def _missing_shelly_io_host_members(value: object) -> tuple[str, ...]:
-    return tuple(name for name in _SHELLY_IO_HOST_REQUIRED_METHODS if not callable(getattr(value, name, None)))
-
-
-def is_shelly_io_host(value: object) -> TypeGuard["ShellyIoHost"]:
-    """Return whether one object exposes the core Shelly I/O host contract."""
-    return not _missing_shelly_io_host_members(value)
-
-
-def require_shelly_io_host(value: object) -> "ShellyIoHost":
-    """Return a validated Shelly I/O host or fail with actionable context."""
-    if is_shelly_io_host(value):
+def require_session(value: object) -> ShellyHttpSession:
+    """Return one requests-like session or reject the dynamic boundary."""
+    if is_session_like(value):
         return value
-    missing = ", ".join(_missing_shelly_io_host_members(value))
-    raise TypeError(f"ShellyIoController requires a ShellyIoHost-compatible service; missing: {missing}")
+    raise TypeError("Shelly session must expose get()")
 
 
 class _RequestAuthKwargs(TypedDict, total=False):
@@ -230,138 +252,6 @@ class _RequestKwargs(_RequestAuthKwargs):
 
     url: str
     timeout: float
-
-
-class ShellyIoHost(Protocol):
-    """Host attributes and callbacks required by ``ShellyIoController``."""
-
-    session: _SessionLike
-    use_digest_auth: bool
-    username: str
-    password: str
-    host: str
-    shelly_request_timeout_seconds: float
-    pm_component: str
-    pm_id: int
-    _worker_session: _SessionLike | object
-    auto_shelly_soft_fail_seconds: float
-    virtual_mode: int
-    _worker_poll_interval_seconds: float
-    _worker_stop_event: _WorkerStopEventLike
-    _worker_thread: _WorkerThreadLike | None
-    _last_pm_status: ShellyPmStatus | JsonObject | None
-    _last_pm_status_at: float | None
-    _last_pm_status_confirmed: bool
-    _last_voltage: float | None
-    _relay_command_lock: _LockLike
-    _pending_relay_state: bool | None
-    _pending_relay_requested_at: float | None
-    relay_sync_timeout_seconds: float
-    _relay_sync_expected_state: bool | None
-    _relay_sync_requested_at: float | None
-    _relay_sync_deadline_at: float | None
-    _relay_sync_failure_reported: bool
-    supported_phase_selections: tuple[str, ...]
-    requested_phase_selection: str
-    active_phase_selection: str
-    virtual_startstop: int
-    virtual_enable: int
-    virtual_set_current: float
-    _last_charger_state_enabled: bool | None
-    _last_charger_state_current_amps: float | None
-    _last_charger_state_phase_selection: PhaseSelection | None
-    _last_charger_state_actual_current_amps: float | None
-    _last_charger_state_power_w: float | None
-    _last_charger_state_energy_kwh: float | None
-    _last_charger_state_status: str | None
-    _last_charger_state_fault: str | None
-    _last_charger_state_at: float | None
-    _last_charger_estimate_source: str | None
-    _last_charger_estimate_at: float | None
-    _charger_estimated_energy_kwh: float | None
-    _charger_estimated_energy_at: float | None
-    _charger_estimated_power_w: float | None
-    _last_charger_transport_reason: str | None
-    _last_charger_transport_source: str | None
-    _last_charger_transport_detail: str | None
-    _last_charger_transport_at: float | None
-    _charger_retry_reason: str | None
-    _charger_retry_source: str | None
-    _charger_retry_until: float | None
-    _source_retry_after: dict[str, float]
-    _last_switch_feedback_closed: bool | None
-    _last_switch_interlock_ok: bool | None
-    _last_switch_feedback_at: float | None
-    _charger_target_current_amps: float | None
-    _charger_target_current_applied_at: float | None
-    _shelly_state: str
-    _shelly_last_error_reason: str | None
-    _shelly_last_error_detail: str | None
-    _shelly_last_error_at: float | None
-    _shelly_consecutive_errors: int
-    _shelly_retry_after: float
-    _shelly_offline_since: float | None
-    _shelly_last_ok_at: float | None
-    _shelly_session_reset_count: int
-
-    def _time_now(self) -> float: ...  # pragma: no cover
-
-    def _request(self, url: str) -> JsonObject: ...  # pragma: no cover
-
-    def _request_with_session(self, session: object, url: str) -> JsonObject: ...  # pragma: no cover
-
-    def rpc_call(self, method: str, **params: ShellyRpcScalar) -> JsonObject: ...  # pragma: no cover
-
-    def _rpc_call_with_session(
-        self,
-        session: object,
-        method: str,
-        **params: ShellyRpcScalar,
-    ) -> JsonObject: ...  # pragma: no cover
-
-    def _build_local_pm_status(self, relay_on: bool) -> ShellyPmStatus: ...  # pragma: no cover
-
-    def _publish_local_pm_status(self, relay_on: bool, now: float | None = None) -> ShellyPmStatus: ...  # pragma: no cover
-
-    def _peek_pending_relay_command(self) -> PendingRelayCommand: ...  # pragma: no cover
-
-    def _clear_pending_relay_command(self, relay_on: bool) -> None: ...  # pragma: no cover
-
-    def _worker_fetch_pm_status(self) -> JsonObject: ...  # pragma: no cover
-
-    def _worker_apply_pending_relay_command(self) -> None: ...  # pragma: no cover
-
-    def _ensure_worker_state(self) -> None: ...  # pragma: no cover
-
-    def _update_worker_snapshot(self, **fields: object) -> None: ...  # pragma: no cover
-
-    def _mark_failure(self, source_key: str) -> None: ...  # pragma: no cover
-
-    def _warning_throttled(
-        self,
-        key: str,
-        interval_seconds: float,
-        message: str,
-        *args: object,
-        **kwargs: object,
-    ) -> None: ...  # pragma: no cover
-
-    def _mark_recovery(self, source_key: str, message: str, *args: object) -> None: ...  # pragma: no cover
-
-    def _source_retry_ready(self, source_key: str, now: float) -> bool: ...  # pragma: no cover
-
-    def _delay_source_retry(
-        self,
-        source_key: str,
-        now: float,
-        delay_seconds: float | None = None,
-    ) -> None: ...  # pragma: no cover
-
-    def _mark_relay_changed(self, relay_on: bool, changed_at: float) -> None: ...  # pragma: no cover
-
-    def _mode_uses_auto_logic(self, mode: object) -> bool: ...  # pragma: no cover
-
-    def _ensure_auto_input_helper_process(self) -> None: ...  # pragma: no cover
 
 
 def normalize_supported_phase_tuple(
@@ -382,8 +272,9 @@ __all__ = [
     "JsonObject",
     "PendingRelayCommand",
     "ShellyEnergyData",
-    "ShellyIoHost",
     "ShellyPmStatus",
+    "ShellyHttpResponse",
+    "ShellyHttpSession",
     "ShellyRpcScalar",
     "_RequestAuthKwargs",
     "_RequestKwargs",
@@ -393,9 +284,7 @@ __all__ = [
     "_LockLike",
     "_MeterBackendLike",
     "_PhaseSelectionBackendLike",
-    "_ResponseLike",
     "_SettableEventLike",
-    "_SessionLike",
     "_SwitchCapabilitiesBackendLike",
     "_SwitchStateBackendLike",
     "_TransportSessionResetBackendLike",
@@ -405,8 +294,13 @@ __all__ = [
     "_phase_currents_for_selection",
     "_phase_powers_for_selection",
     "_single_phase_vector",
-    "is_shelly_io_host",
+    "is_object_dict",
+    "is_object_mapping",
+    "is_object_sequence",
     "normalize_phase_value",
+    "normalized_json_object",
     "normalize_supported_phase_tuple",
-    "require_shelly_io_host",
+    "optional_json_object",
+    "is_session_like",
+    "require_session",
 ]

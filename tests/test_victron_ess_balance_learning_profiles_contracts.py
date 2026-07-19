@@ -5,35 +5,21 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, call, patch
+from unittest.mock import call, patch
 
 from venus_evcharger.update import victron_ess_balance_learning_profiles as profiles_module
 from venus_evcharger.update.victron_ess_balance_learning_profiles import (
-    _UpdateCycleVictronEssBalanceLearningProfiles,
+    VictronEssLearningProfiles,
 )
-
-
-class _ProfilesHarness(_UpdateCycleVictronEssBalanceLearningProfiles):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        return float(value) if isinstance(value, (int, float)) else None
-
-    @staticmethod
-    def _ewma_learned_value(current: float | None, sample: float, samples: int) -> float:
-        return sample if current is None else ((current * samples) + sample) / (samples + 1)
-
-    @staticmethod
-    def _victron_ess_balance_ev_active(svc: object) -> bool:
-        return bool(getattr(svc, "ev_active", False))
-
-    @staticmethod
-    def _victron_ess_balance_activation_mode(svc: object) -> str:
-        return str(getattr(svc, "activation_mode", "always"))
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.profiles = _ProfilesHarness()
+        components = build_victron_ess_components()
+        self.profiles: VictronEssLearningProfiles = components.profiles
+        self.sources = components.sources
+        self.scorer = components.scorer
 
     def test_field_schemas_are_exact(self) -> None:
         self.assertEqual(
@@ -178,7 +164,8 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
             "battery_headroom_discharge_w": 300.0,
         }
         source = {"soc": 50.0, "discharge_balance_reserve_floor_soc": 45.0}
-        result = self.profiles._victron_ess_balance_learning_profile(svc, cluster, source, -1.0)
+        with patch.object(self.sources, "_victron_ess_balance_ev_active", return_value=True):
+            result = self.profiles._victron_ess_balance_learning_profile(svc, cluster, source, -1.0)
         self.assertEqual(
             result,
             {"key": "more_export:export:day:reserve_band:ev_active:pv_strong:near_discharge_limit",
@@ -224,7 +211,7 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
             patch.object(self.profiles, "_victron_ess_balance_action_direction", autospec=True, return_value="action") as action,
             patch.object(self.profiles, "_victron_ess_balance_site_regime", autospec=True, return_value="site") as site,
             patch.object(self.profiles, "_victron_ess_balance_day_phase", autospec=True, return_value="day") as day,
-            patch.object(self.profiles, "_victron_ess_balance_ev_active", autospec=True, return_value=False) as ev,
+            patch.object(self.sources, "_victron_ess_balance_ev_active", autospec=True, return_value=False) as ev,
             patch.object(profiles_module, "_victron_ess_balance_pv_phase", autospec=True, return_value="pv") as pv,
             patch.object(self.profiles, "_victron_ess_balance_reserve_phase", autospec=True, return_value="reserve") as reserve,
             patch.object(self.profiles, "_victron_ess_balance_battery_limit_phase", autospec=True, return_value="limit") as limit_phase,
@@ -339,10 +326,10 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
         self.profiles._victron_ess_balance_update_profile_gain(svc, "p", 5.0)
         self.profiles._victron_ess_balance_increment_profile_counter(svc, "p", "settled_count")
         state = svc._victron_ess_balance_learning_profiles["p"]
-        self.assertEqual(state["response_delay_seconds"], 3.0)
+        self.assertEqual(state["response_delay_seconds"], 2.5)
         self.assertEqual(state["delay_samples"], 2)
         self.assertEqual(state["response_delay_mad_seconds"], 2.0)
-        self.assertEqual(state["estimated_gain"], 4.0)
+        self.assertEqual(state["estimated_gain"], 3.5)
         self.assertEqual(state["gain_samples"], 2)
         self.assertEqual(state["gain_mad"], 2.0)
         self.assertEqual(state["settled_count"], 1)
@@ -351,16 +338,23 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
             self.profiles._victron_ess_balance_increment_profile_counter(svc, "p", "settled_count")
         self.assertEqual(state["settled_count"], 3)
 
+        with patch.object(self.profiles, "_ensure_victron_ess_balance_learning_profile_state", return_value={}):
+            self.profiles._victron_ess_balance_update_profile_delay(svc, "", 1.0)
+            self.profiles._victron_ess_balance_update_profile_gain(svc, "", 1.0)
+            self.profiles._victron_ess_balance_increment_profile_counter(svc, "", "settled_count")
+        with patch.object(self.profiles, "_victron_ess_balance_learning_profile_state", return_value={}):
+            self.profiles._victron_ess_balance_refresh_profile_stability(svc, "")
+
     def test_refresh_stability_writes_all_derived_metrics(self) -> None:
         svc = SimpleNamespace()
         state = {"settled_count": 4, "overshoot_count": 1, "estimated_gain": 2.0,
                  "response_delay_seconds": 3.0, "response_delay_mad_seconds": 0.5, "gain_mad": 0.25}
         with (
             patch.object(self.profiles, "_victron_ess_balance_learning_profile_state", autospec=True, return_value=state) as profile_state,
-            patch.object(self.profiles, "_victron_ess_balance_stability_score_values", autospec=True, return_value=0.6) as stability,
-            patch.object(self.profiles, "_victron_ess_balance_variance_score", autospec=True, return_value=0.7) as variance,
-            patch.object(self.profiles, "_victron_ess_balance_regime_consistency_score", autospec=True, return_value=0.8) as consistency,
-            patch.object(self.profiles, "_victron_ess_balance_reproducibility_score", autospec=True, return_value=0.9) as reproducibility,
+            patch.object(self.scorer, "stability_score_values", autospec=True, return_value=0.6) as stability,
+            patch.object(self.scorer, "variance_score", autospec=True, return_value=0.7) as variance,
+            patch.object(self.scorer, "regime_consistency_score", autospec=True, return_value=0.8) as consistency,
+            patch.object(self.scorer, "reproducibility_score", autospec=True, return_value=0.9) as reproducibility,
             patch.object(self.profiles, "_victron_ess_balance_profile_limit_recommendations", autospec=True, return_value={"limit": 1.0}) as limits,
         ):
             self.profiles._victron_ess_balance_refresh_profile_stability(svc, "p")
@@ -377,10 +371,10 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
         zero_state = dict(state)
         with (
             patch.object(self.profiles, "_victron_ess_balance_learning_profile_state", return_value=zero_state),
-            patch.object(self.profiles, "_victron_ess_balance_stability_score_values", return_value=0.0),
-            patch.object(self.profiles, "_victron_ess_balance_variance_score", return_value=0.0),
-            patch.object(self.profiles, "_victron_ess_balance_regime_consistency_score", return_value=0.0),
-            patch.object(self.profiles, "_victron_ess_balance_reproducibility_score", return_value=0.0),
+            patch.object(self.scorer, "stability_score_values", return_value=0.0),
+            patch.object(self.scorer, "variance_score", return_value=0.0),
+            patch.object(self.scorer, "regime_consistency_score", return_value=0.0),
+            patch.object(self.scorer, "reproducibility_score", return_value=0.0),
             patch.object(self.profiles, "_victron_ess_balance_profile_limit_recommendations", return_value={}) as limits,
         ):
             self.profiles._victron_ess_balance_refresh_profile_stability(svc, "zero")
@@ -409,7 +403,7 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
         cast.assert_called_once_with(3, "int")
         with patch.object(profiles_module, "_victron_ess_balance_adaptive_scalar_value", return_value="cast") as helper:
             self.assertEqual(self.profiles._victron_ess_balance_adaptive_scalar_value("raw", "str"), "cast")
-        helper.assert_called_once_with("raw", "str", self.profiles._optional_float)
+        helper.assert_called_once_with("raw", "str", self.sources._optional_float)
         with (
             patch.object(profiles_module, "_victron_ess_balance_adaptive_scalar_specs", return_value=(("target", "missing", "str"),)),
             patch.object(self.profiles, "_victron_ess_balance_adaptive_scalar_value", return_value="empty") as cast,
@@ -426,7 +420,7 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
             _victron_ess_balance_learning_profiles={},
             _victron_ess_balance_last_stable_tuning={"kp": 1},
             _victron_ess_balance_conservative_tuning={"kp": 2},
-            activation_mode="export_only",
+            auto_battery_discharge_balance_victron_bias_activation_mode="export_only",
         )
         self.assertEqual(
             self.profiles._victron_ess_balance_current_topology_key(svc, " source "),
@@ -480,7 +474,7 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
             auto_battery_discharge_balance_victron_bias_deadband_watts=4,
             auto_battery_discharge_balance_victron_bias_max_abs_watts=5,
             auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second=6,
-            activation_mode="export_only",
+            auto_battery_discharge_balance_victron_bias_activation_mode="export_only",
         )
         self.assertEqual(
             self.profiles._victron_ess_balance_current_tuning_snapshot(svc),

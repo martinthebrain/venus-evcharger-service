@@ -102,13 +102,6 @@ class TestAppBootstrapSupport(unittest.TestCase):
         self.assertIsInstance(logged_error, RuntimeError)
         self.assertEqual(str(logged_error), "quit failed")
 
-    def test_dbus_mainloop_setup_is_gateway_owned(self) -> None:
-        logging = SimpleNamespace(debug=MagicMock())
-
-        bootstrap_support.setup_dbus_mainloop(logging)
-
-        logging.debug.assert_called_once_with("Skipping DBus mainloop setup in the core service; gateway owns DBus")
-
     def test_request_mainloop_quit_prefers_idle_add_and_falls_back(self) -> None:
         mainloop = SimpleNamespace(quit=MagicMock())
         gobject = SimpleNamespace(idle_add=MagicMock())
@@ -171,3 +164,6 @@ class TestAppBootstrapSupport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+__all__ = [name for name in globals() if not name.startswith("__")]

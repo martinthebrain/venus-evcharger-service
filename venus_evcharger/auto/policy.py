@@ -10,13 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
-from typing import Any
-
 from configparser import SectionProxy
 
 from venus_evcharger.auto.policy_builders import (
     build_auto_policy_from_config,
-    build_auto_policy_from_service,
     load_auto_policy_from_config,
     validate_auto_policy,
 )
@@ -264,11 +261,6 @@ class AutoPolicy:
         """Build an AutoPolicy from config defaults."""
         return build_auto_policy_from_config(cls, defaults)
 
-    @classmethod
-    def from_service(cls, svc: Any) -> AutoPolicy:
-        """Build an AutoPolicy from legacy flat service attributes."""
-        return build_auto_policy_from_service(cls, svc)
-
     @staticmethod
     def _clamp_percentage(value: float, label: str) -> float:
         if 0 <= value <= 100:
@@ -373,43 +365,6 @@ class AutoPolicy:
         self.phase.clamp()
         self._warn_semantic_relationships()
 
-    def apply_to_service(self, svc: Any) -> None:
-        """Mirror the policy onto legacy flat service attributes for compatibility."""
-        svc.auto_policy = self
-        svc.auto_start_surplus_watts = float(self.normal_profile.start_surplus_watts)
-        svc.auto_stop_surplus_watts = float(self.normal_profile.stop_surplus_watts)
-        svc.auto_high_soc_threshold = float(self.high_soc_threshold)
-        svc.auto_high_soc_release_threshold = float(self.high_soc_release_threshold)
-        svc.auto_high_soc_start_surplus_watts = float(self.high_soc_profile.start_surplus_watts)
-        svc.auto_high_soc_stop_surplus_watts = float(self.high_soc_profile.stop_surplus_watts)
-        svc.auto_min_soc = float(self.min_soc)
-        svc.auto_resume_soc = float(self.resume_soc)
-        svc.auto_start_max_grid_import_watts = float(self.start_max_grid_import_watts)
-        svc.auto_stop_grid_import_watts = float(self.stop_grid_import_watts)
-        svc.auto_grid_recovery_start_seconds = float(self.grid_recovery_start_seconds)
-        svc.auto_stop_surplus_delay_seconds = float(self.stop_surplus_delay_seconds)
-        svc.auto_stop_ewma_alpha = float(self.ewma.base_alpha)
-        svc.auto_stop_ewma_alpha_stable = float(self.ewma.stable_alpha)
-        svc.auto_stop_ewma_alpha_volatile = float(self.ewma.volatile_alpha)
-        svc.auto_stop_surplus_volatility_low_watts = float(self.ewma.volatility_low_watts)
-        svc.auto_stop_surplus_volatility_high_watts = float(self.ewma.volatility_high_watts)
-        svc.auto_learn_charge_power_enabled = bool(self.learn_charge_power.enabled)
-        svc.auto_reference_charge_power_watts = float(self.learn_charge_power.reference_power_watts)
-        svc.auto_learn_charge_power_min_watts = float(self.learn_charge_power.min_watts)
-        svc.auto_learn_charge_power_alpha = float(self.learn_charge_power.alpha)
-        svc.auto_learn_charge_power_start_delay_seconds = float(self.learn_charge_power.start_delay_seconds)
-        svc.auto_learn_charge_power_window_seconds = float(self.learn_charge_power.window_seconds)
-        svc.auto_learn_charge_power_max_age_seconds = float(self.learn_charge_power.max_age_seconds)
-        svc.auto_phase_switching_enabled = bool(self.phase.enabled)
-        svc.auto_phase_upshift_delay_seconds = float(self.phase.upshift_delay_seconds)
-        svc.auto_phase_downshift_delay_seconds = float(self.phase.downshift_delay_seconds)
-        svc.auto_phase_upshift_headroom_watts = float(self.phase.upshift_headroom_watts)
-        svc.auto_phase_downshift_margin_watts = float(self.phase.downshift_margin_watts)
-        svc.auto_phase_mismatch_retry_seconds = float(self.phase.mismatch_retry_seconds)
-        svc.auto_phase_mismatch_lockout_count = int(self.phase.mismatch_lockout_count)
-        svc.auto_phase_mismatch_lockout_seconds = float(self.phase.mismatch_lockout_seconds)
-        svc.auto_phase_prefer_lowest_when_idle = bool(self.phase.prefer_lowest_phase_when_idle)
-
     def resolve_threshold_profile(
         self,
         battery_soc: float,
@@ -438,7 +393,6 @@ __all__ = [
     "AutoStopEwmaPolicy",
     "AutoThresholdProfile",
     "build_auto_policy_from_config",
-    "build_auto_policy_from_service",
     "load_auto_policy_from_config",
     "validate_auto_policy",
 ]

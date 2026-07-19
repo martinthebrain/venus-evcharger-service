@@ -8,17 +8,43 @@ from typing import Any
 
 from venus_evcharger.runtime.setup_support import default_auto_metrics
 
-from .victron_ess_balance_apply_support import _UpdateCycleVictronEssBalanceApplySupport
-from .victron_ess_balance_learning_profiles_support import (
-    _clear_victron_ess_balance_tracking_episode_state,
-    _record_victron_ess_balance_tracking_command,
-    _reset_victron_ess_balance_pid_integral_state,
-    _reset_victron_ess_balance_pid_state,
-)
+from .victron_ess_balance_adaptive import VictronEssAdaptiveTuner
+from .victron_ess_balance_apply_pid import VictronEssPidController
+from .victron_ess_balance_apply_sources import VictronEssSourceResolver
+from .victron_ess_balance_apply_write import VictronEssSetpointWriter
+from .victron_ess_balance_learning_profiles import VictronEssLearningProfiles
+from .victron_ess_balance_learning_telemetry import VictronEssTelemetryRecorder
+from .victron_ess_balance_recommendation import VictronEssRecommendationEngine
+from .victron_ess_balance_safety import VictronEssSafetyController
+from .victron_ess_balance_safety_support import VictronEssSafetyRecovery
+
+__all__ = ("logging",)
 
 
-class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySupport):
+class VictronEssBalanceExecutor:
     """Apply one optional Victron-side ESS balance bias through a GX DBus setpoint."""
+
+    def __init__(
+        self,
+        sources: VictronEssSourceResolver,
+        pid: VictronEssPidController,
+        writer: VictronEssSetpointWriter,
+        profiles: VictronEssLearningProfiles,
+        safety: VictronEssSafetyController,
+        recovery: VictronEssSafetyRecovery,
+        telemetry: VictronEssTelemetryRecorder,
+        recommendation: VictronEssRecommendationEngine,
+        adaptive: VictronEssAdaptiveTuner,
+    ) -> None:
+        self._sources = sources
+        self._pid = pid
+        self._writer = writer
+        self._profiles = profiles
+        self._safety = safety
+        self._recovery = recovery
+        self._telemetry = telemetry
+        self._recommendation = recommendation
+        self._adaptive = adaptive
 
     @staticmethod
     def _victron_ess_balance_default_metrics(reason: str = "disabled") -> dict[str, Any]:
@@ -58,8 +84,12 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
 
     def _initialize_victron_ess_balance_apply_metrics(self, svc: Any, metrics: dict[str, Any]) -> None:
         metrics["battery_discharge_balance_victron_bias_enabled"] = int(self._victron_ess_balance_enabled(svc))
-        metrics["battery_discharge_balance_victron_bias_support_mode"] = self._victron_ess_balance_support_mode(svc)
-        metrics["battery_discharge_balance_victron_bias_activation_mode"] = self._victron_ess_balance_activation_mode(svc)
+        metrics["battery_discharge_balance_victron_bias_support_mode"] = self._sources._victron_ess_balance_support_mode(
+            svc
+        )
+        metrics["battery_discharge_balance_victron_bias_activation_mode"] = (
+            self._sources._victron_ess_balance_activation_mode(svc)
+        )
         metrics["battery_discharge_balance_victron_bias_auto_apply_enabled"] = int(
             bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_auto_apply_enabled", None))
         )
@@ -68,31 +98,9 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
     def _victron_ess_balance_enabled(svc: Any) -> bool:
         return bool(getattr(svc, "auto_battery_discharge_balance_victron_bias_enabled", None))
 
-    @staticmethod
-    def _reset_victron_ess_balance_pid(svc: Any) -> None:
-        _reset_victron_ess_balance_pid_state(svc)
-
-    @staticmethod
-    def _reset_victron_ess_balance_pid_integral(svc: Any, aggressive: bool = False) -> None:
-        _reset_victron_ess_balance_pid_integral_state(svc, aggressive)
-
-    def _record_victron_ess_balance_command(
-        self,
-        svc: Any,
-        now: float,
-        setpoint_w: float,
-        source_error_w: float,
-        profile_key: str,
-    ) -> None:
-        _record_victron_ess_balance_tracking_command(svc, now, setpoint_w, source_error_w, profile_key)
-
-    @staticmethod
-    def _clear_victron_ess_balance_tracking_episode(svc: Any) -> None:
-        _clear_victron_ess_balance_tracking_episode_state(svc)
-
     def _disable_victron_ess_balance(self, svc: Any, metrics: dict[str, Any]) -> None:
-        self._merge_victron_ess_balance_metrics(svc, metrics)
-        self._reset_victron_ess_balance_pid(svc)
+        self._sources._merge_victron_ess_balance_metrics(svc, metrics)
+        self._pid.reset(svc)
 
     def _victron_ess_balance_cluster_state(
         self,
@@ -101,7 +109,7 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
     ) -> tuple[dict[str, Any], str]:
         if not auto_mode_active:
             return {}, "auto-mode-inactive"
-        cluster = self._normalized_mapping(getattr(svc, "_last_energy_cluster", None))
+        cluster = self._sources._normalized_mapping(getattr(svc, "_last_energy_cluster", None))
         raw_source_count = cluster.get("battery_discharge_balance_eligible_source_count")
         if not isinstance(raw_source_count, (int, float)) or int(raw_source_count) < 2:
             return cluster, "insufficient-eligible-sources"
@@ -113,7 +121,7 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         svc: Any,
         metrics: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, float | None, str]:
-        source, resolve_reason = self._victron_ess_balance_source(cluster, svc)
+        source, resolve_reason = self._sources._victron_ess_balance_source(cluster, svc)
         if source is None:
             return None, None, resolve_reason
         return self._victron_ess_balance_resolved_source_state(source, svc, metrics)
@@ -124,20 +132,20 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         svc: Any,
         metrics: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, float | None, str]:
-        source_id = self._normalized_text(source.get("source_id"))
+        source_id = self._sources._normalized_text(source.get("source_id"))
         metrics["battery_discharge_balance_victron_bias_source_id"] = source_id
-        metrics["battery_discharge_balance_victron_bias_topology_key"] = self._victron_ess_balance_current_topology_key(
+        metrics["battery_discharge_balance_victron_bias_topology_key"] = self._profiles._victron_ess_balance_current_topology_key(
             svc,
             source_id,
         )
         online = source.get("online")
         if online is not None and not bool(online):
             return None, None, "victron-source-offline"
-        source_error_w = self._optional_float(source.get("discharge_balance_error_w"))
+        source_error_w = self._sources._optional_float(source.get("discharge_balance_error_w"))
         metrics["battery_discharge_balance_victron_bias_source_error_w"] = source_error_w
         if source_error_w is None:
             return None, None, "victron-source-error-missing"
-        if not self._victron_ess_balance_source_support_allowed(source, svc):
+        if not self._sources._victron_ess_balance_source_support_allowed(source, svc):
             return None, None, "victron-source-support-blocked"
         return source, source_error_w, ""
 
@@ -150,18 +158,20 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         source_error_w: float,
         metrics: dict[str, Any],
     ) -> dict[str, str]:
-        learning_profile = self._victron_ess_balance_learning_profile(svc, cluster, source, source_error_w)
-        self._set_victron_ess_balance_active_profile(svc, learning_profile)
-        self._ensure_victron_ess_balance_learning_profile_state(svc, learning_profile["key"])
-        self._merge_victron_ess_balance_learning_profile_metrics(svc, metrics, learning_profile["key"])
-        self._victron_ess_balance_refresh_stable_tuning(svc, metrics, now)
-        direction_change_count = self._victron_ess_balance_note_action_direction(
+        learning_profile = self._profiles._victron_ess_balance_learning_profile(
+            svc, cluster, source, source_error_w
+        )
+        self._profiles._set_victron_ess_balance_active_profile(svc, learning_profile)
+        self._profiles._ensure_victron_ess_balance_learning_profile_state(svc, learning_profile["key"])
+        self._profiles._merge_victron_ess_balance_learning_profile_metrics(svc, metrics, learning_profile["key"])
+        self._recovery._victron_ess_balance_refresh_stable_tuning(svc, metrics, now)
+        direction_change_count = self._safety._victron_ess_balance_note_action_direction(
             svc,
             learning_profile["action_direction"],
             now,
         )
         metrics["battery_discharge_balance_victron_bias_oscillation_direction_change_count"] = int(direction_change_count)
-        self._populate_victron_ess_balance_runtime_safety_metrics(svc, now, metrics)
+        self._safety._populate_victron_ess_balance_runtime_safety_metrics(svc, now, metrics)
         return learning_profile
 
     def _prepare_victron_ess_balance_tracking_source(
@@ -198,7 +208,7 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         safety_reason = self._victron_ess_balance_safety_block_reason(svc, now, metrics)
         if safety_reason:
             return None, safety_reason
-        if not self._victron_ess_balance_activation_allowed(learning_profile, svc):
+        if not self._sources._victron_ess_balance_activation_allowed(learning_profile, svc):
             return None, "activation-mode-blocked"
         return str(learning_profile["key"]), ""
 
@@ -231,11 +241,15 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         return cluster, source_error_w, profile_key, ""
 
     def _victron_ess_balance_safety_block_reason(self, svc: Any, now: float, metrics: dict[str, Any]) -> str:
-        if self._victron_ess_balance_overshoot_cooldown_active(svc, now):
-            self._maybe_restore_victron_ess_balance_stable_tuning(svc, metrics, "overshoot_cooldown")
+        if self._recovery._victron_ess_balance_overshoot_cooldown_active(svc, now):
+            self._recovery._maybe_restore_victron_ess_balance_stable_tuning(
+                svc, metrics, "overshoot_cooldown"
+            )
             return "overshoot-cooldown-active"
-        if self._victron_ess_balance_oscillation_lockout_active(svc, now):
-            self._maybe_restore_victron_ess_balance_stable_tuning(svc, metrics, "oscillation_lockout")
+        if self._safety._victron_ess_balance_oscillation_lockout_active(svc, now):
+            self._recovery._maybe_restore_victron_ess_balance_stable_tuning(
+                svc, metrics, "oscillation_lockout"
+            )
             return "oscillation-lockout-active"
         svc._victron_ess_balance_safe_state_active = False
         svc._victron_ess_balance_safe_state_reason = ""
@@ -253,7 +267,7 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         metrics: dict[str, Any],
     ) -> float:
         metrics["battery_discharge_balance_victron_bias_activation_gate_active"] = 1
-        output_w = self._victron_ess_balance_pid_output(svc, source_error_w, now)
+        output_w = self._pid._victron_ess_balance_pid_output(svc, source_error_w, now)
         setpoint_w = float(self._victron_ess_balance_base_setpoint_w(svc) + output_w)
         metrics["battery_discharge_balance_victron_bias_pid_output_w"] = float(output_w)
         metrics["battery_discharge_balance_victron_bias_setpoint_w"] = float(setpoint_w)
@@ -270,7 +284,7 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         profile_key: str,
         metrics: dict[str, Any],
     ) -> None:
-        self._update_victron_ess_balance_telemetry(
+        self._telemetry._update_victron_ess_balance_telemetry(
             svc,
             now,
             cluster,
@@ -288,7 +302,7 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         profile_key: str,
         metrics: dict[str, Any],
     ) -> None:
-        if self._victron_ess_balance_write_setpoint(
+        if self._writer._victron_ess_balance_write_setpoint(
             svc,
             getattr(svc, "auto_battery_discharge_balance_victron_bias_service", ""),
             getattr(svc, "auto_battery_discharge_balance_victron_bias_path", ""),
@@ -296,7 +310,9 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         ):
             svc._victron_ess_balance_last_write_at = float(now)
             svc._victron_ess_balance_last_setpoint_w = float(setpoint_w)
-            self._record_victron_ess_balance_command(svc, now, setpoint_w, source_error_w, profile_key)
+            self._telemetry._record_victron_ess_balance_command(
+                svc, now, setpoint_w, source_error_w, profile_key
+            )
             metrics["battery_discharge_balance_victron_bias_active"] = 1
             metrics["battery_discharge_balance_victron_bias_reason"] = "applied"
             return
@@ -311,7 +327,7 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         profile_key: str,
         metrics: dict[str, Any],
     ) -> None:
-        if self._victron_ess_balance_should_write(svc, now, setpoint_w):
+        if self._writer._victron_ess_balance_should_write(svc, now, setpoint_w):
             self._victron_ess_balance_apply_write_outcome(
                 svc,
                 now,
@@ -321,13 +337,13 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
                 metrics,
             )
             return
-        if self._victron_ess_balance_last_setpoint(svc) is not None:
+        if self._writer._victron_ess_balance_last_setpoint(svc) is not None:
             metrics["battery_discharge_balance_victron_bias_active"] = 1
             metrics["battery_discharge_balance_victron_bias_reason"] = "holding"
 
     def _finalize_victron_ess_balance_metrics(self, svc: Any, now: float, metrics: dict[str, Any]) -> None:
-        self._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
-        self._merge_victron_ess_balance_metrics(svc, metrics)
+        self._adaptive._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
+        self._sources._merge_victron_ess_balance_metrics(svc, metrics)
 
     def _apply_victron_ess_balance_tracking(
         self,
@@ -365,25 +381,25 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         reason: str,
     ) -> None:
         base_setpoint_w = self._victron_ess_balance_base_setpoint_w(svc)
-        self._reset_victron_ess_balance_pid(svc)
-        self._clear_victron_ess_balance_tracking_episode(svc)
-        self._clear_victron_ess_balance_active_profile(svc)
+        self._pid.reset(svc)
+        self._telemetry._clear_victron_ess_balance_tracking_episode(svc)
+        self._profiles._clear_victron_ess_balance_active_profile(svc)
         metrics["battery_discharge_balance_victron_bias_setpoint_w"] = float(base_setpoint_w)
         metrics["battery_discharge_balance_victron_bias_reason"] = reason
         metrics["battery_discharge_balance_victron_bias_activation_gate_active"] = 0
-        if self._victron_ess_balance_last_setpoint(svc) is None:
-            self._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
-            self._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
-            self._merge_victron_ess_balance_metrics(svc, metrics)
+        if self._writer._victron_ess_balance_last_setpoint(svc) is None:
+            self._recommendation._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
+            self._adaptive._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
+            self._sources._merge_victron_ess_balance_metrics(svc, metrics)
             return
-        if not self._victron_ess_balance_should_write(svc, now, base_setpoint_w):
+        if not self._writer._victron_ess_balance_should_write(svc, now, base_setpoint_w):
             metrics["battery_discharge_balance_victron_bias_active"] = 1
             metrics["battery_discharge_balance_victron_bias_reason"] = f"{reason}-holding"
-            self._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
-            self._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
-            self._merge_victron_ess_balance_metrics(svc, metrics)
+            self._recommendation._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
+            self._adaptive._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
+            self._sources._merge_victron_ess_balance_metrics(svc, metrics)
             return
-        if self._victron_ess_balance_write_setpoint(
+        if self._writer._victron_ess_balance_write_setpoint(
             svc,
             getattr(svc, "auto_battery_discharge_balance_victron_bias_service", ""),
             getattr(svc, "auto_battery_discharge_balance_victron_bias_path", ""),
@@ -395,6 +411,6 @@ class _UpdateCycleVictronEssBalanceApply(_UpdateCycleVictronEssBalanceApplySuppo
         else:
             metrics["battery_discharge_balance_victron_bias_active"] = 1
             metrics["battery_discharge_balance_victron_bias_reason"] = f"{reason}-restore-failed"
-        self._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
-        self._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
-        self._merge_victron_ess_balance_metrics(svc, metrics)
+        self._recommendation._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
+        self._adaptive._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
+        self._sources._merge_victron_ess_balance_metrics(svc, metrics)

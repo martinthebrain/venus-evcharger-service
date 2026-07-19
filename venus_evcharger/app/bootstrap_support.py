@@ -54,11 +54,6 @@ def install_signal_logging(
             logging_module.debug("Unable to install signal handler for %s: %s", signum, error)
 
 
-def setup_dbus_mainloop(logging_module: Any) -> None:
-    """Compatibility hook; DBus setup is isolated in the gateway adapter."""
-    logging_module.debug("Skipping DBus mainloop setup in the core service; gateway owns DBus")
-
-
 def request_mainloop_quit(gobject_module: Any, mainloop: Any, logging_module: Any) -> None:
     """Request a clean GLib shutdown, preferring idle_add when available."""
     idle_add = getattr(gobject_module, "idle_add", None)

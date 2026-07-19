@@ -5,11 +5,27 @@ from __future__ import annotations
 
 from typing import Any
 
-from .victron_ess_balance_apply_sources import _UpdateCycleVictronEssBalanceApplySources
+from .victron_ess_balance_apply_sources import VictronEssSourceResolver
 
 
-class _UpdateCycleVictronEssBalanceApplyPid(_UpdateCycleVictronEssBalanceApplySources):
+class VictronEssPidController:
     """Compute bounded and ramped Victron ESS balance-bias setpoint offsets."""
+
+    def __init__(self, sources: VictronEssSourceResolver) -> None:
+        self._sources = sources
+
+    @staticmethod
+    def reset(svc: Any) -> None:
+        svc._victron_ess_balance_pid_last_error_w = 0.0
+        svc._victron_ess_balance_pid_last_at = None
+        svc._victron_ess_balance_pid_integral_output_w = 0.0
+        svc._victron_ess_balance_pid_last_output_w = 0.0
+
+    @staticmethod
+    def reset_integral(svc: Any, aggressive: bool = False) -> None:
+        svc._victron_ess_balance_pid_integral_output_w = 0.0
+        if aggressive:
+            svc._victron_ess_balance_pid_last_output_w = 0.0
 
     @staticmethod
     def _victron_ess_balance_pid_gain_config(svc: Any) -> dict[str, float]:
@@ -54,7 +70,7 @@ class _UpdateCycleVictronEssBalanceApplyPid(_UpdateCycleVictronEssBalanceApplySo
         return 0.0 if abs(raw_error_w) < deadband_w else raw_error_w
 
     def _victron_ess_balance_pid_timing(self, svc: Any, now: float) -> tuple[float, float]:
-        last_at = self._optional_float(getattr(svc, "_victron_ess_balance_pid_last_at", None))
+        last_at = self._sources._optional_float(getattr(svc, "_victron_ess_balance_pid_last_at", None))
         dt = 0.0 if last_at is None else max(0.0, float(now) - float(last_at))
         last_error_w = float(getattr(svc, "_victron_ess_balance_pid_last_error_w", None) or 0.0)
         return dt, last_error_w

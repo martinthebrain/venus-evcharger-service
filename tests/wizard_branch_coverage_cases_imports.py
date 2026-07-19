@@ -8,7 +8,6 @@ from tests.wizard_branch_coverage_cases_common import (
     _profile_defaults,
     _profile_defaults_from_types,
     _request_timeout_seconds,
-    _result,
     _switch_group_host_value,
     _topology_summary_text,
     policy_defaults,

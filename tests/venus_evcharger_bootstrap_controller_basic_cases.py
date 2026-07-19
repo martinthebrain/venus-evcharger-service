@@ -4,6 +4,7 @@ from tests.venus_evcharger_bootstrap_controller_support import (
     ServiceBootstrapController,
     ServiceBootstrapControllerTestCase,
     SimpleNamespace,
+    _FakeGobjectTimers,
     _install_signal_logging,
     _logging_level_from_config,
     configparser,
@@ -18,11 +19,8 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         normalize_mode = MagicMock(return_value=2)
         mode_uses_auto_logic = MagicMock(return_value=True)
         month_window = MagicMock(return_value=((7, 0), (19, 0)))
-        age_seconds = MagicMock(return_value=9)
-        health_code = MagicMock(return_value=42)
-        phase_values = MagicMock(return_value={"L1": 123})
         read_version = MagicMock(return_value="1.2.3")
-        gobject_module = MagicMock()
+        gobject_module = _FakeGobjectTimers()
         formatters = {"w": MagicMock(return_value="123 W")}
 
         controller = ServiceBootstrapController(
@@ -31,9 +29,6 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
             normalize_mode_func=normalize_mode,
             mode_uses_auto_logic_func=mode_uses_auto_logic,
             month_window_func=month_window,
-            age_seconds_func=age_seconds,
-            health_code_func=health_code,
-            phase_values_func=phase_values,
             read_version_func=read_version,
             gobject_module=gobject_module,
             script_path="/tmp/custom-service.py",
@@ -41,17 +36,17 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         )
 
         self.assertIs(controller.service, service)
-        self.assertIs(controller._normalize_phase, normalize_phase)
-        self.assertIs(controller._normalize_mode, normalize_mode)
-        self.assertIs(controller._mode_uses_auto_logic, mode_uses_auto_logic)
-        self.assertIs(controller._month_window, month_window)
-        self.assertIs(controller._age_seconds, age_seconds)
-        self.assertIs(controller._health_code, health_code)
-        self.assertIs(controller._phase_values, phase_values)
-        self.assertIs(controller._read_version, read_version)
-        self.assertIs(controller._gobject, gobject_module)
-        self.assertEqual(controller._script_path, "/tmp/custom-service.py")
-        self.assertIs(controller._formatters, formatters)
+        self.assertIs(controller.dependencies.normalize_phase, normalize_phase)
+        self.assertIs(controller.dependencies.normalize_mode, normalize_mode)
+        self.assertIs(controller.dependencies.mode_uses_auto_logic, mode_uses_auto_logic)
+        self.assertIs(controller.dependencies.month_window, month_window)
+        self.assertIs(controller.dependencies.read_version, read_version)
+        self.assertIs(controller.dependencies.gobject, gobject_module)
+        self.assertEqual(controller.dependencies.script_path, "/tmp/custom-service.py")
+        self.assertIs(controller.dependencies.formatters, formatters)
+        self.assertIs(controller.components.config.identity, controller.components.identity)
+        self.assertIs(controller.components.config.backend, controller.components.backend)
+        self.assertIs(controller.components.config.auto, controller.components.auto)
 
     def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self):
         service = SimpleNamespace(

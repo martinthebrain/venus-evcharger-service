@@ -1,18 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from tests.test_device_inventory_config_support import *  # noqa: F401,F403
-from tests.test_device_inventory_config_part1 import _DeviceInventoryConfigTestsPart1
-from tests.test_device_inventory_config_part2 import _DeviceInventoryConfigTestsPart2
-from tests.test_device_inventory_config_part3 import _DeviceInventoryConfigTestsPart3
-from tests.test_device_inventory_config_part4 import _DeviceInventoryConfigTestsPart4
-from tests.test_device_inventory_config_part5 import _DeviceInventoryConfigTestsPart5
+"""Aggregate the responsibility-specific inventory test cases for audit targets."""
 
-class DeviceInventoryConfigTests(
-    _DeviceInventoryConfigTestsPart1,
-    _DeviceInventoryConfigTestsPart2,
-    _DeviceInventoryConfigTestsPart3,
-    _DeviceInventoryConfigTestsPart4,
-    _DeviceInventoryConfigTestsPart5,
-    _DeviceInventoryConfigTestsHelperRole,
-    unittest.TestCase,
-):
-    pass
+from tests.device_inventory_config_cases_part1 import DeviceInventoryConfigPart1Tests
+from tests.device_inventory_config_cases_part2 import DeviceInventoryConfigPart2Tests
+from tests.device_inventory_config_cases_part3 import DeviceInventoryConfigPart3Tests
+from tests.device_inventory_config_cases_part4 import DeviceInventoryConfigPart4Tests
+from tests.device_inventory_config_cases_part5 import DeviceInventoryConfigPart5Tests
+
+__all__ = (
+    "DeviceInventoryConfigPart1Tests",
+    "DeviceInventoryConfigPart2Tests",
+    "DeviceInventoryConfigPart3Tests",
+    "DeviceInventoryConfigPart4Tests",
+    "DeviceInventoryConfigPart5Tests",
+)

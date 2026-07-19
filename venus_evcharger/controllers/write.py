@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from venus_evcharger.auto.policy import AutoPolicy, validate_auto_policy
+from venus_evcharger.auto.policy_settings import AUTO_POLICY_SETTING_BY_PATH
 from venus_evcharger.control import ControlApiV1Service, ControlCommand, ControlResult
 from venus_evcharger.control.models import ControlCommandSource
 from venus_evcharger.core.contracts import write_failure_is_reversible
@@ -63,44 +63,20 @@ class DbusWriteController(_DbusWriteSupport):
         "/MaxCurrent": "max_current",
         "/MinCurrent": "min_current",
     }
-    AUTO_RUNTIME_SETTING_SPECS: dict[str, tuple[str, Callable[[Any], Any], str]] = {
-        "/Auto/StartSurplusWatts": ("auto_start_surplus_watts", float, "policy"),
-        "/Auto/StopSurplusWatts": ("auto_stop_surplus_watts", float, "policy"),
-        "/Auto/MinSoc": ("auto_min_soc", float, "policy"),
-        "/Auto/ResumeSoc": ("auto_resume_soc", float, "policy"),
-        "/Auto/StartDelaySeconds": ("auto_start_delay_seconds", float, "runtime"),
-        "/Auto/StopDelaySeconds": ("auto_stop_delay_seconds", float, "runtime"),
-        "/Auto/ScheduledEnabledDays": ("auto_scheduled_enabled_days", str, "runtime"),
-        "/Auto/ScheduledFallbackDelaySeconds": ("auto_scheduled_night_start_delay_seconds", float, "runtime"),
-        "/Auto/ScheduledLatestEndTime": ("auto_scheduled_latest_end_time", str, "runtime"),
-        "/Auto/ScheduledNightCurrent": ("auto_scheduled_night_current_amps", float, "runtime"),
-        "/Auto/DbusBackoffBaseSeconds": ("auto_dbus_backoff_base_seconds", float, "runtime"),
-        "/Auto/DbusBackoffMaxSeconds": ("auto_dbus_backoff_max_seconds", float, "runtime"),
-        "/Auto/GridRecoveryStartSeconds": ("auto_grid_recovery_start_seconds", float, "policy"),
-        "/Auto/StopSurplusDelaySeconds": ("auto_stop_surplus_delay_seconds", float, "policy"),
-        "/Auto/StopSurplusVolatilityLowWatts": ("auto_stop_surplus_volatility_low_watts", float, "policy"),
-        "/Auto/StopSurplusVolatilityHighWatts": ("auto_stop_surplus_volatility_high_watts", float, "policy"),
-        "/Auto/ReferenceChargePowerWatts": ("auto_reference_charge_power_watts", float, "policy"),
-        "/Auto/LearnChargePowerEnabled": ("auto_learn_charge_power_enabled", int, "policy"),
-        "/Auto/LearnChargePowerMinWatts": ("auto_learn_charge_power_min_watts", float, "policy"),
-        "/Auto/LearnChargePowerAlpha": ("auto_learn_charge_power_alpha", float, "policy"),
-        "/Auto/LearnChargePowerStartDelaySeconds": ("auto_learn_charge_power_start_delay_seconds", float, "policy"),
-        "/Auto/LearnChargePowerWindowSeconds": ("auto_learn_charge_power_window_seconds", float, "policy"),
-        "/Auto/LearnChargePowerMaxAgeSeconds": ("auto_learn_charge_power_max_age_seconds", float, "policy"),
-        "/Auto/PhaseSwitching": ("auto_phase_switching_enabled", int, "policy"),
-        "/Auto/PhasePreferLowestWhenIdle": ("auto_phase_prefer_lowest_when_idle", int, "policy"),
-        "/Auto/PhaseUpshiftDelaySeconds": ("auto_phase_upshift_delay_seconds", float, "policy"),
-        "/Auto/PhaseDownshiftDelaySeconds": ("auto_phase_downshift_delay_seconds", float, "policy"),
-        "/Auto/PhaseUpshiftHeadroomWatts": ("auto_phase_upshift_headroom_watts", float, "policy"),
-        "/Auto/PhaseDownshiftMarginWatts": ("auto_phase_downshift_margin_watts", float, "policy"),
-        "/Auto/PhaseMismatchRetrySeconds": ("auto_phase_mismatch_retry_seconds", float, "policy"),
-        "/Auto/PhaseMismatchLockoutCount": ("auto_phase_mismatch_lockout_count", int, "policy"),
-        "/Auto/PhaseMismatchLockoutSeconds": ("auto_phase_mismatch_lockout_seconds", float, "policy"),
+    AUTO_RUNTIME_SETTING_SPECS: dict[str, tuple[str, Callable[[Any], Any]]] = {
+        "/Auto/StartDelaySeconds": ("auto_start_delay_seconds", float),
+        "/Auto/StopDelaySeconds": ("auto_stop_delay_seconds", float),
+        "/Auto/ScheduledEnabledDays": ("auto_scheduled_enabled_days", str),
+        "/Auto/ScheduledFallbackDelaySeconds": ("auto_scheduled_night_start_delay_seconds", float),
+        "/Auto/ScheduledLatestEndTime": ("auto_scheduled_latest_end_time", str),
+        "/Auto/ScheduledNightCurrent": ("auto_scheduled_night_current_amps", float),
+        "/Auto/DbusBackoffBaseSeconds": ("auto_dbus_backoff_base_seconds", float),
+        "/Auto/DbusBackoffMaxSeconds": ("auto_dbus_backoff_max_seconds", float),
     }
-    AUTO_RUNTIME_SETTING_PATHS = set(AUTO_RUNTIME_SETTING_SPECS)
+    AUTO_RUNTIME_SETTING_PATHS = set(AUTO_RUNTIME_SETTING_SPECS) | set(AUTO_POLICY_SETTING_BY_PATH)
     AUTO_RUNTIME_SETTING_FIELDS = {
         path: evcs_path_to_field(path)
-        for path in AUTO_RUNTIME_SETTING_SPECS
+        for path in AUTO_RUNTIME_SETTING_PATHS
     }
 
     def __init__(self, port: Any) -> None:
@@ -229,21 +205,17 @@ class DbusWriteController(_DbusWriteSupport):
             target_value = port.min_current
         port.publish_dbus_field(self.CURRENT_SETTING_FIELDS[path], target_value, current_time, force=True)
 
-    @staticmethod
-    def _sync_auto_policy_runtime(port: Any) -> None:
-        """Rebuild and validate the structured Auto policy after runtime tuning writes."""
-        validate_auto_policy(AutoPolicy.from_service(port._service), port._service)
-        port.validate_runtime_config()
-
     @classmethod
     def _apply_auto_runtime_setting(cls, port: Any, path: str, value: Any) -> Any:
         """Apply one Auto runtime setting using its declarative normalization spec."""
-        attr_name, normalizer, validation = cls.AUTO_RUNTIME_SETTING_SPECS[path]
-        setattr(port, attr_name, normalizer(value))
-        if validation == "policy":
-            cls._sync_auto_policy_runtime(port)
-        else:
+        policy_setting = AUTO_POLICY_SETTING_BY_PATH.get(path)
+        if policy_setting is not None:
+            target_value = policy_setting.update(port.auto_policy, value)
             port.validate_runtime_config()
+            return target_value
+        attr_name, normalizer = cls.AUTO_RUNTIME_SETTING_SPECS[path]
+        setattr(port, attr_name, normalizer(value))
+        port.validate_runtime_config()
         return getattr(port, attr_name)
 
     def _handle_auto_runtime_setting_write(self, path: str, value: Any) -> None:
@@ -327,10 +299,6 @@ class DbusWriteController(_DbusWriteSupport):
         port._software_update_run_requested_at = current_time
         port.publish_dbus_field("auto_software_update_run", 0, current_time, force=True)
         logging.info("DBus write /Auto/SoftwareUpdateRun=1 queued a software update request %s", port.state_summary())
-
-    @staticmethod
-    def _handle_unknown_write(_path: str, _value: Any) -> None:
-        """Keep legacy unknown writes as a no-op compatibility path."""
 
     def _handle_mode_value_write(self, value: Any) -> None:
         """Normalize and dispatch one /Mode write value."""

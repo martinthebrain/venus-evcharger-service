@@ -5,8 +5,8 @@ from tests.auto_controller_primary_cases_common import *
 class _AutoControllerPrimaryBatteryBalanceCases:
     def test_combined_battery_activity_penalizes_surplus_when_batteries_are_active(self):
         controller, service = self._make_controller()
-        service._add_auto_sample = MagicMock()
-        service._average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
+        controller.samples.add_auto_sample = MagicMock()
+        controller.samples.average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
         service._last_energy_cluster = {
             "battery_sources": [
                 {"source_id": "hybrid", "charge_power_w": 0.0, "discharge_power_w": 400.0},
@@ -18,7 +18,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "victron": {"observed_max_charge_power_w": 500.0, "sample_count": 2},
         }
 
-        surplus, grid = controller._update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
+        surplus, grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
 
         self.assertEqual(surplus, 600.0)
         self.assertEqual(grid, 100.0)
@@ -30,8 +30,8 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
     def test_tiny_battery_activity_below_learned_ratio_threshold_is_ignored(self):
         controller, service = self._make_controller()
-        service._add_auto_sample = MagicMock()
-        service._average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
+        controller.samples.add_auto_sample = MagicMock()
+        controller.samples.average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
         service._last_energy_cluster = {
             "battery_sources": [
                 {"source_id": "hybrid", "charge_power_w": 0.0, "discharge_power_w": 30.0},
@@ -41,7 +41,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "hybrid": {"observed_max_discharge_power_w": 1000.0, "sample_count": 5},
         }
 
-        surplus, _grid = controller._update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
+        surplus, _grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
 
         self.assertEqual(surplus, 1200.0)
         self.assertEqual(service._last_auto_metrics["battery_surplus_penalty_w"], 0.0)
@@ -49,9 +49,9 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
     def test_battery_activity_penalty_uses_response_delay_and_bias_metrics(self):
         controller, service = self._make_controller()
-        service._add_auto_sample = MagicMock()
-        service._average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
-        service._time_now = lambda: datetime(2026, 4, 22, 13, 0).timestamp()
+        controller.samples.add_auto_sample = MagicMock()
+        controller.samples.average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
+        service.time_now = lambda: datetime(2026, 4, 22, 13, 0).timestamp()
         service._last_energy_cluster = {
             "battery_sources": [
                 {"source_id": "hybrid", "charge_power_w": 0.0, "discharge_power_w": 400.0},
@@ -74,7 +74,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             },
         }
 
-        surplus, _grid = controller._update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
+        surplus, _grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
 
         self.assertAlmostEqual(surplus, 637.5, places=6)
         self.assertAlmostEqual(service._last_auto_metrics["battery_surplus_penalty_w"], 562.5, places=6)
@@ -88,8 +88,8 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
     def test_battery_activity_uses_near_term_grid_forecast_metrics(self):
         controller, service = self._make_controller()
-        service._add_auto_sample = MagicMock()
-        service._average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
+        controller.samples.add_auto_sample = MagicMock()
+        controller.samples.average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
         service._last_energy_cluster = {
             "battery_sources": [
                 {"source_id": "hybrid", "charge_power_w": 800.0, "discharge_power_w": 0.0},
@@ -111,7 +111,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             },
         }
 
-        surplus, _grid = controller._update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
+        surplus, _grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
 
         self.assertAlmostEqual(surplus, 7.0, places=6)
         self.assertEqual(service._last_auto_metrics["battery_headroom_charge_w"], 1200.0)
@@ -142,7 +142,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             }
         }
 
-        activity = controller._combined_battery_activity_context()
+        activity = controller.battery_balance._combined_battery_activity_context()
 
         self.assertEqual(activity["charge_power_w"], 375.0)
         self.assertEqual(activity["discharge_power_w"], 450.0)
@@ -159,19 +159,19 @@ class _AutoControllerPrimaryBatteryBalanceCases:
         self.assertEqual(activity["mode"], "mixed")
 
         service._last_energy_cluster = {"battery_sources": ["bad-source"]}
-        idle_activity = controller._combined_battery_activity_context()
+        idle_activity = controller.battery_balance._combined_battery_activity_context()
         self.assertEqual(idle_activity["mode"], "idle")
-        self.assertEqual(controller._normalized_mapping_list("bad-source"), [])
+        self.assertEqual(controller.battery_learning._normalized_mapping_list("bad-source"), [])
 
-        self.assertIsNone(controller._learning_observed_value("bad-profile", "observed_max_charge_power_w"))
-        self.assertEqual(controller._active_battery_power(50.0, None), (50.0, None))
-        self.assertEqual(controller._active_battery_power(50.0, 1000.0), (50.0, 0.05))
-        self.assertIsNone(controller._non_negative_optional_float(-1.0))
-        self.assertEqual(controller._max_optional_ratio(0.2, 0.4), 0.4)
-        self.assertEqual(controller._bounded_optional_float(-5.0), -1.0)
-        self.assertEqual(controller._bounded_optional_float(5.0), 1.0)
+        self.assertIsNone(controller.battery_learning._learning_observed_value("bad-profile", "observed_max_charge_power_w"))
+        self.assertEqual(controller.battery_learning._active_battery_power(50.0, None), (50.0, None))
+        self.assertEqual(controller.battery_learning._active_battery_power(50.0, 1000.0), (50.0, 0.05))
+        self.assertIsNone(controller.battery_learning._non_negative_optional_float(-1.0))
+        self.assertEqual(controller.battery_learning._max_optional_ratio(0.2, 0.4), 0.4)
+        self.assertEqual(controller.battery_learning._bounded_optional_float(-5.0), -1.0)
+        self.assertEqual(controller.battery_learning._bounded_optional_float(5.0), 1.0)
         self.assertEqual(
-            controller._battery_penalty_multiplier(
+            controller.battery_learning._battery_penalty_multiplier(
                 direction="discharge",
                 response_delay_seconds=30.0,
                 support_bias=0.5,
@@ -181,7 +181,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             1.40625,
         )
         self.assertEqual(
-            controller._battery_penalty_multiplier(
+            controller.battery_learning._battery_penalty_multiplier(
                 direction="idle",
                 response_delay_seconds=30.0,
                 support_bias=0.5,
@@ -209,34 +209,34 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "discharge-c": {"observed_max_charge_power_w": 1000.0, "observed_max_discharge_power_w": 1000.0},
         }
 
-        cluster, sources, profiles = controller._battery_activity_inputs()
+        cluster, sources, profiles = controller.battery_learning._battery_activity_inputs()
 
         self.assertEqual(cluster, service._last_energy_cluster)
         self.assertEqual(sources, service._last_energy_cluster["battery_sources"][:3])
         self.assertEqual(profiles, service._last_energy_learning_profiles)
         self.assertEqual(
-            controller._source_activity_penalty(sources[0], profiles),
+            controller.battery_learning._source_activity_penalty(sources[0], profiles),
             (800.0, 0.0, 0.8, None),
         )
         self.assertEqual(
-            controller._source_activity_penalty(sources[1], profiles),
+            controller.battery_learning._source_activity_penalty(sources[1], profiles),
             (200.0, 300.0, 0.5, 0.5),
         )
         self.assertEqual(
-            controller._source_activity_penalty(sources[2], profiles),
+            controller.battery_learning._source_activity_penalty(sources[2], profiles),
             (0.0, 700.0, None, 0.7),
         )
         self.assertEqual(
-            controller._source_activity_penalty(
+            controller.battery_learning._source_activity_penalty(
                 {"charge_power_w": 20.0, "discharge_power_w": 30.0},
                 {"": {"observed_max_charge_power_w": 100.0, "observed_max_discharge_power_w": 100.0}},
             ),
             (20.0, 30.0, 0.2, 0.3),
         )
-        self.assertEqual(controller._source_activity_penalties(sources, profiles), (1000.0, 1000.0, 0.8, 0.7))
-        self.assertEqual(controller._source_activity_penalties([sources[2], sources[1]], profiles), (200.0, 1000.0, 0.5, 0.7))
+        self.assertEqual(controller.battery_learning._source_activity_penalties(sources, profiles), (1000.0, 1000.0, 0.8, 0.7))
+        self.assertEqual(controller.battery_learning._source_activity_penalties([sources[2], sources[1]], profiles), (200.0, 1000.0, 0.5, 0.7))
         self.assertEqual(
-            controller._cluster_activity_penalties(
+            controller.battery_learning._cluster_activity_penalties(
                 cluster,
                 {"observed_max_charge_power_w": 1000.0, "observed_max_discharge_power_w": 600.0},
             ),
@@ -245,58 +245,58 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
         service._last_energy_cluster = "bad-cluster"
         service._last_energy_learning_profiles = "bad-profiles"
-        self.assertEqual(controller._battery_activity_inputs(), ({}, [], {}))
+        self.assertEqual(controller.battery_learning._battery_activity_inputs(), ({}, [], {}))
 
-        self.assertEqual(controller._battery_activity_mode(0.0, 0.0), "idle")
-        self.assertEqual(controller._battery_activity_mode(1.0, 0.0), "charging")
-        self.assertEqual(controller._battery_activity_mode(0.0, 1.0), "discharging")
-        self.assertEqual(controller._battery_activity_mode(1.0, 1.0), "mixed")
+        self.assertEqual(controller.battery_learning._battery_activity_mode(0.0, 0.0), "idle")
+        self.assertEqual(controller.battery_learning._battery_activity_mode(1.0, 0.0), "charging")
+        self.assertEqual(controller.battery_learning._battery_activity_mode(0.0, 1.0), "discharging")
+        self.assertEqual(controller.battery_learning._battery_activity_mode(1.0, 1.0), "mixed")
 
-        self.assertEqual(controller._near_term_grid_adjustment({}), 0.0)
+        self.assertEqual(controller.battery_learning._near_term_grid_adjustment({}), 0.0)
         self.assertEqual(
-            controller._near_term_grid_adjustment(
+            controller.battery_learning._near_term_grid_adjustment(
                 {"expected_near_term_export_w": 100.0, "expected_near_term_import_w": 40.0}
             ),
             9.0,
         )
         self.assertEqual(
-            controller._near_term_grid_adjustment(
+            controller.battery_learning._near_term_grid_adjustment(
                 {"expected_near_term_export_w": -100.0, "expected_near_term_import_w": 40.0}
             ),
             -6.0,
         )
 
-        self.assertEqual(controller._active_battery_power(None, 1000.0), (None, None))
-        self.assertEqual(controller._active_battery_power(0.0, 1000.0), (None, None))
-        self.assertEqual(controller._active_battery_power(49.0, 1000.0), (None, 0.049))
-        self.assertEqual(controller._active_battery_power(1.0, 1000.0), (None, 0.001))
-        self.assertEqual(controller._active_battery_power(50.0, 1000.0), (50.0, 0.05))
-        self.assertEqual(controller._active_battery_power(50.0, None), (50.0, None))
-        self.assertEqual(controller._battery_activity_ratio(50.0, 1000.0), 0.05)
-        self.assertEqual(controller._battery_activity_ratio(50.0, 1.0), 50.0)
-        self.assertIsNone(controller._battery_activity_ratio(50.0, None))
-        self.assertIsNone(controller._battery_activity_ratio(50.0, 0.0))
+        self.assertEqual(controller.battery_learning._active_battery_power(None, 1000.0), (None, None))
+        self.assertEqual(controller.battery_learning._active_battery_power(0.0, 1000.0), (None, None))
+        self.assertEqual(controller.battery_learning._active_battery_power(49.0, 1000.0), (None, 0.049))
+        self.assertEqual(controller.battery_learning._active_battery_power(1.0, 1000.0), (None, 0.001))
+        self.assertEqual(controller.battery_learning._active_battery_power(50.0, 1000.0), (50.0, 0.05))
+        self.assertEqual(controller.battery_learning._active_battery_power(50.0, None), (50.0, None))
+        self.assertEqual(controller.battery_learning._battery_activity_ratio(50.0, 1000.0), 0.05)
+        self.assertEqual(controller.battery_learning._battery_activity_ratio(50.0, 1.0), 50.0)
+        self.assertIsNone(controller.battery_learning._battery_activity_ratio(50.0, None))
+        self.assertIsNone(controller.battery_learning._battery_activity_ratio(50.0, 0.0))
 
-        self.assertIsNone(controller._bounded_optional_float("bad"))
-        self.assertEqual(controller._bounded_optional_float(-2.0), -1.0)
-        self.assertEqual(controller._bounded_optional_float(-1.0), -1.0)
-        self.assertEqual(controller._bounded_optional_float(0.5), 0.5)
-        self.assertEqual(controller._bounded_optional_float(2.0), 1.0)
+        self.assertIsNone(controller.battery_learning._bounded_optional_float("bad"))
+        self.assertEqual(controller.battery_learning._bounded_optional_float(-2.0), -1.0)
+        self.assertEqual(controller.battery_learning._bounded_optional_float(-1.0), -1.0)
+        self.assertEqual(controller.battery_learning._bounded_optional_float(0.5), 0.5)
+        self.assertEqual(controller.battery_learning._bounded_optional_float(2.0), 1.0)
 
-        self.assertEqual(controller._response_delay_penalty_factor(None), 1.0)
-        self.assertEqual(controller._response_delay_penalty_factor(-1.0), 1.0)
-        self.assertEqual(controller._response_delay_penalty_factor(0.0), 1.0)
-        self.assertAlmostEqual(controller._response_delay_penalty_factor(1.0), 1.0083333333333333)
-        self.assertEqual(controller._response_delay_penalty_factor(60.0), 1.5)
-        self.assertEqual(controller._response_delay_penalty_factor(120.0), 1.5)
-        self.assertEqual(controller._charge_bias_penalty_factor(None), 1.0)
-        self.assertEqual(controller._charge_bias_penalty_factor(-1.0), 1.0)
-        self.assertEqual(controller._charge_bias_penalty_factor(1.0), 1.25)
-        self.assertEqual(controller._discharge_bias_penalty_factor(None, None), 1.0)
-        self.assertEqual(controller._discharge_bias_penalty_factor(None, 0.5), 1.125)
-        self.assertEqual(controller._discharge_bias_penalty_factor(1.0, 0.0), 1.25)
+        self.assertEqual(controller.battery_learning._response_delay_penalty_factor(None), 1.0)
+        self.assertEqual(controller.battery_learning._response_delay_penalty_factor(-1.0), 1.0)
+        self.assertEqual(controller.battery_learning._response_delay_penalty_factor(0.0), 1.0)
+        self.assertAlmostEqual(controller.battery_learning._response_delay_penalty_factor(1.0), 1.0083333333333333)
+        self.assertEqual(controller.battery_learning._response_delay_penalty_factor(60.0), 1.5)
+        self.assertEqual(controller.battery_learning._response_delay_penalty_factor(120.0), 1.5)
+        self.assertEqual(controller.battery_learning._charge_bias_penalty_factor(None), 1.0)
+        self.assertEqual(controller.battery_learning._charge_bias_penalty_factor(-1.0), 1.0)
+        self.assertEqual(controller.battery_learning._charge_bias_penalty_factor(1.0), 1.25)
+        self.assertEqual(controller.battery_learning._discharge_bias_penalty_factor(None, None), 1.0)
+        self.assertEqual(controller.battery_learning._discharge_bias_penalty_factor(None, 0.5), 1.125)
+        self.assertEqual(controller.battery_learning._discharge_bias_penalty_factor(1.0, 0.0), 1.25)
         self.assertEqual(
-            controller._battery_penalty_multiplier(
+            controller.battery_learning._battery_penalty_multiplier(
                 direction="charge",
                 response_delay_seconds=60.0,
                 support_bias=None,
@@ -308,9 +308,9 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
     def test_battery_learning_behavior_and_period_boundaries_are_contracts(self):
         controller, service = self._make_controller()
-        service._time_now = lambda: datetime(2026, 4, 22, 12, 0).timestamp()
+        service.time_now = lambda: datetime(2026, 4, 22, 12, 0).timestamp()
 
-        behavior = controller._battery_learning_behavior(
+        behavior = controller.battery_learning._battery_learning_behavior(
             {
                 "typical_response_delay_seconds": 2.0,
                 "support_bias": 0.1,
@@ -349,20 +349,20 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             (21, 59, "day"),
             (22, 0, "night"),
         ):
-            service._time_now = lambda hour=hour, minute=minute: datetime(2026, 4, 22, hour, minute).timestamp()
-            self.assertEqual(controller._current_learning_period(), expected)
+            service.time_now = lambda hour=hour, minute=minute: datetime(2026, 4, 22, hour, minute).timestamp()
+            self.assertEqual(controller.battery_learning._current_learning_period(), expected)
 
-        service._time_now = lambda: "bad-time"
-        self.assertIsNone(controller._current_learning_period())
-        del service._time_now
-        self.assertIsNone(controller._current_learning_period())
+        service.time_now = lambda: "bad-time"
+        self.assertIsNone(controller.battery_learning._current_learning_period())
+        del service.time_now
+        self.assertIsNone(controller.battery_learning._current_learning_period())
 
         self.assertEqual(
-            controller._battery_learning_behavior({"support_bias": 0.75})["support_bias"],
+            controller.battery_learning._battery_learning_behavior({"support_bias": 0.75})["support_bias"],
             0.75,
         )
         self.assertEqual(
-            controller._battery_learning_behavior({"support_bias": 2.0})["support_bias"],
+            controller.battery_learning._battery_learning_behavior({"support_bias": 2.0})["support_bias"],
             1.0,
         )
 
@@ -373,9 +373,9 @@ class _AutoControllerPrimaryBatteryBalanceCases:
         service.auto_battery_discharge_balance_bias_start_error_watts = 500.0
         service.auto_battery_discharge_balance_bias_max_penalty_watts = 300.0
         service.auto_battery_discharge_balance_bias_mode = "always"
-        service._warning_throttled = MagicMock()
-        service._add_auto_sample = MagicMock()
-        service._average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
+        service.runtime.warning_throttled = MagicMock()
+        controller.samples.add_auto_sample = MagicMock()
+        controller.samples.average_auto_metric = MagicMock(side_effect=[1200.0, 100.0])
         service._last_energy_cluster = {
             "battery_sources": [
                 {"source_id": "hybrid", "charge_power_w": 0.0, "discharge_power_w": 400.0},
@@ -389,7 +389,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "hybrid": {"observed_max_discharge_power_w": 1000.0, "sample_count": 3},
         }
 
-        surplus, _grid = controller._update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
+        surplus, _grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
 
         self.assertEqual(surplus, 650.0)
         self.assertEqual(service._last_auto_metrics["battery_surplus_penalty_w"], 550.0)
@@ -407,7 +407,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             service._last_auto_metrics["battery_discharge_balance_coordination_advisory_reason"],
             "no_configured_source_offers_a_write_path",
         )
-        self.assertEqual(service._warning_throttled.call_count, 2)
+        self.assertEqual(service.runtime.warning_throttled.call_count, 2)
 
     def test_battery_discharge_balance_policy_can_gate_bias_to_export_only(self):
         controller, service = self._make_controller()
@@ -416,7 +416,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
         service.auto_battery_discharge_balance_bias_start_error_watts = 500.0
         service.auto_battery_discharge_balance_bias_max_penalty_watts = 300.0
         service.auto_battery_discharge_balance_bias_mode = "export_only"
-        service._warning_throttled = MagicMock()
+        service.runtime.warning_throttled = MagicMock()
         service._last_energy_cluster = {
             "battery_sources": [
                 {"source_id": "hybrid", "charge_power_w": 0.0, "discharge_power_w": 400.0},
@@ -431,14 +431,14 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "hybrid": {"observed_max_discharge_power_w": 1000.0, "sample_count": 3},
         }
 
-        activity = controller._combined_battery_activity_context()
+        activity = controller.battery_balance._combined_battery_activity_context()
 
         self.assertEqual(activity["discharge_balance_bias_mode"], "export_only")
         self.assertEqual(activity["discharge_balance_bias_gate_active"], 0)
         self.assertEqual(activity["discharge_balance_bias_penalty_w"], 0.0)
         self.assertEqual(activity["discharge_balance_coordination_feasibility"], "observe_only")
         self.assertEqual(activity["discharge_balance_coordination_advisory_active"], 1)
-        self.assertEqual(service._warning_throttled.call_count, 2)
+        self.assertEqual(service.runtime.warning_throttled.call_count, 2)
 
     def test_battery_discharge_balance_policy_can_gate_bias_to_reserve_band(self):
         controller, service = self._make_controller()
@@ -448,7 +448,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
         service.auto_battery_discharge_balance_bias_max_penalty_watts = 300.0
         service.auto_battery_discharge_balance_bias_mode = "above_reserve_band"
         service.auto_battery_discharge_balance_bias_reserve_margin_soc = 5.0
-        service._warning_throttled = MagicMock()
+        service.runtime.warning_throttled = MagicMock()
         service._last_energy_cluster = {
             "battery_sources": [
                 {"source_id": "hybrid", "charge_power_w": 0.0, "discharge_power_w": 400.0},
@@ -463,7 +463,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "other": {"reserve_band_floor_soc": 40.0},
         }
 
-        activity = controller._combined_battery_activity_context()
+        activity = controller.battery_balance._combined_battery_activity_context()
 
         self.assertEqual(activity["discharge_balance_bias_mode"], "above_reserve_band")
         self.assertEqual(activity["discharge_balance_bias_gate_active"], 0)
@@ -490,7 +490,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "hybrid": {"observed_max_discharge_power_w": 1000.0, "sample_count": 3},
         }
 
-        activity = controller._combined_battery_activity_context()
+        activity = controller.battery_balance._combined_battery_activity_context()
 
         self.assertEqual(activity["discharge_balance_coordination_policy_enabled"], 1)
         self.assertEqual(activity["discharge_balance_coordination_support_mode"], "supported_only")
@@ -521,7 +521,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "hybrid": {"observed_max_discharge_power_w": 1000.0, "sample_count": 3},
         }
 
-        activity = controller._combined_battery_activity_context()
+        activity = controller.battery_balance._combined_battery_activity_context()
 
         self.assertEqual(activity["discharge_balance_coordination_policy_enabled"], 1)
         self.assertEqual(activity["discharge_balance_coordination_feasibility"], "blocked_by_source_availability")
@@ -550,7 +550,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
             "hybrid": {"observed_max_discharge_power_w": 1000.0, "sample_count": 3},
         }
 
-        activity = controller._combined_battery_activity_context()
+        activity = controller.battery_balance._combined_battery_activity_context()
 
         self.assertEqual(activity["discharge_balance_coordination_support_mode"], "supported_only")
         self.assertEqual(activity["discharge_balance_coordination_feasibility"], "experimental")
@@ -558,7 +558,7 @@ class _AutoControllerPrimaryBatteryBalanceCases:
         self.assertEqual(activity["discharge_balance_coordination_penalty_w"], 0.0)
 
         service.auto_battery_discharge_balance_coordination_support_mode = "allow_experimental"
-        activity = controller._combined_battery_activity_context()
+        activity = controller.battery_balance._combined_battery_activity_context()
 
         self.assertEqual(activity["discharge_balance_coordination_support_mode"], "allow_experimental")
         self.assertEqual(activity["discharge_balance_coordination_feasibility"], "experimental")

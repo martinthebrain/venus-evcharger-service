@@ -14,7 +14,7 @@ class _UpdateCycleQuaternaryRuntimeCases:
             _auto_cached_inputs_used=True,
             _auto_decide_relay=MagicMock(return_value=True),
             _bump_update_index=MagicMock(),
-            _time_now=MagicMock(return_value=123.0),
+            time_now=MagicMock(return_value=123.0),
             _last_successful_update_at=None,
             _last_recovery_attempt_at=1.0,
             last_update=0.0,
@@ -31,30 +31,45 @@ class _UpdateCycleQuaternaryRuntimeCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertIsNone(controller._fresh_offline_pm_status(service, 101.0))
-        self.assertEqual(controller._offline_power_state(), (0.0, 0.0, 0))
-        self.assertEqual(controller.resolve_auto_inputs({}, 100.0, False), (None, None, None))
+        self.assertIsNone(controller.components.offline._fresh_offline_pm_status(service, 101.0))
+        self.assertEqual(controller.components.offline._offline_power_state(), (0.0, 0.0, 0))
+        self.assertEqual(controller.components.inputs.resolve_auto_inputs({}, 100.0, False), (None, None, None))
         self.assertFalse(service._auto_cached_inputs_used)
 
-        controller.complete_update_cycle(service, False, 200.0, False, 0.0, 0.0, 0, None, None, None)
+        controller.components.runtime_cycle.complete_update_cycle(
+            False, 200.0, False, 0.0, 0.0, 0, None, None, None
+        )
         service._bump_update_index.assert_not_called()
         self.assertEqual(service._last_successful_update_at, 123.0)
 
-        controller.complete_update_cycle(service, True, 201.0, False, 0.0, 0.0, 0, None, None, None)
+        controller.components.runtime_cycle.complete_update_cycle(
+            True, 201.0, False, 0.0, 0.0, 0, None, None, None
+        )
         service._bump_update_index.assert_called_once_with(201.0)
         self.assertEqual(service._publish_companion_dbus_bridge.call_count, 2)
         service._publish_companion_dbus_bridge.assert_called_with(123.0)
 
-        with patch.object(controller, "orchestrate_pending_phase_switch", return_value=(True, 2300.0, 10.0, True, None)), patch.object(
-            controller,
+        with patch.object(
+            controller.components.relay.foundation.phase_switch,
+            "orchestrate_pending_phase_switch",
+            return_value=(True, 2300.0, 10.0, True, None),
+        ), patch.object(
+            controller.components.runtime_cycle,
             "_blocking_switch_feedback_health",
             return_value="switch-feedback-mismatch",
-        ), patch.object(controller, "_blocking_charger_health", return_value=None), patch.object(
-            controller,
+        ), patch.object(
+            controller.components.runtime_cycle,
+            "_blocking_charger_health",
+            return_value=None,
+        ), patch.object(
+            controller.components.relay.foundation.auto_phase,
             "maybe_apply_auto_phase_selection",
             return_value=True,
-        ), patch.object(controller, "apply_charger_current_target") as apply_target:
-            result = controller._resolved_relay_decision({}, True, 2300.0, 230.0, 10.0, True, 100.0, True, 5000.0, 50.0, -1000.0)
+        ), patch.object(
+            controller.components.relay.foundation.targets,
+            "apply_current_target",
+        ) as apply_target:
+            result = controller.components.runtime_cycle._resolved_relay_decision({}, True, 2300.0, 230.0, 10.0, True, 100.0, True, 5000.0, 50.0, -1000.0)
 
         self.assertEqual(result, (True, 2300.0, 10.0, True, True, "switch-feedback-mismatch"))
         apply_target.assert_called_once_with(service, True, 100.0, True)
@@ -71,7 +86,7 @@ class _UpdateCycleQuaternaryRuntimeCases:
             )
             controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-            started = controller._start_software_update_run(service, 120.0, "manual")
+            started = controller.components.software_update._start_software_update_run(service, 120.0, "manual")
 
             self.assertFalse(started)
             self.assertEqual(service._software_update_state, "available-blocked")
@@ -86,7 +101,7 @@ class _UpdateCycleQuaternaryRuntimeCases:
             service = self._software_update_service(temp_dir, _software_update_run_requested_at=50.0)
             controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-            started = controller._start_software_update_run(service, 120.0, "manual")
+            started = controller.components.software_update._start_software_update_run(service, 120.0, "manual")
 
             self.assertFalse(started)
             self.assertEqual(service._software_update_state, "update-unavailable")
@@ -102,8 +117,8 @@ class _UpdateCycleQuaternaryRuntimeCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(UpdateCycleController, "_start_software_update_run", return_value=True) as start_run:
-            controller._software_update_housekeeping(service, 120.0)
+        with patch.object(SoftwareUpdateController, "_start_software_update_run", return_value=True) as start_run:
+            controller.components.software_update._software_update_housekeeping(service, 120.0)
 
         self.assertIsNone(service._software_update_boot_auto_due_at)
         start_run.assert_called_once_with(service, 120.0, "boot-auto")
@@ -116,8 +131,8 @@ class _UpdateCycleQuaternaryRuntimeCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(UpdateCycleController, "_start_software_update_run", return_value=True) as start_run:
-            controller._software_update_housekeeping(service, 120.0)
+        with patch.object(SoftwareUpdateController, "_start_software_update_run", return_value=True) as start_run:
+            controller.components.software_update._software_update_housekeeping(service, 120.0)
 
         start_run.assert_called_once_with(service, 120.0, "manual")
 
@@ -130,11 +145,11 @@ class _UpdateCycleQuaternaryRuntimeCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(UpdateCycleController, "_run_software_update_check") as check, patch.object(
-            UpdateCycleController,
+        with patch.object(SoftwareUpdateController, "_run_software_update_check") as check, patch.object(
+            SoftwareUpdateController,
             "_start_software_update_run",
         ) as start_run:
-            controller._software_update_housekeeping(service, 120.0)
+            controller.components.software_update._software_update_housekeeping(service, 120.0)
 
         check.assert_called_once_with(service, 120.0)
         start_run.assert_not_called()
@@ -159,11 +174,11 @@ class _UpdateCycleQuaternaryRuntimeCases:
             )
             controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-            with patch.object(UpdateCycleController, "_run_software_update_check") as check, patch.object(
-                UpdateCycleController,
+            with patch.object(SoftwareUpdateController, "_run_software_update_check") as check, patch.object(
+                SoftwareUpdateController,
                 "_start_software_update_run",
             ) as start_run:
-                controller._software_update_housekeeping(service, 120.0)
+                controller.components.software_update._software_update_housekeeping(service, 120.0)
 
             check.assert_not_called()
             start_run.assert_not_called()
@@ -182,8 +197,8 @@ class _UpdateCycleQuaternaryRuntimeCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(UpdateCycleController, "_start_software_update_run", return_value=True) as start_run:
-            controller._software_update_housekeeping(service, 120.0)
+        with patch.object(SoftwareUpdateController, "_start_software_update_run", return_value=True) as start_run:
+            controller.components.software_update._software_update_housekeeping(service, 120.0)
 
         self.assertIsNone(service._software_update_run_requested_at)
         self.assertIsNone(service._software_update_boot_auto_due_at)
@@ -191,13 +206,13 @@ class _UpdateCycleQuaternaryRuntimeCases:
 
     def test_update_flushes_debounced_runtime_overrides_from_main_loop(self):
         service = self._software_update_service("")
-        service._time_now = MagicMock(return_value=42.0)
+        service.time_now = MagicMock(return_value=42.0)
         service._flush_runtime_overrides = MagicMock()
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller, "_run_update_cycle", return_value=True), patch.object(
-            controller,
-            "_software_update_housekeeping",
+        with patch.object(controller.components.runtime_cycle, "run", return_value=True), patch.object(
+            controller.components.software_update,
+            "housekeeping",
         ) as housekeeping_mock:
             result = controller.update()
 
@@ -209,7 +224,7 @@ class _UpdateCycleQuaternaryRuntimeCases:
         service = SimpleNamespace(_last_voltage=228.5)
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertEqual(controller._current_learning_voltage_signature(0.0), 228.5)
+        self.assertEqual(controller.components.learning._current_learning_voltage_signature(0.0), 228.5)
 
         service._last_voltage = None
-        self.assertIsNone(controller._current_learning_voltage_signature(0.0))
+        self.assertIsNone(controller.components.learning._current_learning_voltage_signature(0.0))

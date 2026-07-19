@@ -31,7 +31,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _auto_mode_cutover_pending=False,
             _ignore_min_offtime_once=False,
             _dbusservice={"/Mode": 0, "/StartStop": 1, "/Enable": 0},
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _clear_auto_samples=MagicMock(),
@@ -48,7 +48,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
         result = controller.handle_write("/Mode", 1)
 
         self.assertTrue(result)
@@ -78,7 +78,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _auto_mode_cutover_pending=False,
             _ignore_min_offtime_once=False,
             _dbusservice={"/Mode": 0, "/StartStop": 0, "/Enable": 0},
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _clear_auto_samples=MagicMock(),
@@ -96,7 +96,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Mode", 1))
 
@@ -117,7 +117,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _auto_mode_cutover_pending=False,
             _ignore_min_offtime_once=False,
             _dbusservice={"/Mode": 0, "/StartStop": 0, "/Enable": 0},
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _clear_auto_samples=MagicMock(),
@@ -134,7 +134,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Mode", 1))
 
@@ -155,7 +155,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _auto_mode_cutover_pending=False,
             _ignore_min_offtime_once=False,
             _dbusservice={"/Mode": 0, "/StartStop": 0, "/Enable": 0},
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _clear_auto_samples=MagicMock(),
@@ -174,7 +174,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Mode", 1))
 
@@ -195,7 +195,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             _auto_mode_cutover_pending=True,
             _ignore_min_offtime_once=True,
             _dbusservice={"/Mode": 0, "/StartStop": 1, "/Enable": 0},
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _clear_auto_samples=MagicMock(),
@@ -225,7 +225,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service._clear_auto_samples = partial(self._clear_auto_samples, service)
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Mode", 1))
 
@@ -238,7 +238,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
     def test_handle_software_update_run_write_queues_request_and_resets_dbus_path(self) -> None:
         service = SimpleNamespace(
             _dbusservice={"/Auto/SoftwareUpdateRun": 0},
-            _time_now=MagicMock(return_value=200.0),
+            time_now=MagicMock(return_value=200.0),
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
@@ -247,7 +247,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Auto/SoftwareUpdateRun", 1))
 
@@ -276,7 +276,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             auto_manual_override_seconds=300,
             manual_override_until=0.0,
             _dbusservice={"/StartStop": 0, "/Enable": 0},
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _queue_relay_command=MagicMock(),
             _publish_local_pm_status=MagicMock(),
@@ -286,7 +286,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
         result = controller.handle_write("/Enable", 1)
 
         self.assertTrue(result)
@@ -309,7 +309,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
             manual_override_until=0.0,
             _charger_backend=charger_backend,
             _dbusservice={"/StartStop": 0, "/Enable": 0},
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _queue_relay_command=MagicMock(),
             _publish_local_pm_status=MagicMock(),
@@ -319,7 +319,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/Enable", 1))
 

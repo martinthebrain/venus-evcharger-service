@@ -3,43 +3,70 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from collections.abc import Mapping
+from typing import ClassVar, Protocol
 
-from venus_evcharger.core.contracts import timestamp_not_future
-from venus_evcharger.update.learning_runtime import _UpdateCycleLearningRuntime
+from venus_evcharger.core.contracts import finite_float_or_none, timestamp_not_future
+class InputCacheService(Protocol):
+    auto_input_cache_seconds: float
+    auto_input_validation_poll_seconds: float
+    auto_pv_poll_interval_seconds: float
+    auto_grid_poll_interval_seconds: float
+    auto_battery_poll_interval_seconds: float
+    _auto_cached_inputs_used: bool
+    _error_state: dict[str, int]
+    _last_energy_cluster: dict[str, object]
+    _last_energy_learning_profiles: dict[str, object]
+    _last_pv_value: float | None
+    _last_pv_at: float | None
+    _last_grid_value: float | None
+    _last_grid_at: float | None
+    _last_battery_soc_value: float | None
+    _last_battery_soc_at: float | None
+    _last_combined_battery_charge_power_w: float | None
+    _last_combined_battery_charge_power_at: float | None
+    _last_combined_battery_discharge_power_w: float | None
+    _last_combined_battery_discharge_power_at: float | None
+    _last_combined_battery_net_power_w: float | None
+    _last_combined_battery_net_power_at: float | None
+    _last_combined_battery_ac_power_w: float | None
+    _last_combined_battery_ac_power_at: float | None
 
 
-class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
-    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
-    service: Any
+class InputCacheResolver:
+    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float] = 1.0
+
+    def __init__(self, service: InputCacheService) -> None:
+        self.service = service
 
     @staticmethod
     def extract_pm_measurements(
-        svc: Any,
-        pm_status: dict[str, Any],
+        svc: object,
+        pm_status: dict[str, object],
     ) -> tuple[bool, float, float, float, float]:
         """Extract normalized relay/power/current/energy values from a Shelly status dict."""
         relay_on = bool(pm_status.get("output"))
-        power = svc._safe_float(pm_status.get("apower", 0.0), 0.0)
-        voltage = svc._safe_float(pm_status.get("voltage", 0.0), 0.0)
-        current = svc._safe_float(pm_status.get("current", 0.0), 0.0)
-        energy_values = pm_status.get("aenergy") or {}
-        energy_forward = svc._safe_float(energy_values.get("total", 0.0), 0.0) / 1000.0
+        power = InputCacheResolver._float_or_default(pm_status.get("apower", 0.0))
+        voltage = InputCacheResolver._float_or_default(pm_status.get("voltage", 0.0))
+        current = InputCacheResolver._float_or_default(pm_status.get("current", 0.0))
+        raw_energy = pm_status.get("aenergy")
+        energy_values = raw_energy if isinstance(raw_energy, Mapping) else {}
+        energy_forward = InputCacheResolver._float_or_default(energy_values.get("total", 0.0)) / 1000.0
         return relay_on, power, voltage, current, energy_forward
 
     @classmethod
     def resolve_cached_input_value(
         cls,
-        svc: Any,
-        value: Any,
+        svc: InputCacheService,
+        value: float | None,
         snapshot_at: float | None,
         last_value_attr: str,
         last_at_attr: str,
         now: float,
         max_age_seconds: float | None = None,
-    ) -> tuple[Any, bool]:
+    ) -> tuple[float | None, bool]:
         """Use fresh input values immediately and short-lived cached values as fallback."""
-        cache_owner = getattr(svc, "_service", svc)
+        cache_owner = svc
         cache_max_age = float(svc.auto_input_cache_seconds)
         if max_age_seconds is not None:
             cache_max_age = min(cache_max_age, float(max_age_seconds))
@@ -64,11 +91,11 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
     @classmethod
     def _discard_invalid_snapshot_input(
         cls,
-        value: Any,
+        value: float | None,
         snapshot_at: float | None,
         now: float,
         max_age_seconds: float | None,
-    ) -> tuple[Any, float | None]:
+    ) -> tuple[float | None, float | None]:
         """Drop future or over-age source values before cache fallback is considered."""
         if value is None or snapshot_at is None:
             return value, snapshot_at
@@ -100,12 +127,12 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
     @classmethod
     def _cached_input_from_service(
         cls,
-        cache_owner: Any,
+        cache_owner: InputCacheService,
         last_value_attr: str,
         last_at_attr: str,
         now: float,
         cache_max_age: float,
-    ) -> tuple[Any, bool]:
+    ) -> tuple[float | None, bool]:
         """Return a recent cached helper-fed value when direct input is unavailable."""
         last_value = getattr(cache_owner, last_value_attr, None)
         last_at = getattr(cache_owner, last_at_attr, None)
@@ -115,11 +142,11 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
             and last_at <= (float(now) + cls.FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS)
             and (now - last_at) <= cache_max_age
         ):
-            return last_value, True
+            return finite_float_or_none(last_value), True
         return None, False
 
     @staticmethod
-    def _auto_input_source_max_age_seconds(svc: Any, poll_interval_attr: str) -> float:
+    def _auto_input_source_max_age_seconds(svc: InputCacheService, poll_interval_attr: str) -> float:
         """Return the maximum tolerated age for one helper-fed source value."""
         raw_poll_interval = getattr(svc, poll_interval_attr, None)
         poll_interval_seconds = 0.0 if raw_poll_interval is None else max(0.0, float(raw_poll_interval))
@@ -133,13 +160,12 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
 
     def resolve_auto_inputs(
         self,
-        worker_snapshot: dict[str, Any],
+        worker_snapshot: dict[str, object],
         now: float,
         auto_mode_active: bool,
-    ) -> tuple[Any, Any, Any]:
+    ) -> tuple[float | None, float | None, float | None]:
         """Resolve Auto inputs from helper snapshots with short cache fallback."""
         svc = self.service
-        cache_owner = getattr(svc, "_service", svc)
         if not auto_mode_active:
             svc._auto_cached_inputs_used = False
             return None, None, None
@@ -205,14 +231,14 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
             last_value_attr="_last_combined_battery_ac_power_w",
             last_at_attr="_last_combined_battery_ac_power_at",
         )
-        cache_owner._last_energy_cluster = self._energy_cluster_snapshot(
+        svc._last_energy_cluster = self._energy_cluster_snapshot(
             worker_snapshot,
             combined_charge_power=combined_charge_power,
             combined_discharge_power=combined_discharge_power,
             combined_net_power=combined_net_power,
             combined_ac_power=combined_ac_power,
         )
-        self._store_learning_profiles(cache_owner, worker_snapshot)
+        self._store_learning_profiles(svc, worker_snapshot)
         svc._auto_cached_inputs_used = pv_cached or grid_cached or battery_cached
         if svc._auto_cached_inputs_used:
             svc._error_state["cache_hits"] += 1
@@ -220,8 +246,8 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
 
     def _resolve_auto_input_metric(
         self,
-        svc: Any,
-        worker_snapshot: dict[str, Any],
+        svc: InputCacheService,
+        worker_snapshot: dict[str, object],
         now: float,
         *,
         value_key: str,
@@ -229,11 +255,11 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
         last_value_attr: str,
         last_at_attr: str,
         poll_interval_attr: str,
-    ) -> tuple[Any, bool]:
+    ) -> tuple[float | None, bool]:
         return self.resolve_cached_input_value(
             svc,
-            worker_snapshot.get(value_key),
-            worker_snapshot.get(captured_at_key, worker_snapshot.get("captured_at")),
+            finite_float_or_none(worker_snapshot.get(value_key)),
+            finite_float_or_none(worker_snapshot.get(captured_at_key, worker_snapshot.get("captured_at"))),
             last_value_attr,
             last_at_attr,
             now,
@@ -242,14 +268,14 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
 
     def _resolve_battery_cluster_metric(
         self,
-        svc: Any,
-        worker_snapshot: dict[str, Any],
+        svc: InputCacheService,
+        worker_snapshot: dict[str, object],
         now: float,
         *,
         value_key: str,
         last_value_attr: str,
         last_at_attr: str,
-    ) -> Any:
+    ) -> float | None:
         value, _ = self._resolve_auto_input_metric(
             svc,
             worker_snapshot,
@@ -264,13 +290,15 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
 
     @staticmethod
     def _energy_cluster_snapshot(
-        worker_snapshot: dict[str, Any],
+        worker_snapshot: dict[str, object],
         *,
-        combined_charge_power: Any,
-        combined_discharge_power: Any,
-        combined_net_power: Any,
-        combined_ac_power: Any,
-    ) -> dict[str, Any]:
+        combined_charge_power: float | None,
+        combined_discharge_power: float | None,
+        combined_net_power: float | None,
+        combined_ac_power: float | None,
+    ) -> dict[str, object]:
+        raw_battery_sources = worker_snapshot.get("battery_sources")
+        battery_sources = list(raw_battery_sources) if isinstance(raw_battery_sources, (list, tuple)) else []
         return {
             "battery_combined_soc": worker_snapshot.get("battery_combined_soc"),
             "battery_combined_usable_capacity_wh": worker_snapshot.get("battery_combined_usable_capacity_wh"),
@@ -300,11 +328,19 @@ class _UpdateCycleInputCache(_UpdateCycleLearningRuntime):
             "battery_battery_source_count": worker_snapshot.get("battery_battery_source_count", 0),
             "battery_hybrid_inverter_source_count": worker_snapshot.get("battery_hybrid_inverter_source_count", 0),
             "battery_inverter_source_count": worker_snapshot.get("battery_inverter_source_count", 0),
-            "battery_sources": list(worker_snapshot.get("battery_sources") or []),
+            "battery_sources": battery_sources,
         }
 
     @staticmethod
-    def _store_learning_profiles(cache_owner: Any, worker_snapshot: dict[str, Any]) -> None:
+    def _store_learning_profiles(cache_owner: InputCacheService, worker_snapshot: dict[str, object]) -> None:
         raw_learning_profiles = worker_snapshot.get("battery_learning_profiles", {})
         if isinstance(raw_learning_profiles, dict):
             cache_owner._last_energy_learning_profiles = dict(raw_learning_profiles)
+
+    @staticmethod
+    def _float_or_default(value: object, default: float = 0.0) -> float:
+        normalized = finite_float_or_none(value)
+        return float(default if normalized is None else normalized)
+
+
+__all__ = ["InputCacheResolver", "InputCacheService"]

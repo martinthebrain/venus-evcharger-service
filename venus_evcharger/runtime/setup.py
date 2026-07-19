@@ -1,47 +1,40 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Runtime, worker-state, and watchdog helpers for the Venus EV charger service.
-
-This controller owns the "glue" state that keeps the service robust in the
-field: cached worker snapshots, throttled warnings, watchdog recovery,
-auto-audit logging, and safe persistence of runtime-only state.
-"""
+"""Initialization of mutable, RAM-only service runtime state."""
 
 from __future__ import annotations
 
 import os
 import threading
 import time
-import uuid
-from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import requests
+
 from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths
-from venus_evcharger.runtime.async_mainloop import _RuntimeAsyncMainloop
+from venus_evcharger.runtime.contracts import AsyncRuntimeStatePort, HealthCode, RuntimeStateStorePort
 from venus_evcharger.runtime.setup_support import (
     _first_existing_version_line,
-    clone_worker_battery_sources_payload as _clone_worker_battery_sources_payload,
-    clone_worker_learning_profiles_payload as _clone_worker_learning_profiles_payload,
-    clone_worker_status_payload as _clone_worker_status_payload,
     default_auto_metrics,
-    empty_worker_snapshot as _empty_worker_snapshot,
     initialize_runtime_override_state,
     initialize_victron_balance_runtime_state,
 )
 from venus_evcharger.runtime.software_update_setup import initialize_software_update_runtime_state
 
-WorkerSnapshot = dict[str, Any]
 
+class RuntimeSetup:
+    """Initialize the mutable runtime state for one service."""
 
-
-class _RuntimeSetup(_RuntimeAsyncMainloop):
-    if TYPE_CHECKING:  # pragma: no cover
-        service: Any
-        _health_code: Callable[[str], int]
-
-        def new_error_state(self) -> dict[str, int]: ...
-
-        def new_failure_state(self) -> dict[str, bool]: ...
+    def __init__(
+        self,
+        service: Any,
+        health_code: HealthCode,
+        state_store: RuntimeStateStorePort,
+        async_state: AsyncRuntimeStatePort,
+    ) -> None:
+        self.service = service
+        self._health_code = health_code
+        self.state_store = state_store
+        self.async_state = async_state
 
     @staticmethod
     def _service_repo_root(service: Any) -> str:
@@ -79,7 +72,7 @@ class _RuntimeSetup(_RuntimeAsyncMainloop):
             os.path.join(repo_root, ".bootstrap-state", "installed_version"),
             os.path.join(repo_root, "version.txt"),
         )
-        return _first_existing_version_line(candidates)
+        return str(_first_existing_version_line(candidates))
 
     def initialize_runtime_support(self) -> None:
         """Initialize runtime caches and watchdog state kept in RAM only."""
@@ -107,8 +100,9 @@ class _RuntimeSetup(_RuntimeAsyncMainloop):
         svc._dbus_list_backoff_until = 0.0
         svc._dbus_list_failures = 0
         svc._warning_state = {}
-        svc._error_state = self.new_error_state()
-        svc._failure_active = self.new_failure_state()
+        defaults = self.state_store.observability_defaults()
+        svc._error_state = defaults["_error_state"]()
+        svc._failure_active = defaults["_failure_active"]()
         svc._last_health_reason = "init"
         svc._last_health_code = self._health_code(svc._last_health_reason)
         svc._last_auto_state = "idle"
@@ -160,12 +154,12 @@ class _RuntimeSetup(_RuntimeAsyncMainloop):
             current_version=self._read_local_version(repo_root),
             boot_auto_due_at=self._boot_delayed_update_due_at(started_at, 3600.0),
         )
-        self.initialize_async_runtime_state()
+        self.async_state.initialize()
 
     def reset_system_bus(self) -> None:
         """Invalidate cached DBus connections so each thread reconnects cleanly."""
         svc = self.service
-        svc._ensure_system_bus_state()
+        self.ensure_system_bus_state()
         with svc._system_bus_generation_lock:
             svc._system_bus_generation += 1
         svc._system_bus = None
@@ -187,62 +181,4 @@ class _RuntimeSetup(_RuntimeAsyncMainloop):
         """Reject direct DBus access from the core service."""
         raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
-    def get_system_bus(self) -> Any:
-        """Return the current thread-local DBus connection, reconnecting after resets."""
-        svc = self.service
-        svc._ensure_system_bus_state()
-        state = svc._system_bus_state
-        generation = int(getattr(svc, "_system_bus_generation", 0))
-        bus = getattr(state, "bus", None)
-        bus_generation = int(getattr(state, "generation", -1))
-        if bus is None or bus_generation != generation:
-            bus = self.create_system_bus()
-            state.bus = bus
-            state.generation = generation
-        return bus
-
-    @staticmethod
-    def empty_worker_snapshot() -> WorkerSnapshot:
-        """Return a default RAM snapshot for the background I/O worker."""
-        return _empty_worker_snapshot()
-
-    @staticmethod
-    def clone_worker_snapshot(snapshot: WorkerSnapshot) -> WorkerSnapshot:
-        """Copy the worker snapshot so the main loop sees a stable view."""
-        cloned = dict(snapshot)
-        _clone_worker_status_payload(cloned)
-        _clone_worker_battery_sources_payload(cloned)
-        _clone_worker_learning_profiles_payload(cloned)
-        return cloned
-
-    def init_worker_state(self) -> None:
-        """Initialize the background I/O worker state kept in RAM."""
-        svc = self.service
-        svc._worker_poll_interval_seconds = max(0.2, svc.poll_interval_ms / 1000.0)
-        svc._worker_snapshot_lock = threading.Lock()
-        svc._relay_command_lock = threading.Lock()
-        svc._worker_snapshot = self.empty_worker_snapshot()
-        svc._worker_stop_event = threading.Event()
-        svc._worker_session = requests.Session()
-        svc._worker_thread = None
-        svc._pending_relay_state = None
-        svc._pending_relay_requested_at = None
-        svc.relay_sync_timeout_seconds = max(2.0, svc._worker_poll_interval_seconds * 3.0)
-        svc._relay_sync_expected_state = None
-        svc._relay_sync_requested_at = None
-        svc._relay_sync_deadline_at = None
-        svc._relay_sync_failure_reported = False
-        svc._auto_input_helper_process = None
-        svc._auto_input_helper_generation = 0
-        svc._auto_input_runtime_instance_id = uuid.uuid4().hex
-        svc._auto_input_helper_last_start_at = 0.0
-        svc._auto_input_helper_restart_requested_at = None
-        svc._auto_input_snapshot_last_seen = None
-        svc._auto_input_snapshot_seen_for_current_helper = False
-        svc._auto_input_snapshot_mtime_ns = None
-        svc._auto_input_snapshot_last_captured_at = None
-        svc._auto_input_snapshot_version = None
-        svc._auto_input_snapshot_writer_pid = None
-        svc._auto_input_snapshot_generation = None
-        svc._auto_input_snapshot_runtime_instance_id = None
-__all__ = ["_RuntimeSetup"]
+__all__ = ["RuntimeSetup"]

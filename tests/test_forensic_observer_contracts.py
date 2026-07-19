@@ -175,6 +175,18 @@ class ForensicObserverContractTests(unittest.TestCase):
         self.assertEqual(continued["values"], {"/Mode": 5})
         self.assertEqual(continued["errors"], {"/Missing": "missing-from-gateway-cache"})
 
+    def test_incident_reasons_ignore_malformed_dbus_error_payload(self) -> None:
+        self.assertEqual(
+            observer.incident_reasons(
+                {
+                    "dbus": {"errors": "not-a-mapping"},
+                    "svstat": {"ok": True, "stdout": "service up"},
+                    "trace_markers": [],
+                }
+            ),
+            [],
+        )
+
     def test_shelly_fetch_has_exact_url_limit_decode_and_error_contract(self) -> None:
         self.assertEqual(observer.fetch_shelly_status(""), {"ok": False, "skipped": "no-host"})
         response = MagicMock()

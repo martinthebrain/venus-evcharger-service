@@ -60,11 +60,11 @@ Type=actuator_native
             create_meter_backend("unknown", SimpleNamespace(), "")
 
     def test_build_service_backends_uses_default_combined_selection(self) -> None:
-        service = SimpleNamespace(phase="L1", pm_component="Switch", pm_id=0, max_current=16.0)
+        service = _service_from_backends_config()
         resolved = build_service_backends(service)
         self.assertEqual(resolved.runtime.backend_mode, "combined")
-        self.assertFalse(resolved.runtime.topology_configured)
-        self.assertFalse(resolved.runtime.primary_rpc_configured)
+        self.assertTrue(resolved.runtime.topology_configured)
+        self.assertTrue(resolved.runtime.primary_rpc_configured)
         self.assertEqual(resolved.runtime.meter_type, "shelly_meter")
         self.assertEqual(resolved.runtime.switch_type, "shelly_contactor_switch")
         self.assertIsInstance(resolved.meter, ShellyMeterBackend)
@@ -319,5 +319,3 @@ ConfigPath={meter_path}
             self.assertEqual(resolved.runtime.switch_type, "template_switch")
             self.assertIsInstance(resolved.meter, TemplateMeterBackend)
             self.assertIsInstance(resolved.switch, TemplateSwitchBackend)
-
-

@@ -8,18 +8,18 @@ from http.server import BaseHTTPRequestHandler
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from tests.control_api_http_cases_common import ControlApiHttpServiceHarness, control_api_http_service
 from venus_evcharger.control.http_api import LocalControlApiHttpServer
-from venus_evcharger.control.idempotency import ControlApiIdempotencyStore
+from venus_evcharger.control.http_api_command_payloads import tracked_command
 from venus_evcharger.control.models import ControlCommand, ControlResult
-from venus_evcharger.control.rate_limit import ControlApiRateLimiter
 
 
 class ControlHttpLifecycleContractTests(unittest.TestCase):
-    def _service(self) -> SimpleNamespace:
-        return SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
-            _control_api_capabilities_payload=MagicMock(return_value={}),
+    def _service(self) -> ControlApiHttpServiceHarness:
+        return control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
+            capabilities_payload=MagicMock(return_value={}),
         )
 
     def test_constructor_normalizes_every_option_and_initializes_runtime_state(self) -> None:
@@ -39,44 +39,42 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
         self.assertIs(server._service, service)
         self.assertEqual(server._host, "127.0.0.7")
         self.assertEqual(server._port, 8123)
-        self.assertEqual(server._auth_token, "auth")
-        self.assertEqual(server._read_token, "read")
-        self.assertEqual(server._control_token, "control")
-        self.assertEqual(server._admin_token, "admin")
-        self.assertEqual(server._update_token, "update")
+        self.assertEqual(
+            server.authenticator.scope_tokens(),
+            (("update_admin", "update"), ("control_admin", "admin"), ("control_basic", "control"), ("read", "read")),
+        )
         self.assertFalse(server._localhost_only)
         self.assertEqual(server._unix_socket_path, "/tmp/control.sock")
         self.assertIsNone(server._server)
         self.assertIsNone(server._thread)
-        self.assertIsInstance(server._fallback_idempotency_store, ControlApiIdempotencyStore)
-        self.assertIsInstance(server._fallback_rate_limiter, ControlApiRateLimiter)
+        self.assertIsNotNone(server.idempotency)
+        self.assertIsNotNone(server.rate_limit)
         self.assertEqual((server.bound_host, server.bound_port, server.bound_unix_socket_path), ("", 0, ""))
 
         defaults = LocalControlApiHttpServer(service, host="host", port=1)
         self.assertEqual(
             (
-                defaults._auth_token,
-                defaults._read_token,
-                defaults._control_token,
-                defaults._admin_token,
-                defaults._update_token,
+                defaults.authenticator.effective_read_token,
+                defaults.authenticator.effective_control_token,
+                defaults.authenticator.effective_admin_token,
+                defaults.authenticator.effective_update_token,
                 defaults._localhost_only,
                 defaults._unix_socket_path,
             ),
-            ("", "", "", "", "", True, ""),
+            ("", "", "", "", True, ""),
         )
 
     def test_bound_host_port_accepts_only_network_address_tuples(self) -> None:
         self.assertEqual(
-            LocalControlApiHttpServer._bound_host_port(SimpleNamespace(server_address=("host", "17"))),
+            LocalControlApiHttpServer.bound_host_port(SimpleNamespace(server_address=("host", "17"))),
             ("host", 17),
         )
         self.assertEqual(
-            LocalControlApiHttpServer._bound_host_port(SimpleNamespace(server_address=("only-one",))),
+            LocalControlApiHttpServer.bound_host_port(SimpleNamespace(server_address=("only-one",))),
             ("", 0),
         )
         self.assertEqual(
-            LocalControlApiHttpServer._bound_host_port(SimpleNamespace(server_address="/tmp/unix")),
+            LocalControlApiHttpServer.bound_host_port(SimpleNamespace(server_address="/tmp/unix")),
             ("", 0),
         )
 
@@ -200,7 +198,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
     def test_capabilities_payload_normalizes_the_service_contract_once(self) -> None:
         service = self._service()
         raw = {"ok": True, "api_version": "v1"}
-        service._control_api_capabilities_payload.return_value = raw
+        service.capabilities_payload.return_value = raw
         server = LocalControlApiHttpServer(service, host="host", port=1)
         sentinel = {"normalized": True}
         with patch(
@@ -208,7 +206,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
             return_value=sentinel,
         ) as normalize:
             self.assertIs(server.capabilities_payload(), sentinel)
-        service._control_api_capabilities_payload.assert_called_once_with()
+        service.capabilities_payload.assert_called_once_with()
         normalize.assert_called_once_with(raw)
 
     def test_execute_payload_preserves_tracking_or_rebuilds_it_exactly_once(self) -> None:
@@ -218,32 +216,32 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
             name="set_mode", path="/Mode", value=1, source="http", command_id="c", idempotency_key="i"
         )
         result = ControlResult.applied_result(tracked)
-        service._control_command_from_payload.return_value = tracked
-        service._handle_control_command.return_value = result
+        service.control_command_from_payload.return_value = tracked
+        service.handle_control_command.return_value = result
         payload = {"name": "set_mode", "value": 1, "idempotency_key": "i"}
-        with patch.object(server, "_tracked_command", wraps=server._tracked_command) as rebuild:
+        with patch("venus_evcharger.control.http_api_commands.tracked_command", wraps=tracked_command) as rebuild:
             self.assertEqual(server.execute_payload(payload), (tracked, result))
         rebuild.assert_not_called()
-        service._control_command_from_payload.assert_called_once_with(payload, source="http")
-        service._handle_control_command.assert_called_once_with(tracked)
+        service.control_command_from_payload.assert_called_once_with(payload, source="http")
+        service.handle_control_command.assert_called_once_with(tracked)
 
         untracked = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
         replacement = ControlCommand(
             name="set_mode", path="/Mode", value=1, source="http", command_id="new", idempotency_key="new-i"
         )
         replacement_result = ControlResult.applied_result(replacement)
-        service._control_command_from_payload.return_value = untracked
-        service._handle_control_command.return_value = replacement_result
-        with patch.object(server, "_tracked_command", return_value=replacement) as rebuild:
+        service.control_command_from_payload.return_value = untracked
+        service.handle_control_command.return_value = replacement_result
+        with patch("venus_evcharger.control.http_api_commands.tracked_command", return_value=replacement) as rebuild:
             self.assertEqual(server.execute_payload({"idempotency_key": "new-i"}), (replacement, replacement_result))
         rebuild.assert_called_once_with({"idempotency_key": "new-i"}, untracked)
-        service._handle_control_command.assert_called_with(replacement)
+        service.handle_control_command.assert_called_with(replacement)
 
         command_id_only = ControlCommand(
             name="set_mode", path="/Mode", value=1, source="http", command_id="existing"
         )
-        service._control_command_from_payload.return_value = command_id_only
-        with patch.object(server, "_tracked_command", return_value=replacement) as rebuild:
+        service.control_command_from_payload.return_value = command_id_only
+        with patch("venus_evcharger.control.http_api_commands.tracked_command", return_value=replacement) as rebuild:
             server.execute_payload({"idempotency_key": "different"})
         rebuild.assert_called_once_with({"idempotency_key": "different"}, command_id_only)
 
@@ -256,9 +254,9 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
                 command_id="existing",
                 idempotency_key=idempotency_key,
             )
-            service._control_command_from_payload.return_value = command_with_default_sentinel
-            with self.subTest(idempotency_key=idempotency_key), patch.object(
-                server, "_tracked_command", return_value=replacement
+            service.control_command_from_payload.return_value = command_with_default_sentinel
+            with self.subTest(idempotency_key=idempotency_key), patch(
+                "venus_evcharger.control.http_api_commands.tracked_command", return_value=replacement
             ) as rebuild:
                 server.execute_payload({})
             rebuild.assert_called_once_with({}, command_with_default_sentinel)
@@ -280,7 +278,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
         )
         with (
             patch.object(unix, "_handler_class", return_value=handler_class),
-            patch.object(unix, "_prepare_unix_socket_path") as prepare,
+            patch.object(unix, "prepare_unix_socket_path") as prepare,
             patch("venus_evcharger.control.http_api._ThreadingLocalControlUnixHttpServer", return_value=transport) as factory,
         ):
             self.assertIs(unix._build_server(), transport)
@@ -289,7 +287,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
 
     def test_unix_path_preparation_has_exact_file_type_policy(self) -> None:
         with patch("venus_evcharger.control.http_api.os.path.exists", return_value=False) as exists:
-            LocalControlApiHttpServer._prepare_unix_socket_path("/tmp/missing.sock")
+            LocalControlApiHttpServer.prepare_unix_socket_path("/tmp/missing.sock")
         exists.assert_called_once_with("/tmp/missing.sock")
 
         with (
@@ -298,7 +296,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
             patch("venus_evcharger.control.http_api.stat.S_ISSOCK", return_value=True) as is_socket,
             patch("venus_evcharger.control.http_api.os.unlink") as unlink,
         ):
-            LocalControlApiHttpServer._prepare_unix_socket_path("/tmp/socket")
+            LocalControlApiHttpServer.prepare_unix_socket_path("/tmp/socket")
         stat_call.assert_called_once_with("/tmp/socket")
         is_socket.assert_called_once_with(123)
         unlink.assert_called_once_with("/tmp/socket")
@@ -309,7 +307,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
             patch("venus_evcharger.control.http_api.stat.S_ISSOCK", return_value=False),
         ):
             with self.assertRaises(ValueError) as raised:
-                LocalControlApiHttpServer._prepare_unix_socket_path("/tmp/file")
+                LocalControlApiHttpServer.prepare_unix_socket_path("/tmp/file")
         self.assertEqual(
             str(raised.exception),
             "Control API unix socket path already exists and is not a socket: /tmp/file",
@@ -318,8 +316,8 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
     def test_generated_handler_delegates_get_post_and_log_calls(self) -> None:
         server = LocalControlApiHttpServer(self._service(), host="host", port=1)
         with (
-            patch.object(server, "_handle_get") as get,
-            patch.object(server, "_handle_post") as post,
+            patch.object(server.router, "handle_get") as get,
+            patch.object(server.router, "handle_post") as post,
             patch("venus_evcharger.control.http_api.logging.debug") as debug,
         ):
             handler_type = server._handler_class()

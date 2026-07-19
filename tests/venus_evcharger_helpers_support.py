@@ -20,6 +20,15 @@ sys.modules["gi.repository.GLib"] = MagicMock()
 
 import venus_evcharger_service  # noqa: E402
 import venus_evcharger.runtime.support as runtime_support_module  # noqa: E402
+from venus_evcharger.auto.policy import AutoPolicy, AutoThresholdProfile  # noqa: E402
+from venus_evcharger.controllers.auto import AutoDecisionController  # noqa: E402
+from venus_evcharger.core.common import _age_seconds, _health_code, read_version  # noqa: E402
+from venus_evcharger.service.auto_facade import ServiceAutoFacade  # noqa: E402
+from venus_evcharger.service.control import ServiceControlFacade  # noqa: E402
+from venus_evcharger.service.controller_owner import ServiceControllerOwner, ServiceFunctionBundle  # noqa: E402
+from venus_evcharger.service.runtime_facade import ServiceRuntimeFacade  # noqa: E402
+from venus_evcharger.service.state_facade import ServiceStateFacade  # noqa: E402
+from venus_evcharger.service.update_facade import ServiceUpdateFacade  # noqa: E402
 from venus_evcharger_service import ShellyWallboxService, mode_uses_auto_logic, month_in_ranges, month_window, normalize_mode, normalize_phase, parse_hhmm, phase_values  # noqa: E402
 
 
@@ -27,10 +36,75 @@ def utc_timestamp(year: int, month: int, day: int, hour: int, minute: int = 0) -
     return datetime(year, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
 
 
+def configure_auto_policy(
+    service: object,
+    *,
+    start_surplus_watts: float = 2000.0,
+    stop_surplus_watts: float = 1600.0,
+    min_soc: float = 30.0,
+    resume_soc: float = 33.0,
+    start_max_grid_import_watts: float = 50.0,
+    stop_grid_import_watts: float = 300.0,
+    grid_recovery_start_seconds: float = 10.0,
+) -> AutoPolicy:
+    policy = AutoPolicy(
+        normal_profile=AutoThresholdProfile(start_surplus_watts, stop_surplus_watts),
+        min_soc=min_soc,
+        resume_soc=resume_soc,
+        start_max_grid_import_watts=start_max_grid_import_watts,
+        stop_grid_import_watts=stop_grid_import_watts,
+        grid_recovery_start_seconds=grid_recovery_start_seconds,
+    )
+    setattr(service, "auto_policy", policy)
+    return policy
+
+
+class _TestTimers:
+    @staticmethod
+    def timeout_add(_interval: int, _callback: object) -> object:
+        return object()
+
+
+def _compose_helper_service(service: ShellyWallboxService) -> ShellyWallboxService:
+    """Build the production controller graph around a lightweight test service."""
+    functions = ServiceFunctionBundle(
+        normalize_phase=normalize_phase,
+        normalize_mode=normalize_mode,
+        mode_uses_auto_logic=mode_uses_auto_logic,
+        month_window=month_window,
+        age_seconds=_age_seconds,
+        health_code=_health_code,
+        phase_values=phase_values,
+        read_version=read_version,
+        gobject=_TestTimers(),
+        script_path=str(venus_evcharger_service.__file__),
+        config_path="/tmp/venus-evcharger-helper-test.ini",
+        auto_input_helper_path="/tmp/venus_evcharger_auto_input_helper.py",
+        formatters=service._formatter_bundle,
+    )
+    service.controllers = ServiceControllerOwner(service, functions)
+    service.runtime = ServiceRuntimeFacade(service.controllers)
+    service.state = ServiceStateFacade(service.controllers, service.runtime)
+    service.update = ServiceUpdateFacade(service.controllers)
+    service.control = ServiceControlFacade(service)
+    service.auto = ServiceAutoFacade(
+        lambda: service._control_command_async_enabled,
+        service.controllers,
+        service.runtime,
+        service.control.publish_command_event,
+    )
+    service.controllers.initialize_runtime()
+    return service
+
+
+def make_helper_service() -> ShellyWallboxService:
+    """Return a fully composed service fixture with neutral runtime defaults."""
+    return ShellyWallboxHelpersTestBase._make_update_service(background_runtime=True)
+
 
 class ShellyWallboxHelpersTestBase(unittest.TestCase):
     @staticmethod
-    def _make_update_service():
+    def _make_update_service(*, background_runtime: bool = False):
         service = ShellyWallboxService.__new__(ShellyWallboxService)
         service.config = configparser.ConfigParser()
         service.config.read_string(
@@ -46,6 +120,13 @@ ChargerType=
 """
         )
         service.poll_interval_ms = 1000
+        service.host = "192.168.1.20"
+        service.use_digest_auth = False
+        service.username = ""
+        service.password = ""
+        service.pm_component = "switch:0"
+        service.pm_id = 0
+        service.shelly_request_timeout_seconds = 2.0
         service.phase = "L1"
         service.voltage_mode = "phase"
         service.charging_threshold_watts = 100
@@ -57,6 +138,17 @@ ChargerType=
         service.virtual_set_current = 16.0
         service.min_current = 6.0
         service.max_current = 16.0
+        service.supported_phase_selections = ("P1",)
+        service.requested_phase_selection = "P1"
+        service.active_phase_selection = "P1"
+        service.relay_sync_timeout_seconds = 5.0
+        service._worker_poll_interval_seconds = 1.0
+        service._worker_session = MagicMock()
+        service._worker_stop_event = threading.Event()
+        service._worker_thread = None
+        service._relay_command_lock = threading.Lock()
+        service._pending_relay_state = None
+        service._pending_relay_requested_at = None
         service.charging_started_at = None
         service.energy_at_start = 0.0
         service.last_status = 0
@@ -81,11 +173,19 @@ ChargerType=
         }
         service._warning_state = {}
         service._dbusservice = {"/UpdateIndex": 0}
+        service._dbus_publish_state = {}
+        service._dbus_live_publish_interval_seconds = 0.0
+        service._dbus_slow_publish_interval_seconds = 0.0
         service.last_update = 0
+        service.service_name = "com.victronenergy.evcharger.test"
+        service._control_command_async_enabled = False
+        service._script_path_value = str(venus_evcharger_service.__file__)
         service.auto_input_cache_seconds = 120
         service.auto_input_snapshot_path = "/tmp/auto-helper.json"
         service.auto_input_helper_restart_seconds = 5
         service.auto_input_helper_stale_seconds = 15
+        service._auto_input_helper_generation = 0
+        service._auto_input_runtime_instance_id = "helper-test"
         service.auto_shelly_soft_fail_seconds = 10
         service.auto_watchdog_stale_seconds = 180
         service.auto_watchdog_recovery_seconds = 60
@@ -112,19 +212,52 @@ ChargerType=
         service._charger_target_current_amps = None
         service._charger_target_current_applied_at = None
         service._last_auto_metrics = {"surplus": None, "grid": None, "soc": None}
+        service.dbus_gateway_run_dir = "/tmp/venus-evcharger-helper-gateway"
+        service.dbus_gateway_cache_path = "/tmp/venus-evcharger-helper-gateway/dbus-cache.json"
+        service.dbus_gateway_max_age_seconds = 10.0
+        service.auto_dbus_backoff_base_seconds = 1.0
+        service.auto_dbus_backoff_max_seconds = 60.0
+        service.auto_pv_scan_interval_seconds = 60.0
+        service.auto_pv_service = ""
+        service.auto_pv_service_prefix = "com.victronenergy.pvinverter"
+        service.auto_pv_max_services = 8
+        service.auto_pv_path = "/Ac/Power"
+        service.auto_use_dc_pv = True
+        service.auto_battery_scan_interval_seconds = 60.0
+        service.auto_battery_service = ""
+        service.auto_battery_service_prefix = "com.victronenergy.battery"
+        service.auto_battery_soc_path = "/Soc"
+        service.auto_battery_capacity_wh = None
+        service.auto_battery_power_path = "/Dc/0/Power"
+        service.auto_battery_ac_power_path = "/Ac/Power"
+        service.auto_battery_pv_power_path = "/Dc/Pv/Power"
+        service.auto_battery_grid_interaction_path = "/Ac/ActiveIn/L1/P"
+        service.auto_battery_operating_mode_path = "/Settings/CGwacs/BatteryLife/State"
+        service.auto_energy_sources = ()
+        service.auto_use_combined_battery_soc = False
+        service.auto_grid_service = "com.victronenergy.system"
+        service._last_energy_learning_profiles = {}
+        service._last_energy_cluster = {}
         service.auto_samples = deque()
         service.relay_last_changed_at = None
         service.relay_last_off_at = None
         service._auto_cached_inputs_used = False
         service._worker_snapshot_lock = threading.Lock()
-        service._worker_snapshot = ShellyWallboxService._empty_worker_snapshot()
+        service._worker_snapshot = runtime_support_module.RuntimeSupportController.empty_worker_snapshot()
         service._ensure_auto_input_helper_process = MagicMock()
         service._refresh_auto_input_snapshot = MagicMock()
-        return service
+        configure_auto_policy(service)
+        composed = _compose_helper_service(service)
+        composed.runtime.initialize_worker_state()
+        if not background_runtime:
+            composed.controllers.runtime.shelly.start_io_worker = MagicMock()
+            composed.controllers.runtime.auto_input.ensure_helper_process = MagicMock()
+            composed.controllers.runtime.auto_input.refresh_snapshot = MagicMock()
+        return composed
 
     @staticmethod
     def _set_worker_snapshot(service, **overrides):
-        snapshot = ShellyWallboxService._empty_worker_snapshot()
+        snapshot = runtime_support_module.RuntimeSupportController.empty_worker_snapshot()
         snapshot.update(overrides)
         service._worker_snapshot = snapshot
 

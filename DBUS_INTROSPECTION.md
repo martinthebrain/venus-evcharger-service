@@ -1,8 +1,11 @@
 # DBus Introspection via Gateway
 
 The EV charger no longer starts a separate DBus introspection worker process.
-All Victron DBus access, including `Introspect`, is owned by
-`venus_evcharger_dbus_adapter.py`.
+All Victron DBus access, including `Introspect`, is owned by the
+`venus_evcharger_dbus_adapter.py` process. Its implementation lives under
+`venus_evcharger/dbus_adapter/process/`; snapshot generation and process
+contracts are in `process/introspection_snapshot.py` and
+`process/protocols/introspection.py`.
 
 The gateway keeps the legacy advisory map file compatible for consumers:
 

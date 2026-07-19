@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from venus_evcharger.backend.models import BackendRuntimeSummary
+
 from tests.venus_evcharger_publisher_diagnostic_cases_support import *  # noqa: F401,F403
 
 class _TestDbusPublishControllerDiagnosticsPart1:
@@ -46,7 +48,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
             _shelly_state="offline",
             _shelly_last_error_reason="no-route",
             _shelly_consecutive_errors=3,
-            _shelly_retry_after=current_time + 30.0,
+            _source_retry_after={"shelly": current_time + 30.0},
             _shelly_last_ok_at=current_time - 11.0,
             _pending_relay_requested_at=current_time - 9.0,
             _last_confirmed_pm_status={"_phase_selection": "P1"},
@@ -80,7 +82,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
                 "phase_candidate": "P1_P2",
             },
             _auto_phase_target_since=current_time - 8.0,
-            _is_update_stale=self._never_stale,
+            _runtime_update_is_stale=self._never_stale,
             _recovery_attempts=4,
             _last_confirmed_pm_status_at=current_time - 5.0,
             _last_pm_status_at=current_time - 5.0,
@@ -102,8 +104,8 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         ), mode="split", meter_type="template_meter", switch_type="template_switch", charger_type="smartevse_charger")
         controller = DbusPublishController(service, self._real_age_seconds)
 
-        counter_values = controller._diagnostic_counter_values(current_time)
-        age_values = controller._diagnostic_age_values(current_time)
+        counter_values = controller.diagnostics.counter_values(current_time)
+        age_values = controller.diagnostics.age_values(current_time)
 
         self.assertEqual(counter_values["auto_scheduled_state"], "night-boost")
         self.assertEqual(counter_values["auto_scheduled_state_code"], 4)
@@ -202,12 +204,12 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         self.assertEqual(age_values["auto_software_update_last_run_age"], 3600.0)
 
         service._last_health_reason = "contactor-suspected-welded"
-        welded_counter_values = controller._diagnostic_counter_values(current_time)
+        welded_counter_values = controller.diagnostics.counter_values(current_time)
         self.assertEqual(welded_counter_values["auto_contactor_suspected_open"], 0)
         self.assertEqual(welded_counter_values["auto_contactor_suspected_welded"], 1)
 
         service._last_health_reason = "contactor-suspected-open"
-        open_counter_values = controller._diagnostic_counter_values(current_time)
+        open_counter_values = controller.diagnostics.counter_values(current_time)
         self.assertEqual(open_counter_values["auto_contactor_suspected_open"], 1)
         self.assertEqual(open_counter_values["auto_contactor_suspected_welded"], 0)
 
@@ -218,8 +220,8 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         service._contactor_lockout_reason = "contactor-suspected-open"
         service._contactor_lockout_source = "count-threshold"
         service._contactor_lockout_at = current_time - 6.0
-        lockout_counter_values = controller._diagnostic_counter_values(current_time)
-        lockout_age_values = controller._diagnostic_age_values(current_time)
+        lockout_counter_values = controller.diagnostics.counter_values(current_time)
+        lockout_age_values = controller.diagnostics.age_values(current_time)
         self.assertEqual(lockout_counter_values["auto_recovery_active"], 1)
         self.assertEqual(lockout_counter_values["auto_fault_active"], 1)
         self.assertEqual(lockout_counter_values["auto_fault_reason"], "contactor-lockout-open")
@@ -253,7 +255,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
             switch_backend_type="shelly_combined",
             charger_backend_type=None,
             _backend_bundle=SimpleNamespace(
-                runtime=SimpleNamespace(
+                runtime=BackendRuntimeSummary(
                     backend_mode="split",
                     meter_type="template_meter",
                     switch_type="switch_group",
@@ -261,14 +263,16 @@ class _TestDbusPublishControllerDiagnosticsPart1:
                     meter_config_path=None,
                     switch_config_path=None,
                     charger_config_path=None,
+                    topology_configured=True,
+                    primary_rpc_configured=False,
                 )
             ),
-            _is_update_stale=self._never_stale,
+            _runtime_update_is_stale=self._never_stale,
             _recovery_attempts=0,
             started_at=current_time - 10.0,
         )
 
-        counter_values = DbusPublishController(service, self._real_age_seconds)._diagnostic_counter_values(current_time)
+        counter_values = DbusPublishController(service, self._real_age_seconds).diagnostics.counter_values(current_time)
 
         self.assertEqual(counter_values["auto_backend_mode"], "split")
         self.assertEqual(counter_values["auto_meter_backend"], "template_meter")
@@ -276,7 +280,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         self.assertEqual(counter_values["auto_charger_backend"], "smartevse_charger")
 
         service._error_state = "bad"
-        counter_values = DbusPublishController(service, self._real_age_seconds)._diagnostic_counter_values(current_time)
+        counter_values = DbusPublishController(service, self._real_age_seconds).diagnostics.counter_values(current_time)
         self.assertEqual(counter_values["auto_error_count"], 0)
         self.assertEqual(counter_values["auto_dbus_read_errors"], 0)
 
@@ -307,13 +311,13 @@ class _TestDbusPublishControllerDiagnosticsPart1:
             _last_dbus_ok_at=None,
             _software_update_last_check_at=None,
             _software_update_last_run_at=None,
-            _is_update_stale=self._never_stale,
+            _runtime_update_is_stale=self._never_stale,
             _last_successful_update_at=90.0,
             started_at=90.0,
         )
         controller = DbusPublishController(service, self._real_age_seconds)
 
-        age_values = controller._diagnostic_age_values(100.0)
+        age_values = controller.diagnostics.age_values(100.0)
 
         self.assertEqual(age_values["auto_software_update_last_check_age"], -1.0)
         self.assertEqual(age_values["auto_software_update_last_run_age"], -1.0)

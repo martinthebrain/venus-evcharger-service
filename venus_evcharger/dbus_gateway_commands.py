@@ -8,7 +8,6 @@ import os
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import Mapping
 from pathlib import Path
 
 from venus_evcharger.dbus_gateway_command_types import CommandFile, CommandFileList, CommandMapping, CommandPayload
@@ -17,6 +16,7 @@ from venus_evcharger.dbus_gateway_core import (
     PUBLISH_PATH_RANKS,
     _now,
     float_or_zero,
+    normalized_object_mapping,
     priority_rank,
     read_json_file,
     write_json_file,
@@ -70,8 +70,8 @@ class DbusCommandInbox:
 
     @staticmethod
     def _should_replace_existing(path: str, payload: CommandMapping) -> bool:
-        existing = read_json_file(path)
-        if not isinstance(existing, Mapping):
+        existing = normalized_object_mapping(read_json_file(path))
+        if existing is None:
             return True
         return DbusCommandInbox._should_replace_existing_payload(existing, payload)
 
@@ -107,8 +107,8 @@ class DbusCommandInbox:
             return []
         pending: CommandFileList = []
         for path in paths:
-            payload = read_json_file(str(path))
-            if isinstance(payload, dict):
+            payload = normalized_object_mapping(read_json_file(str(path)))
+            if payload is not None:
                 pending.append((str(path), self._normalized_command(payload)))
         return pending
 
@@ -171,9 +171,10 @@ def _coalesced_target_exists(normalized: CommandMapping, target: str) -> bool:
 
 
 def _replace_existing_coalesced(existing: object, payload: CommandMapping) -> bool:
-    if not isinstance(existing, Mapping):
+    existing_mapping = normalized_object_mapping(existing)
+    if existing_mapping is None:
         return True
-    return DbusCommandInbox._should_replace_existing_payload(existing, payload)
+    return DbusCommandInbox._should_replace_existing_payload(existing_mapping, payload)
 
 
 def _same_priority(existing: CommandMapping, payload: CommandMapping) -> bool:
@@ -200,16 +201,17 @@ def _coalesced_publish_path_maps(
     existing: object,
     payload: CommandMapping,
 ) -> tuple[CommandMapping | None, CommandMapping | None]:
-    if not _same_publish_desired_payload(existing, payload):
+    existing_mapping = normalized_object_mapping(existing)
+    if existing_mapping is None or not _same_publish_desired_payload(existing_mapping, payload):
         return None, None
-    assert isinstance(existing, Mapping)
-    return _path_mapping(existing), _path_mapping(payload)
+    return _path_mapping(existing_mapping), _path_mapping(payload)
 
 
 def _same_publish_desired_payload(existing: object, payload: CommandMapping) -> bool:
-    if not isinstance(existing, Mapping):
+    existing_mapping = normalized_object_mapping(existing)
+    if existing_mapping is None:
         return False
-    if not (_same_kind(existing, payload) and _same_priority(existing, payload)):
+    if not (_same_kind(existing_mapping, payload) and _same_priority(existing_mapping, payload)):
         return False
     return _command_kind(payload) == "publish_desired"
 
@@ -225,34 +227,34 @@ def _coalesced_publish_field_maps(
     existing: object,
     payload: CommandMapping,
 ) -> tuple[CommandMapping | None, CommandMapping | None]:
-    if not _same_publish_fields_payload(existing, payload):
+    existing_mapping = normalized_object_mapping(existing)
+    if existing_mapping is None or not _same_publish_fields_payload(existing_mapping, payload):
         return None, None
-    assert isinstance(existing, Mapping)
-    return _field_mapping(existing), _field_mapping(payload)
+    return _field_mapping(existing_mapping), _field_mapping(payload)
 
 
 def _same_publish_fields_payload(existing: object, payload: CommandMapping) -> bool:
-    if not isinstance(existing, Mapping):
+    existing_mapping = normalized_object_mapping(existing)
+    if existing_mapping is None:
         return False
-    if not (_same_kind(existing, payload) and _same_priority(existing, payload)):
+    if not (_same_kind(existing_mapping, payload) and _same_priority(existing_mapping, payload)):
         return False
     return _command_kind(payload) == "publish_fields"
 
 
 def _path_mapping(command: CommandMapping) -> CommandMapping | None:
-    paths = command.get("paths")
-    return paths if isinstance(paths, Mapping) else None
+    return normalized_object_mapping(command.get("paths"))
 
 
 def _field_mapping(command: CommandMapping) -> CommandMapping | None:
-    fields = command.get("fields")
-    return fields if isinstance(fields, Mapping) else None
+    return normalized_object_mapping(command.get("fields"))
 
 
 def _mark_coalesced_payload(existing: object, payload: CommandPayload) -> None:
     payload["lifecycle_state"] = "coalesced"
-    if isinstance(existing, Mapping) and _same_priority(existing, payload):
-        payload["created_at"] = float_or_zero(existing.get("created_at")) or payload["created_at"]
+    existing_mapping = normalized_object_mapping(existing)
+    if existing_mapping is not None and _same_priority(existing_mapping, payload):
+        payload["created_at"] = float_or_zero(existing_mapping.get("created_at")) or payload["created_at"]
         payload["updated_at"] = _now()
 
 

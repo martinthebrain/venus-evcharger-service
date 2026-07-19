@@ -8,21 +8,23 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
+from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.controllers import state_runtime_overrides
-from venus_evcharger.controllers.state import ServiceStateController
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
+from venus_evcharger.controllers.state_runtime_overrides import RuntimeOverrideStore
 from venus_evcharger.controllers.state_specs import RUNTIME_OVERRIDE_SPECS, RuntimeOverrideSpec
 
 
-def _normalize_mode(value: object) -> int:
-    return int(value)
+def _store(service: object) -> RuntimeOverrideStore:
+    return RuntimeOverrideStore(service, RuntimeStateNormalizer())
 
 
 class TestStateRuntimeOverridesContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.service = SimpleNamespace()
-        self.controller = ServiceStateController(self.service, _normalize_mode)
+        self.service = SimpleNamespace(auto_policy=AutoPolicy())
+        self.controller = _store(self.service)
 
     @staticmethod
     def _defaults(**values: str) -> configparser.SectionProxy:
@@ -67,7 +69,6 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             (RuntimeOverrideSpec("/x", "x", "x", "weekday_set"), "Sat,Sun", "Sat,Sun"),
             (RuntimeOverrideSpec("/x", "x", "x", "hhmm"), " 7:05 ", "07:05"),
             (RuntimeOverrideSpec("/x", "x", "x", "float"), "2.5", "2.5"),
-            (RuntimeOverrideSpec("/x", "x", "x", "unknown"), "3.5", "3.5"),
         )
         for spec, raw, expected in cases:
             with self.subTest(kind=spec.value_kind):
@@ -79,23 +80,21 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
         self.assertEqual(self.controller._override_value_as_text(mode_spec, 2), "2")
 
     def test_default_values_are_exact_for_every_kind(self) -> None:
-        expected = {
-            "bool": 0,
-            "int": 0,
-            "phase": "P1",
-            "weekday_set": (0, 1, 2, 3, 4),
-            "hhmm": "06:30",
-            "float": 0.0,
-            "unknown": 0.0,
-        }
-        for kind, value in expected.items():
-            spec = RuntimeOverrideSpec("/x", "x", "x", kind)
+        expected = (
+            (RuntimeOverrideSpec("/x", "x", "x", "bool"), 0),
+            (RuntimeOverrideSpec("/x", "x", "x", "int"), 0),
+            (RuntimeOverrideSpec("/x", "x", "x", "phase"), "P1"),
+            (RuntimeOverrideSpec("/x", "x", "x", "weekday_set"), (0, 1, 2, 3, 4)),
+            (RuntimeOverrideSpec("/x", "x", "x", "hhmm"), "06:30"),
+            (RuntimeOverrideSpec("/x", "x", "x", "float"), 0.0),
+        )
+        for spec, value in expected:
             actual = self.controller._runtime_override_default_value(spec)
             self.assertEqual(actual, value)
             self.assertIs(type(actual), type(value))
 
     def test_current_overrides_cover_every_spec_and_missing_attribute_default(self) -> None:
-        values = self.controller.current_runtime_overrides()
+        values = self.controller.current()
         self.assertEqual(set(values), {spec.config_key for spec in RUNTIME_OVERRIDE_SPECS})
         self.assertEqual(len(values), len(RUNTIME_OVERRIDE_SPECS))
         self.assertEqual(values["Mode"], "0")
@@ -104,7 +103,7 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
         self.assertEqual(values["AutoScheduledLatestEndTime"], "06:30")
         self.service.virtual_mode = 2
         self.service.requested_phase_selection = "P1_P2"
-        values = self.controller.current_runtime_overrides()
+        values = self.controller.current()
         self.assertEqual(values["Mode"], "2")
         self.assertEqual(values["PhaseSelection"], "P1_P2")
 
@@ -115,9 +114,23 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             patch("venus_evcharger.controllers.state_runtime_overrides.RUNTIME_OVERRIDE_SPECS", (RUNTIME_OVERRIDE_SPECS[0],)),
         ):
             del self.service.virtual_mode
-            self.assertEqual(self.controller.current_runtime_overrides(), {"Mode": "rendered"})
+            self.assertEqual(self.controller.current(), {"Mode": "rendered"})
         default.assert_called_once_with(RUNTIME_OVERRIDE_SPECS[0])
         render.assert_called_once_with(RUNTIME_OVERRIDE_SPECS[0], sentinel)
+
+    def test_current_override_owner_contract_rejects_missing_policy(self) -> None:
+        policy_spec = next(spec for spec in RUNTIME_OVERRIDE_SPECS if spec.policy_setting is not None)
+        with self.assertRaisesRegex(TypeError, r"^state service must expose AutoPolicy as auto_policy$"):
+            _store(SimpleNamespace())._current_runtime_override_value(
+                SimpleNamespace(),
+                policy_spec,
+            )
+
+        ownerless_spec = RuntimeOverrideSpec("/x", "x", None, "float")
+        self.assertEqual(
+            self.controller._current_runtime_override_value(self.service, ownerless_spec),
+            0.0,
+        )
 
     def test_interval_clock_due_and_pending_payload_boundaries_are_exact(self) -> None:
         self.assertEqual(self.controller._runtime_override_write_min_interval_seconds(SimpleNamespace()), 1.0)
@@ -134,8 +147,8 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             2.5,
         )
         clock = MagicMock(return_value="7.5")
-        with patch("venus_evcharger.controllers.state_runtime_overrides.time.time", return_value=9.0) as system:
-            self.assertEqual(self.controller._runtime_now(SimpleNamespace(_time_now=clock)), 7.5)
+        with patch("venus_evcharger.controllers.state_runtime_normalize.time.time", return_value=9.0) as system:
+            self.assertEqual(self.controller._runtime_now(SimpleNamespace(time_now=clock)), 7.5)
         clock.assert_called_once_with()
         system.assert_called_once_with()
         self.assertTrue(self.controller._runtime_override_write_due(SimpleNamespace(), 5.0))
@@ -166,10 +179,20 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
         self.assertIsNone(self.controller._pending_runtime_overrides_payload(pending, ""))
         pending._runtime_overrides_pending_values = []
         self.assertIsNone(self.controller._pending_runtime_overrides_payload(pending, "/tmp/x"))
+        pending._runtime_overrides_pending_values = {"Mode": 2}
+        self.assertIsNone(self.controller._pending_runtime_overrides_payload(pending, "/tmp/x"))
 
-        with patch("venus_evcharger.controllers.state_runtime_overrides.time.time", return_value=11.0) as system:
-            self.assertEqual(self.controller._runtime_now(SimpleNamespace()), 11.0)
-        self.assertEqual(system.call_count, 2)
+        with self.assertRaises(AttributeError):
+            self.controller._runtime_now(SimpleNamespace())
+
+        invalid_clock = MagicMock(return_value="invalid")
+        with patch("venus_evcharger.controllers.state_runtime_normalize.time.time", return_value=11.0) as system:
+            self.assertEqual(
+                self.controller._runtime_now(SimpleNamespace(time_now=invalid_clock)),
+                11.0,
+            )
+        invalid_clock.assert_called_once_with()
+        system.assert_called_once_with()
 
     def test_stage_write_and_clear_mutate_the_complete_state_contract(self) -> None:
         svc = SimpleNamespace()
@@ -188,19 +211,20 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
         )
         payload["Mode"] = "changed"
         self.assertEqual(svc._runtime_overrides_pending_values, {"Mode": "2"})
+        written_service = SimpleNamespace()
         with patch.object(self.controller, "_write_text_atomically") as write:
             self.controller._write_runtime_overrides_payload(
-                svc, "/tmp/x", {"Mode": "1"}, "new", "ini", 14.0
+                written_service, "/tmp/x", {"Mode": "1"}, "new", "ini", 14.0
             )
         write.assert_called_once_with("/tmp/x", "ini")
-        self.assertEqual(svc._runtime_overrides_serialized, "new")
-        self.assertEqual(svc._runtime_overrides_last_saved_at, 14.0)
-        self.assertTrue(svc._runtime_overrides_active)
-        self.assertEqual(svc._runtime_overrides_values, {"Mode": "1"})
-        self.assertIsNone(svc._runtime_overrides_pending_serialized)
-        self.assertIsNone(svc._runtime_overrides_pending_values)
-        self.assertIsNone(svc._runtime_overrides_pending_text)
-        self.assertIsNone(svc._runtime_overrides_pending_due_at)
+        self.assertEqual(written_service._runtime_overrides_serialized, "new")
+        self.assertEqual(written_service._runtime_overrides_last_saved_at, 14.0)
+        self.assertTrue(written_service._runtime_overrides_active)
+        self.assertEqual(written_service._runtime_overrides_values, {"Mode": "1"})
+        self.assertIsNone(written_service._runtime_overrides_pending_serialized)
+        self.assertIsNone(written_service._runtime_overrides_pending_values)
+        self.assertIsNone(written_service._runtime_overrides_pending_text)
+        self.assertIsNone(written_service._runtime_overrides_pending_due_at)
 
     def test_read_and_apply_contract_accepts_only_known_override_keys(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -218,7 +242,7 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
 
             config = configparser.ConfigParser()
             config["DEFAULT"] = {"RuntimeOverridesPath": str(path), "Mode": "0"}
-            result = self.controller._apply_runtime_overrides_to_config(self.service, config)
+            result = self.controller.apply_to_config(config)
         self.assertIs(result, config)
         self.assertEqual(config["DEFAULT"]["Mode"], "2")
         self.assertEqual(config["DEFAULT"]["SetCurrent"], "10.5")
@@ -229,14 +253,14 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
 
     def test_read_contract_short_circuits_blank_path_and_reports_read_errors(self) -> None:
         parser = MagicMock()
-        with patch("venus_evcharger.controllers.state_runtime_overrides._CasePreservingConfigParser", return_value=parser):
+        with patch("venus_evcharger.controllers.state_runtime_overrides.CasePreservingConfigParser", return_value=parser):
             self.assertEqual(self.controller._read_runtime_override_values("   "), {})
         parser.read.assert_not_called()
 
         error = OSError("unreadable")
         parser.read.side_effect = error
         with (
-            patch("venus_evcharger.controllers.state_runtime_overrides._CasePreservingConfigParser", return_value=parser),
+            patch("venus_evcharger.controllers.state_runtime_overrides.CasePreservingConfigParser", return_value=parser),
             patch("venus_evcharger.controllers.state_runtime_overrides.logging.warning") as warning,
         ):
             self.assertEqual(self.controller._read_runtime_override_values("/tmp/overrides.ini"), {})
@@ -250,18 +274,14 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
         parser.read.side_effect = None
         parser.read.return_value = []
         parser.has_section.return_value = True
-        with patch("venus_evcharger.controllers.state_runtime_overrides._CasePreservingConfigParser", return_value=parser):
+        with patch("venus_evcharger.controllers.state_runtime_overrides.CasePreservingConfigParser", return_value=parser):
             self.assertEqual(self.controller._read_runtime_override_values("/tmp/overrides.ini"), {})
         parser.__getitem__.assert_not_called()
 
     def test_serializers_and_atomic_writer_have_exact_boundary_contracts(self) -> None:
-        with patch.object(self.controller, "current_runtime_overrides", return_value={"Mode": "2"}) as current:
-            self.assertEqual(self.controller._serialized_runtime_overrides(), '{"Mode":"2"}')
+        with patch.object(self.controller, "current", return_value={"Mode": "2"}) as current:
+            self.assertEqual(self.controller.serialized(), '{"Mode":"2"}')
         current.assert_called_once_with()
-
-        with patch.object(self.controller, "current_runtime_state", return_value={"mode": 2}) as current_state:
-            self.assertEqual(self.controller._serialized_runtime_state(), '{"mode":2}')
-        current_state.assert_called_once_with()
 
         rendered = self.controller._runtime_override_ini_text({"Mode": "2"})
         self.assertEqual(rendered, "[RuntimeOverrides]\nMode = 2\n\n")
@@ -271,9 +291,9 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
 
     def test_save_contract_covers_no_path_unchanged_immediate_and_deferred_writes(self) -> None:
         svc = SimpleNamespace()
-        controller = ServiceStateController(svc, _normalize_mode)
-        with patch.object(controller, "current_runtime_overrides") as current:
-            controller.save_runtime_overrides()
+        controller = _store(svc)
+        with patch.object(controller, "current") as current:
+            controller.save()
         current.assert_not_called()
 
         payload = {"Mode": "2"}
@@ -282,11 +302,11 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
         svc._runtime_overrides_serialized = serialized
         svc._runtime_overrides_pending_serialized = "old"
         with (
-            patch.object(controller, "current_runtime_overrides", return_value=payload),
+            patch.object(controller, "current", return_value=payload),
             patch.object(controller, "_clear_pending_runtime_overrides") as clear,
             patch.object(controller, "_write_runtime_overrides_payload") as write,
         ):
-            controller.save_runtime_overrides()
+            controller.save()
         clear.assert_called_once_with(svc)
         write.assert_not_called()
 
@@ -294,27 +314,27 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
         svc._runtime_overrides_last_saved_at = "7.0"
         svc._runtime_overrides_pending_due_at = "8.0"
         with (
-            patch.object(controller, "current_runtime_overrides", return_value=payload),
+            patch.object(controller, "current", return_value=payload),
             patch.object(controller, "_runtime_override_ini_text", return_value="ini") as render,
             patch.object(controller, "_runtime_now", return_value=10.0) as runtime_now,
-            patch.object(controller, "_coerce_optional_runtime_float", side_effect=(7.0, 8.0)) as optional,
+            patch.object(controller.normalizer, "optional_float", side_effect=(7.0, 8.0)) as optional,
             patch.object(controller, "_runtime_override_write_min_interval_seconds", return_value=3.0) as interval,
             patch.object(controller, "_runtime_override_due_at", return_value=None) as due,
             patch.object(controller, "_write_runtime_overrides_payload") as write,
         ):
-            controller.save_runtime_overrides()
+            controller.save()
         render.assert_called_once_with(payload)
         runtime_now.assert_called_once_with(svc)
         self.assertEqual(
             optional.call_args_list,
-            [unittest.mock.call("7.0"), unittest.mock.call("8.0")],
+            [call("7.0"), call("8.0")],
         )
         interval.assert_called_once_with(svc)
         due.assert_called_once_with(10.0, 8.0, 7.0, 3.0)
         write.assert_called_once_with(svc, "/tmp/overrides.ini", payload, serialized, "ini", 10.0)
 
         with (
-            patch.object(controller, "current_runtime_overrides", return_value=payload),
+            patch.object(controller, "current", return_value=payload),
             patch.object(controller, "_runtime_override_ini_text", return_value="ini"),
             patch.object(controller, "_runtime_now", return_value=10.0),
             patch.object(controller, "_runtime_override_write_min_interval_seconds", return_value=3.0),
@@ -322,17 +342,17 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             patch.object(controller, "_stage_runtime_overrides_write") as stage,
             patch.object(controller, "_write_runtime_overrides_payload") as write,
         ):
-            controller.save_runtime_overrides()
+            controller.save()
         stage.assert_called_once_with(svc, payload, serialized, "ini", 12.0)
         write.assert_not_called()
 
     def test_save_contract_stages_failed_write_for_exact_retry_time(self) -> None:
         svc = SimpleNamespace(runtime_overrides_path="/tmp/overrides.ini")
-        controller = ServiceStateController(svc, _normalize_mode)
+        controller = _store(svc)
         payload = {"Mode": "2"}
         error = OSError("full")
         with (
-            patch.object(controller, "current_runtime_overrides", return_value=payload),
+            patch.object(controller, "current", return_value=payload),
             patch.object(controller, "_runtime_override_ini_text", return_value="ini"),
             patch.object(controller, "_runtime_now", return_value=10.0),
             patch.object(controller, "_runtime_override_write_min_interval_seconds", return_value=3.0),
@@ -341,7 +361,7 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             patch.object(controller, "_stage_runtime_overrides_write") as stage,
             patch("venus_evcharger.controllers.state_runtime_overrides.logging.warning") as warning,
         ):
-            controller.save_runtime_overrides()
+            controller.save()
         stage.assert_called_once_with(svc, payload, '{"Mode":"2"}', "ini", 13.0)
         warning.assert_called_once_with(
             "Unable to write runtime overrides to %s: %s",
@@ -351,12 +371,12 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
 
     def test_flush_and_save_orchestration_covers_noop_defer_success_and_failure(self) -> None:
         svc = SimpleNamespace()
-        controller = ServiceStateController(svc, _normalize_mode)
+        controller = _store(svc)
         with (
             patch.object(controller, "_pending_runtime_overrides_payload", return_value=None) as pending_call,
             patch.object(controller, "_write_runtime_overrides_payload") as write,
         ):
-            controller.flush_runtime_overrides(1.0)
+            controller.flush(1.0)
         pending_call.assert_called_once_with(svc, "")
         write.assert_not_called()
 
@@ -367,7 +387,7 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             patch.object(controller, "_runtime_override_write_due", return_value=False) as due,
             patch.object(controller, "_write_runtime_overrides_payload") as write,
         ):
-            controller.flush_runtime_overrides(2.0)
+            controller.flush(2.0)
         pending_call.assert_called_once_with(svc, "/tmp/x")
         due.assert_called_once_with(svc, 2.0)
         write.assert_not_called()
@@ -377,7 +397,7 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             patch.object(controller, "_runtime_override_write_due", return_value=True) as due,
             patch.object(controller, "_write_runtime_overrides_payload") as write,
         ):
-            controller.flush_runtime_overrides(3.0)
+            controller.flush(3.0)
         pending_call.assert_called_once_with(svc, "/tmp/x")
         due.assert_called_once_with(svc, 3.0)
         write.assert_called_once_with(svc, "/tmp/x", {"Mode": "2"}, "serialized", "rendered", 3.0)
@@ -387,7 +407,7 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             patch.object(controller, "_runtime_now", return_value=4.0) as runtime_now,
             patch.object(controller, "_runtime_override_write_due", return_value=False),
         ):
-            controller.flush_runtime_overrides()
+            controller.flush()
         runtime_now.assert_called_once_with(svc)
 
         svc._runtime_overrides_pending_due_at = None
@@ -399,7 +419,7 @@ class TestStateRuntimeOverridesContracts(unittest.TestCase):
             patch.object(controller, "_runtime_override_write_min_interval_seconds", return_value=4.0) as interval,
             patch("venus_evcharger.controllers.state_runtime_overrides.logging.warning") as warning,
         ):
-            controller.flush_runtime_overrides(3.0)
+            controller.flush(3.0)
         self.assertEqual(svc._runtime_overrides_pending_due_at, 7.0)
         interval.assert_called_once_with(svc)
         warning.assert_called_once_with(

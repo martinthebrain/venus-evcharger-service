@@ -7,21 +7,24 @@ import logging
 from typing import Any
 
 from venus_evcharger.dbus_gateway import GatewayClient, gateway_paths
-from .victron_ess_balance_apply_pid import _UpdateCycleVictronEssBalanceApplyPid
+from .victron_ess_balance_apply_sources import VictronEssSourceResolver
 
 
 VICTRON_ESS_BALANCE_WRITE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApplyPid):
+class VictronEssSetpointWriter:
     """Coalesce and enqueue Victron ESS balance-bias setpoint writes through the gateway."""
+
+    def __init__(self, sources: VictronEssSourceResolver) -> None:
+        self._sources = sources
 
     def _victron_ess_balance_should_write(self, svc: Any, now: float, setpoint_w: float) -> bool:
         min_update_seconds = max(
             0.0,
             float(getattr(svc, "auto_battery_discharge_balance_victron_bias_min_update_seconds", None) or 0.0),
         )
-        last_write_at = self._optional_float(getattr(svc, "_victron_ess_balance_last_write_at", None))
+        last_write_at = self._sources._optional_float(getattr(svc, "_victron_ess_balance_last_write_at", None))
         if last_write_at is not None and (float(now) - float(last_write_at)) < min_update_seconds:
             return False
         last_setpoint_w = self._victron_ess_balance_last_setpoint(svc)
@@ -30,7 +33,7 @@ class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApply
         return abs(float(setpoint_w) - float(last_setpoint_w)) >= 1.0
 
     def _victron_ess_balance_last_setpoint(self, svc: Any) -> float | None:
-        return self._optional_float(getattr(svc, "_victron_ess_balance_last_setpoint_w", None))
+        return self._sources._optional_float(getattr(svc, "_victron_ess_balance_last_setpoint_w", None))
 
     @staticmethod
     def _victron_ess_balance_write_target(service_name: object, path: object) -> tuple[str, str]:
@@ -91,7 +94,7 @@ class _UpdateCycleVictronEssBalanceApplyWrite(_UpdateCycleVictronEssBalanceApply
         )
         if last_error is None:
             return True
-        svc._warning_throttled(
+        svc.runtime.warning_throttled(
             "victron-ess-balance-write-failed",
             self._victron_ess_balance_write_warning_interval_seconds(svc),
             "Victron ESS balance-bias write to %s %s failed: %s",

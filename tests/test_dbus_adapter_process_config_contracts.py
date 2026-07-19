@@ -8,8 +8,8 @@ import unittest
 from configparser import SectionProxy
 from pathlib import Path
 
-import venus_evcharger.dbus_adapter_process_config as config
-from venus_evcharger.dbus_adapter_jsonl import DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES, DEFAULT_HEALTH_HISTORY_MAX_BYTES
+import venus_evcharger.dbus_adapter.process.config as config
+from venus_evcharger.dbus_adapter.jsonl import DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES, DEFAULT_HEALTH_HISTORY_MAX_BYTES
 from venus_evcharger.dbus_gateway import gateway_paths
 
 

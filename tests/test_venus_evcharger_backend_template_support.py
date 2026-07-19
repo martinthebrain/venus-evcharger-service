@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import configparser
-import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from venus_evcharger.backend.template_support import (
     TemplateAuthSettings,
     TemplateHttpBackendBase,
     _request_auth,
     _request_headers,
+    _request_kwargs,
     _request_method_callable,
     _response_payload_dict,
     enabled_state_from_text,
@@ -25,6 +25,45 @@ from venus_evcharger.backend.template_support import (
 
 class _TemplateBackend(TemplateHttpBackendBase):
     pass
+
+
+class _Response:
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+        self.raise_called = False
+
+    def raise_for_status(self) -> None:
+        self.raise_called = True
+
+    def json(self) -> object:
+        return self.payload
+
+
+class _Session:
+    def __init__(self, response: _Response | None = None) -> None:
+        self.response = response or _Response({})
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def _request(self, method: str, **kwargs: object) -> _Response:
+        self.calls.append((method, kwargs))
+        return self.response
+
+    def get(self, **kwargs: object) -> _Response:
+        return self._request("GET", **kwargs)
+
+    def post(self, **kwargs: object) -> _Response:
+        return self._request("POST", **kwargs)
+
+    def put(self, **kwargs: object) -> _Response:
+        return self._request("PUT", **kwargs)
+
+    def patch(self, **kwargs: object) -> _Response:
+        return self._request("PATCH", **kwargs)
+
+
+class _InvalidDynamicSession:
+    def __getattr__(self, name: str) -> object:
+        return name
 
 
 class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
@@ -106,6 +145,7 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         with self.assertRaises(ValueError) as payload_context:
             payload_object(["not", "a", "dict"])
         self.assertEqual(str(payload_context.exception), "Template backend response must be a JSON object")
+        self.assertEqual(payload_object({7: "seven"}), {"7": "seven"})
         self.assertIsNone(render_json_payload(None, {}))
         self.assertIsNone(render_json_payload("   ", {}))
         self.assertEqual(normalize_http_method(" patch ", "GET"), "PATCH")
@@ -123,17 +163,42 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         self.assertEqual(_request_headers(header_settings), {"Authorization": "Bearer token"})
         self.assertIsNone(_request_headers(digest_settings))
         self.assertIsNone(_request_headers(incomplete_header_settings))
+        self.assertEqual(
+            _request_kwargs("http://test.local", 2.5, {"enabled": True}, basic_settings),
+            {
+                "url": "http://test.local",
+                "timeout": 2.5,
+                "json": {"enabled": True},
+                "auth": ("user", "secret"),
+            },
+        )
+        self.assertEqual(
+            _request_kwargs("http://test.local", 2.5, None, header_settings),
+            {
+                "url": "http://test.local",
+                "timeout": 2.5,
+                "headers": {"Authorization": "Bearer token"},
+            },
+        )
 
-        session = SimpleNamespace(get="get", post="post", put="put", patch="patch")
-        self.assertEqual(_request_method_callable(session, "GET"), "get")
-        self.assertEqual(_request_method_callable(session, "POST"), "post")
-        self.assertEqual(_request_method_callable(session, "PUT"), "put")
-        self.assertEqual(_request_method_callable(session, "PATCH"), "patch")
+        session = _Session()
+        for method in ("GET", "POST", "PUT", "PATCH"):
+            response = _request_method_callable(session, method)(url="http://test.local", timeout=1.0)
+            self.assertEqual(response.json(), {})
         with self.assertRaisesRegex(ValueError, "Unsupported template backend HTTP method"):
             _request_method_callable(session, "DELETE")
+        with self.assertRaisesRegex(TypeError, "does not implement HTTP GET"):
+            _request_method_callable(object(), "GET")
+        with self.assertRaisesRegex(TypeError, "does not implement HTTP POST"):
+            _request_method_callable(object(), "POST")
+        with self.assertRaisesRegex(TypeError, "does not implement HTTP PUT"):
+            _request_method_callable(object(), "PUT")
+        with self.assertRaisesRegex(TypeError, "does not implement HTTP PATCH"):
+            _request_method_callable(object(), "PATCH")
+        with self.assertRaisesRegex(TypeError, "does not implement HTTP GET"):
+            _request_method_callable(_InvalidDynamicSession(), "GET")
 
-        response = MagicMock()
-        response.json.return_value = ["not", "a", "dict"]
+        response = _Response(["not", "a", "dict"])
         self.assertEqual(_response_payload_dict(response), {})
 
     def test_template_enabled_state_tokens_are_exhaustive_contract(self) -> None:
@@ -153,10 +218,8 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         self.assertIsNotNone(backend._session)
 
     def test_template_http_backend_perform_request_renders_templates(self) -> None:
-        session = MagicMock()
-        response = MagicMock()
-        response.json.return_value = {"ok": True}
-        session.post.return_value = response
+        response = _Response({"ok": True})
+        session = _Session(response)
         backend = _TemplateBackend(
             SimpleNamespace(session=session),
             2.0,
@@ -171,8 +234,17 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         )
 
         self.assertEqual(payload, {"ok": True})
-        session.post.assert_called_once_with(
-            url="http://adapter.local/control",
-            timeout=2.0,
-            json={"enabled": True},
+        self.assertTrue(response.raise_called)
+        self.assertEqual(
+            session.calls,
+            [
+                (
+                    "POST",
+                    {
+                        "url": "http://adapter.local/control",
+                        "timeout": 2.0,
+                        "json": {"enabled": True},
+                    },
+                )
+            ],
         )

@@ -1,5 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from tests.venus_evcharger_state_controller_support import *
+import os
+import tempfile
+from unittest.mock import patch
+
+from venus_evcharger.controllers.state import ServiceStateController
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
+from venus_evcharger.controllers.state_runtime_overrides import RuntimeOverrideStore
+from tests.venus_evcharger_state_controller_support import (
+    STATE_RUNTIME_LOG_WARNING,
+    ServiceStateControllerTestBase,
+)
+from tests.venus_evcharger_test_fixtures import make_runtime_state_service
 
 
 class TestServiceStateControllerQuinary(ServiceStateControllerTestBase):
@@ -30,7 +41,7 @@ class TestServiceStateControllerQuinary(ServiceStateControllerTestBase):
 
     def test_runtime_restore_helpers_cover_non_dict_fault_and_mismatch_maps(self) -> None:
         service = make_runtime_state_service()
-        controller = ServiceStateController(service, self._normalize_mode)
+        controller = self.runtime_restorer(service)
 
         self.assertEqual(controller._normalized_phase_switch_mismatch_counts([], "P1"), {})
         self.assertEqual(controller._normalized_contactor_fault_counts([]), {})
@@ -42,6 +53,6 @@ class TestServiceStateControllerQuinary(ServiceStateControllerTestBase):
             _runtime_overrides_pending_values=[],
             _runtime_overrides_pending_text=None,
         )
-        controller = ServiceStateController(service, self._normalize_mode)
+        controller = RuntimeOverrideStore(service, RuntimeStateNormalizer())
 
         self.assertIsNone(controller._pending_runtime_overrides_payload(service, "/tmp/runtime.ini"))

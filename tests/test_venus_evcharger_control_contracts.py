@@ -60,7 +60,8 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
         self.assertEqual(normalized_control_api_error_code(" Invalid-JSON "), "invalid_json")
         self.assertEqual(normalized_control_api_error_code("boom"), "bad_request")
         self.assertEqual(normalized_control_command_name(" set_mode "), "set_mode")
-        self.assertEqual(normalized_control_command_name("unknown"), "legacy_unknown_write")
+        with self.assertRaisesRegex(ValueError, "Unsupported control command 'unknown'"):
+            normalized_control_command_name("unknown")
         self.assertEqual(normalized_control_command_source(" MQTT ", default="dbus"), "mqtt")
         self.assertEqual(normalized_control_command_source("unknown", default="dbus"), "dbus")
         self.assertEqual(normalized_control_command_status(" applied "), "applied")
@@ -87,14 +88,8 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
         self.assertEqual(payload["command_id"], "cmd-1")
         self.assertEqual(payload["idempotency_key"], "idem-1")
 
-        fallback = normalized_control_command_fields({"value": 12.5}, default_source="mqtt")
-        self.assertEqual(fallback["name"], "legacy_unknown_write")
-        self.assertEqual(fallback["path"], "")
-        self.assertEqual(fallback["value"], 12.5)
-        self.assertEqual(fallback["source"], "mqtt")
-        self.assertEqual(fallback["detail"], "")
-        self.assertEqual(fallback["command_id"], "")
-        self.assertEqual(fallback["idempotency_key"], "")
+        with self.assertRaisesRegex(ValueError, "Unsupported control command ''"):
+            normalized_control_command_fields({"value": 12.5}, default_source="mqtt")
 
     def test_control_result_fields_enforce_one_consistent_status_shape(self) -> None:
         applied = normalized_control_result_fields(
@@ -249,11 +244,10 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
         self.assertEqual(payload["unix_socket_path"], "/tmp/control.sock")
         self.assertEqual(payload["auth_header"], "Authorization: Bearer <token>")
         self.assertEqual(payload["auth_scopes"], ["control_admin", "read"])
-        self.assertEqual(payload["command_names"], ["legacy_unknown_write", "set_mode"])
+        self.assertEqual(payload["command_names"], ["set_mode"])
         self.assertEqual(
             payload["command_scope_requirements"],
             {
-                "legacy_unknown_write": "control_basic",
                 "set_mode": "control_basic",
                 "trigger_software_update": "update_admin",
             },

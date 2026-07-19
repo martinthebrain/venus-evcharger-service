@@ -7,10 +7,10 @@ REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 
 cd "$REPO_DIR"
 
-if python3 -m bandit --version >/dev/null 2>&1; then
-	BANDIT=(python3 -m bandit)
-elif [ -x "$REPO_DIR/.venv-ruff/bin/python" ] && "$REPO_DIR/.venv-ruff/bin/python" -m bandit --version >/dev/null 2>&1; then
+if [ -x "$REPO_DIR/.venv-ruff/bin/python" ] && "$REPO_DIR/.venv-ruff/bin/python" -m bandit --version >/dev/null 2>&1; then
 	BANDIT=("$REPO_DIR/.venv-ruff/bin/python" -m bandit)
+elif python3 -m bandit --version >/dev/null 2>&1; then
+	BANDIT=(python3 -m bandit)
 else
 	echo "bandit is required for the security audit. Install it with: .venv-ruff/bin/python -m pip install bandit" >&2
 	exit 1
@@ -26,3 +26,5 @@ fi
 	venus_evcharger_dbus_adapter.py \
 	venus_evchargerctl.py \
 	scripts/dev
+
+"$SCRIPT_DIR/run_dependency_audit.sh"

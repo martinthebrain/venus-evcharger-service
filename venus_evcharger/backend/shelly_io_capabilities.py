@@ -3,14 +3,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from venus_evcharger.backend.config import backend_mode_for_service
 from venus_evcharger.backend.errors import BACKEND_OPTIONAL_CAPABILITY_ERRORS
-from venus_evcharger.backend.models import PhaseSelection
-from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
+from venus_evcharger.backend.models import PhaseSelection, SwitchState
+from venus_evcharger.backend.shelly_io_ports import ShellyCapabilityHost
 from venus_evcharger.backend.shelly_io_types import (
-    ShellyIoHost,
     _ChargerStateBackendLike,
     _EnableBackendLike,
     _MeterBackendLike,
@@ -24,20 +23,21 @@ from venus_evcharger.backend.shelly_io_types import (
     normalize_supported_phase_tuple,
 )
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.ports.readback import TimedSwitchState
 
 
-class ShellyIoCapabilities(ShellyIoRequests):
+class ShellyCapabilities:
     """Expose split-backend discovery and direct-switch safety helpers."""
 
-    if TYPE_CHECKING:
-        service: ShellyIoHost
+    def __init__(self, service: ShellyCapabilityHost, clock: Callable[[], float]) -> None:
+        self.service = service
+        self._clock = clock
 
-        @staticmethod
-        def _optional_bool(value: object) -> bool | None: ...
+    @staticmethod
+    def _optional_bool(value: object) -> bool | None:
+        return None if value is None else bool(value)
 
-        def _runtime_now(self) -> float: ...
-
-    def _uses_split_backends(self) -> bool:
+    def uses_split_backends(self) -> bool:
         return backend_mode_for_service(self.service) == "split"
 
     def _service_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
@@ -50,37 +50,37 @@ class ShellyIoCapabilities(ShellyIoRequests):
             return None
         return normalize_supported_phase_tuple(getattr(settings, "supported_phase_selections"))
 
-    def _split_meter_backend(self) -> _MeterBackendLike | None:
-        if not self._uses_split_backends():
+    def split_meter_backend(self) -> _MeterBackendLike | None:
+        if not self.uses_split_backends():
             return None
         backend = getattr(self.service, "_meter_backend", None)
         return backend if is_meter_backend(backend) else None
 
-    def _split_switch_backend(self) -> _EnableBackendLike | None:
-        if not self._uses_split_backends():
+    def split_switch_backend(self) -> _EnableBackendLike | None:
+        if not self.uses_split_backends():
             return None
         backend = getattr(self.service, "_switch_backend", None)
         return backend if is_enable_backend(backend) else None
 
-    def _split_enable_backend(self) -> _EnableBackendLike | None:
-        backend = self._split_switch_backend()
+    def split_enable_backend(self) -> _EnableBackendLike | None:
+        backend = self.split_switch_backend()
         if backend is not None:
             return backend
-        if not self._uses_split_backends():
+        if not self.uses_split_backends():
             return None
         charger_backend = getattr(self.service, "_charger_backend", None)
         return charger_backend if is_enable_backend(charger_backend) else None
 
-    def _split_enable_source_key(self) -> str:
-        backend = self._split_enable_backend()
+    def split_enable_source_key(self) -> str:
+        backend = self.split_enable_backend()
         if backend is not None and backend is getattr(self.service, "_charger_backend", None):
             return "charger"
         return "shelly"
 
-    def _split_enable_source_label(self) -> str:
-        return "charger backend" if self._split_enable_source_key() == "charger" else "Shelly relay"
+    def split_enable_source_label(self) -> str:
+        return "charger backend" if self.split_enable_source_key() == "charger" else "Shelly relay"
 
-    def _phase_selection_switch_backend(self) -> _PhaseSelectionBackendLike | None:
+    def phase_selection_switch_backend(self) -> _PhaseSelectionBackendLike | None:
         backend = getattr(self.service, "_switch_backend", None)
         return backend if is_phase_selection_backend(backend) else None
 
@@ -97,11 +97,11 @@ class ShellyIoCapabilities(ShellyIoRequests):
             return True
         return selection in supported
 
-    def _charger_state_backend(self) -> _ChargerStateBackendLike | None:
+    def charger_state_backend(self) -> _ChargerStateBackendLike | None:
         backend = getattr(self.service, "_charger_backend", None)
         return backend if is_charger_state_backend(backend) else None
 
-    def _charger_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
+    def charger_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
         backend = getattr(self.service, "_charger_backend", None)
         supported = self._settings_supported_phase_selections(backend)
         return supported if supported is not None else self._service_supported_phase_selections()
@@ -129,10 +129,9 @@ class ShellyIoCapabilities(ShellyIoRequests):
 
     def _current_confirmed_switch_load_power_w(self) -> float | None:
         svc = self.service
-        confirmed = getattr(svc, "_last_pm_status_confirmed", None)
-        if not bool(confirmed):
+        if not bool(svc._last_pm_status_confirmed):
             return None
-        pm_status = getattr(svc, "_last_pm_status", None)
+        pm_status = svc._last_pm_status
         if not isinstance(pm_status, dict):
             return None
         power_w = finite_float_or_none(pm_status.get("apower"))
@@ -155,16 +154,13 @@ class ShellyIoCapabilities(ShellyIoRequests):
             seconds = 30.0
         return max(1.0, float(seconds))
 
-    def _warn_if_direct_switching_under_load(self, relay_on: bool) -> None:
+    def warn_if_direct_switching_under_load(self, relay_on: bool) -> None:
         warning_context = self._direct_switch_warning_context(relay_on)
         if warning_context is None:
             return
         power_w, limit_w = warning_context
         svc = self.service
-        warning = getattr(svc, "_warning_throttled", None)
-        if not callable(warning):
-            return
-        warning(
+        svc.runtime.warning_throttled(
             "direct-switch-under-load",
             self._direct_switch_warning_interval(),
             "Direct Shelly relay OFF requested at %.1fW above configured direct switch limit %.1fW; consider switching_mode=contactor",
@@ -172,7 +168,7 @@ class ShellyIoCapabilities(ShellyIoRequests):
             limit_w,
         )
 
-    def _remember_phase_selection_state(
+    def remember_phase_selection_state(
         self,
         *,
         active: object | None = None,
@@ -208,14 +204,18 @@ class ShellyIoCapabilities(ShellyIoRequests):
             return value
         return None
 
-    def _store_runtime_switch_snapshot(self, switch_state: object | None, now: float | None = None) -> None:
+    def store_runtime_switch_snapshot(self, switch_state: SwitchState | None, now: float | None = None) -> None:
         svc = self.service
         feedback_closed, interlock_ok = self._switch_snapshot_values(switch_state)
+        snapshot_at = self._clock() if now is None else float(now)
+        svc._readback_store.replace_switch(
+            None if switch_state is None else TimedSwitchState(state=switch_state, captured_at=snapshot_at)
+        )
         svc._last_switch_feedback_closed = feedback_closed
         svc._last_switch_interlock_ok = interlock_ok
         svc._last_switch_feedback_at = self._switch_snapshot_timestamp(feedback_closed, interlock_ok, now)
 
-    def _switch_snapshot_values(self, switch_state: object | None) -> tuple[bool | None, bool | None]:
+    def _switch_snapshot_values(self, switch_state: SwitchState | None) -> tuple[bool | None, bool | None]:
         feedback_value = None if switch_state is None else getattr(switch_state, "feedback_closed", None)
         interlock_value = None if switch_state is None else getattr(switch_state, "interlock_ok", None)
         return self._optional_bool(feedback_value), self._optional_bool(interlock_value)
@@ -228,13 +228,13 @@ class ShellyIoCapabilities(ShellyIoRequests):
     ) -> float | None:
         if feedback_closed is None and interlock_ok is None:
             return None
-        return self._runtime_now() if now is None else float(now)
+        return self._clock() if now is None else float(now)
 
-    def _split_switch_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
+    def split_switch_supported_phase_selections(self) -> tuple[PhaseSelection, ...]:
         capabilities = self._phase_switch_capabilities()
         if capabilities is None:
             if getattr(self.service, "_switch_backend", None) is None:
-                return tuple(self._charger_supported_phase_selections())
+                return tuple(self.charger_supported_phase_selections())
             return self._service_supported_phase_selections()
         if hasattr(capabilities, "supported_phase_selections"):
             return normalize_supported_phase_tuple(getattr(capabilities, "supported_phase_selections"))
@@ -245,7 +245,7 @@ class ShellyIoCapabilities(ShellyIoRequests):
         return bool(getattr(capabilities, "requires_charge_pause_for_phase_change", None))
 
     def set_phase_selection(self, selection: object) -> PhaseSelection:
-        supported_phase_selections = self._split_switch_supported_phase_selections()
+        supported_phase_selections = self.split_switch_supported_phase_selections()
         default_phase_selection = supported_phase_selections[0]
         normalized_selection = normalize_phase_value(selection, default_phase_selection)
         if normalized_selection not in supported_phase_selections:
@@ -254,7 +254,7 @@ class ShellyIoCapabilities(ShellyIoRequests):
                 f"(supported: {','.join(supported_phase_selections)})"
             )
 
-        switch_backend = self._phase_selection_switch_backend()
+        switch_backend = self.phase_selection_switch_backend()
         if switch_backend is not None:
             switch_backend.set_phase_selection(normalized_selection)
 
@@ -262,9 +262,12 @@ class ShellyIoCapabilities(ShellyIoRequests):
         if charger_backend is not None and self._charger_supports_phase_selection(normalized_selection):
             charger_backend.set_phase_selection(normalized_selection)
 
-        self._remember_phase_selection_state(
+        self.remember_phase_selection_state(
             supported=supported_phase_selections,
             requested=normalized_selection,
             active=normalized_selection,
         )
         return normalized_selection
+
+
+__all__ = ["ShellyCapabilities"]

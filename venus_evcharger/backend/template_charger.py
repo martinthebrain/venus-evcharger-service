@@ -56,7 +56,6 @@ from .template_charger_contract import (
 from .models import (
     ChargerState,
     PhaseSelection,
-    normalize_phase_selection,
     normalize_phase_selection_or_none,
     normalize_phase_selection_tuple,
 )

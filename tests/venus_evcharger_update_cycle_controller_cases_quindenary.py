@@ -9,7 +9,7 @@ class TestUpdateCycleControllerQuindenary(UpdateCycleControllerTestBase):
             set_current=MagicMock(),
         )
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=105.0),
+            time_now=MagicMock(return_value=105.0),
             _state_summary=lambda: "state",
             _watchdog_recover=MagicMock(),
             _ensure_auto_input_helper_process=MagicMock(),
@@ -86,12 +86,7 @@ class TestUpdateCycleControllerQuindenary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=None,
             learned_charge_power_signature_mismatch_sessions=0,
             learned_charge_power_signature_checked_session_started_at=None,
-            auto_learn_charge_power_enabled=False,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            auto_learn_charge_power_window_seconds=180.0,
-            auto_learn_charge_power_max_age_seconds=21600.0,
-            auto_learn_charge_power_min_watts=500.0,
-            auto_learn_charge_power_alpha=0.2,
+            auto_policy=_learning_policy(enabled=False),
             min_current=6.0,
             max_current=16.0,
             _relay_sync_expected_state=None,
@@ -121,7 +116,7 @@ class TestUpdateCycleControllerQuindenary(UpdateCycleControllerTestBase):
 
     def test_update_saves_runtime_state_when_charge_power_learning_updates(self):
         service = SimpleNamespace(
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _state_summary=lambda: "state",
             _watchdog_recover=MagicMock(),
             _ensure_auto_input_helper_process=MagicMock(),
@@ -174,12 +169,7 @@ class TestUpdateCycleControllerQuindenary(UpdateCycleControllerTestBase):
             _last_battery_soc_value=None,
             _last_battery_soc_at=None,
             auto_input_cache_seconds=0.0,
-            auto_learn_charge_power_enabled=True,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            auto_learn_charge_power_window_seconds=180.0,
-            auto_learn_charge_power_max_age_seconds=21600.0,
-            auto_learn_charge_power_min_watts=500.0,
-            auto_learn_charge_power_alpha=0.2,
+            auto_policy=_learning_policy(),
             learned_charge_power_watts=None,
             learned_charge_power_updated_at=None,
             learned_charge_power_state="unknown",

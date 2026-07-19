@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
+from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.control import ControlCommand, ControlResult
 from venus_evcharger.controllers import write as write_module
 from venus_evcharger.controllers.write import DbusWriteController
@@ -105,46 +106,47 @@ class TestWriteControllerCommandBoundaryContracts(unittest.TestCase):
         build.assert_called_once_with("/Mode", 2, source="dbus")
         handle.assert_called_once_with(command)
 
+    def test_unsupported_path_is_rejected_before_state_or_persistence_work(self) -> None:
+        controller = DbusWriteController(SimpleNamespace())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "^Unsupported control path '/Unknown'\\.$",
+        ):
+            controller.handle_write("/Unknown", object())
+
 
 class TestWriteControllerRuntimeSettingContracts(unittest.TestCase):
-    def test_sync_auto_policy_rebuilds_validates_and_revalidates_runtime(self) -> None:
-        service = SimpleNamespace()
-        port = SimpleNamespace(_service=service, validate_runtime_config=MagicMock())
-        policy = SimpleNamespace()
-        with (
-            patch.object(write_module.AutoPolicy, "from_service", return_value=policy) as build,
-            patch.object(write_module, "validate_auto_policy") as validate,
-        ):
-            DbusWriteController._sync_auto_policy_runtime(port)
-        build.assert_called_once_with(service)
-        validate.assert_called_once_with(policy, service)
+    def test_apply_policy_setting_updates_the_canonical_object(self) -> None:
+        policy = AutoPolicy()
+        port = SimpleNamespace(auto_policy=policy, validate_runtime_config=MagicMock())
+
+        self.assertEqual(
+            DbusWriteController._apply_auto_runtime_setting(
+                port,
+                "/Auto/StartSurplusWatts",
+                "123.5",
+            ),
+            123.5,
+        )
+
+        self.assertEqual(policy.normal_profile.start_surplus_watts, 123.5)
+        self.assertFalse(hasattr(port, "auto_start_surplus_watts"))
         port.validate_runtime_config.assert_called_once_with()
 
-    def test_apply_runtime_setting_uses_declared_normalizer_and_validation_kind(self) -> None:
-        port = SimpleNamespace(_service=SimpleNamespace(), validate_runtime_config=MagicMock())
-        policy_normalizer = MagicMock(return_value=123.5)
+    def test_apply_runtime_setting_uses_its_declared_normalizer(self) -> None:
+        port = SimpleNamespace(validate_runtime_config=MagicMock())
         runtime_normalizer = MagicMock(return_value="normalized")
         specs = {
-            "/Policy": ("policy_value", policy_normalizer, "policy"),
-            "/Runtime": ("runtime_value", runtime_normalizer, "runtime"),
+            "/Runtime": ("runtime_value", runtime_normalizer),
         }
-        with (
-            patch.object(DbusWriteController, "AUTO_RUNTIME_SETTING_SPECS", specs),
-            patch.object(DbusWriteController, "_sync_auto_policy_runtime") as sync,
-        ):
-            self.assertEqual(
-                DbusWriteController._apply_auto_runtime_setting(port, "/Policy", "123.5"),
-                123.5,
-            )
+        with patch.object(DbusWriteController, "AUTO_RUNTIME_SETTING_SPECS", specs):
             self.assertEqual(
                 DbusWriteController._apply_auto_runtime_setting(port, "/Runtime", " value "),
                 "normalized",
             )
-        policy_normalizer.assert_called_once_with("123.5")
         runtime_normalizer.assert_called_once_with(" value ")
-        sync.assert_called_once_with(port)
         port.validate_runtime_config.assert_called_once_with()
-        self.assertEqual(port.policy_value, 123.5)
         self.assertEqual(port.runtime_value, "normalized")
 
     def test_runtime_setting_handler_publishes_normalized_value_once(self) -> None:
@@ -158,7 +160,7 @@ class TestWriteControllerRuntimeSettingContracts(unittest.TestCase):
         apply.assert_called_once_with(port, "/Setting", "7.5")
         port.publish_dbus_field.assert_called_once_with("field", 7.5, 50.0, force=True)
 
-    def test_value_adapters_and_unknown_write_have_exact_normalization(self) -> None:
+    def test_value_adapters_have_exact_normalization(self) -> None:
         controller = DbusWriteController(SimpleNamespace())
         with (
             patch.object(controller, "_handle_mode_write") as mode,
@@ -171,7 +173,6 @@ class TestWriteControllerRuntimeSettingContracts(unittest.TestCase):
         mode.assert_called_once_with(2)
         startstop.assert_called_once_with(False)
         enable.assert_called_once_with(True)
-        self.assertIsNone(controller._handle_unknown_write("/Unknown", object()))
 
 
 if __name__ == "__main__":

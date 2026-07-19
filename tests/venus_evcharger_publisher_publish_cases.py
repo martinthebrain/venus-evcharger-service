@@ -176,17 +176,17 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        self.assertIsNone(controller._charger_current_readback(100.0))
-        self.assertFalse(controller._learned_charge_power_expired_for_display(100.0))
+        self.assertIsNone(controller.learned._charger_current_readback(100.0))
+        self.assertFalse(controller.learned._learned_charge_power_expired_for_display(100.0))
         service.auto_learn_charge_power_max_age_seconds = 60.0
-        self.assertTrue(controller._learned_charge_power_expired_for_display(100.0))
-        self.assertIsNone(controller._validated_learned_display_scalars(None, 230.0))
-        self.assertIsNone(controller._validated_learned_display_scalars(2000.0, None))
-        self.assertIsNone(controller._raw_learned_display_values())
-        self.assertIsNone(controller._stable_learned_display_inputs(100.0))
-        self.assertIsNone(controller._rounded_display_current(0.4))
-        self.assertIsNone(controller._derived_learned_set_current(100.0))
-        self.assertEqual(controller._fault_active(service), 1)
+        self.assertTrue(controller.learned._learned_charge_power_expired_for_display(100.0))
+        self.assertIsNone(controller.learned._validated_learned_display_scalars(None, 230.0))
+        self.assertIsNone(controller.learned._validated_learned_display_scalars(2000.0, None))
+        self.assertIsNone(controller.learned._raw_learned_display_values())
+        self.assertIsNone(controller.learned._stable_learned_display_inputs(100.0))
+        self.assertIsNone(controller.learned._rounded_display_current(0.4))
+        self.assertIsNone(controller.learned._derived_learned_set_current(100.0))
+        self.assertEqual(controller.runtime_view.fault_active(service), 1)
 
     def test_publish_helpers_cover_delete_failure_and_display_fallback_edges(self) -> None:
         class _DeleteFailingDbusService(dict[str, object]):
@@ -214,7 +214,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         controller = DbusPublishController(service, self._age_seconds)
 
         self.assertTrue(controller.publish_path("/Ghost", None, now=10.0, force=True))
-        self.assertEqual(controller._display_set_current(100.0), 6.0)
+        self.assertEqual(controller.learned.display_set_current(100.0), 6.0)
 
     def test_publish_helpers_cover_remaining_restore_and_learned_display_edges(self) -> None:
         class _DeleteFailingDbusService(dict[str, object]):
@@ -232,25 +232,25 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        controller._restore_service_values(["/Ghost"], {})
+        controller.core._restore_service_values(["/Ghost"], {})
 
-        with patch.object(controller, "_learned_display_current_allowed", return_value=True):
-            with patch.object(controller, "_raw_learned_display_values", return_value=None):
-                self.assertIsNone(controller._stable_learned_display_inputs(100.0))
+        with patch.object(controller.learned, "_learned_display_current_allowed", return_value=True):
+            with patch.object(controller.learned, "_raw_learned_display_values", return_value=None):
+                self.assertIsNone(controller.learned._stable_learned_display_inputs(100.0))
             with (
-                patch.object(controller, "_raw_learned_display_values", return_value=(2300.0, 230.0, "L1")),
-                patch.object(controller, "_phase_voltage_for_display_current", return_value=None),
+                patch.object(controller.learned, "_raw_learned_display_values", return_value=(2300.0, 230.0, "L1")),
+                patch.object(controller.learned, "_phase_voltage_for_display_current", return_value=None),
             ):
-                self.assertIsNone(controller._stable_learned_display_inputs(100.0))
+                self.assertIsNone(controller.learned._stable_learned_display_inputs(100.0))
             with (
                 patch.object(
-                    controller,
+                    controller.learned,
                     "_stable_learned_display_inputs",
                     return_value=SimpleNamespace(power_w=1.0, phase_voltage_v=230.0, phase_count=1.0),
                 ),
-                patch.object(controller, "_rounded_display_current", return_value=None),
+                patch.object(controller.learned, "_rounded_display_current", return_value=None),
             ):
-                self.assertIsNone(controller._derived_learned_set_current(100.0))
+                self.assertIsNone(controller.learned._derived_learned_set_current(100.0))
 
     def test_learned_display_helpers_cover_minimal_candidate_and_unbounded_current_edges(self) -> None:
         service = SimpleNamespace(
@@ -262,8 +262,8 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        self.assertEqual(controller._charger_state_max_age_seconds(), 2.0)
-        self.assertEqual(controller._clamped_display_current(12.5), 12.5)
+        self.assertEqual(controller.learned._charger_state_max_age_seconds(), 2.0)
+        self.assertEqual(controller.learned._clamped_display_current(12.5), 12.5)
 
     def test_publish_transactional_removes_new_paths_when_group_write_fails(self) -> None:
         class FlakyDbusService(dict[str, int]):
@@ -282,7 +282,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        changed = controller._publish_values_transactional(
+        changed = controller.core._publish_values_transactional(
             "generic",
             {"/A": 1, "/B": 2},
             100.0,
@@ -295,7 +295,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         self.assertEqual(service._dbus_publish_state, {})
         service._mark_failure.assert_called_once_with("dbus")
 
-    def test_publish_group_failure_falls_back_to_logging_without_warning_helper(self) -> None:
+    def test_publish_group_failure_uses_runtime_logging_without_custom_warning_callback(self) -> None:
         service = SimpleNamespace(
             _dbusservice={},
             _dbus_publish_state={},
@@ -306,7 +306,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         controller = DbusPublishController(service, self._age_seconds)
 
         with patch("logging.warning") as warning:
-            controller._publish_group_failure("diagnostic", ["/Path"], 123.0)
+            controller.core._publish_group_failure("diagnostic", ["/Path"])
 
         service._mark_failure.assert_called_once_with("dbus")
         warning.assert_called_once()
@@ -322,7 +322,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        changed = controller._publish_values({"/Path": 5}, 100.0, interval_seconds=10.0)
+        changed = controller.core._publish_values({"/Path": 5}, 100.0, interval_seconds=10.0)
 
         self.assertFalse(changed)
         self.assertEqual(service._dbusservice["/Path"], 5)
@@ -339,7 +339,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        changed = controller._publish_values({"/Path": 2, "/Other": 3}, 100.0, force=True)
+        changed = controller.core._publish_values({"/Path": 2, "/Other": 3}, 100.0, force=True)
 
         self.assertTrue(changed)
         self.assertEqual(service._dbusservice["/Path"], 1)
@@ -434,7 +434,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
         controller = DbusPublishController(service, self._age_seconds)
 
-        changed = controller._publish_values_transactional(
+        changed = controller.core._publish_values_transactional(
             "generic",
             {"/A": 2, "/B": 3},
             100.0,

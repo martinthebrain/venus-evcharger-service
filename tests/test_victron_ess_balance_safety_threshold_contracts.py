@@ -7,25 +7,23 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from venus_evcharger.update.victron_ess_balance_safety import _UpdateCycleVictronEssBalanceSafety
-
-
-class _SafetyThresholdHarness(_UpdateCycleVictronEssBalanceSafety):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        return float(value) if isinstance(value, (int, float)) else None
+from venus_evcharger.update.victron_ess_balance_safety import VictronEssSafetyController
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 class VictronEssBalanceSafetyThresholdContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.safety = _SafetyThresholdHarness()
+        components = build_victron_ess_components()
+        self.safety = components.safety
+        self.recovery = components.recovery
+        self.sources = components.sources
 
     def test_missing_runtime_metric_fields_have_explicit_defaults(self) -> None:
         svc = SimpleNamespace()
         with (
             patch.object(self.safety, "_victron_ess_balance_recent_direction_change_count", return_value=0),
-            patch.object(self.safety, "_victron_ess_balance_overshoot_cooldown_active", return_value=False),
-            patch.object(self.safety, "_victron_ess_balance_auto_apply_suspended", return_value=False),
+            patch.object(self.recovery, "_victron_ess_balance_overshoot_cooldown_active", return_value=False),
+            patch.object(self.recovery, "_victron_ess_balance_auto_apply_suspended", return_value=False),
         ):
             self.assertEqual(
                 self.safety._victron_ess_balance_lockout_metrics(svc, 10.0, None),
@@ -136,8 +134,8 @@ class VictronEssBalanceSafetyThresholdContracts(unittest.TestCase):
         svc = SimpleNamespace(_victron_ess_balance_recent_action_changes=[{"at": 1.0}])
         kept = [{"at": 5.0}, {"at": 6.0}, {"at": 7.0}]
         with (
-            patch.object(_UpdateCycleVictronEssBalanceSafety, "_victron_ess_balance_direction_change_window_seconds", return_value=4.0) as window,
-            patch.object(_UpdateCycleVictronEssBalanceSafety, "_victron_ess_balance_kept_action_changes", return_value=kept) as filter_entries,
+            patch.object(VictronEssSafetyController, "_victron_ess_balance_direction_change_window_seconds", return_value=4.0) as window,
+            patch.object(VictronEssSafetyController, "_victron_ess_balance_kept_action_changes", return_value=kept) as filter_entries,
         ):
             self.assertEqual(self.safety._victron_ess_balance_recent_direction_change_count(svc, 10.0), 2)
         window.assert_called_once_with(svc)
@@ -145,7 +143,7 @@ class VictronEssBalanceSafetyThresholdContracts(unittest.TestCase):
         self.assertIs(svc._victron_ess_balance_recent_action_changes, kept)
 
         with patch.object(
-            _UpdateCycleVictronEssBalanceSafety,
+            VictronEssSafetyController,
             "_victron_ess_balance_kept_action_changes",
             return_value=[],
         ):
@@ -178,7 +176,7 @@ class VictronEssBalanceSafetyThresholdContracts(unittest.TestCase):
             self.assertIsNone(self.safety._victron_ess_balance_power_window_reason(svc, cluster))
         foreign.assert_called_once_with(5.0, 2.0)
         with (
-            patch.object(self.safety, "_victron_ess_balance_ev_power_w", return_value=6.0) as power,
+            patch.object(self.sources, "_victron_ess_balance_ev_power_w", return_value=6.0) as power,
             patch.object(self.safety, "_victron_ess_balance_ev_load_jump", return_value=False) as jump,
         ):
             self.assertIsNone(self.safety._victron_ess_balance_ev_window_reason(svc))

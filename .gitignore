@@ -1,7 +1,8 @@
 .coverage
+coverage.xml
 .ruff_cache/
-.venv-mutmut/
-.venv-ruff/
+.venv-mutmut
+.venv-ruff
 __pycache__/
 build/
 mutants/

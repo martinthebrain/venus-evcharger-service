@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
 
+from tests.support.dbus_inputs import DbusInputServiceFake
 from venus_evcharger.energy import EnergyLearningProfile, EnergySourceDefinition
 from venus_evcharger.inputs.dbus import DbusInputController
 from venus_evcharger.inputs.dbus_errors import (
@@ -21,27 +21,37 @@ from venus_evcharger.inputs.energy_snapshot_contracts import (
     nested_object_mappings,
     object_mapping,
 )
+from venus_evcharger.ports.dbus import DbusInputPort
 
 
 class InputBoundaryContractTests(unittest.TestCase):
     def test_dbus_controller_binds_only_supported_ports(self) -> None:
-        class BoundPort:
-            def __init__(self) -> None:
-                self.controllers: list[object] = []
+        service = DbusInputServiceFake(_resolved_auto_pv_services=["pv.a"], _auto_pv_last_scan=5.0)
+        port = DbusInputPort(service)
+        controller = DbusInputController(port)
+        port.invalidate_auto_pv_services()
+        self.assertEqual(service._resolved_auto_pv_services, [])
+        self.assertEqual(service._auto_pv_last_scan, 0.0)
+        self.assertIsInstance(controller.gateway, object)
+        self.assertIsInstance(controller.pv, object)
+        self.assertIsInstance(controller.storage, object)
 
-            def bind_controller(self, controller: object) -> None:
-                self.controllers.append(controller)
+    def test_dbus_controller_wires_one_shared_boundary_graph(self) -> None:
+        port = DbusInputPort(DbusInputServiceFake())
+        controller = DbusInputController(port)
 
-        bound_port = BoundPort()
-        controller = DbusInputController(bound_port)
-        self.assertIs(controller.port, bound_port)
-        self.assertIs(controller.service, bound_port)
-        self.assertEqual(bound_port.controllers, [controller])
-
-        plain_port = object()
-        plain_controller = DbusInputController(plain_port)
-        self.assertIs(plain_controller.port, plain_port)
-        self.assertIs(plain_controller.service, plain_port)
+        self.assertIs(controller.gateway._port, port)
+        self.assertIs(controller.source_health._port, port)
+        self.assertIs(controller.pv._port, port)
+        self.assertIs(controller.pv._gateway, controller.gateway)
+        self.assertIs(controller.pv._health, controller.source_health)
+        self.assertIs(controller.energy_services._port, port)
+        self.assertIs(controller.energy_services._gateway, controller.gateway)
+        self.assertIs(controller.storage._port, port)
+        self.assertIs(controller.storage._gateway, controller.gateway)
+        self.assertIs(controller.storage._health, controller.source_health)
+        self.assertIs(controller.storage._resolver, controller.energy_services)
+        self.assertIs(port._bound_controller(), controller)
 
     def test_error_contracts_are_exact(self) -> None:
         self.assertEqual(DBUS_INPUT_READ_ERRORS, (OSError, RuntimeError, ValueError))

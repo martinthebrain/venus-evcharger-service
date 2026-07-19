@@ -10,11 +10,7 @@ from unittest.mock import patch
 from venus_evcharger.backend.models import ChargerState
 from venus_evcharger.backend.modbus_charger import ModbusChargerBackend
 from venus_evcharger.backend.modbus_transport import ModbusTransportSettings
-from venus_evcharger.backend.native_modbus_backend import (
-    _native_modbus_transport_factory,
-    create_modbus_transport,
-    native_modbus_client,
-)
+from venus_evcharger.backend.native_modbus_backend import native_modbus_client
 from venus_evcharger.backend.modbus_transport import ModbusRequest
 
 
@@ -443,18 +439,9 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
             self.assertIs(client, backend._client_cache)
             create_transport.assert_not_called()
 
-    def test_native_modbus_backend_contracts_cover_invalid_cache_and_transport_factory(self) -> None:
+    def test_native_modbus_backend_contract_rejects_invalid_client_cache(self) -> None:
         with self.assertRaisesRegex(TypeError, "Native Modbus client cache must hold ModbusClient"):
             native_modbus_client(SimpleNamespace(_client_cache=object()))
-
-        backend = SimpleNamespace()
-        with patch("types.create_modbus_transport", object(), create=True):
-            self.assertIs(_native_modbus_transport_factory(backend), create_modbus_transport)
-
-        with patch("types.create_modbus_transport", return_value=object(), create=True):
-            factory = _native_modbus_transport_factory(backend)
-            with self.assertRaisesRegex(TypeError, "Modbus transport factory returned object"):
-                factory(SimpleNamespace())
 
     def test_modbus_charger_can_emulate_enable_via_current_write(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

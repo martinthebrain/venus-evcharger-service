@@ -15,19 +15,14 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=229.0,
             learned_charge_power_signature_mismatch_sessions=0,
             learned_charge_power_signature_checked_session_started_at=50.0,
-            auto_learn_charge_power_enabled=True,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            auto_learn_charge_power_window_seconds=180.0,
-            auto_learn_charge_power_max_age_seconds=21600.0,
-            auto_learn_charge_power_min_watts=500.0,
-            auto_learn_charge_power_alpha=0.2,
+            auto_policy=_learning_policy(),
             phase="L1",
             max_current=16.0,
             _last_voltage=None,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertTrue(controller.update_learned_charge_power(True, 2, 1920.0, 0.0, 110.0))
+        self.assertTrue(controller.components.learning.update_learned_charge_power(True, 2, 1920.0, 0.0, 110.0))
         self.assertEqual(service.learned_charge_power_voltage, 229.0)
 
     def test_plausible_learning_power_max_uses_phase_voltage_for_three_phase_line_voltage(self):
@@ -40,7 +35,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         self.assertAlmostEqual(
-            controller._plausible_learning_power_max(400.0),
+            controller.components.learning._plausible_learning_power_max(400.0),
             16.0 * (400.0 / math.sqrt(3.0)) * 3.0 * 1.1,
             places=6,
         )
@@ -57,12 +52,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
             learned_charge_power_voltage=None,
             learned_charge_power_signature_mismatch_sessions=0,
             learned_charge_power_signature_checked_session_started_at=None,
-            auto_learn_charge_power_enabled=True,
-            auto_learn_charge_power_start_delay_seconds=30.0,
-            auto_learn_charge_power_window_seconds=180.0,
-            auto_learn_charge_power_max_age_seconds=21600.0,
-            auto_learn_charge_power_min_watts=500.0,
-            auto_learn_charge_power_alpha=0.2,
+            auto_policy=_learning_policy(),
             phase="3P",
             voltage_mode="line",
             max_current=16.0,
@@ -70,7 +60,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertFalse(controller.update_learned_charge_power(True, 2, 15000.0, 400.0, 100.0))
+        self.assertFalse(controller.components.learning.update_learned_charge_power(True, 2, 15000.0, 400.0, 100.0))
         self.assertIsNone(service.learned_charge_power_watts)
         self.assertEqual(service.learned_charge_power_state, "unknown")
 
@@ -88,7 +78,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
         pm_status = {"output": True, "apower": 1200.0, "current": 5.2}
 
-        updated = controller.apply_startup_manual_target(pm_status, 123.0)
+        updated = controller.components.state.apply_startup_manual_target(pm_status, 123.0)
 
         self.assertIs(updated, pm_status)
         service._queue_relay_command.assert_not_called()
@@ -108,7 +98,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        updated = controller.apply_startup_manual_target(
+        updated = controller.components.state.apply_startup_manual_target(
             {"output": True, "apower": 1200.0, "current": 5.2},
             123.0,
         )
@@ -135,7 +125,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        updated = controller.apply_startup_manual_target(
+        updated = controller.components.state.apply_startup_manual_target(
             {"output": True, "apower": 1200.0, "current": 5.2},
             123.0,
         )
@@ -167,14 +157,14 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
         pm_status = {"output": True, "apower": 1200.0, "current": 5.2}
 
-        updated = controller.apply_startup_manual_target(pm_status, 123.0)
+        updated = controller.components.state.apply_startup_manual_target(pm_status, 123.0)
 
         charger_backend.set_enabled.assert_not_called()
         service._publish_local_pm_status.assert_not_called()
         self.assertIs(updated, pm_status)
         self.assertIs(service._startup_manual_target, False)
 
-    def test_apply_startup_manual_target_falls_back_to_local_pm_status_update_without_helper(self):
+    def test_apply_startup_manual_target_uses_canonical_local_pm_status_runtime_port(self):
         service = SimpleNamespace(
             _startup_manual_target=False,
             virtual_mode=0,
@@ -183,15 +173,19 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
             _queue_relay_command=MagicMock(),
             _mark_failure=MagicMock(),
             _warning_throttled=MagicMock(),
+            _publish_local_pm_status=MagicMock(
+                return_value={"output": False, "apower": 0.0, "current": 0.0}
+            ),
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        updated = controller.apply_startup_manual_target(
+        updated = controller.components.state.apply_startup_manual_target(
             {"output": True, "apower": 1200.0, "current": 5.2},
             123.0,
         )
 
         service._queue_relay_command.assert_called_once_with(False, 123.0)
+        service._publish_local_pm_status.assert_called_once_with(False, 123.0)
         self.assertIsNone(service._startup_manual_target)
         self.assertFalse(updated["output"])
         self.assertEqual(updated["apower"], 0.0)
@@ -211,7 +205,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
         pm_status = {"output": True, "apower": 1200.0, "current": 5.2}
 
-        updated = controller.apply_startup_manual_target(pm_status, 123.0)
+        updated = controller.components.state.apply_startup_manual_target(pm_status, 123.0)
 
         self.assertIs(updated, pm_status)
         self.assertIs(service._startup_manual_target, False)
@@ -234,7 +228,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
         pm_status = {"output": True, "apower": 1200.0, "current": 5.2}
 
-        updated = controller.apply_startup_manual_target(pm_status, 123.0)
+        updated = controller.components.state.apply_startup_manual_target(pm_status, 123.0)
 
         self.assertIs(updated, pm_status)
         self.assertIs(service._startup_manual_target, False)
@@ -255,7 +249,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        updated = controller.apply_startup_manual_target(
+        updated = controller.components.state.apply_startup_manual_target(
             {"output": True, "apower": 1200.0, "current": 5.2},
             123.0,
         )
@@ -287,7 +281,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        pv_power, battery_soc, grid_power = controller.resolve_auto_inputs(
+        pv_power, battery_soc, grid_power = controller.components.inputs.resolve_auto_inputs(
             {
                 "captured_at": 100.0,
                 "pv_power": None,
@@ -322,7 +316,7 @@ class TestUpdateCycleControllerOctonary(UpdateCycleControllerTestBase):
         )
 
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        pv_power, battery_soc, grid_power = controller.resolve_auto_inputs(
+        pv_power, battery_soc, grid_power = controller.components.inputs.resolve_auto_inputs(
             {
                 "captured_at": 100.0,
                 "pv_power": 2300.0,

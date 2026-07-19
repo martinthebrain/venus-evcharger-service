@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Service roles packaged under ``venus_evcharger.service``."""
+"""Explicit wallbox service components."""
 
-from .auto import DbusAutoLogic
-from .factory import ServiceControllerFactory
-from .runtime import RuntimeHelper
-from .state_publish import StatePublish
-from .update import UpdateCycle
+from .auto_facade import ServiceAutoFacade
+from .control import ServiceControlFacade
+from .controller_owner import ServiceControllerOwner
+from .runtime_facade import ServiceRuntimeFacade
+from .state_facade import ServiceStateFacade
+from .update_facade import ServiceUpdateFacade
 
 __all__ = [
-    "DbusAutoLogic",
-    "RuntimeHelper",
-    "ServiceControllerFactory",
-    "StatePublish",
-    "UpdateCycle",
+    "ServiceAutoFacade",
+    "ServiceControlFacade",
+    "ServiceControllerOwner",
+    "ServiceRuntimeFacade",
+    "ServiceStateFacade",
+    "ServiceUpdateFacade",
 ]

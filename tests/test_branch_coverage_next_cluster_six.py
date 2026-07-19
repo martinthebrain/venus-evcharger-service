@@ -1,14 +1,13 @@
 import unittest
-from argparse import Namespace
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from tests.service_roles_cases_common import _RuntimeService
 from tests.wizard_branch_runtime_cases_common import _namespace
 from venus_evcharger.bootstrap import wizard_main
 from venus_evcharger.energy import connectors as connectors_mod
 from venus_evcharger.energy import connectors_command as connectors_command_mod
 from venus_evcharger.energy import connectors_template as connectors_template_mod
+from venus_evcharger.service.runtime_facade import ServiceRuntimeFacade
 
 
 class BranchCoverageNextClusterSixTests(unittest.TestCase):
@@ -38,14 +37,9 @@ class BranchCoverageNextClusterSixTests(unittest.TestCase):
         )
         self.assertEqual(connectors_mod._modbus_field_text(_FloatClient(), field), "12.5")
 
-    def test_runtime_helper_get_system_bus_rejects_direct_dbus_access(self) -> None:
-        service = _RuntimeService()
-        service._runtime_support_controller = MagicMock()
-        service._runtime_support_controller.get_system_bus.return_value = "system-bus"
-
+    def test_runtime_facade_rejects_direct_dbus_access(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            service._get_system_bus()
-        service._runtime_support_controller.get_system_bus.assert_not_called()
+            ServiceRuntimeFacade.get_system_bus()
 
     def test_resolved_energy_capacity_wh_returns_none_when_prompt_declined(self) -> None:
         namespace = _namespace(energy_recommendation_prefix=["/tmp/huawei-rec"])

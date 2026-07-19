@@ -9,7 +9,6 @@ from typing import Any, SupportsFloat, SupportsIndex, SupportsInt
 
 from venus_evcharger.backend.config import backend_mode_for_service, backend_type_for_service
 from venus_evcharger.energy import energy_source_profile_details
-from venus_evcharger.service.control_state_victron import _ControlApiStateVictron
 
 _ConfigConverter = Callable[[object], object]
 
@@ -257,11 +256,16 @@ def _state_api_config_effective_state(owner: object) -> dict[str, Any]:
     return state
 
 
-class _ControlApiStateConfig(_ControlApiStateVictron):
-    def _state_api_config_effective_payload(self) -> dict[str, Any]:
+class ControlStateConfig:
+    """Build the effective configuration payload from one explicit owner."""
+
+    def __init__(self, service: object) -> None:
+        self.service = service
+
+    def effective_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
             "api_version": "v1",
             "kind": "config-effective",
-            "state": _state_api_config_effective_state(self),
+            "state": _state_api_config_effective_state(self.service),
         }

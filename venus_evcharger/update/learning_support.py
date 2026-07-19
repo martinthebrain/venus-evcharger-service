@@ -22,10 +22,8 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
         return LearningEngine.window_status(
             None if charging_started_at is None else float(charging_started_at),
             LearningWindowConfig(
-                start_delay_seconds=float(
-                    getattr(self.service, "auto_learn_charge_power_start_delay_seconds", 30.0)
-                ),
-                window_seconds=float(getattr(self.service, "auto_learn_charge_power_window_seconds", 180.0)),
+                start_delay_seconds=float(self.service.auto_policy.learn_charge_power.start_delay_seconds),
+                window_seconds=float(self.service.auto_policy.learn_charge_power.window_seconds),
             ),
             now,
         )
@@ -40,7 +38,7 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
         return LearningEngine.accepted_sample(
             power,
             LearningPlausibilityConfig(
-                min_watts=float(getattr(self.service, "auto_learn_charge_power_min_watts", 500.0)),
+                min_watts=float(self.service.auto_policy.learn_charge_power.min_watts),
                 max_watts=self._plausible_learning_power_max(voltage),
             ),
         )
@@ -111,7 +109,7 @@ class _UpdateCycleLearningSupport(_UpdateCycleLearningSignature):
         current_voltage_signature: float | None,
     ) -> tuple[float, float | None]:
         """Return EWMA-smoothed learned power and voltage signature."""
-        alpha = float(getattr(self.service, "auto_learn_charge_power_alpha", 0.2))
+        alpha = float(self.service.auto_policy.learn_charge_power.alpha)
         previous_voltage_signature = getattr(self.service, "learned_charge_power_voltage", None)
         return LearningEngine.smoothed_values(
             previous_value,

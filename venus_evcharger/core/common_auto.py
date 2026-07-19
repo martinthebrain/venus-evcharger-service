@@ -133,7 +133,7 @@ def _charger_transport_max_age_seconds(svc: Any) -> float:
 def _charger_transport_now(svc: Any, now: float | int | None = None) -> float:
     if now is not None:
         return float(now)
-    time_now = getattr(svc, "_time_now", None)
+    time_now = getattr(svc, "time_now", None)
     if callable(time_now):
         raw_value = time_now()
         if isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
@@ -242,17 +242,9 @@ def _confirmed_relay_state_max_age_seconds(svc: Any) -> float:
 def _confirmed_relay_sample(svc: Any) -> tuple[dict[str, Any] | None, Any]:
     pm_status = getattr(svc, "_last_confirmed_pm_status", None)
     captured_at = getattr(svc, "_last_confirmed_pm_status_at", None)
-    if pm_status is None:
-        pm_status, captured_at = _legacy_confirmed_relay_sample(svc)
     if not isinstance(pm_status, dict):
         return None, None
     return {str(key): value for key, value in pm_status.items()}, captured_at
-
-
-def _legacy_confirmed_relay_sample(svc: Any) -> tuple[Any, Any]:
-    if not bool(getattr(svc, "_last_pm_status_confirmed", False)):
-        return None, None
-    return getattr(svc, "_last_pm_status", None), getattr(svc, "_last_pm_status_at", None)
 
 
 def _confirmed_relay_sample_valid(pm_status: dict[str, Any] | None, captured_at: Any) -> bool:

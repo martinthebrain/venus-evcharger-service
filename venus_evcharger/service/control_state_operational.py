@@ -19,12 +19,14 @@ from venus_evcharger.service.control_state_operational_support import (
     _worker_learning_summary,
     _worker_snapshot,
 )
-from venus_evcharger.service.control_state_core import _ControlApiStateCore
+class ControlStateOperational:
+    """Build the operational payload from the state-owning service."""
 
+    def __init__(self, service: object) -> None:
+        self.service = service
 
-class _ControlApiStateOperational(_ControlApiStateCore):
-    def _state_api_operational_payload(self) -> dict[str, Any]:
-        return _state_api_operational_payload(self)
+    def payload(self) -> dict[str, Any]:
+        return _state_api_operational_payload(self.service)
 
 
 def _state_api_operational_payload(owner: Any) -> dict[str, Any]:

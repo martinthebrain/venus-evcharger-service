@@ -26,7 +26,7 @@ from typing import Any
 
 import requests
 
-from .config import compat_legacy_backend_view_from_runtime
+from .config import backend_selection_view
 from .config_file import load_required_backend_config
 from .factory import build_service_backends
 from .registry import CHARGER_BACKENDS, METER_BACKENDS, SWITCH_BACKENDS
@@ -211,7 +211,7 @@ def validate_wallbox_config(path: str) -> dict[str, object]:
     return {
         "path": path,
         "runtime": _json_ready(resolved.runtime),
-        "selection": _json_ready(compat_legacy_backend_view_from_runtime(resolved.runtime)),
+        "selection": _json_ready(backend_selection_view(resolved.runtime)),
         "resolved_roles": {
             "meter": resolved.meter is not None,
             "switch": resolved.switch is not None,

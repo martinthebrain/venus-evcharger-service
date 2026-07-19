@@ -13,8 +13,8 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 
 install_venus_adapter_stubs()
 
-import venus_evcharger.dbus_adapter_process as process
-from venus_evcharger.dbus_adapter_process_config import (
+import venus_evcharger.dbus_adapter.process.adapter as process
+from venus_evcharger.dbus_adapter.process.config import (
     CasePreservingConfigParser,
     GatewayAdapterSettings,
     GatewayFileSettings,

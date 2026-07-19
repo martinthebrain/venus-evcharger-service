@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from collections.abc import Mapping
+from typing import ClassVar, Protocol, TypeGuard
 
 from venus_evcharger.core.contracts import (
     finite_float_or_none,
@@ -11,19 +12,32 @@ from venus_evcharger.core.contracts import (
     timestamp_age_within,
     timestamp_not_future,
 )
-from venus_evcharger.update.offline_publish import _UpdateCycleOffline
 
 
-class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
-    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float]
+class PmSnapshotService(Protocol):
+    auto_shelly_soft_fail_seconds: float
+    _worker_poll_interval_seconds: float
+    _last_pm_status: dict[str, object] | None
+    _last_pm_status_at: float | None
+    _last_pm_status_confirmed: bool
+    _last_confirmed_pm_status: dict[str, object] | None
+    _last_confirmed_pm_status_at: float | None
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+class PmSnapshotResolver:
+    FUTURE_INPUT_TIMESTAMP_TOLERANCE_SECONDS: ClassVar[float] = 1.0
     CLAMP_WORKER_PM_FUTURE_TIMESTAMPS: ClassVar[bool] = False
 
     @classmethod
     def _worker_pm_snapshot_data(
         cls,
-        worker_snapshot: dict[str, Any],
+        worker_snapshot: dict[str, object],
         now: float,
-    ) -> tuple[dict[str, Any] | None, bool, float]:
+    ) -> tuple[dict[str, object] | None, bool, float]:
         """Return normalized worker PM data plus confirmation and timestamp."""
         normalized_snapshot = normalized_worker_snapshot(
             worker_snapshot,
@@ -40,28 +54,28 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         )
 
     @staticmethod
-    def _worker_pm_status_payload(normalized_snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    def _worker_pm_status_payload(normalized_snapshot: Mapping[str, object]) -> dict[str, object] | None:
         """Return a defensive copy of normalized PM payload data."""
         pm_status = normalized_snapshot["pm_status"]
-        return dict(pm_status) if isinstance(pm_status, dict) else None
+        return dict(pm_status) if _is_string_object_dict(pm_status) else None
 
     @staticmethod
-    def _worker_pm_confirmed(normalized_snapshot: dict[str, Any]) -> bool:
+    def _worker_pm_confirmed(normalized_snapshot: Mapping[str, object]) -> bool:
         """Return whether the normalized PM payload is confirmed by the helper."""
         return bool(normalized_snapshot["pm_confirmed"])
 
     @staticmethod
-    def _worker_pm_snapshot_timestamp(normalized_snapshot: dict[str, Any]) -> float:
+    def _worker_pm_snapshot_timestamp(normalized_snapshot: Mapping[str, object]) -> float:
         """Return the PM sample timestamp from normalized worker data."""
-        snapshot_at = normalized_snapshot["pm_captured_at"]
+        snapshot_at = finite_float_or_none(normalized_snapshot["pm_captured_at"])
         if snapshot_at is None:
-            snapshot_at = normalized_snapshot["captured_at"]
-        return float(snapshot_at)
+            snapshot_at = finite_float_or_none(normalized_snapshot["captured_at"])
+        return 0.0 if snapshot_at is None else snapshot_at
 
     @staticmethod
     def _remember_pm_snapshot(
-        svc: Any,
-        pm_status: dict[str, Any],
+        svc: PmSnapshotService,
+        pm_status: dict[str, object],
         snapshot_at: float,
         pm_confirmed: bool,
     ) -> None:
@@ -78,10 +92,10 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     @classmethod
     def _cached_pm_status_for_soft_fail(
         cls,
-        svc: Any,
+        svc: PmSnapshotService,
         now: float,
         soft_fail_seconds: float,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Return the last confirmed PM status when it is still inside soft-fail budget."""
         confirmed = cls._fresh_confirmed_pm_status(
             getattr(svc, "_last_confirmed_pm_status", None),
@@ -101,7 +115,7 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         )
 
     @staticmethod
-    def _last_pm_status_marked_confirmed(svc: Any) -> bool:
+    def _last_pm_status_marked_confirmed(svc: PmSnapshotService) -> bool:
         """Return whether the legacy last-PM cache is confirmed."""
         if not hasattr(svc, "_last_pm_status_confirmed"):
             return False
@@ -110,13 +124,13 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     @classmethod
     def _fresh_confirmed_pm_status(
         cls,
-        pm_status: Any,
-        captured_at: Any,
+        pm_status: object,
+        captured_at: object,
         now: float,
         soft_fail_seconds: float,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Return one confirmed PM cache entry when it is fresh enough."""
-        if not isinstance(pm_status, dict) or captured_at is None:
+        if not _is_string_object_dict(pm_status) or captured_at is None:
             return None
         if not timestamp_age_within(
             captured_at,
@@ -130,7 +144,7 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         return confirmed
 
     @staticmethod
-    def _direct_pm_snapshot_max_age_seconds(svc: Any) -> float:
+    def _direct_pm_snapshot_max_age_seconds(svc: PmSnapshotService) -> float:
         """Return the freshness window for directly supplied worker PM snapshots."""
         worker_poll_seconds = finite_float_or_none(getattr(svc, "_worker_poll_interval_seconds", None))
         if worker_poll_seconds is None:
@@ -140,12 +154,12 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     @classmethod
     def resolve_pm_status_for_update(
         cls,
-        svc: Any,
-        worker_snapshot: dict[str, Any],
+        svc: PmSnapshotService,
+        worker_snapshot: dict[str, object],
         now: float,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Return the freshest Shelly status, including short soft-fail reuse."""
-        soft_fail_seconds = float(getattr(svc, "auto_shelly_soft_fail_seconds", 10.0))
+        soft_fail_seconds = float(svc.auto_shelly_soft_fail_seconds)
         pm_status, pm_confirmed, snapshot_at = cls._worker_pm_snapshot_data(worker_snapshot, now)
         if pm_status is None or not cls._worker_pm_snapshot_usable(pm_confirmed, snapshot_at, now):
             return cls._cached_pm_status_for_soft_fail(svc, now, soft_fail_seconds)
@@ -191,7 +205,7 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     @classmethod
     def _pm_snapshot_within_soft_fail_budget(
         cls,
-        svc: Any,
+        svc: PmSnapshotService,
         now: float,
         snapshot_at: float,
         soft_fail_seconds: float,
@@ -201,7 +215,7 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         return (float(now) - snapshot_at) <= max(soft_fail_seconds, direct_snapshot_max_age)
 
     @staticmethod
-    def _remembered_pm_snapshot_timestamp(svc: Any) -> float | None:
+    def _remembered_pm_snapshot_timestamp(svc: PmSnapshotService) -> float | None:
         """Return the newest known PM timestamp across direct and confirmed caches."""
         candidates = [
             finite_float_or_none(getattr(svc, "_last_pm_status_at", None)),
@@ -211,7 +225,7 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         return max(fresh_candidates) if fresh_candidates else None
 
     @classmethod
-    def _pm_snapshot_newer_than_last(cls, svc: Any, snapshot_at: float) -> bool:
+    def _pm_snapshot_newer_than_last(cls, svc: PmSnapshotService, snapshot_at: float) -> bool:
         """Return True when a PM snapshot is at least as new as the stored one."""
         last_snapshot_at = cls._remembered_pm_snapshot_timestamp(svc)
         return last_snapshot_at is None or snapshot_at >= float(last_snapshot_at)
@@ -219,7 +233,7 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
     @classmethod
     def _pm_snapshot_storage_decision(
         cls,
-        svc: Any,
+        svc: PmSnapshotService,
         now: float,
         snapshot_at: float,
         soft_fail_seconds: float,
@@ -233,3 +247,6 @@ class _UpdateCyclePmSnapshot(_UpdateCycleOffline):
         )
         should_remember = within_soft_fail or cls._pm_snapshot_newer_than_last(svc, snapshot_at)
         return should_remember, within_soft_fail
+
+
+__all__ = ["PmSnapshotResolver", "PmSnapshotService"]

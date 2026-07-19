@@ -53,23 +53,41 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
         ):
             setattr(common_module, name, lambda *args, **kwargs: args[0] if args else None)
 
-        control_module = ModuleType("venus_evcharger.service.control")
+        facade_modules = {
+            name: ModuleType(name)
+            for name in (
+                "venus_evcharger.service.auto_facade",
+                "venus_evcharger.service.control",
+                "venus_evcharger.service.controller_owner",
+                "venus_evcharger.service.runtime_facade",
+                "venus_evcharger.service.state_facade",
+                "venus_evcharger.service.update_facade",
+            )
+        }
+        facade_modules["venus_evcharger.service.auto_facade"].ServiceAutoFacade = type(
+            "ServiceAutoFacade", (), {}
+        )
+        facade_modules["venus_evcharger.service.control"].ServiceControlFacade = type(
+            "ServiceControlFacade", (), {}
+        )
+        facade_modules["venus_evcharger.service.controller_owner"].ServiceControllerOwner = type(
+            "ServiceControllerOwner", (), {}
+        )
+        facade_modules["venus_evcharger.service.controller_owner"].ServiceFunctionBundle = type(
+            "ServiceFunctionBundle", (), {}
+        )
+        facade_modules["venus_evcharger.service.runtime_facade"].ServiceRuntimeFacade = type(
+            "ServiceRuntimeFacade", (), {}
+        )
 
-        class StatePublish:
+        class ServiceStateFacade:
             @staticmethod
-            def _config_path():
+            def config_path():
                 return "/tmp/config.venus_evcharger.ini"
 
-        class ControlApi(StatePublish):
-            pass
-
-        control_module.ControlApi = ControlApi
-
-        state_module = ModuleType("venus_evcharger.controllers.state")
-        state_module.ServiceStateController = type(
-            "ServiceStateController",
-            (),
-            {"__init__": lambda self, *_args, **_kwargs: None},
+        facade_modules["venus_evcharger.service.state_facade"].ServiceStateFacade = ServiceStateFacade
+        facade_modules["venus_evcharger.service.update_facade"].ServiceUpdateFacade = type(
+            "ServiceUpdateFacade", (), {}
         )
 
         fake_glib = MagicMock()
@@ -81,8 +99,7 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
         return {
             "venus_evcharger.bootstrap.controller": bootstrap_module,
             "venus_evcharger.core.common": common_module,
-            "venus_evcharger.service.control": control_module,
-            "venus_evcharger.controllers.state": state_module,
+            **facade_modules,
             "dbus": MagicMock(),
             "vedbus": MagicMock(),
             "gi": fake_gi,
@@ -115,34 +132,7 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
 
     def test_helper_module_main_guard_exits_cleanly(self):
         helper_path = self._repo_file("venus_evcharger_auto_input_helper.py")
-        fake_bus = MagicMock()
-        fake_bus.add_signal_receiver = MagicMock()
-        fake_interface = MagicMock()
-        fake_interface.ListNames.return_value = []
-        fake_interface.GetValue.return_value = None
-        fake_interface.Introspect.return_value = "<node/>"
-
-        fake_dbus = ModuleType("dbus")
-        fake_dbus.SystemBus = MagicMock(return_value=fake_bus)
-        fake_dbus.SessionBus = MagicMock(return_value=fake_bus)
-        fake_dbus.Interface = MagicMock(return_value=fake_interface)
-        fake_dbus.__path__ = []
-
-        fake_dbus_mainloop = ModuleType("dbus.mainloop")
-        fake_dbus_glib = ModuleType("dbus.mainloop.glib")
-        fake_dbus_glib.DBusGMainLoop = MagicMock()
-        fake_dbus_mainloop.glib = fake_dbus_glib
-        fake_dbus.mainloop = fake_dbus_mainloop
-
         fake_loop = MagicMock()
-        fake_glib = ModuleType("gi.repository.GLib")
-        fake_glib.MainLoop = MagicMock(return_value=fake_loop)
-        fake_glib.timeout_add = MagicMock()
-        fake_glib.idle_add = MagicMock()
-        fake_gi = ModuleType("gi")
-        fake_repository = ModuleType("gi.repository")
-        fake_repository.GLib = fake_glib
-        fake_gi.repository = fake_repository
 
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
             handle.write(
@@ -159,25 +149,18 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
             config_path = handle.name
         self.addCleanup(lambda: os.path.exists(config_path) and os.unlink(config_path))
 
-        with patch.dict(
-            sys.modules,
-            {
-                "dbus": fake_dbus,
-                "dbus.mainloop": fake_dbus_mainloop,
-                "dbus.mainloop.glib": fake_dbus_glib,
-                "gi": fake_gi,
-                "gi.repository": fake_repository,
-                "gi.repository.GLib": fake_glib,
-            },
-            clear=False,
+        with patch.object(sys, "argv", [helper_path, config_path]), patch(
+            "venus_evcharger.inputs.helper.glib_runtime.GLIB_RUNTIME.create_main_loop",
+            return_value=fake_loop,
+        ), patch("venus_evcharger.inputs.helper.glib_runtime.GLIB_RUNTIME.timeout_add"), patch(
+            "venus_evcharger.inputs.helper.glib_runtime.GLIB_RUNTIME.idle_add"
         ):
-            with patch.object(sys, "argv", [helper_path, config_path]):
-                with self.assertRaises(SystemExit) as raised:
-                    runpy.run_path(helper_path, run_name="__main__")
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path(helper_path, run_name="__main__")
 
         self.assertEqual(raised.exception.code, 0)
 
-    def test_package_facades_reexport_expected_symbols(self) -> None:
+    def test_package_entrypoints_export_only_canonical_symbols(self) -> None:
         with patch.dict(
             sys.modules,
             {
@@ -192,19 +175,19 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
         ):
             bootstrap_facade = import_module("venus_evcharger.app.bootstrap")
             main_facade = import_module("venus_evcharger.app.main")
-            helper_facade = import_module("venus_evcharger.inputs.helper.main")
+            helper_module = import_module("venus_evcharger_auto_input_helper")
             runtime_module = import_module("venus_evcharger.runtime")
 
             self.assertTrue(hasattr(bootstrap_facade, "ServiceBootstrapController"))
             self.assertTrue(hasattr(main_facade, "ShellyWallboxService"))
-            self.assertTrue(hasattr(helper_facade, "AutoInputHelper"))
-            self.assertTrue(hasattr(helper_facade, "main"))
+            self.assertTrue(hasattr(helper_module, "AutoInputHelper"))
+            self.assertTrue(hasattr(helper_module, "main"))
             self.assertTrue(hasattr(runtime_module, "RuntimeSupportController"))
 
             with self.assertRaises(AttributeError):
                 getattr(runtime_module, "DoesNotExist")
 
-    def test_type_checking_only_import_paths_can_be_executed(self) -> None:
+    def test_entrypoint_has_no_retired_service_base(self) -> None:
         module_path = self._repo_file("venus_evcharger_service.py")
         fake_modules, _bootstrap_module = self._fake_main_module_dependencies()
         with patch.dict(
@@ -215,14 +198,9 @@ class TestShellyWallboxEntrypoints(unittest.TestCase):
             },
             clear=False,
         ):
-            import typing
             import venus_evcharger.runtime as runtime_module
-            import venus_evcharger.service.factory as factory_module
+            module_globals = runpy.run_path(module_path, run_name="venus_evcharger_service_composition_test")
+            reload(runtime_module)
 
-            with patch.object(typing, "TYPE_CHECKING", True):
-                module_globals = runpy.run_path(module_path, run_name="venus_evcharger_service_type_checking_test")
-                reload(runtime_module)
-                reload(factory_module)
-
-            self.assertIn("FormatterMap", module_globals)
+            self.assertEqual(module_globals["ShellyWallboxService"].__bases__, (object,))
             self.assertTrue(hasattr(runtime_module, "RuntimeSupportController"))

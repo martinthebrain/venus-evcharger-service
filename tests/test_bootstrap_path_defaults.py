@@ -140,12 +140,19 @@ class BootstrapPathDefaultsContracts(unittest.TestCase):
         self.assertEqual(false_flags["/Auto/SoftwareUpdateAvailable"], (0, None))
         self.assertEqual(false_flags["/Auto/SoftwareUpdateNoUpdateActive"], (0, None))
 
-    def test_backend_and_decision_defaults_reflect_service_attributes(self) -> None:
+    def test_backend_and_decision_defaults_reflect_canonical_runtime_state(self) -> None:
         service = SimpleNamespace(
-            backend_mode="split",
-            meter_backend_type="template_meter",
-            switch_backend_type="template_switch",
-            charger_backend_type="goe_charger",
+            _backend_runtime_summary=BackendRuntimeSummary(
+                backend_mode="split",
+                meter_type="template_meter",
+                meter_config_path=None,
+                switch_type="template_switch",
+                switch_config_path=None,
+                charger_type="goe_charger",
+                charger_config_path=None,
+                topology_configured=True,
+                primary_rpc_configured=False,
+            ),
             _runtime_overrides_active=True,
             runtime_overrides_path="/run/overrides.ini",
             _last_health_reason="grid-missing",

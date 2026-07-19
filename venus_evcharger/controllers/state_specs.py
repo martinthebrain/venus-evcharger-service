@@ -5,6 +5,12 @@ from __future__ import annotations
 
 import configparser
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
+
+from venus_evcharger.auto.policy_settings import AUTO_POLICY_SETTING_BY_PATH, AutoPolicySetting
+
+
+OverrideValueKind: TypeAlias = Literal["bool", "float", "hhmm", "int", "phase", "weekday_set"]
 
 
 @dataclass(frozen=True)
@@ -13,8 +19,20 @@ class RuntimeOverrideSpec:
 
     dbus_path: str
     config_key: str
-    attr_name: str
-    value_kind: str
+    attr_name: str | None
+    value_kind: OverrideValueKind
+    policy_setting: AutoPolicySetting | None = None
+
+
+def _policy_runtime_override(dbus_path: str) -> RuntimeOverrideSpec:
+    setting = AUTO_POLICY_SETTING_BY_PATH[dbus_path]
+    return RuntimeOverrideSpec(
+        dbus_path=setting.dbus_path,
+        config_key=setting.config_key,
+        attr_name=None,
+        value_kind=setting.value_kind,
+        policy_setting=setting,
+    )
 
 
 RUNTIME_OVERRIDE_SPECS: tuple[RuntimeOverrideSpec, ...] = (
@@ -24,10 +42,10 @@ RUNTIME_OVERRIDE_SPECS: tuple[RuntimeOverrideSpec, ...] = (
     RuntimeOverrideSpec("/MinCurrent", "MinCurrent", "min_current", "float"),
     RuntimeOverrideSpec("/MaxCurrent", "MaxCurrent", "max_current", "float"),
     RuntimeOverrideSpec("/PhaseSelection", "PhaseSelection", "requested_phase_selection", "phase"),
-    RuntimeOverrideSpec("/Auto/StartSurplusWatts", "AutoStartSurplusWatts", "auto_start_surplus_watts", "float"),
-    RuntimeOverrideSpec("/Auto/StopSurplusWatts", "AutoStopSurplusWatts", "auto_stop_surplus_watts", "float"),
-    RuntimeOverrideSpec("/Auto/MinSoc", "AutoMinSoc", "auto_min_soc", "float"),
-    RuntimeOverrideSpec("/Auto/ResumeSoc", "AutoResumeSoc", "auto_resume_soc", "float"),
+    _policy_runtime_override("/Auto/StartSurplusWatts"),
+    _policy_runtime_override("/Auto/StopSurplusWatts"),
+    _policy_runtime_override("/Auto/MinSoc"),
+    _policy_runtime_override("/Auto/ResumeSoc"),
     RuntimeOverrideSpec("/Auto/StartDelaySeconds", "AutoStartDelaySeconds", "auto_start_delay_seconds", "float"),
     RuntimeOverrideSpec("/Auto/StopDelaySeconds", "AutoStopDelaySeconds", "auto_stop_delay_seconds", "float"),
     RuntimeOverrideSpec("/Auto/ScheduledEnabledDays", "AutoScheduledEnabledDays", "auto_scheduled_enabled_days", "weekday_set"),
@@ -51,111 +69,26 @@ RUNTIME_OVERRIDE_SPECS: tuple[RuntimeOverrideSpec, ...] = (
     ),
     RuntimeOverrideSpec("/Auto/DbusBackoffBaseSeconds", "AutoDbusBackoffBaseSeconds", "auto_dbus_backoff_base_seconds", "float"),
     RuntimeOverrideSpec("/Auto/DbusBackoffMaxSeconds", "AutoDbusBackoffMaxSeconds", "auto_dbus_backoff_max_seconds", "float"),
-    RuntimeOverrideSpec(
-        "/Auto/GridRecoveryStartSeconds",
-        "AutoGridRecoveryStartSeconds",
-        "auto_grid_recovery_start_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/StopSurplusDelaySeconds",
-        "AutoStopSurplusDelaySeconds",
-        "auto_stop_surplus_delay_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/StopSurplusVolatilityLowWatts",
-        "AutoStopSurplusVolatilityLowWatts",
-        "auto_stop_surplus_volatility_low_watts",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/StopSurplusVolatilityHighWatts",
-        "AutoStopSurplusVolatilityHighWatts",
-        "auto_stop_surplus_volatility_high_watts",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/ReferenceChargePowerWatts",
-        "AutoReferenceChargePowerWatts",
-        "auto_reference_charge_power_watts",
-        "float",
-    ),
-    RuntimeOverrideSpec("/Auto/LearnChargePowerEnabled", "AutoLearnChargePower", "auto_learn_charge_power_enabled", "bool"),
-    RuntimeOverrideSpec(
-        "/Auto/LearnChargePowerMinWatts",
-        "AutoLearnChargePowerMinWatts",
-        "auto_learn_charge_power_min_watts",
-        "float",
-    ),
-    RuntimeOverrideSpec("/Auto/LearnChargePowerAlpha", "AutoLearnChargePowerAlpha", "auto_learn_charge_power_alpha", "float"),
-    RuntimeOverrideSpec(
-        "/Auto/LearnChargePowerStartDelaySeconds",
-        "AutoLearnChargePowerStartDelaySeconds",
-        "auto_learn_charge_power_start_delay_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/LearnChargePowerWindowSeconds",
-        "AutoLearnChargePowerWindowSeconds",
-        "auto_learn_charge_power_window_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/LearnChargePowerMaxAgeSeconds",
-        "AutoLearnChargePowerMaxAgeSeconds",
-        "auto_learn_charge_power_max_age_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec("/Auto/PhaseSwitching", "AutoPhaseSwitching", "auto_phase_switching_enabled", "bool"),
-    RuntimeOverrideSpec(
-        "/Auto/PhasePreferLowestWhenIdle",
-        "AutoPhasePreferLowestWhenIdle",
-        "auto_phase_prefer_lowest_when_idle",
-        "bool",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/PhaseUpshiftDelaySeconds",
-        "AutoPhaseUpshiftDelaySeconds",
-        "auto_phase_upshift_delay_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/PhaseDownshiftDelaySeconds",
-        "AutoPhaseDownshiftDelaySeconds",
-        "auto_phase_downshift_delay_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/PhaseUpshiftHeadroomWatts",
-        "AutoPhaseUpshiftHeadroomWatts",
-        "auto_phase_upshift_headroom_watts",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/PhaseDownshiftMarginWatts",
-        "AutoPhaseDownshiftMarginWatts",
-        "auto_phase_downshift_margin_watts",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/PhaseMismatchRetrySeconds",
-        "AutoPhaseMismatchRetrySeconds",
-        "auto_phase_mismatch_retry_seconds",
-        "float",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/PhaseMismatchLockoutCount",
-        "AutoPhaseMismatchLockoutCount",
-        "auto_phase_mismatch_lockout_count",
-        "int",
-    ),
-    RuntimeOverrideSpec(
-        "/Auto/PhaseMismatchLockoutSeconds",
-        "AutoPhaseMismatchLockoutSeconds",
-        "auto_phase_mismatch_lockout_seconds",
-        "float",
-    ),
+    _policy_runtime_override("/Auto/GridRecoveryStartSeconds"),
+    _policy_runtime_override("/Auto/StopSurplusDelaySeconds"),
+    _policy_runtime_override("/Auto/StopSurplusVolatilityLowWatts"),
+    _policy_runtime_override("/Auto/StopSurplusVolatilityHighWatts"),
+    _policy_runtime_override("/Auto/ReferenceChargePowerWatts"),
+    _policy_runtime_override("/Auto/LearnChargePowerEnabled"),
+    _policy_runtime_override("/Auto/LearnChargePowerMinWatts"),
+    _policy_runtime_override("/Auto/LearnChargePowerAlpha"),
+    _policy_runtime_override("/Auto/LearnChargePowerStartDelaySeconds"),
+    _policy_runtime_override("/Auto/LearnChargePowerWindowSeconds"),
+    _policy_runtime_override("/Auto/LearnChargePowerMaxAgeSeconds"),
+    _policy_runtime_override("/Auto/PhaseSwitching"),
+    _policy_runtime_override("/Auto/PhasePreferLowestWhenIdle"),
+    _policy_runtime_override("/Auto/PhaseUpshiftDelaySeconds"),
+    _policy_runtime_override("/Auto/PhaseDownshiftDelaySeconds"),
+    _policy_runtime_override("/Auto/PhaseUpshiftHeadroomWatts"),
+    _policy_runtime_override("/Auto/PhaseDownshiftMarginWatts"),
+    _policy_runtime_override("/Auto/PhaseMismatchRetrySeconds"),
+    _policy_runtime_override("/Auto/PhaseMismatchLockoutCount"),
+    _policy_runtime_override("/Auto/PhaseMismatchLockoutSeconds"),
 )
 
 RUNTIME_OVERRIDE_BY_PATH: dict[str, RuntimeOverrideSpec] = {
@@ -167,7 +100,7 @@ RUNTIME_OVERRIDE_BY_CONFIG_KEY: dict[str, RuntimeOverrideSpec] = {
 RUNTIME_OVERRIDE_SECTION = "RuntimeOverrides"
 
 
-class _CasePreservingConfigParser(configparser.ConfigParser):
+class CasePreservingConfigParser(configparser.ConfigParser):
     """Config parser that keeps option names exactly as written."""
 
     def optionxform(self, optionstr: str) -> str:

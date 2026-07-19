@@ -117,11 +117,6 @@ def _control_request_schemas() -> dict[str, Any]:
             {"type": "string", "enum": ["/SetCurrent"]},
             _number_schema(minimum=0.0),
         ),
-        "LegacyUnknownWriteCommandRequest": _named_command_request_schema(
-            "legacy_unknown_write",
-            {},
-            path_schema=_string_schema(),
-        ),
     }
     for path, schema_name in direct_binary_path_names.items():
         command_name = ControlApiV1Service._DIRECT_PATH_COMMANDS[path]
@@ -206,7 +201,7 @@ def _component_schemas() -> dict[str, Any]:
         ),
         "ControlCommand": _object_schema(
             {
-                "name": _string_schema(enum=CONTROL_COMMAND_NAMES, default="legacy_unknown_write"),
+                "name": _string_schema(enum=CONTROL_COMMAND_NAMES),
                 "path": _string_schema(),
                 "value": {},
                 "source": _string_schema(enum=CONTROL_COMMAND_SOURCES, default="http"),

@@ -7,12 +7,48 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from venus_evcharger.controllers.state_contracts import (
+    StateAttributes,
+    is_object_dict,
+    is_object_list,
+    string_key_items,
+    string_object_mapping,
+    string_value_mapping,
+)
 from venus_evcharger.controllers.state_json import json_object_payload, read_json_object_file
 
 
 class TestStateJsonContracts(unittest.TestCase):
+    def test_dynamic_collection_boundaries_are_explicit_and_copy_values(self) -> None:
+        source: object = {"valid": "text", 7: "ignored"}
+        self.assertTrue(is_object_dict(source))
+        self.assertFalse(is_object_dict([]))
+        self.assertTrue(is_object_list([1]))
+        self.assertFalse(is_object_list((1,)))
+        self.assertEqual(string_key_items(source), {"valid": "text"})
+        self.assertEqual(string_key_items([]), {})
+        self.assertEqual(string_object_mapping({"valid": 1}), {"valid": 1})
+        self.assertIsNone(string_object_mapping(source))
+        self.assertEqual(string_value_mapping({"valid": "text"}), {"valid": "text"})
+        self.assertIsNone(string_value_mapping({"valid": 1}))
+        self.assertIsNone(string_value_mapping([]))
+
+    def test_state_attributes_expose_one_typed_dynamic_boundary(self) -> None:
+        target = SimpleNamespace(existing=1)
+        attributes = StateAttributes(target)
+
+        self.assertTrue(attributes.has("existing"))
+        self.assertFalse(attributes.has("missing"))
+        self.assertEqual(attributes.get("existing"), 1)
+        self.assertEqual(attributes.get("missing", "fallback"), "fallback")
+        with self.assertRaises(AttributeError):
+            attributes.get("missing")
+        attributes.set("created", 2)
+        self.assertEqual(target.created, 2)
+
     def test_object_payload_accepts_only_dicts_with_string_keys_and_copies_them(self) -> None:
         source = {"a": 1, "nested": {"value": True}}
         payload = json_object_payload(source)

@@ -2,23 +2,9 @@
 from tests.test_topology_config_support import *  # noqa: F401,F403
 
 class _TopologyConfigTestsPart3:
-    def test_backend_helpers_prefer_runtime_selection_over_legacy_attrs(self) -> None:
-        runtime = SimpleNamespace(
-            backend_mode="split",
-            meter_type="template_meter",
-            switch_type="template_switch",
-            charger_type="goe_charger",
-            meter_config_path=None,
-            switch_config_path=None,
-            charger_config_path=None,
-        )
-        service = SimpleNamespace(
-            _backend_bundle=SimpleNamespace(runtime=runtime),
-            backend_mode="combined",
-            meter_backend_type="shelly_combined",
-            switch_backend_type="shelly_combined",
-            charger_backend_type=None,
-        )
+    def test_backend_helpers_use_resolved_runtime_selection(self) -> None:
+        runtime = runtime_summary_fixture()
+        service = SimpleNamespace(_backend_bundle=SimpleNamespace(runtime=runtime))
 
         self.assertEqual(backend_mode_for_service(service, "combined"), "split")
         self.assertEqual(backend_type_for_service(service, "meter", "shelly_combined"), "template_meter")
@@ -81,7 +67,7 @@ ConfigPath={meter_path}
             self.assertEqual(runtime.switch_type, "template_switch")
             self.assertEqual(str(runtime.switch_config_path), "/data/etc/wallbox-actuator.ini")
 
-    def test_backend_helpers_prefer_runtime_topology_over_conflicting_legacy_attrs(self) -> None:
+    def test_backend_helpers_use_runtime_topology(self) -> None:
         parser = configparser.ConfigParser()
         parser.read_string(
             """
@@ -98,13 +84,7 @@ ReferenceWatts=2300
 """
         )
         topology = parse_topology_config(parser)
-        service = SimpleNamespace(
-            _topology_config=topology,
-            backend_mode="combined",
-            meter_backend_type="shelly_combined",
-            switch_backend_type="shelly_combined",
-            charger_backend_type=None,
-        )
+        service = SimpleNamespace(_topology_config=topology)
 
         self.assertEqual(backend_mode_for_service(service, "combined"), "split")
         self.assertEqual(backend_type_for_service(service, "meter", "shelly_combined"), "fixed_reference")
@@ -128,15 +108,7 @@ ReferenceWatts=2300
 """
         )
         topology = parse_topology_config(parser)
-        runtime = SimpleNamespace(
-            backend_mode="split",
-            meter_type="template_meter",
-            switch_type="template_switch",
-            charger_type="goe_charger",
-            meter_config_path=None,
-            switch_config_path=None,
-            charger_config_path=None,
-        )
+        runtime = runtime_summary_fixture()
         service = SimpleNamespace(
             _topology_config=topology,
             _backend_bundle=SimpleNamespace(runtime=runtime),
@@ -164,12 +136,7 @@ ReferenceWatts=2300
 """
         )
         topology = parse_topology_config(parser)
-        runtime = SimpleNamespace(
-            backend_mode="split",
-            meter_type="template_meter",
-            switch_type="template_switch",
-            charger_type="goe_charger",
-        )
+        runtime = runtime_summary_fixture()
         service = SimpleNamespace(
             _topology_config=topology,
             _backend_bundle=SimpleNamespace(runtime=runtime),
@@ -332,8 +299,9 @@ ChargerType=goe_charger
             primary_rpc_configured=False,
         )
         self.assertTrue(runtime_summary_uses_legacy_primary_rpc(combined_summary, legacy_host="192.168.1.20"))
-        self.assertIsNone(compat_legacy_backend_view_from_runtime(None))
-        self.assertEqual(compat_legacy_backend_view_from_config(legacy_parser)["mode"], "split")
+        with self.assertRaisesRegex(TypeError, "BackendRuntimeSummary"):
+            backend_selection_view(cast(Any, None))
+        self.assertEqual(backend_selection_view_from_config(legacy_parser)["mode"], "split")
 
     def test_topology_private_helpers_cover_remaining_measurement_and_legacy_edges(self) -> None:
         self.assertIsNone(_optional_text(None))

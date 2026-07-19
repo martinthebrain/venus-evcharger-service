@@ -2,7 +2,6 @@
 from tests.venus_evcharger_bootstrap_controller_support import (
     MONTH_WINDOW_DEFAULTS,
     MagicMock,
-    Path,
     ServiceBootstrapControllerTestCase,
     SimpleNamespace,
     _logging_level_from_config,
@@ -101,44 +100,41 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                 }
             }
         )
-        service = SimpleNamespace(config=parser)
+        service = SimpleNamespace(config=parser, deviceinstance=60)
         controller = self._controller(service)
 
-        controller._load_auto_policy_config(parser["DEFAULT"])
+        controller.components.auto.load(parser["DEFAULT"])
 
-        self.assertEqual(service.auto_start_surplus_watts, 1700.0)
-        self.assertEqual(service.auto_stop_surplus_watts, 1200.0)
         self.assertEqual(service.auto_policy.normal_profile.start_surplus_watts, 1700.0)
         self.assertEqual(service.auto_policy.normal_profile.stop_surplus_watts, 1200.0)
-        self.assertEqual(service.auto_high_soc_threshold, 50.0)
-        self.assertEqual(service.auto_high_soc_release_threshold, 45.0)
-        self.assertEqual(service.auto_high_soc_start_surplus_watts, 1650.0)
-        self.assertEqual(service.auto_high_soc_stop_surplus_watts, 800.0)
+        self.assertEqual(service.auto_policy.high_soc_threshold, 50.0)
+        self.assertEqual(service.auto_policy.high_soc_release_threshold, 45.0)
         self.assertEqual(service.auto_policy.high_soc_profile.start_surplus_watts, 1650.0)
         self.assertEqual(service.auto_policy.high_soc_profile.stop_surplus_watts, 800.0)
-        self.assertEqual(service.auto_min_soc, 40.0)
-        self.assertEqual(service.auto_resume_soc, 44.0)
-        self.assertEqual(service.auto_start_max_grid_import_watts, 70.0)
-        self.assertEqual(service.auto_stop_grid_import_watts, 350.0)
+        self.assertEqual(service.auto_policy.min_soc, 40.0)
+        self.assertEqual(service.auto_policy.resume_soc, 44.0)
+        self.assertEqual(service.auto_policy.start_max_grid_import_watts, 70.0)
+        self.assertEqual(service.auto_policy.stop_grid_import_watts, 350.0)
         self.assertEqual(service.auto_average_window_seconds, 45.0)
         self.assertEqual(service.auto_min_runtime_seconds, 360.0)
         self.assertEqual(service.auto_min_offtime_seconds, 90.0)
         self.assertEqual(service.auto_start_delay_seconds, 12.0)
         self.assertEqual(service.auto_stop_delay_seconds, 18.0)
-        self.assertEqual(service.auto_stop_surplus_delay_seconds, 54.0)
-        self.assertEqual(service.auto_stop_ewma_alpha, 0.4)
+        self.assertEqual(service.auto_policy.stop_surplus_delay_seconds, 54.0)
         self.assertEqual(service.auto_policy.ewma.base_alpha, 0.4)
-        self.assertEqual(service.auto_stop_ewma_alpha_stable, 0.6)
-        self.assertEqual(service.auto_stop_ewma_alpha_volatile, 0.2)
-        self.assertEqual(service.auto_stop_surplus_volatility_low_watts, 120.0)
-        self.assertEqual(service.auto_stop_surplus_volatility_high_watts, 380.0)
-        self.assertTrue(service.auto_learn_charge_power_enabled)
-        self.assertEqual(service.auto_reference_charge_power_watts, 2050.0)
-        self.assertEqual(service.auto_learn_charge_power_min_watts, 650.0)
-        self.assertEqual(service.auto_learn_charge_power_alpha, 0.3)
-        self.assertEqual(service.auto_learn_charge_power_start_delay_seconds, 40.0)
-        self.assertEqual(service.auto_learn_charge_power_window_seconds, 120.0)
-        self.assertEqual(service.auto_learn_charge_power_max_age_seconds, 1800.0)
+        self.assertEqual(service.auto_policy.ewma.stable_alpha, 0.6)
+        self.assertEqual(service.auto_policy.ewma.volatile_alpha, 0.2)
+        self.assertEqual(service.auto_policy.ewma.volatility_low_watts, 120.0)
+        self.assertEqual(service.auto_policy.ewma.volatility_high_watts, 380.0)
+        self.assertTrue(service.auto_policy.learn_charge_power.enabled)
+        self.assertEqual(service.auto_policy.learn_charge_power.reference_power_watts, 2050.0)
+        self.assertEqual(service.auto_policy.learn_charge_power.min_watts, 650.0)
+        self.assertEqual(service.auto_policy.learn_charge_power.alpha, 0.3)
+        self.assertEqual(service.auto_policy.learn_charge_power.start_delay_seconds, 40.0)
+        self.assertEqual(service.auto_policy.learn_charge_power.window_seconds, 120.0)
+        self.assertEqual(service.auto_policy.learn_charge_power.max_age_seconds, 1800.0)
+        self.assertFalse(hasattr(service, "auto_start_surplus_watts"))
+        self.assertFalse(hasattr(service, "auto_learn_charge_power_enabled"))
         self.assertEqual(service.auto_input_cache_seconds, 150.0)
         self.assertTrue(service.auto_audit_log)
         self.assertEqual(service.auto_audit_log_path, "/tmp/auto.log")
@@ -175,10 +171,10 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                 }
             }
         )
-        service = SimpleNamespace(config=parser)
+        service = SimpleNamespace(config=parser, deviceinstance=60)
         controller = self._controller(service)
 
-        controller._load_auto_policy_config(parser["DEFAULT"])
+        controller.components.auto.load(parser["DEFAULT"])
 
         self.assertEqual(service.auto_policy.normal_profile.stop_surplus_watts, 1850.0)
         self.assertEqual(service.auto_policy.high_soc_profile.stop_surplus_watts, 1650.0)
@@ -309,7 +305,8 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                 }
             }
         )
-        service = SimpleNamespace(_load_config=MagicMock(return_value=parser), _validate_runtime_config=MagicMock())
+        state = SimpleNamespace(load_config=MagicMock(return_value=parser), validate_runtime_config=MagicMock())
+        service = SimpleNamespace(state=state)
         controller = self._controller(service)
 
         controller.load_runtime_configuration()
@@ -411,7 +408,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.auto_grid_l3_path, "/Grid/L3")
         self.assertFalse(service.auto_grid_require_all_phases)
         self.assertEqual(service.auto_grid_missing_stop_seconds, 33.0)
-        self.assertEqual(service.auto_grid_recovery_start_seconds, 14.0)
+        self.assertEqual(service.auto_policy.grid_recovery_start_seconds, 14.0)
         self.assertEqual(service.auto_input_snapshot_path, "/tmp/auto.json")
         self.assertEqual(service.auto_pv_poll_interval_seconds, 2.2)
         self.assertEqual(service.auto_grid_poll_interval_seconds, 3.3)
@@ -429,12 +426,13 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.startup_device_info_retry_seconds, 1.5)
         self.assertEqual(service.shelly_request_timeout_seconds, 4.5)
         self.assertEqual(service.dbus_method_timeout_seconds, 2.5)
-        service._validate_runtime_config.assert_called_once_with()
+        state.validate_runtime_config.assert_called_once_with()
 
     def test_load_runtime_configuration_applies_identity_and_companion_defaults(self):
         parser = configparser.ConfigParser()
         parser.read_dict({"DEFAULT": {}})
-        service = SimpleNamespace(_load_config=MagicMock(return_value=parser), _validate_runtime_config=MagicMock())
+        state = SimpleNamespace(load_config=MagicMock(return_value=parser), validate_runtime_config=MagicMock())
+        service = SimpleNamespace(state=state)
         controller = self._controller(service)
 
         controller.load_runtime_configuration()
@@ -507,14 +505,14 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.companion_source_battery_service_prefix, "com.victronenergy.battery.external")
         self.assertEqual(service.companion_source_pvinverter_service_prefix, "com.victronenergy.pvinverter.external")
         self.assertEqual(service.companion_source_grid_service_prefix, "com.victronenergy.grid.external")
-        service._validate_runtime_config.assert_called_once_with()
+        state.validate_runtime_config.assert_called_once_with()
 
     def test_identity_config_keeps_runtime_override_fallback_and_loopback_for_blank_host(self):
         parser = configparser.ConfigParser()
         parser.read_dict({"DEFAULT": {"ControlApiHost": "   "}})
+        state = SimpleNamespace(load_config=MagicMock(return_value=parser), validate_runtime_config=MagicMock())
         service = SimpleNamespace(
-            _load_config=MagicMock(return_value=parser),
-            _validate_runtime_config=MagicMock(),
+            state=state,
             runtime_overrides_path="/tmp/existing-overrides.ini",
         )
         controller = self._controller(service)
@@ -540,11 +538,15 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                 },
             }
         )
-        service = SimpleNamespace(_load_config=MagicMock(return_value=parser), _validate_runtime_config=MagicMock())
+        state = SimpleNamespace(load_config=MagicMock(return_value=parser), validate_runtime_config=MagicMock())
+        service = SimpleNamespace(state=state)
         controller = self._controller(service)
 
         controller.load_runtime_configuration()
 
+        self.assertEqual(service._backend_runtime_summary.backend_mode, "split")
+        self.assertEqual(service._backend_runtime_summary.meter_type, "shelly_meter")
+        self.assertEqual(service._backend_runtime_summary.switch_type, "shelly_contactor_switch")
         self.assertFalse(hasattr(service, "_backend_selection"))
         self.assertFalse(hasattr(service, "backend_mode"))
         self.assertFalse(hasattr(service, "meter_backend_type"))
@@ -575,7 +577,8 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                 },
             }
         )
-        service = SimpleNamespace(_load_config=MagicMock(return_value=parser), _validate_runtime_config=MagicMock())
+        state = SimpleNamespace(load_config=MagicMock(return_value=parser), validate_runtime_config=MagicMock())
+        service = SimpleNamespace(state=state)
         controller = self._controller(service)
 
         controller.load_runtime_configuration()
@@ -583,6 +586,8 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service._topology_config.topology.type, "simple_relay")
         self.assertEqual(service._topology_config.actuator.type, "template_switch")
         self.assertEqual(service._topology_config.measurement.type, "fixed_reference")
+        self.assertEqual(service._backend_runtime_summary.backend_mode, "split")
+        self.assertTrue(service._backend_runtime_summary.topology_configured)
         self.assertFalse(hasattr(service, "_backend_selection"))
         self.assertFalse(hasattr(service, "backend_mode"))
         self.assertFalse(hasattr(service, "meter_backend_type"))
@@ -602,13 +607,14 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                 },
             }
         )
-        service = SimpleNamespace(_load_config=MagicMock(return_value=parser), _validate_runtime_config=MagicMock())
+        state = SimpleNamespace(load_config=MagicMock(return_value=parser), validate_runtime_config=MagicMock())
+        service = SimpleNamespace(state=state)
         controller = self._controller(service)
 
         with self.assertRaisesRegex(ValueError, "MeterType=none requires a configured charger backend"):
             controller.load_runtime_configuration()
 
-        service._validate_runtime_config.assert_not_called()
+        state.validate_runtime_config.assert_not_called()
 
     def test_logging_level_and_seasonal_windows_helpers(self):
         parser = configparser.ConfigParser()

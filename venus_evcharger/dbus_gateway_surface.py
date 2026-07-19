@@ -8,10 +8,20 @@ as gateway contract data, not as backend policy.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-import re
 from typing import Literal
+
+from venus_evcharger.core.contracts_control_surface import (
+    EVCS_CONTACTOR_AGE_PATHS,
+    EVCS_CONTACTOR_CONTROL_PATHS,
+    EVCS_PHASE_CONTROL_PATHS,
+    EVCS_PRIMARY_CONTROL_PATHS,
+    EVCS_REQUIRED_CONTROL_PATHS,
+    EVCS_SOFTWARE_UPDATE_CONTROL_PATHS,
+    EVCS_WRITABLE_PATHS,
+)
 
 VenusPathRole = Literal["identity", "measurement", "control", "status"]
 
@@ -57,53 +67,7 @@ VENUS_EV_CHARGER_STATUS_PATHS = (
     "/Auto/StatusSource",
 )
 
-VENUS_EV_CHARGER_WRITABLE_PATHS = frozenset(
-    {
-        "/MinCurrent",
-        "/MaxCurrent",
-        "/SetCurrent",
-        "/PhaseSelection",
-        "/AutoStart",
-        "/Auto/StartSurplusWatts",
-        "/Auto/StopSurplusWatts",
-        "/Auto/MinSoc",
-        "/Auto/ResumeSoc",
-        "/Auto/StartDelaySeconds",
-        "/Auto/StopDelaySeconds",
-        "/Auto/ScheduledEnabledDays",
-        "/Auto/ScheduledFallbackDelaySeconds",
-        "/Auto/ScheduledLatestEndTime",
-        "/Auto/ScheduledNightCurrent",
-        "/Auto/DbusBackoffBaseSeconds",
-        "/Auto/DbusBackoffMaxSeconds",
-        "/Auto/GridRecoveryStartSeconds",
-        "/Auto/StopSurplusDelaySeconds",
-        "/Auto/StopSurplusVolatilityLowWatts",
-        "/Auto/StopSurplusVolatilityHighWatts",
-        "/Auto/ReferenceChargePowerWatts",
-        "/Auto/LearnChargePowerEnabled",
-        "/Auto/LearnChargePowerMinWatts",
-        "/Auto/LearnChargePowerAlpha",
-        "/Auto/LearnChargePowerStartDelaySeconds",
-        "/Auto/LearnChargePowerWindowSeconds",
-        "/Auto/LearnChargePowerMaxAgeSeconds",
-        "/Auto/PhaseSwitching",
-        "/Auto/PhasePreferLowestWhenIdle",
-        "/Auto/PhaseUpshiftDelaySeconds",
-        "/Auto/PhaseDownshiftDelaySeconds",
-        "/Auto/PhaseUpshiftHeadroomWatts",
-        "/Auto/PhaseDownshiftMarginWatts",
-        "/Auto/PhaseMismatchRetrySeconds",
-        "/Auto/PhaseMismatchLockoutCount",
-        "/Auto/PhaseMismatchLockoutSeconds",
-        "/Mode",
-        "/StartStop",
-        "/Enable",
-        "/Auto/PhaseLockoutReset",
-        "/Auto/ContactorLockoutReset",
-        "/Auto/SoftwareUpdateRun",
-    }
-)
+VENUS_EV_CHARGER_WRITABLE_PATHS = EVCS_WRITABLE_PATHS
 
 VENUS_EV_CHARGER_REQUIRED_CONTRACTS = tuple(
     VenusDbusPathContract(path, "identity") for path in VENUS_EV_CHARGER_IDENTITY_PATHS
@@ -112,7 +76,7 @@ VENUS_EV_CHARGER_REQUIRED_CONTRACTS = tuple(
     for path in VENUS_EV_CHARGER_STATUS_PATHS
 ) + tuple(
     VenusDbusPathContract(path, "control", True)
-    for path in ("/Mode", "/StartStop", "/Enable", "/SetCurrent", "/AutoStart")
+    for path in EVCS_REQUIRED_CONTROL_PATHS
 )
 
 EVCS_LIVE_MEASUREMENT_FIELDS = {
@@ -160,48 +124,7 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/UpdateIndex",
     "/Connected",
     "/Status",
-    "/Mode",
-    "/AutoStart",
-    "/StartStop",
-    "/Enable",
-    "/PhaseSelection",
-    "/PhaseSelectionActive",
-    "/SupportedPhaseSelections",
-    "/SetCurrent",
-    "/MinCurrent",
-    "/MaxCurrent",
-    "/Auto/StartSurplusWatts",
-    "/Auto/StopSurplusWatts",
-    "/Auto/MinSoc",
-    "/Auto/ResumeSoc",
-    "/Auto/StartDelaySeconds",
-    "/Auto/StopDelaySeconds",
-    "/Auto/ScheduledEnabledDays",
-    "/Auto/ScheduledFallbackDelaySeconds",
-    "/Auto/ScheduledLatestEndTime",
-    "/Auto/ScheduledNightCurrent",
-    "/Auto/DbusBackoffBaseSeconds",
-    "/Auto/DbusBackoffMaxSeconds",
-    "/Auto/GridRecoveryStartSeconds",
-    "/Auto/StopSurplusDelaySeconds",
-    "/Auto/StopSurplusVolatilityLowWatts",
-    "/Auto/StopSurplusVolatilityHighWatts",
-    "/Auto/ReferenceChargePowerWatts",
-    "/Auto/LearnChargePowerEnabled",
-    "/Auto/LearnChargePowerMinWatts",
-    "/Auto/LearnChargePowerAlpha",
-    "/Auto/LearnChargePowerStartDelaySeconds",
-    "/Auto/LearnChargePowerWindowSeconds",
-    "/Auto/LearnChargePowerMaxAgeSeconds",
-    "/Auto/PhaseSwitching",
-    "/Auto/PhasePreferLowestWhenIdle",
-    "/Auto/PhaseUpshiftDelaySeconds",
-    "/Auto/PhaseDownshiftDelaySeconds",
-    "/Auto/PhaseUpshiftHeadroomWatts",
-    "/Auto/PhaseDownshiftMarginWatts",
-    "/Auto/PhaseMismatchRetrySeconds",
-    "/Auto/PhaseMismatchLockoutCount",
-    "/Auto/PhaseMismatchLockoutSeconds",
+    *EVCS_PRIMARY_CONTROL_PATHS,
     "/Auto/Health",
     "/Auto/HealthCode",
     "/Auto/State",
@@ -222,7 +145,7 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/Auto/ChargerCurrentTargetAge",
     "/Auto/PhaseCandidateAge",
     "/Auto/PhaseLockoutAge",
-    "/Auto/ContactorLockoutAge",
+    *EVCS_CONTACTOR_AGE_PATHS,
     "/Auto/LastSwitchFeedbackAge",
     "/Auto/LastChargerReadAge",
     "/Auto/LastChargerEstimateAge",
@@ -238,13 +161,7 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/Auto/PhaseTarget",
     "/Auto/PhaseReason",
     "/Auto/PhaseMismatchActive",
-    "/Auto/PhaseLockoutActive",
-    "/Auto/PhaseLockoutTarget",
-    "/Auto/PhaseLockoutReason",
-    "/Auto/PhaseLockoutReset",
-    "/Auto/PhaseSupportedConfigured",
-    "/Auto/PhaseSupportedEffective",
-    "/Auto/PhaseDegradedActive",
+    *EVCS_PHASE_CONTROL_PATHS,
     "/Auto/PhaseThresholdWatts",
     "/Auto/PhaseCandidate",
     "/Auto/SwitchFeedbackClosed",
@@ -252,11 +169,7 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/Auto/SwitchFeedbackMismatch",
     "/Auto/ContactorSuspectedOpen",
     "/Auto/ContactorSuspectedWelded",
-    "/Auto/ContactorFaultCount",
-    "/Auto/ContactorLockoutActive",
-    "/Auto/ContactorLockoutReason",
-    "/Auto/ContactorLockoutSource",
-    "/Auto/ContactorLockoutReset",
+    *EVCS_CONTACTOR_CONTROL_PATHS,
     "/Auto/UpdateWorkerDurationSeconds",
     "/Auto/UpdateWorkerPending",
     "/Auto/UpdateWorkerSkipped",
@@ -294,7 +207,7 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/Auto/SoftwareUpdateCurrentVersion",
     "/Auto/SoftwareUpdateAvailableVersion",
     "/Auto/SoftwareUpdateNoUpdateActive",
-    "/Auto/SoftwareUpdateRun",
+    *EVCS_SOFTWARE_UPDATE_CONTROL_PATHS,
     "/Auto/BackendMode",
     "/Auto/MeterBackend",
     "/Auto/SwitchBackend",

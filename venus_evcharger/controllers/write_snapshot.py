@@ -4,69 +4,15 @@
 from __future__ import annotations
 
 import copy
-from collections import deque
 import time
-from typing import Any
+from collections import deque
+from collections.abc import Callable
+from typing import Any, cast
 
 from venus_evcharger.controllers.errors import WRITE_SNAPSHOT_DBUS_ERRORS
+from venus_evcharger.core.contracts_control_surface import EVCS_WRITE_SNAPSHOT_PATHS
 
-SNAPSHOT_DBUS_PATHS = (
-    "/Mode",
-    "/AutoStart",
-    "/StartStop",
-    "/Enable",
-    "/PhaseSelection",
-    "/PhaseSelectionActive",
-    "/SupportedPhaseSelections",
-    "/Auto/PhaseLockoutActive",
-    "/Auto/PhaseLockoutTarget",
-    "/Auto/PhaseLockoutReason",
-    "/Auto/PhaseSupportedConfigured",
-    "/Auto/PhaseSupportedEffective",
-    "/Auto/PhaseDegradedActive",
-    "/Auto/PhaseLockoutReset",
-    "/Auto/ContactorFaultCount",
-    "/Auto/ContactorLockoutActive",
-    "/Auto/ContactorLockoutReason",
-    "/Auto/ContactorLockoutSource",
-    "/Auto/ContactorLockoutAge",
-    "/Auto/ContactorLockoutReset",
-    "/SetCurrent",
-    "/MinCurrent",
-    "/MaxCurrent",
-    "/Auto/StartSurplusWatts",
-    "/Auto/StopSurplusWatts",
-    "/Auto/MinSoc",
-    "/Auto/ResumeSoc",
-    "/Auto/StartDelaySeconds",
-    "/Auto/StopDelaySeconds",
-    "/Auto/ScheduledEnabledDays",
-    "/Auto/ScheduledFallbackDelaySeconds",
-    "/Auto/ScheduledLatestEndTime",
-    "/Auto/ScheduledNightCurrent",
-    "/Auto/DbusBackoffBaseSeconds",
-    "/Auto/DbusBackoffMaxSeconds",
-    "/Auto/GridRecoveryStartSeconds",
-    "/Auto/StopSurplusDelaySeconds",
-    "/Auto/StopSurplusVolatilityLowWatts",
-    "/Auto/StopSurplusVolatilityHighWatts",
-    "/Auto/ReferenceChargePowerWatts",
-    "/Auto/LearnChargePowerEnabled",
-    "/Auto/LearnChargePowerMinWatts",
-    "/Auto/LearnChargePowerAlpha",
-    "/Auto/LearnChargePowerStartDelaySeconds",
-    "/Auto/LearnChargePowerWindowSeconds",
-    "/Auto/LearnChargePowerMaxAgeSeconds",
-    "/Auto/PhaseSwitching",
-    "/Auto/PhasePreferLowestWhenIdle",
-    "/Auto/PhaseUpshiftDelaySeconds",
-    "/Auto/PhaseDownshiftDelaySeconds",
-    "/Auto/PhaseUpshiftHeadroomWatts",
-    "/Auto/PhaseDownshiftMarginWatts",
-    "/Auto/PhaseMismatchRetrySeconds",
-    "/Auto/PhaseMismatchLockoutCount",
-    "/Auto/PhaseMismatchLockoutSeconds",
-)
+SNAPSHOT_DBUS_PATHS = EVCS_WRITE_SNAPSHOT_PATHS
 SNAPSHOT_ATTRS = (
     "virtual_mode",
     "virtual_autostart",
@@ -98,10 +44,6 @@ SNAPSHOT_ATTRS = (
     "min_current",
     "max_current",
     "auto_policy",
-    "auto_start_surplus_watts",
-    "auto_stop_surplus_watts",
-    "auto_min_soc",
-    "auto_resume_soc",
     "auto_start_delay_seconds",
     "auto_stop_delay_seconds",
     "auto_scheduled_enabled_days",
@@ -110,26 +52,6 @@ SNAPSHOT_ATTRS = (
     "auto_scheduled_night_current_amps",
     "auto_dbus_backoff_base_seconds",
     "auto_dbus_backoff_max_seconds",
-    "auto_grid_recovery_start_seconds",
-    "auto_stop_surplus_delay_seconds",
-    "auto_stop_surplus_volatility_low_watts",
-    "auto_stop_surplus_volatility_high_watts",
-    "auto_reference_charge_power_watts",
-    "auto_learn_charge_power_enabled",
-    "auto_learn_charge_power_min_watts",
-    "auto_learn_charge_power_alpha",
-    "auto_learn_charge_power_start_delay_seconds",
-    "auto_learn_charge_power_window_seconds",
-    "auto_learn_charge_power_max_age_seconds",
-    "auto_phase_switching_enabled",
-    "auto_phase_prefer_lowest_when_idle",
-    "auto_phase_upshift_delay_seconds",
-    "auto_phase_downshift_delay_seconds",
-    "auto_phase_upshift_headroom_watts",
-    "auto_phase_downshift_margin_watts",
-    "auto_phase_mismatch_retry_seconds",
-    "auto_phase_mismatch_lockout_count",
-    "auto_phase_mismatch_lockout_seconds",
     "manual_override_until",
     "auto_start_condition_since",
     "auto_stop_condition_since",
@@ -163,7 +85,11 @@ SNAPSHOT_MAPPING_ATTRS = (
 
 def _snapshot_attrs(svc: Any, attr_names: tuple[str, ...]) -> dict[str, Any]:
     """Capture one set of scalar-like attributes."""
-    return {attr_name: getattr(svc, attr_name) for attr_name in attr_names if hasattr(svc, attr_name)}
+    return {
+        attr_name: copy.deepcopy(getattr(svc, attr_name))
+        for attr_name in attr_names
+        if hasattr(svc, attr_name)
+    }
 
 
 def _snapshot_deques(svc: Any, attr_names: tuple[str, ...]) -> dict[str, deque[Any]]:
@@ -292,8 +218,8 @@ def _restore_dbus_paths_via_queue(svc: Any, saved_paths: dict[str, Any]) -> bool
     enqueue_publish = getattr(svc, "_enqueue_dbus_publish_values", None)
     if not callable(enqueue_publish):
         return False
-    now_func = getattr(svc, "_time_now", None)
-    current = float(now_func()) if callable(now_func) else time.time()
+    now_func = getattr(svc, "time_now", None)
+    current = float(cast(Callable[[], float], now_func)()) if callable(now_func) else time.time()
     enqueue_publish(list(saved_paths.items()), current)
     return True
 

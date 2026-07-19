@@ -200,4 +200,5 @@ __all__ = [
     "scheduled_enabled_days_text",
     "scheduled_mode_snapshot",
     "scheduled_night_window_active",
+    "time",
 ]

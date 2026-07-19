@@ -8,14 +8,8 @@ from pathlib import Path
 from .config_file import normalized_optional_lower_text
 from .models import BackendMode
 
-
 DEFAULT_COMBINED_METER_TYPE = "shelly_meter"
 DEFAULT_COMBINED_SWITCH_TYPE = "shelly_contactor_switch"
-
-
-def _role_field_name(role: str) -> str:
-    """Return the normalized runtime-summary field name for one backend role."""
-    return f"{role.strip().lower()}_type"
 
 
 def _normalized_text_or_default(value: object, default: str = "") -> str:
@@ -42,7 +36,8 @@ def normalize_backend_type(value: object, fallback: str) -> str:
 
 def normalize_optional_backend_type(value: object) -> str | None:
     """Return one optional backend type name."""
-    return normalized_optional_lower_text(value)
+    normalized: str | None = normalized_optional_lower_text(value)
+    return normalized
 
 
 def normalize_config_path(value: object) -> Path | None:
@@ -58,24 +53,6 @@ def _configured_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
-
-
-def _runtime_meter_role_from_legacy(mode: BackendMode, value: object) -> str | None:
-    """Return the runtime meter role reconstructed from legacy config values."""
-    return _runtime_role_from_legacy(mode, DEFAULT_COMBINED_METER_TYPE, value)
-
-
-def _runtime_switch_role_from_legacy(mode: BackendMode, value: object) -> str | None:
-    """Return the runtime switch role reconstructed from legacy config values."""
-    return _runtime_role_from_legacy(mode, DEFAULT_COMBINED_SWITCH_TYPE, value)
-
-
-def _runtime_role_from_legacy(mode: BackendMode, combined_fallback: str, value: object) -> str | None:
-    """Return one runtime backend role reconstructed from legacy config values."""
-    normalized = normalize_backend_type(value, combined_fallback)
-    if _split_none_role(mode, normalized):
-        return None
-    return _runtime_role_alias(combined_fallback, normalized)
 
 
 def _split_none_role(mode: BackendMode, normalized: str) -> bool:
@@ -114,21 +91,3 @@ def _validate_legacy_backend_values(
         errors.extend(_legacy_none_backend_errors(mode, charger_type, "SwitchType"))
     for message in errors:
         raise ValueError(message)
-
-
-def _legacy_meter_view_role_from_runtime(mode: BackendMode, value: object) -> str:
-    """Return one compatibility meter label reconstructed from runtime data."""
-    return _legacy_view_role_from_runtime(mode, DEFAULT_COMBINED_METER_TYPE, value)
-
-
-def _legacy_switch_view_role_from_runtime(mode: BackendMode, value: object) -> str:
-    """Return one compatibility switch label reconstructed from runtime data."""
-    return _legacy_view_role_from_runtime(mode, DEFAULT_COMBINED_SWITCH_TYPE, value)
-
-
-def _legacy_view_role_from_runtime(mode: BackendMode, combined_fallback: str, value: object) -> str:
-    """Return one compatibility backend label reconstructed from runtime data."""
-    if value is None:
-        return "none" if mode == "split" else combined_fallback
-    normalized = _normalized_text_or_default(str(value).lower())
-    return normalized or ("none" if mode == "split" else combined_fallback)

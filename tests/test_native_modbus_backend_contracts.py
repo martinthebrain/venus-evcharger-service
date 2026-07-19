@@ -1,13 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import sys
-import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from venus_evcharger.backend.modbus_transport import create_modbus_transport
 from venus_evcharger.backend.native_modbus_backend import (
-    _native_modbus_transport_factory,
     initialize_native_modbus_backend,
     native_modbus_client,
 )
@@ -80,71 +76,9 @@ class TestNativeModbusBackendContracts(unittest.TestCase):
         self.assertEqual(client.timeout_seconds, 4.5)
         factory.assert_not_called()
 
-    def test_native_modbus_client_uses_backend_module_transport_patchpoint(self) -> None:
-        module_name = "_native_modbus_backend_client_contract_module"
-        module = types.ModuleType(module_name)
-        transport_settings = SimpleNamespace(unit_id=11, timeout_seconds=5.5)
-        transport = _FakeTransport()
-        calls: list[object] = []
-
-        def custom_factory(factory_settings: object) -> _FakeTransport:
-            calls.append(factory_settings)
-            return transport
-
-        module.create_modbus_transport = custom_factory
-        sys.modules[module_name] = module
-        try:
-            backend_type = type("ClientBackendWithPatchpoint", (), {"__module__": module_name})
-            backend = backend_type()
-            backend._client_cache = None
-            backend._transport = None
-            backend.settings = SimpleNamespace(transport_settings=transport_settings)
-            with patch("venus_evcharger.backend.native_modbus_backend.ModbusClient", _FakeClient):
-                client = native_modbus_client(backend)
-        finally:
-            sys.modules.pop(module_name, None)
-
-        self.assertEqual(calls, [transport_settings])
-        self.assertIs(backend._transport, transport)
-        self.assertIs(client.transport, transport)
-        self.assertEqual(client.unit_id, 11)
-        self.assertEqual(client.timeout_seconds, 5.5)
-
     def test_native_modbus_client_rejects_invalid_cache_with_precise_type(self) -> None:
         with self.assertRaisesRegex(TypeError, "Native Modbus client cache must hold ModbusClient, got object"):
             native_modbus_client(SimpleNamespace(_client_cache=object()))
-
-    def test_transport_factory_uses_backend_module_patchpoint(self) -> None:
-        module_name = "_native_modbus_backend_contract_module"
-        module = types.ModuleType(module_name)
-        transport = _FakeTransport()
-        settings = object()
-        calls: list[object] = []
-
-        def custom_factory(factory_settings: object) -> _FakeTransport:
-            calls.append(factory_settings)
-            return transport
-
-        module.create_modbus_transport = custom_factory
-        sys.modules[module_name] = module
-        try:
-            backend_type = type("BackendWithPatchpoint", (), {"__module__": module_name})
-            factory = _native_modbus_transport_factory(backend_type())
-            self.assertIs(factory(settings), transport)
-        finally:
-            sys.modules.pop(module_name, None)
-
-        self.assertEqual(calls, [settings])
-
-    def test_transport_factory_falls_back_and_validates_exchange_method(self) -> None:
-        backend = SimpleNamespace()
-        with patch("types.create_modbus_transport", object(), create=True):
-            self.assertIs(_native_modbus_transport_factory(backend), create_modbus_transport)
-
-        with patch("types.create_modbus_transport", return_value=object(), create=True):
-            factory = _native_modbus_transport_factory(backend)
-            with self.assertRaisesRegex(TypeError, "Modbus transport factory returned object"):
-                factory(SimpleNamespace())
 
 
 if __name__ == "__main__":

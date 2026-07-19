@@ -10,7 +10,6 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import patch
 
 from venus_evcharger.backend import factory, probe, registry
@@ -128,6 +127,27 @@ def _write_config(directory: str, name: str, content: str) -> str:
 
 
 class TestBackendRegistryContracts(unittest.TestCase):
+    def test_switch_group_registry_injects_the_registry_owned_child_factory(self) -> None:
+        service = object()
+        expected_backend = object()
+        with patch.object(registry, "SwitchGroupBackend", return_value=expected_backend) as group_constructor:
+            backend = registry.create_switch_backend("switch_group", service, "/tmp/group.ini")
+
+        self.assertIs(backend, expected_backend)
+        group_constructor.assert_called_once_with(
+            service,
+            config_path="/tmp/group.ini",
+            child_backend_factory=registry._create_switch_group_child_backend,
+        )
+
+    def test_switch_group_child_factory_keeps_its_role_specific_unknown_type_error(self) -> None:
+        with patch.dict(registry.SWITCH_BACKENDS, {}, clear=True):
+            with self.assertRaisesRegex(
+                ValueError,
+                "^Unsupported switch-group child backend 'missing'$",
+            ):
+                registry._create_switch_group_child_backend("missing", object(), "/tmp/child.ini")
+
     def test_create_meter_backend_normalizes_type_and_passes_config_path(self) -> None:
         service = object()
         with (
@@ -863,7 +883,7 @@ class TestBackendProbeContracts(unittest.TestCase):
             with (
                 patch("venus_evcharger.backend.probe.build_service_backends", return_value=resolved),
                 patch(
-                    "venus_evcharger.backend.probe.compat_legacy_backend_view_from_runtime",
+                    "venus_evcharger.backend.probe.backend_selection_view",
                     return_value={"mode": "split"},
                 ),
                 patch("venus_evcharger.backend.probe._dbus_introspection_probe_summary", return_value={"enabled": True}),

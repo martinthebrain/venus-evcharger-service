@@ -5,9 +5,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from venus_evcharger.auto.logic_gates_battery_balance import _AutoDecisionBatteryBalance
+from venus_evcharger.auto.component_context import AutoDecisionContext
+from venus_evcharger.auto.logic_gates_battery_balance import AutoBatteryBalance
 from venus_evcharger.auto.logic_gates_battery_balance_support import (
-    _AutoDecisionBatteryBalanceSupport,
+    AutoBatteryBalancePolicy,
     _battery_discharge_balance_allowed_feasibilities,
     _battery_discharge_balance_cluster_count,
     _battery_discharge_balance_coordination_blocked_by_availability,
@@ -23,15 +24,22 @@ from venus_evcharger.auto.logic_gates_battery_balance_support import (
     _battery_discharge_balance_zero_start_penalty,
     _discharge_balance_bias_mode_active,
 )
+from venus_evcharger.auto.logic_gates_battery_learning import AutoBatteryLearning
+from venus_evcharger.ports.auto import AutoDecisionPort
 
 
-class _BatteryBalanceHarness(_AutoDecisionBatteryBalance):
+class _BatteryBalanceHarness:
     def __init__(self) -> None:
+        warning_throttled = MagicMock()
         self.service = SimpleNamespace(
             auto_battery_scan_interval_seconds=60.0,
             auto_battery_discharge_balance_policy_enabled=True,
-            _warning_throttled=MagicMock(),
+            runtime=SimpleNamespace(warning_throttled=warning_throttled),
         )
+        context = AutoDecisionContext(AutoDecisionPort(self.service), lambda _reason: 0, lambda _mode: True)
+        self.learning = AutoBatteryLearning(context)
+        self.policy = AutoBatteryBalancePolicy(context, self.learning)
+        self.balance = AutoBatteryBalance(context, self.learning, self.policy)
 
 
 class _RecordingBatteryBalanceHarness(_BatteryBalanceHarness):
@@ -41,6 +49,16 @@ class _RecordingBatteryBalanceHarness(_BatteryBalanceHarness):
         self.coordination_args: tuple[object, ...] | None = None
         self.coordination_policy_args: tuple[object, ...] | None = None
         self.multiplier_kwargs: dict[str, object] | None = None
+        self.balance.policy._battery_discharge_balance_policy_context = (
+            self._battery_discharge_balance_policy_context
+        )
+        self.balance.policy._battery_discharge_balance_coordination_advisory = (
+            self._battery_discharge_balance_coordination_advisory
+        )
+        self.balance.policy._battery_discharge_balance_coordination_policy_context = (
+            self._battery_discharge_balance_coordination_policy_context
+        )
+        self.balance.learning._battery_penalty_multiplier = self._battery_penalty_multiplier
 
     def _battery_discharge_balance_policy_context(
         self,
@@ -76,6 +94,14 @@ class _RecordingBatteryBalanceHarness(_BatteryBalanceHarness):
 
 
 class _ActivityContextHarness(_RecordingBatteryBalanceHarness):
+    def __init__(self) -> None:
+        super().__init__()
+        self.balance.learning._battery_activity_inputs = self._battery_activity_inputs
+        self.balance.learning._battery_learning_behavior = self._battery_learning_behavior
+        self.balance._combined_battery_learning_summary = self._combined_battery_learning_summary
+        self.balance._combined_battery_penalties = self._combined_battery_penalties
+        self.balance._combined_battery_scaled_penalties = self._combined_battery_scaled_penalties
+
     def _battery_activity_inputs(self) -> tuple[dict[str, object], list[dict[str, object]], dict[str, object]]:
         return (
             {"battery_headroom_charge_w": 300.0},
@@ -126,7 +152,7 @@ class _ActivityContextHarness(_RecordingBatteryBalanceHarness):
         return 11.0, 22.0
 
 
-class _BatteryBalanceSupportHarness(_AutoDecisionBatteryBalanceSupport):
+class _BatteryBalanceSupportHarness:
     def __init__(self) -> None:
         self.service = SimpleNamespace(
             auto_battery_discharge_balance_policy_enabled=True,
@@ -140,20 +166,16 @@ class _BatteryBalanceSupportHarness(_AutoDecisionBatteryBalanceSupport):
             auto_battery_discharge_balance_coordination_max_penalty_watts=180.0,
             auto_battery_discharge_balance_coordination_support_mode="allow_experimental",
         )
-
-    @staticmethod
-    def _non_negative_optional_float(value: object) -> float | None:
-        if not isinstance(value, (int, float)):
-            return None
-        numeric_value = float(value)
-        return numeric_value if numeric_value >= 0.0 else None
+        context = AutoDecisionContext(AutoDecisionPort(self.service), lambda _reason: 0, lambda _mode: True)
+        self.learning = AutoBatteryLearning(context)
+        self.policy = AutoBatteryBalancePolicy(context, self.learning)
 
 
 class TestAutoBatteryBalanceContracts(unittest.TestCase):
     def test_combined_battery_activity_payload_is_exact_semantic_contract(self) -> None:
         controller = _BatteryBalanceHarness()
 
-        payload = controller._combined_battery_activity_payload(
+        payload = controller.balance._combined_battery_activity_payload(
             cluster={"battery_headroom_charge_w": 300.0},
             learning_summary={
                 "profile_count": 2,
@@ -258,7 +280,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
         controller.service.auto_battery_discharge_balance_policy_enabled = False
 
         self.assertEqual(
-            controller._combined_battery_power_payload(0.5, 0.5, 0.1, 0.2),
+            controller.balance._combined_battery_power_payload(0.5, 0.5, 0.1, 0.2),
             {
                 "charge_power_w": 0.5,
                 "discharge_power_w": 0.5,
@@ -268,7 +290,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
         self.assertEqual(
-            controller._combined_battery_power_payload(0.0, 0.0, None, None),
+            controller.balance._combined_battery_power_payload(0.0, 0.0, None, None),
             {
                 "charge_power_w": None,
                 "discharge_power_w": None,
@@ -278,7 +300,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
         self.assertEqual(
-            controller._combined_battery_power_payload(0.0, 25.0, None, 0.2),
+            controller.balance._combined_battery_power_payload(0.0, 25.0, None, 0.2),
             {
                 "charge_power_w": None,
                 "discharge_power_w": 25.0,
@@ -288,7 +310,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
         self.assertEqual(
-            controller._combined_battery_learning_payload(
+            controller.balance._combined_battery_learning_payload(
                 {
                     "profile_count": 3,
                     "observed_max_charge_power_w": -1.0,
@@ -302,7 +324,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
         self.assertEqual(
-            controller._combined_battery_learning_payload({}),
+            controller.balance._combined_battery_learning_payload({}),
             {
                 "learning_profile_count": 0,
                 "observed_max_charge_power_w": None,
@@ -310,17 +332,17 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
         self.assertEqual(
-            controller._combined_battery_learning_payload({"profile_count": 0}),
+            controller.balance._combined_battery_learning_payload({"profile_count": 0}),
             {
                 "learning_profile_count": 0,
                 "observed_max_charge_power_w": None,
                 "observed_max_discharge_power_w": None,
             },
         )
-        self.assertEqual(controller._combined_battery_effective_penalty_w("8.5", 9), 9.0)
-        self.assertIsNone(controller._combined_battery_warning_error_w({"warning_active": False, "error_w": 12.0}))
+        self.assertEqual(controller.balance._combined_battery_effective_penalty_w("8.5", 9), 9.0)
+        self.assertIsNone(controller.balance._combined_battery_warning_error_w({"warning_active": False, "error_w": 12.0}))
         self.assertEqual(
-            controller._combined_battery_bias_payload(
+            controller.balance._combined_battery_bias_payload(
                 {
                     "warning_active": False,
                     "error_w": 12.0,
@@ -343,7 +365,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
         self.assertEqual(
-            controller._combined_battery_coordination_payload(
+            controller.balance._combined_battery_coordination_payload(
                 {
                     "feasibility": "partial",
                     "advisory_active": False,
@@ -373,7 +395,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
         controller = _RecordingBatteryBalanceHarness()
         cluster = {"battery_combined_soc": 88.0}
 
-        bias_context = controller._combined_battery_discharge_balance_context(
+        bias_context = controller.balance._combined_battery_discharge_balance_context(
             cluster,
             {"expected_near_term_export_w": 123.0},
             {"reserve_band_floor_soc": 75.0},
@@ -392,7 +414,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
 
-        coordination_context = controller._combined_battery_coordination_context(cluster, "truthy")
+        coordination_context = controller.balance._combined_battery_coordination_context(cluster, "truthy")
         self.assertEqual(controller.coordination_args, (cluster, True))
         self.assertEqual(
             coordination_context,
@@ -403,7 +425,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
         )
 
-        policy_context = controller._combined_battery_coordination_policy_context(cluster, "experimental")
+        policy_context = controller.balance._combined_battery_coordination_policy_context(cluster, "experimental")
         self.assertEqual(controller.coordination_policy_args, (cluster, "experimental"))
         self.assertEqual(
             policy_context,
@@ -422,7 +444,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             "import_support_bias": 0.2,
             "export_bias": 0.3,
         }
-        self.assertEqual(controller._combined_battery_penalty_multiplier("charge", behavior), 1.75)
+        self.assertEqual(controller.balance._combined_battery_penalty_multiplier("charge", behavior), 1.75)
         self.assertEqual(
             controller.multiplier_kwargs,
             {
@@ -437,7 +459,7 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
     def test_activity_context_preserves_activity_ratios_from_penalty_stage(self) -> None:
         controller = _ActivityContextHarness()
 
-        payload = controller._combined_battery_activity_context()
+        payload = controller.balance._combined_battery_activity_context()
 
         self.assertEqual(payload["charge_power_w"], 11.0)
         self.assertEqual(payload["discharge_power_w"], 22.0)
@@ -456,14 +478,14 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             "battery_discharge_balance_eligible_source_count": 3,
         }
 
-        controller._emit_combined_battery_discharge_warning(cluster, {"warning_active": False})
-        controller.service._warning_throttled.assert_not_called()
+        controller.balance._emit_combined_battery_discharge_warning(cluster, {"warning_active": False})
+        controller.service.runtime.warning_throttled.assert_not_called()
 
-        controller._emit_combined_battery_discharge_warning(
+        controller.balance._emit_combined_battery_discharge_warning(
             cluster,
             {"warning_active": True, "error_w": 12.34},
         )
-        controller.service._warning_throttled.assert_called_once_with(
+        controller.service.runtime.warning_throttled.assert_called_once_with(
             "battery-discharge-balance-warning",
             60.0,
             "Auto mode observed battery discharge imbalance: error=%s W active=%s eligible=%s",
@@ -472,9 +494,9 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             3,
         )
 
-        controller.service._warning_throttled.reset_mock()
-        controller._emit_combined_battery_discharge_warning({}, {"warning_active": True, "error_w": 0.04})
-        controller.service._warning_throttled.assert_called_once_with(
+        controller.service.runtime.warning_throttled.reset_mock()
+        controller.balance._emit_combined_battery_discharge_warning({}, {"warning_active": True, "error_w": 0.04})
+        controller.service.runtime.warning_throttled.assert_called_once_with(
             "battery-discharge-balance-warning",
             60.0,
             "Auto mode observed battery discharge imbalance: error=%s W active=%s eligible=%s",
@@ -483,43 +505,37 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             0,
         )
 
-        controller.service._warning_throttled.reset_mock()
-        controller._emit_combined_battery_coordination_warning({"advisory_active": False})
-        controller.service._warning_throttled.assert_not_called()
+        controller.service.runtime.warning_throttled.reset_mock()
+        controller.balance._emit_combined_battery_coordination_warning({"advisory_active": False})
+        controller.service.runtime.warning_throttled.assert_not_called()
 
-        controller._emit_combined_battery_coordination_warning(
+        controller.balance._emit_combined_battery_coordination_warning(
             {
                 "advisory_active": True,
                 "advisory_reason": "candidate_sources_not_ready",
             }
         )
-        controller.service._warning_throttled.assert_called_once_with(
+        controller.service.runtime.warning_throttled.assert_called_once_with(
             "battery-discharge-balance-coordination-advisory",
             60.0,
             "Auto mode observed ESS imbalance but coordination feasibility is limited: %s",
             "candidate_sources_not_ready",
         )
 
-        controller.service._warning_throttled.reset_mock()
+        controller.service.runtime.warning_throttled.reset_mock()
         controller.service.auto_battery_scan_interval_seconds = 5.0
-        controller._combined_battery_warning_throttled("custom", "value=%s", "x")
-        controller.service._warning_throttled.assert_called_once_with("custom", 30.0, "value=%s", "x")
+        controller.balance._combined_battery_warning_throttled("custom", "value=%s", "x")
+        controller.service.runtime.warning_throttled.assert_called_once_with("custom", 30.0, "value=%s", "x")
 
-        controller.service._warning_throttled.reset_mock()
+        controller.service.runtime.warning_throttled.reset_mock()
         controller.service.auto_battery_scan_interval_seconds = 0.0
-        controller._combined_battery_warning_throttled("default", "message")
-        controller.service._warning_throttled.assert_called_once_with("default", 60.0, "message")
+        controller.balance._combined_battery_warning_throttled("default", "message")
+        controller.service.runtime.warning_throttled.assert_called_once_with("default", 60.0, "message")
 
         delattr(controller.service, "auto_battery_scan_interval_seconds")
-        controller.service._warning_throttled.reset_mock()
-        controller._combined_battery_warning_throttled("missing", "message")
-        controller.service._warning_throttled.assert_called_once_with("missing", 60.0, "message")
-
-        controller.service._warning_throttled = None
-        controller._combined_battery_warning_throttled("ignored", "message")
-
-        delattr(controller.service, "_warning_throttled")
-        controller._combined_battery_warning_throttled("missing-hook", "message")
+        controller.service.runtime.warning_throttled.reset_mock()
+        controller.balance._combined_battery_warning_throttled("missing", "message")
+        controller.service.runtime.warning_throttled.assert_called_once_with("missing", 60.0, "message")
 
 
 class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
@@ -532,10 +548,10 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
             "battery_combined_soc": 80.0,
         }
 
-        self.assertEqual(controller._battery_discharge_balance_policy_counts(cluster), (150.0, 2, 1))
-        self.assertEqual(controller._battery_discharge_balance_policy_counts({}), (0.0, 0, 0))
+        self.assertEqual(controller.policy._battery_discharge_balance_policy_counts(cluster), (150.0, 2, 1))
+        self.assertEqual(controller.policy._battery_discharge_balance_policy_counts({}), (0.0, 0, 0))
         self.assertEqual(
-            controller._battery_discharge_balance_policy_counts(
+            controller.policy._battery_discharge_balance_policy_counts(
                 {
                     "battery_discharge_balance_eligible_source_count": 0,
                     "battery_discharge_balance_active_source_count": 0,
@@ -543,11 +559,11 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
             ),
             (0.0, 0, 0),
         )
-        self.assertEqual(controller._battery_discharge_balance_policy_thresholds(), (100.0, 50.0, 200.0))
-        self.assertEqual(controller._battery_discharge_balance_reserve_margin_soc(), 5.0)
-        self.assertEqual(controller._discharge_balance_bias_mode(), "export_and_above_reserve_band")
+        self.assertEqual(controller.policy._battery_discharge_balance_policy_thresholds(), (100.0, 50.0, 200.0))
+        self.assertEqual(controller.policy._battery_discharge_balance_reserve_margin_soc(), 5.0)
+        self.assertEqual(controller.policy._discharge_balance_bias_mode(), "export_and_above_reserve_band")
         self.assertEqual(
-            controller._battery_discharge_balance_policy_context(
+            controller.policy._battery_discharge_balance_policy_context(
                 cluster,
                 expected_export_w=1.0,
                 reserve_floor_soc=70.0,
@@ -557,7 +573,7 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
 
         controller.service.auto_battery_discharge_balance_policy_enabled = False
         self.assertEqual(
-            controller._battery_discharge_balance_policy_context(
+            controller.policy._battery_discharge_balance_policy_context(
                 cluster,
                 expected_export_w=1.0,
                 reserve_floor_soc=70.0,
@@ -571,17 +587,17 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
         controller.service.auto_battery_discharge_balance_bias_max_penalty_watts = -2.0
         controller.service.auto_battery_discharge_balance_bias_reserve_margin_soc = -3.0
         controller.service.auto_battery_discharge_balance_bias_mode = "bad-mode"
-        self.assertEqual(controller._battery_discharge_balance_policy_thresholds(), (0.0, 0.0, 0.0))
-        self.assertEqual(controller._battery_discharge_balance_reserve_margin_soc(), 0.0)
-        self.assertEqual(controller._discharge_balance_bias_mode(), "always")
+        self.assertEqual(controller.policy._battery_discharge_balance_policy_thresholds(), (0.0, 0.0, 0.0))
+        self.assertEqual(controller.policy._battery_discharge_balance_reserve_margin_soc(), 0.0)
+        self.assertEqual(controller.policy._discharge_balance_bias_mode(), "always")
         controller.service.auto_battery_discharge_balance_bias_mode = ""
-        self.assertEqual(controller._discharge_balance_bias_mode(), "always")
+        self.assertEqual(controller.policy._discharge_balance_bias_mode(), "always")
         controller.service.auto_battery_discharge_balance_bias_mode = None
-        self.assertEqual(controller._discharge_balance_bias_mode(), "always")
+        self.assertEqual(controller.policy._discharge_balance_bias_mode(), "always")
 
     def test_policy_and_coordination_defaults_are_safe_when_service_config_is_absent(self) -> None:
         controller = _BatteryBalanceSupportHarness()
-        controller.service = SimpleNamespace()
+        controller.policy.service = SimpleNamespace()
         cluster = {
             "battery_discharge_balance_error_w": 150.0,
             "battery_discharge_balance_eligible_source_count": 2,
@@ -590,25 +606,25 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
             "battery_combined_soc": 80.0,
         }
 
-        self.assertFalse(controller._battery_discharge_balance_policy_enabled())
-        self.assertEqual(controller._battery_discharge_balance_policy_counts(cluster), (150.0, 2, 1))
-        self.assertEqual(controller._battery_discharge_balance_policy_thresholds(), (0.0, 0.0, 0.0))
-        self.assertEqual(controller._battery_discharge_balance_reserve_margin_soc(), 0.0)
-        self.assertEqual(controller._discharge_balance_bias_mode(), "always")
+        self.assertFalse(controller.policy._battery_discharge_balance_policy_enabled())
+        self.assertEqual(controller.policy._battery_discharge_balance_policy_counts(cluster), (150.0, 2, 1))
+        self.assertEqual(controller.policy._battery_discharge_balance_policy_thresholds(), (0.0, 0.0, 0.0))
+        self.assertEqual(controller.policy._battery_discharge_balance_reserve_margin_soc(), 0.0)
+        self.assertEqual(controller.policy._discharge_balance_bias_mode(), "always")
         self.assertEqual(
-            controller._battery_discharge_balance_policy_context(
+            controller.policy._battery_discharge_balance_policy_context(
                 cluster,
                 expected_export_w=1.0,
                 reserve_floor_soc=70.0,
             ),
             (False, 0.0, 0.0, "always", False, 0.0, 0.0),
         )
-        self.assertFalse(controller._battery_discharge_balance_coordination_enabled())
-        self.assertEqual(controller._battery_discharge_balance_coordination_counts(cluster), (150.0, 2))
-        self.assertEqual(controller._battery_discharge_balance_coordination_thresholds(), (0.0, 0.0))
-        self.assertEqual(controller._discharge_balance_coordination_support_mode(), "supported_only")
+        self.assertFalse(controller.policy._battery_discharge_balance_coordination_enabled())
+        self.assertEqual(controller.policy._battery_discharge_balance_coordination_counts(cluster), (150.0, 2))
+        self.assertEqual(controller.policy._battery_discharge_balance_coordination_thresholds(), (0.0, 0.0))
+        self.assertEqual(controller.policy._discharge_balance_coordination_support_mode(), "supported_only")
         self.assertEqual(
-            controller._battery_discharge_balance_coordination_policy_context(
+            controller.policy._battery_discharge_balance_coordination_policy_context(
                 cluster,
                 feasibility="supported",
             ),
@@ -616,12 +632,12 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
         )
 
     def test_policy_formula_boundaries_are_contracts(self) -> None:
-        self.assertFalse(_BatteryBalanceSupportHarness._battery_discharge_balance_warning_active(1, 1, 100.0, 100.0))
-        self.assertFalse(_BatteryBalanceSupportHarness._battery_discharge_balance_warning_active(2, 0, 100.0, 100.0))
-        self.assertFalse(_BatteryBalanceSupportHarness._battery_discharge_balance_warning_active(2, 1, 0.0, 0.0))
-        self.assertFalse(_BatteryBalanceSupportHarness._battery_discharge_balance_warning_active(2, 1, 99.9, 100.0))
-        self.assertTrue(_BatteryBalanceSupportHarness._battery_discharge_balance_warning_active(2, 1, 0.5, 0.5))
-        self.assertTrue(_BatteryBalanceSupportHarness._battery_discharge_balance_warning_active(2, 1, 100.0, 100.0))
+        self.assertFalse(AutoBatteryBalancePolicy._battery_discharge_balance_warning_active(1, 1, 100.0, 100.0))
+        self.assertFalse(AutoBatteryBalancePolicy._battery_discharge_balance_warning_active(2, 0, 100.0, 100.0))
+        self.assertFalse(AutoBatteryBalancePolicy._battery_discharge_balance_warning_active(2, 1, 0.0, 0.0))
+        self.assertFalse(AutoBatteryBalancePolicy._battery_discharge_balance_warning_active(2, 1, 99.9, 100.0))
+        self.assertTrue(AutoBatteryBalancePolicy._battery_discharge_balance_warning_active(2, 1, 0.5, 0.5))
+        self.assertTrue(AutoBatteryBalancePolicy._battery_discharge_balance_warning_active(2, 1, 100.0, 100.0))
 
         self.assertFalse(_battery_discharge_balance_penalty_inputs_valid(1, 1, True, 1.0))
         self.assertFalse(_battery_discharge_balance_penalty_inputs_valid(2, 0, True, 1.0))
@@ -671,7 +687,7 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
             start_error_w=50.0,
             max_penalty_w=200.0,
         ), 100.0)
-        self.assertEqual(_BatteryBalanceSupportHarness._battery_discharge_balance_penalty_w(
+        self.assertEqual(AutoBatteryBalancePolicy._battery_discharge_balance_penalty_w(
             eligible_source_count=2,
             active_source_count=1,
             gate_active=True,
@@ -679,7 +695,7 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
             start_error_w=50.0,
             max_penalty_w=200.0,
         ), 100.0)
-        self.assertEqual(_BatteryBalanceSupportHarness._battery_discharge_balance_penalty_w(
+        self.assertEqual(AutoBatteryBalancePolicy._battery_discharge_balance_penalty_w(
             eligible_source_count=1,
             active_source_count=1,
             gate_active=True,
@@ -712,39 +728,39 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
                 "experimental_count": 1,
             },
         )
-        self.assertEqual(controller._battery_discharge_balance_coordination_counts(cluster), (150.0, 2))
+        self.assertEqual(controller.policy._battery_discharge_balance_coordination_counts(cluster), (150.0, 2))
         self.assertEqual(
-            controller._battery_discharge_balance_coordination_counts(
+            controller.policy._battery_discharge_balance_coordination_counts(
                 {"battery_discharge_balance_control_ready_count": 2}
             ),
             (0.0, 2),
         )
-        self.assertEqual(controller._battery_discharge_balance_coordination_thresholds(), (60.0, 180.0))
-        self.assertEqual(controller._discharge_balance_coordination_support_mode(), "allow_experimental")
+        self.assertEqual(controller.policy._battery_discharge_balance_coordination_thresholds(), (60.0, 180.0))
+        self.assertEqual(controller.policy._discharge_balance_coordination_support_mode(), "allow_experimental")
         self.assertEqual(
-            controller._battery_discharge_balance_coordination_policy_context(cluster, feasibility="experimental"),
+            controller.policy._battery_discharge_balance_coordination_policy_context(cluster, feasibility="experimental"),
             (True, "allow_experimental", True, 60.0, 180.0),
         )
 
         controller.service.auto_battery_discharge_balance_coordination_enabled = False
         self.assertEqual(
-            controller._battery_discharge_balance_coordination_policy_context(cluster, feasibility="experimental"),
+            controller.policy._battery_discharge_balance_coordination_policy_context(cluster, feasibility="experimental"),
             (False, "allow_experimental", False, 0.0, 0.0),
         )
         controller.service.auto_battery_discharge_balance_coordination_enabled = True
         controller.service.auto_battery_discharge_balance_coordination_start_error_watts = -1.0
         controller.service.auto_battery_discharge_balance_coordination_max_penalty_watts = None
         controller.service.auto_battery_discharge_balance_coordination_support_mode = "bad-mode"
-        self.assertEqual(controller._battery_discharge_balance_coordination_thresholds(), (0.0, 0.0))
-        self.assertEqual(controller._discharge_balance_coordination_support_mode(), "supported_only")
+        self.assertEqual(controller.policy._battery_discharge_balance_coordination_thresholds(), (0.0, 0.0))
+        self.assertEqual(controller.policy._discharge_balance_coordination_support_mode(), "supported_only")
         controller.service.auto_battery_discharge_balance_coordination_support_mode = ""
-        self.assertEqual(controller._discharge_balance_coordination_support_mode(), "supported_only")
-        self.assertFalse(controller._battery_discharge_balance_coordination_gate_active(
+        self.assertEqual(controller.policy._discharge_balance_coordination_support_mode(), "supported_only")
+        self.assertFalse(controller.policy._battery_discharge_balance_coordination_gate_active(
             support_mode="supported_only",
             feasibility="experimental",
             control_ready_count=2,
         ))
-        self.assertTrue(controller._battery_discharge_balance_coordination_gate_active(
+        self.assertTrue(controller.policy._battery_discharge_balance_coordination_gate_active(
             support_mode="allow_experimental",
             feasibility="experimental",
             control_ready_count=2,
@@ -801,7 +817,7 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
         self.assertEqual(_battery_discharge_balance_allowed_feasibilities("allow_experimental"), {"supported", "experimental"})
         self.assertEqual(_battery_discharge_balance_allowed_feasibilities("supported_only"), {"supported"})
         self.assertEqual(
-            _BatteryBalanceSupportHarness._battery_discharge_balance_coordination_advisory(
+            AutoBatteryBalancePolicy._battery_discharge_balance_coordination_advisory(
                 {
                     "battery_discharge_balance_eligible_source_count": 2,
                     "battery_discharge_balance_control_candidate_count": 0,
@@ -814,7 +830,7 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
             ("observe_only", True, "no_configured_source_offers_a_write_path"),
         )
         self.assertEqual(
-            _BatteryBalanceSupportHarness._battery_discharge_balance_coordination_advisory(
+            AutoBatteryBalancePolicy._battery_discharge_balance_coordination_advisory(
                 {
                     "battery_discharge_balance_eligible_source_count": 2,
                     "battery_discharge_balance_control_candidate_count": 2,
@@ -830,12 +846,12 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
     def test_bias_gates_export_and_reserve_contracts(self) -> None:
         controller = _BatteryBalanceSupportHarness()
 
-        self.assertFalse(controller._discharge_balance_export_active(None))
-        self.assertFalse(controller._discharge_balance_export_active(0.0))
-        self.assertTrue(controller._discharge_balance_export_active(0.1))
-        self.assertFalse(controller._discharge_balance_reserve_gate_active({}, 50.0, 5.0))
-        self.assertFalse(controller._discharge_balance_reserve_gate_active({"battery_combined_soc": 54.9}, 50.0, 5.0))
-        self.assertTrue(controller._discharge_balance_reserve_gate_active({"battery_combined_soc": 55.0}, 50.0, 5.0))
+        self.assertFalse(controller.policy._discharge_balance_export_active(None))
+        self.assertFalse(controller.policy._discharge_balance_export_active(0.0))
+        self.assertTrue(controller.policy._discharge_balance_export_active(0.1))
+        self.assertFalse(controller.policy._discharge_balance_reserve_gate_active({}, 50.0, 5.0))
+        self.assertFalse(controller.policy._discharge_balance_reserve_gate_active({"battery_combined_soc": 54.9}, 50.0, 5.0))
+        self.assertTrue(controller.policy._discharge_balance_reserve_gate_active({"battery_combined_soc": 55.0}, 50.0, 5.0))
 
         for mode, expected in (
             ("always", True),
@@ -853,14 +869,14 @@ class TestAutoBatteryBalanceSupportContracts(unittest.TestCase):
         self.assertFalse(_discharge_balance_bias_mode_active("export_and_above_reserve_band", False, True))
         self.assertFalse(_discharge_balance_bias_mode_active("export_and_above_reserve_band", True, False))
         self.assertTrue(_discharge_balance_bias_mode_active("export_and_above_reserve_band", True, True))
-        self.assertTrue(controller._discharge_balance_bias_gate_active(
+        self.assertTrue(controller.policy._discharge_balance_bias_gate_active(
             bias_mode="export_and_above_reserve_band",
             cluster={"battery_combined_soc": 80.0},
             expected_export_w=1.0,
             reserve_floor_soc=70.0,
             reserve_margin_soc=5.0,
         ))
-        self.assertFalse(controller._discharge_balance_bias_gate_active(
+        self.assertFalse(controller.policy._discharge_balance_bias_gate_active(
             bias_mode="export_and_above_reserve_band",
             cluster={"battery_combined_soc": 74.9},
             expected_export_w=1.0,

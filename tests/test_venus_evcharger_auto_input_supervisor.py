@@ -1,5 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-from tests.venus_evcharger_auto_input_supervisor_runtime_cases import TestAutoInputSupervisorRuntime
-from tests.venus_evcharger_auto_input_supervisor_validation_cases import TestAutoInputSupervisorValidation
+from tests.test_auto_input_supervisor_process_contracts import TestAutoInputSupervisorProcessContracts
+from tests.test_auto_input_supervisor_snapshot_runtime_contracts import (
+    TestAutoInputSupervisorSnapshotRuntimeContracts,
+)
+from tests.test_auto_input_supervisor_snapshot_validation_contracts import (
+    TestAutoInputSupervisorSnapshotValidationContracts,
+)
 
-__all__ = ["TestAutoInputSupervisorRuntime", "TestAutoInputSupervisorValidation"]
+__all__ = [
+    "TestAutoInputSupervisorProcessContracts",
+    "TestAutoInputSupervisorSnapshotRuntimeContracts",
+    "TestAutoInputSupervisorSnapshotValidationContracts",
+]

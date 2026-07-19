@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
 from venus_evcharger.energy.grid_fusion_contracts import GridMeasurement
+from venus_evcharger.inputs.helper.payload_types import is_object_list, is_object_mapping
 
 
 def apply_grid_fusion(
@@ -69,17 +70,17 @@ def _backup_measurement(fusion: GridMeasurementFusion, snapshot: Mapping[str, ob
     )
 
 
-def _source_payload(snapshot: Mapping[str, object], source_id: str) -> Mapping[str, object] | None:
-    raw_sources = snapshot.get("battery_sources")
-    if not isinstance(raw_sources, list):
+def _source_payload(snapshot: Mapping[str, object], source_id: str) -> Mapping[object, object] | None:
+    raw_sources: object = snapshot.get("battery_sources")
+    if not is_object_list(raw_sources):
         return None
     for raw_source in raw_sources:
-        if isinstance(raw_source, Mapping) and _payload_source_id(raw_source) == source_id:
+        if is_object_mapping(raw_source) and _payload_source_id(raw_source) == source_id:
             return raw_source
     return None
 
 
-def _payload_source_id(raw_source: Mapping[str, object]) -> str | None:
+def _payload_source_id(raw_source: Mapping[object, object]) -> str | None:
     value = raw_source.get("source_id")
     return value.strip() if isinstance(value, str) else None
 

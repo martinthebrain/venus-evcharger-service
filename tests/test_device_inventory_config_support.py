@@ -1,57 +1,35 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import configparser
-import unittest
+from collections.abc import Mapping
 
-from venus_evcharger.inventory import (
-    DeviceCapability,
-    DeviceInventory,
-    DeviceInventoryConfigError,
-    DeviceInstance,
-    DeviceProfile,
-    parse_device_inventory_config,
-    RoleBinding,
-    RoleBindingMember,
-    render_device_inventory_config,
-)
-from venus_evcharger.inventory.config import (
-    _InventorySection,
-    _as_bool,
-    _binding_members,
-    _binding_role,
-    _bindings,
-    _capability_kind,
-    _capabilities,
-    _devices,
-    _optional_switching_mode,
-    _phase_label,
-    _phase_labels,
-    _phase_tokens,
-    _profiles,
-    _render_switch_capability_fields,
-    _suffix,
-    validate_device_inventory,
-)
+from venus_evcharger.inventory.config_contracts import InventorySectionLike
+
+__all__ = ["FakeInventoryConfig", "FakeInventorySection"]
 
 
-class _DeviceInventoryConfigTestsHelperRole:
-    class _FakeSection:
-        def __init__(self, name: str, values: dict[str, object]) -> None:
-            self.name = name
-            self._values = values
+class FakeInventorySection:
+    """In-memory section implementing the production parser boundary."""
 
-        def get(self, key: str, fallback: object | None = None) -> object | None:
-            return self._values.get(key, fallback)
+    def __init__(self, name: str, values: Mapping[str, object]) -> None:
+        self.name = name
+        self._values = dict(values)
 
-    class _FakeConfig:
-        def __init__(self, sections: list[str], mapping: dict[str, _InventorySection]) -> None:
-            self._sections = sections
-            self._mapping = mapping
-
-        def sections(self) -> list[str]:
-            return list(self._sections)
-
-        def __getitem__(self, key: str) -> _InventorySection:
-            return self._mapping[key]
+    def get(self, key: str, fallback: object | None = None) -> object | None:
+        return self._values.get(key, fallback)
 
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+class FakeInventoryConfig:
+    """In-memory config implementing the production section collection boundary."""
+
+    def __init__(
+        self,
+        sections: list[str],
+        mapping: Mapping[str, InventorySectionLike],
+    ) -> None:
+        self._sections = list(sections)
+        self._mapping = dict(mapping)
+
+    def sections(self) -> list[str]:
+        return list(self._sections)
+
+    def __getitem__(self, key: str) -> InventorySectionLike:
+        return self._mapping[key]

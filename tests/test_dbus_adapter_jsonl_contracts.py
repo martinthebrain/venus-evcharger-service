@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import mock_open, patch
 
-import venus_evcharger.dbus_adapter_jsonl as jsonl
+import venus_evcharger.dbus_adapter.jsonl as jsonl
 
 
 class DbusAdapterJsonlContractTests(unittest.TestCase):

@@ -3,15 +3,12 @@ import json
 import threading
 import time
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
-from tests.control_api_http_cases_common import _FakeHandler
+from tests.control_api_http_cases_common import _FakeHandler, control_api_http_service
 from venus_evcharger.control import (
     ControlApiAuditTrail,
     ControlApiEventBus,
-    ControlCommand,
-    ControlResult,
     LocalControlApiHttpServer,
 )
 
@@ -207,9 +204,9 @@ class _ControlApiHttpStorageServerCases:
         self.assertIsInstance(debug_log.call_args.args[2], OSError)
 
     def test_start_initializes_server_and_background_thread(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
@@ -232,9 +229,9 @@ class _ControlApiHttpStorageServerCases:
         fake_thread.join.assert_called_once_with(timeout=1.0)
 
     def test_start_is_noop_when_server_is_already_running(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         server._server = MagicMock()
@@ -245,9 +242,9 @@ class _ControlApiHttpStorageServerCases:
         server_factory.assert_not_called()
 
     def test_stop_handles_missing_server_and_missing_thread(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         server.stop()
@@ -262,16 +259,16 @@ class _ControlApiHttpStorageServerCases:
         fake_server.server_close.assert_called_once_with()
 
     def test_health_endpoint_reports_bound_local_server(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
         server.bound_host = "127.0.0.1"
         server.bound_port = 8765
         handler = _FakeHandler("/v1/control/health")
 
-        server._handle_get(handler)
+        server.router.handle_get(handler)
         payload = handler.json_payload()
 
         self.assertEqual(handler.status_code, 200)
@@ -281,14 +278,14 @@ class _ControlApiHttpStorageServerCases:
         self.assertEqual(payload["listen_port"], 8765)
 
     def test_openapi_endpoint_returns_machine_readable_spec_without_auth(self) -> None:
-        service = SimpleNamespace(
-            _control_command_from_payload=MagicMock(),
-            _handle_control_command=MagicMock(),
+        service = control_api_http_service(
+            control_command_from_payload=MagicMock(),
+            handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, auth_token="secret-token")
         handler = _FakeHandler("/v1/openapi.json")
 
-        server._handle_get(handler)
+        server.router.handle_get(handler)
         payload = handler.json_payload()
 
         self.assertEqual(handler.status_code, 200)

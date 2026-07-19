@@ -8,19 +8,19 @@ PROJECT_VENV_BIN="$REPO_DIR/.venv-ruff/bin"
 
 cd "$REPO_DIR"
 
-if command -v shellcheck >/dev/null 2>&1; then
-	SHELLCHECK_CMD="$(command -v shellcheck)"
-elif [ -x "$PROJECT_VENV_BIN/shellcheck" ]; then
+if [ -x "$PROJECT_VENV_BIN/shellcheck" ]; then
 	SHELLCHECK_CMD="$PROJECT_VENV_BIN/shellcheck"
+elif command -v shellcheck >/dev/null 2>&1; then
+	SHELLCHECK_CMD="$(command -v shellcheck)"
 else
 	echo "shellcheck is required for shell audit." >&2
 	exit 1
 fi
 
-if command -v shfmt >/dev/null 2>&1; then
-	SHFMT_CMD="$(command -v shfmt)"
-elif [ -x "$PROJECT_VENV_BIN/shfmt" ]; then
+if [ -x "$PROJECT_VENV_BIN/shfmt" ]; then
 	SHFMT_CMD="$PROJECT_VENV_BIN/shfmt"
+elif command -v shfmt >/dev/null 2>&1; then
+	SHFMT_CMD="$(command -v shfmt)"
 else
 	echo "shfmt is required for shell audit." >&2
 	exit 1

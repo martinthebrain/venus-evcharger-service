@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 import tempfile
 import unittest
-from typing import Any, cast
 
 from requests.auth import HTTPDigestAuth
 
@@ -52,16 +51,40 @@ class _Session:
         return self.responses.pop(0)
 
 
+@dataclass
+class _Service:
+    session: object
+    shelly_request_timeout_seconds: float = 5.0
+    _adapter_auth_fallback_enabled: bool = False
+    username: str = ""
+    password: str = ""
+    use_digest_auth: bool = False
+
+
 class TestGoEChargerBackend(unittest.TestCase):
     def _config(self, text: str) -> str:
         path = Path(tempfile.mkdtemp()) / "goe.ini"
         path.write_text(text, encoding="utf-8")
         return str(path)
 
-    def _service(self, session: _Session | None = None, **attrs: object) -> SimpleNamespace:
-        payload = {"session": session or _Session()}
-        payload.update(attrs)
-        return SimpleNamespace(**payload)
+    def _service(
+        self,
+        session: _Session | None = None,
+        *,
+        shelly_request_timeout_seconds: float = 5.0,
+        _adapter_auth_fallback_enabled: bool = False,
+        username: str = "",
+        password: str = "",
+        use_digest_auth: bool = False,
+    ) -> _Service:
+        return _Service(
+            session=session or _Session(),
+            shelly_request_timeout_seconds=shelly_request_timeout_seconds,
+            _adapter_auth_fallback_enabled=_adapter_auth_fallback_enabled,
+            username=username,
+            password=password,
+            use_digest_auth=use_digest_auth,
+        )
 
     def test_settings_require_base_url_and_preserve_contract_fields(self) -> None:
         with self.assertRaises(ValueError) as missing_base_url:
@@ -211,21 +234,27 @@ class TestGoEChargerBackend(unittest.TestCase):
         self.assertIs(backend.service, service)
         self.assertIs(backend._session, session)
         self.assertEqual(backend.config_path, backend.config_path.strip())
-        self.assertEqual(kwargs["url"], "http://goe.local/api/status")
-        self.assertEqual(kwargs["timeout"], 4.0)
-        self.assertEqual(kwargs["params"], {"filter": "alw"})
-        self.assertEqual(kwargs["auth"], ("user", "secret"))
-        self.assertEqual(kwargs["headers"], {"X-Token": "abc"})
+        self.assertEqual(
+            kwargs,
+            {
+                "url": "http://goe.local/api/status",
+                "timeout": 4.0,
+                "params": {"filter": "alw"},
+                "auth": ("user", "secret"),
+                "headers": {"X-Token": "abc"},
+            },
+        )
         self.assertEqual(_goe_headers(backend.settings.auth_settings), {"X-Token": "abc"})
 
         digest_backend = GoEChargerBackend(
             self._service(_Session()),
             self._config("[Adapter]\nBaseUrl=http://goe.local\nUsername=user\nPassword=secret\nDigestAuth=1\n"),
         )
-        self.assertIsInstance(digest_backend._request_kwargs("http://goe.local")["auth"], HTTPDigestAuth)
+        digest_kwargs = digest_backend._request_kwargs("http://goe.local")
+        self.assertIsInstance(digest_kwargs.get("auth"), HTTPDigestAuth)
 
         backend_without_session_attr = GoEChargerBackend(
-            SimpleNamespace(),
+            object(),
             self._config("[Adapter]\nBaseUrl=http://goe.local\n"),
         )
         self.assertIsNotNone(backend_without_session_attr._session)
@@ -296,17 +325,16 @@ class TestGoEChargerBackend(unittest.TestCase):
         self.assertTrue(current_response.raise_called)
         self.assertTrue(missing_ack_response.raise_called)
 
-        off_backend = GoEChargerBackend(self._service(_Session(_Response({"frc": True}))), self._config("[Adapter]\nBaseUrl=http://goe.local\n"))
+        off_session = _Session(_Response({"frc": True}))
+        off_backend = GoEChargerBackend(self._service(off_session), self._config("[Adapter]\nBaseUrl=http://goe.local\n"))
         off_backend.set_enabled(False)
-        self.assertEqual(off_backend._session.calls[0]["params"], {"frc": "1"})
+        self.assertEqual(off_session.calls[0]["params"], {"frc": "1"})
 
     def test_current_and_phase_write_validation(self) -> None:
         backend = GoEChargerBackend(self._service(_Session()), self._config("[Adapter]\nBaseUrl=http://goe.local\n"))
 
-        for amps in (None, "bad", -1):
-            with self.subTest(amps=amps):
-                with self.assertRaisesRegex(ValueError, "Unsupported charger current"):
-                    backend.set_current(cast(Any, amps))
+        with self.assertRaisesRegex(ValueError, "Unsupported charger current"):
+            backend.set_current(-1)
         with self.assertRaises(ValueError) as zero_current:
             backend.set_current(0)
         self.assertEqual(str(zero_current.exception), "Unsupported charger current '0'")
@@ -314,7 +342,6 @@ class TestGoEChargerBackend(unittest.TestCase):
             backend.set_current(1)
 
         backend.set_phase_selection("P1")
-        backend.set_phase_selection(cast(Any, None))
         backend._observed_phase_selection = "P1_P2"
         backend.set_phase_selection("P1_P2")
         with self.assertRaises(ValueError) as phase_error:

@@ -5,22 +5,17 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from venus_evcharger.update.victron_ess_balance_apply_pid import (
-    _UpdateCycleVictronEssBalanceApplyPid,
+    VictronEssPidController,
 )
-
-
-class _PidHarness(_UpdateCycleVictronEssBalanceApplyPid):
-    @staticmethod
-    def _optional_float(value: object) -> float | None:
-        return float(value) if isinstance(value, (str, int, float)) else None
+from venus_evcharger.update.victron_ess_balance_apply_sources import VictronEssSourceResolver
 
 
 class VictronEssBalanceApplyPidContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.pid = _PidHarness()
+        self.pid = VictronEssPidController(VictronEssSourceResolver())
 
     def test_gain_and_limit_config_preserve_names_defaults_and_bounds(self) -> None:
         svc = SimpleNamespace(
@@ -56,8 +51,8 @@ class VictronEssBalanceApplyPidContractTests(unittest.TestCase):
     def test_combined_config_delegates_and_merges_exactly(self) -> None:
         svc = object()
         with (
-            patch.object(_PidHarness, "_victron_ess_balance_pid_gain_config", return_value={"kp": 1.0}) as gains,
-            patch.object(_PidHarness, "_victron_ess_balance_pid_limit_config", return_value={"deadband_w": 2.0}) as limits,
+            patch.object(VictronEssPidController, "_victron_ess_balance_pid_gain_config", return_value={"kp": 1.0}) as gains,
+            patch.object(VictronEssPidController, "_victron_ess_balance_pid_limit_config", return_value={"deadband_w": 2.0}) as limits,
         ):
             self.assertEqual(self.pid._victron_ess_balance_pid_config(svc), {"kp": 1.0, "deadband_w": 2.0})
         gains.assert_called_once_with(svc)

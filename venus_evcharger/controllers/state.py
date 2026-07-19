@@ -1,49 +1,81 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Configuration and RAM-only runtime-state helpers for the Venus EV charger service."""
+"""Flat composition root for configuration and volatile service state."""
 
 from __future__ import annotations
 
 import configparser
-import os
-import time
-from typing import Any, Callable
 
-from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.controllers.state_specs import (
-    RUNTIME_OVERRIDE_BY_CONFIG_KEY,
-    RUNTIME_OVERRIDE_BY_PATH,
-    RUNTIME_OVERRIDE_SECTION,
-    RUNTIME_OVERRIDE_SPECS,
-    RuntimeOverrideSpec,
-    _CasePreservingConfigParser,
-)
-from venus_evcharger.controllers.state_validation import _StateValidation
-
-_REQUIRED_HOST_KEY = "Host"
+from venus_evcharger.controllers.state_config import StateConfigLoader, default_state_config_path
+from venus_evcharger.controllers.state_contracts import ModeNormalizer, StateControllerComponents
+from venus_evcharger.controllers.state_persistence import RuntimeStatePersistence
+from venus_evcharger.controllers.state_restore import RuntimeStateRestorer
+from venus_evcharger.controllers.state_restore_victron_ess import VictronEssRuntimeRestorer
+from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
+from venus_evcharger.controllers.state_runtime_overrides import RuntimeOverrideStore
+from venus_evcharger.controllers.state_runtime_snapshot import RuntimeStateSnapshotBuilder
+from venus_evcharger.controllers.state_summary import StateSummaryBuilder
+from venus_evcharger.controllers.state_validation import RuntimeConfigValidator
 
 
-class ServiceStateController(_StateValidation):
-    """Encapsulate config loading, config validation, and volatile runtime state."""
+class ServiceStateController:
+    """Stable service facade over explicitly composed state components."""
 
-    def __init__(self, service: Any, normalize_mode_func: Callable[[object], int]) -> None:
-        self.service = service
-        self._normalize_mode = normalize_mode_func
+    def __init__(self, service: object, normalize_mode_func: ModeNormalizer) -> None:
+        normalizer = RuntimeStateNormalizer()
+        summary = StateSummaryBuilder(service)
+        snapshot = RuntimeStateSnapshotBuilder(service, normalizer)
+        overrides = RuntimeOverrideStore(service, normalizer)
+        restorer = RuntimeStateRestorer(
+            service,
+            normalize_mode_func,
+            normalizer,
+            VictronEssRuntimeRestorer(),
+        )
+        persistence = RuntimeStatePersistence(service, normalizer, snapshot, restorer, summary)
+        self.components = StateControllerComponents(
+            config=StateConfigLoader(overrides, lambda: self.config_path()),
+            validation=RuntimeConfigValidator(service),
+            snapshot=snapshot,
+            overrides=overrides,
+            persistence=persistence,
+            summary=summary,
+        )
 
     @staticmethod
     def config_path() -> str:
-        return os.path.join(
-            os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "..")),
-            "deploy",
-            "venus",
-            "config.venus_evcharger.ini",
-        )
+        return default_state_config_path()
+
+    @staticmethod
+    def coerce_runtime_int(value: object, default: int = 0) -> int:
+        return RuntimeStateNormalizer.coerce_runtime_int(value, default)
+
+    @staticmethod
+    def coerce_runtime_float(value: object, default: float = 0.0) -> float:
+        return RuntimeStateNormalizer.coerce_runtime_float(value, default)
 
     def load_config(self) -> configparser.ConfigParser:
-        config = configparser.ConfigParser()
-        config.read(self.config_path())
-        if "DEFAULT" not in config or _REQUIRED_HOST_KEY not in config["DEFAULT"]:
-            raise ValueError(
-                "deploy/venus/config.venus_evcharger.ini is missing or incomplete. "
-                "Copy it from the documented deploy/venus/config.venus_evcharger.ini template so the required keys exist."
-            )
-        return self._apply_runtime_overrides_to_config(self.service, config)
+        return self.components.config.load()
+
+    def validate_runtime_config(self) -> None:
+        self.components.validation.validate()
+
+    def state_summary(self) -> str:
+        return self.components.summary.build()
+
+    def current_runtime_state(self) -> dict[str, object]:
+        return self.components.snapshot.build()
+
+    def load_runtime_state(self) -> None:
+        self.components.persistence.load()
+
+    def save_runtime_state(self) -> None:
+        self.components.persistence.save()
+
+    def current_runtime_overrides(self) -> dict[str, str]:
+        return self.components.overrides.current()
+
+    def save_runtime_overrides(self) -> None:
+        self.components.overrides.save()
+
+    def flush_runtime_overrides(self, now: float | None = None) -> None:
+        self.components.overrides.flush(now)

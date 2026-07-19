@@ -1,41 +1,55 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+"""NDJSON event endpoint for Control API HTTP."""
+
 from __future__ import annotations
 
 import json
 import time
 from http.server import BaseHTTPRequestHandler
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import Any, Mapping
 
+from venus_evcharger.control.http_api_auth import ControlApiHttpAuthenticator
+from venus_evcharger.control.http_api_command_contracts import (
+    ControlApiEventBusPort,
+    ControlApiEventsPort,
+)
 from venus_evcharger.core.contracts import CONTROL_API_EVENT_KINDS, normalized_control_api_event_fields
-from venus_evcharger.control.http_api_command_contracts import ControlApiEventBusLike, ControlApiHttpService
-from venus_evcharger.control.http_api_commands import _LocalControlApiCommand
 
 
-class _LocalControlApiEvents(_LocalControlApiCommand):
-    if TYPE_CHECKING:
-        _service: ControlApiHttpService
-        _RETRY_HEADER: str
+RETRY_HEADER = "X-Control-Api-Retry-Ms"
 
-        def _state_token(self) -> str: ...
 
-    def _write_event_stream(self, handler: BaseHTTPRequestHandler, params: dict[str, list[str]]) -> None:
-        event_bus = self._service._control_api_event_bus()
-        limit = self._query_int(params, "limit", 20)
-        after_seq = max(self._query_int(params, "after", 0), self._query_int(params, "resume", 0))
-        timeout = self._query_float(params, "timeout", 5.0)
-        heartbeat_interval = self._query_float(params, "heartbeat", 1.0)
-        event_kinds = self._query_event_kinds(params)
-        retry_ms = self._recommended_retry_ms(heartbeat_interval)
-        once = self._query_bool(params, "once", False)
+class ControlApiHttpEventEndpoint:
+    """Stream snapshots, recent events, heartbeats, and live events."""
+
+    def __init__(self, service: ControlApiEventsPort, authenticator: ControlApiHttpAuthenticator) -> None:
+        self._service = service
+        self._authenticator = authenticator
+
+    def write_stream(self, handler: BaseHTTPRequestHandler, params: dict[str, list[str]]) -> None:
+        event_bus = self._service.event_bus()
+        limit = self.query_int(params, "limit", 20)
+        after_seq = max(self.query_int(params, "after", 0), self.query_int(params, "resume", 0))
+        timeout = self.query_float(params, "timeout", 5.0)
+        heartbeat_interval = self.query_float(params, "heartbeat", 1.0)
+        event_kinds = self.query_event_kinds(params)
+        retry_ms = self.recommended_retry_ms(heartbeat_interval)
+        once = self.query_bool(params, "once", False)
         handler.send_response(200)
         handler.send_header("Content-Type", "application/x-ndjson")
         handler.send_header("Cache-Control", "no-cache")
-        handler.send_header(self._RETRY_HEADER, str(retry_ms))
+        handler.send_header(RETRY_HEADER, str(retry_ms))
         handler.end_headers()
-        last_seq = self._write_initial_event_snapshot(handler, after_seq, event_kinds, retry_ms)
-        last_seq = self._write_recent_events(handler, event_bus, limit=limit, after_seq=last_seq, event_kinds=event_kinds)
+        last_seq = self.write_initial_snapshot(handler, after_seq, event_kinds, retry_ms)
+        last_seq = self.write_recent_events(
+            handler,
+            event_bus,
+            limit=limit,
+            after_seq=last_seq,
+            event_kinds=event_kinds,
+        )
         if not once:
-            self._write_live_events(
+            self.write_live_events(
                 handler,
                 event_bus,
                 after_seq=last_seq,
@@ -45,18 +59,16 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
                 retry_ms=retry_ms,
             )
 
-    def _write_initial_event_snapshot(
+    def write_initial_snapshot(
         self,
         handler: BaseHTTPRequestHandler,
         after_seq: int,
         event_kinds: frozenset[str],
         retry_ms: int,
     ) -> int:
-        if after_seq > 0:
+        if after_seq > 0 or (event_kinds and "snapshot" not in event_kinds):
             return after_seq
-        if event_kinds and "snapshot" not in event_kinds:
-            return after_seq
-        self._write_event_line(
+        self.write_event_line(
             handler,
             normalized_control_api_event_fields(
                 {
@@ -65,8 +77,8 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
                     "kind": "snapshot",
                     "timestamp": time.time(),
                     "payload": {
-                        **self._service._state_api_event_snapshot_payload(),
-                        "state_token": self._state_token(),
+                        **self._service.event_snapshot_payload(),
+                        "state_token": self._authenticator.state_token,
                         "retry_hint_ms": retry_ms,
                     },
                 }
@@ -74,10 +86,10 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
         )
         return after_seq
 
-    def _write_recent_events(
+    def write_recent_events(
         self,
         handler: BaseHTTPRequestHandler,
-        event_bus: ControlApiEventBusLike,
+        event_bus: ControlApiEventBusPort,
         *,
         limit: int,
         after_seq: int,
@@ -85,17 +97,15 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
     ) -> int:
         last_seq = after_seq
         for event in event_bus.recent(limit=limit, after_seq=after_seq):
-            if not self._event_matches_kinds(event, event_kinds):
-                last_seq = max(last_seq, int(event["seq"]))
-                continue
-            self._write_event_line(handler, event)
             last_seq = max(last_seq, int(event["seq"]))
+            if self.event_matches_kinds(event, event_kinds):
+                self.write_event_line(handler, event)
         return last_seq
 
-    def _write_live_events(
+    def write_live_events(
         self,
         handler: BaseHTTPRequestHandler,
-        event_bus: ControlApiEventBusLike,
+        event_bus: ControlApiEventBusPort,
         *,
         after_seq: int,
         timeout: float,
@@ -107,23 +117,23 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
         last_seq = after_seq
         while time.time() < deadline:
             remaining = max(0.0, deadline - time.time())
-            event, last_seq = self._wait_for_matching_event(
+            event, last_seq = self.wait_for_matching_event(
                 event_bus,
                 after_seq=last_seq,
-                timeout=self._event_wait_timeout(remaining, heartbeat_interval),
+                timeout=self.event_wait_timeout(remaining, heartbeat_interval),
                 event_kinds=event_kinds,
             )
             if event is None:
-                if self._should_end_live_stream(remaining, heartbeat_interval):
+                if self.should_end_live_stream(remaining, heartbeat_interval):
                     return
-                self._write_event_line(handler, self._heartbeat_event(last_seq, retry_ms))
+                self.write_event_line(handler, self.heartbeat_event(last_seq, retry_ms))
                 continue
-            self._write_event_line(handler, event)
+            self.write_event_line(handler, event)
             last_seq = max(last_seq, int(event["seq"]))
 
-    def _wait_for_matching_event(
+    def wait_for_matching_event(
         self,
-        event_bus: ControlApiEventBusLike,
+        event_bus: ControlApiEventBusPort,
         *,
         after_seq: int,
         timeout: float,
@@ -137,21 +147,19 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
             if event is None:
                 return None, current_after_seq
             current_after_seq = max(current_after_seq, int(event["seq"]))
-            if self._event_matches_kinds(event, event_kinds):
+            if self.event_matches_kinds(event, event_kinds):
                 return event, current_after_seq
 
     @staticmethod
-    def _event_wait_timeout(remaining: float, heartbeat_interval: float) -> float:
-        if heartbeat_interval <= 0.0:
-            return remaining
-        return min(remaining, heartbeat_interval)
+    def event_wait_timeout(remaining: float, heartbeat_interval: float) -> float:
+        return remaining if heartbeat_interval <= 0.0 else min(remaining, heartbeat_interval)
 
     @staticmethod
-    def _should_end_live_stream(remaining: float, heartbeat_interval: float) -> bool:
+    def should_end_live_stream(remaining: float, heartbeat_interval: float) -> bool:
         return heartbeat_interval <= 0.0 or remaining <= 0.0
 
     @staticmethod
-    def _heartbeat_event(after_seq: int, retry_ms: int) -> dict[str, Any]:
+    def heartbeat_event(after_seq: int, retry_ms: int) -> dict[str, Any]:
         return normalized_control_api_event_fields(
             {
                 "seq": after_seq,
@@ -168,28 +176,26 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
         )
 
     @staticmethod
-    def _query_event_kinds(params: dict[str, list[str]]) -> frozenset[str]:
-        kinds: set[str] = set()
-        for raw_value in params.get("kind", []):
-            for item in raw_value.split(","):
-                normalized = item.strip().lower()
-                if normalized in CONTROL_API_EVENT_KINDS:
-                    kinds.add(normalized)
+    def query_event_kinds(params: dict[str, list[str]]) -> frozenset[str]:
+        kinds = {
+            item.strip().lower()
+            for raw_value in params.get("kind", [])
+            for item in raw_value.split(",")
+            if item.strip().lower() in CONTROL_API_EVENT_KINDS
+        }
         return frozenset(kinds)
 
     @staticmethod
-    def _event_matches_kinds(event: Mapping[str, Any], event_kinds: frozenset[str]) -> bool:
-        if not event_kinds:
-            return True
-        return str(event.get("kind", "")).strip().lower() in event_kinds
+    def event_matches_kinds(event: Mapping[str, Any], event_kinds: frozenset[str]) -> bool:
+        return not event_kinds or str(event.get("kind", "")).strip().lower() in event_kinds
 
     @staticmethod
-    def _recommended_retry_ms(heartbeat_interval: float) -> int:
+    def recommended_retry_ms(heartbeat_interval: float) -> int:
         interval = heartbeat_interval if heartbeat_interval > 0.0 else 1.0
         return max(250, int(interval * 1000))
 
     @staticmethod
-    def _query_int(params: dict[str, list[str]], key: str, default: int) -> int:
+    def query_int(params: dict[str, list[str]], key: str, default: int) -> int:
         values = params.get(key)
         if not values:
             return default
@@ -199,7 +205,7 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
             return default
 
     @staticmethod
-    def _query_float(params: dict[str, list[str]], key: str, default: float) -> float:
+    def query_float(params: dict[str, list[str]], key: str, default: float) -> float:
         values = params.get(key)
         if not values:
             return default
@@ -209,15 +215,14 @@ class _LocalControlApiEvents(_LocalControlApiCommand):
             return default
 
     @staticmethod
-    def _query_bool(params: dict[str, list[str]], key: str, default: bool) -> bool:
+    def query_bool(params: dict[str, list[str]], key: str, default: bool) -> bool:
         values = params.get(key)
         if not values:
             return default
-        raw = values[0].strip().lower()
-        return raw in {"1", "true", "yes", "on"}
+        return values[0].strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
-    def _write_event_line(handler: BaseHTTPRequestHandler, event: Mapping[str, Any]) -> None:
+    def write_event_line(handler: BaseHTTPRequestHandler, event: Mapping[str, Any]) -> None:
         normalized_event = normalized_control_api_event_fields(event)
         handler.wfile.write((json.dumps(normalized_event, sort_keys=True) + "\n").encode())
         handler.wfile.flush()

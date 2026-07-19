@@ -22,18 +22,6 @@ from venus_evcharger.core.contracts_control import (
     normalized_control_result_fields,
 )
 
-
-EMPTY_COMMAND = {
-    "name": "legacy_unknown_write",
-    "path": "",
-    "value": None,
-    "source": "http",
-    "detail": "",
-    "command_id": "",
-    "idempotency_key": "",
-}
-
-
 class TestCoreContractsControlCommandContracts(unittest.TestCase):
     def test_primitive_control_normalizers(self) -> None:
         self.assertEqual(_normalized_text(None), "")
@@ -77,8 +65,12 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
 
     def test_command_name_source_and_status_normalizers(self) -> None:
         self.assertEqual(normalized_control_command_name(" set_mode "), "set_mode")
-        self.assertEqual(normalized_control_command_name(None), "legacy_unknown_write")
-        self.assertEqual(normalized_control_command_name("invalid"), "legacy_unknown_write")
+        for value, display in ((None, ""), ("invalid", "invalid")):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                ValueError,
+                f"^Unsupported control command '{display}'\\.$",
+            ):
+                normalized_control_command_name(value)
         for source in ("dbus", "http", "internal", "mqtt"):
             self.assertEqual(normalized_control_command_source(source.upper()), source)
         self.assertEqual(normalized_control_command_source("invalid"), "http")
@@ -90,7 +82,8 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
         self.assertEqual(normalized_control_command_status("invalid"), "rejected")
 
     def test_empty_and_full_command_shapes(self) -> None:
-        self.assertEqual(normalized_control_command_fields(None), EMPTY_COMMAND)
+        with self.assertRaisesRegex(ValueError, "^Unsupported control command ''\\.$"):
+            normalized_control_command_fields(None)
         self.assertEqual(
             normalized_control_command_fields(
                 {
@@ -114,22 +107,12 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
                 "idempotency_key": "key",
             },
         )
-        self.assertEqual(normalized_control_command_fields({}, default_source="internal")["source"], "internal")
+        with self.assertRaisesRegex(ValueError, "^Unsupported control command ''\\.$"):
+            normalized_control_command_fields({}, default_source="internal")
 
     def test_empty_result_shape(self) -> None:
-        self.assertEqual(
-            normalized_control_result_fields(None),
-            {
-                "command": EMPTY_COMMAND,
-                "status": "rejected",
-                "accepted": False,
-                "applied": False,
-                "persisted": False,
-                "reversible_failure": True,
-                "external_side_effect_started": False,
-                "detail": "",
-            },
-        )
+        with self.assertRaisesRegex(ValueError, "^Unsupported control command ''\\.$"):
+            normalized_control_result_fields(None)
 
     def test_applied_result_shape(self) -> None:
         result = normalized_control_result_fields(
@@ -165,8 +148,10 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
         )
 
     def test_in_flight_and_rejected_result_shapes(self) -> None:
+        command = {"name": "set_mode", "path": "/Mode", "value": 1}
         in_flight = normalized_control_result_fields(
             {
+                "command": command,
                 "status": "accepted_in_flight",
                 "persisted": 1,
                 "reversible_failure": 1,
@@ -185,7 +170,12 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
             },
         )
         rejected = normalized_control_result_fields(
-            {"status": "rejected", "reversible_failure": 0, "external_side_effect_started": 1}
+            {
+                "command": command,
+                "status": "rejected",
+                "reversible_failure": 0,
+                "external_side_effect_started": 1,
+            }
         )
         self.assertEqual(
             {key: rejected[key] for key in ("status", "accepted", "applied", "persisted", "reversible_failure", "external_side_effect_started")},

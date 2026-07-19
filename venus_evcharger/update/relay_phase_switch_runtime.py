@@ -3,85 +3,77 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
 from venus_evcharger.backend.models import PhaseSelection, normalize_phase_selection, normalize_phase_selection_or_none
 from venus_evcharger.core.contracts import finite_float_or_none
 from venus_evcharger.update.relay_phase_switch_runtime_recovery import (
     PHASE_SWITCH_FALLBACK_SELECTION,
     PHASE_SWITCH_RUNTIME_APPLY_ERRORS,
-    _RelayPhaseSwitchRuntimeRecovery,
+    PhaseSwitchRecovery,
     _non_negative_seconds_attr,
 )
+from venus_evcharger.update.relay_phase_switch_mismatch import PhaseSwitchMismatchMonitor
+from venus_evcharger.update.relay_ports import PhaseSwitchServicePort
 
 
-class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
+class PhaseSwitchCoordinator:
     """Advance waiting and stabilizing phase-switch state machines."""
 
-    if TYPE_CHECKING:  # pragma: no cover
-        PHASE_SWITCH_WAITING_STATE: str
-        PHASE_SWITCH_STABILIZING_STATE: str
-
-        @classmethod
-        def _fresh_charger_state_timestamp(cls, svc: Any, now: float | None = None) -> float | None: ...
-
-        @classmethod
-        def _clear_phase_switch_mismatch_tracking(
-            cls,
-            svc: Any,
-            selection: PhaseSelection | None = None,
-        ) -> None: ...
-
-        @staticmethod
-        def _clear_phase_switch_lockout(svc: Any) -> None: ...
+    def __init__(
+        self,
+        recovery: PhaseSwitchRecovery,
+        mismatch: PhaseSwitchMismatchMonitor,
+        *,
+        waiting_state: str,
+        stabilizing_state: str,
+    ) -> None:
+        self._recovery = recovery
+        self._mismatch = mismatch
+        self._waiting_state = waiting_state
+        self._stabilizing_state = stabilizing_state
 
     @staticmethod
-    def _phase_switch_pause_seconds(svc: Any) -> float:
+    def _phase_switch_pause_seconds(svc: object) -> float:
         return _non_negative_seconds_attr(svc, "phase_switch_pause_seconds", 1.0)
 
     @staticmethod
-    def _phase_switch_stabilization_seconds(svc: Any) -> float:
+    def _phase_switch_stabilization_seconds(svc: object) -> float:
         return _non_negative_seconds_attr(svc, "phase_switch_stabilization_seconds", 2.0)
 
     @staticmethod
-    def _pending_phase_switch_selection(svc: Any) -> PhaseSelection | None:
+    def pending_selection(svc: PhaseSwitchServicePort) -> PhaseSelection | None:
         pending = getattr(svc, "_phase_switch_pending_selection", None)
         if pending is None:
             return None
         return normalize_phase_selection_or_none(pending) or PHASE_SWITCH_FALLBACK_SELECTION
 
     @staticmethod
-    def _observed_phase_selection_from_pm_status(pm_status: dict[str, Any]) -> PhaseSelection | None:
+    def _observed_phase_selection_from_pm_status(pm_status: dict[str, object]) -> PhaseSelection | None:
         observed = pm_status.get("_phase_selection")
         if observed is None:
             return None
         return normalize_phase_selection_or_none(observed) or PHASE_SWITCH_FALLBACK_SELECTION
 
-    @classmethod
     def _observed_phase_selection(
-        cls,
-        svc: Any,
-        pm_status: dict[str, Any],
+        self,
+        svc: PhaseSwitchServicePort,
+        pm_status: dict[str, object],
         now: float,
     ) -> PhaseSelection | None:
-        observed = cls._observed_phase_selection_from_pm_status(pm_status)
+        observed = self._observed_phase_selection_from_pm_status(pm_status)
         if observed is not None:
             return observed
-        return cls._observed_phase_selection_from_charger_state(svc, now)
+        return self._observed_phase_selection_from_charger_state(svc, now)
 
-    @classmethod
-    def _observed_phase_selection_from_charger_state(cls, svc: Any, now: float) -> PhaseSelection | None:
-        if cls._fresh_charger_state_timestamp(svc, now) is None:
+    def _observed_phase_selection_from_charger_state(self, svc: PhaseSwitchServicePort, now: float) -> PhaseSelection | None:
+        readback = svc._readback_resolver.resolve(now).charger
+        if readback is None:
             return None
-        if not hasattr(svc, "_last_charger_state_phase_selection"):
-            return None
-        raw_phase_selection = svc._last_charger_state_phase_selection
+        raw_phase_selection = readback.state.phase_selection
         if raw_phase_selection is None:
             return None
         return normalize_phase_selection_or_none(raw_phase_selection) or PHASE_SWITCH_FALLBACK_SELECTION
 
-    @classmethod
-    def _phase_switch_verification_deadline(cls, svc: Any) -> float | None:
+    def _phase_switch_verification_deadline(self, svc: PhaseSwitchServicePort) -> float | None:
         stable_until = finite_float_or_none(getattr(svc, "_phase_switch_stable_until", None))
         soft_fail_seconds = _non_negative_seconds_attr(svc, "auto_shelly_soft_fail_seconds", 10.0)
         if stable_until is not None:
@@ -91,16 +83,16 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
         requested_at = finite_float_or_none(svc._phase_switch_requested_at)
         if requested_at is None:
             return None
-        return requested_at + cls._phase_switch_pause_seconds(svc) + cls._phase_switch_stabilization_seconds(svc) + soft_fail_seconds
+        return requested_at + self._phase_switch_pause_seconds(svc) + self._phase_switch_stabilization_seconds(svc) + soft_fail_seconds
 
-    @classmethod
-    def _phase_switch_verification_expired(cls, svc: Any, now: float) -> bool:
-        deadline = cls._phase_switch_verification_deadline(svc)
+    def _phase_switch_verification_expired(self, svc: PhaseSwitchServicePort, now: float) -> bool:
+        deadline = self._phase_switch_verification_deadline(svc)
         return deadline is not None and float(now) >= float(deadline)
 
     def orchestrate_pending_phase_switch(
         self,
-        pm_status: dict[str, Any],
+        svc: PhaseSwitchServicePort,
+        pm_status: dict[str, object],
         relay_on: bool,
         power: float,
         current: float,
@@ -108,16 +100,14 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
         now: float,
         auto_mode_active: bool,
     ) -> tuple[bool, float, float, bool, bool | None]:
-        svc = self.service
-        pending_selection = self._pending_phase_switch_selection(svc)
+        pending_selection = self.pending_selection(svc)
         raw_switch_state = getattr(svc, "_phase_switch_state", None)
         switch_state = "" if raw_switch_state is None else str(raw_switch_state)
-        if not self._phase_switch_state_active(pending_selection, switch_state):
-            self._clear_phase_switch_state(svc)
+        if pending_selection is None or not self.state_active(pending_selection, switch_state):
+            self._recovery.clear_phase_switch_state(svc)
             return relay_on, power, current, pm_confirmed, None
-        assert pending_selection is not None
 
-        if switch_state == self.PHASE_SWITCH_WAITING_STATE:
+        if switch_state == self._waiting_state:
             return self._orchestrate_waiting_phase_switch(
                 svc,
                 pending_selection,
@@ -140,43 +130,43 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
             auto_mode_active,
         )
 
-    def _phase_switch_state_active(self, pending_selection: PhaseSelection | None, switch_state: str) -> bool:
+    def state_active(self, pending_selection: PhaseSelection | None, switch_state: str) -> bool:
         return pending_selection is not None and switch_state in {
-            self.PHASE_SWITCH_WAITING_STATE,
-            self.PHASE_SWITCH_STABILIZING_STATE,
+            self._waiting_state,
+            self._stabilizing_state,
         }
 
-    def _phase_switch_waiting_ready(self, svc: Any, relay_on: bool, pm_confirmed: bool, now: float) -> bool:
-        pending_relay_state, _requested_at = svc._peek_pending_relay_command()
+    def _phase_switch_waiting_ready(self, svc: PhaseSwitchServicePort, relay_on: bool, pm_confirmed: bool, now: float) -> bool:
+        pending_relay_state, _requested_at = svc.runtime.pending_relay_command()
         if self._phase_switch_waiting_blocked(relay_on, pending_relay_state, pm_confirmed):
             return False
         return self._phase_switch_pause_elapsed(svc, now)
 
     @staticmethod
-    def _phase_switch_waiting_blocked(relay_on: bool, pending_relay_state: Any, pm_confirmed: bool) -> bool:
+    def _phase_switch_waiting_blocked(relay_on: bool, pending_relay_state: object, pm_confirmed: bool) -> bool:
         return bool(relay_on) or pending_relay_state is not None or not pm_confirmed
 
-    def _phase_switch_pause_elapsed(self, svc: Any, now: float) -> bool:
+    def _phase_switch_pause_elapsed(self, svc: PhaseSwitchServicePort, now: float) -> bool:
         requested_at = svc._phase_switch_requested_at if hasattr(svc, "_phase_switch_requested_at") else None
         return requested_at is None or (float(now) - float(requested_at)) >= self._phase_switch_pause_seconds(svc)
 
     def _apply_pending_phase_selection(
         self,
-        svc: Any,
+        svc: PhaseSwitchServicePort,
         pending_selection: PhaseSelection,
         now: float,
     ) -> tuple[bool, float, float, bool, bool | None]:
-        applied_selection = svc._apply_phase_selection(pending_selection)
+        applied_selection = svc.runtime.apply_phase_selection(pending_selection)
         svc._phase_switch_mismatch_active = False
         svc.requested_phase_selection = applied_selection
-        svc._phase_switch_state = self.PHASE_SWITCH_STABILIZING_STATE
+        svc._phase_switch_state = self._stabilizing_state
         svc._phase_switch_stable_until = float(now) + self._phase_switch_stabilization_seconds(svc)
-        svc._save_runtime_state()
+        svc.state.save_runtime_state()
         return False, 0.0, 0.0, False, False
 
     def _orchestrate_waiting_phase_switch(
         self,
-        svc: Any,
+        svc: PhaseSwitchServicePort,
         pending_selection: PhaseSelection,
         relay_on: bool,
         power: float,
@@ -190,7 +180,7 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
         try:
             return self._apply_pending_phase_selection(svc, pending_selection, now)
         except PHASE_SWITCH_RUNTIME_APPLY_ERRORS as error:
-            relay_on, power, current, pm_confirmed = self._abort_pending_phase_switch(
+            relay_on, power, current, pm_confirmed = self._recovery._abort_pending_phase_switch(
                 svc,
                 relay_on,
                 power,
@@ -204,9 +194,9 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
 
     def _orchestrate_stabilizing_phase_switch(
         self,
-        svc: Any,
+        svc: PhaseSwitchServicePort,
         pending_selection: PhaseSelection,
-        pm_status: dict[str, Any],
+        pm_status: dict[str, object],
         relay_on: bool,
         power: float,
         current: float,
@@ -243,8 +233,8 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
 
     def _remember_observed_phase_selection(
         self,
-        svc: Any,
-        pm_status: dict[str, Any],
+        svc: PhaseSwitchServicePort,
+        pm_status: dict[str, object],
         now: float,
     ) -> PhaseSelection | None:
         observed_selection = self._observed_phase_selection(svc, pm_status, now)
@@ -254,7 +244,7 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
 
     def _complete_stabilized_phase_switch(
         self,
-        svc: Any,
+        svc: PhaseSwitchServicePort,
         pending_selection: PhaseSelection,
         relay_on: bool,
         power: float,
@@ -264,9 +254,9 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
         auto_mode_active: bool,
     ) -> tuple[bool, float, float, bool, bool | None]:
         svc.active_phase_selection = pending_selection
-        self._clear_phase_switch_mismatch_tracking(svc, pending_selection)
+        self._mismatch._clear_phase_switch_mismatch_tracking(svc, pending_selection)
         self._clear_matching_phase_switch_lockout(svc, pending_selection)
-        relay_on, power, current, pm_confirmed = self._resume_after_phase_switch_pause(
+        relay_on, power, current, pm_confirmed = self._recovery._resume_after_phase_switch_pause(
             svc,
             relay_on,
             power,
@@ -276,20 +266,19 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
             auto_mode_active,
         )
         return relay_on, power, current, pm_confirmed, None
-
-    def _clear_matching_phase_switch_lockout(self, svc: Any, pending_selection: PhaseSelection) -> None:
+    def _clear_matching_phase_switch_lockout(self, svc: PhaseSwitchServicePort, pending_selection: PhaseSelection) -> None:
         lockout_selection = getattr(svc, "_phase_switch_lockout_selection", None)
         if lockout_selection is not None and normalize_phase_selection(lockout_selection, "P1") == pending_selection:
-            self._clear_phase_switch_lockout(svc)
+            self._mismatch._clear_phase_switch_lockout(svc)
 
     @staticmethod
-    def _phase_switch_still_stabilizing(svc: Any, now: float) -> bool:
+    def _phase_switch_still_stabilizing(svc: PhaseSwitchServicePort, now: float) -> bool:
         stable_until = getattr(svc, "_phase_switch_stable_until", None)
         return stable_until is not None and float(now) < float(stable_until)
 
     def _stabilizing_phase_switch_mismatch_result(
         self,
-        svc: Any,
+        svc: PhaseSwitchServicePort,
         pending_selection: PhaseSelection,
         observed_selection: PhaseSelection | None,
         relay_on: bool,
@@ -303,8 +292,8 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
             return None
         if not self._phase_switch_verification_expired(svc, now):
             return False, 0.0, 0.0, False, False
-        self._report_phase_switch_mismatch(svc, pending_selection, observed_selection, now)
-        relay_on, power, current, pm_confirmed = self._abort_phase_switch_after_mismatch(
+        self._recovery._report_phase_switch_mismatch(svc, pending_selection, observed_selection, now)
+        relay_on, power, current, pm_confirmed = self._recovery._abort_phase_switch_after_mismatch(
             svc,
             pending_selection,
             observed_selection,
@@ -316,3 +305,6 @@ class _RelayPhaseSwitchRuntime(_RelayPhaseSwitchRuntimeRecovery):
             auto_mode_active,
         )
         return relay_on, power, current, pm_confirmed, None
+
+
+__all__ = ["PhaseSwitchCoordinator"]

@@ -21,6 +21,13 @@ from .models import (
 )
 from .native_modbus_backend import initialize_native_modbus_backend, native_modbus_client
 
+__all__ = (
+    "SimpleEvseChargerBackend",
+    "SimpleEvseChargerSettings",
+    "create_modbus_transport",
+    "load_simpleevse_charger_settings",
+)
+
 
 _SIMPLEEVSE_SUPPORTED_PHASE_SELECTIONS: tuple[PhaseSelection, ...] = ("P1",)
 _SIMPLEEVSE_CURRENT_REGISTER = 1000

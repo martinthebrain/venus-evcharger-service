@@ -18,29 +18,26 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _apply_phase_selection=MagicMock(return_value={"phase": "bad"}),
             _state_summary=MagicMock(return_value={"state": "bad"}),
         )
-        port = WriteControllerPort(service)
+        port = write_port(service)
 
-        with self.assertRaisesRegex(TypeError, "_apply_phase_selection must return str"):
+        with self.assertRaisesRegex(TypeError, "apply_phase_selection must return str"):
             port.apply_phase_selection("P1")
-        with self.assertRaisesRegex(TypeError, "_state_summary must return str"):
+        with self.assertRaisesRegex(TypeError, "state.summary must return str"):
             port.state_summary()
 
     def test_auto_runtime_setting_write_publishes_and_persists_overrides(self) -> None:
+        policy = AutoPolicy()
+        policy.normal_profile.start_surplus_watts = 1500.0
         service = SimpleNamespace(
             virtual_mode=1,
             virtual_autostart=1,
             virtual_startstop=0,
             virtual_enable=1,
-            auto_start_surplus_watts=1500.0,
-            auto_stop_surplus_watts=1200.0,
-            auto_min_soc=40.0,
-            auto_resume_soc=50.0,
             auto_start_delay_seconds=10.0,
             auto_stop_delay_seconds=30.0,
-            auto_phase_switching_enabled=True,
-            auto_policy=SimpleNamespace(),
+            auto_policy=policy,
             _dbusservice={"/Auto/StartSurplusWatts": 1500.0},
-            _time_now=MagicMock(return_value=42.0),
+            time_now=MagicMock(return_value=42.0),
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
@@ -48,16 +45,13 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _validate_runtime_config=MagicMock(),
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
-        with patch("venus_evcharger.controllers.write.AutoPolicy.from_service", return_value=service.auto_policy), patch(
-            "venus_evcharger.controllers.write.validate_auto_policy"
-        ) as validate_policy:
-            self.assertTrue(controller.handle_write("/Auto/StartSurplusWatts", 1825.0))
+        self.assertTrue(controller.handle_write("/Auto/StartSurplusWatts", 1825.0))
 
-        self.assertEqual(service.auto_start_surplus_watts, 1825.0)
+        self.assertEqual(service.auto_policy.normal_profile.start_surplus_watts, 1825.0)
+        self.assertFalse(hasattr(service, "auto_start_surplus_watts"))
         self.assertEqual(service._dbusservice["/Auto/StartSurplusWatts"], 1825.0)
-        validate_policy.assert_called_once_with(service.auto_policy, service)
         service._validate_runtime_config.assert_called_once()
         service._save_runtime_state.assert_called_once()
         service._save_runtime_overrides.assert_called_once()
@@ -70,7 +64,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             virtual_enable=1,
             auto_dbus_backoff_base_seconds=5.0,
             _dbusservice={"/Auto/DbusBackoffBaseSeconds": 5.0},
-            _time_now=MagicMock(return_value=42.0),
+            time_now=MagicMock(return_value=42.0),
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
@@ -78,14 +72,12 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _validate_runtime_config=MagicMock(),
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
-        with patch("venus_evcharger.controllers.write.validate_auto_policy") as validate_policy:
-            self.assertTrue(controller.handle_write("/Auto/DbusBackoffBaseSeconds", 7.5))
+        self.assertTrue(controller.handle_write("/Auto/DbusBackoffBaseSeconds", 7.5))
 
         self.assertEqual(service.auto_dbus_backoff_base_seconds, 7.5)
         self.assertEqual(service._dbusservice["/Auto/DbusBackoffBaseSeconds"], 7.5)
-        validate_policy.assert_not_called()
         service._validate_runtime_config.assert_called_once()
         service._save_runtime_state.assert_called_once()
         service._save_runtime_overrides.assert_called_once()
@@ -106,7 +98,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
                 "/Auto/ScheduledLatestEndTime": "06:30",
                 "/Auto/ScheduledNightCurrent": 0.0,
             },
-            _time_now=MagicMock(return_value=42.0),
+            time_now=MagicMock(return_value=42.0),
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
@@ -114,13 +106,12 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _validate_runtime_config=MagicMock(),
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
-        with patch("venus_evcharger.controllers.write.validate_auto_policy") as validate_policy:
-            self.assertTrue(controller.handle_write("/Auto/ScheduledEnabledDays", "Mon,Wed,Fri"))
-            self.assertTrue(controller.handle_write("/Auto/ScheduledFallbackDelaySeconds", 1800.0))
-            self.assertTrue(controller.handle_write("/Auto/ScheduledLatestEndTime", "07:15"))
-            self.assertTrue(controller.handle_write("/Auto/ScheduledNightCurrent", 11.0))
+        self.assertTrue(controller.handle_write("/Auto/ScheduledEnabledDays", "Mon,Wed,Fri"))
+        self.assertTrue(controller.handle_write("/Auto/ScheduledFallbackDelaySeconds", 1800.0))
+        self.assertTrue(controller.handle_write("/Auto/ScheduledLatestEndTime", "07:15"))
+        self.assertTrue(controller.handle_write("/Auto/ScheduledNightCurrent", 11.0))
 
         self.assertEqual(service.auto_scheduled_enabled_days, "Mon,Wed,Fri")
         self.assertEqual(service.auto_scheduled_night_start_delay_seconds, 1800.0)
@@ -130,21 +121,20 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         self.assertEqual(service._dbusservice["/Auto/ScheduledFallbackDelaySeconds"], 1800.0)
         self.assertEqual(service._dbusservice["/Auto/ScheduledLatestEndTime"], "07:15")
         self.assertEqual(service._dbusservice["/Auto/ScheduledNightCurrent"], 11.0)
-        validate_policy.assert_not_called()
         self.assertEqual(service._validate_runtime_config.call_count, 4)
         self.assertEqual(service._save_runtime_state.call_count, 4)
         self.assertEqual(service._save_runtime_overrides.call_count, 4)
 
-    def test_auto_runtime_setting_write_updates_learn_charge_flag_with_policy_rebuild(self) -> None:
+    def test_auto_runtime_setting_write_updates_canonical_learn_charge_flag(self) -> None:
+        policy = AutoPolicy()
         service = SimpleNamespace(
             virtual_mode=1,
             virtual_autostart=1,
             virtual_startstop=0,
             virtual_enable=1,
-            auto_learn_charge_power_enabled=True,
-            auto_policy=SimpleNamespace(),
+            auto_policy=policy,
             _dbusservice={"/Auto/LearnChargePowerEnabled": 1},
-            _time_now=MagicMock(return_value=42.0),
+            time_now=MagicMock(return_value=42.0),
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(),
@@ -152,16 +142,13 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _validate_runtime_config=MagicMock(),
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
-        with patch("venus_evcharger.controllers.write.AutoPolicy.from_service", return_value=service.auto_policy), patch(
-            "venus_evcharger.controllers.write.validate_auto_policy"
-        ) as validate_policy:
-            self.assertTrue(controller.handle_write("/Auto/LearnChargePowerEnabled", 0))
+        self.assertTrue(controller.handle_write("/Auto/LearnChargePowerEnabled", 0))
 
-        self.assertFalse(service.auto_learn_charge_power_enabled)
+        self.assertFalse(service.auto_policy.learn_charge_power.enabled)
+        self.assertFalse(hasattr(service, "auto_learn_charge_power_enabled"))
         self.assertEqual(service._dbusservice["/Auto/LearnChargePowerEnabled"], 0)
-        validate_policy.assert_called_once_with(service.auto_policy, service)
         service._validate_runtime_config.assert_called_once()
         service._save_runtime_state.assert_called_once()
         service._save_runtime_overrides.assert_called_once()
@@ -183,7 +170,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             virtual_set_current=10.0,
             _charger_backend=charger_backend,
             _dbusservice={"/StartStop": 0, "/Enable": 0, "/SetCurrent": 10.0},
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _queue_relay_command=MagicMock(),
@@ -193,7 +180,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _save_runtime_state=MagicMock(),
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/StartStop", 1))
         charger_backend.set_enabled.assert_called_once_with(True)
@@ -220,14 +207,14 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             virtual_set_current=10.0,
             _charger_backend=charger_backend,
             _dbusservice={"/SetCurrent": 10.0},
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
             _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/SetCurrent", 12.5))
 
@@ -243,7 +230,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             auto_manual_override_seconds=300,
             manual_override_until=0.0,
             _dbusservice={"/StartStop": 0, "/Enable": 0},
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _queue_relay_command=MagicMock(),
             _publish_local_pm_status=MagicMock(),
@@ -252,7 +239,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _save_runtime_state=MagicMock(),
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/StartStop", 1))
         self.assertEqual(service.virtual_enable, 1)
@@ -277,7 +264,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _publish_dbus_field=MagicMock(),
         )
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         controller._handle_mode_transition_to_auto(1, 100.0)
         self.assertFalse(hasattr(service, "manual_override_until"))
@@ -305,7 +292,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
                 "/PhaseSelectionActive": "P1",
                 "/SupportedPhaseSelections": "P1,P1_P2",
             },
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _phase_selection_requires_pause=MagicMock(return_value=True),
@@ -321,7 +308,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._apply_phase_selection.side_effect = partial(self._apply_phase_selection, service)
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/PhaseSelection", "P1_P2"))
 
@@ -356,7 +343,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
                 "/PhaseSelectionActive": "P1",
                 "/SupportedPhaseSelections": "P1,P1_P2",
             },
-            _time_now=MagicMock(return_value=100.0),
+            time_now=MagicMock(return_value=100.0),
             _normalize_mode=self._normalize_mode,
             _mode_uses_auto_logic=self._mode_uses_auto_logic,
             _phase_selection_requires_pause=MagicMock(return_value=True),
@@ -373,7 +360,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         )
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = write_controller(service)
 
         self.assertTrue(controller.handle_write("/PhaseSelection", "P1_P2"))
         service._queue_relay_command.assert_called_once_with(False, 100.0)

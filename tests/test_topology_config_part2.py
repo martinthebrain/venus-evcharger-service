@@ -155,7 +155,7 @@ ChargerType=
 
         self.assertTrue(runtime_summary_is_configured(summary, legacy_host=""))
 
-    def test_runtime_summary_from_service_prefers_config_over_legacy_backend_attrs(self) -> None:
+    def test_runtime_summary_from_service_uses_config_as_canonical_source(self) -> None:
         parser = configparser.ConfigParser()
         parser.read_string(
             """
@@ -170,13 +170,7 @@ ConfigPath=/data/etc/wizard-charger.ini
 Type=charger_native
 """
         )
-        service = SimpleNamespace(
-            config=parser,
-            backend_mode="combined",
-            meter_backend_type="shelly_combined",
-            switch_backend_type="shelly_combined",
-            charger_backend_type=None,
-        )
+        service = SimpleNamespace(config=parser)
 
         selection = runtime_summary_from_service(service)
 
@@ -185,23 +179,9 @@ Type=charger_native
         self.assertIsNone(selection.switch_type)
         self.assertEqual(selection.charger_type, "goe_charger")
 
-    def test_runtime_summary_from_service_prefers_backend_bundle_selection_over_legacy_backend_attrs(self) -> None:
-        runtime = SimpleNamespace(
-            backend_mode="split",
-            meter_type="template_meter",
-            switch_type="template_switch",
-            charger_type="goe_charger",
-            meter_config_path=None,
-            switch_config_path=None,
-            charger_config_path=None,
-        )
-        service = SimpleNamespace(
-            _backend_bundle=SimpleNamespace(runtime=runtime),
-            backend_mode="combined",
-            meter_backend_type="shelly_combined",
-            switch_backend_type="shelly_combined",
-            charger_backend_type=None,
-        )
+    def test_runtime_summary_from_service_uses_resolved_backend_bundle(self) -> None:
+        runtime = runtime_summary_fixture()
+        service = SimpleNamespace(_backend_bundle=SimpleNamespace(runtime=runtime))
 
         resolved = runtime_summary_from_service(service)
 
@@ -211,15 +191,7 @@ Type=charger_native
         self.assertEqual(resolved.charger_type, "goe_charger")
 
     def test_runtime_summary_from_service_prefers_backend_bundle_selection_over_runtime_topology(self) -> None:
-        runtime = SimpleNamespace(
-            backend_mode="split",
-            meter_type="template_meter",
-            switch_type="template_switch",
-            charger_type="goe_charger",
-            meter_config_path=None,
-            switch_config_path=None,
-            charger_config_path=None,
-        )
+        runtime = runtime_summary_fixture()
         parser = configparser.ConfigParser()
         parser.read_string(
             """
@@ -248,7 +220,7 @@ ReferenceWatts=2300
         self.assertEqual(resolved.switch_type, "template_switch")
         self.assertEqual(resolved.charger_type, "goe_charger")
 
-    def test_runtime_summary_from_service_prefers_runtime_topology_over_conflicting_legacy_attrs(self) -> None:
+    def test_runtime_summary_from_service_uses_runtime_topology(self) -> None:
         parser = configparser.ConfigParser()
         parser.read_string(
             """
@@ -264,13 +236,7 @@ Type=charger_native
 """
         )
         topology = parse_topology_config(parser)
-        service = SimpleNamespace(
-            _topology_config=topology,
-            backend_mode="combined",
-            meter_backend_type="shelly_combined",
-            switch_backend_type="shelly_combined",
-            charger_backend_type=None,
-        )
+        service = SimpleNamespace(_topology_config=topology)
 
         resolved = runtime_summary_from_service(service)
 
@@ -279,15 +245,13 @@ Type=charger_native
         self.assertIsNone(resolved.switch_type)
         self.assertEqual(resolved.charger_type, "goe_charger")
 
-    def test_runtime_summary_from_service_supports_explicit_legacy_backend_attr_fallback(self) -> None:
+    def test_runtime_summary_from_service_supports_bootstrap_normalized_summary(self) -> None:
         service = SimpleNamespace(
-            backend_mode="split",
-            meter_backend_type="template_meter",
-            switch_backend_type="template_switch",
-            charger_backend_type="goe_charger",
-            meter_backend_config_path="/data/etc/wizard-meter.ini",
-            switch_backend_config_path="/data/etc/wizard-switch.ini",
-            charger_backend_config_path="/data/etc/wizard-charger.ini",
+            _backend_runtime_summary=runtime_summary_fixture(
+                meter_config_path=Path("/data/etc/wizard-meter.ini"),
+                switch_config_path=Path("/data/etc/wizard-switch.ini"),
+                charger_config_path=Path("/data/etc/wizard-charger.ini"),
+            )
         )
 
         resolved = runtime_summary_from_service(service)
@@ -300,13 +264,9 @@ Type=charger_native
         self.assertEqual(str(resolved.switch_config_path), "/data/etc/wizard-switch.ini")
         self.assertEqual(str(resolved.charger_config_path), "/data/etc/wizard-charger.ini")
 
-    def test_runtime_summary_from_service_uses_default_selection_without_runtime_config_or_legacy_attrs(self) -> None:
-        resolved = runtime_summary_from_service(SimpleNamespace())
-
-        self.assertEqual(resolved.backend_mode, "combined")
-        self.assertEqual(resolved.meter_type, "shelly_meter")
-        self.assertEqual(resolved.switch_type, "shelly_contactor_switch")
-        self.assertIsNone(resolved.charger_type)
+    def test_runtime_summary_from_service_rejects_missing_canonical_source(self) -> None:
+        with self.assertRaisesRegex(ValueError, "canonical backend configuration"):
+            runtime_summary_from_service(SimpleNamespace())
 
     def test_load_runtime_backend_summary_supports_fixed_reference_topology(self) -> None:
         parser = configparser.ConfigParser()
@@ -331,5 +291,4 @@ ReferenceWatts=2300
         self.assertIsNone(summary.meter_type)
         self.assertEqual(summary.switch_type, "template_switch")
         self.assertIsNone(summary.charger_type)
-
 

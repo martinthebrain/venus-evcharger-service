@@ -1,0 +1,390 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Gateway adapter health, freshness, and SLO behavior."""
+
+from __future__ import annotations
+
+from tests.support.dbus_gateway_adapter_harness import (
+    DbusAdapter,
+    GatewayAdapterContractCase,
+    MagicMock,
+    Path,
+    gateway_paths,
+    health_slo_module,
+    install_mock,
+    patch,
+    process_health_module,
+    tempfile,
+    time,
+)
+
+
+class GatewayHealthSloCases(GatewayAdapterContractCase):
+    """Exercise health, freshness, and SLO behavior."""
+
+    def test_health_snapshot_time_and_backpressure_contracts_are_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            install_mock(
+                adapter.write_scheduler,
+                "health",
+                MagicMock(return_value={"processed_commands_60s": 7, "last_processed_at": 321.0}),
+            )
+            install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 12.0}))
+            install_mock(adapter, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
+            adapter._last_tick_monotonic = 999.75
+
+            with (
+                patch.object(process_health_module.time, "time", return_value=500.0),
+                patch.object(
+                    process_health_module.time,
+                    "monotonic",
+                    return_value=1000.0,
+                ),
+            ):
+                health = adapter.health_snapshot()
+
+            adapter.write_scheduler.health.assert_called_once_with(now=500.0)
+            adapter.slo_snapshot.assert_called_once()
+            self.assertEqual(adapter.slo_snapshot.call_args.kwargs["current_monotonic"], 1000.0)
+            adapter.tick_health.snapshot.assert_called_once_with(now=1000.0)
+            self.assertEqual(health["queues"]["processed_commands_60s"], 7)
+            self.assertEqual(health["queues"]["last_processed_at"], 321.0)
+            self.assertEqual(health["write_scheduler"]["processed_commands_60s"], 7)
+            self.assertEqual(health["mainloop_heartbeat_age_s"], 0.25)
+            self.assertEqual(health["eventloop"]["mainloop_heartbeat_age_s"], 0.25)
+            self.assertEqual(health["eventloop"]["max_tick_gap_ms_60s"], 12.0)
+            self.assertEqual(health["backpressure"]["state"], "ok")
+
+            degraded = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-degraded")))
+            install_mock(degraded, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
+            degraded.circuit.degraded_until = time.time() + 60.0
+            self.assertEqual(degraded.health_snapshot()["backpressure"]["state"], "slow")
+
+            for last_tick, expected in ((0.0, 0.0), (0.5, 999.5)):
+                heartbeat_adapter = DbusAdapter(
+                    str(config_path),
+                    paths=gateway_paths(str(Path(temp_dir) / f"run-heartbeat-{last_tick}")),
+                )
+                install_mock(heartbeat_adapter, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
+                heartbeat_adapter._last_tick_monotonic = last_tick
+                with patch.object(process_health_module.time, "monotonic", return_value=1000.0):
+                    self.assertEqual(heartbeat_adapter.health_snapshot()["mainloop_heartbeat_age_s"], expected)
+
+    def test_backpressure_marks_slo_violations(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                "DbusGatewaySloGuiMaxAgeSeconds=1\n"
+                "DbusGatewaySloCoreReadMaxAgeSeconds=1\n"
+                "DbusGatewaySloQueueMaxAgeSeconds=1\n"
+                "DbusGatewaySloMainloopGapMaxMs=100\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            now = time.time()
+            adapter.cache.update_value(
+                f"path:{adapter.service_name}/Ac/Power",
+                10.0,
+                source=f"{adapter.service_name}/Ac/Power",
+                now=now - 5.0,
+            )
+            adapter.cache.update_value("grid_power_w", 10.0, source="grid", now=now - 5.0)
+            monotonic_now = time.monotonic()
+            adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=monotonic_now - 3.0)
+            adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=monotonic_now)
+            adapter.commands.enqueue({"kind": "refresh_services", "created_at": now - 5.0})
+
+            health = adapter.health_snapshot()
+
+            self.assertEqual(health["slo"]["state"], "violated")
+            self.assertIn("gui_fresh", health["slo"]["violated"])
+            self.assertIn("core_reads_fresh", health["slo"]["violated"])
+            self.assertIn("queue_age_ok", health["slo"]["violated"])
+            self.assertIn("mainloop_gap_ok", health["slo"]["violated"])
+            self.assertNotEqual(health["backpressure"]["state"], "ok")
+            self.assertTrue(health["backpressure"]["core_should_throttle"])
+
+    def test_gui_freshness_ignores_idle_session_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\nDbusGatewaySloGuiMaxAgeSeconds=1\nDbusGatewaySloCoreReadMaxAgeSeconds=1\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            now = time.time()
+            for path, value, age in (
+                ("/Ac/Power", 1.7, 0.5),
+                ("/Ac/Current", 0.01, 0.5),
+                ("/Session/Energy", 0.0, 600.0),
+                ("/Session/Time", 0, 600.0),
+                ("/Ac/Energy/Forward", 0.0, 600.0),
+            ):
+                adapter.cache.update_value(
+                    f"path:{adapter.service_name}{path}",
+                    value,
+                    source=f"{adapter.service_name}{path}",
+                    now=now - age,
+                )
+
+            self.assertFalse(adapter.charging_session_active_for_gui(now))
+            freshness_paths = adapter.gui_freshness_paths(now)
+            self.assertIn("/Ac/Power", freshness_paths)
+            self.assertIn("/Ac/Current", freshness_paths)
+            self.assertIn("/Connected", freshness_paths)
+            self.assertIn("/Mode", freshness_paths)
+            self.assertNotIn("/Session/Energy", freshness_paths)
+            observed = adapter.slo_observed({}, {}, now, time.monotonic())
+            self.assertIn("gui_measurement_max_age_s", observed)
+            self.assertIn("gui_measurement_missing_path_count", observed)
+            self.assertEqual(observed["gui_session_max_age_s"], 0.0)
+            self.assertEqual(observed["gui_session_missing_path_count"], 0.0)
+            self.assertGreater(observed["gui_control_missing_path_count"], 0.0)
+            checks = health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())
+            self.assertTrue(checks["gui_fresh"])
+            self.assertTrue(checks["gui_controls_fresh"])
+
+    def test_gui_freshness_tracks_control_paths_against_effective_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\nDbusGatewaySloGuiMaxAgeSeconds=2\nDbusGatewaySloCoreReadMaxAgeSeconds=5\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            now = time.time()
+            for path, value, age in (
+                ("/Ac/Power", 1.0, 0.5),
+                ("/Ac/Current", 0.01, 0.5),
+                ("/Mode", 1, 9.0),
+            ):
+                adapter.cache.update_value(
+                    f"path:{adapter.service_name}{path}",
+                    value,
+                    source=f"{adapter.service_name}{path}",
+                    now=now - age,
+                )
+
+            observed = adapter.slo_observed({}, {}, now, time.monotonic())
+            checks = health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())
+            targets = health_slo_module.slo_targets(adapter.slo_thresholds())
+
+            self.assertEqual(targets["configured_gui_max_age_s"], 2.0)
+            self.assertEqual(targets["gui_control_max_age_s"], 10.0)
+            self.assertEqual(observed["gui_control_max_age_s"], 9.0)
+            self.assertEqual(observed["gui_control_missing_path_count"], 7.0)
+            self.assertGreater(observed["gui_missing_path_count"], observed["gui_control_missing_path_count"])
+            self.assertTrue(checks["gui_controls_fresh"])
+            self.assertTrue(checks["gui_fresh"])
+
+            adapter.cache.update_value(
+                f"path:{adapter.service_name}/Mode",
+                1,
+                source=f"{adapter.service_name}/Mode",
+                now=now - 10.1,
+            )
+            stale_observed = adapter.slo_observed({}, {}, now, time.monotonic())
+            stale_checks = health_slo_module.slo_checks_from_observed(stale_observed, adapter.slo_thresholds())
+
+            self.assertFalse(stale_checks["gui_controls_fresh"])
+            self.assertFalse(stale_checks["gui_fresh"])
+
+    def test_slo_observed_uses_tick_snapshot_time_and_named_measurement_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 42.0}))
+
+            observed = adapter.slo_observed(
+                {"oldest_command_age_s": 3.0},
+                {"grid_power_w_age_s": 4.0},
+                now=100.0,
+                current_monotonic=777.0,
+            )
+
+            adapter.tick_health.snapshot.assert_called_once_with(now=777.0)
+            self.assertEqual(observed["gui_measurement_max_age_s"], 0.0)
+            self.assertGreater(observed["gui_measurement_missing_path_count"], 0.0)
+            self.assertEqual(observed["queue_oldest_age_s"], 3.0)
+            self.assertEqual(observed["core_read_max_age_s"], 4.0)
+            self.assertEqual(observed["mainloop_max_gap_ms_60s"], 42.0)
+
+    def test_gui_freshness_includes_session_counters_while_charging(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\nDbusGatewaySloGuiMaxAgeSeconds=1\nDbusGatewaySloCoreReadMaxAgeSeconds=1\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            now = time.time()
+            for path, value, age in (
+                ("/Ac/Power", 900.0, 0.5),
+                ("/Ac/Current", 4.0, 0.5),
+                ("/Session/Energy", 0.1, 600.0),
+            ):
+                adapter.cache.update_value(
+                    f"path:{adapter.service_name}{path}",
+                    value,
+                    source=f"{adapter.service_name}{path}",
+                    now=now - age,
+                )
+
+            self.assertTrue(adapter.charging_session_active_for_gui(now))
+            self.assertIn("/Session/Energy", adapter.gui_freshness_paths(now))
+            observed = adapter.slo_observed({}, {}, now, time.monotonic())
+            self.assertFalse(
+                health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())["gui_fresh"]
+            )
+
+    def test_gui_activity_detection_uses_fresh_power_or_current_thresholds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\nDbusGatewaySloGuiMaxAgeSeconds=1\nDbusGatewaySloCoreReadMaxAgeSeconds=1\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            now = time.time()
+
+            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 50.0, source="power", now=now)
+            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Current", 0.0, source="current", now=now)
+            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Power", now), 50.0)
+            self.assertTrue(adapter.charging_session_active_for_gui(now))
+
+            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 0.0, source="power", now=now)
+            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Current", 0.2, source="current", now=now)
+            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Current", now), 0.2)
+            self.assertTrue(adapter.charging_session_active_for_gui(now))
+
+            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 900.0, source="power", now=now - 2.0)
+            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Current", 0.0, source="current", now=now)
+            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Power", now), 900.0)
+            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 900.0, source="power", now=now - 2.1)
+            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Power", now), 0.0)
+            self.assertFalse(adapter.charging_session_active_for_gui(now))
+
+    def test_core_read_stale_requires_fresh_status_and_age(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\nDbusGatewaySloCoreReadMaxAgeSeconds=5\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.slo_core_read_max_age_seconds = 0.5
+
+            self.assertTrue(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+            self.assertTrue(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {"grid_power_w_status": "fresh"},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+            self.assertTrue(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {"grid_power_w_status": "error", "grid_power_w_age_s": 0.0},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+            self.assertFalse(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {"grid_power_w_status": "fresh", "grid_power_w_age_s": 0.0},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+            self.assertFalse(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {"grid_power_w_status": "fresh", "grid_power_w_age_s": 0.5},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+            self.assertTrue(
+                health_slo_module.core_read_stale(
+                    "grid_power_w",
+                    {"grid_power_w_status": "fresh", "grid_power_w_age_s": 0.6},
+                    max_age_seconds=adapter.slo_core_read_max_age_seconds,
+                )
+            )
+
+    def test_health_snapshot_includes_gateway_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            paths = gateway_paths(str(Path(temp_dir) / "run"))
+            adapter = DbusAdapter(str(config_path), paths=paths)
+
+            adapter.write_scheduler.registered_paths.update({"/Mode", "/StartStop"})
+            adapter.commands.enqueue({"kind": "refresh_services", "priority": "read"})
+            legacy_refresh = Path(paths.command_dir) / "legacy-refresh.json"
+            legacy_refresh.write_text(
+                '{"kind":"refresh_services","created_at":1.0,"coalesce_key":"refresh-services"}',
+                encoding="utf-8",
+            )
+            adapter.core_commands.enqueue({"kind": "user_command", "path": "/Mode", "value": 1})
+            adapter.circuit.record_success(12.5)
+            adapter.cache.update_value("grid_power_w", 10.0, source="grid", now=time.time() - 1.0)
+            adapter.cache.mark_error("pv_power_w", source="pv", error="offline")
+            adapter._last_tick_at = 123.0
+            adapter._last_tick_monotonic = time.monotonic() - 0.25
+            adapter._last_tick_duration_ms = 7.5
+            install_mock(adapter.resource_monitor, "snapshot", MagicMock(return_value={"state": "ok"}))
+            adapter.tick_health.record(duration_ms=7.5, expected_interval_s=adapter.tick_seconds)
+
+            health = adapter.health_snapshot()
+
+            self.assertEqual(health["state"], "ok")
+            self.assertEqual(health["pending_command_count"], 1)
+            self.assertEqual(health["physical_command_count"], 2)
+            self.assertEqual(health["core_command_count"], 1)
+            self.assertEqual(health["registered_path_count"], 2)
+            self.assertEqual(health["last_tick_at"], 123.0)
+            self.assertEqual(health["tick_duration_ms"], 7.5)
+            self.assertIn("discovery_last_success_at", health)
+            self.assertIn("discovery_last_error", health)
+            self.assertIn("discovery_next_scan_at", health)
+            self.assertGreaterEqual(health["mainloop_heartbeat_age_s"], 0.0)
+            self.assertGreater(health["last_success_at"], 0.0)
+            self.assertEqual(health["last_error"], "")
+            self.assertEqual(health["queues"]["pending_command_count"], 1)
+            self.assertEqual(health["queues"]["physical_command_count"], 2)
+            self.assertGreaterEqual(health["queues"]["oldest_command_age_s"], 0.0)
+            self.assertEqual(
+                health["queues"]["last_processed_at"],
+                health["write_scheduler"]["last_processed_at"],
+            )
+            self.assertEqual(health["queue_classes"]["discovery"]["pending"], 1)
+            self.assertEqual(health["cache_freshness"]["grid_power_w_status"], "fresh")
+            self.assertEqual(health["cache_freshness"]["pv_power_w_status"], "error")
+            self.assertIn("write_scheduler", health)
+            self.assertIn("queue_class_budgets", health["write_scheduler"])
+            self.assertIn("queue_class_usage_1s", health["write_scheduler"])
+            self.assertIn("core_reads_fresh", health["slo"]["checks"])
+            self.assertIn(health["backpressure"]["state"], {"ok", "congested", "slow", "protective"})
+            self.assertIn("core_should_throttle", health["backpressure"])
+            self.assertEqual(health["resources"]["state"], "ok")
+            self.assertEqual(health["adaptive_tick_seconds"], adapter.tick_seconds)
+            self.assertEqual(health["min_tick_seconds"], adapter.min_tick_seconds)
+            self.assertEqual(health["max_tick_seconds"], adapter.max_tick_seconds)
+            self.assertIn("last_tick_at", health["eventloop"])
+            self.assertIn("mainloop_heartbeat_age_s", health["eventloop"])
+            self.assertEqual(health["eventloop"]["last_tick_at"], 123.0)
+            self.assertEqual(health["eventloop"]["tick_duration_ms"], 7.5)
+            self.assertEqual(
+                health["eventloop"]["mainloop_heartbeat_age_s"],
+                health["mainloop_heartbeat_age_s"],
+            )

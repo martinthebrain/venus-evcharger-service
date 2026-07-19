@@ -1,0 +1,27 @@
+# The unit profile preserves the project's 100% unit-test contract. Platform-
+# coupled modules are measured in the same run but evaluated separately by
+# .coveragerc.platform instead of being silently absent from coverage data.
+[report]
+fail_under = 100
+show_missing = True
+skip_empty = True
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if typing.TYPE_CHECKING:
+    # Protocol bodies are declarative type contracts, not runtime branches.
+    class .*\(.*Protocol.*\):
+    ^\s*Protocol,?$
+omit =
+    venus_evcharger/backend/cerbo_gx_relay_switch.py
+    venus_evcharger/dbus_adapter_process_protocols.py
+    venus_evcharger/inputs/helper/sources_dbus.py
+    venus_evcharger/inputs/helper/subscriptions.py
+    venus_evcharger/inputs/pv.py
+    venus_evcharger/ops/*
+    venus_evcharger/ports/dbus.py
+    venus_evcharger/runtime/async_mainloop.py
+    venus_evcharger/runtime/health.py
+    venus_evcharger/runtime/setup.py
+    venus_evcharger/update/victron_ess_balance_apply_support.py
+    venus_evcharger_auto_input_helper.py

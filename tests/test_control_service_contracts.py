@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import unittest
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 from venus_evcharger.control.models import ControlCommand, ControlCommandName
@@ -32,7 +32,6 @@ class ControlServiceContractTests(unittest.TestCase):
     def test_command_name_and_direct_path_contract_is_complete(self) -> None:
         expected_names = frozenset(
             {
-                "legacy_unknown_write",
                 "reset_contactor_lockout",
                 "reset_phase_lockout",
                 "set_auto_runtime_setting",
@@ -87,26 +86,12 @@ class ControlServiceContractTests(unittest.TestCase):
                 source="http",
             ),
         )
-        self.assertEqual(
-            self.api.command_for_write("/Unknown", 9, source="dbus"),
-            ControlCommand(
-                name="legacy_unknown_write",
-                path="/Unknown",
-                value=9,
-                source="dbus",
-                detail="No canonical Control API command is registered for this write path.",
-            ),
-        )
-        self.assertEqual(
-            self.api.command_for_write("/Unknown", 9, source="mqtt"),
-            ControlCommand(
-                name="legacy_unknown_write",
-                path="/Unknown",
-                value=9,
-                source="mqtt",
-                detail="No canonical Control API command is registered for this write path.",
-            ),
-        )
+        for source in ("dbus", "mqtt"):
+            with self.subTest(source=source), self.assertRaisesRegex(
+                ValueError,
+                "^Unsupported control path '/Unknown'\\.$",
+            ):
+                self.api.command_for_write("/Unknown", 9, source=source)
         self.assertEqual(
             self.api.command_for_dbus_write("/Mode", 2),
             ControlCommand(name="set_mode", path="/Mode", value=2, source="dbus"),
@@ -309,10 +294,6 @@ class ControlServiceContractTests(unittest.TestCase):
             + ".",
         )
         self.assertEqual(
-            self.api._specialized_command_path_error("legacy_unknown_write", "/Legacy"),
-            "",
-        )
-        self.assertEqual(
             self.api._specialized_command_path_error("set_mode", "/Mode"),
             "",
         )
@@ -329,12 +310,21 @@ class ControlServiceContractTests(unittest.TestCase):
             self.api._auto_runtime_value_error(CUSTOM_AUTO_PATH),
             "Control command 'set_auto_runtime_setting' received an invalid value for path '/Auto/Custom'.",
         )
-        self.assertEqual(
-            self.api._command_value_error("legacy_unknown_write", "/Legacy"),
-            "Control command 'legacy_unknown_write' received an invalid value for path '/Legacy'.",
-        )
-        fallback_validator = self.api._command_value_validator("legacy_unknown_write", "/Legacy")
-        self.assertTrue(fallback_validator(object()))
+
+    def test_execute_rejects_a_runtime_forged_command_before_dispatch(self) -> None:
+        forged_name = cast(ControlCommandName, "set_everything_on")
+        controller = MagicMock()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "^Unsupported control command 'set_everything_on'\\.$",
+        ):
+            self.api.execute(
+                controller,
+                ControlCommand(name=forged_name, path="/Mode", value=1),
+            )
+
+        controller.assert_not_called()
 
     def test_path_payloads_apply_path_specific_validation(self) -> None:
         cases = (
@@ -360,9 +350,31 @@ class ControlServiceContractTests(unittest.TestCase):
             setattr(controller, handler_name, handler)
             handlers[handler_name] = handler
 
+        commands: dict[ControlCommandName, ControlCommand] = {
+            "reset_contactor_lockout": ControlCommand(
+                name="reset_contactor_lockout", path="/Auto/ContactorLockoutReset", value=1
+            ),
+            "reset_phase_lockout": ControlCommand(
+                name="reset_phase_lockout", path="/Auto/PhaseLockoutReset", value=1
+            ),
+            "set_auto_runtime_setting": ControlCommand(
+                name="set_auto_runtime_setting", path="/Auto/StartSurplusWatts", value=1.0
+            ),
+            "set_auto_start": ControlCommand(name="set_auto_start", path="/AutoStart", value=1),
+            "set_current_setting": ControlCommand(name="set_current_setting", path="/SetCurrent", value=1.0),
+            "set_enable": ControlCommand(name="set_enable", path="/Enable", value=1),
+            "set_mode": ControlCommand(name="set_mode", path="/Mode", value=1),
+            "set_phase_selection": ControlCommand(
+                name="set_phase_selection", path="/PhaseSelection", value="P1"
+            ),
+            "set_start_stop": ControlCommand(name="set_start_stop", path="/StartStop", value=1),
+            "trigger_software_update": ControlCommand(
+                name="trigger_software_update", path="/Auto/SoftwareUpdateRun", value=1
+            ),
+        }
         for name, (handler_name, include_path) in ControlApiV1Service._HANDLER_SPECS.items():
             with self.subTest(name=name):
-                command = ControlCommand(name=name, path=f"/{name}", value={"value": name})
+                command = commands[name]
                 self.api.execute(controller, command)
                 expected_args = (command.path, command.value) if include_path else (command.value,)
                 handlers[handler_name].assert_called_once_with(*expected_args)

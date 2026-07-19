@@ -16,6 +16,7 @@ from venus_evcharger.dbus_gateway_core import (
     _now,
     float_or_zero,
     gateway_paths,
+    is_object_mapping,
     read_json_file,
     write_json_file,
 )
@@ -37,7 +38,7 @@ def _valid_snapshot_payload(payload: object) -> bool:
 
 
 def _snapshot_payload(payload: object) -> Mapping[object, object] | None:
-    if not isinstance(payload, Mapping):
+    if not is_object_mapping(payload):
         return None
     return payload if _snapshot_captured_at(payload) > 0.0 else None
 
@@ -210,7 +211,7 @@ class DbusCacheStore:
     @staticmethod
     def value_entry(snapshot: Mapping[str, object], key: str) -> CommandPayload | None:
         values = snapshot.get("values")
-        if not isinstance(values, Mapping):
+        if not is_object_mapping(values):
             return None
         item = values.get(key)
-        return dict(item) if isinstance(item, Mapping) else None
+        return {str(item_key): item_value for item_key, item_value in item.items()} if is_object_mapping(item) else None

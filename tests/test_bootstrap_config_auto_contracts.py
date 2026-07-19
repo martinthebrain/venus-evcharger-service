@@ -2,10 +2,12 @@
 import configparser
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import call, patch
 
-from tests.venus_evcharger_bootstrap_controller_support import ServiceBootstrapControllerTestCase
+from venus_evcharger.auto.policy import load_auto_policy_from_config
+from venus_evcharger.bootstrap.config_auto import AutoConfigLoader
 from venus_evcharger.bootstrap.config_auto_daytime import load_auto_daytime_policy
+from venus_evcharger.bootstrap.config_auto_helper import load_helper_and_timeout_config
 from venus_evcharger.bootstrap.config_auto_helper_gateway import load_gateway_and_introspection_config
 from venus_evcharger.bootstrap.config_auto_helper_polling import load_helper_polling_config
 from venus_evcharger.bootstrap.config_auto_helper_resilience import load_helper_resilience_config
@@ -13,6 +15,8 @@ from venus_evcharger.bootstrap.config_auto_sources_battery import load_auto_batt
 from venus_evcharger.bootstrap.config_auto_sources_energy import load_auto_energy_source_config
 from venus_evcharger.bootstrap.config_auto_sources_grid import load_auto_grid_source_config
 from venus_evcharger.bootstrap.config_auto_sources_pv import load_auto_pv_source_config
+from venus_evcharger.bootstrap.config_auto_sources import load_auto_source_config
+from venus_evcharger.bootstrap.config_auto_timing import load_auto_timing_policy
 from venus_evcharger.bootstrap.config_auto_timing_audit import load_auto_audit_config
 from venus_evcharger.bootstrap.config_auto_timing_balance import load_discharge_balance_policy
 from venus_evcharger.bootstrap.config_auto_timing_core import load_auto_timing_core_config
@@ -20,6 +24,7 @@ from venus_evcharger.bootstrap.config_auto_timing_victron_bias_apply import load
 from venus_evcharger.bootstrap.config_auto_timing_victron_bias_base import load_victron_bias_base_config
 from venus_evcharger.bootstrap.config_auto_timing_victron_bias_pid import load_victron_bias_pid_config
 from venus_evcharger.bootstrap.config_auto_timing_victron_bias_safety import load_victron_bias_safety_config
+from venus_evcharger.bootstrap.config_shared import MONTH_WINDOW_DEFAULTS
 from venus_evcharger.energy.models import EnergySourceDefinition
 
 
@@ -46,29 +51,37 @@ def _month_window(
     return ((int(start[:2]), int(start[3:])), (int(end[:2]), int(end[3:])))
 
 
-class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
-    def test_auto_policy_loader_delegates_to_surplus_timing_and_daytime_steps(self) -> None:
-        controller = self._controller(SimpleNamespace())
+class BootstrapConfigAutoContracts(unittest.TestCase):
+    def test_auto_config_component_delegates_in_dependency_order(self) -> None:
+        service = SimpleNamespace()
+        loader = AutoConfigLoader(service, _month_window)
         defaults = _defaults({})
-        with patch.object(controller, "_load_auto_surplus_thresholds") as surplus, patch.object(
-            controller, "_load_auto_timing_policy"
-        ) as timing, patch.object(controller, "_load_auto_daytime_policy") as daytime:
-            controller._load_auto_policy_config(defaults)
+        policy = object()
+        with patch("venus_evcharger.bootstrap.config_auto.load_auto_source_config") as sources, patch(
+            "venus_evcharger.bootstrap.config_auto.load_auto_policy_from_config", return_value=policy
+        ) as policy_loader, patch("venus_evcharger.bootstrap.config_auto.load_auto_timing_policy") as timing, patch(
+            "venus_evcharger.bootstrap.config_auto.load_auto_daytime_policy"
+        ) as daytime, patch("venus_evcharger.bootstrap.config_auto.load_helper_and_timeout_config") as helper:
+            loader.load(defaults)
 
         self.assertEqual(
-            [surplus.call_args, timing.call_args, daytime.call_args],
-            [call(defaults), call(defaults), call(defaults)],
+            [sources.call_args, policy_loader.call_args, timing.call_args, daytime.call_args, helper.call_args],
+            [
+                call(service, defaults),
+                call(defaults),
+                call(service, defaults),
+                call(service, defaults, _month_window),
+                call(service, defaults),
+            ],
         )
+        self.assertIs(service.auto_policy, policy)
 
-    def test_auto_surplus_thresholds_delegate_to_policy_loader(self) -> None:
+    def test_auto_policy_loader_uses_documented_default_threshold(self) -> None:
         service = SimpleNamespace()
-        controller = self._controller(service)
         defaults = _defaults({})
+        service.auto_policy = load_auto_policy_from_config(defaults)
 
-        with patch("venus_evcharger.bootstrap.config_auto.load_auto_policy_from_config") as load_policy:
-            controller._load_auto_surplus_thresholds(defaults)
-
-        load_policy.assert_called_once_with(defaults, service)
+        self.assertEqual(service.auto_policy.normal_profile.start_surplus_watts, 1500.0)
 
     def test_auto_pv_source_config_uses_victron_defaults(self) -> None:
         service = SimpleNamespace()
@@ -156,7 +169,7 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.auto_grid_l3_path, "/Ac/Grid/L3/Power")
         self.assertTrue(service.auto_grid_require_all_phases)
         self.assertEqual(service.auto_grid_missing_stop_seconds, 60.0)
-        self.assertEqual(service.auto_grid_recovery_start_seconds, 10.0)
+        self.assertFalse(hasattr(service, "auto_grid_recovery_start_seconds"))
 
     def test_auto_grid_source_config_accepts_common_true_values(self) -> None:
         for raw_value in ("1", "true", "yes", "on", " TRUE "):
@@ -440,13 +453,12 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
             }
         )
         service = SimpleNamespace()
-        controller = self._controller(service)
 
         with patch(
             "venus_evcharger.bootstrap.config_auto_sources_energy.load_energy_source_settings",
             return_value=((source,), True),
         ) as load_sources:
-            controller._load_auto_source_config(defaults)
+            load_auto_source_config(service, defaults)
 
         load_sources.assert_called_once_with(defaults)
         self.assertEqual(service.auto_pv_service, "com.example.pv")
@@ -486,22 +498,15 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.auto_grid_l3_path, "/Grid/L3")
         self.assertFalse(service.auto_grid_require_all_phases)
         self.assertEqual(service.auto_grid_missing_stop_seconds, 33.0)
-        self.assertEqual(service.auto_grid_recovery_start_seconds, 14.0)
+        self.assertFalse(hasattr(service, "auto_grid_recovery_start_seconds"))
 
-    def test_auto_source_config_uses_grid_recovery_start_delay_fallback(self) -> None:
+    def test_auto_policy_config_uses_grid_recovery_start_delay_fallback(self) -> None:
         defaults = _defaults({"AutoStartDelaySeconds": "42"})
         service = SimpleNamespace()
-        controller = self._controller(service)
+        service.auto_policy = load_auto_policy_from_config(defaults)
 
-        with patch(
-            "venus_evcharger.bootstrap.config_auto_sources_energy.load_energy_source_settings",
-            return_value=((), False),
-        ) as load_sources:
-            controller._load_auto_source_config(defaults)
-
-        load_sources.assert_called_once_with(defaults)
-        self.assertTrue(service.auto_use_dc_pv)
-        self.assertEqual(service.auto_grid_recovery_start_seconds, 42.0)
+        self.assertEqual(service.auto_policy.grid_recovery_start_seconds, 42.0)
+        self.assertFalse(hasattr(service, "auto_grid_recovery_start_seconds"))
 
     def test_auto_timing_policy_maps_balance_and_audit_settings(self) -> None:
         defaults = _defaults(
@@ -557,9 +562,7 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
             }
         )
         service = SimpleNamespace()
-        controller = self._controller(service)
-
-        controller._load_auto_timing_policy(defaults)
+        load_auto_timing_policy(service, defaults)
 
         self.assertEqual(service.auto_average_window_seconds, 45.0)
         self.assertEqual(service.auto_min_runtime_seconds, 360.0)
@@ -626,13 +629,17 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
             }
         )
         service = SimpleNamespace(config=parser)
-        controller = self._controller(service)
-
-        controller._load_auto_daytime_policy(parser["DEFAULT"])
+        load_auto_daytime_policy(service, parser["DEFAULT"], _month_window)
 
         self.assertFalse(service.auto_daytime_only)
         self.assertEqual(len(service.auto_month_windows), 12)
-        self.assertTrue(all(window == ((8, 0), (18, 0)) for window in service.auto_month_windows.values()))
+        self.assertEqual(
+            service.auto_month_windows,
+            {
+                month: _month_window(parser, month, start, end)
+                for month, (start, end) in MONTH_WINDOW_DEFAULTS.items()
+            },
+        )
         self.assertEqual(service.auto_schedule_timezone, "UTC")
         self.assertEqual(service.auto_scheduled_night_start_delay_seconds, 7200.0)
         self.assertEqual(service.auto_scheduled_enabled_days, "Sat,Sun")
@@ -668,9 +675,7 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
             }
         )
         service = SimpleNamespace(deviceinstance=77)
-        controller = self._controller(service)
-
-        controller._load_helper_and_timeout_config(defaults)
+        load_helper_and_timeout_config(service, defaults)
 
         self.assertEqual(service.auto_pv_poll_interval_seconds, 0.2)
         self.assertEqual(service.auto_grid_poll_interval_seconds, 0.2)
@@ -704,7 +709,6 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
 
     def test_helper_and_timeout_loader_delegates_to_focused_loaders(self) -> None:
         service = SimpleNamespace()
-        controller = self._controller(service)
         defaults = _defaults({})
 
         with patch(
@@ -714,7 +718,7 @@ class BootstrapConfigAutoContracts(ServiceBootstrapControllerTestCase):
         ) as gateway, patch(
             "venus_evcharger.bootstrap.config_auto_helper.load_helper_resilience_config"
         ) as resilience:
-            controller._load_helper_and_timeout_config(defaults)
+            load_helper_and_timeout_config(service, defaults)
 
         polling.assert_called_once_with(service, defaults)
         gateway.assert_called_once_with(service, defaults)

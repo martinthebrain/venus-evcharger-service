@@ -4,50 +4,50 @@ from tests.venus_evcharger_update_cycle_controller_support import *
 
 class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
     def test_phase_voltage_and_normalization_contracts(self):
-        self.assertEqual(UpdateCycleController._normalized_phase_selection(None), "")
-        self.assertEqual(UpdateCycleController._normalized_phase_selection(" p1_p2_p3 "), "P1_P2_P3")
-        self.assertEqual(UpdateCycleController._normalized_voltage_mode(None), "phase")
-        self.assertEqual(UpdateCycleController._normalized_voltage_mode(" LINE "), "line")
-        self.assertFalse(UpdateCycleController._selection_uses_line_to_line_voltage("P1", "line"))
-        self.assertFalse(UpdateCycleController._selection_uses_line_to_line_voltage("P1_P2_P3", "phase"))
-        self.assertTrue(UpdateCycleController._selection_uses_line_to_line_voltage("P1_P2_P3", "line"))
+        self.assertEqual(RelayTelemetry._normalized_phase_selection(None), "")
+        self.assertEqual(RelayTelemetry._normalized_phase_selection(" p1_p2_p3 "), "P1_P2_P3")
+        self.assertEqual(RelayTelemetry._normalized_voltage_mode(None), "phase")
+        self.assertEqual(RelayTelemetry._normalized_voltage_mode(" LINE "), "line")
+        self.assertFalse(RelayTelemetry._selection_uses_line_to_line_voltage("P1", "line"))
+        self.assertFalse(RelayTelemetry._selection_uses_line_to_line_voltage("P1_P2_P3", "phase"))
+        self.assertTrue(RelayTelemetry._selection_uses_line_to_line_voltage("P1_P2_P3", "line"))
 
-        self.assertEqual(UpdateCycleController._phase_voltage(230.0, "P1", "line"), 230.0)
-        self.assertAlmostEqual(UpdateCycleController._phase_voltage(0.5, "P1_P2_P3", "line"), 0.5 / math.sqrt(3.0))
-        self.assertAlmostEqual(UpdateCycleController._phase_voltage(400.0, "P1_P2_P3", "line"), 400.0 / math.sqrt(3.0))
-        self.assertEqual(UpdateCycleController._phase_voltage(0.0, "P1_P2_P3", "line"), 0.0)
-        self.assertEqual(UpdateCycleController._phase_voltage(-10.0, "P1_P2_P3", "line"), 0.0)
+        self.assertEqual(RelayTelemetry.phase_voltage(230.0, "P1", "line"), 230.0)
+        self.assertAlmostEqual(RelayTelemetry.phase_voltage(0.5, "P1_P2_P3", "line"), 0.5 / math.sqrt(3.0))
+        self.assertAlmostEqual(RelayTelemetry.phase_voltage(400.0, "P1_P2_P3", "line"), 400.0 / math.sqrt(3.0))
+        self.assertEqual(RelayTelemetry.phase_voltage(0.0, "P1_P2_P3", "line"), 0.0)
+        self.assertEqual(RelayTelemetry.phase_voltage(-10.0, "P1_P2_P3", "line"), 0.0)
 
     def test_phase_data_for_pm_status_prefers_backend_metadata_and_falls_back_to_phase_delegate(self):
         service = SimpleNamespace(phase="L1", voltage_mode="phase")
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        controller._phase_data_from_backend_metadata = MagicMock(return_value={"L1": {"power": 1.0}})
-        controller._phase_values = MagicMock()
+        controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata = MagicMock(return_value={"L1": {"power": 1.0}})
+        controller.components.relay.foundation.telemetry._phase_values = MagicMock()
 
-        self.assertEqual(controller._phase_data_for_pm_status({"pm": True}, 1200.0, 230.0), {"L1": {"power": 1.0}})
-        controller._phase_data_from_backend_metadata.assert_called_once_with({"pm": True}, 230.0, "phase")
-        controller._phase_values.assert_not_called()
+        self.assertEqual(controller.components.relay.foundation.telemetry._phase_data_for_pm_status(service, {"pm": True}, 1200.0, 230.0), {"L1": {"power": 1.0}})
+        controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata.assert_called_once_with({"pm": True}, 230.0, "phase")
+        controller.components.relay.foundation.telemetry._phase_values.assert_not_called()
 
-        controller._phase_data_from_backend_metadata.return_value = None
-        controller._phase_values = MagicMock(return_value={"L1": {"power": 1200, "voltage": 230, "current": 5}})
+        controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata.return_value = None
+        controller.components.relay.foundation.telemetry._phase_values = MagicMock(return_value={"L1": {"power": 1200, "voltage": 230, "current": 5}})
         self.assertEqual(
-            controller._phase_data_for_pm_status(None, 1200.0, 230.0),
+            controller.components.relay.foundation.telemetry._phase_data_for_pm_status(service, None, 1200.0, 230.0),
             {"L1": {"power": 1200.0, "voltage": 230.0, "current": 5.0}},
         )
-        controller._phase_values.assert_called_once_with(1200.0, 230.0, "L1", "phase")
+        controller.components.relay.foundation.telemetry._phase_values.assert_called_once_with(1200.0, 230.0, "L1", "phase")
 
     def test_phase_data_for_pm_status_uses_default_voltage_mode_for_metadata_only(self):
         service = SimpleNamespace(phase="P1_P2", voltage_mode="line")
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        controller._phase_data_from_backend_metadata = MagicMock(return_value=None)
-        controller._phase_values = MagicMock(return_value={"L1": {"power": 10, "voltage": 11, "current": 12}})
+        controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata = MagicMock(return_value=None)
+        controller.components.relay.foundation.telemetry._phase_values = MagicMock(return_value={"L1": {"power": 10, "voltage": 11, "current": 12}})
 
         self.assertEqual(
-            controller._phase_data_for_pm_status({"pm": True}, 10.0, 11.0),
+            controller.components.relay.foundation.telemetry._phase_data_for_pm_status(service, {"pm": True}, 10.0, 11.0),
             {"L1": {"power": 10.0, "voltage": 11.0, "current": 12.0}},
         )
-        controller._phase_data_from_backend_metadata.assert_called_once_with({"pm": True}, 11.0, "line")
-        controller._phase_values.assert_called_once_with(10.0, 11.0, "P1_P2", "line")
+        controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata.assert_called_once_with({"pm": True}, 11.0, "line")
+        controller.components.relay.foundation.telemetry._phase_values.assert_called_once_with(10.0, 11.0, "P1_P2", "line")
 
         metadata_only_service = SimpleNamespace(phase="L1")
         metadata_controller = UpdateCycleController(
@@ -55,19 +55,24 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _phase_values,
             lambda reason: {"init": 0}.get(reason, 99),
         )
-        metadata_controller._phase_data_from_backend_metadata = MagicMock(return_value={"L1": {"power": 2.0}})
+        metadata_controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata = MagicMock(return_value={"L1": {"power": 2.0}})
         self.assertEqual(
-            metadata_controller._phase_data_for_pm_status({"pm": True}, 2.0, 230.0),
+            metadata_controller.components.relay.foundation.telemetry._phase_data_for_pm_status(
+                metadata_only_service,
+                {"pm": True},
+                2.0,
+                230.0,
+            ),
             {"L1": {"power": 2.0}},
         )
-        metadata_controller._phase_data_from_backend_metadata.assert_called_once_with({"pm": True}, 230.0, "phase")
+        metadata_controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata.assert_called_once_with({"pm": True}, 230.0, "phase")
 
     def test_phase_data_validation_and_backend_metadata_contracts(self):
-        self.assertEqual(UpdateCycleController._phase_tuple([1, 2.5, 3]), (1.0, 2.5, 3.0))
-        self.assertIsNone(UpdateCycleController._phase_tuple((1, 2)))
-        self.assertIsNone(UpdateCycleController._phase_tuple((1, True, 3)))
+        self.assertEqual(RelayTelemetry._phase_tuple([1, 2.5, 3]), (1.0, 2.5, 3.0))
+        self.assertIsNone(RelayTelemetry._phase_tuple((1, 2)))
+        self.assertIsNone(RelayTelemetry._phase_tuple((1, True, 3)))
         self.assertEqual(
-            UpdateCycleController._checked_phase_data(
+            RelayTelemetry._checked_phase_data(
                 {
                     "L1": {"power": 1, "voltage": 2.5, "current": 3},
                     "L2": {"power": 4.5, "voltage": 5, "current": 6.5},
@@ -83,21 +88,21 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
                 TypeError,
                 r"_phase_values must return dict",
             ):
-                UpdateCycleController._checked_phase_data(bad_value)
+                RelayTelemetry._checked_phase_data(bad_value)
         with self.assertRaises(TypeError) as phase_error:
-            UpdateCycleController._checked_phase_data({"L1": []})
+            RelayTelemetry._checked_phase_data({"L1": []})
         self.assertEqual(str(phase_error.exception), "_phase_values must return dict[str, dict[str, float]]")
         with self.assertRaisesRegex(TypeError, r"_phase_values must return dict"):
-            UpdateCycleController._checked_phase_values({"power": True})
+            RelayTelemetry._checked_phase_values({"power": True})
         with self.assertRaises(TypeError) as value_error:
-            UpdateCycleController._checked_phase_values({"power": True})
+            RelayTelemetry._checked_phase_values({"power": True})
         self.assertEqual(str(value_error.exception), "_phase_values must return dict[str, dict[str, float]]")
 
         controller = UpdateCycleController(SimpleNamespace(), _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        self.assertIsNone(controller._phase_data_from_backend_metadata(None, 230.0, "phase"))
-        self.assertIsNone(controller._phase_data_from_backend_metadata({}, 230.0, "phase"))
+        self.assertIsNone(controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata(None, 230.0, "phase"))
+        self.assertIsNone(controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata({}, 230.0, "phase"))
         self.assertEqual(
-            controller._phase_data_from_backend_metadata(
+            controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata(
                 {
                     "_phase_powers_w": (100.0, 200.0, 300.0),
                     "_phase_currents_a": (1.0, 2.0, 3.0),
@@ -113,7 +118,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             },
         )
         self.assertEqual(
-            controller._phase_data_from_backend_metadata(
+            controller.components.relay.foundation.telemetry._phase_data_from_backend_metadata(
                 {"_phase_powers_w": (230.0, 0.0, 115.0), "_phase_selection": "P1"},
                 230.0,
                 "phase",
@@ -127,15 +132,15 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
 
     def test_phase_measurement_derives_current_only_when_needed(self):
         self.assertEqual(
-            UpdateCycleController._phase_measurement(230.0, None, 230.0),
+            RelayTelemetry._phase_measurement(230.0, None, 230.0),
             {"power": 230.0, "voltage": 230.0, "current": 1.0},
         )
         self.assertEqual(
-            UpdateCycleController._phase_measurement(230.0, None, 0.0),
+            RelayTelemetry._phase_measurement(230.0, None, 0.0),
             {"power": 230.0, "voltage": 0.0, "current": 0.0},
         )
         self.assertEqual(
-            UpdateCycleController._phase_measurement(230.0, 2.5, 230.0),
+            RelayTelemetry._phase_measurement(230.0, 2.5, 230.0),
             {"power": 230.0, "voltage": 230.0, "current": 2.5},
         )
 
@@ -146,7 +151,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         )
 
         with patch("venus_evcharger.update.relay_phase_publish.logging.info") as info:
-            UpdateCycleController.log_auto_relay_change(service, True)
+            RelayTelemetry.log_auto_relay_change(service, True)
 
         self.assertEqual(
             info.call_args.args,
@@ -162,7 +167,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
 
         service._last_auto_metrics = {"surplus": None, "grid": None, "soc": None}
         with patch("venus_evcharger.update.relay_phase_publish.logging.info") as info:
-            UpdateCycleController.log_auto_relay_change(service, False)
+            RelayTelemetry.log_auto_relay_change(service, False)
         self.assertEqual(info.call_args.args[1:], ("OFF", "running", "na", "na", "na"))
 
     def test_relay_sync_tracking_confirmation_and_pre_timeout_contracts(self):
@@ -175,27 +180,27 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertFalse(controller._relay_sync_confirmed_match(service, False, True, True))
-        self.assertFalse(controller._relay_sync_confirmed_match(service, True, False, True))
-        self.assertTrue(controller._relay_sync_confirmed_match(service, True, True, True))
+        self.assertFalse(controller.components.relay.foundation.telemetry._relay_sync_confirmed_match(service, False, True, True))
+        self.assertFalse(controller.components.relay.foundation.telemetry._relay_sync_confirmed_match(service, True, False, True))
+        self.assertTrue(controller.components.relay.foundation.telemetry._relay_sync_confirmed_match(service, True, True, True))
         service._mark_recovery.assert_called_once_with("shelly", "Shelly relay confirmation recovered")
         self.assertIsNone(service._relay_sync_expected_state)
         self.assertIsNone(service._relay_sync_requested_at)
         self.assertIsNone(service._relay_sync_deadline_at)
         self.assertIs(service._relay_sync_failure_reported, False)
 
-        self.assertTrue(UpdateCycleController._relay_sync_before_deadline(None, 100.0))
-        self.assertTrue(UpdateCycleController._relay_sync_before_deadline(101.0, 100.0))
-        self.assertFalse(UpdateCycleController._relay_sync_before_deadline(100.0, 100.0))
-        self.assertEqual(UpdateCycleController._relay_sync_pre_timeout_result(False, True, True), "command-mismatch")
-        self.assertIsNone(UpdateCycleController._relay_sync_pre_timeout_result(False, False, True))
-        self.assertIsNone(UpdateCycleController._relay_sync_pre_timeout_result(True, True, True))
+        self.assertTrue(RelayTelemetry._relay_sync_before_deadline(None, 100.0))
+        self.assertTrue(RelayTelemetry._relay_sync_before_deadline(101.0, 100.0))
+        self.assertFalse(RelayTelemetry._relay_sync_before_deadline(100.0, 100.0))
+        self.assertEqual(RelayTelemetry._relay_sync_pre_timeout_result(False, True, True), "command-mismatch")
+        self.assertIsNone(RelayTelemetry._relay_sync_pre_timeout_result(False, False, True))
+        self.assertIsNone(RelayTelemetry._relay_sync_pre_timeout_result(True, True, True))
 
     def test_pm_status_confirmed_and_local_publish_warning_contracts(self):
-        self.assertFalse(UpdateCycleController._pm_status_confirmed({}))
-        self.assertFalse(UpdateCycleController._pm_status_confirmed({"_pm_confirmed": 0}))
-        self.assertFalse(UpdateCycleController._pm_status_confirmed({"_PM_CONFIRMED": 1}))
-        self.assertTrue(UpdateCycleController._pm_status_confirmed({"_pm_confirmed": 1}))
+        self.assertFalse(RelayTelemetry.pm_status_confirmed({}))
+        self.assertFalse(RelayTelemetry.pm_status_confirmed({"_pm_confirmed": 0}))
+        self.assertFalse(RelayTelemetry.pm_status_confirmed({"_PM_CONFIRMED": 1}))
+        self.assertTrue(RelayTelemetry.pm_status_confirmed({"_pm_confirmed": 1}))
 
         successful_service = SimpleNamespace(
             _publish_local_pm_status=MagicMock(),
@@ -206,7 +211,11 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _phase_values,
             lambda reason: {"init": 0}.get(reason, 99),
         )
-        successful_controller._publish_local_pm_status_best_effort(False, 123.4)
+        successful_controller.components.relay.foundation.telemetry.publish_local_pm_status_best_effort(
+            successful_service,
+            False,
+            123.4,
+        )
         successful_service._publish_local_pm_status.assert_called_once_with(False, 123.4)
         successful_service._warning_throttled.assert_not_called()
 
@@ -218,7 +227,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller._publish_local_pm_status_best_effort(True, 100.0)
+        controller.components.relay.foundation.telemetry.publish_local_pm_status_best_effort(service, True, 100.0)
 
         service._publish_local_pm_status.assert_called_once_with(True, 100.0)
         service._warning_throttled.assert_called_once_with(
@@ -237,7 +246,11 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _warning_throttled=MagicMock(),
         )
         tuned_controller = UpdateCycleController(tuned_service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        tuned_controller._publish_local_pm_status_best_effort(False, 101.5)
+        tuned_controller.components.relay.foundation.telemetry.publish_local_pm_status_best_effort(
+            tuned_service,
+            False,
+            101.5,
+        )
         tuned_service._warning_throttled.assert_called_once_with(
             "relay-placeholder-publish-failed",
             1.5,
@@ -257,7 +270,11 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _phase_values,
             lambda reason: {"init": 0}.get(reason, 99),
         )
-        default_timeout_controller._publish_local_pm_status_best_effort(True, 102.0)
+        default_timeout_controller.components.relay.foundation.telemetry.publish_local_pm_status_best_effort(
+            default_timeout_service,
+            True,
+            102.0,
+        )
         default_timeout_service._warning_throttled.assert_called_once_with(
             "relay-placeholder-publish-failed",
             2.0,
@@ -273,27 +290,27 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _relay_sync_deadline_at=120.0,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
-        controller._relay_sync_confirmed_match = MagicMock(return_value=False)
-        controller._relay_sync_before_deadline = MagicMock(return_value=True)
-        controller._relay_sync_pre_timeout_result = MagicMock(return_value="command-mismatch")
-        controller._record_relay_sync_timeout = MagicMock()
-        controller._clear_relay_sync_tracking = MagicMock()
+        controller.components.relay.foundation.telemetry._relay_sync_confirmed_match = MagicMock(return_value=False)
+        controller.components.relay.foundation.telemetry._relay_sync_before_deadline = MagicMock(return_value=True)
+        controller.components.relay.foundation.telemetry._relay_sync_pre_timeout_result = MagicMock(return_value="command-mismatch")
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout = MagicMock()
+        controller.components.relay.foundation.telemetry._clear_relay_sync_tracking = MagicMock()
 
-        self.assertEqual(controller.relay_sync_health_override(False, True, 110.0), "command-mismatch")
-        controller._relay_sync_confirmed_match.assert_called_once_with(service, False, True, True)
-        controller._relay_sync_before_deadline.assert_called_once_with(120.0, 110.0)
-        controller._relay_sync_pre_timeout_result.assert_called_once_with(False, True, True)
-        controller._record_relay_sync_timeout.assert_not_called()
-        controller._clear_relay_sync_tracking.assert_not_called()
+        self.assertEqual(controller.components.relay.foundation.telemetry.relay_sync_health_override(service, False, True, 110.0), "command-mismatch")
+        controller.components.relay.foundation.telemetry._relay_sync_confirmed_match.assert_called_once_with(service, False, True, True)
+        controller.components.relay.foundation.telemetry._relay_sync_before_deadline.assert_called_once_with(120.0, 110.0)
+        controller.components.relay.foundation.telemetry._relay_sync_pre_timeout_result.assert_called_once_with(False, True, True)
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout.assert_not_called()
+        controller.components.relay.foundation.telemetry._clear_relay_sync_tracking.assert_not_called()
 
-        controller._relay_sync_before_deadline.return_value = False
-        controller._relay_sync_confirmed_match.reset_mock()
-        controller._relay_sync_pre_timeout_result.reset_mock()
-        self.assertEqual(controller.relay_sync_health_override(False, False, 121.0), "relay-sync-failed")
-        controller._relay_sync_confirmed_match.assert_called_once_with(service, False, False, True)
-        controller._record_relay_sync_timeout.assert_called_once_with(service, False, False, True, 120.0)
-        controller._clear_relay_sync_tracking.assert_called_once_with(service)
-        controller._relay_sync_pre_timeout_result.assert_not_called()
+        controller.components.relay.foundation.telemetry._relay_sync_before_deadline.return_value = False
+        controller.components.relay.foundation.telemetry._relay_sync_confirmed_match.reset_mock()
+        controller.components.relay.foundation.telemetry._relay_sync_pre_timeout_result.reset_mock()
+        self.assertEqual(controller.components.relay.foundation.telemetry.relay_sync_health_override(service, False, False, 121.0), "relay-sync-failed")
+        controller.components.relay.foundation.telemetry._relay_sync_confirmed_match.assert_called_once_with(service, False, False, True)
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout.assert_called_once_with(service, False, False, True, 120.0)
+        controller.components.relay.foundation.telemetry._clear_relay_sync_tracking.assert_called_once_with(service)
+        controller.components.relay.foundation.telemetry._relay_sync_pre_timeout_result.assert_not_called()
 
         missing_deadline_service = SimpleNamespace(_relay_sync_expected_state=False)
         missing_deadline_controller = UpdateCycleController(
@@ -301,10 +318,18 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _phase_values,
             lambda reason: {"init": 0}.get(reason, 99),
         )
-        missing_deadline_controller._relay_sync_confirmed_match = MagicMock(return_value=False)
-        missing_deadline_controller._relay_sync_pre_timeout_result = MagicMock(return_value=None)
-        self.assertIsNone(missing_deadline_controller.relay_sync_health_override(True, False, 122.0))
-        missing_deadline_controller._relay_sync_pre_timeout_result.assert_called_once_with(True, False, False)
+        missing_telemetry = missing_deadline_controller.components.relay.foundation.telemetry
+        missing_telemetry._relay_sync_confirmed_match = MagicMock(return_value=False)
+        missing_telemetry._relay_sync_pre_timeout_result = MagicMock(return_value=None)
+        self.assertIsNone(
+            missing_telemetry.relay_sync_health_override(
+                missing_deadline_service,
+                True,
+                False,
+                122.0,
+            )
+        )
+        missing_telemetry._relay_sync_pre_timeout_result.assert_called_once_with(True, False, False)
 
     def test_relay_sync_timeout_records_once_and_clears_tracking(self):
         service = SimpleNamespace(
@@ -317,7 +342,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller._record_relay_sync_timeout(service, False, False, True, 100.0)
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout(service, False, False, True, 100.0)
 
         service._mark_failure.assert_called_once_with("shelly")
         service._warning_throttled.assert_called_once_with(
@@ -337,7 +362,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         service._mark_failure.reset_mock()
         service._warning_throttled.reset_mock()
         service._relay_sync_failure_reported = True
-        controller._record_relay_sync_timeout(service, True, True, False, 110.0)
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout(service, True, True, False, 110.0)
         service._mark_failure.assert_not_called()
         service._warning_throttled.assert_not_called()
 
@@ -349,7 +374,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller._record_relay_sync_timeout(service, True, True, False, 100.0)
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout(service, True, True, False, 100.0)
 
         service._mark_failure.assert_called_once_with("shelly")
         service._warning_throttled.assert_called_once_with(
@@ -366,7 +391,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         service._relay_sync_requested_at = 99.5
         service._mark_failure.reset_mock()
         service._warning_throttled.reset_mock()
-        controller._record_relay_sync_timeout(service, True, False, True, 100.0)
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout(service, True, False, True, 100.0)
         service._warning_throttled.assert_called_once_with(
             "relay-sync-failed",
             1.0,
@@ -382,7 +407,8 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _mark_failure=MagicMock(),
             _warning_throttled=MagicMock(),
         )
-        controller._record_relay_sync_timeout(missing_reported_service, False, True, True, 100.0)
+        install_update_cycle_roles(missing_reported_service)
+        controller.components.relay.foundation.telemetry._record_relay_sync_timeout(missing_reported_service, False, True, True, 100.0)
         missing_reported_service._mark_failure.assert_called_once_with("shelly")
         missing_reported_service._warning_throttled.assert_called_once_with(
             "relay-sync-failed",
@@ -403,7 +429,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        self.assertTrue(controller._relay_sync_confirmed_match(service, False, True, False))
+        self.assertTrue(controller.components.relay.foundation.telemetry._relay_sync_confirmed_match(service, False, True, False))
         service._mark_recovery.assert_not_called()
         self.assertIsNone(service._relay_sync_expected_state)
         self.assertIsNone(service._relay_sync_requested_at)
@@ -418,7 +444,7 @@ class TestUpdateCycleControllerSeptendecenary(UpdateCycleControllerTestBase):
             _relay_sync_failure_reported=True,
         )
 
-        UpdateCycleController._clear_relay_sync_tracking(service)
+        RelayTelemetry._clear_relay_sync_tracking(service)
 
         self.assertIsNone(service._relay_sync_expected_state)
         self.assertIsNone(service._relay_sync_requested_at)

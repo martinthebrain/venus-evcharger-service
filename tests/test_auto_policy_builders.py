@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import configparser
 import unittest
-from types import SimpleNamespace
 from typing import cast
 
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.auto.policy_builders import (
     build_auto_policy_from_config,
-    build_auto_policy_from_service,
     load_auto_policy_from_config,
     validate_auto_policy,
+)
+from venus_evcharger.auto.policy_settings import (
+    AUTO_POLICY_SETTING_BY_CONFIG_KEY,
+    AUTO_POLICY_SETTING_BY_PATH,
+    AUTO_POLICY_SETTINGS,
+    auto_policy_control_values,
 )
 
 
@@ -30,18 +34,6 @@ class CaseSensitiveDefaults:
 
 def case_sensitive_defaults(values: dict[str, str]) -> configparser.SectionProxy:
     return cast(configparser.SectionProxy, CaseSensitiveDefaults(values))
-
-
-class FakePolicy:
-    def __init__(self) -> None:
-        self.applied_to: object | None = None
-        self.clamped = False
-
-    def clamp(self) -> None:
-        self.clamped = True
-
-    def apply_to_service(self, svc: object) -> None:
-        self.applied_to = svc
 
 
 class TestAutoPolicyBuilders(unittest.TestCase):
@@ -306,195 +298,77 @@ class TestAutoPolicyBuilders(unittest.TestCase):
         self.assertIs(policy.phase.enabled, False)
         self.assertIs(policy.phase.prefer_lowest_phase_when_idle, False)
 
-    def test_build_auto_policy_from_service_reads_every_flat_service_attribute(self) -> None:
-        service = SimpleNamespace(
-            auto_start_surplus_watts=3101,
-            auto_stop_surplus_watts=2702,
-            auto_high_soc_start_surplus_watts=3403,
-            auto_high_soc_stop_surplus_watts=2804,
-            auto_high_soc_threshold=81,
-            auto_high_soc_release_threshold=73,
-            auto_min_soc=41,
-            auto_resume_soc=46,
-            auto_start_max_grid_import_watts=65,
-            auto_stop_grid_import_watts=365,
-            auto_grid_recovery_start_seconds=24,
-            auto_stop_surplus_delay_seconds=37,
-            auto_stop_ewma_alpha=0.32,
-            auto_stop_ewma_alpha_stable=0.62,
-            auto_stop_ewma_alpha_volatile=0.12,
-            auto_stop_surplus_volatility_low_watts=142,
-            auto_stop_surplus_volatility_high_watts=462,
-            auto_learn_charge_power_enabled=False,
-            auto_reference_charge_power_watts=3011,
-            auto_learn_charge_power_min_watts=711,
-            auto_learn_charge_power_alpha=0.28,
-            auto_learn_charge_power_start_delay_seconds=42,
-            auto_learn_charge_power_window_seconds=122,
-            auto_learn_charge_power_max_age_seconds=4601,
-            auto_phase_switching_enabled=False,
-            auto_phase_upshift_delay_seconds=92,
-            auto_phase_downshift_delay_seconds=47,
-            auto_phase_upshift_headroom_watts=402,
-            auto_phase_downshift_margin_watts=202,
-            auto_phase_mismatch_retry_seconds=602,
-            auto_phase_mismatch_lockout_count=6,
-            auto_phase_mismatch_lockout_seconds=2402,
-            auto_phase_prefer_lowest_when_idle=False,
-        )
-
-        policy = build_auto_policy_from_service(AutoPolicy, service)
-
-        self.assert_policy_values(
-            policy,
-            {
-                "normal_start": 3101.0,
-                "normal_stop": 2702.0,
-                "high_start": 3403.0,
-                "high_stop": 2804.0,
-                "high_threshold": 81.0,
-                "high_release": 73.0,
-                "min_soc": 41.0,
-                "resume_soc": 46.0,
-                "start_grid": 65.0,
-                "stop_grid": 365.0,
-                "grid_recovery": 24.0,
-                "stop_surplus_delay": 37.0,
-                "ewma_base": 0.32,
-                "ewma_stable": 0.62,
-                "ewma_volatile": 0.12,
-                "volatility_low": 142.0,
-                "volatility_high": 462.0,
-                "learn_enabled": False,
-                "learn_reference": 3011.0,
-                "learn_min": 711.0,
-                "learn_alpha": 0.28,
-                "learn_start_delay": 42.0,
-                "learn_window": 122.0,
-                "learn_max_age": 4601.0,
-                "phase_enabled": False,
-                "phase_upshift_delay": 92.0,
-                "phase_downshift_delay": 47.0,
-                "phase_upshift_headroom": 402.0,
-                "phase_downshift_margin": 202.0,
-                "phase_retry": 602.0,
-                "phase_lockout_count": 6,
-                "phase_lockout_seconds": 2402.0,
-                "phase_prefer_lowest": False,
-            },
-        )
-
-    def test_build_auto_policy_from_empty_service_uses_complete_documented_defaults(self) -> None:
-        policy = build_auto_policy_from_service(AutoPolicy, SimpleNamespace())
-
-        self.assert_policy_values(
-            policy,
-            {
-                "normal_start": 1500.0,
-                "normal_stop": 1100.0,
-                "high_start": 1500.0,
-                "high_stop": 1100.0,
-                "high_threshold": 50.0,
-                "high_release": 50.0,
-                "min_soc": 30.0,
-                "resume_soc": 33.0,
-                "start_grid": 50.0,
-                "stop_grid": 300.0,
-                "grid_recovery": 10.0,
-                "stop_surplus_delay": 10.0,
-                "ewma_base": 0.35,
-                "ewma_stable": 0.55,
-                "ewma_volatile": 0.15,
-                "volatility_low": 150.0,
-                "volatility_high": 400.0,
-                "learn_enabled": True,
-                "learn_reference": 1900.0,
-                "learn_min": 500.0,
-                "learn_alpha": 0.2,
-                "learn_start_delay": 30.0,
-                "learn_window": 180.0,
-                "learn_max_age": 21600.0,
-                "phase_enabled": True,
-                "phase_upshift_delay": 120.0,
-                "phase_downshift_delay": 30.0,
-                "phase_upshift_headroom": 250.0,
-                "phase_downshift_margin": 150.0,
-                "phase_retry": 300.0,
-                "phase_lockout_count": 3,
-                "phase_lockout_seconds": 1800.0,
-                "phase_prefer_lowest": True,
-            },
-        )
-
-    def test_build_auto_policy_from_service_uses_documented_defaults_and_high_soc_fallbacks(self) -> None:
-        service = SimpleNamespace(auto_start_surplus_watts=2200, auto_stop_surplus_watts=1750, auto_high_soc_threshold=64)
-
-        policy = build_auto_policy_from_service(AutoPolicy, service)
-
-        self.assert_policy_values(
-            policy,
-            {
-                "normal_start": 2200.0,
-                "normal_stop": 1750.0,
-                "high_start": 2200.0,
-                "high_stop": 1750.0,
-                "high_threshold": 64.0,
-                "high_release": 64.0,
-                "min_soc": 30.0,
-                "resume_soc": 33.0,
-                "start_grid": 50.0,
-                "stop_grid": 300.0,
-                "grid_recovery": 10.0,
-                "stop_surplus_delay": 10.0,
-                "ewma_base": 0.35,
-                "ewma_stable": 0.55,
-                "ewma_volatile": 0.15,
-                "volatility_low": 150.0,
-                "volatility_high": 400.0,
-                "learn_enabled": True,
-                "learn_reference": 1900.0,
-                "learn_min": 500.0,
-                "learn_alpha": 0.2,
-                "learn_start_delay": 30.0,
-                "learn_window": 180.0,
-                "learn_max_age": 21600.0,
-                "phase_enabled": True,
-                "phase_upshift_delay": 120.0,
-                "phase_downshift_delay": 30.0,
-                "phase_upshift_headroom": 250.0,
-                "phase_downshift_margin": 150.0,
-                "phase_retry": 300.0,
-                "phase_lockout_count": 3,
-                "phase_lockout_seconds": 1800.0,
-                "phase_prefer_lowest": True,
-            },
-        )
-
-    def test_validate_auto_policy_clamps_and_optionally_applies_to_service(self) -> None:
-        policy = FakePolicy()
+    def test_validate_auto_policy_clamps_the_canonical_object(self) -> None:
+        policy = AutoPolicy(min_soc=-1.0)
 
         self.assertIs(validate_auto_policy(policy), policy)
-        self.assertTrue(policy.clamped)
-        self.assertIsNone(policy.applied_to)
+        self.assertEqual(policy.min_soc, 0.0)
 
-        policy = FakePolicy()
-        service = SimpleNamespace()
-
-        self.assertIs(validate_auto_policy(policy, service), policy)
-        self.assertTrue(policy.clamped)
-        self.assertIs(policy.applied_to, service)
-
-    def test_load_auto_policy_from_config_validates_and_applies_to_service(self) -> None:
-        service = SimpleNamespace()
-
+    def test_load_auto_policy_from_config_returns_the_canonical_policy(self) -> None:
         policy = load_auto_policy_from_config(
             defaults_section({"AutoStartSurplusWatts": "2300", "AutoStopSurplusWatts": "1800"}),
-            service,
         )
 
-        self.assertIs(service.auto_policy, policy)
-        self.assertEqual(service.auto_start_surplus_watts, 2300.0)
-        self.assertEqual(service.auto_stop_surplus_watts, 1800.0)
+        self.assertEqual(policy.normal_profile.start_surplus_watts, 2300.0)
+        self.assertEqual(policy.normal_profile.stop_surplus_watts, 1800.0)
+
+    def test_runtime_setting_registry_has_unique_complete_boundaries(self) -> None:
+        self.assertEqual(len(AUTO_POLICY_SETTINGS), 24)
+        self.assertEqual(len(AUTO_POLICY_SETTING_BY_PATH), len(AUTO_POLICY_SETTINGS))
+        self.assertEqual(len(AUTO_POLICY_SETTING_BY_CONFIG_KEY), len(AUTO_POLICY_SETTINGS))
+        self.assertEqual(
+            set(AUTO_POLICY_SETTING_BY_PATH.values()),
+            set(AUTO_POLICY_SETTINGS),
+        )
+        self.assertEqual(
+            set(AUTO_POLICY_SETTING_BY_CONFIG_KEY.values()),
+            set(AUTO_POLICY_SETTINGS),
+        )
+
+    def test_runtime_settings_read_and_update_only_the_canonical_policy(self) -> None:
+        raw_values: dict[str, object] = {
+            "/Auto/StartSurplusWatts": 2500,
+            "/Auto/StopSurplusWatts": 900,
+            "/Auto/MinSoc": 20,
+            "/Auto/ResumeSoc": 40,
+            "/Auto/StopSurplusVolatilityHighWatts": 500,
+            "/Auto/ReferenceChargePowerWatts": 2100,
+            "/Auto/LearnChargePowerMinWatts": 600,
+            "/Auto/LearnChargePowerAlpha": 0.4,
+            "/Auto/LearnChargePowerEnabled": 0,
+            "/Auto/PhaseSwitching": 0,
+            "/Auto/PhasePreferLowestWhenIdle": 0,
+            "/Auto/PhaseMismatchLockoutCount": "7",
+        }
+        policy = AutoPolicy()
+
+        for setting in AUTO_POLICY_SETTINGS:
+            with self.subTest(path=setting.dbus_path):
+                raw_value = raw_values.get(setting.dbus_path, 12)
+                stored_value = setting.update(policy, raw_value)
+                self.assertEqual(setting.read(policy), stored_value)
+                if setting.value_kind == "bool":
+                    self.assertIsInstance(stored_value, int)
+                elif setting.value_kind == "int":
+                    self.assertIsInstance(stored_value, int)
+                else:
+                    self.assertIsInstance(stored_value, float)
+
+        self.assertEqual(auto_policy_control_values(policy), {
+            setting.dbus_path: setting.read(policy) for setting in AUTO_POLICY_SETTINGS
+        })
+
+    def test_runtime_setting_normalization_rejects_non_scalars(self) -> None:
+        setting = AUTO_POLICY_SETTING_BY_PATH["/Auto/StartSurplusWatts"]
+
+        with self.assertRaisesRegex(TypeError, "requires a scalar value"):
+            setting.normalize(object())
+
+    def test_boolean_runtime_setting_preserves_historical_positive_rule(self) -> None:
+        setting = AUTO_POLICY_SETTING_BY_PATH["/Auto/LearnChargePowerEnabled"]
+
+        self.assertIs(setting.normalize("1"), True)
+        self.assertIs(setting.normalize(-1), False)
 
 
 if __name__ == "__main__":

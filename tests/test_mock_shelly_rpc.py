@@ -73,8 +73,9 @@ class TestMockShellyRpc(unittest.TestCase):
 
     def test_fault_endpoint_can_force_http_500_until_reset(self):
         self._read_json("/__admin/fault?mode=http500")
-        with self.assertRaises(HTTPError):
+        with self.assertRaises(HTTPError) as error_context:
             self._read_json("/rpc/Switch.GetStatus?id=0")
+        error_context.exception.close()
 
         self._read_json("/__admin/reset")
         status = self._read_json("/rpc/Switch.GetStatus?id=0")

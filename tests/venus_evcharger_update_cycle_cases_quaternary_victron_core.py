@@ -47,8 +47,8 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
-            controller.apply_victron_ess_balance_bias(service, 100.0, True)
+        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
 
         write_mock.assert_called_once_with(
             service,
@@ -94,8 +94,8 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
-            controller.apply_victron_ess_balance_bias(service, 100.0, False)
+        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, False)
 
         write_mock.assert_called_once_with(
             service,
@@ -150,15 +150,15 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
-            controller.apply_victron_ess_balance_bias(service, 100.0, True)
+        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             self.assertEqual(
                 service._last_auto_metrics["battery_discharge_balance_victron_bias_reason"],
                 "victron-source-support-blocked",
             )
             write_mock.assert_not_called()
             service.auto_battery_discharge_balance_victron_bias_support_mode = "allow_experimental"
-            controller.apply_victron_ess_balance_bias(service, 101.0, True)
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 101.0, True)
 
         write_mock.assert_called_once_with(
             service,
@@ -208,10 +208,10 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True):
-            controller.apply_victron_ess_balance_bias(service, 100.0, True)
+        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = -200.0
-            controller.apply_victron_ess_balance_bias(service, 104.0, True)
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 104.0, True)
 
         self.assertEqual(
             service._last_auto_metrics["battery_discharge_balance_victron_bias_response_delay_seconds"],
@@ -264,10 +264,10 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True):
-            controller.apply_victron_ess_balance_bias(service, 100.0, True)
+        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = 150.0
-            controller.apply_victron_ess_balance_bias(service, 103.0, True)
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 103.0, True)
 
         self.assertEqual(service._last_auto_metrics["battery_discharge_balance_victron_bias_overshoot_active"], 1)
         self.assertEqual(service._last_auto_metrics["battery_discharge_balance_victron_bias_overshoot_count"], 1)
@@ -293,8 +293,8 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        metrics = controller._victron_ess_balance_default_metrics()
-        controller._populate_victron_ess_balance_telemetry_metrics(service, metrics)
+        metrics = controller.components.victron_ess_balance.components.executor._victron_ess_balance_default_metrics()
+        controller.components.victron_ess_balance.components.recommendation._populate_victron_ess_balance_telemetry_metrics(service, metrics)
 
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_recommended_kp"], 0.23)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_recommended_ki"], 0.022)
@@ -340,8 +340,8 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        metrics = controller._victron_ess_balance_default_metrics()
-        controller._populate_victron_ess_balance_telemetry_metrics(service, metrics)
+        metrics = controller.components.victron_ess_balance.components.executor._victron_ess_balance_default_metrics()
+        controller.components.victron_ess_balance.components.recommendation._populate_victron_ess_balance_telemetry_metrics(service, metrics)
 
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_recommended_kp"], 0.16)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_recommended_ki"], 0.01)
@@ -397,11 +397,11 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller, "_victron_ess_balance_write_setpoint", return_value=True):
-            controller.apply_victron_ess_balance_bias(service, 100.0, True)
+        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._auto_cached_inputs_used = True
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = -250.0
-            controller.apply_victron_ess_balance_bias(service, 104.0, True)
+            controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 104.0, True)
 
         self.assertEqual(service._last_auto_metrics["battery_discharge_balance_victron_bias_telemetry_clean"], 0)
         self.assertEqual(

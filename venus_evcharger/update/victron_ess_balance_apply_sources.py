@@ -5,10 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from venus_evcharger.update.runtime_cycle import _UpdateCycleRuntime
 
-
-class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
+class VictronEssSourceResolver:
     """Resolve eligible Victron-side battery sources and activation policy."""
 
     @staticmethod
@@ -40,7 +38,7 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
 
     @staticmethod
     def _victron_ess_balance_configured_source_id(svc: Any) -> str:
-        return _UpdateCycleVictronEssBalanceApplySources._normalized_text(
+        return VictronEssSourceResolver._normalized_text(
             getattr(svc, "auto_battery_discharge_balance_victron_bias_source_id", None)
         )
 
@@ -50,7 +48,7 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
         configured_source_id: str,
     ) -> dict[str, Any] | None:
         for source in sources:
-            if _UpdateCycleVictronEssBalanceApplySources._normalized_text(source.get("source_id")) == configured_source_id:
+            if VictronEssSourceResolver._normalized_text(source.get("source_id")) == configured_source_id:
                 return source
         return None
 
@@ -59,7 +57,7 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
         return [
             source
             for source in sources
-            if _UpdateCycleVictronEssBalanceApplySources._normalized_text(
+            if VictronEssSourceResolver._normalized_text(
                 source.get("discharge_balance_control_connector_type")
             ).lower()
             == "dbus"
@@ -126,3 +124,30 @@ class _UpdateCycleVictronEssBalanceApplySources(_UpdateCycleRuntime):
             mode,
             reserve_phase,
         )
+
+    @staticmethod
+    def _victron_ess_balance_direct_ev_power_w(svc: Any) -> float | None:
+        for attr_name in ("_last_charger_state_power_w", "_charger_estimated_power_w", "_last_power", "ac_power"):
+            value = getattr(svc, attr_name, None)
+            if isinstance(value, (int, float)):
+                return float(value)
+        return None
+
+    @classmethod
+    def _victron_ess_balance_ev_power_w(cls, svc: Any) -> float | None:
+        direct = cls._victron_ess_balance_direct_ev_power_w(svc)
+        if direct is not None:
+            return direct
+        learned_charge_power = getattr(svc, "learned_charge_power_watts", None)
+        if isinstance(learned_charge_power, (int, float)) and int(getattr(svc, "virtual_startstop", None) or 0):
+            return float(learned_charge_power)
+        return None
+
+    @classmethod
+    def _victron_ess_balance_ev_active(cls, svc: Any) -> bool:
+        ev_power_w = cls._victron_ess_balance_ev_power_w(svc)
+        if ev_power_w is not None and ev_power_w >= 200.0:
+            return True
+        if getattr(svc, "charging_started_at", None) is not None:
+            return True
+        return bool(int(getattr(svc, "virtual_startstop", None) or 0))

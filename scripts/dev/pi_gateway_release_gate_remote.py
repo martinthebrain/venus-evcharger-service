@@ -62,13 +62,16 @@ def remote_compile(pi: PiSession, remote_dir: str) -> None:
             "venus_evcharger_service.py",
             "venus_evcharger_auto_input_helper.py",
             "venus_evcharger/dbus_gateway.py",
-            "venus_evcharger/dbus_adapter_components.py",
-            "venus_evcharger/dbus_adapter_read.py",
-            "venus_evcharger/dbus_adapter_write.py",
+            "venus_evcharger/dbus_adapter/read/executor.py",
+            "venus_evcharger/dbus_adapter/write/scheduler.py",
             "scripts/dev/dbus_gateway_chaos.py",
         ]
     )
-    pi.ssh(f"cd {remote_dir!r} && python3 -m py_compile {modules}", timeout=60.0)
+    pi.ssh(
+        f"cd {remote_dir!r} && python3 -m compileall -q venus_evcharger/dbus_adapter "
+        f"&& python3 -m py_compile {modules}",
+        timeout=60.0,
+    )
 
 
 def remote_isolation(pi: PiSession, remote_dir: str) -> None:

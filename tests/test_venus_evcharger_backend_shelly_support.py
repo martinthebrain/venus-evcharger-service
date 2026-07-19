@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from venus_evcharger.readback_store import InMemoryReadbackStore
 from venus_evcharger.backend.shelly_support import (
     ShellyBackendBase,
     _config,
@@ -30,7 +31,25 @@ from venus_evcharger.backend.shelly_support import (
     validate_shelly_profile_role,
 )
 from venus_evcharger.backend.shelly_support_phase import _channel_id_tokens
-from venus_evcharger.backend.shelly_io_requests import ShellyIoRequests
+from venus_evcharger.backend.shelly_io_requests import ShellyRequestClient
+from venus_evcharger.backend.shelly_io_ports import (
+    is_shelly_capability_host,
+    is_shelly_lifecycle_host,
+    is_shelly_readback_cache_host,
+    is_shelly_readback_host,
+    is_shelly_request_host,
+    is_shelly_runtime_host,
+    is_shelly_transport_host,
+    is_shelly_worker_host,
+    require_shelly_capability_host,
+    require_shelly_lifecycle_host,
+    require_shelly_readback_cache_host,
+    require_shelly_readback_host,
+    require_shelly_request_host,
+    require_shelly_runtime_host,
+    require_shelly_transport_host,
+    require_shelly_worker_host,
+)
 from venus_evcharger.backend.shelly_io_types import (
     ShellyPmStatus,
     is_charger_state_backend,
@@ -39,13 +58,11 @@ from venus_evcharger.backend.shelly_io_types import (
     is_meter_backend,
     is_phase_selection_backend,
     is_settable_event,
-    is_shelly_io_host,
     is_switch_capabilities_backend,
     is_switch_state_backend,
     is_transport_session_reset_backend,
     normalize_phase_value,
     normalize_supported_phase_tuple,
-    require_shelly_io_host,
 )
 from venus_evcharger.backend.shelly_io_worker_status import (
     _copy_float_field,
@@ -522,7 +539,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
     def test_shelly_response_and_phase_status_contracts_cover_invalid_and_valid_edges(self) -> None:
         with self.assertRaisesRegex(ValueError, "Shelly response must be a JSON object"):
-            ShellyIoRequests._json_object(["not", "a", "dict"])
+            ShellyRequestClient._json_object(["not", "a", "dict"])
 
         pm_status: dict[str, object] = {}
         _copy_known_status_phase_fields(
@@ -667,46 +684,58 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
             uninitialized_backend.reset_transport_session(new_session)
             self.assertIs(uninitialized_backend._session, new_session)
 
-    def test_shelly_io_host_contract_validates_core_service_boundary(self) -> None:
+    def test_shelly_io_component_ports_validate_independently(self) -> None:
+        readback_store = InMemoryReadbackStore()
+        runtime = SimpleNamespace(
+            ensure_worker_state=MagicMock(),
+            update_worker_snapshot=MagicMock(),
+            mark_failure=MagicMock(),
+            warning_throttled=MagicMock(),
+            mark_recovery=MagicMock(),
+            worker_snapshot=MagicMock(return_value={}),
+            ensure_auto_input_helper=MagicMock(),
+            source_retry_ready=MagicMock(return_value=True),
+            source_retry_remaining=MagicMock(return_value=0),
+            delay_source_retry=MagicMock(),
+        )
+        auto = SimpleNamespace(
+            mark_relay_changed=MagicMock(),
+            mode_uses_auto_logic=MagicMock(return_value=False),
+        )
         service = SimpleNamespace(
             session=MagicMock(),
+            use_digest_auth=False,
+            username="",
+            password="",
             host="192.168.1.20",
             pm_component="switch",
             pm_id=0,
-            _relay_command_lock=MagicMock(),
-            _worker_stop_event=MagicMock(),
-            _time_now=lambda: 123.0,
-            _request=lambda _url: {},
-            rpc_call=lambda _method, **_params: {},
-            _peek_pending_relay_command=lambda: (None, None),
-            _clear_pending_relay_command=lambda _relay_on: None,
+            _worker_session=MagicMock(),
+            _readback_store=readback_store,
+            time_now=lambda: 1.0,
+            auto_shelly_soft_fail_seconds=10.0,
+            requested_phase_selection="P1",
+            active_phase_selection="P1",
+            runtime=runtime,
+            auto=auto,
         )
-
-        self.assertTrue(is_shelly_io_host(service))
-        self.assertIs(require_shelly_io_host(service), service)
-
-    def test_shelly_io_host_contract_reports_missing_members(self) -> None:
-        with self.assertRaisesRegex(TypeError, "_request"):
-            require_shelly_io_host(SimpleNamespace(session=MagicMock()))
-        try:
-            require_shelly_io_host(SimpleNamespace(session=MagicMock()))
-        except TypeError as error:
-            self.assertEqual(
-                str(error),
-                "ShellyIoController requires a ShellyIoHost-compatible service; "
-                "missing: _time_now, _request, rpc_call, _peek_pending_relay_command, _clear_pending_relay_command",
-            )
-
-        partial_service = SimpleNamespace(
-            _time_now=lambda: 123.0,
-            _request="not-callable",
-            rpc_call=lambda _method, **_params: {},
-            _peek_pending_relay_command=lambda: (None, None),
-            _clear_pending_relay_command=lambda _relay_on: None,
+        contracts = (
+            (is_shelly_request_host, require_shelly_request_host),
+            (is_shelly_capability_host, require_shelly_capability_host),
+            (is_shelly_runtime_host, require_shelly_runtime_host),
+            (is_shelly_readback_cache_host, require_shelly_readback_cache_host),
+            (is_shelly_readback_host, require_shelly_readback_host),
+            (is_shelly_transport_host, require_shelly_transport_host),
+            (is_shelly_worker_host, require_shelly_worker_host),
+            (is_shelly_lifecycle_host, require_shelly_lifecycle_host),
         )
-        self.assertFalse(is_shelly_io_host(partial_service))
-        with self.assertRaisesRegex(TypeError, "missing: _request"):
-            require_shelly_io_host(partial_service)
+        for predicate, require in contracts:
+            with self.subTest(require=require.__name__):
+                self.assertTrue(predicate(service))
+                self.assertIs(require(service), service)
+                self.assertFalse(predicate(SimpleNamespace()))
+                with self.assertRaises(TypeError):
+                    require(SimpleNamespace())
 
     def test_shelly_io_type_guard_contracts_are_explicit(self) -> None:
         guard_cases = (
@@ -733,3 +762,6 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         self.assertEqual(normalize_phase_value("bad", "P1_P2_P3"), "P1_P2_P3")
         self.assertEqual(normalize_supported_phase_tuple("P1_P2,P1_P2_P3"), ("P1_P2", "P1_P2_P3"))
         self.assertEqual(normalize_supported_phase_tuple("", ("P1_P2",)), ("P1_P2",))
+
+
+__all__ = [name for name in globals() if not name.startswith("__")]

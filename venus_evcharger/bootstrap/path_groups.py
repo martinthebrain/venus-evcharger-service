@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from venus_evcharger.auto.policy_settings import auto_policy_control_values
 from venus_evcharger.bootstrap.path_defaults import PathMap
 
 
@@ -61,6 +62,7 @@ def measurement_paths(formatters: Mapping[str, Any]) -> PathMap:
 
 def control_paths(svc: Any, formatters: Mapping[str, Any]) -> PathMap:
     """Return writable and status-like EV charger control paths."""
+    policy_values = auto_policy_control_values(svc.auto_policy)
     return {
         "/MinCurrent": (svc.min_current, formatters["a"]),
         "/MaxCurrent": (svc.max_current, formatters["a"]),
@@ -69,10 +71,10 @@ def control_paths(svc: Any, formatters: Mapping[str, Any]) -> PathMap:
         "/PhaseSelectionActive": (getattr(svc, "active_phase_selection", "P1"), None),
         "/SupportedPhaseSelections": (",".join(getattr(svc, "supported_phase_selections", ("P1",))), None),
         "/AutoStart": (svc.virtual_autostart, None),
-        "/Auto/StartSurplusWatts": (getattr(svc, "auto_start_surplus_watts", 0.0), None),
-        "/Auto/StopSurplusWatts": (getattr(svc, "auto_stop_surplus_watts", 0.0), None),
-        "/Auto/MinSoc": (getattr(svc, "auto_min_soc", 0.0), None),
-        "/Auto/ResumeSoc": (getattr(svc, "auto_resume_soc", 0.0), None),
+        "/Auto/StartSurplusWatts": (policy_values["/Auto/StartSurplusWatts"], None),
+        "/Auto/StopSurplusWatts": (policy_values["/Auto/StopSurplusWatts"], None),
+        "/Auto/MinSoc": (policy_values["/Auto/MinSoc"], None),
+        "/Auto/ResumeSoc": (policy_values["/Auto/ResumeSoc"], None),
         "/Auto/StartDelaySeconds": (getattr(svc, "auto_start_delay_seconds", 0.0), None),
         "/Auto/StopDelaySeconds": (getattr(svc, "auto_stop_delay_seconds", 0.0), None),
         "/Auto/ScheduledEnabledDays": (str(getattr(svc, "auto_scheduled_enabled_days", "Mon,Tue,Wed,Thu,Fri")), None),
@@ -81,26 +83,41 @@ def control_paths(svc: Any, formatters: Mapping[str, Any]) -> PathMap:
         "/Auto/ScheduledNightCurrent": (getattr(svc, "auto_scheduled_night_current_amps", 0.0), None),
         "/Auto/DbusBackoffBaseSeconds": (getattr(svc, "auto_dbus_backoff_base_seconds", 0.0), None),
         "/Auto/DbusBackoffMaxSeconds": (getattr(svc, "auto_dbus_backoff_max_seconds", 0.0), None),
-        "/Auto/GridRecoveryStartSeconds": (getattr(svc, "auto_grid_recovery_start_seconds", 0.0), None),
-        "/Auto/StopSurplusDelaySeconds": (getattr(svc, "auto_stop_surplus_delay_seconds", 0.0), None),
-        "/Auto/StopSurplusVolatilityLowWatts": (getattr(svc, "auto_stop_surplus_volatility_low_watts", 0.0), None),
-        "/Auto/StopSurplusVolatilityHighWatts": (getattr(svc, "auto_stop_surplus_volatility_high_watts", 0.0), None),
-        "/Auto/ReferenceChargePowerWatts": (getattr(svc, "auto_reference_charge_power_watts", 0.0), None),
-        "/Auto/LearnChargePowerEnabled": (int(bool(getattr(svc, "auto_learn_charge_power_enabled", True))), None),
-        "/Auto/LearnChargePowerMinWatts": (getattr(svc, "auto_learn_charge_power_min_watts", 0.0), None),
-        "/Auto/LearnChargePowerAlpha": (getattr(svc, "auto_learn_charge_power_alpha", 0.0), None),
-        "/Auto/LearnChargePowerStartDelaySeconds": (getattr(svc, "auto_learn_charge_power_start_delay_seconds", 0.0), None),
-        "/Auto/LearnChargePowerWindowSeconds": (getattr(svc, "auto_learn_charge_power_window_seconds", 0.0), None),
-        "/Auto/LearnChargePowerMaxAgeSeconds": (getattr(svc, "auto_learn_charge_power_max_age_seconds", 0.0), None),
-        "/Auto/PhaseSwitching": (int(bool(getattr(svc, "auto_phase_switching_enabled", True))), None),
-        "/Auto/PhasePreferLowestWhenIdle": (int(bool(getattr(svc, "auto_phase_prefer_lowest_when_idle", True))), None),
-        "/Auto/PhaseUpshiftDelaySeconds": (getattr(svc, "auto_phase_upshift_delay_seconds", 0.0), None),
-        "/Auto/PhaseDownshiftDelaySeconds": (getattr(svc, "auto_phase_downshift_delay_seconds", 0.0), None),
-        "/Auto/PhaseUpshiftHeadroomWatts": (getattr(svc, "auto_phase_upshift_headroom_watts", 0.0), None),
-        "/Auto/PhaseDownshiftMarginWatts": (getattr(svc, "auto_phase_downshift_margin_watts", 0.0), None),
-        "/Auto/PhaseMismatchRetrySeconds": (getattr(svc, "auto_phase_mismatch_retry_seconds", 0.0), None),
-        "/Auto/PhaseMismatchLockoutCount": (getattr(svc, "auto_phase_mismatch_lockout_count", 0), None),
-        "/Auto/PhaseMismatchLockoutSeconds": (getattr(svc, "auto_phase_mismatch_lockout_seconds", 0.0), None),
+        "/Auto/GridRecoveryStartSeconds": (policy_values["/Auto/GridRecoveryStartSeconds"], None),
+        "/Auto/StopSurplusDelaySeconds": (policy_values["/Auto/StopSurplusDelaySeconds"], None),
+        "/Auto/StopSurplusVolatilityLowWatts": (
+            policy_values["/Auto/StopSurplusVolatilityLowWatts"],
+            None,
+        ),
+        "/Auto/StopSurplusVolatilityHighWatts": (
+            policy_values["/Auto/StopSurplusVolatilityHighWatts"],
+            None,
+        ),
+        "/Auto/ReferenceChargePowerWatts": (policy_values["/Auto/ReferenceChargePowerWatts"], None),
+        "/Auto/LearnChargePowerEnabled": (policy_values["/Auto/LearnChargePowerEnabled"], None),
+        "/Auto/LearnChargePowerMinWatts": (policy_values["/Auto/LearnChargePowerMinWatts"], None),
+        "/Auto/LearnChargePowerAlpha": (policy_values["/Auto/LearnChargePowerAlpha"], None),
+        "/Auto/LearnChargePowerStartDelaySeconds": (
+            policy_values["/Auto/LearnChargePowerStartDelaySeconds"],
+            None,
+        ),
+        "/Auto/LearnChargePowerWindowSeconds": (
+            policy_values["/Auto/LearnChargePowerWindowSeconds"],
+            None,
+        ),
+        "/Auto/LearnChargePowerMaxAgeSeconds": (
+            policy_values["/Auto/LearnChargePowerMaxAgeSeconds"],
+            None,
+        ),
+        "/Auto/PhaseSwitching": (policy_values["/Auto/PhaseSwitching"], None),
+        "/Auto/PhasePreferLowestWhenIdle": (policy_values["/Auto/PhasePreferLowestWhenIdle"], None),
+        "/Auto/PhaseUpshiftDelaySeconds": (policy_values["/Auto/PhaseUpshiftDelaySeconds"], None),
+        "/Auto/PhaseDownshiftDelaySeconds": (policy_values["/Auto/PhaseDownshiftDelaySeconds"], None),
+        "/Auto/PhaseUpshiftHeadroomWatts": (policy_values["/Auto/PhaseUpshiftHeadroomWatts"], None),
+        "/Auto/PhaseDownshiftMarginWatts": (policy_values["/Auto/PhaseDownshiftMarginWatts"], None),
+        "/Auto/PhaseMismatchRetrySeconds": (policy_values["/Auto/PhaseMismatchRetrySeconds"], None),
+        "/Auto/PhaseMismatchLockoutCount": (policy_values["/Auto/PhaseMismatchLockoutCount"], None),
+        "/Auto/PhaseMismatchLockoutSeconds": (policy_values["/Auto/PhaseMismatchLockoutSeconds"], None),
         "/ChargingTime": (0, None),
         "/Mode": (svc.virtual_mode, None),
         "/StartStop": (svc.virtual_startstop, None),

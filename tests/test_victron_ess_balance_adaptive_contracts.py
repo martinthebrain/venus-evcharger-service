@@ -1,29 +1,9 @@
 import unittest
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, patch
 
-from venus_evcharger.update.victron_ess_balance_adaptive import _UpdateCycleVictronEssBalanceAdaptive
-
-
-class _AdaptiveHarness(_UpdateCycleVictronEssBalanceAdaptive):
-    def __init__(self) -> None:
-        self.suspended = False
-        self.activation_mode = "always"
-        self.suspend_calls: list[tuple[Any, float]] = []
-        self.activation_calls: list[Any] = []
-
-    @staticmethod
-    def _optional_float(value: Any) -> float | None:
-        return float(value) if isinstance(value, (int, float)) else None
-
-    def _victron_ess_balance_auto_apply_suspended(self, svc: Any, now: float) -> bool:
-        self.suspend_calls.append((svc, now))
-        return self.suspended
-
-    def _victron_ess_balance_activation_mode(self, svc: Any) -> str:
-        self.activation_calls.append(svc)
-        return self.activation_mode
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 def _adaptive_service(**overrides: object) -> SimpleNamespace:
@@ -51,7 +31,10 @@ def _adaptive_service(**overrides: object) -> SimpleNamespace:
 
 class AdaptiveMetricContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.harness = _AdaptiveHarness()
+        components = build_victron_ess_components()
+        self.harness = components.adaptive
+        self.sources = components.sources
+        self.recovery = components.recovery
 
     def test_profile_keys_map_and_normalize_both_fields(self) -> None:
         metrics = {
@@ -63,10 +46,14 @@ class AdaptiveMetricContracts(unittest.TestCase):
 
     def test_runtime_metrics_publish_exact_service_state(self) -> None:
         svc = _adaptive_service()
-        self.harness.suspended = True
         metrics: dict[str, Any] = {}
-        self.harness._initialize_victron_ess_balance_auto_apply_runtime_metrics(svc, metrics, 100.0)
-        self.assertEqual(self.harness.suspend_calls, [(svc, 100.0)])
+        with patch.object(
+            self.recovery,
+            "_victron_ess_balance_auto_apply_suspended",
+            return_value=True,
+        ) as suspended:
+            self.harness._initialize_victron_ess_balance_auto_apply_runtime_metrics(svc, metrics, 100.0)
+        suspended.assert_called_once_with(svc, 100.0)
         self.assertEqual(
             metrics,
             {
@@ -114,7 +101,10 @@ class AdaptiveMetricContracts(unittest.TestCase):
 
 class AdaptiveReadinessContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.harness = _AdaptiveHarness()
+        components = build_victron_ess_components()
+        self.harness = components.adaptive
+        self.sources = components.sources
+        self.recovery = components.recovery
         self.svc = _adaptive_service()
 
     def test_thresholds_clamp_each_independent_value(self) -> None:
@@ -177,11 +167,13 @@ class AdaptiveReadinessContracts(unittest.TestCase):
         self.harness._victron_ess_balance_auto_apply_stability_reason.return_value = ""
         self.harness._victron_ess_balance_auto_apply_sample_reason.return_value = ""
         self.assertEqual(self.harness._victron_ess_balance_auto_apply_readiness(self.svc, {}), "fourth")
+        self.harness._victron_ess_balance_auto_apply_profile_reason.return_value = ""
+        self.assertEqual(self.harness._victron_ess_balance_auto_apply_readiness(self.svc, {}), "")
 
 
 class AdaptiveTimingAndApplyContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.harness = _AdaptiveHarness()
+        self.harness = build_victron_ess_components().adaptive
 
     def test_blend_and_observation_window_clamp_exactly(self) -> None:
         self.assertEqual(self.harness._victron_ess_balance_auto_apply_blend(_adaptive_service()), 0.25)
@@ -270,7 +262,10 @@ class AdaptiveTimingAndApplyContracts(unittest.TestCase):
 
 class AdaptiveSchedulingAndSettingContracts(unittest.TestCase):
     def setUp(self) -> None:
-        self.harness = _AdaptiveHarness()
+        components = build_victron_ess_components()
+        self.harness = components.adaptive
+        self.sources = components.sources
+        self.recovery = components.recovery
 
     def test_blocker_returns_first_reason_in_fixed_order(self) -> None:
         svc = _adaptive_service()
@@ -292,19 +287,51 @@ class AdaptiveSchedulingAndSettingContracts(unittest.TestCase):
         self.assertEqual(self.harness._victron_ess_balance_auto_apply_blocker_reason(svc, metrics, 1.0), "")
         self.harness._victron_ess_balance_auto_apply_readiness.assert_called_once_with(svc, metrics)
 
+    def test_enabled_suspend_and_fallback_step_boundaries(self) -> None:
+        svc = _adaptive_service()
+        self.assertTrue(self.harness._victron_ess_balance_auto_apply_enabled(svc))
+        svc.auto_battery_discharge_balance_victron_bias_auto_apply_enabled = False
+        self.assertFalse(self.harness._victron_ess_balance_auto_apply_enabled(svc))
+        self.recovery._victron_ess_balance_auto_apply_suspended = MagicMock(return_value=True)
+        self.assertEqual(
+            self.harness._victron_ess_balance_auto_apply_suspend_reason(svc, 8.0),
+            "auto_apply_suspended",
+        )
+        self.recovery._victron_ess_balance_auto_apply_suspended.return_value = False
+        self.assertEqual(self.harness._victron_ess_balance_auto_apply_suspend_reason(svc, 8.0), "")
+
+        self.harness._victron_ess_balance_recommended_setting_pairs = MagicMock(
+            return_value=(("first", "first_recommendation"), ("second", "second_recommendation"))
+        )
+        self.harness._blend_recommended_setting = MagicMock(side_effect=(False, True))
+        self.assertEqual(
+            self.harness._apply_victron_ess_balance_recommended_tuning_step(
+                svc,
+                {"first_recommendation": 1.0, "second_recommendation": 2.0},
+                0.5,
+            ),
+            "second",
+        )
+        self.harness._blend_recommended_setting = MagicMock(side_effect=(False, False))
+        self.harness._victron_ess_balance_recommended_activation_step = MagicMock(return_value="activation")
+        self.assertEqual(
+            self.harness._apply_victron_ess_balance_recommended_tuning_step(svc, {}, 0.5),
+            "activation",
+        )
+
     def test_rollback_reason_owns_restore_result_and_arguments(self) -> None:
         svc = _adaptive_service()
         metrics: dict[str, Any] = {}
-        self.harness._victron_ess_balance_should_rollback_stable_tuning = MagicMock(return_value=False)
-        self.harness._maybe_restore_victron_ess_balance_stable_tuning = MagicMock(return_value=True)
+        self.recovery._victron_ess_balance_should_rollback_stable_tuning = MagicMock(return_value=False)
+        self.recovery._maybe_restore_victron_ess_balance_stable_tuning = MagicMock(return_value=True)
         self.assertEqual(self.harness._victron_ess_balance_auto_apply_rollback_reason(svc, metrics, 4.0), "")
-        self.harness._maybe_restore_victron_ess_balance_stable_tuning.assert_not_called()
-        self.harness._victron_ess_balance_should_rollback_stable_tuning.return_value = True
-        self.harness._maybe_restore_victron_ess_balance_stable_tuning.return_value = False
+        self.recovery._maybe_restore_victron_ess_balance_stable_tuning.assert_not_called()
+        self.recovery._victron_ess_balance_should_rollback_stable_tuning.return_value = True
+        self.recovery._maybe_restore_victron_ess_balance_stable_tuning.return_value = False
         self.assertEqual(self.harness._victron_ess_balance_auto_apply_rollback_reason(svc, metrics, 5.0), "")
-        self.harness._maybe_restore_victron_ess_balance_stable_tuning.return_value = True
+        self.recovery._maybe_restore_victron_ess_balance_stable_tuning.return_value = True
         self.assertEqual(self.harness._victron_ess_balance_auto_apply_rollback_reason(svc, metrics, 6.0), "rolled_back")
-        self.harness._maybe_restore_victron_ess_balance_stable_tuning.assert_called_with(
+        self.recovery._maybe_restore_victron_ess_balance_stable_tuning.assert_called_with(
             svc,
             metrics,
             "unstable_observation_window",
@@ -384,12 +411,13 @@ class AdaptiveSchedulingAndSettingContracts(unittest.TestCase):
         self.assertEqual(self.harness._victron_ess_balance_recommended_activation_step(svc, {}), "")
         self.assertEqual(self.harness._victron_ess_balance_recommended_activation_step(svc, {key: "   "}), "")
         self.assertEqual(self.harness._victron_ess_balance_recommended_activation_step(svc, {key: "always"}), "")
-        self.assertEqual(
-            self.harness._victron_ess_balance_recommended_activation_step(svc, {key: " export_only "}),
-            "auto_battery_discharge_balance_victron_bias_activation_mode",
-        )
+        with patch.object(self.sources, "_victron_ess_balance_activation_mode", return_value="always") as activation:
+            self.assertEqual(
+                self.harness._victron_ess_balance_recommended_activation_step(svc, {key: " export_only "}),
+                "auto_battery_discharge_balance_victron_bias_activation_mode",
+            )
         self.assertEqual(svc.auto_battery_discharge_balance_victron_bias_activation_mode, "export_only")
-        self.assertEqual(self.harness.activation_calls[-1], svc)
+        activation.assert_called_once_with(svc)
 
 
 if __name__ == "__main__":

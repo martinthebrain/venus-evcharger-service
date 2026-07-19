@@ -1,98 +1,78 @@
 import unittest
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock, patch
 
-from venus_evcharger.update.victron_ess_balance_apply_write import _UpdateCycleVictronEssBalanceApplyWrite
-from venus_evcharger.update.victron_ess_balance_learning_telemetry import (
-    _UpdateCycleVictronEssBalanceLearningTelemetry,
-    _victron_ess_balance_clamped_stability_score,
-    _victron_ess_balance_delay_penalty,
-    _victron_ess_balance_gain_bonus,
-    _victron_ess_balance_overshoot_penalty,
-    _victron_ess_balance_settle_ratio,
+from venus_evcharger.update.victron_ess_balance_apply_write import VictronEssSetpointWriter
+from venus_evcharger.update.victron_ess_balance_scoring import (
+    clamped_stability_score,
+    delay_penalty_value,
+    gain_bonus_value,
+    overshoot_penalty_value,
+    settle_ratio_value,
 )
-
-
-class _TelemetryHarness(_UpdateCycleVictronEssBalanceLearningTelemetry):
-    def __init__(self) -> None:
-        self.clean_result = (True, "clean")
-        self.delay_updates: list[tuple[str, float]] = []
-        self.gain_updates: list[tuple[str, float]] = []
-        self.counters: list[tuple[str, str]] = []
-        self.cooldowns: list[tuple[float, str]] = []
-        self.refreshed_profiles: list[str] = []
-
-    @staticmethod
-    def _optional_float(value: Any) -> float | None:
-        return float(value) if isinstance(value, (int, float)) else None
-
-    @staticmethod
-    def _victron_ess_balance_profile_sample_count(profile: dict[str, Any]) -> int:
-        return int(profile.get("sample_count", 0) or 0)
-
-    def _victron_ess_balance_update_profile_delay(
-        self,
-        svc: Any,
-        profile_key: str,
-        response_delay_seconds: float,
-    ) -> None:
-        del svc
-        self.delay_updates.append((profile_key, response_delay_seconds))
-
-    def _victron_ess_balance_update_profile_gain(self, svc: Any, profile_key: str, gain_sample: float) -> None:
-        del svc
-        self.gain_updates.append((profile_key, gain_sample))
-
-    def _victron_ess_balance_increment_profile_counter(
-        self,
-        svc: Any,
-        profile_key: str,
-        counter_name: str,
-    ) -> None:
-        del svc
-        self.counters.append((profile_key, counter_name))
-
-    def _enter_victron_ess_balance_overshoot_cooldown(self, svc: Any, now: float, reason: str) -> None:
-        del svc
-        self.cooldowns.append((now, reason))
-
-    def _victron_ess_balance_telemetry_is_clean(
-        self,
-        svc: Any,
-        cluster: dict[str, Any],
-        source_error_w: float,
-    ) -> tuple[bool, str]:
-        del svc, cluster, source_error_w
-        return self.clean_result
-
-    @staticmethod
-    def _victron_ess_balance_ev_power_w(svc: Any) -> float | None:
-        return _TelemetryHarness._optional_float(getattr(svc, "ev_power", None))
-
-    def _victron_ess_balance_refresh_profile_stability(self, svc: Any, profile_key: str) -> None:
-        del svc
-        self.refreshed_profiles.append(profile_key)
-
-    @staticmethod
-    def _populate_victron_ess_balance_telemetry_metrics(svc: Any, metrics: dict[str, Any]) -> None:
-        metrics["telemetry_populated"] = bool(svc)
+from tests.support.victron_ess_balance import build_victron_ess_components
 
 
 class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.harness = _TelemetryHarness()
+        components = build_victron_ess_components()
+        self.harness = components.telemetry
+        self.scorer = components.scorer
+        self.profiles = components.profiles
+        self.recovery = components.recovery
+        self.safety = components.safety
+        self.sources = components.sources
+        self.recommendation = components.recommendation
+        self.pid = components.pid
+        self.delay_update = self._patch_method(
+            self.profiles, "_victron_ess_balance_update_profile_delay"
+        )
+        self.gain_update = self._patch_method(
+            self.profiles, "_victron_ess_balance_update_profile_gain"
+        )
+        self.counter_update = self._patch_method(
+            self.profiles, "_victron_ess_balance_increment_profile_counter"
+        )
+        self.cooldown = self._patch_method(
+            self.recovery, "_enter_victron_ess_balance_overshoot_cooldown"
+        )
+        self.profile_refresh = self._patch_method(
+            self.profiles, "_victron_ess_balance_refresh_profile_stability"
+        )
+        self.clean = self._patch_method(
+            self.safety,
+            "_victron_ess_balance_telemetry_is_clean",
+            return_value=(True, "clean"),
+        )
+        self.ev_power = self._patch_method(
+            self.sources,
+            "_victron_ess_balance_ev_power_w",
+            side_effect=lambda svc: self.sources._optional_float(getattr(svc, "ev_power", None)),
+        )
+        self.populate = self._patch_method(
+            self.recommendation,
+            "_populate_victron_ess_balance_telemetry_metrics",
+            side_effect=lambda svc, metrics: metrics.update(telemetry_populated=bool(svc)),
+        )
+        self.integral_reset = self._patch_method(self.pid, "reset_integral")
+
+    def _patch_method(self, target: object, name: str, **kwargs: object) -> MagicMock:
+        patcher = patch.object(target, name, **kwargs)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
 
     def test_basic_score_helpers_cover_boundaries(self) -> None:
-        self.assertEqual(_victron_ess_balance_settle_ratio(0, 0), 1.0)
-        self.assertEqual(_victron_ess_balance_settle_ratio(2, 4), 0.5)
-        self.assertEqual(_victron_ess_balance_overshoot_penalty(2, 0), 0.0)
-        self.assertEqual(_victron_ess_balance_overshoot_penalty(10, 10), 0.6)
-        self.assertEqual(_victron_ess_balance_gain_bonus(None), 0.0)
-        self.assertEqual(_victron_ess_balance_gain_bonus(0.5), 0.15)
-        self.assertEqual(_victron_ess_balance_delay_penalty(None), 0.0)
-        self.assertGreater(_victron_ess_balance_delay_penalty(30.0), 0.0)
-        self.assertEqual(_victron_ess_balance_clamped_stability_score(1.0, 0.2, 0.0, 0.0), 1.0)
-        self.assertEqual(_victron_ess_balance_clamped_stability_score(0.0, 0.0, 2.0, 0.0), 0.0)
+        self.assertEqual(settle_ratio_value(0, 0), 1.0)
+        self.assertEqual(settle_ratio_value(2, 4), 0.5)
+        self.assertEqual(overshoot_penalty_value(2, 0), 0.0)
+        self.assertEqual(overshoot_penalty_value(10, 10), 0.6)
+        self.assertEqual(gain_bonus_value(None), 0.0)
+        self.assertEqual(gain_bonus_value(0.5), 0.15)
+        self.assertEqual(delay_penalty_value(None), 0.0)
+        self.assertGreater(delay_penalty_value(30.0), 0.0)
+        self.assertEqual(clamped_stability_score(1.0, 0.2, 0.0, 0.0), 1.0)
+        self.assertEqual(clamped_stability_score(0.0, 0.0, 2.0, 0.0), 0.0)
 
     def test_telemetry_static_helpers_cover_edges(self) -> None:
         stats = self.harness._victron_ess_balance_improvement_stats(-5.0, 20.0, 75.0, 50.0)
@@ -106,8 +86,8 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=42.0,
         )
         self.assertEqual(self.harness._victron_ess_balance_telemetry_thresholds(svc), (12.0, 42.0))
-        self.assertEqual(self.harness._ewma_learned_value(None, 10.0, 0), 10.0)
-        self.assertEqual(self.harness._ewma_learned_value(4.0, 8.0, 2), 5.0)
+        self.assertEqual(self.scorer.ewma_learned_value(None, 10.0, 0), 10.0)
+        self.assertEqual(self.scorer.ewma_learned_value(4.0, 8.0, 2), 5.0)
 
     def test_update_response_delay_gain_and_markers(self) -> None:
         svc = SimpleNamespace(
@@ -118,13 +98,13 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         )
         self.harness._victron_ess_balance_update_response_delay(svc, "p", 3.0)
         self.harness._victron_ess_balance_update_gain(svc, "p", 0.5)
-        self.assertEqual(self.harness.delay_updates, [("p", 3.0)])
-        self.assertEqual(self.harness.gain_updates, [("p", 0.5)])
+        self.delay_update.assert_called_once_with(svc, "p", 3.0)
+        self.gain_update.assert_called_once_with(svc, "p", 0.5)
         self.harness._victron_ess_balance_mark_overshoot(svc, 10.0, "p")
         self.harness._victron_ess_balance_mark_settled(svc, "p")
-        self.assertIn(("p", "overshoot_count"), self.harness.counters)
-        self.assertIn(("p", "settled_count"), self.harness.counters)
-        self.assertEqual(self.harness.cooldowns, [(10.0, "overshoot_detected")])
+        self.counter_update.assert_any_call(svc, "p", "overshoot_count")
+        self.counter_update.assert_any_call(svc, "p", "settled_count")
+        self.cooldown.assert_called_once_with(svc, 10.0, "overshoot_detected")
 
     def test_maybe_record_helpers_cover_skip_and_record_paths(self) -> None:
         svc = SimpleNamespace(
@@ -169,10 +149,10 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.harness._update_victron_ess_balance_telemetry(svc, 100.0, cluster, -12.0, metrics, "fallback")
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_telemetry_clean"], 1)
         self.assertEqual(svc._victron_ess_balance_telemetry_last_ev_power_w, 123.0)
-        self.assertEqual(self.harness.refreshed_profiles[-1], "profile-a")
+        self.profile_refresh.assert_called_with(svc, "profile-a")
         self.assertTrue(svc._victron_ess_balance_telemetry_overshoot_active)
 
-        self.harness.clean_result = (False, "noisy")
+        self.clean.return_value = (False, "noisy")
         metrics = {}
         svc._victron_ess_balance_telemetry_last_command_at = None
         self.harness._update_victron_ess_balance_telemetry(svc, 101.0, cluster, 2.0, metrics, "fallback")
@@ -201,32 +181,32 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.assertFalse(overshoot)
         self.assertTrue(settling)
         profile = {"sample_count": 4, "stability_score": 0.8, "response_variance_score": 0.6}
-        self.assertGreater(self.harness._victron_ess_balance_regime_consistency_score(profile), 0.0)
+        self.assertGreater(self.scorer.regime_consistency_score(profile), 0.0)
         self.assertEqual(
-            self.harness._victron_ess_balance_reproducibility_score(
+            self.scorer.reproducibility_score(
                 {"settled_count": 0, "overshoot_count": 0, "response_variance_score": 0.5}
             ),
             0.8,
         )
         self.assertGreater(
-            self.harness._victron_ess_balance_reproducibility_score(
+            self.scorer.reproducibility_score(
                 {"settled_count": 3, "overshoot_count": 1, "response_variance_score": 0.5}
             ),
             0.0,
         )
 
     def test_variance_and_stability_score_helpers(self) -> None:
-        self.assertEqual(self.harness._victron_ess_balance_variance_ratio(None, 1.0, 1.0), 1.0)
-        self.assertEqual(self.harness._victron_ess_balance_variance_ratio(0.0, 1.0, 1.0), 1.0)
-        self.assertEqual(self.harness._victron_ess_balance_variance_ratio(10.0, None, 1.0), 1.0)
-        self.assertGreater(self.harness._victron_ess_balance_variance_score(10.0, 1.0, 1.0, 0.1), 0.0)
+        self.assertEqual(self.scorer.variance_ratio(None, 1.0, 1.0), 1.0)
+        self.assertEqual(self.scorer.variance_ratio(0.0, 1.0, 1.0), 1.0)
+        self.assertEqual(self.scorer.variance_ratio(10.0, None, 1.0), 1.0)
+        self.assertGreater(self.scorer.variance_score(10.0, 1.0, 1.0, 0.1), 0.0)
         svc = SimpleNamespace(
             _victron_ess_balance_telemetry_settled_count=2,
             _victron_ess_balance_telemetry_overshoot_count=1,
             _victron_ess_balance_telemetry_estimated_gain=0.5,
             _victron_ess_balance_telemetry_response_delay_seconds=12.0,
         )
-        self.assertGreater(self.harness._victron_ess_balance_stability_score(svc), 0.0)
+        self.assertGreater(self.scorer.stability_score(svc), 0.0)
 
     def test_tracking_wrappers_and_gateway_dbus_guard(self) -> None:
         svc = SimpleNamespace()
@@ -234,10 +214,10 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.assertEqual(svc._victron_ess_balance_telemetry_last_command_profile_key, "p")
         self.harness._clear_victron_ess_balance_tracking_episode(svc)
         self.assertIsNone(svc._victron_ess_balance_telemetry_last_command_at)
-        self.harness._reset_victron_ess_balance_pid(svc)
-        self.harness._reset_victron_ess_balance_pid_integral(svc, aggressive=True)
+        self.pid.reset(svc)
+        self.pid.reset_integral(svc, aggressive=True)
         with self.assertRaises(RuntimeError):
-            _UpdateCycleVictronEssBalanceApplyWrite._victron_ess_balance_dbus_module()
+            VictronEssSetpointWriter._victron_ess_balance_dbus_module()
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from pathlib import Path
 from tests.venus_evcharger_test_fixtures import make_state_validation_service
 from venus_evcharger.bootstrap import wizard_persistence as wizard_persistence_mod
 from venus_evcharger.controllers.state import ServiceStateController
+from venus_evcharger.controllers.state_validation import RuntimeConfigValidator
 from venus_evcharger.energy import probe_cli as probe_cli_mod
 
 
@@ -21,10 +22,6 @@ def _normalize_mode(value: object) -> int:
 class BranchCoverageNextClusterFiveStateValidationTests(unittest.TestCase):
     def test_validate_runtime_config_clamps_victron_balance_modes_and_auto_apply_fields(self) -> None:
         service = make_state_validation_service(
-            auto_min_soc=20.0,
-            auto_resume_soc=30.0,
-            auto_start_surplus_watts=1500.0,
-            auto_stop_surplus_watts=1200.0,
             auto_battery_discharge_balance_coordination_support_mode="bad-mode",
             auto_battery_discharge_balance_victron_bias_support_mode="bad-mode",
             auto_battery_discharge_balance_victron_bias_activation_mode="bad-mode",
@@ -56,7 +53,7 @@ class BranchCoverageNextClusterFiveStateValidationTests(unittest.TestCase):
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_rollback_min_stability_score, 0.45)
 
     def test_state_validation_helpers_cover_missing_and_valid_optional_modes(self) -> None:
-        controller = ServiceStateController(make_state_validation_service(), _normalize_mode)
+        controller = RuntimeConfigValidator(make_state_validation_service())
 
         bare_service = object()
         controller._validate_scheduled_runtime_config(bare_service)

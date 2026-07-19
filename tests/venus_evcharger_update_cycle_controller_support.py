@@ -9,14 +9,54 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from tests.support.update_cycle_roles import install_update_cycle_roles
+from tests.venus_evcharger_shelly_io_controller_support import ShellyIoController
+
 from venus_evcharger.backend.factory import build_service_backends
+from venus_evcharger.backend.config_normalization import normalize_backend_mode
 from venus_evcharger.backend.modbus_transport import ModbusRequest, ModbusSlaveOfflineError
-from venus_evcharger.backend.shelly_io import ShellyIoController
-from venus_evcharger.auto.policy import AutoPolicy
+from venus_evcharger.backend.models import (
+    BackendRuntimeSummary,
+    ChargerState,
+    SwitchState,
+    normalize_phase_selection_or_none,
+)
+from venus_evcharger.auto.policy import AutoLearnChargePowerPolicy, AutoPhasePolicy, AutoPolicy
 from venus_evcharger.runtime.setup_support import initialize_victron_balance_runtime_state
+from venus_evcharger.readback_store import InMemoryReadbackStore
 from venus_evcharger.service.control_state_config import _VICTRON_BIAS_FIELDS
 from venus_evcharger.update.controller import UpdateCycleController as _RuntimeUpdateCycleController
-from venus_evcharger.update.relay import _UpdateCycleRelay
+from venus_evcharger.update.input_cache import InputCacheResolver
+from venus_evcharger.update.learning import LearningController
+from venus_evcharger.update.offline_publish import OfflinePublisher
+from venus_evcharger.update.pm_snapshot import PmSnapshotResolver
+from venus_evcharger.update.readback_resolver import ReadbackResolver
+from venus_evcharger.update.relay import (
+    PHASE_SWITCH_STABILIZING_STATE,
+    PHASE_SWITCH_WAITING_STATE,
+    RelayComponents,
+    build_relay_foundation,
+    complete_relay_components,
+)
+from venus_evcharger.update.relay_charger_current import ChargerTargetController
+from venus_evcharger.update.relay_charger_current_targets import ChargerCurrentTargetPolicy
+from venus_evcharger.update.relay_charger_health import ChargerHealthMonitor
+from venus_evcharger.update.relay_charger_transport import ChargerTransportTracker
+from venus_evcharger.update.relay_phase_decision import AutoPhaseTargetSelector
+from venus_evcharger.update.relay_phase_publish import RelayTelemetry
+from venus_evcharger.update.relay_phase_switch_mismatch import PhaseSwitchMismatchMonitor
+from venus_evcharger.update.relay_phase_switch_policy import AutoPhaseSwitchController
+from venus_evcharger.update.relay_phase_switch_runtime import PhaseSwitchCoordinator
+from venus_evcharger.update.relay_phase_switch_runtime_recovery import PhaseSwitchRecovery
+from venus_evcharger.update.relay_status_publish import RelayStatusPublisher
+from venus_evcharger.update.runtime_cycle import RuntimeCycleCoordinator
+from venus_evcharger.update.runtime_cycle_warnings import (
+    blocking_charger_health_warning_spec,
+    switch_feedback_warning_spec,
+)
+from venus_evcharger.update.software_update_controller import SoftwareUpdateController
+from venus_evcharger.update.state import UpdateStateController
+from venus_evcharger.ports.readback import TimedChargerState, TimedSwitchState
 
 
 def _phase_values(total_power, voltage, _phase, _voltage_mode):
@@ -32,12 +72,166 @@ def utc_timestamp(year: int, month: int, day: int, hour: int, minute: int = 0) -
     return datetime(year, month, day, hour, minute, tzinfo=timezone.utc).timestamp()
 
 
+def _learning_policy(
+    *,
+    enabled: bool = True,
+    reference_power_watts: float = 1900.0,
+    min_watts: float = 500.0,
+    alpha: float = 0.2,
+    start_delay_seconds: float = 30.0,
+    window_seconds: float = 180.0,
+    max_age_seconds: float = 21600.0,
+) -> AutoPolicy:
+    return AutoPolicy(
+        learn_charge_power=AutoLearnChargePowerPolicy(
+            enabled=enabled,
+            reference_power_watts=reference_power_watts,
+            min_watts=min_watts,
+            alpha=alpha,
+            start_delay_seconds=start_delay_seconds,
+            window_seconds=window_seconds,
+            max_age_seconds=max_age_seconds,
+        )
+    )
+
+
+def _phase_policy(
+    *,
+    enabled: bool = True,
+    upshift_delay_seconds: float = 120.0,
+    downshift_delay_seconds: float = 30.0,
+    upshift_headroom_watts: float = 250.0,
+    downshift_margin_watts: float = 150.0,
+    mismatch_retry_seconds: float = 300.0,
+    mismatch_lockout_count: int = 3,
+    mismatch_lockout_seconds: float = 1800.0,
+    prefer_lowest_phase_when_idle: bool = True,
+) -> AutoPolicy:
+    return AutoPolicy(
+        phase=AutoPhasePolicy(
+            enabled=enabled,
+            upshift_delay_seconds=upshift_delay_seconds,
+            downshift_delay_seconds=downshift_delay_seconds,
+            upshift_headroom_watts=upshift_headroom_watts,
+            downshift_margin_watts=downshift_margin_watts,
+            mismatch_retry_seconds=mismatch_retry_seconds,
+            mismatch_lockout_count=mismatch_lockout_count,
+            mismatch_lockout_seconds=mismatch_lockout_seconds,
+            prefer_lowest_phase_when_idle=prefer_lowest_phase_when_idle,
+        )
+    )
+
+
 class UpdateCycleController(_RuntimeUpdateCycleController):
     """Production controller with the runtime initialization contract applied to test doubles."""
 
     def __init__(self, service: Any, phase_values_func: Any, health_code_func: Any) -> None:
+        if not hasattr(service, "auto_policy"):
+            service.auto_policy = AutoPolicy()
+        install_update_cycle_roles(service)
         initialize_victron_test_service(service)
+        sync_readback_test_service(service)
         super().__init__(service, phase_values_func, health_code_func)
+
+
+def sync_readback_test_service(service: Any) -> None:
+    """Install explicit immutable readbacks for one update-controller scenario."""
+    if not hasattr(service, "time_now"):
+        service.time_now = lambda: 0.0
+    if not hasattr(service, "_readback_store"):
+        service._readback_store = InMemoryReadbackStore()
+    if not hasattr(service, "_worker_poll_interval_seconds"):
+        service._worker_poll_interval_seconds = 1.0
+    if not hasattr(service, "auto_shelly_soft_fail_seconds"):
+        service.auto_shelly_soft_fail_seconds = 10.0
+    service._readback_resolver = ReadbackResolver(service._readback_store, service, service.time_now)
+    service._readback_store.replace_charger(_test_charger_snapshot(service))
+    service._readback_store.replace_switch(_test_switch_snapshot(service))
+
+
+def relay_components_for_test(service: Any) -> RelayComponents:
+    """Build the real relay component graph around one canonical test fixture."""
+    install_update_cycle_roles(service)
+    if not hasattr(service, "auto_policy"):
+        service.auto_policy = AutoPolicy()
+    sync_readback_test_service(service)
+    foundation = build_relay_foundation(_phase_values)
+    return complete_relay_components(foundation, MagicMock())
+
+
+def sync_backend_runtime_test_service(service: Any) -> None:
+    """Attach the normalized backend-selection contract used by the factory."""
+    def configured_path(name: str) -> Path | None:
+        value = str(getattr(service, name, "") or "").strip()
+        return Path(value) if value else None
+
+    def backend_type(name: str) -> str | None:
+        value = str(getattr(service, name, "") or "").strip()
+        return None if value in {"", "none"} else value
+
+    service._backend_runtime_summary = BackendRuntimeSummary(
+        backend_mode=normalize_backend_mode(getattr(service, "backend_mode", "split")),
+        meter_type=backend_type("meter_backend_type"),
+        meter_config_path=configured_path("meter_backend_config_path"),
+        switch_type=backend_type("switch_backend_type"),
+        switch_config_path=configured_path("switch_backend_config_path"),
+        charger_type=backend_type("charger_backend_type"),
+        charger_config_path=configured_path("charger_backend_config_path"),
+        topology_configured=True,
+        primary_rpc_configured=False,
+    )
+
+
+def _test_charger_snapshot(service: Any) -> TimedChargerState | None:
+    captured_at = getattr(service, "_last_charger_state_at", None)
+    if getattr(service, "_charger_backend", None) is None or not isinstance(captured_at, (int, float)):
+        return None
+    phase = normalize_phase_selection_or_none(getattr(service, "_last_charger_state_phase_selection", None))
+    state = ChargerState(
+        enabled=_optional_test_bool(getattr(service, "_last_charger_state_enabled", None)),
+        current_amps=_optional_test_float(getattr(service, "_last_charger_state_current_amps", None)),
+        phase_selection=phase,
+        actual_current_amps=_optional_test_float(
+            getattr(service, "_last_charger_state_actual_current_amps", None)
+        ),
+        power_w=_optional_test_float(getattr(service, "_last_charger_state_power_w", None)),
+        energy_kwh=_optional_test_float(getattr(service, "_last_charger_state_energy_kwh", None)),
+        status_text=_optional_test_text(getattr(service, "_last_charger_state_status", None)),
+        fault_text=_optional_test_text(getattr(service, "_last_charger_state_fault", None)),
+    )
+    return TimedChargerState(state=state, captured_at=float(captured_at))
+
+
+def _test_switch_snapshot(service: Any) -> TimedSwitchState | None:
+    captured_at = getattr(service, "_last_switch_feedback_at", None)
+    if not isinstance(captured_at, (int, float)):
+        return None
+    feedback = _optional_test_bool(getattr(service, "_last_switch_feedback_closed", None))
+    interlock = _optional_test_bool(getattr(service, "_last_switch_interlock_ok", None))
+    if feedback is None and interlock is None:
+        return None
+    state = SwitchState(
+        enabled=bool(feedback),
+        phase_selection=normalize_phase_selection_or_none(
+            getattr(service, "active_phase_selection", None)
+        )
+        or "P1",
+        feedback_closed=feedback,
+        interlock_ok=interlock,
+    )
+    return TimedSwitchState(state=state, captured_at=float(captured_at))
+
+
+def _optional_test_bool(value: object) -> bool | None:
+    return None if value is None else bool(value)
+
+
+def _optional_test_float(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _optional_test_text(value: object) -> str | None:
+    return None if value is None else str(value)
 
 
 def initialize_victron_test_service(service: Any) -> None:
@@ -89,7 +283,7 @@ class _FakeSmartEvseTransport:
 
 
 class AutoPhaseServiceStub:
-    auto_policy: AutoPolicy | None
+    auto_policy: AutoPolicy
     supported_phase_selections: tuple[str, ...]
     requested_phase_selection: str
     active_phase_selection: str
@@ -113,6 +307,7 @@ class AutoPhaseServiceStub:
     _phase_switch_last_mismatch_at: float | None
     _auto_phase_target_candidate: str | None
     _auto_phase_target_since: float | None
+    time_now: Callable[[], float]
 
     def __init__(self, **overrides: object) -> None:
         auto_policy = AutoPolicy()
@@ -150,15 +345,17 @@ class AutoPhaseServiceStub:
         self._phase_switch_last_mismatch_at = None
         self._auto_phase_target_candidate = None
         self._auto_phase_target_since = None
+        self.time_now = lambda: 100.0
         for name, value in overrides.items():
             setattr(self, name, value)
 
 
 def _auto_phase_service(**overrides: object) -> AutoPhaseServiceStub:
-    return AutoPhaseServiceStub(**overrides)
+    return install_update_cycle_roles(AutoPhaseServiceStub(**overrides))
 
 
 class LearningServiceStub:
+    auto_policy: AutoPolicy
     charging_started_at: float | None
     learned_charge_power_watts: float | None
     learned_charge_power_updated_at: float | None
@@ -173,17 +370,13 @@ class LearningServiceStub:
     learned_charge_power_stability_score: float
     learned_charge_power_reason: str
     learned_charge_power_detail: str
-    auto_learn_charge_power_enabled: bool
-    auto_learn_charge_power_start_delay_seconds: float
-    auto_learn_charge_power_window_seconds: float
-    auto_learn_charge_power_max_age_seconds: float
-    auto_learn_charge_power_min_watts: float
-    auto_learn_charge_power_alpha: float
     phase: str
     max_current: float
     _last_voltage: float
+    time_now: Callable[[], float]
 
     def __init__(self, **overrides: object) -> None:
+        self.auto_policy = AutoPolicy()
         self.charging_started_at = 50.0
         self.learned_charge_power_watts = 1900.0
         self.learned_charge_power_updated_at = 90.0
@@ -198,25 +391,20 @@ class LearningServiceStub:
         self.learned_charge_power_stability_score = 1.0
         self.learned_charge_power_reason = "stable"
         self.learned_charge_power_detail = ""
-        self.auto_learn_charge_power_enabled = True
-        self.auto_learn_charge_power_start_delay_seconds = 30.0
-        self.auto_learn_charge_power_window_seconds = 180.0
-        self.auto_learn_charge_power_max_age_seconds = 21600.0
-        self.auto_learn_charge_power_min_watts = 500.0
-        self.auto_learn_charge_power_alpha = 0.2
         self.phase = "L1"
         self.max_current = 16.0
         self._last_voltage = 230.0
+        self.time_now = lambda: 100.0
         for name, value in overrides.items():
             setattr(self, name, value)
 
 
 def _learning_service(**overrides: object) -> LearningServiceStub:
-    return LearningServiceStub(**overrides)
+    return install_update_cycle_roles(LearningServiceStub(**overrides))
 
 
 class PhaseSwitchMismatchServiceStub:
-    auto_policy: object | None
+    auto_policy: AutoPolicy
     active_phase_selection: str
     requested_phase_selection: str
     _phase_switch_mismatch_active: bool
@@ -227,9 +415,10 @@ class PhaseSwitchMismatchServiceStub:
     _phase_switch_lockout_reason: str
     _phase_switch_lockout_at: float | None
     _phase_switch_lockout_until: float | None
+    time_now: Callable[[], float]
 
     def __init__(self, **overrides: object) -> None:
-        self.auto_policy = None
+        self.auto_policy = AutoPolicy()
         self.active_phase_selection = "P1"
         self.requested_phase_selection = "P1"
         self._phase_switch_mismatch_active = False
@@ -240,12 +429,13 @@ class PhaseSwitchMismatchServiceStub:
         self._phase_switch_lockout_reason = ""
         self._phase_switch_lockout_at = None
         self._phase_switch_lockout_until = None
+        self.time_now = lambda: 100.0
         for name, value in overrides.items():
             setattr(self, name, value)
 
 
 def _phase_switch_mismatch_service(**overrides: object) -> PhaseSwitchMismatchServiceStub:
-    return PhaseSwitchMismatchServiceStub(**overrides)
+    return install_update_cycle_roles(PhaseSwitchMismatchServiceStub(**overrides))
 
 
 

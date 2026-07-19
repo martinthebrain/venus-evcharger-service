@@ -171,7 +171,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
             with (
                 redirect_stdout(stdout),
                 patch(
-                    "venus_evcharger.backend.simpleevse_charger.create_modbus_transport",
+                    "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                     return_value=_FakeSimpleEvseTransport(),
                 ),
             ):
@@ -199,7 +199,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
             with (
                 redirect_stdout(stdout),
                 patch(
-                    "venus_evcharger.backend.smartevse_charger.create_modbus_transport",
+                    "venus_evcharger.backend.native_modbus_backend.create_modbus_transport",
                     return_value=_FakeSmartEvseTransport(),
                 ),
             ):

@@ -1,151 +1,123 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Native charger-current and enable-target helpers for the update cycle."""
+"""Apply charger current and enable targets through explicit collaborators."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Protocol
 
 from venus_evcharger.backend.modbus_transport import modbus_transport_issue_reason
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.update.relay_charger_current_targets import _RelayChargerCurrentTargets
-
-if TYPE_CHECKING:
-    from venus_evcharger.update.relay_charger_readback import ChargerCurrentBackend
+from venus_evcharger.update.relay_charger_current_targets import ChargerCurrentTargetPolicy
+from venus_evcharger.update.relay_charger_readback import ChargerBackendAccess, ChargerCurrentBackend
+from venus_evcharger.update.relay_charger_transport import ChargerTransportTracker
 
 
 CHARGER_CURRENT_APPLY_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
-class _RelayChargerCurrent(_RelayChargerCurrentTargets):
+class ChargerRuntimePort(Protocol):
+    def mark_failure(self, source_key: str) -> None: ...
+    def mark_recovery(self, source_key: str, message: str, *args: object) -> None: ...
+    def queue_relay_command(self, relay_on: bool, current_time: float) -> object: ...
+    def warning_throttled(
+        self,
+        warning_key: str,
+        interval_seconds: float,
+        warning_message: str,
+        *args: object,
+        **kwargs: object,
+    ) -> None: ...
+
+
+class ChargerControlService(Protocol):
+    @property
+    def runtime(self) -> ChargerRuntimePort: ...
+
+    auto_shelly_soft_fail_seconds: float
+    _charger_target_current_amps: float | None
+    _charger_target_current_applied_at: float | None
+
+
+class ChargerTargetController:
     """Derive and apply charger current targets from learned and scheduled policy."""
 
-    if TYPE_CHECKING:  # pragma: no cover
+    def __init__(
+        self,
+        backends: ChargerBackendAccess,
+        targets: ChargerCurrentTargetPolicy,
+        transport: ChargerTransportTracker,
+    ) -> None:
+        self._backends = backends
+        self._targets = targets
+        self._transport = transport
 
-        @staticmethod
-        def _charger_current_backend(svc: Any) -> ChargerCurrentBackend | None: ...
-
-        @staticmethod
-        def _charger_enable_backend(svc: Any) -> Any | None: ...
-
-        @classmethod
-        def _charger_retry_active(cls, svc: Any, now: float | None = None) -> bool: ...
-
-        @classmethod
-        def _clear_charger_transport_issue(cls, svc: Any) -> None: ...
-
-        @classmethod
-        def _clear_charger_retry(cls, svc: Any) -> None: ...
-
-        @classmethod
-        def _remember_charger_transport_issue(
-            cls,
-            svc: Any,
-            reason: str,
-            source: str,
-            error: BaseException,
-            now: float | None = None,
-        ) -> None: ...
-
-        @classmethod
-        def _remember_charger_retry(
-            cls,
-            svc: Any,
-            reason: str,
-            source: str,
-            now: float | None = None,
-        ) -> None: ...
-
-    @classmethod
-    def _contactor_heuristic_delay_seconds(cls, svc: Any) -> float:
-        return max(0.0, float(getattr(svc, "auto_shelly_soft_fail_seconds", 0.0)))
-
-    @classmethod
-    def _contactor_lockout_threshold(cls, svc: Any) -> int:
-        return max(0, int(getattr(svc, "auto_contactor_fault_latch_count", 3)))
-
-    @classmethod
-    def _contactor_lockout_persistence_seconds(cls, svc: Any) -> float:
-        return max(0.0, float(getattr(svc, "auto_contactor_fault_latch_seconds", 60.0)))
-
-    @classmethod
-    def _contactor_power_threshold_w(cls, svc: Any) -> float:
-        configured = finite_float_or_none(getattr(svc, "charging_threshold_watts", None))
-        if configured is None:
-            return 100.0
-        return max(100.0, float(configured))
-
-    @classmethod
-    def _contactor_current_threshold_a(cls, svc: Any) -> float:
-        configured = finite_float_or_none(getattr(svc, "min_current", None))
-        if configured is None:
-            return 1.0
-        return max(1.0, float(configured) / 4.0)
-
-    @classmethod
-    def apply_charger_current_target(
-        cls,
-        svc: Any,
+    def apply_current_target(
+        self,
+        svc: ChargerControlService,
         desired_relay: bool,
         now: float,
         auto_mode_active: bool,
     ) -> float | None:
-        backend = cls._charger_current_backend(svc)
+        backend = self._backends.current_backend(svc)
         if backend is None:
             return None
-        if cls._charger_current_reset_needed(desired_relay, auto_mode_active):
-            cls._reset_charger_current_target(svc)
+        if self.current_reset_needed(desired_relay, auto_mode_active):
+            self.reset_current_target(svc)
             return None
 
-        target_amps = cls._charger_current_target_amps(svc, desired_relay, now, auto_mode_active)
+        target_amps = self._targets.current_target(svc, desired_relay, now, auto_mode_active)
         if target_amps is None:
             return None
 
         last_target = finite_float_or_none(getattr(svc, "_charger_target_current_amps", None))
-        if cls._charger_target_unchanged(last_target, target_amps):
-            return cls._known_charger_current_target(last_target)
-        return cls._apply_new_charger_current_target(svc, backend, target_amps, now, last_target)
+        if self.target_unchanged(last_target, target_amps):
+            return self.known_current_target(last_target)
+        return self._apply_new_current_target(svc, backend, target_amps, now, last_target)
 
-    @classmethod
-    def _apply_new_charger_current_target(
-        cls,
-        svc: Any,
+    def _apply_new_current_target(
+        self,
+        svc: ChargerControlService,
         backend: ChargerCurrentBackend,
         target_amps: float,
         now: float,
         last_target: float | None,
     ) -> float | None:
-        if cls._charger_retry_active(svc, now):
+        if self._transport.retry_active(svc, now):
             return last_target
         try:
             backend.set_current(float(target_amps))
         except CHARGER_CURRENT_APPLY_ERRORS as error:
-            cls._handle_charger_current_target_failure(svc, error, now)
+            self._handle_current_target_failure(svc, error, now)
             return last_target
-        cls._clear_charger_transport_issue(svc)
-        cls._clear_charger_retry(svc)
-        return cls._remember_charger_current_target(svc, target_amps, now)
+        self._transport.clear_issue(svc)
+        self._transport.clear_retry(svc)
+        return self.remember_current_target(svc, target_amps, now)
 
     @staticmethod
-    def _charger_current_reset_needed(desired_relay: bool, auto_mode_active: bool) -> bool:
+    def current_reset_needed(desired_relay: bool, auto_mode_active: bool) -> bool:
         return not auto_mode_active or not bool(desired_relay)
 
     @staticmethod
-    def _reset_charger_current_target(svc: Any) -> None:
+    def reset_current_target(svc: ChargerControlService) -> None:
         svc._charger_target_current_amps = None
         svc._charger_target_current_applied_at = None
 
     @staticmethod
-    def _charger_target_unchanged(last_target: float | None, target_amps: float) -> bool:
+    def target_unchanged(last_target: float | None, target_amps: float) -> bool:
         return last_target is not None and abs(last_target - target_amps) < 0.01
 
-    @classmethod
-    def _handle_charger_current_target_failure(cls, svc: Any, error: Exception, now: float | None = None) -> None:
+    def _handle_current_target_failure(
+        self,
+        svc: ChargerControlService,
+        error: Exception,
+        now: float | None = None,
+    ) -> None:
         transport_reason = modbus_transport_issue_reason(error)
         if transport_reason is not None:
-            cls._remember_charger_transport_issue(svc, transport_reason, "current", error, now)
-            cls._remember_charger_retry(svc, transport_reason, "current", now)
-        svc._mark_failure("charger")
-        svc._warning_throttled(
+            self._transport.remember_issue(svc, transport_reason, "current", error, now)
+            self._transport.remember_retry(svc, transport_reason, "current", now)
+        svc.runtime.mark_failure("charger")
+        svc.runtime.warning_throttled(
             "charger-current-failed",
             svc.auto_shelly_soft_fail_seconds,
             "Charger current request failed: %s",
@@ -154,28 +126,30 @@ class _RelayChargerCurrent(_RelayChargerCurrentTargets):
         )
 
     @staticmethod
-    def _remember_charger_current_target(svc: Any, target_amps: float, now: float) -> float:
+    def remember_current_target(svc: ChargerControlService, target_amps: float, now: float) -> float:
         svc._charger_target_current_amps = float(target_amps)
         svc._charger_target_current_applied_at = float(now)
-        svc._mark_recovery("charger", "Charger current writes recovered")
+        svc.runtime.mark_recovery("charger", "Charger current writes recovered")
         return float(target_amps)
 
-    @classmethod
-    def _apply_enabled_target(cls, svc: Any, enabled: bool, now: float) -> bool:
-        backend = cls._charger_enable_backend(svc)
+    def apply_enabled_target(self, svc: ChargerControlService, enabled: bool, now: float) -> bool:
+        backend = self._backends.enable_backend(svc)
         if backend is not None:
-            if cls._charger_retry_active(svc, now):
+            if self._transport.retry_active(svc, now):
                 return False
             backend.set_enabled(bool(enabled))
-            cls._clear_charger_transport_issue(svc)
-            cls._clear_charger_retry(svc)
-            svc._mark_recovery("charger", "Charger enable writes recovered")
+            self._transport.clear_issue(svc)
+            self._transport.clear_retry(svc)
+            svc.runtime.mark_recovery("charger", "Charger enable writes recovered")
             return True
-        svc._queue_relay_command(bool(enabled), now)
+        svc.runtime.queue_relay_command(bool(enabled), now)
         return True
 
     @staticmethod
-    def _known_charger_current_target(last_target: float | None) -> float:
+    def known_current_target(last_target: float | None) -> float:
         if last_target is None:
             raise TypeError("last charger current target must be available when unchanged")
         return float(last_target)
+
+
+__all__ = ["ChargerControlService", "ChargerTargetController"]

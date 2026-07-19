@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import argparse
 
-from venus_evcharger.bootstrap.wizard_inventory_support import PHASE_ORDER
 from venus_evcharger.bootstrap.wizard_inventory_types import InventoryCapabilityChoice
 from venus_evcharger.inventory import (
     BindingRole,

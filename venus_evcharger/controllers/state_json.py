@@ -7,19 +7,14 @@ import json
 import logging
 from pathlib import Path
 
+from venus_evcharger.controllers.state_contracts import string_object_mapping
+
 _UTF8 = "utf-8"
 
 
 def json_object_payload(value: object) -> dict[str, object] | None:
     """Return a JSON object payload with string keys, or None for invalid state."""
-    if not isinstance(value, dict):
-        return None
-    payload: dict[str, object] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            return None
-        payload[key] = item
-    return payload
+    return string_object_mapping(value)
 
 
 def read_json_object_file(path: str) -> dict[str, object] | None:

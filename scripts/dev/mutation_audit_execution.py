@@ -88,8 +88,16 @@ def artifacts_for_target(out_dir: Path, target: audit_support.MutationTarget) ->
 def clear_mutmut_worktree(repo: Path, *, reuse_cache: bool) -> None:
     if reuse_cache:
         return
-    shutil.rmtree(repo / MUTMUT_CACHE, ignore_errors=True)
-    shutil.rmtree(repo / MUTMUT_WORKTREE, ignore_errors=True)
+    _remove_generated_path(repo / MUTMUT_CACHE)
+    _remove_generated_path(repo / MUTMUT_WORKTREE)
+
+
+def _remove_generated_path(path: Path) -> None:
+    """Remove a local artifact path without following an external symlink."""
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+        return
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def clear_target_bytecode(repo: Path, target_path: str) -> None:

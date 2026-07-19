@@ -9,7 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 from tests.runtime_contract_assertions import assert_typed_mapping, typed_values
-from venus_evcharger.runtime.support import DefaultFactory, RuntimeSupportController
+from venus_evcharger.runtime.contracts import DefaultFactory
+from venus_evcharger.runtime.state_store import RuntimeStateStore
+from venus_evcharger.runtime.support import RuntimeSupportController
 
 
 OBS_NONE = (
@@ -86,27 +88,21 @@ def _evaluate(defaults: dict[str, DefaultFactory]) -> dict[str, object]:
 
 class RuntimeSupportContractTests(unittest.TestCase):
     def test_constructor_and_source_state_factories_preserve_contracts(self) -> None:
-        service = object()
+        service = SimpleNamespace()
         age = MagicMock(return_value=2)
         health_code = MagicMock(return_value=3)
         controller = RuntimeSupportController(service, age, health_code)
         self.assertIs(controller.service, service)
-        self.assertIs(controller._age_seconds, age)
-        self.assertIs(controller._health_code, health_code)
+        self.assertIs(controller.health._age_seconds, age)
+        self.assertIs(controller.setup._health_code, health_code)
         self.assertEqual(
-            controller.new_error_state(),
+            RuntimeStateStore.new_error_state(),
             {"dbus": 0, "shelly": 0, "charger": 0, "pv": 0, "battery": 0, "grid": 0, "cache_hits": 0},
         )
         self.assertEqual(
-            controller.new_failure_state(),
+            RuntimeStateStore.new_failure_state(),
             {"dbus": False, "shelly": False, "charger": False, "pv": False, "battery": False, "grid": False},
         )
-
-        class OneSourceController(RuntimeSupportController):
-            SOURCE_ERROR_KEYS = ("only",)
-
-        self.assertEqual(OneSourceController.new_error_state(), {"only": 0, "cache_hits": 0})
-        self.assertEqual(OneSourceController.new_failure_state(), {"only": False})
 
     def test_worker_defaults_are_complete_typed_lazy_and_independent(self) -> None:
         service = SimpleNamespace(poll_interval_ms=1000, deviceinstance=61)
@@ -114,9 +110,9 @@ class RuntimeSupportContractTests(unittest.TestCase):
         snapshot = {"snapshot": True}
         session = object()
         with (
-            patch.object(controller, "empty_worker_snapshot", return_value=snapshot) as empty,
-            patch("venus_evcharger.runtime.support.requests.Session", return_value=session),
-            patch("venus_evcharger.runtime.support.uuid.uuid4") as uuid4,
+            patch.object(controller.state, "empty_snapshot", return_value=snapshot) as empty,
+            patch("venus_evcharger.runtime.state_store.requests.Session", return_value=session),
+            patch("venus_evcharger.runtime.state_store.uuid.uuid4") as uuid4,
         ):
             uuid4.return_value.hex = "runtime-id"
             defaults = controller.worker_state_defaults()
@@ -190,13 +186,13 @@ class RuntimeSupportContractTests(unittest.TestCase):
     def test_observability_defaults_are_complete_typed_and_delegate_normalizers(self) -> None:
         controller = RuntimeSupportController(SimpleNamespace(), MagicMock(), MagicMock())
         with (
-            patch("venus_evcharger.runtime.support.time.time", return_value=123.0),
+            patch("venus_evcharger.runtime.state_store.time.time", return_value=123.0),
             patch(
-                "venus_evcharger.runtime.support.normalize_phase_selection",
+                "venus_evcharger.runtime.state_store.normalize_phase_selection",
                 side_effect=lambda value: f"phase:{value}",
             ) as normalize,
             patch(
-                "venus_evcharger.runtime.support.normalize_phase_selection_tuple",
+                "venus_evcharger.runtime.state_store.normalize_phase_selection_tuple",
                 return_value=("supported",),
             ) as normalize_tuple,
         ):

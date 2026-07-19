@@ -16,7 +16,7 @@ from venus_evcharger.bootstrap.wizard_render import (
     redact_sensitive_rendered_setup,
     sensitive_defaults_from_config_text,
 )
-from venus_evcharger.bootstrap.wizard_render_secrets import probe_service_from_wallbox_config, secret_default
+from venus_evcharger.bootstrap.wizard_render_secrets import probe_service_from_wallbox_config
 from venus_evcharger.bootstrap.wizard_runtime_results import json_ready
 
 

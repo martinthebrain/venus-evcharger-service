@@ -2,6 +2,8 @@
 from types import SimpleNamespace
 import unittest
 
+from venus_evcharger.auto.policy import AutoPolicy
+from venus_evcharger.auto.policy_settings import auto_policy_control_values
 from venus_evcharger.bootstrap.path_groups import (
     connected_value,
     control_paths,
@@ -145,8 +147,10 @@ class BootstrapPathGroupsContracts(unittest.TestCase):
             },
         )
 
-    def test_control_paths_fill_missing_optional_values_with_documented_defaults(self) -> None:
+    def test_control_paths_fill_non_policy_optionals_and_publish_canonical_policy_defaults(self) -> None:
+        policy = AutoPolicy()
         service = SimpleNamespace(
+            auto_policy=policy,
             min_current=6.0,
             max_current=16.0,
             virtual_set_current=6.0,
@@ -162,44 +166,49 @@ class BootstrapPathGroupsContracts(unittest.TestCase):
         self.assertEqual(defaults["/SupportedPhaseSelections"], ("P1", None))
         self.assertEqual(defaults["/Auto/ScheduledEnabledDays"], ("Mon,Tue,Wed,Thu,Fri", None))
         self.assertEqual(defaults["/Auto/ScheduledLatestEndTime"], ("06:30", None))
-        self.assertEqual(defaults["/Auto/LearnChargePowerEnabled"], (1, None))
-        self.assertEqual(defaults["/Auto/PhaseSwitching"], (1, None))
-        self.assertEqual(defaults["/Auto/PhasePreferLowestWhenIdle"], (1, None))
+        for path, value in auto_policy_control_values(policy).items():
+            with self.subTest(path=path):
+                self.assertEqual(defaults[path], (value, None))
         for path in (
-            "/Auto/StartSurplusWatts",
-            "/Auto/StopSurplusWatts",
-            "/Auto/MinSoc",
-            "/Auto/ResumeSoc",
             "/Auto/StartDelaySeconds",
             "/Auto/StopDelaySeconds",
             "/Auto/ScheduledFallbackDelaySeconds",
             "/Auto/ScheduledNightCurrent",
             "/Auto/DbusBackoffBaseSeconds",
             "/Auto/DbusBackoffMaxSeconds",
-            "/Auto/GridRecoveryStartSeconds",
-            "/Auto/StopSurplusDelaySeconds",
-            "/Auto/StopSurplusVolatilityLowWatts",
-            "/Auto/StopSurplusVolatilityHighWatts",
-            "/Auto/ReferenceChargePowerWatts",
-            "/Auto/LearnChargePowerMinWatts",
-            "/Auto/LearnChargePowerAlpha",
-            "/Auto/LearnChargePowerStartDelaySeconds",
-            "/Auto/LearnChargePowerWindowSeconds",
-            "/Auto/LearnChargePowerMaxAgeSeconds",
-            "/Auto/PhaseUpshiftDelaySeconds",
-            "/Auto/PhaseDownshiftDelaySeconds",
-            "/Auto/PhaseUpshiftHeadroomWatts",
-            "/Auto/PhaseDownshiftMarginWatts",
-            "/Auto/PhaseMismatchRetrySeconds",
-            "/Auto/PhaseMismatchLockoutSeconds",
         ):
             with self.subTest(path=path):
                 self.assertEqual(defaults[path], (0.0, None))
-        self.assertEqual(defaults["/Auto/PhaseMismatchLockoutCount"], (0, None))
 
 
 def _configured_control_service() -> SimpleNamespace:
+    policy = AutoPolicy()
+    policy.normal_profile.start_surplus_watts = 1850.0
+    policy.normal_profile.stop_surplus_watts = 1350.0
+    policy.min_soc = 40.0
+    policy.resume_soc = 50.0
+    policy.grid_recovery_start_seconds = 14.0
+    policy.stop_surplus_delay_seconds = 45.0
+    policy.ewma.volatility_low_watts = 80.0
+    policy.ewma.volatility_high_watts = 240.0
+    policy.learn_charge_power.enabled = False
+    policy.learn_charge_power.reference_power_watts = 2100.0
+    policy.learn_charge_power.min_watts = 1400.0
+    policy.learn_charge_power.alpha = 0.25
+    policy.learn_charge_power.start_delay_seconds = 12.0
+    policy.learn_charge_power.window_seconds = 180.0
+    policy.learn_charge_power.max_age_seconds = 21600.0
+    policy.phase.enabled = False
+    policy.phase.prefer_lowest_phase_when_idle = False
+    policy.phase.upshift_delay_seconds = 120.0
+    policy.phase.downshift_delay_seconds = 30.0
+    policy.phase.upshift_headroom_watts = 250.0
+    policy.phase.downshift_margin_watts = 150.0
+    policy.phase.mismatch_retry_seconds = 300.0
+    policy.phase.mismatch_lockout_count = 3
+    policy.phase.mismatch_lockout_seconds = 1800.0
     return SimpleNamespace(
+        auto_policy=policy,
         min_current=6.0,
         max_current=16.0,
         virtual_set_current=13.0,
@@ -207,10 +216,6 @@ def _configured_control_service() -> SimpleNamespace:
         active_phase_selection="P3",
         supported_phase_selections=("P1", "P1_P2", "P3"),
         virtual_autostart=1,
-        auto_start_surplus_watts=1850.0,
-        auto_stop_surplus_watts=1350.0,
-        auto_min_soc=40.0,
-        auto_resume_soc=50.0,
         auto_start_delay_seconds=10.0,
         auto_stop_delay_seconds=30.0,
         auto_scheduled_enabled_days="Sat,Sun",
@@ -219,26 +224,6 @@ def _configured_control_service() -> SimpleNamespace:
         auto_scheduled_night_current_amps=13.0,
         auto_dbus_backoff_base_seconds=5.0,
         auto_dbus_backoff_max_seconds=60.0,
-        auto_grid_recovery_start_seconds=14.0,
-        auto_stop_surplus_delay_seconds=45.0,
-        auto_stop_surplus_volatility_low_watts=80.0,
-        auto_stop_surplus_volatility_high_watts=240.0,
-        auto_reference_charge_power_watts=2100.0,
-        auto_learn_charge_power_enabled=False,
-        auto_learn_charge_power_min_watts=1400.0,
-        auto_learn_charge_power_alpha=0.25,
-        auto_learn_charge_power_start_delay_seconds=12.0,
-        auto_learn_charge_power_window_seconds=180.0,
-        auto_learn_charge_power_max_age_seconds=21600.0,
-        auto_phase_switching_enabled=False,
-        auto_phase_prefer_lowest_when_idle=False,
-        auto_phase_upshift_delay_seconds=120.0,
-        auto_phase_downshift_delay_seconds=30.0,
-        auto_phase_upshift_headroom_watts=250.0,
-        auto_phase_downshift_margin_watts=150.0,
-        auto_phase_mismatch_retry_seconds=300.0,
-        auto_phase_mismatch_lockout_count=3,
-        auto_phase_mismatch_lockout_seconds=1800.0,
         virtual_mode=2,
         virtual_startstop=1,
         virtual_enable=1,
