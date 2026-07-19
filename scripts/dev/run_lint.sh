@@ -29,6 +29,7 @@ fi
 	--ignore B007,B904,RUF100 \
 	scripts/dev/check_architecture_contracts.py \
 	scripts/dev/check_dbus_isolation.py \
+	scripts/dev/check_python_syntax_venus.py \
 	scripts/dev/dbus_gateway_chaos.py \
 	scripts/dev/pi_gateway_release_gate.py \
 	scripts/dev/pi_gateway_release_gate_assertions.py \

@@ -48,7 +48,7 @@ def safety_steps(args: argparse.Namespace) -> list[SafetyStep]:
     return [
         SafetyStep(
             "syntax",
-            "python3 -m py_compile "
+            "python3 scripts/dev/check_python_syntax_venus.py "
             "scripts/dev/dbus_gateway_chaos.py "
             "tests/test_venus_evcharger_invariants.py "
             "tests/test_venus_evcharger_stress.py",

@@ -186,7 +186,8 @@ host-side Shelly simulator, configures the Pi service to use that simulated
 endpoint, runs offline gateway chaos scenarios on the Pi, restarts the Pi
 services, and then checks:
 
-- remote syntax and DBus isolation
+- remote syntax (using built-in `compile`, because Venus OS may omit
+  `py_compile` and `compileall`) and DBus isolation
 - bounded behavior during simulated DBus hangs, GUI publish bursts, queue
   overproduction, adapter restart during queued work, and tick pressure
 - exactly one service, adapter, and observer instance

@@ -16,6 +16,14 @@ from architecture_suppression_contracts import check_suppression_contracts
 REPO = Path(__file__).resolve().parents[2]
 
 FORBIDDEN_SUBSTRINGS = {
+    "scripts/dev/pi_gateway_release_gate_remote.py": (
+        "-m py_compile",
+        "-m compileall",
+    ),
+    "scripts/dev/pi_safety_invariants_gate.py": (
+        "-m py_compile",
+        "-m compileall",
+    ),
     "venus_evcharger/app/bootstrap_support.py": (
         "setup_dbus_mainloop",
     ),
