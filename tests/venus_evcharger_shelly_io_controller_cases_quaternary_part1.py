@@ -379,6 +379,9 @@ class _TestShellyIoControllerQuaternaryPart1:
         controller.runtime.clear_charger_retry()
         self.assertEqual(service._source_retry_after["charger"], 0.0)
         self.assertIsNone(service._charger_retry_until)
+        service._source_retry_after = None
+        controller.runtime.clear_charger_retry()
+        self.assertIsNone(service._source_retry_after)
         self.assertEqual(controller.readback._relay_state_from_split_switch(True), True)
         self.assertIsNone(controller.runtime_cache.cached_charger_state())
 
