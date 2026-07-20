@@ -33,6 +33,8 @@ payload = {
     "source_repo": os.environ.get("REPO_SLUG", ""),
     "source_channel": os.environ.get("CHANNEL", ""),
     "deployment_receipt_path": os.environ.get("DEPLOYMENT_RECEIPT_FILE", ""),
+    "work_storage": os.environ.get("WORK_STORAGE", ""),
+    "work_root": os.environ.get("WORK_ROOT", ""),
     "bootstrap_entrypoint_path": os.environ.get("BOOTSTRAP_ENTRYPOINT", ""),
     "bootstrap_refreshed": os.environ.get("BOOTSTRAP_REFRESHED", "0") == "1",
     "current_preserved": os.environ.get("CURRENT_PRESERVED", "0") == "1",
@@ -98,6 +100,8 @@ payload = {
     "source_repo": os.environ.get("REPO_SLUG", ""),
     "source_channel": os.environ.get("CHANNEL", ""),
     "deployment_receipt_path": os.environ.get("DEPLOYMENT_RECEIPT_FILE", ""),
+    "work_storage": os.environ.get("WORK_STORAGE", ""),
+    "work_root": os.environ.get("WORK_ROOT", ""),
     "bootstrap_entrypoint_path": os.environ.get("BOOTSTRAP_ENTRYPOINT", ""),
     "bootstrap_refreshed": os.environ.get("BOOTSTRAP_REFRESHED", "0") == "1",
     "already_current": os.environ.get("CURRENT_ALREADY_MATCHED", "0") == "1",
@@ -113,8 +117,72 @@ payload = {
     "config_validation_passed": os.environ.get("VALIDATION_PASSED", "0") == "1",
     "config_validation_mode": os.environ.get("CONFIG_VALIDATION_MODE", ""),
 }
+
 print(json.dumps(payload, sort_keys=True))
 PY
+}
+
+filesystem_available_kb() {
+	df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'
+}
+
+filesystem_mountpoint() {
+	df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $6 }'
+}
+
+ram_work_area_available() {
+	[ -d "$RAM_WORK_BASE" ] && [ -w "$RAM_WORK_BASE" ] || return 1
+	ram_mountpoint=$(filesystem_mountpoint "$RAM_WORK_BASE")
+	[ -n "$ram_mountpoint" ] || return 1
+	awk -v mountpoint="$ram_mountpoint" '$2 == mountpoint && $3 == "tmpfs" { found=1 } END { exit found ? 0 : 1 }' \
+		"$MOUNTS_PATH" || return 1
+	ram_mem_available=$(read_mem_available_kb)
+	ram_fs_available=$(filesystem_available_kb "$RAM_WORK_BASE")
+	[ -n "$ram_mem_available" ] && [ "$ram_mem_available" -ge "$RAM_MIN_MEM_AVAILABLE_KB" ] || return 1
+	[ -n "$ram_fs_available" ] && [ "$ram_fs_available" -ge "$RAM_MIN_FILESYSTEM_AVAILABLE_KB" ]
+}
+
+detected_sd_mountpoint() {
+	[ -r "$MOUNTS_PATH" ] || return 1
+	awk '
+		$1 ~ /^\/dev\/mmcblk[0-9]+p?[0-9]*$/ &&
+		($2 ~ /^\/media\// || $2 ~ /^\/run\/media\//) &&
+		("," $4 ",") ~ /,rw,/ { print $2; exit }
+	' "$MOUNTS_PATH"
+}
+
+select_sd_work_root() {
+	if [ -n "$SD_WORK_ROOT_OVERRIDE" ]; then
+		sd_work_root="$SD_WORK_ROOT_OVERRIDE"
+		sd_parent=$(dirname "$sd_work_root")
+	else
+		sd_mountpoint=$(detected_sd_mountpoint)
+		[ -n "$sd_mountpoint" ] || return 1
+		sd_parent="$sd_mountpoint"
+		sd_work_root="${sd_mountpoint}/.venus-evcharger-updater-work"
+	fi
+	[ -d "$sd_parent" ] && [ -w "$sd_parent" ] || return 1
+	sd_available=$(filesystem_available_kb "$sd_parent")
+	[ -n "$sd_available" ] && [ "$sd_available" -ge "$RESOURCE_MIN_DISK_AVAILABLE_KB" ] || return 1
+	printf '%s\n' "$sd_work_root"
+}
+
+select_update_work_root() {
+	if [ -n "$WORK_ROOT_OVERRIDE" ]; then
+		WORK_ROOT="$WORK_ROOT_OVERRIDE"
+		WORK_STORAGE="override"
+	elif ram_work_area_available; then
+		WORK_ROOT="${RAM_WORK_BASE}/venus-evcharger-updater-work"
+		WORK_STORAGE="ram"
+	elif selected_sd_root=$(select_sd_work_root); then
+		WORK_ROOT="$selected_sd_root"
+		WORK_STORAGE="sd"
+	else
+		WORK_ROOT="$FALLBACK_WORK_ROOT"
+		WORK_STORAGE="data"
+	fi
+	export WORK_ROOT WORK_STORAGE
+	log "Using ${WORK_STORAGE} updater workspace: ${WORK_ROOT}"
 }
 
 finalize_run() {
@@ -126,14 +194,19 @@ finalize_run() {
 	if [ "${DRY_RUN:-0}" != "1" ] && [ -n "${TARGET_DIR:-}" ]; then
 		write_update_status
 	fi
+	release_update_lock
 	return "$status"
 }
 
 trap finalize_run EXIT
 
 main() {
-	TMP_DIR=$(mktemp -d)
 	ensure_updater_prereqs
+	select_update_work_root
+	mkdir -p "$WORK_ROOT"
+	acquire_update_lock || exit $?
+	TMP_DIR=$(mktemp -d "${WORK_ROOT}/update.XXXXXX")
+	wait_for_update_resources "update-start" || exit $?
 
 	RUN_OLD_VERSION=$(detect_current_version || true)
 	RUN_OLD_BUNDLE_SHA256=$(detect_current_bundle_hash || true)
@@ -195,8 +268,9 @@ main() {
 			set_failure_reason_once "bundle-download-failed"
 			exit 1
 		fi
-		RUN_NEW_BUNDLE_SHA256=$(sha256sum "$archive_path" | awk '{print $1}')
-		tar -xzf "$archive_path" -C "$extract_dir"
+		guarded_sha256_file "$archive_path" "${TMP_DIR}/bundle.sha256" || exit $?
+		RUN_NEW_BUNDLE_SHA256="$GUARDED_SHA256"
+		run_resource_guarded_command "bundle-extraction" tar -xzf "$archive_path" -C "$extract_dir" || exit $?
 		SOURCE_DIR=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 		if [ -z "$SOURCE_DIR" ] || ! require_source_layout "$SOURCE_DIR"; then
 			log "Downloaded code bundle is incomplete"
@@ -218,6 +292,7 @@ main() {
 		print_preview_summary
 		exit 0
 	fi
+	wait_for_update_resources "layout-staging" || exit $?
 
 	if [ -n "${MANIFEST_VERSION:-}" ]; then
 		if ! promote_release_layout "$SOURCE_DIR"; then
@@ -235,6 +310,7 @@ main() {
 	fi
 
 	record_install_state
+	wait_for_update_resources "deployment-receipt" || exit $?
 	write_deployment_receipt
 	refresh_bootstrap_entrypoint
 	RUN_RESULT="success"

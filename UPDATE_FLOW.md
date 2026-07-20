@@ -149,6 +149,38 @@ while an update is prepared; it does not weaken bundle or manifest validation.
 The updater also applies these priorities to itself when invoked by an older
 bootstrap, so the one-time transition to this update flow is resource-aware.
 
+Updater archives, extraction trees, and staging layouts use an adaptive work
+location. They are removed after every completed or failed run. Selection is:
+
+1. RAM-backed `tmpfs` when both available system RAM and free filesystem space
+   have a conservative safety margin.
+2. A writable mounted SD card under `/media` or `/run/media`.
+3. `<target>/.bootstrap-state/work` on `/data` as the reliable fallback.
+
+This avoids internal-flash writes on capable systems, prefers removable media
+under memory pressure, and never holds several complete code trees in scarce
+RAM. A specific location can be selected with
+`VENUS_EVCHARGER_UPDATER_WORK_ROOT`. The selected storage class and path are
+recorded as `work_storage` and `work_root` in `update_status.json`.
+The RAM margins are configurable through
+`VENUS_EVCHARGER_UPDATER_RAM_MIN_MEM_AVAILABLE_KB` and
+`VENUS_EVCHARGER_UPDATER_RAM_MIN_FILESYSTEM_AVAILABLE_KB`; an explicitly
+managed SD work directory can be supplied through
+`VENUS_EVCHARGER_UPDATER_SD_WORK_ROOT`.
+The outer bootstrap's small updater-script downloads use `/tmp` independently;
+if that location is unavailable, they fall back to the bootstrap state on
+`/data`.
+
+Only one updater may run at a time. Before hashing, extracting, staging, or
+promoting a tree, it checks load averages, available RAM, and free work-volume
+space. Heavy hash and extraction subprocesses are monitored while they run. If
+pressure persists, the updater exits with a resource-pressure reason while the
+previous validated installation remains active. The conservative defaults can
+be adjusted for a known platform through the `VENUS_EVCHARGER_UPDATER_MAX_LOAD1`,
+`VENUS_EVCHARGER_UPDATER_MAX_LOAD5`, `VENUS_EVCHARGER_UPDATER_MAX_LOAD15`,
+`VENUS_EVCHARGER_UPDATER_MIN_MEM_AVAILABLE_KB`, and
+`VENUS_EVCHARGER_UPDATER_MIN_DISK_AVAILABLE_KB` environment variables.
+
 The service remains online while the bundle is downloaded, unpacked, merged,
 validated, and promoted. Direct-layout promotion updates the existing runit
 directories in place, so a supervisor cannot retain a deleted working

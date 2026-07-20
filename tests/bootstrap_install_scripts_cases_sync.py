@@ -6,6 +6,142 @@ from venus_evcharger.core.contracts import normalized_bootstrap_update_status_fi
 
 
 class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
+    def test_bootstrap_updater_selects_ram_sd_and_data_workspaces_in_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ram_base = root / "ram"
+            sd_mount = root / "sd"
+            ram_base.mkdir()
+            sd_mount.mkdir()
+            ram_mountpoint = subprocess.run(
+                ["df", "-Pk", str(ram_base)],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()[1].split()[-1]
+
+            cases = (
+                (
+                    "ram",
+                    "MemAvailable:      524288 kB\n",
+                    f"tmpfs {ram_mountpoint} tmpfs rw 0 0\n/dev/mmcblk0p1 {sd_mount} ext4 rw 0 0\n",
+                    ram_base / "venus-evcharger-updater-work",
+                ),
+                (
+                    "sd",
+                    "MemAvailable:      131072 kB\n",
+                    f"tmpfs {ram_mountpoint} tmpfs rw 0 0\n/dev/mmcblk0p1 {sd_mount} ext4 rw 0 0\n",
+                    sd_mount / ".venus-evcharger-updater-work",
+                ),
+                (
+                    "data",
+                    "MemAvailable:      131072 kB\n",
+                    f"overlay {ram_mountpoint} ext4 rw 0 0\n",
+                    None,
+                ),
+            )
+
+            for index, (expected_storage, meminfo, mounts, expected_root) in enumerate(cases):
+                with self.subTest(storage=expected_storage):
+                    target_dir = root / f"target-{index}"
+                    mounts_path = root / f"mounts-{index}"
+                    meminfo_path = root / f"meminfo-{index}"
+                    mounts_path.write_text(mounts, encoding="utf-8")
+                    meminfo_path.write_text(meminfo, encoding="utf-8")
+                    if expected_root is None:
+                        expected_root = target_dir / ".bootstrap-state/work"
+
+                    completed = subprocess.run(
+                        ["bash", str(UPDATER_SCRIPT), str(target_dir)],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        env={
+                            **os.environ,
+                            "VENUS_EVCHARGER_SOURCE_DIR": str(root / "missing-source"),
+                            "VENUS_EVCHARGER_UPDATER_RAM_WORK_BASE": str(ram_base),
+                            "VENUS_EVCHARGER_UPDATER_RAM_MIN_MEM_AVAILABLE_KB": "393216",
+                            "VENUS_EVCHARGER_UPDATER_RAM_MIN_FILESYSTEM_AVAILABLE_KB": "1",
+                            "VENUS_EVCHARGER_UPDATER_MEMINFO_PATH": str(meminfo_path),
+                            "VENUS_EVCHARGER_UPDATER_MOUNTS_PATH": str(mounts_path),
+                            "VENUS_EVCHARGER_UPDATER_RESOURCE_GUARD": "0",
+                            **(
+                                {"VENUS_EVCHARGER_UPDATER_SD_WORK_ROOT": str(expected_root)}
+                                if expected_storage == "sd"
+                                else {}
+                            ),
+                        },
+                    )
+
+                    self.assertEqual(completed.returncode, 1)
+                    self.assertIn(f"Using {expected_storage} updater workspace", completed.stderr)
+                    status = self._read_normalized_status(target_dir)
+                    self.assertEqual(status["work_storage"], expected_storage)
+                    self.assertEqual(status["work_root"], str(expected_root))
+                    self.assertEqual(status["failure_reason"], "incomplete-local-source")
+                    self.assertEqual(list(expected_root.iterdir()), [])
+
+    def test_bootstrap_updater_rejects_a_concurrent_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target_dir = root / "target"
+            lock_dir = target_dir / ".bootstrap-state/update.lock"
+            lock_dir.mkdir(parents=True)
+            (lock_dir / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                ["bash", str(UPDATER_SCRIPT), str(target_dir)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_SOURCE_DIR": str(root / "missing-source"),
+                    "VENUS_EVCHARGER_UPDATER_RESOURCE_GUARD": "0",
+                },
+            )
+
+            self.assertEqual(completed.returncode, 73)
+            self.assertIn("Another updater is already running", completed.stderr)
+            self.assertEqual((lock_dir / "pid").read_text(encoding="utf-8"), f"{os.getpid()}\n")
+            status = self._read_normalized_status(target_dir)
+            self.assertEqual(status["failure_reason"], "update-already-running")
+
+    def test_bootstrap_updater_aborts_before_source_work_under_resource_pressure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target_dir = root / "target"
+            work_root = root / "persistent-work"
+            loadavg_path = root / "loadavg"
+            meminfo_path = root / "meminfo"
+            loadavg_path.write_text("12.5 8.0 4.0 1/100 1\n", encoding="utf-8")
+            meminfo_path.write_text("MemAvailable:      262144 kB\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                ["bash", str(UPDATER_SCRIPT), str(target_dir)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_SOURCE_DIR": str(root / "missing-source"),
+                    "VENUS_EVCHARGER_UPDATER_WORK_ROOT": str(work_root),
+                    "VENUS_EVCHARGER_UPDATER_LOADAVG_PATH": str(loadavg_path),
+                    "VENUS_EVCHARGER_UPDATER_MEMINFO_PATH": str(meminfo_path),
+                    "VENUS_EVCHARGER_UPDATER_RESOURCE_WAIT_SECONDS": "0",
+                },
+            )
+
+            self.assertEqual(completed.returncode, 75)
+            self.assertIn("Resource pressure persisted during update-start", completed.stderr)
+            status = self._read_normalized_status(target_dir)
+            self.assertEqual(status["result"], "failed")
+            self.assertEqual(status["failure_reason"], "resource-pressure:update-start:load1=12.5>8.0")
+            self.assertEqual(status["work_storage"], "override")
+            self.assertEqual(status["work_root"], str(work_root))
+            self.assertFalse((target_dir / ".bootstrap-state/update.lock").exists())
+            self.assertEqual(list(work_root.iterdir()), [])
+
     def test_bootstrap_updater_syncs_local_source_and_preserves_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -129,7 +265,7 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
 
             self.assertTrue((target_dir / "venus_evcharger_service.py").is_file())
             self.assertEqual(outer_bootstrap.read_text(encoding="utf-8"), "#!/bin/bash\n")
-            self.assertEqual(nice_log.read_text(encoding="utf-8").splitlines(), ["-n 10 " + str(UPDATER_SCRIPT) + " " + str(target_dir)])
+            self.assertEqual(nice_log.read_text(encoding="utf-8").splitlines(), ["-n 15 " + str(UPDATER_SCRIPT) + " " + str(target_dir)])
             self.assertTrue((target_dir / "deploy/venus/install_venus_evcharger_service.sh").is_file())
             self.assertEqual(live_service_dir.stat().st_ino, service_inode)
             self.assertEqual((live_service_dir / "run").read_text(encoding="utf-8"), "#!/bin/sh\n")
