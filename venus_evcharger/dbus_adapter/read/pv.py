@@ -38,7 +38,7 @@ def ac_pv_members(
     return [
         (service, path)
         for service in services
-        if path and not pv_member_recently_failed(cached_values, service, path, now=now)
+        if path and not pv_member_in_backoff(cached_values, service, path, now=now)
     ]
 
 
@@ -49,7 +49,7 @@ def dc_pv_members(
     now: float,
 ) -> list[tuple[str, str]]:
     target = dc_pv_target(spec) if use_dc_pv(spec) else None
-    if target is None or pv_member_recently_failed(cached_values, *target, now=now):
+    if target is None or pv_member_in_backoff(cached_values, *target, now=now):
         return []
     return [target]
 
@@ -70,22 +70,21 @@ def use_dc_pv(spec: ReadSpec) -> bool:
     return str(spec["use_dc_pv"]).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def pv_member_recently_failed(
+def pv_member_in_backoff(
     cached_values: Mapping[str, Mapping[str, object]],
     service: str,
     path: str,
     *,
     now: float | None = None,
-    backoff_seconds: float = PV_MEMBER_ERROR_BACKOFF_SECONDS,
 ) -> bool:
     entry = cached_values.get(dbus_path_key(service, path), {})
-    if entry.get("status") != "error":
+    if entry.get("source_state") != "unavailable":
         return False
-    if "error_at" not in entry:
+    if "next_probe_at" not in entry:
         return False
-    error_at = _float_or_zero(entry["error_at"])
+    next_probe_at = _float_or_zero(entry["next_probe_at"])
     current_time = time.time() if now is None else now
-    return error_at > 0.0 and current_time - error_at < backoff_seconds
+    return next_probe_at > current_time
 
 
 def _float_or_zero(raw_value: object) -> float:

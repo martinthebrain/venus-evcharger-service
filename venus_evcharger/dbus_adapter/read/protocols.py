@@ -49,6 +49,16 @@ class ReadCacheProtocol(Protocol):  # pragma: no cover
         freshness_kind: CacheFreshnessKind | None = None,
     ) -> None: ...
 
+    def mark_unavailable(
+        self,
+        key: str,
+        *,
+        source: str,
+        error: BaseException | str,
+        retry_after_seconds: float,
+        now: float | None = None,
+    ) -> None: ...
+
 
 class ReadSchedulerProtocol(Protocol):  # pragma: no cover
     """Read-scheduler surface required by requested refreshes."""

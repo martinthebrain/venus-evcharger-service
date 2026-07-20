@@ -77,6 +77,7 @@ GUI_CRITICAL_PUBLISH_PATHS = {
 
 GatewayReadKey = Literal["grid_power_w", "pv_power_w", "battery_soc"]
 CacheFreshnessKind = Literal["external_read", "local_owned", "static", "diagnostic"]
+CacheSourceState = Literal["active", "unavailable", "error"]
 
 GRID_POWER_READ_KEY: GatewayReadKey = "grid_power_w"
 PV_POWER_READ_KEY: GatewayReadKey = "pv_power_w"

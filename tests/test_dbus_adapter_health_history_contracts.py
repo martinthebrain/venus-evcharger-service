@@ -26,6 +26,8 @@ class DbusAdapterHealthHistoryContractTests(unittest.TestCase):
             "pv_power_w_status": "stale",
             "battery_soc_age_s": 3.0,
             "battery_soc_status": "missing",
+            "optional_source_error_count": 1,
+            "optional_source_unavailable_count": 2,
             "ignored": "not logged",
         }
         self.assertEqual(
@@ -37,6 +39,8 @@ class DbusAdapterHealthHistoryContractTests(unittest.TestCase):
                 "pv_power_w_status": "stale",
                 "battery_soc_age_s": 3.0,
                 "battery_soc_status": "missing",
+                "optional_source_error_count": 1,
+                "optional_source_unavailable_count": 2,
             },
         )
         self.assertEqual(
@@ -48,6 +52,8 @@ class DbusAdapterHealthHistoryContractTests(unittest.TestCase):
                 "pv_power_w_status": None,
                 "battery_soc_age_s": None,
                 "battery_soc_status": None,
+                "optional_source_error_count": None,
+                "optional_source_unavailable_count": None,
             },
         )
 
@@ -65,6 +71,8 @@ class DbusAdapterHealthHistoryContractTests(unittest.TestCase):
                 "pv_power_w_status": "stale",
                 "battery_soc_age_s": 3.0,
                 "battery_soc_status": "missing",
+                "optional_source_error_count": 1,
+                "optional_source_unavailable_count": 2,
             },
             "ignored": "not logged",
         }

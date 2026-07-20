@@ -95,8 +95,10 @@ Consumers read `dbus-cache.json`. Every value is more than a scalar:
 - `freshness_kind`: `external_read`, `local_owned`, `static`, or `diagnostic`
 - `stale_after_s`: per-value read TTL where applicable
 - `status`: `fresh`, `stale`, `error`, or `unavailable`
+- `source_state`: `active`, `unavailable`, or `error`
 - `last_error`: last read error, if any
 - `confidence`: advisory confidence
+- `next_probe_at`: next scheduled probe after a non-fatal source outage
 
 If a value is missing or too old, consumers request a refresh from the gateway.
 They still do not read DBus directly.
@@ -113,8 +115,12 @@ service registration is absent.
 `diagnostic_status_counts`. The compatibility field `status_counts` describes
 only the three critical semantic reads. `critical_stale_count` therefore cannot
 be inflated by unchanged GUI/configuration paths, while
-`optional_source_error_count` keeps failed AC/DC PV candidates visible without
-marking a successfully aggregated `pv_power_w` value stale.
+`optional_source_unavailable_count` reports temporarily unavailable AC/DC PV
+candidates separately from `optional_source_error_count`. A sleeping inverter
+therefore remains visible with its last `NoReply`, `error_at`, and
+`next_probe_at`, but it is not reported as an active DBus fault and does not
+make a successfully aggregated `pv_power_w` value stale. The first successful
+probe returns the source to `active` immediately.
 
 Standard Auto inputs do not use raw DBus service/path keys. PV power, grid
 power, and battery SOC are gateway-owned semantic read keys:

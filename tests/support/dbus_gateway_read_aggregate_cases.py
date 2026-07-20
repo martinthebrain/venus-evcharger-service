@@ -48,43 +48,41 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
         self.assertIsNone(read_pv_module.dc_pv_target({"dc_service": "svc"}))
 
         failed_values = {
-            "path:svc/Path": {"status": "error", "error_at": "100.0"},
-            "path:svc/Other": {"status": "fresh", "error_at": "100.0"},
-            "path:svc/MissingErrorAt": {"status": "error"},
-            "path:svc/OneSecond": {"status": "error", "error_at": 1.0},
+            "path:svc/Path": {"source_state": "unavailable", "next_probe_at": "400.0"},
+            "path:svc/Other": {"source_state": "active", "next_probe_at": "400.0"},
+            "path:svc/MissingErrorAt": {"source_state": "unavailable"},
+            "path:svc/OneSecond": {"source_state": "unavailable", "next_probe_at": 301.0},
         }
         self.assertTrue(
-            read_pv_module.pv_member_recently_failed(
+            read_pv_module.pv_member_in_backoff(
                 failed_values,
                 "svc",
                 "/Path",
                 now=399.9,
-                backoff_seconds=300.0,
             )
         )
         self.assertFalse(
-            read_pv_module.pv_member_recently_failed(
+            read_pv_module.pv_member_in_backoff(
                 failed_values,
                 "svc",
                 "/Path",
                 now=400.0,
-                backoff_seconds=300.0,
             )
         )
-        self.assertFalse(read_pv_module.pv_member_recently_failed(failed_values, "svc", "/Other", now=101.0))
-        self.assertFalse(read_pv_module.pv_member_recently_failed(failed_values, "svc", "/MissingErrorAt", now=1.0))
-        self.assertTrue(read_pv_module.pv_member_recently_failed(failed_values, "svc", "/OneSecond", now=2.0))
+        self.assertFalse(read_pv_module.pv_member_in_backoff(failed_values, "svc", "/Other", now=101.0))
+        self.assertFalse(read_pv_module.pv_member_in_backoff(failed_values, "svc", "/MissingErrorAt", now=1.0))
+        self.assertTrue(read_pv_module.pv_member_in_backoff(failed_values, "svc", "/OneSecond", now=2.0))
         self.assertFalse(
-            read_pv_module.pv_member_recently_failed(
-                {"path:svc/Path": {"status": "error", "error_at": True}},
+            read_pv_module.pv_member_in_backoff(
+                {"path:svc/Path": {"source_state": "unavailable", "next_probe_at": True}},
                 "svc",
                 "/Path",
                 now=101.0,
             )
         )
         self.assertFalse(
-            read_pv_module.pv_member_recently_failed(
-                {"path:svc/Path": {"status": "error", "error_at": "bad"}},
+            read_pv_module.pv_member_in_backoff(
+                {"path:svc/Path": {"source_state": "unavailable", "next_probe_at": "bad"}},
                 "svc",
                 "/Path",
                 now=101.0,
@@ -150,8 +148,10 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 "com.victronenergy.pvinverter.http_1/Ac/Power: sleeping",
             )
             entry = adapter.cache.values["path:com.victronenergy.pvinverter.http_1/Ac/Power"]
-            self.assertEqual(entry["status"], "error")
+            self.assertEqual(entry["status"], "unavailable")
+            self.assertEqual(entry["source_state"], "unavailable")
             self.assertEqual(entry["last_error"], "sleeping")
+            self.assertGreater(entry["next_probe_at"], entry["error_at"])
             self.assertTrue(
                 any(
                     "DBus adapter optional aggregate member failed com.victronenergy.pvinverter.http_1/Ac/Power"

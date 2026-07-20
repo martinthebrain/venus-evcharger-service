@@ -13,6 +13,7 @@ from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import (
     DBUS_GATEWAY_SCHEMA_VERSION,
     CacheFreshnessKind,
+    CacheSourceState,
     GatewayPaths,
     _json_ready,
     _now,
@@ -67,7 +68,19 @@ class CacheValueMetadata:
     last_error: str = ""
     now: float | None = None
     freshness_kind: CacheFreshnessKind = "external_read"
+    source_state: CacheSourceState = "active"
     stale_after_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class _CacheReadFailure:
+    source: str
+    error: BaseException | str
+    status: str
+    source_state: CacheSourceState
+    now: float | None = None
+    freshness_kind: CacheFreshnessKind | None = None
+    retry_after_seconds: float | None = None
 
 
 class ExternalReadMetadata(TypedDict, total=False):
@@ -79,6 +92,7 @@ class ExternalReadMetadata(TypedDict, total=False):
     last_error: str
     now: float | None
     stale_after_seconds: float | None
+    source_state: CacheSourceState
 
 
 def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[str, object]) -> CacheValueMetadata:
@@ -91,6 +105,7 @@ def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[s
                 last_error=str(fields.get("last_error", metadata.last_error)),
                 now=_metadata_now(fields.get("now"), metadata.now),
                 freshness_kind=_metadata_freshness_kind(fields.get("freshness_kind"), metadata.freshness_kind),
+                source_state=_metadata_source_state(fields.get("source_state"), metadata.source_state),
                 stale_after_seconds=_metadata_optional_float(
                     fields.get("stale_after_seconds"), metadata.stale_after_seconds
                 ),
@@ -103,6 +118,7 @@ def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[s
         last_error=str(fields.get("last_error", "")),
         now=_metadata_now(fields.get("now")),
         freshness_kind=_metadata_freshness_kind(fields.get("freshness_kind"), "external_read"),
+        source_state=_metadata_source_state(fields.get("source_state"), "active"),
         stale_after_seconds=_metadata_optional_float(fields.get("stale_after_seconds")),
     )
 
@@ -110,6 +126,17 @@ def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[s
 def _metadata_freshness_kind(value: object, fallback: CacheFreshnessKind) -> CacheFreshnessKind:
     normalized = str(value) if value is not None else fallback
     return CACHE_FRESHNESS_KINDS.get(normalized, fallback)
+
+
+def _metadata_source_state(value: object, fallback: CacheSourceState) -> CacheSourceState:
+    normalized = str(value) if value is not None else fallback
+    if normalized == "active":
+        return "active"
+    if normalized == "unavailable":
+        return "unavailable"
+    if normalized == "error":
+        return "error"
+    return fallback
 
 
 def _is_local_cache_value(
@@ -203,6 +230,7 @@ class DbusCacheStore:
             "last_error": str(details.last_error),
             "confidence": float(details.confidence),
             "freshness_kind": details.freshness_kind,
+            "source_state": details.source_state,
             "stale_after_s": details.stale_after_seconds,
         }
         self.sequence += 1
@@ -230,27 +258,66 @@ class DbusCacheStore:
         now: float | None = None,
         freshness_kind: CacheFreshnessKind | None = None,
     ) -> None:
-        current = _now() if now is None else float(now)
+        self._mark_unreadable(
+            key,
+            _CacheReadFailure(
+                source=source,
+                error=error,
+                now=now,
+                freshness_kind=freshness_kind,
+                status="error",
+                source_state="error",
+            ),
+        )
+
+    def mark_unavailable(
+        self,
+        key: str,
+        *,
+        source: str,
+        error: BaseException | str,
+        retry_after_seconds: float,
+        now: float | None = None,
+    ) -> None:
+        """Record a non-fatal source outage while retaining forensic details."""
+        self._mark_unreadable(
+            key,
+            _CacheReadFailure(
+                source=source,
+                error=error,
+                now=now,
+                status="unavailable",
+                source_state="unavailable",
+                retry_after_seconds=retry_after_seconds,
+            ),
+        )
+
+    def _mark_unreadable(self, key: str, failure: _CacheReadFailure) -> None:
+        current = _now() if failure.now is None else float(failure.now)
         current_value = self.values.get(str(key), {})
         resolved_kind = (
             _metadata_freshness_kind(current_value.get("freshness_kind"), "external_read")
-            if freshness_kind is None
-            else freshness_kind
+            if failure.freshness_kind is None
+            else failure.freshness_kind
         )
-        self.values[str(key)] = {
+        failure_value: CommandPayload = {
             "value": current_value.get("value"),
-            "source": str(source),
+            "source": str(failure.source),
             "changed_at": float_or_zero(current_value.get("changed_at")),
             "confirmed_at": float_or_zero(current_value.get("confirmed_at")),
             "updated_at": float_or_zero(current_value.get("updated_at")),
             "error_at": current,
             "age_s": max(0.0, current - float_or_zero(current_value.get("updated_at"))),
-            "status": "error",
-            "last_error": str(error),
+            "status": failure.status,
+            "last_error": str(failure.error),
             "confidence": 0.0,
             "freshness_kind": resolved_kind,
+            "source_state": failure.source_state,
             "stale_after_s": current_value.get("stale_after_s"),
         }
+        if failure.retry_after_seconds is not None:
+            failure_value["next_probe_at"] = current + max(0.0, float(failure.retry_after_seconds))
+        self.values[str(key)] = failure_value
         self.sequence += 1
 
     def set_local_service_registered(self, registered: bool, *, service_name: str) -> None:

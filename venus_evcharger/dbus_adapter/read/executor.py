@@ -19,7 +19,7 @@ from venus_evcharger.dbus_adapter.read.aggregate import (
     AggregateStore,
 )
 from venus_evcharger.dbus_adapter.read.protocols import DbusReadAdapter
-from venus_evcharger.dbus_adapter.read.pv import pv_total_members
+from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS, pv_total_members
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
 from venus_evcharger.dbus_adapter.read.targets import ReadTarget, read_target
 from venus_evcharger.dbus_gateway_command_types import CommandMapping
@@ -293,7 +293,12 @@ class DbusReadExecutor:
     ) -> None:
         target = read_target(service, path)
         if target is not None:
-            self.adapter.cache.mark_error(target.cache_key, source=target.source, error=error)
+            self.adapter.cache.mark_unavailable(
+                target.cache_key,
+                source=target.source,
+                error=error,
+                retry_after_seconds=PV_MEMBER_ERROR_BACKOFF_SECONDS,
+            )
         state.record_error(service, path, error)
         logging.debug("DBus adapter optional aggregate member failed %s%s: %s", service, path, error)
 

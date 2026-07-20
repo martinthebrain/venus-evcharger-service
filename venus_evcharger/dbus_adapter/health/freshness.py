@@ -34,6 +34,7 @@ def cache_freshness(cache: DbusCacheStore, now: float) -> CommandPayload:
         "diagnostic_status_counts": status_counts(diagnostic_values),
         "critical_stale_count": count_status(critical_values, "stale"),
         "optional_source_error_count": optional_source_error_count(external_values),
+        "optional_source_unavailable_count": optional_source_unavailable_count(external_values),
         **important_freshness(values),
     }
 
@@ -53,6 +54,11 @@ def count_status(values: CacheValues, expected: str) -> int:
 def optional_source_error_count(values: CacheValues) -> int:
     optional_values = {key: value for key, value in values.items() if key not in FAST_READ_KEYS}
     return count_status(optional_values, "error")
+
+
+def optional_source_unavailable_count(values: CacheValues) -> int:
+    optional_values = {key: value for key, value in values.items() if key not in FAST_READ_KEYS}
+    return count_status(optional_values, "unavailable")
 
 
 def status_counts(values: CacheValues) -> dict[str, int]:

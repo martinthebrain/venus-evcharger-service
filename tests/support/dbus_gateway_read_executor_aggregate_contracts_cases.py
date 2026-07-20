@@ -13,6 +13,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     patch,
     read_aggregate_module,
     read_module,
+    read_pv_module,
     read_targets_module,
     tempfile,
     unittest,
@@ -182,15 +183,16 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             error = RuntimeError("sleeping")
 
             with (
-                patch.object(adapter.cache, "mark_error") as mark_error,
+                patch.object(adapter.cache, "mark_unavailable") as mark_unavailable,
                 patch.object(read_module.logging, "debug") as log_debug,
             ):
                 adapter.read_executor._record_optional_aggregate_error("svc.optional", "/Power", state, error)
 
-            mark_error.assert_called_once_with(
+            mark_unavailable.assert_called_once_with(
                 "path:svc.optional/Power",
                 source="svc.optional/Power",
                 error=error,
+                retry_after_seconds=read_pv_module.PV_MEMBER_ERROR_BACKOFF_SECONDS,
             )
             self.assertEqual(state.errors, ["svc.optional/Power: sleeping"])
             log_debug.assert_called_once_with(

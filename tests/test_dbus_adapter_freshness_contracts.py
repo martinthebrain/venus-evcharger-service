@@ -16,6 +16,7 @@ from venus_evcharger.dbus_adapter.health.freshness import (
     max_cached_path_age,
     missing_cached_path_count,
     optional_source_error_count,
+    optional_source_unavailable_count,
     status_counts,
     values_for_kinds,
 )
@@ -118,6 +119,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                 "diagnostic_status_counts": {},
                 "critical_stale_count": 0,
                 "optional_source_error_count": 0,
+                "optional_source_unavailable_count": 0,
                 "grid_power_w_age_s": 1.0,
                 "pv_power_w_age_s": 2.0,
                 "battery_soc_age_s": 0.0,
@@ -138,10 +140,11 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
             now=99.0,
             freshness_kind="external_read",
         )
-        cache.mark_error(
+        cache.mark_unavailable(
             dbus_path_key("com.victronenergy.pvinverter.b", "/Ac/Power"),
             source="com.victronenergy.pvinverter.b/Ac/Power",
             error="sleeping",
+            retry_after_seconds=300.0,
             now=100.0,
         )
         cache.update_value(
@@ -169,8 +172,9 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         snapshot = cache_freshness(cache, 100.0)
         self.assertEqual(snapshot["status_counts"], {"stale": 1})
         self.assertEqual(snapshot["critical_stale_count"], 1)
-        self.assertEqual(snapshot["optional_source_error_count"], 1)
-        self.assertEqual(snapshot["external_read_status_counts"], {"stale": 1, "fresh": 1, "error": 1})
+        self.assertEqual(snapshot["optional_source_error_count"], 0)
+        self.assertEqual(snapshot["optional_source_unavailable_count"], 1)
+        self.assertEqual(snapshot["external_read_status_counts"], {"stale": 1, "fresh": 1, "unavailable": 1})
         self.assertEqual(snapshot["local_publish_status_counts"], {"fresh": 2})
         self.assertEqual(snapshot["static_status_counts"], {"fresh": 1})
         self.assertEqual(snapshot["diagnostic_status_counts"], {"fresh": 1})
@@ -184,6 +188,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         external = values_for_kinds(values, {"external_read"})
         self.assertEqual(set(external), {"read", "legacy"})
         self.assertEqual(optional_source_error_count(external), 1)
+        self.assertEqual(optional_source_unavailable_count(external), 0)
 
     def test_status_helpers_distinguish_critical_and_optional_entries_exactly(self) -> None:
         values = {
@@ -193,6 +198,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
             "optional-error": {"status": "error"},
             "optional-fresh": {"status": "fresh"},
             "optional-unknown": {},
+            "optional-unavailable": {"status": "unavailable"},
         }
         self.assertEqual(count_status(values, "error"), 3)
         self.assertEqual(count_status(values, "stale"), 1)
@@ -200,6 +206,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         self.assertEqual(count_status(values, "unknown"), 1)
         self.assertEqual(count_status(values, "missing"), 0)
         self.assertEqual(optional_source_error_count(values), 1)
+        self.assertEqual(optional_source_unavailable_count(values), 1)
 
     def test_cache_separates_value_change_from_successful_confirmation(self) -> None:
         cache = DbusCacheStore(stale_after_seconds=10.0)
@@ -241,6 +248,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                     "last_error": "",
                     "now": "8.5",
                     "freshness_kind": "diagnostic",
+                    "source_state": "unavailable",
                     "stale_after_seconds": "4.5",
                 },
             ),
@@ -251,6 +259,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                 last_error="",
                 now=8.5,
                 freshness_kind="diagnostic",
+                source_state="unavailable",
                 stale_after_seconds=4.5,
             ),
         )
@@ -267,12 +276,14 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                 {
                     "source": "field",
                     "freshness_kind": "local_owned",
+                    "source_state": "error",
                     "stale_after_seconds": -2,
                 },
             ),
             CacheValueMetadata(
                 source="field",
                 freshness_kind="local_owned",
+                source_state="error",
                 stale_after_seconds=0.0,
             ),
         )
@@ -296,6 +307,10 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
             dbus_gateway_cache._metadata_freshness_kind("invalid", "diagnostic"),
             "diagnostic",
         )
+        self.assertEqual(dbus_gateway_cache._metadata_source_state("active", "error"), "active")
+        self.assertEqual(dbus_gateway_cache._metadata_source_state("unavailable", "active"), "unavailable")
+        self.assertEqual(dbus_gateway_cache._metadata_source_state("error", "active"), "error")
+        self.assertEqual(dbus_gateway_cache._metadata_source_state("invalid", "active"), "active")
         self.assertIsNone(dbus_gateway_cache._metadata_optional_float(None))
         self.assertEqual(dbus_gateway_cache._metadata_optional_float(None, 3.0), 3.0)
         self.assertEqual(dbus_gateway_cache._metadata_optional_float(-2), 0.0)
@@ -340,6 +355,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                 "last_error": "",
                 "confidence": 1.0,
                 "freshness_kind": "external_read",
+                "source_state": "active",
                 "stale_after_s": 5.0,
             },
         )
@@ -366,6 +382,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                 "last_error": "offline",
                 "confidence": 0.0,
                 "freshness_kind": "external_read",
+                "source_state": "error",
                 "stale_after_s": 5.0,
             },
         )
@@ -420,6 +437,74 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         boundary_timestamp.update_value("one", 1, source="svc/One", now=1.0)
         boundary_timestamp.update_value("one", 1, source="svc/One", now=2.0)
         self.assertEqual(boundary_timestamp.values["one"]["changed_at"], 1.0)
+
+    def test_unavailable_source_contract_retains_value_and_schedules_retry(self) -> None:
+        cache = DbusCacheStore(stale_after_seconds=10.0)
+        cache.update_value(
+            "pv-member",
+            125.0,
+            source="com.victronenergy.pvinverter.test/Ac/Power",
+            now=10.0,
+            freshness_kind="external_read",
+            stale_after_seconds=30.0,
+        )
+        initial_sequence = cache.sequence
+
+        cache.mark_unavailable(
+            "pv-member",
+            source="com.victronenergy.pvinverter.test/Ac/Power",
+            error=RuntimeError("NoReply"),
+            retry_after_seconds=300.0,
+            now=20.0,
+        )
+
+        self.assertEqual(cache.sequence, initial_sequence + 1)
+        self.assertEqual(
+            cache.values["pv-member"],
+            {
+                "value": 125.0,
+                "source": "com.victronenergy.pvinverter.test/Ac/Power",
+                "changed_at": 10.0,
+                "confirmed_at": 10.0,
+                "updated_at": 10.0,
+                "error_at": 20.0,
+                "age_s": 10.0,
+                "status": "unavailable",
+                "last_error": "NoReply",
+                "confidence": 0.0,
+                "freshness_kind": "external_read",
+                "source_state": "unavailable",
+                "stale_after_s": 30.0,
+                "next_probe_at": 320.0,
+            },
+        )
+
+        cache.mark_unavailable(
+            "missing-member",
+            source="com.victronenergy.pvinverter.missing/Ac/Power",
+            error="sleeping",
+            retry_after_seconds=-5.0,
+            now=25.0,
+        )
+        self.assertEqual(
+            cache.values["missing-member"],
+            {
+                "value": None,
+                "source": "com.victronenergy.pvinverter.missing/Ac/Power",
+                "changed_at": 0.0,
+                "confirmed_at": 0.0,
+                "updated_at": 0.0,
+                "error_at": 25.0,
+                "age_s": 25.0,
+                "status": "unavailable",
+                "last_error": "sleeping",
+                "confidence": 0.0,
+                "freshness_kind": "external_read",
+                "source_state": "unavailable",
+                "stale_after_s": None,
+                "next_probe_at": 25.0,
+            },
+        )
 
     def test_local_cache_value_classifier_is_bound_to_the_owned_service(self) -> None:
         service = "com.victronenergy.evcharger.test"
