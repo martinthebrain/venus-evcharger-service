@@ -15,6 +15,7 @@ from venus_evcharger.backend.shelly_io_types import (
     is_object_dict,
     is_transport_session_reset_backend,
 )
+from venus_evcharger.core.contracts import finite_float_or_none, timestamp_age_within
 
 _SHELLY_TRANSPORT_ERROR_REASONS = frozenset(
     {
@@ -85,6 +86,32 @@ class ShellyWorkerTransport:
     def is_common_network_error(cls, error: BaseException) -> bool:
         return cls._is_shelly_transport_error_reason(cls.classify_error(error))
 
+    def read_failure_is_tolerated(self, error: BaseException, now: float) -> bool:
+        """Return whether a common network miss is covered by fresh confirmed state."""
+        if not self.is_common_network_error(error):
+            return False
+        svc = self.service
+        soft_fail_seconds = finite_float_or_none(svc.auto_shelly_soft_fail_seconds)
+        if soft_fail_seconds is None or soft_fail_seconds <= 0.0:
+            return False
+        return any(
+            timestamp_age_within(
+                candidate,
+                now,
+                soft_fail_seconds,
+            )
+            for candidate in self._last_success_timestamps(svc)
+        )
+
+    @staticmethod
+    def _last_success_timestamps(svc: ShellyTransportHost) -> tuple[float, ...]:
+        """Return valid timestamps proving a recent successful Shelly read."""
+        candidates = (
+            finite_float_or_none(svc._shelly_last_ok_at),
+            finite_float_or_none(svc._last_confirmed_pm_status_at),
+        )
+        return tuple(candidate for candidate in candidates if candidate is not None)
+
     @staticmethod
     def _shelly_retry_delay_seconds(reason: str, consecutive_errors: int) -> float:
         if reason == "auth-error":
@@ -102,7 +129,7 @@ class ShellyWorkerTransport:
         now: float,
     ) -> None:
         svc = self.service
-        previous_errors = svc._shelly_consecutive_errors if hasattr(svc, "_shelly_consecutive_errors") else 0
+        previous_errors = svc._shelly_consecutive_errors
         try:
             consecutive_errors = int(previous_errors) + 1
         except (TypeError, ValueError):
@@ -162,18 +189,16 @@ class ShellyWorkerTransport:
         svc._shelly_last_ok_at = float(now)
         svc._shelly_retry_after = 0.0
         svc._shelly_offline_since = None
-        source_retry_after = getattr(svc, "_source_retry_after", None)
-        if isinstance(source_retry_after, dict):
-            source_retry_after["shelly"] = 0.0
+        svc._source_retry_after["shelly"] = 0.0
         svc.runtime.mark_recovery("shelly", recovery_message)
 
     def _reset_shelly_worker_session(self) -> None:
         svc = self.service
-        self.close_object(getattr(svc, "_worker_session", None))
+        self.close_object(svc._worker_session)
         svc._worker_session = requests.Session()
         self._reset_shelly_shared_session(svc)
         self._reset_shelly_backend_sessions(svc)
-        previous_reset_count = svc._shelly_session_reset_count if hasattr(svc, "_shelly_session_reset_count") else 0
+        previous_reset_count = svc._shelly_session_reset_count
         try:
             svc._shelly_session_reset_count = int(previous_reset_count) + 1
         except (TypeError, ValueError):
@@ -208,7 +233,7 @@ class ShellyWorkerTransport:
 
     def consecutive_errors(self) -> int:
         """Return the normalized current transport error count."""
-        candidate = getattr(self.service, "_shelly_consecutive_errors", 0)
+        candidate = self.service._shelly_consecutive_errors
         try:
             return int(candidate)
         except (TypeError, ValueError):

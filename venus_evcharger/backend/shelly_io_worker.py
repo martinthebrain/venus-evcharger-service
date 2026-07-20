@@ -49,10 +49,10 @@ class ShellyWorker:
 
     def build_local_pm_status(self, relay_on: bool) -> ShellyPmStatus:
         svc = self.service
-        source = getattr(svc, "_last_pm_status", None)
+        source = svc._last_pm_status
         raw_status = optional_json_object(source) or {}
         pm_status = local_pm_status_payload(raw_status)
-        last_voltage = getattr(svc, "_last_voltage", None)
+        last_voltage = svc._last_voltage
         voltage = (
             float(last_voltage)
             if isinstance(last_voltage, (int, float)) and not isinstance(last_voltage, bool)
@@ -92,7 +92,7 @@ class ShellyWorker:
             svc._pending_relay_requested_at = current
             svc._relay_sync_expected_state = bool(relay_on)
             svc._relay_sync_requested_at = current
-            svc._relay_sync_deadline_at = current + float(getattr(svc, "relay_sync_timeout_seconds", 2.0))
+            svc._relay_sync_deadline_at = current + float(svc.relay_sync_timeout_seconds)
             svc._relay_sync_failure_reported = False
 
     def peek_pending_relay_command(self) -> PendingRelayCommand:
@@ -257,21 +257,34 @@ class ShellyWorker:
             self.transport.remember_success(read_at, "Shelly status reads recovered")
             self._update_worker_confirmed_snapshot(svc, read_at, auto_mode_active, pm_status)
         except BACKEND_IO_ERRORS as error:
+            failure_at = svc.time_now()
             reason = self.transport.classify_error(error)
-            self.transport.remember_failure(reason, "read", error, now)
-            svc.runtime.mark_failure("shelly")
-            exc_info = None if self.transport.is_common_network_error(error) else error
-            svc.runtime.warning_throttled(
-                f"worker-shelly-read-failed-{reason}",
-                svc.auto_shelly_soft_fail_seconds,
-                "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
-                reason,
-                self._pending_relay_shelly_error_count("shelly"),
-                self._pending_relay_shelly_retry_remaining("shelly", now),
-                error,
-                exc_info=exc_info,
-            )
-            self._update_worker_unconfirmed_snapshot(svc, now, auto_mode_active)
+            failure_is_tolerated = self.transport.read_failure_is_tolerated(error, failure_at)
+            self.transport.remember_failure(reason, "read", error, failure_at)
+            if not failure_is_tolerated:
+                self._report_shelly_read_failure(svc, reason, error, failure_at)
+            self._update_worker_unconfirmed_snapshot(svc, failure_at, auto_mode_active)
+
+    def _report_shelly_read_failure(
+        self,
+        svc: ShellyWorkerHost,
+        reason: str,
+        error: BaseException,
+        now: float,
+    ) -> None:
+        """Escalate a read failure that exceeded the short network-loss budget."""
+        svc.runtime.mark_failure("shelly")
+        exc_info = None if self.transport.is_common_network_error(error) else error
+        svc.runtime.warning_throttled(
+            f"worker-shelly-read-failed-{reason}",
+            svc.auto_shelly_soft_fail_seconds,
+            "Shelly status read failed (%s, consecutive=%s, retry=%ss): %s",
+            reason,
+            self._pending_relay_shelly_error_count("shelly"),
+            self._pending_relay_shelly_retry_remaining("shelly", now),
+            error,
+            exc_info=exc_info,
+        )
 
     @staticmethod
     def _worker_auto_mode_active(svc: ShellyWorkerHost) -> bool:
