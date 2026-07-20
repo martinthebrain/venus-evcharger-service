@@ -8,4 +8,4 @@ REPO_DIR=$(realpath "$SCRIPT_DIR/../../..")
 CONFIG_PATH="$REPO_DIR/deploy/venus/config.venus_evcharger.ini"
 exec 2>&1
 
-python3 "$(realpath "$REPO_DIR/venus_evcharger_observer.py")" "$CONFIG_PATH"
+exec python3 "$(realpath "$REPO_DIR/venus_evcharger_observer.py")" "$CONFIG_PATH"

@@ -65,6 +65,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             self.assertFalse(adapter.process_one_dbus_operation_once())
             adapter._prefer_read_next = False
             install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=True))
+            adapter.write_scheduler.last_scheduled_outcome = "applied"
             install_mock(adapter, "poll_one_due_read_once", MagicMock(return_value=True))
             self.assertTrue(adapter.try_write_then_read())
             adapter.poll_one_due_read_once.assert_not_called()
@@ -330,10 +331,17 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             self.assertFalse(adapter._prefer_read_next)
 
             install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=True))
+            adapter.write_scheduler.last_scheduled_outcome = "applied"
             adapter._prefer_read_next = True
             self.assertTrue(adapter.try_scheduled_write(prefer_read_next=False))
             self.assertIs(adapter._prefer_read_next, False)
             adapter.write_scheduler.process_one.assert_called_once_with(include_local_publish=False)
+
+            install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=True))
+            adapter.write_scheduler.last_scheduled_outcome = "deferred"
+            adapter._prefer_read_next = True
+            self.assertTrue(adapter.try_scheduled_write(prefer_read_next=True))
+            self.assertIs(adapter._prefer_read_next, False)
 
             install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=False))
             install_mock(adapter, "poll_one_due_read_once", MagicMock(return_value=False))
@@ -342,6 +350,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
 
             install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=True))
             install_mock(adapter, "poll_one_due_read_once", MagicMock(return_value=True))
+            adapter.write_scheduler.last_scheduled_outcome = "applied"
             adapter._prefer_read_next = False
             self.assertTrue(adapter.try_write_then_read())
             self.assertTrue(adapter._prefer_read_next)

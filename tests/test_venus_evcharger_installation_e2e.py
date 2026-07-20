@@ -51,6 +51,19 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
                 shutil.copy2(source, target)
         return repo_copy
 
+    def test_runit_entrypoints_replace_the_shell_process(self) -> None:
+        run_scripts = (
+            "deploy/venus/service_venus_evcharger/run",
+            "deploy/venus/service_venus_evcharger_dbus_adapter/run",
+            "deploy/venus/service_venus_evcharger_observer/run",
+        )
+        for relative_path in run_scripts:
+            with self.subTest(relative_path=relative_path):
+                lines = (REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines()
+                python_commands = [line for line in lines if "python3 " in line]
+                self.assertEqual(len(python_commands), 1)
+                self.assertTrue(python_commands[0].startswith("exec python3 "))
+
     @staticmethod
     def _make_executable(path: Path) -> None:
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

@@ -156,5 +156,7 @@ class DbusAdapterLoop(DbusAdapterIntrospection):
     def try_scheduled_write(self: DbusAdapterLoopContext, *, prefer_read_next: bool) -> bool:
         if not self.write_scheduler.process_one(include_local_publish=False):
             return False
-        self._prefer_read_next = prefer_read_next
+        self._prefer_read_next = (
+            False if self.write_scheduler.last_scheduled_outcome == "deferred" else prefer_read_next
+        )
         return True

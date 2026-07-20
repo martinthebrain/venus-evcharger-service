@@ -46,8 +46,10 @@ class DbusWriteSchedulerCore:
     record_budget: Callable[[CommandMapping], None]
     record_lifecycle: Callable[[CommandMapping, str], None]
     record_processed: Callable[[], None]
+    last_scheduled_outcome: CommandOutcome | None
 
     def process_one(self, *, include_local_publish: bool = True) -> bool:
+        self.last_scheduled_outcome = None
         pending = self.adapter.commands.load_pending()
         coalesced = self.prioritized_commands(DbusCommandInbox.coalesce(pending))
         if not coalesced:
@@ -70,6 +72,7 @@ class DbusWriteSchedulerCore:
             return False
         path, command = selected
         outcome = self.process_loaded_command(path, command)
+        self.last_scheduled_outcome = outcome
         if should_follow_with_local_burst(command, outcome):
             self.process_local_publish_burst(max(0, self.local_publish_burst_limit - 1))
         return True

@@ -502,6 +502,7 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/dbus_adapter/write/scheduler.py": (
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_health_budgets_lifecycle_and_remote_write_edges",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_next_scheduled_command_runs_followup_burst_only_after_local_publish_completion",
             ),
             "venus_evcharger/dbus_adapter/write/support.py": (
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_support_helper_contracts",

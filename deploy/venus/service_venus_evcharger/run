@@ -10,4 +10,4 @@ exec 2>&1
 
 # Always resolve the script path relative to the deployed service directory so
 # symlinked /service setups behave the same as direct launches.
-python3 "$(realpath "$REPO_DIR/venus_evcharger_service.py")"
+exec python3 "$(realpath "$REPO_DIR/venus_evcharger_service.py")"
