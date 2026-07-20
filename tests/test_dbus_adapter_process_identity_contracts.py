@@ -31,6 +31,7 @@ install_venus_adapter_stubs()
 
 import venus_evcharger.dbus_adapter.process.identity as identity
 from venus_evcharger.dbus_adapter.process.config import CasePreservingConfigParser
+from venus_evcharger.dbus_gateway import DbusCacheStore, dbus_path_key
 
 
 def adapter(values: dict[str, str] | None = None) -> identity.DbusAdapterIdentity:
@@ -40,6 +41,7 @@ def adapter(values: dict[str, str] | None = None) -> identity.DbusAdapterIdentit
     instance.service_name = "com.victronenergy.evcharger.http_60"
     instance._dbusservice = None
     instance._dbusservice_registered = False
+    instance.cache = DbusCacheStore()
     instance.write_scheduler = SimpleNamespace(registered_paths=set(), last_values={})
     return instance
 
@@ -51,8 +53,11 @@ class DbusAdapterProcessIdentityContractTests(unittest.TestCase):
         instance.set_dbus_service(service, registered=True)
         self.assertIs(instance.dbus_service, service)
         self.assertIs(instance.dbus_service_registered, True)
+        self.assertIs(instance.cache.local_service_registered, True)
+        self.assertEqual(instance.cache.local_service_name, instance.service_name)
         instance.set_dbus_service(service, registered=False)
         self.assertIs(instance.dbus_service_registered, False)
+        self.assertIs(instance.cache.local_service_registered, False)
 
     def test_ensure_service_creates_once_and_registers_identity_paths(self) -> None:
         instance = adapter()
@@ -78,6 +83,7 @@ class DbusAdapterProcessIdentityContractTests(unittest.TestCase):
             instance.register_dbus_service_name()
         self.assertEqual(service.register_calls, 1)
         self.assertIs(instance.dbus_service_registered, True)
+        self.assertIs(instance.cache.local_service_registered, True)
         info.assert_called_once_with("DBus adapter owns service %s", instance.service_name)
 
     def test_default_identity_payload_is_exact(self) -> None:
@@ -152,6 +158,11 @@ class DbusAdapterProcessIdentityContractTests(unittest.TestCase):
         self.assertEqual(service.added, [("/A", 1), ("/B", "two")])
         self.assertEqual(instance.write_scheduler.registered_paths, {"/A", "/B"})
         self.assertEqual(instance.write_scheduler.last_values, {"/A": 1, "/B": "two"})
+        cached_a = instance.cache.values[dbus_path_key(instance.service_name, "/A")]
+        cached_b = instance.cache.values[dbus_path_key(instance.service_name, "/B")]
+        self.assertEqual(cached_a["value"], 1)
+        self.assertEqual(cached_b["value"], "two")
+        self.assertEqual(cached_a["freshness_kind"], "local_owned")
 
 
 if __name__ == "__main__":

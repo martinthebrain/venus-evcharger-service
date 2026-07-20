@@ -65,6 +65,7 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
                 "service": "svc",
                 "paths": ["/A", "/B"],
                 "interval": 2,
+                "stale_after_seconds": 6,
                 "use_dc_pv": True,
                 "optional_zero_on_error": False,
                 "optional_confidence": 0.2,
@@ -79,6 +80,7 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
         self.assertEqual(spec["service"], "svc")
         self.assertEqual(spec["paths"], ["/A", "/B"])
         self.assertEqual(spec["interval"], 2.0)
+        self.assertEqual(spec["stale_after_seconds"], 6.0)
         self.assertEqual(spec["optional_confidence"], 0.2)
         self.assertFalse(spec["optional_zero_on_error"])
         self.assertTrue(spec["use_dc_pv"])
@@ -137,12 +139,12 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
         scheduler.force_due(["missing"])
         self.assertNotIn("missing", scheduler.next_read_at)
 
-    def test_pv_member_backoff_ignores_non_numeric_error_timestamps(self) -> None:
+    def test_pv_member_backoff_ignores_non_numeric_probe_timestamps(self) -> None:
         key = dbus_path_key("com.victronenergy.system", "/Dc/Pv/Power")
-        for error_at in (True, "bad", object()):
-            cached = {key: {"status": "error", "error_at": error_at}}
+        for next_probe_at in (True, "bad", object()):
+            cached = {key: {"source_state": "unavailable", "next_probe_at": next_probe_at}}
             self.assertFalse(
-                read_pv_module.pv_member_recently_failed(
+                read_pv_module.pv_member_in_backoff(
                     cached,
                     "com.victronenergy.system",
                     "/Dc/Pv/Power",

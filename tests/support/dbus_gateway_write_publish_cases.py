@@ -34,7 +34,7 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
         with self.adapter_scenario("[DEFAULT]\nDbusGatewayLocalPublishBurstLimit=1\n") as scenario:
             adapter = scenario.adapter
             service = RecordingDbusService()
-            adapter.set_dbus_service(service)
+            adapter.set_dbus_service(service, registered=True)
             adapter.write_scheduler.registered_paths.update({"/A", "/B"})
             command_path = adapter.commands.enqueue(
                 {
@@ -115,7 +115,7 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter
             service = RecordingDbusService()
-            adapter.set_dbus_service(service)
+            adapter.set_dbus_service(service, registered=True)
             adapter.write_scheduler.registered_paths.add("/Ac/Power")
 
             self.assertEqual(adapter.write_scheduler.publish_path("/Ac/Power", 1200.0), "applied")

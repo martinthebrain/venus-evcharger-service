@@ -230,6 +230,21 @@ class TestDbusAdapterResourceContracts(unittest.TestCase):
         with patch("venus_evcharger.dbus_adapter.resources.os.listdir", return_value=["0", "1", "2"]):
             self.assertEqual(monitor._open_fd_count(), 3)
 
+    def test_process_status_ignores_empty_venus_os_groups_field(self) -> None:
+        status = (
+            "Name:\tpython3\n"
+            "Groups:\t \n"
+            "FDSize:\t256\n"
+            "VmHWM:\t21764 kB\n"
+            "VmRSS:\t14480 kB\n"
+            "Threads:\t1\n"
+        )
+        with patch("builtins.open", mock_open(read_data=status)):
+            self.assertEqual(
+                ResourceMonitor(pid=1481)._read_process_status(),
+                {"FDSize": 256.0, "VmHWM": 21764.0, "VmRSS": 14480.0, "Threads": 1.0},
+            )
+
     def test_procfs_short_and_malformed_inputs_fail_closed(self) -> None:
         monitor = ResourceMonitor(pid=123)
         with patch("builtins.open", side_effect=OSError("missing")):

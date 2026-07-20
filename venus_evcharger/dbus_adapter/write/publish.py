@@ -23,6 +23,7 @@ from venus_evcharger.dbus_gateway import (
     DbusCommandInbox,
     dbus_path_key,
     evcs_fields_to_paths,
+    evcs_path_freshness_kind,
 )
 from venus_evcharger.dbus_gateway_command_types import CommandFile, CommandFileList, CommandMapping
 from venus_evcharger.dbus_gateway_core import _json_ready
@@ -132,6 +133,7 @@ class DbusWriteSchedulerPublish(DbusWriteSchedulerCore):
         )
         self.registered_paths.add(path)
         self.last_values[path] = value
+        self._refresh_local_publish_cache(path, value)
         return "applied"
 
     def handle_gui_write(self, path: str, value: object) -> bool:
@@ -224,6 +226,7 @@ class DbusWriteSchedulerPublish(DbusWriteSchedulerCore):
             dbus_path_key(self.adapter.service_name, path),
             value,
             source=source,
+            freshness_kind=evcs_path_freshness_kind(path),
         )
 
     def timed_local_publish(self, operation: Callable[[], object]) -> object:

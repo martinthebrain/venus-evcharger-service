@@ -214,6 +214,7 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
             value,
             source=f"{service}{path}",
             confidence=0.9,
+            freshness_kind="external_read",
         )
         return "applied"
 

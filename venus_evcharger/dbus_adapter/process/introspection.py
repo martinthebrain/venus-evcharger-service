@@ -233,7 +233,12 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         path: str,
         error: BaseException,
     ) -> CommandOutcome:
-        self.cache.mark_error(f"introspection:{service}:{path}", source=f"{service}{path}", error=error)
+        self.cache.mark_error(
+            f"introspection:{service}:{path}",
+            source=f"{service}{path}",
+            error=error,
+            freshness_kind="diagnostic",
+        )
         self._introspection_queue_depth = max(0, self._introspection_queue_depth - 1)
         logging.debug("Dropping failed DBus introspection command service=%s path=%s: %s", service, path, error)
         return "dropped"
@@ -244,7 +249,13 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         path: str,
         xml_data: object,
     ) -> None:
-        self.cache.update_value(f"introspection:{service}:{path}", xml_data, source=f"{service}{path}", confidence=0.5)
+        self.cache.update_value(
+            f"introspection:{service}:{path}",
+            xml_data,
+            source=f"{service}{path}",
+            confidence=0.5,
+            freshness_kind="diagnostic",
+        )
         self._introspection_queue_depth = max(0, self._introspection_queue_depth - 1)
 
 

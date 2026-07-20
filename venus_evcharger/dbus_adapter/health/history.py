@@ -52,5 +52,7 @@ def health_log_cache_freshness(cache_freshness: Mapping[str, object]) -> Command
             "pv_power_w_status",
             "battery_soc_age_s",
             "battery_soc_status",
+            "optional_source_error_count",
+            "optional_source_unavailable_count",
         )
     }

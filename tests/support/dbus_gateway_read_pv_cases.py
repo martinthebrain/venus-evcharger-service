@@ -13,6 +13,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     read_pv_module,
     tempfile,
 )
+from venus_evcharger.dbus_adapter.health.freshness import cache_freshness
 
 
 class GatewayPvReadCases(GatewayAdapterContractCase):
@@ -96,9 +97,15 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             self.assertEqual(outcome, "applied")
             adapter.circuit.record_error.assert_not_called()
             member = adapter.cache.values["path:com.victronenergy.pvinverter.http_1/Ac/Power"]
-            self.assertEqual(member["status"], "error")
+            self.assertEqual(member["status"], "unavailable")
+            self.assertEqual(member["source_state"], "unavailable")
             self.assertEqual(member["last_error"], "night pv asleep")
             self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 0.0)
+            health = cache_freshness(adapter.cache, 1.0 + float(adapter.cache.values["pv_power_w"]["confirmed_at"]))
+            self.assertEqual(health["pv_power_w_status"], "fresh")
+            self.assertEqual(health["status_counts"], {"fresh": 1})
+            self.assertEqual(health["optional_source_error_count"], 0)
+            self.assertEqual(health["optional_source_unavailable_count"], 1)
 
     def test_optional_direct_read_falls_back_to_fresh_zero(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -356,16 +363,19 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                     ("com.victronenergy.pvinverter.http_9", "/Ac/Power"),
                 ],
             )
-            adapter.cache.mark_error(
+
+            adapter.cache.mark_unavailable(
                 "path:com.victronenergy.pvinverter.http_1/Ac/Power",
                 source="com.victronenergy.pvinverter.http_1/Ac/Power",
                 error="asleep",
+                retry_after_seconds=300.0,
                 now=100.0,
             )
-            adapter.cache.mark_error(
+            adapter.cache.mark_unavailable(
                 "path:com.victronenergy.pvinverter.http_9/Ac/Power",
                 source="com.victronenergy.pvinverter.http_9/Ac/Power",
                 error="old",
+                retry_after_seconds=300.0,
                 now=-1000.0,
             )
             self.assertEqual(
@@ -381,10 +391,11 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                 ),
                 [("com.victronenergy.pvinverter.http_9", "/Ac/Power")],
             )
-            adapter.cache.mark_error(
+            adapter.cache.mark_unavailable(
                 "path:com.victronenergy.system/Dc/Pv/Power",
                 source="com.victronenergy.system/Dc/Pv/Power",
                 error="dc asleep",
+                retry_after_seconds=300.0,
                 now=100.0,
             )
             self.assertEqual(

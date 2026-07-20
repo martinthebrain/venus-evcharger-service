@@ -13,6 +13,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     patch,
     read_aggregate_module,
     read_module,
+    read_pv_module,
     read_targets_module,
     tempfile,
     unittest,
@@ -67,23 +68,39 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             assert target is not None
 
             with patch.object(adapter.cache, "update_value") as update_value:
-                adapter.read_executor._update_read_value("semantic_value", target, 42.0)
+                adapter.read_executor._update_read_value(
+                    "semantic_value",
+                    target,
+                    42.0,
+                    spec={"interval": 2.0},
+                )
                 update_value.assert_has_calls(
                     [
-                        unittest.mock.call("path:svc.update/Value", 42.0, source="svc.update/Value"),
-                        unittest.mock.call("semantic_value", 42.0, source="svc.update/Value"),
+                        unittest.mock.call(
+                            "path:svc.update/Value", 42.0, source="svc.update/Value", freshness_kind="external_read"
+                        ),
+                        unittest.mock.call(
+                            "semantic_value",
+                            42.0,
+                            source="svc.update/Value",
+                            freshness_kind="external_read",
+                            stale_after_seconds=6.0,
+                        ),
                     ]
                 )
                 self.assertEqual(update_value.call_count, 2)
 
                 update_value.reset_mock()
                 adapter.read_executor._update_read_value("path:svc.update/Value", target, 43.0)
-                update_value.assert_called_once_with("path:svc.update/Value", 43.0, source="svc.update/Value")
+                update_value.assert_called_once_with(
+                    "path:svc.update/Value", 43.0, source="svc.update/Value", freshness_kind="external_read"
+                )
 
             state = read_aggregate_module.AggregateState(("sum", (("svc.a", "/A"),)), empty_confidence=0.35)
             adapter.read_executor._record_aggregate_member(state, "svc.a", "/A", 2.5)
             state.record_error("svc.b", "/B", RuntimeError("offline"))
             adapter.read_executor._aggregates.state_for("aggregate_key", state.signature, 0.35)
+            adapter.read_executor._stale_after_by_key = {"aggregate_key": 6.0, "other": 9.0}
 
             with patch.object(adapter.cache, "update_value") as update_value:
                 update_value.reset_mock()
@@ -94,11 +111,15 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
                     source="svc.a/A",
                     confidence=1.0,
                     last_error="svc.b/B: offline",
+                    freshness_kind="external_read",
+                    stale_after_seconds=6.0,
                 )
+                self.assertEqual(adapter.read_executor._stale_after_by_key, {"other": 9.0})
 
                 empty_state = read_aggregate_module.AggregateState(
                     ("sum", (("svc.empty", "/A"),)), empty_confidence=0.35
                 )
+                adapter.read_executor._stale_after_by_key["empty_aggregate"] = 8.0
                 update_value.reset_mock()
                 adapter.read_executor._complete_aggregate("empty_aggregate", empty_state)
                 update_value.assert_called_once_with(
@@ -107,6 +128,8 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
                     source="empty_aggregate",
                     confidence=0.35,
                     last_error="",
+                    freshness_kind="external_read",
+                    stale_after_seconds=8.0,
                 )
 
     def test_read_executor_aggregate_default_confidence_and_prefix_defaults_are_contracts(self) -> None:
@@ -134,12 +157,15 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=77.0))
             self.assertEqual(
                 adapter.read_executor._poll_first_service(
-                    "first_default", {"aggregate": "first-service", "path": "/Soc"}
+                    "first_default",
+                    {"aggregate": "first-service", "path": "/Soc", "interval": 2.0},
                 ),
                 "applied",
             )
             adapter.read_executor.read_busitem.assert_called_once_with("svc.a", "/Soc")
             self.assertEqual(adapter.cache.values["first_default"]["value"], 77.0)
+            self.assertEqual(adapter.cache.values["first_default"]["stale_after_s"], 6.0)
+            self.assertEqual(adapter.cache.values["first_default"]["freshness_kind"], "external_read")
 
             with self.assertRaisesRegex(RuntimeError, "No cached services for prefix ''"):
                 empty_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-empty")))
@@ -157,15 +183,16 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             error = RuntimeError("sleeping")
 
             with (
-                patch.object(adapter.cache, "mark_error") as mark_error,
+                patch.object(adapter.cache, "mark_unavailable") as mark_unavailable,
                 patch.object(read_module.logging, "debug") as log_debug,
             ):
                 adapter.read_executor._record_optional_aggregate_error("svc.optional", "/Power", state, error)
 
-            mark_error.assert_called_once_with(
+            mark_unavailable.assert_called_once_with(
                 "path:svc.optional/Power",
                 source="svc.optional/Power",
                 error=error,
+                retry_after_seconds=read_pv_module.PV_MEMBER_ERROR_BACKOFF_SECONDS,
             )
             self.assertEqual(state.errors, ["svc.optional/Power: sleeping"])
             log_debug.assert_called_once_with(
