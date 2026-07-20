@@ -86,6 +86,7 @@ DEFAULT_TARGETS = (
     "venus_evcharger/dbus_adapter/write/health.py",
     "venus_evcharger/dbus_adapter/write/core.py",
     "venus_evcharger/dbus_adapter/write/publish.py",
+    "venus_evcharger/dbus_adapter/refresh_state.py",
     "venus_evcharger/dbus_adapter/read/executor.py",
     "venus_evcharger/dbus_adapter/read/pv.py",
     "venus_evcharger/dbus_adapter/process/health.py",

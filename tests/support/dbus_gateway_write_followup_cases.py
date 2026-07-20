@@ -30,6 +30,11 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\nDbusGatewayLocalPublishBurstLimit=4\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            self.assertIsNone(adapter.write_scheduler.last_scheduled_outcome)
+            adapter.write_scheduler.last_scheduled_outcome = "deferred"
+            install_mock(adapter.commands, "load_pending", MagicMock(return_value=[]))
+            self.assertFalse(adapter.write_scheduler.process_one())
+            self.assertIsNone(adapter.write_scheduler.last_scheduled_outcome)
             install_mock(adapter.write_scheduler, "process_loaded_command", MagicMock(return_value="applied"))
             install_mock(adapter.write_scheduler, "process_local_publish_burst", MagicMock())
 
@@ -49,6 +54,7 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
                     include_local_publish=True,
                 )
             )
+            self.assertEqual(adapter.write_scheduler.last_scheduled_outcome, "deferred")
             adapter.write_scheduler.process_local_publish_burst.assert_not_called()
 
             install_mock(adapter.write_scheduler, "process_loaded_command", MagicMock(return_value="applied"))

@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections import deque
 
 from venus_evcharger.core.shared import config_get_float
+from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.write.health import DbusWriteSchedulerHealth
 from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
 
@@ -37,3 +38,4 @@ class DbusWriteScheduler(DbusWriteSchedulerHealth):
         self._lifecycle_events: deque[tuple[float, str, str]] = deque()
         self._lifecycle_counts: dict[str, int] = {}
         self.last_processed_at = 0.0
+        self.last_scheduled_outcome: CommandOutcome | None = None

@@ -187,6 +187,60 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             )
             self.assertNotIn("path:svc.direct/Deferred", adapter.cache.values)
 
+    def test_refresh_request_uses_newer_cache_confirmation_without_an_extra_dbus_call(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.cache.update_external_read("grid_power_w", 123.0, source="system", now=20.0)
+            read = install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="deferred"))
+
+            self.assertEqual(
+                adapter.read_executor.refresh_requested_value(
+                    {"key": "grid_power_w", "created_at": 10.0}
+                ),
+                "applied",
+            )
+            read.assert_not_called()
+
+            self.assertEqual(
+                adapter.read_executor.refresh_requested_value(
+                    {"key": "grid_power_w", "created_at": 10.0, "updated_at": 25.0}
+                ),
+                "deferred",
+            )
+            read.assert_called_once_with("grid_power_w", adapter.read_scheduler.specs["grid_power_w"])
+
+    def test_refresh_request_drops_a_newer_terminal_cache_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter.cache.mark_unavailable(
+                "path:svc.direct/Value",
+                source="svc.direct/Value",
+                error="sleeping",
+                retry_after_seconds=60.0,
+                now=20.0,
+            )
+            read = install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=1.0))
+
+            self.assertEqual(
+                adapter.read_executor.refresh_requested_value(
+                    {"service": "svc.direct", "path": "/Value", "created_at": 10.0}
+                ),
+                "dropped",
+            )
+            read.assert_not_called()
+
+            self.assertEqual(
+                adapter.read_executor.refresh_requested_value(
+                    {"service": "svc.direct", "path": "/Value", "created_at": 30.0}
+                ),
+                "applied",
+            )
+            read.assert_called_once_with("svc.direct", "/Value")
+
     def test_read_executor_optional_and_low_level_dbus_contracts_are_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"

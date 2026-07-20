@@ -22,6 +22,8 @@ from venus_evcharger.dbus_adapter.read.protocols import DbusReadAdapter
 from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS, pv_total_members
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
 from venus_evcharger.dbus_adapter.read.targets import ReadTarget, read_target
+from venus_evcharger.dbus_adapter.refresh_state import cached_refresh_outcome
+from venus_evcharger.dbus_gateway import dbus_path_key
 from venus_evcharger.dbus_gateway_command_types import CommandMapping
 
 DBUS_READ_ERRORS = DBUS_GATEWAY_OPERATION_ERRORS
@@ -51,9 +53,21 @@ class DbusReadExecutor:
 
     def refresh_requested_value(self, command: CommandMapping) -> CommandOutcome:
         key = str(command["key"] or "") if "key" in command else ""
+        cached_outcome = self._cached_refresh_outcome(command, key)
+        if cached_outcome is not None:
+            return cached_outcome
         if key in self.adapter.read_scheduler.specs:
             return self.poll_read_spec(key, self.adapter.read_scheduler.specs[key])
         return self._refresh_direct_value(command)
+
+    def _cached_refresh_outcome(self, command: CommandMapping, key: str) -> CommandOutcome | None:
+        if key:
+            return cached_refresh_outcome(self.adapter.cache.values.get(key), command)
+        target = self._direct_refresh_target(command)
+        if target is None:
+            return None
+        cache_key = dbus_path_key(target.service, target.path)
+        return cached_refresh_outcome(self.adapter.cache.values.get(cache_key), command)
 
     def _refresh_direct_value(self, command: CommandMapping) -> CommandOutcome:
         target = self._direct_refresh_target(command)

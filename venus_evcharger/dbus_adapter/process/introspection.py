@@ -21,6 +21,7 @@ from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionContext
 from venus_evcharger.dbus_adapter.process.runtime import DbusAdapterRuntime
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter.refresh_state import services_refresh_satisfied
 from venus_evcharger.dbus_gateway_command_types import CommandMapping, CommandPayload
 from venus_evcharger.dbus_gateway_core import float_or_default
 
@@ -168,17 +169,22 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         }
         return handlers.get(kind, _drop_command)(command)
 
-    def refresh_services_command(self: DbusAdapterIntrospectionContext, _command: CommandMapping) -> CommandOutcome:
+    def refresh_services_command(self: DbusAdapterIntrospectionContext, command: CommandMapping) -> CommandOutcome:
         if self.circuit.state() != "ok":
             return "deferred"
+        if services_refresh_satisfied(self.cache.services, command):
+            self.commands.remove_coalesced("refresh:services")
+            return "applied"
+        now = time.time()
         try:
             self.cache.update_services(self.list_services())
         except DbusOperationDeferred:
             return "deferred"
         except DBUS_GATEWAY_OPERATION_ERRORS as error:
-            self.discovery.record_error(error, now=time.time())
+            self.discovery.record_error(error, now=now)
             self.commands.remove_coalesced("refresh:services")
             return "dropped"
+        self.discovery.record_success(now=now)
         self.commands.remove_coalesced("refresh:services")
         return "applied"
 

@@ -109,6 +109,8 @@ FOCUSED_TEST_SELECTIONS_CORE: tuple[tuple[str, tuple[str, ...]], ...] = (('venus
  ('venus_evcharger/dbus_adapter/read/pv.py',
   ('tests/test_dbus_adapter_read_pv_contracts.py',
    'tests/test_dbus_gateway_adapter_scheduler.py')),
+ ('venus_evcharger/dbus_adapter/refresh_state.py',
+  ('tests/test_dbus_adapter_refresh_state_contracts.py',)),
  ('venus_evcharger/dbus_adapter/read/executor.py',
   ('tests/test_dbus_gateway_adapter_scheduler.py',)),
  ('venus_evcharger/dbus_adapter/scheduling.py', ('tests/test_dbus_adapter_scheduler_contracts.py',)),
@@ -133,6 +135,8 @@ FOCUSED_TEST_SELECTIONS_CORE: tuple[tuple[str, tuple[str, ...]], ...] = (('venus
    'tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_non_write_introspection_command_contracts',
    'tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_non_write_introspection_timed_logging_main_and_json_ready',
   )),
+ ('venus_evcharger/dbus_adapter/process/loop.py',
+  ('tests/test_dbus_gateway_adapter_scheduler.py',)),
  ('venus_evcharger/dbus_adapter/process/introspection_snapshot.py',
   ('tests/test_dbus_adapter_introspection_snapshot_contracts.py',)),
  ('venus_evcharger/dbus_adapter/process/io.py', (
@@ -157,7 +161,10 @@ FOCUSED_TEST_SELECTIONS_CORE: tuple[tuple[str, tuple[str, ...]], ...] = (('venus
  )),
  ('venus_evcharger/dbus_adapter/write/scheduler.py', (
      'tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_health_budgets_lifecycle_and_remote_write_edges',
- )),
+     'tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_next_scheduled_command_runs_followup_burst_only_after_local_publish_completion',
+  )),
+ ('venus_evcharger/dbus_adapter/write/core.py',
+  ('tests/test_dbus_gateway_adapter_scheduler.py',)),
  ('venus_evcharger/dbus_adapter/write/support.py', (
      'tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_support_helper_contracts',
  )),
