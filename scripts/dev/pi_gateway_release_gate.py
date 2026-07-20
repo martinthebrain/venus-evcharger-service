@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Run a Raspberry-Pi release gate for the DBus gateway architecture.
 
-This is a developer-only integration gate. It may use the Venus ``dbus`` CLI
-to verify what the GUI can see, but production code must still use only the
-gateway files/socket and never direct DBus access.
+This developer-only integration gate obeys the same isolation contract as the
+runtime: it observes GUI values through the gateway cache and submits test
+writes through the gateway socket.
 """
 
 from __future__ import annotations

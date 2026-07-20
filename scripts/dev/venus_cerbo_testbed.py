@@ -4,17 +4,29 @@
 
 The default mode is intentionally CI-safe: it returns deterministic DBus-like
 service snapshots that model common EV-charger scenarios. On a real Venus OS
-device, ``probe-real`` performs read-only DBus checks for Cerbo relay paths.
+device, ``probe-real`` requests Cerbo relay paths through the DBus gateway.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import subprocess
+import sys
+import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Sequence
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from venus_evcharger.dbus_gateway import (
+    DEFAULT_GATEWAY_RUN_DIR,
+    DbusCacheStore,
+    GatewayClient,
+    dbus_path_key,
+    gateway_paths,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,18 +103,27 @@ def scenario_expectations(scenario: str) -> dict[str, Any]:
     }[scenario]
 
 
-def probe_real_cerbo(timeout: float) -> dict[str, Any]:
-    dbus_binary = shutil.which("dbus")
-    if not dbus_binary:
-        return {
-            "ok": False,
-            "kind": "venus-cerbo-testbed",
-            "mode": "probe-real",
-            "skipped": True,
-            "reason": "dbus CLI not found; run this on Venus OS or install the dbus tool",
-            "probes": [],
-        }
-    probes = [_read_dbus_value(dbus_binary, service, path, timeout) for service, path in CERBO_READ_ONLY_PROBES]
+def probe_real_cerbo(timeout: float, gateway_run_dir: str = DEFAULT_GATEWAY_RUN_DIR) -> dict[str, Any]:
+    client = GatewayClient(gateway_paths(gateway_run_dir), timeout_seconds=min(max(0.1, timeout), 2.0))
+    response = client.send({"kind": "health", "source": "venus-cerbo-testbed"})
+    if response.get("ok") is not True:
+        return _gateway_unavailable_payload(response)
+    probes = [_read_gateway_value(client, service, path, timeout) for service, path in CERBO_READ_ONLY_PROBES]
+    return _real_probe_payload(probes)
+
+
+def _gateway_unavailable_payload(response: dict[str, object]) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "kind": "venus-cerbo-testbed",
+        "mode": "probe-real",
+        "skipped": True,
+        "reason": f"DBus gateway unavailable: {response.get('error') or 'no response'}",
+        "probes": [],
+    }
+
+
+def _real_probe_payload(probes: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "ok": all(probe["ok"] or probe["skipped"] for probe in probes),
         "kind": "venus-cerbo-testbed",
@@ -112,34 +133,103 @@ def probe_real_cerbo(timeout: float) -> dict[str, Any]:
     }
 
 
-def _read_dbus_value(dbus_binary: str, service: str, path: str, timeout: float) -> dict[str, Any]:
-    command = [dbus_binary, "-y", service, path, "GetValue"]
+def _read_gateway_value(client: GatewayClient, service: str, path: str, timeout: float) -> dict[str, Any]:
+    requested_at = time.time()
+    response = client.send(
+        {
+            "kind": "refresh_value",
+            "source": "venus-cerbo-testbed",
+            "service": service,
+            "path": path,
+            "priority": "diagnostic",
+            "reason": "probe-real",
+            "coalesce_key": f"cerbo-probe:{service}:{path}",
+        }
+    )
+    if response.get("ok") is not True:
+        return _probe_result(service, path, ok=False, skipped=False, error=str(response.get("error") or "rejected"))
+    return _wait_for_gateway_probe(client, service, path, timeout, requested_at=requested_at)
+
+
+def _wait_for_gateway_probe(
+    client: GatewayClient,
+    service: str,
+    path: str,
+    timeout: float,
+    *,
+    requested_at: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + max(0.1, float(timeout))
+    key = dbus_path_key(service, path)
+    while time.monotonic() < deadline:
+        entry = DbusCacheStore.value_entry(client.load_cache(max_age_seconds=max(1.0, timeout * 2.0)), key)
+        if entry is not None:
+            result = _probe_result_from_entry(service, path, entry, requested_at=requested_at)
+            if result is not None:
+                return result
+        time.sleep(0.05)
+    return _probe_result(service, path, ok=False, skipped=False, error="timeout")
+
+
+def _probe_result_from_entry(
+    service: str,
+    path: str,
+    entry: dict[str, object],
+    *,
+    requested_at: float,
+) -> dict[str, Any] | None:
+    status = str(entry.get("status") or "")
+    completed_at = max(_float_value(entry.get("confirmed_at")), _float_value(entry.get("error_at")))
+    if completed_at < requested_at:
+        return None
+    return _completed_probe_result(service, path, entry, status)
+
+
+def _completed_probe_result(
+    service: str,
+    path: str,
+    entry: dict[str, object],
+    status: str,
+) -> dict[str, Any] | None:
+    if status in {"fresh", "stale"}:
+        return _probe_result(service, path, ok=True, skipped=False, value=entry.get("value"))
+    if status in {"error", "unavailable"}:
+        return _probe_result(
+            service,
+            path,
+            ok=False,
+            skipped=True,
+            error=str(entry.get("last_error") or status),
+        )
+    return None
+
+
+def _float_value(value: object) -> float:
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return 0.0
     try:
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return {"service": service, "path": path, "ok": False, "skipped": False, "error": "timeout"}
-    output = completed.stdout.strip()
-    error = completed.stderr.strip()
-    skipped = completed.returncode != 0 and _is_missing_dbus_probe(error)
+        return float(value)
+    except ValueError:
+        return 0.0
+
+
+def _probe_result(
+    service: str,
+    path: str,
+    *,
+    ok: bool,
+    skipped: bool,
+    value: object = None,
+    error: str = "",
+) -> dict[str, Any]:
     return {
         "service": service,
         "path": path,
-        "ok": completed.returncode == 0,
+        "ok": ok,
         "skipped": skipped,
-        "value": output,
+        "value": value,
         "error": error,
     }
-
-
-def _is_missing_dbus_probe(error: str) -> bool:
-    missing_markers = (
-        "ServiceUnknown",
-        "UnknownMethod",
-        "UnknownObject",
-        "org.freedesktop.DBus.Error.Unknown",
-        "NoneType' object has no attribute 'name'",
-    )
-    return any(marker in error for marker in missing_markers)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,8 +239,9 @@ def build_parser() -> argparse.ArgumentParser:
     simulate = subparsers.add_parser("simulate", help="Print one deterministic DBus-like test scenario.")
     simulate.add_argument("scenario", choices=tuple(sorted(SIMULATED_SCENARIOS)))
 
-    probe = subparsers.add_parser("probe-real", help="Run read-only Cerbo relay DBus probes on Venus OS.")
+    probe = subparsers.add_parser("probe-real", help="Request read-only Cerbo relay probes through the gateway.")
     probe.add_argument("--timeout", type=float, default=3.0, help="Per-probe timeout in seconds.")
+    probe.add_argument("--gateway-run-dir", default=DEFAULT_GATEWAY_RUN_DIR)
     return parser
 
 
@@ -159,7 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if namespace.command == "simulate":
         payload = simulated_payload(namespace.scenario)
     else:
-        payload = probe_real_cerbo(namespace.timeout)
+        payload = probe_real_cerbo(namespace.timeout, namespace.gateway_run_dir)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if payload.get("ok") or payload.get("skipped") else 1
 

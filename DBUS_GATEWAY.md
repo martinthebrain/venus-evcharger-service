@@ -9,7 +9,9 @@ resource. Only one process may talk to it directly:
 All other service components, helper processes, forensic tools, companion
 publishers, and operational scripts must use the gateway interfaces. They must
 not import `dbus`, create `SystemBus` or `SessionBus`, call `GetValue`,
-`SetValue`, `Introspect`, or instantiate `VeDbusService`.
+`SetValue`, `ListNames`, `Introspect`, instantiate `VeDbusService`, or execute
+DBus command-line clients. Developer testbeds and release gates follow the same
+rule; integration tests request reads and writes through gateway IPC.
 
 ## Responsibilities
 

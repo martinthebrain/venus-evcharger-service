@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -18,6 +19,8 @@ ROOT_FILES = (
     "venus_evchargerctl.py",
 )
 PRODUCTION_ROOTS = ("venus_evcharger", "scripts")
+SHELL_ROOTS = ("scripts", "deploy")
+DOCUMENTATION_ROOTS = ("docs", "examples")
 FORBIDDEN_IMPORT_ROOTS = {"dbus", "vedbus"}
 FORBIDDEN_CALLS = {
     "SystemBus",
@@ -26,10 +29,28 @@ FORBIDDEN_CALLS = {
     "get_object",
     "GetValue",
     "SetValue",
+    "ListNames",
     "Introspect",
     "add_signal_receiver",
 }
 FORBIDDEN_NAMES = {"VeDbusService"}
+FORBIDDEN_CLI_EXECUTABLES = {"dbus", "dbus-send", "gdbus", "busctl", "dbus-monitor"}
+MIN_COMMAND_ITEMS = 2
+FORBIDDEN_CLI_SUBCOMMANDS = {
+    "dbus": {"-y", "-s", "--system", "--session"},
+    "dbus-send": {"--system", "--session"},
+    "gdbus": {"call", "introspect", "monitor", "wait", "emit"},
+    "busctl": {"call", "get-property", "set-property", "introspect", "list", "monitor"},
+}
+FORBIDDEN_CLI_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:"
+    r"dbus\s+-(?:y|s)\b|"
+    r"dbus-send\s+(?:--system|--session|--)|"
+    r"gdbus\s+(?:call|introspect|monitor|wait|emit)\b|"
+    r"busctl\s+(?:call|get-property|set-property|introspect|list|monitor)\b|"
+    r"dbus-monitor(?:\s|$)"
+    r")",
+)
 
 
 def _production_files() -> list[Path]:
@@ -55,6 +76,23 @@ def _package_production_files() -> list[Path]:
     for root in PRODUCTION_ROOTS:
         files.extend((REPO / root).rglob("*.py"))
     return files
+
+
+def _scanned_text_files() -> list[Path]:
+    files = _matching_files(REPO, ("*.sh", "*.md"), recursive=False)
+    files.extend(_matching_roots(SHELL_ROOTS, ("*.sh", "*.md")))
+    files.extend((REPO / "deploy").rglob("run"))
+    files.extend(_matching_roots(DOCUMENTATION_ROOTS, ("*.md",)))
+    return sorted({path for path in files if path.is_file() and "__pycache__" not in path.parts})
+
+
+def _matching_roots(roots: tuple[str, ...], patterns: tuple[str, ...]) -> list[Path]:
+    return [path for root in roots for path in _matching_files(REPO / root, patterns, recursive=True)]
+
+
+def _matching_files(root: Path, patterns: tuple[str, ...], *, recursive: bool) -> list[Path]:
+    matcher = root.rglob if recursive else root.glob
+    return [path for pattern in patterns for path in matcher(pattern)]
 
 
 def _absolute_import_forbidden(module: str) -> bool:
@@ -89,6 +127,16 @@ class DbusIsolationVisitor(ast.NodeVisitor):
         name = _call_name(node.func)
         if name in FORBIDDEN_CALLS:
             self._add(node, f"forbidden DBus call {name}")
+        if name in {"which", "find_executable"} and node.args and _forbidden_cli_literal(node.args[0]):
+            self._add(node, "forbidden DBus CLI lookup")
+        self.generic_visit(node)
+
+    def visit_List(self, node: ast.List) -> None:  # noqa: N802
+        self._check_command_sequence(node, node.elts)
+        self.generic_visit(node)
+
+    def visit_Tuple(self, node: ast.Tuple) -> None:  # noqa: N802
+        self._check_command_sequence(node, node.elts)
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
@@ -99,6 +147,47 @@ class DbusIsolationVisitor(ast.NodeVisitor):
         relative = self.path.relative_to(REPO)
         self.violations.append(f"{relative}:{getattr(node, 'lineno', 0)}: {message}")
 
+    def _check_command_sequence(self, node: ast.AST, items: list[ast.expr]) -> None:
+        if _forbidden_cli_sequence(items):
+            self._add(node, "forbidden DBus CLI command")
+
+
+def _forbidden_cli_literal(node: ast.AST) -> bool:
+    return _cli_literal_name(node) in FORBIDDEN_CLI_EXECUTABLES
+
+
+def _cli_literal_name(node: ast.AST) -> str:
+    if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+        return ""
+    return Path(node.value).name
+
+
+def _forbidden_cli_sequence(items: list[ast.expr]) -> bool:
+    if not items:
+        return False
+    executable = _cli_literal_name(items[0])
+    return _forbidden_cli_command(executable, _command_argument(items))
+
+
+def _forbidden_cli_command(executable: str, argument: str) -> bool:
+    if executable not in FORBIDDEN_CLI_EXECUTABLES:
+        return False
+    if executable == "dbus-monitor":
+        return True
+    if executable == "dbus-send":
+        return argument.startswith("--")
+    return argument in FORBIDDEN_CLI_SUBCOMMANDS.get(executable, set())
+
+
+def _command_argument(items: list[ast.expr]) -> str:
+    if len(items) < MIN_COMMAND_ITEMS:
+        return ""
+    return _literal_text(items[1])
+
+
+def _literal_text(node: ast.AST) -> str:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else ""
+
 
 def _violations_for(path: Path) -> list[str]:
     try:
@@ -107,13 +196,27 @@ def _violations_for(path: Path) -> list[str]:
         return [f"{path.relative_to(REPO)}:{error.lineno or 0}: unable to parse: {error.msg}"]
     visitor = DbusIsolationVisitor(path)
     visitor.visit(tree)
-    return visitor.violations
+    return visitor.violations + _cli_violations(path)
+
+
+def _cli_violations(path: Path) -> list[str]:
+    if path.resolve() == Path(__file__).resolve():
+        return []
+    violations: list[str] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        match = FORBIDDEN_CLI_PATTERN.search(line)
+        if match is not None:
+            relative = path.relative_to(REPO)
+            violations.append(f"{relative}:{line_number}: forbidden DBus CLI {match.group(0)}")
+    return violations
 
 
 def main() -> int:
     violations: list[str] = []
     for path in _production_files():
         violations.extend(_violations_for(path))
+    for path in _scanned_text_files():
+        violations.extend(_cli_violations(path))
     if violations:
         print("Direct DBus access is only allowed in dedicated DBus gateway adapter modules.", file=sys.stderr)
         for violation in violations:

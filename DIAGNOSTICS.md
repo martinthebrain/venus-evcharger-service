@@ -1,7 +1,7 @@
 # Diagnostics
 
-This file collects the operational DBus paths, log locations, and quick checks
-for live troubleshooting on Venus OS.
+This file collects the operational gateway values, log locations, and quick
+checks for live troubleshooting on Venus OS.
 
 ## Service Commands
 
@@ -17,11 +17,8 @@ tail -f /var/volatile/log/dbus-venus-evcharger/auto-reasons.log
 When the charger did something unexpected, start with these paths:
 
 ```bash
-dbus -y com.victronenergy.evcharger.http_60 /Mode GetValue
-dbus -y com.victronenergy.evcharger.http_60 /StartStop GetValue
-dbus -y com.victronenergy.evcharger.http_60 /Status GetValue
-dbus -y com.victronenergy.evcharger.http_60 /Auto/DecisionReason GetValue
-dbus -y com.victronenergy.evcharger.http_60 /Auto/DecisionState GetValue
+python3 scripts/ops/gateway_cache_read.py \
+  /Mode /StartStop /Status /Auto/DecisionReason /Auto/DecisionState
 ```
 
 Read them as:
@@ -147,10 +144,9 @@ In `Mode=2` (`Scheduled/Plan`), `/StartStop=1` does not force the relay on.
 It only allows the scheduled/Auto policy to charge. For immediate manual
 charging, switch to manual mode first and then start:
 
-```bash
-dbus -y com.victronenergy.evcharger.http_60 /Mode SetValue 0
-dbus -y com.victronenergy.evcharger.http_60 /StartStop SetValue 1
-```
+Use the Venus GUI controls for `Mode=0` and `StartStop=1`, or the authenticated
+local Control API when it is enabled. Operational tools must not bypass the
+gateway with direct DBus writes.
 
 If the service UI stops updating, restart the service before rebooting the GX:
 

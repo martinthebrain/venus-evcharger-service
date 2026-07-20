@@ -83,7 +83,7 @@ This guide covers the usual installation paths for Venus OS and Cerbo GX.
 
    ```bash
    svstat /service/dbus-venus-evcharger
-   dbus -y com.victronenergy.evcharger.http_60 /Connected GetValue
+   python3 scripts/ops/gateway_cache_read.py /Connected
    ```
 
 8. Optional: use the deploy-local API helper for quick diagnostics or manual
