@@ -255,6 +255,16 @@ class MutationAuditScriptTests(unittest.TestCase):
             ("tests/test_mutation_audit_script.py",),
         )
 
+    def test_auto_input_helper_entrypoint_uses_its_runtime_contract_tests(self) -> None:
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("venus_evcharger_auto_input_helper.py"),
+            ("tests/test_venus_evcharger_auto_input_helper.py",),
+        )
+        parsed = tomllib.loads(
+            mutation_audit_config.mutmut_config_toml("venus_evcharger_auto_input_helper.py")
+        )
+        self.assertIn("venus_evcharger", parsed["tool"]["mutmut"]["also_copy"])
+
     def test_grid_fusion_targets_use_focused_contract_selection(self) -> None:
         expected = ("tests/test_grid_measurement_fusion.py",)
         self.assertEqual(

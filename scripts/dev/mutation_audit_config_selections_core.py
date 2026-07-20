@@ -17,6 +17,7 @@ _STORAGE_GATEWAY_BOUNDARY_TESTS = ('tests/test_storage_gateway_boundary_contract
 
 FOCUSED_TEST_SELECTIONS_CORE: tuple[tuple[str, tuple[str, ...]], ...] = (('venus_evcharger/app/', ('tests/test_app_bootstrap_support.py',)),
  ('scripts/dev/', ('tests/test_mutation_audit_script.py',)),
+ ('venus_evcharger_auto_input_helper.py', ('tests/test_venus_evcharger_auto_input_helper.py',)),
  ('venus_evcharger/energy/grid_fusion', ('tests/test_grid_measurement_fusion.py',)),
  ('venus_evcharger/inputs/helper/grid_fusion_snapshot.py', ('tests/test_grid_measurement_fusion.py',)),
  ('venus_evcharger/backend/modbus_transport_serial.py', ('tests/test_venus_evcharger_backend_modbus_transport.py',)),

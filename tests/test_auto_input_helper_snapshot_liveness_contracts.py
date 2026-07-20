@@ -39,6 +39,17 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         second = store.collect(100.1)
         self.assertEqual(first["pv_power"], second["pv_power"])
 
+    def test_poll_publishes_due_sources_and_stops_without_more_work(self) -> None:
+        writer = MemoryWriter()
+        stop_requested = MagicMock(side_effect=[False, True])
+        store = SnapshotStore(helper_settings(), FakeSources(), writer, stop_requested)
+        with patch("venus_evcharger.inputs.helper.snapshot.time.time", return_value=100.0):
+            self.assertTrue(store.poll())
+            self.assertFalse(store.poll())
+        self.assertEqual(len(writer.payloads), 1)
+        self.assertEqual(writer.payloads[0]["battery_soc"], 50.0)
+        self.assertEqual(writer.payloads[0]["battery_captured_at"], 100.0)
+
     def test_refresh_source_writes_and_updates_battery_fields(self) -> None:
         sources = FakeSources()
         sources.battery = {"battery_soc": 66.0, "battery_source_count": 2}

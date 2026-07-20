@@ -6,6 +6,7 @@ from __future__ import annotations
 import signal
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -95,7 +96,21 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         helper.liveness = MagicMock()
         with patch("venus_evcharger_auto_input_helper.GLIB_RUNTIME.timeout_add") as timeout_add:
             helper._install_timers()
-        self.assertEqual(timeout_add.call_count, 3)
+        self.assertEqual(timeout_add.call_count, 4)
+        timeout_add.assert_any_call(
+            max(200, int(helper.settings.poll_interval_seconds * 1000)),
+            helper.snapshots.poll,
+        )
+
+    def test_snapshot_poll_timer_has_a_200_millisecond_lower_bound(self) -> None:
+        helper = object.__new__(AutoInputHelper)
+        helper.settings = replace(helper_settings(), poll_interval_seconds=0.001)
+        helper.snapshots = MagicMock()
+        helper.subscriptions = MagicMock()
+        helper.liveness = MagicMock()
+        with patch("venus_evcharger_auto_input_helper.GLIB_RUNTIME.timeout_add") as timeout_add:
+            helper._install_timers()
+        timeout_add.assert_any_call(200, helper.snapshots.poll)
 
     def test_initial_refresh_honours_stop_and_initializes_when_running(self) -> None:
         helper = object.__new__(AutoInputHelper)
