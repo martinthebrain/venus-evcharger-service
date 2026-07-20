@@ -18,18 +18,25 @@ venus_service_down() {
 venus_service_up() {
 	venus_service_registered "$1" || return 0
 	service_path=$(venus_service_path "$1")
+	venus_wait_for_supervisor "$1" || return 1
 	remaining_seconds="${VENUS_EVCHARGER_SUPERVISOR_WAIT_SECONDS:-10}"
-	while ! { [ -p "$service_path/supervise/ok" ] && svc -u "$service_path"; }; do
+	while ! svc -u "$service_path" >/dev/null 2>&1; do
 		[ "$remaining_seconds" -gt 0 ] || return 1
 		sleep 1
 		remaining_seconds=$((remaining_seconds - 1))
 	done
 }
 
-venus_wait_for_supervisor() {
+venus_supervisor_ready() {
 	service_path=$(venus_service_path "$1")
+	[ -p "$service_path/supervise/ok" ] || return 1
+	command -v svstat >/dev/null 2>&1 || return 1
+	svstat "$service_path" >/dev/null 2>&1
+}
+
+venus_wait_for_supervisor() {
 	remaining_seconds="${VENUS_EVCHARGER_SUPERVISOR_WAIT_SECONDS:-10}"
-	while [ ! -p "$service_path/supervise/ok" ]; do
+	while ! venus_supervisor_ready "$1"; do
 		[ "$remaining_seconds" -gt 0 ] || return 1
 		sleep 1
 		remaining_seconds=$((remaining_seconds - 1))

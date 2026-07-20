@@ -66,6 +66,7 @@ VENUS_EVCHARGER_SERVICE_SETTLE_SECONDS=0
 VENUS_EVCHARGER_ADAPTER_START_SECONDS=0
 VENUS_EVCHARGER_SUPERVISOR_WAIT_SECONDS=0
 svc() {{ printf '%s\n' "$*" >> {service_log!s}; }}
+svstat() {{ return 0; }}
 kill() {{ printf '%s\n' "$*" >> {kill_log!s}; }}
 . "$SCRIPT_DIR/service_lifecycle.sh"
 venus_reconcile_services
@@ -95,6 +96,43 @@ venus_reconcile_services
                     "dbus-venus-evcharger-observer",
                 ],
             )
+
+    def test_waits_for_responsive_supervisor_before_start_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            service_root = root / "service"
+            service_path = service_root / "adapter"
+            supervisor_dir = service_path / "supervise"
+            supervisor_dir.mkdir(parents=True)
+            os.mkfifo(supervisor_dir / "ok")
+            readiness_log = root / "readiness.log"
+            service_log = root / "service.log"
+            command = f"""
+SERVICE_ROOT={service_root!s}
+VENUS_EVCHARGER_SUPERVISOR_WAIT_SECONDS=3
+sleep() {{ :; }}
+svstat() {{
+    printf 'check\n' >> {readiness_log!s}
+    [ "$(wc -l < {readiness_log!s})" -ge 3 ]
+}}
+svc() {{ printf '%s\n' "$*" >> {service_log!s}; }}
+. {LIFECYCLE_SCRIPT!s}
+venus_service_up adapter
+"""
+
+            result = subprocess.run(
+                ["sh", "-c", command],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=os.environ.copy(),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stderr, "")
+            self.assertEqual(readiness_log.read_text(encoding="utf-8").splitlines(), ["check", "check", "check"])
+            self.assertEqual(service_log.read_text(encoding="utf-8").splitlines(), [f"-u {service_path}"])
 
 
 if __name__ == "__main__":
