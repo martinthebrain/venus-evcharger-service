@@ -199,7 +199,7 @@ and multiple physical devices can share the same profile.
    ```bash
    svc -t /service/dbus-venus-evcharger
    svstat /service/dbus-venus-evcharger
-   dbus -y com.victronenergy.evcharger.http_60 /Connected GetValue
+   python3 scripts/ops/gateway_cache_read.py /Connected
    ```
 
    In the Venus GUI, also check the EV charger tile: `Mode`, `StartStop`,

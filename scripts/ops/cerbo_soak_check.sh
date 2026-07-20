@@ -4,6 +4,7 @@ set -u
 
 SERVICE_PATH="${SERVICE_PATH:-/service/dbus-venus-evcharger}"
 DBUS_NAME="${DBUS_NAME:-com.victronenergy.evcharger.http_60}"
+GATEWAY_CACHE_PATH="${GATEWAY_CACHE_PATH:-/run/venus-evcharger/dbus-cache.json}"
 AUTO_REASON_LOG="${AUTO_REASON_LOG:-/var/volatile/log/dbus-venus-evcharger/auto-reasons.log}"
 AUTO_SNAPSHOT_PATH="${AUTO_SNAPSHOT_PATH:-/run/dbus-venus-evcharger-auto-60.json}"
 TAIL_LINES="${TAIL_LINES:-40}"
@@ -40,6 +41,24 @@ run_shell() {
 	return 0
 }
 
+print_gateway_values() {
+	python3 - "$GATEWAY_CACHE_PATH" "$DBUS_NAME" <<'PY'
+import json
+import sys
+
+cache_path, service = sys.argv[1:3]
+with open(cache_path, encoding="utf-8") as handle:
+    snapshot = json.load(handle)
+values = snapshot.get("values", {})
+for path in ("/ProductName", "/Connected", "/Status", "/Mode", "/DeviceInstance", "/Ac/Power"):
+    entry = values.get(f"path:{service}{path}")
+    if not isinstance(entry, dict):
+        print(f"{path}: <missing>")
+        continue
+    print(f"{path}: {entry.get('value')!r} status={entry.get('status')} age_s={entry.get('age_s')}")
+PY
+}
+
 section "Time"
 run_cmd "date" date
 run_cmd "uptime" uptime
@@ -53,13 +72,12 @@ section "Processes"
 run_shell "ps | grep -E 'venus_evcharger|venus-evcharger|dbus-venus-evcharger' | grep -v grep" \
 	"ps | grep -E 'venus_evcharger|venus-evcharger|dbus-venus-evcharger' | grep -v grep"
 
-section "DBus"
-run_cmd "dbus -y $DBUS_NAME /ProductName GetValue" dbus -y "$DBUS_NAME" /ProductName GetValue
-run_cmd "dbus -y $DBUS_NAME /Connected GetValue" dbus -y "$DBUS_NAME" /Connected GetValue
-run_cmd "dbus -y $DBUS_NAME /Status GetValue" dbus -y "$DBUS_NAME" /Status GetValue
-run_cmd "dbus -y $DBUS_NAME /Mode GetValue" dbus -y "$DBUS_NAME" /Mode GetValue
-run_cmd "dbus -y $DBUS_NAME /DeviceInstance GetValue" dbus -y "$DBUS_NAME" /DeviceInstance GetValue
-run_cmd "dbus -y $DBUS_NAME /Ac/Power GetValue" dbus -y "$DBUS_NAME" /Ac/Power GetValue
+section "Gateway Cache"
+if [ -f "$GATEWAY_CACHE_PATH" ]; then
+	run_cmd "read EVCS values from $GATEWAY_CACHE_PATH" print_gateway_values
+else
+	printf 'Gateway cache missing: %s\n' "$GATEWAY_CACHE_PATH"
+fi
 
 section "Snapshot"
 if [ -f "$AUTO_SNAPSHOT_PATH" ]; then
@@ -80,5 +98,5 @@ section "Hints"
 printf '%s\n' 'Healthy signs:'
 printf '%s\n' '- service stays up with stable pid'
 printf '%s\n' '- one main process plus one helper process'
-printf '%s\n' '- DBus values answer without traceback'
+printf '%s\n' '- gateway cache values are fresh and plausible'
 printf '%s\n' '- auto audit log shows plausible reasons instead of restart noise'

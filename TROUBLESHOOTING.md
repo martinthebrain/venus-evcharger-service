@@ -31,15 +31,15 @@ behavior in [UPDATE_FLOW.md](UPDATE_FLOW.md).
 
 ## EV Charger Tile Does Not Appear
 
-Check whether the DBus service is present:
+Check whether the gateway reports the EV charger service as connected:
 
 ```bash
-dbus -y com.victronenergy.evcharger.http_60 /Connected GetValue
+python3 scripts/ops/gateway_cache_read.py /Connected
 ```
 
 Replace `http_60` with the configured `DeviceInstance` when needed.
 
-If DBus is present and the tile still does not refresh, restart the GUI:
+If the cached service is connected and the tile still does not refresh, restart the GUI:
 
 ```bash
 svc -t /service/gui
