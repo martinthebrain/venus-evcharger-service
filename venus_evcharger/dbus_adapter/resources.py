@@ -205,10 +205,20 @@ def _proc_numeric_lines(lines: Iterable[str], *, digits_only: bool) -> dict[str,
         key, separator, raw_value = line.partition(":")
         if not separator:
             return {}
-        token = raw_value.strip().split()[0]
-        if not digits_only or token.isdigit():
-            values[key] = float(token)
+        token = _proc_numeric_token(raw_value, digits_only=digits_only)
+        if token is None:
+            continue
+        values[key] = float(token)
     return values
+
+
+def _proc_numeric_token(raw_value: str, *, digits_only: bool) -> str | None:
+    token = next(iter(raw_value.strip().split()), None)
+    if token is None:
+        return None
+    if digits_only and not token.isdigit():
+        return None
+    return token
 
 
 def _percentage(value: float, total: float) -> float:

@@ -144,13 +144,19 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             self.assertEqual(entry["value"], 12.5)
             self.assertEqual(entry["source"], "svc.direct/Value")
             self.assertEqual(entry["status"], "fresh")
+            self.assertEqual(entry["freshness_kind"], "external_read")
 
             adapter.read_executor.last_operation_performed = True
             self.assertEqual(
-                adapter.read_executor.poll_read_spec("direct_value", {"service": "svc.direct", "path": "/Direct"}),
+                adapter.read_executor.poll_read_spec(
+                    "direct_value",
+                    {"service": "svc.direct", "path": "/Direct", "interval": 2.0},
+                ),
                 "applied",
             )
             self.assertIs(adapter.read_executor.last_operation_performed, False)
+            self.assertEqual(adapter.cache.values["direct_value"]["stale_after_s"], 6.0)
+            self.assertEqual(adapter.cache.values["direct_value"]["freshness_kind"], "external_read")
 
             error = RuntimeError("offline")
             install_mock(adapter.read_executor, "read_busitem", MagicMock(side_effect=error))
@@ -303,6 +309,8 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 source="optional_value",
                 confidence=0.55,
                 last_error="optional offline",
+                freshness_kind="external_read",
+                stale_after_seconds=None,
             )
             log_debug.assert_called_once_with(
                 "DBus adapter optional read fell back to zero key=%s: %s",
@@ -327,6 +335,10 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
         self.assertEqual(read_module.DbusReadExecutor._optional_confidence({"optional_confidence": None}), 0.2)
         self.assertEqual(read_module.DbusReadExecutor._optional_confidence({"optional_confidence": 0.0}), 0.2)
         self.assertEqual(read_module.DbusReadExecutor._optional_confidence({"optional_confidence": 0.45}), 0.45)
+        self.assertIsNone(read_module._spec_stale_after_seconds({}))
+        self.assertEqual(read_module._spec_stale_after_seconds({"interval": 2.0}), 6.0)
+        self.assertEqual(read_module._spec_stale_after_seconds({"interval": 0.25}), 1.0)
+        self.assertEqual(read_module._spec_stale_after_seconds({"stale_after_seconds": -1.0}), 0.0)
         self.assertEqual(
             read_module.DbusReadExecutor._spec_source({"service": "svc", "prefix": "ignored"}, fallback="fb"), "svc"
         )
@@ -335,6 +347,43 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
         )
         self.assertEqual(read_module.DbusReadExecutor._spec_source({}, fallback="fb"), "fb")
         self.assertEqual(read_module.DbusReadExecutor._spec_source({}), "")
+
+    def test_read_executor_ttl_lifecycle_is_keyed_and_preserved_while_deferred(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            spec = {"service": "svc", "path": "/Power", "interval": 2.0}
+
+            with patch.object(
+                adapter.read_executor,
+                "_poll_read_spec_unchecked",
+                side_effect=["deferred", "applied"],
+            ):
+                self.assertEqual(adapter.read_executor.poll_read_spec("power", spec), "deferred")
+                self.assertEqual(adapter.read_executor._stale_after_by_key, {"power": 6.0})
+                self.assertEqual(adapter.read_executor.poll_read_spec("power", spec), "applied")
+                self.assertEqual(adapter.read_executor._stale_after_by_key, {})
+
+            adapter.read_executor._stale_after_by_key = {"power": 6.0, "other": 9.0}
+            with patch.object(adapter.cache, "mark_error") as mark_error:
+                adapter.read_executor._mark_read_error("power", spec, RuntimeError("offline"))
+            self.assertEqual(adapter.read_executor._stale_after_by_key, {"other": 9.0})
+            mark_error.assert_called_once()
+
+            adapter.read_executor._stale_after_by_key = {"power": 6.0, "other": 9.0}
+            with patch.object(adapter.cache, "update_value") as update_value:
+                adapter.read_executor._mark_optional_zero("power", spec, RuntimeError("offline"))
+            self.assertEqual(adapter.read_executor._stale_after_by_key, {"other": 9.0})
+            update_value.assert_called_once_with(
+                "power",
+                0.0,
+                source="svc",
+                confidence=0.2,
+                last_error="offline",
+                freshness_kind="external_read",
+                stale_after_seconds=6.0,
+            )
 
     def test_read_executor_aggregate_dispatch_contracts_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -361,7 +410,13 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                     adapter.read_executor._poll_sum_step("empty_sum", {"aggregate": "sum", "service": "svc.empty"}),
                     "applied",
                 )
-                update_value.assert_called_once_with("empty_sum", 0.0, source="svc.empty")
+            update_value.assert_called_once_with(
+                "empty_sum",
+                0.0,
+                source="svc.empty",
+                freshness_kind="external_read",
+                stale_after_seconds=None,
+            )
 
             aggregate.reset_mock()
             with patch.object(adapter.cache, "update_value") as update_value:
@@ -373,7 +428,13 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                     "applied",
                 )
                 aggregate.assert_not_called()
-                update_value.assert_called_once_with("empty_path_sum", 0.0, source="svc.empty")
+                update_value.assert_called_once_with(
+                    "empty_path_sum",
+                    0.0,
+                    source="svc.empty",
+                    freshness_kind="external_read",
+                    stale_after_seconds=None,
+                )
 
             adapter.cache.update_services(["pv.2", "other.1", "pv.1"])
             aggregate.reset_mock()

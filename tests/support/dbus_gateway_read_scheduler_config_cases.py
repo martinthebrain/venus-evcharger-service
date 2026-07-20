@@ -65,6 +65,7 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
                 "service": "svc",
                 "paths": ["/A", "/B"],
                 "interval": 2,
+                "stale_after_seconds": 6,
                 "use_dc_pv": True,
                 "optional_zero_on_error": False,
                 "optional_confidence": 0.2,
@@ -79,6 +80,7 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
         self.assertEqual(spec["service"], "svc")
         self.assertEqual(spec["paths"], ["/A", "/B"])
         self.assertEqual(spec["interval"], 2.0)
+        self.assertEqual(spec["stale_after_seconds"], 6.0)
         self.assertEqual(spec["optional_confidence"], 0.2)
         self.assertFalse(spec["optional_zero_on_error"])
         self.assertTrue(spec["use_dc_pv"])

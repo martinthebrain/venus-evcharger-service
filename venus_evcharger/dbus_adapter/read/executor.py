@@ -32,12 +32,21 @@ def _spec_text(spec: ReadSpec, key: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _spec_stale_after_seconds(spec: ReadSpec) -> float | None:
+    configured = spec.get("stale_after_seconds")
+    if configured is not None:
+        return max(0.0, float(configured))
+    interval = spec.get("interval")
+    return max(1.0, float(interval) * 3.0) if interval is not None else None
+
+
 class DbusReadExecutor:
     """Execute scheduled DBus reads and update the adapter cache."""
 
     def __init__(self, adapter: DbusReadAdapter) -> None:
         self.adapter = adapter
         self._aggregates = AggregateStore()
+        self._stale_after_by_key: dict[str, float | None] = {}
         self.last_operation_performed = False
 
     def refresh_requested_value(self, command: CommandMapping) -> CommandOutcome:
@@ -65,13 +74,21 @@ class DbusReadExecutor:
             self.adapter.cache.mark_error(target.cache_key, source=target.source, error=error)
             logging.debug("DBus adapter direct refresh failed key=%s: %s", target.cache_key, error)
             return "dropped"
-        self.adapter.cache.update_value(target.cache_key, value, source=target.source)
+        self.adapter.cache.update_external_read(
+            target.cache_key,
+            value,
+            source=target.source,
+        )
         return "applied"
 
     def poll_read_spec(self, key: str, spec: ReadSpec) -> CommandOutcome:
         self.last_operation_performed = False
+        self._stale_after_by_key[key] = _spec_stale_after_seconds(spec)
         try:
-            return self._poll_read_spec_unchecked(key, spec)
+            outcome = self._poll_read_spec_unchecked(key, spec)
+            if outcome != "deferred":
+                self._stale_after_by_key.pop(key, None)
+            return outcome
         except DbusOperationDeferred:
             return "deferred"
         except DBUS_READ_ERRORS as error:
@@ -97,22 +114,25 @@ class DbusReadExecutor:
         if target is None:
             return "dropped"
         value = self.read_busitem(target.service, target.path)
-        self._update_read_value(key, target, value)
+        self._update_read_value(key, target, value, spec=spec)
         return "applied"
 
     def _mark_read_error(self, key: str, spec: ReadSpec, error: BaseException) -> None:
         self._aggregates.discard(key)
+        self._stale_after_by_key.pop(key, None)
         self.adapter.cache.mark_error(key, source=self._spec_source(spec), error=error)
         logging.debug("DBus adapter read failed key=%s: %s", key, error)
 
     def _mark_optional_zero(self, key: str, spec: ReadSpec, error: BaseException) -> None:
         self._aggregates.discard(key)
-        self.adapter.cache.update_value(
+        self._stale_after_by_key.pop(key, None)
+        self.adapter.cache.update_external_read(
             key,
             0.0,
             source=self._spec_source(spec, fallback=key),
             confidence=self._optional_confidence(spec),
             last_error=str(error),
+            stale_after_seconds=_spec_stale_after_seconds(spec),
         )
         logging.debug("DBus adapter optional read fell back to zero key=%s: %s", key, error)
 
@@ -140,7 +160,12 @@ class DbusReadExecutor:
         paths = spec.get("paths", [])
         members = [(service, str(path)) for path in paths if str(path)]
         if not members:
-            self.adapter.cache.update_value(key, 0.0, source=service)
+            self.adapter.cache.update_external_read(
+                key,
+                0.0,
+                source=service,
+                stale_after_seconds=_spec_stale_after_seconds(spec),
+            )
             return "applied"
         return self._poll_aggregate_step(key, ("sum", tuple(members)), members)
 
@@ -180,7 +205,7 @@ class DbusReadExecutor:
         if target is None:
             return "dropped"
         value = self.read_busitem(target.service, target.path)
-        self._update_read_value(key, target, value)
+        self._update_read_value(key, target, value, spec=spec)
         return "applied"
 
     def _services_for_sum(self, spec: ReadSpec) -> list[str]:
@@ -232,7 +257,11 @@ class DbusReadExecutor:
             return None
         target = read_target(service, path)
         if target is not None:
-            self.adapter.cache.update_value(target.cache_key, value, source=target.source)
+            self.adapter.cache.update_external_read(
+                target.cache_key,
+                value,
+                source=target.source,
+            )
         return value
 
     def _read_aggregate_member_value(
@@ -268,11 +297,27 @@ class DbusReadExecutor:
         state.record_error(service, path, error)
         logging.debug("DBus adapter optional aggregate member failed %s%s: %s", service, path, error)
 
-    def _update_read_value(self, key: str, target: ReadTarget, value: object) -> None:
+    def _update_read_value(
+        self,
+        key: str,
+        target: ReadTarget,
+        value: object,
+        *,
+        spec: ReadSpec | None = None,
+    ) -> None:
         path_key = target.cache_key
-        self.adapter.cache.update_value(path_key, value, source=target.source)
+        self.adapter.cache.update_external_read(
+            path_key,
+            value,
+            source=target.source,
+        )
         if key != path_key:
-            self.adapter.cache.update_value(key, value, source=target.source)
+            self.adapter.cache.update_external_read(
+                key,
+                value,
+                source=target.source,
+                stale_after_seconds=_spec_stale_after_seconds(spec) if spec is not None else None,
+            )
 
     @staticmethod
     def _record_aggregate_member(state: AggregateState, service: str, path: str, value: object) -> None:
@@ -280,12 +325,13 @@ class DbusReadExecutor:
 
     def _complete_aggregate(self, key: str, state: AggregateState) -> None:
         payload = state.payload(key)
-        self.adapter.cache.update_value(
+        self.adapter.cache.update_external_read(
             key,
             payload["value"],
             source=payload["source"],
             confidence=payload["confidence"],
             last_error=payload["last_error"],
+            stale_after_seconds=self._stale_after_by_key.pop(key, None),
         )
         self._aggregates.discard(key)
 

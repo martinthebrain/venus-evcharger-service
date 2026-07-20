@@ -21,6 +21,7 @@ class ReadSpec(TypedDict, total=False):
     prefix: str
     priority: str
     service: str
+    stale_after_seconds: float
     use_dc_pv: bool
 
 
@@ -116,6 +117,10 @@ def _set_optional_confidence(spec: ReadSpec, value: float) -> None:
     spec["optional_confidence"] = value
 
 
+def _set_stale_after_seconds(spec: ReadSpec, value: float) -> None:
+    spec["stale_after_seconds"] = value
+
+
 def _set_optional_zero_on_error(spec: ReadSpec, value: bool) -> None:
     spec["optional_zero_on_error"] = value
 
@@ -136,6 +141,7 @@ _TEXT_SETTERS: dict[str, _TextSetter] = {
 _FLOAT_SETTERS: dict[str, _FloatSetter] = {
     "interval": _set_interval,
     "optional_confidence": _set_optional_confidence,
+    "stale_after_seconds": _set_stale_after_seconds,
 }
 _BOOL_SETTERS: dict[str, _BoolSetter] = {
     "optional_zero_on_error": _set_optional_zero_on_error,

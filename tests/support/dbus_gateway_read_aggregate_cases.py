@@ -278,6 +278,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                         "aggregate": "first-service",
                         "prefix": "com.victronenergy.battery",
                         "path": "/Soc",
+                        "interval": 2.0,
                     },
                 ),
                 "applied",
@@ -289,6 +290,8 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             member_key = "path:com.victronenergy.battery.socketcan_can1/Soc"
             self.assertEqual(adapter.cache.values[member_key]["value"], 74.0)
             self.assertEqual(adapter.cache.values[member_key]["status"], "fresh")
+            self.assertEqual(adapter.cache.values[member_key]["freshness_kind"], "external_read")
+            self.assertEqual(adapter.cache.values["battery_soc"]["stale_after_s"], 6.0)
 
     def test_read_executor_covers_refresh_sum_error_and_direct_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -387,9 +390,14 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 adapter.read_executor.poll_read_spec("later", {"service": "svc", "path": "/Later"}), "deferred"
             )
             self.assertEqual(
-                adapter.read_executor.poll_read_spec("empty", {"aggregate": "sum", "service": "svc", "paths": []}),
+                adapter.read_executor.poll_read_spec(
+                    "empty",
+                    {"aggregate": "sum", "service": "svc", "paths": [], "interval": 2.0},
+                ),
                 "applied",
             )
+            self.assertEqual(adapter.cache.values["empty"]["stale_after_s"], 6.0)
+            self.assertEqual(adapter.cache.values["empty"]["freshness_kind"], "external_read")
             self.assertEqual(adapter.cache.values["empty"]["value"], 0.0)
             self.assertEqual(
                 adapter.read_executor.poll_read_spec(

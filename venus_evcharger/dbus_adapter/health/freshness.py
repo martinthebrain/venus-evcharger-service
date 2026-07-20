@@ -18,7 +18,41 @@ def cache_freshness(cache: DbusCacheStore, now: float) -> CommandPayload:
         key: cache.value_snapshot(value, now)
         for key, value in cache.values.items()
     }
-    return {"value_count": len(values), "status_counts": status_counts(values), **important_freshness(values)}
+    critical_values: CacheValues = {
+        key: value for key, value in values.items() if key in FAST_READ_KEYS
+    }
+    external_values = values_for_kinds(values, {"external_read"})
+    local_values = values_for_kinds(values, {"local_owned", "static"})
+    diagnostic_values = values_for_kinds(values, {"diagnostic"})
+    return {
+        "value_count": len(values),
+        "status_counts": status_counts(critical_values),
+        "all_status_counts": status_counts(values),
+        "external_read_status_counts": status_counts(external_values),
+        "local_publish_status_counts": status_counts(local_values),
+        "static_status_counts": status_counts(values_for_kinds(values, {"static"})),
+        "diagnostic_status_counts": status_counts(diagnostic_values),
+        "critical_stale_count": count_status(critical_values, "stale"),
+        "optional_source_error_count": optional_source_error_count(external_values),
+        **important_freshness(values),
+    }
+
+
+def values_for_kinds(values: CacheValues, kinds: set[str]) -> dict[str, Mapping[str, object]]:
+    return {
+        key: value
+        for key, value in values.items()
+        if str(value.get("freshness_kind", "external_read")) in kinds
+    }
+
+
+def count_status(values: CacheValues, expected: str) -> int:
+    return sum(1 for value in values.values() if str(value.get("status", "unknown")) == expected)
+
+
+def optional_source_error_count(values: CacheValues) -> int:
+    optional_values = {key: value for key, value in values.items() if key not in FAST_READ_KEYS}
+    return count_status(optional_values, "error")
 
 
 def status_counts(values: CacheValues) -> dict[str, int]:

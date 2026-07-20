@@ -87,14 +87,34 @@ Consumers read `dbus-cache.json`. Every value is more than a scalar:
 
 - `value`: last value seen by the adapter
 - `source`: DBus service/path source
-- `updated_at`: capture timestamp
-- `age_s`: age at snapshot creation
-- `status`: `fresh`, `stale`, or `error`
+- `changed_at`: timestamp of the last semantic value change
+- `confirmed_at`: timestamp of the last successful read or ownership confirmation
+- `updated_at`: compatibility alias for `confirmed_at`
+- `age_s`: confirmation age at snapshot creation
+- `change_age_s`: age of the semantic value itself
+- `freshness_kind`: `external_read`, `local_owned`, `static`, or `diagnostic`
+- `stale_after_s`: per-value read TTL where applicable
+- `status`: `fresh`, `stale`, `error`, or `unavailable`
 - `last_error`: last read error, if any
 - `confidence`: advisory confidence
 
 If a value is missing or too old, consumers request a refresh from the gateway.
 They still do not read DBus directly.
+
+Freshness is deliberately class-specific. External measurements become stale
+after the TTL derived from their read specification. Adapter-owned values stay
+fresh while the EV charger DBus service is registered, static identity values
+do not age merely because they remain unchanged, and introspection diagnostics
+are not treated as measurements. An owned value becomes `unavailable` when its
+service registration is absent.
+
+`dbus-health.json` separates `external_read_status_counts`,
+`local_publish_status_counts`, `static_status_counts`, and
+`diagnostic_status_counts`. The compatibility field `status_counts` describes
+only the three critical semantic reads. `critical_stale_count` therefore cannot
+be inflated by unchanged GUI/configuration paths, while
+`optional_source_error_count` keeps failed AC/DC PV candidates visible without
+marking a successfully aggregated `pv_power_w` value stale.
 
 Standard Auto inputs do not use raw DBus service/path keys. PV power, grid
 power, and battery SOC are gateway-owned semantic read keys:

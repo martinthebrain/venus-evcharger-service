@@ -22,6 +22,7 @@ from venus_evcharger.core.contracts_control_surface import (
     EVCS_SOFTWARE_UPDATE_CONTROL_PATHS,
     EVCS_WRITABLE_PATHS,
 )
+from venus_evcharger.dbus_gateway_core import CacheFreshnessKind
 
 VenusPathRole = Literal["identity", "measurement", "control", "status"]
 
@@ -50,6 +51,11 @@ VENUS_EV_CHARGER_IDENTITY_PATHS = (
     "/UpdateIndex",
     "/Position",
 )
+
+VENUS_EV_CHARGER_STATIC_PATHS = frozenset(VENUS_EV_CHARGER_IDENTITY_PATHS) - {
+    "/Connected",
+    "/UpdateIndex",
+}
 
 VENUS_EV_CHARGER_MEASUREMENT_PATHS = (
     "/Ac/Power",
@@ -287,3 +293,13 @@ def mismatched_venus_writeability(path: str, writeable: bool) -> bool:
 def venus_path_writeable(path: str) -> bool:
     """Return whether the Venus EVCS surface expects the path to be writeable."""
     return path in VENUS_EV_CHARGER_WRITABLE_PATHS
+
+
+def evcs_path_freshness_kind(path: str) -> CacheFreshnessKind:
+    """Classify one adapter-owned path for cache freshness diagnostics."""
+    normalized = str(path)
+    if normalized in VENUS_EV_CHARGER_STATIC_PATHS:
+        return "static"
+    if normalized.startswith("/Auto/"):
+        return "diagnostic"
+    return "local_owned"

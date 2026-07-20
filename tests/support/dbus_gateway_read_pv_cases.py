@@ -13,6 +13,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     read_pv_module,
     tempfile,
 )
+from venus_evcharger.dbus_adapter.health.freshness import cache_freshness
 
 
 class GatewayPvReadCases(GatewayAdapterContractCase):
@@ -99,6 +100,10 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             self.assertEqual(member["status"], "error")
             self.assertEqual(member["last_error"], "night pv asleep")
             self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 0.0)
+            health = cache_freshness(adapter.cache, 1.0 + float(adapter.cache.values["pv_power_w"]["confirmed_at"]))
+            self.assertEqual(health["pv_power_w_status"], "fresh")
+            self.assertEqual(health["status_counts"], {"fresh": 1})
+            self.assertEqual(health["optional_source_error_count"], 1)
 
     def test_optional_direct_read_falls_back_to_fresh_zero(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -51,6 +51,7 @@ class DbusAdapterIdentityContext(Protocol):  # pragma: no cover
     """EV-charger DBus service identity surface required by ``DbusAdapterIdentity``."""
 
     config: configparser.ConfigParser
+    cache: DbusCacheStore
     write_scheduler: DbusWriteScheduler
     service_name: str
     _dbusservice: DbusServiceLike | None

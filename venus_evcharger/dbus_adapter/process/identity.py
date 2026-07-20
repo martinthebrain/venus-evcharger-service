@@ -15,6 +15,7 @@ from venus_evcharger.dbus_adapter.contracts import DbusServiceLike
 from venus_evcharger.dbus_adapter.process.config import configured_device_instance
 from venus_evcharger.dbus_adapter.process.io import DbusAdapterIo
 from venus_evcharger.dbus_adapter.process.protocols.runtime import DbusAdapterIdentityContext
+from venus_evcharger.dbus_gateway import dbus_path_key, evcs_path_freshness_kind
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 
 
@@ -40,6 +41,7 @@ class DbusAdapterIdentity(DbusAdapterIo):
     ) -> None:
         self._dbusservice = service
         self._dbusservice_registered = bool(registered)
+        self.cache.set_local_service_registered(registered, service_name=self.service_name)
 
     def ensure_dbus_service(self: DbusAdapterIdentityContext) -> None:
         if self._dbusservice is not None:
@@ -53,6 +55,7 @@ class DbusAdapterIdentity(DbusAdapterIo):
             return
         service.register()
         self._dbusservice_registered = True
+        self.cache.set_local_service_registered(True, service_name=self.service_name)
         logging.info("DBus adapter owns service %s", self.service_name)
 
     def register_identity_paths(self: DbusAdapterIdentityContext) -> None:
@@ -94,3 +97,9 @@ class DbusAdapterIdentity(DbusAdapterIo):
         self.dbus_service.add_path(path, value)
         self.write_scheduler.registered_paths.add(path)
         self.write_scheduler.last_values[path] = value
+        self.cache.update_value(
+            dbus_path_key(self.service_name, path),
+            value,
+            source=f"{self.service_name}{path}",
+            freshness_kind=evcs_path_freshness_kind(path),
+        )

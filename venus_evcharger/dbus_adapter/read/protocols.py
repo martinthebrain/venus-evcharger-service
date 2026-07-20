@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, Unpack
 
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
-from venus_evcharger.dbus_gateway_cache import CacheValueMetadata
+from venus_evcharger.dbus_gateway_cache import CacheValueMetadata, ExternalReadMetadata
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.dbus_gateway_core import CacheFreshnessKind
 
 _T = TypeVar("_T")
 
@@ -31,6 +32,13 @@ class ReadCacheProtocol(Protocol):  # pragma: no cover
         **metadata_fields: object,
     ) -> None: ...
 
+    def update_external_read(
+        self,
+        key: str,
+        value: object,
+        **metadata_fields: Unpack[ExternalReadMetadata],
+    ) -> None: ...
+
     def mark_error(
         self,
         key: str,
@@ -38,6 +46,7 @@ class ReadCacheProtocol(Protocol):  # pragma: no cover
         source: str,
         error: BaseException | str,
         now: float | None = None,
+        freshness_kind: CacheFreshnessKind | None = None,
     ) -> None: ...
 
 

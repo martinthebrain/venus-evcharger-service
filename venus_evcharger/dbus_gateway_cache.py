@@ -6,11 +6,13 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TypedDict, Unpack
 
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import (
     DBUS_GATEWAY_SCHEMA_VERSION,
+    CacheFreshnessKind,
     GatewayPaths,
     _json_ready,
     _now,
@@ -23,6 +25,12 @@ from venus_evcharger.dbus_gateway_core import (
 
 NumericMetadataValue = str | bytes | bytearray | int | float
 NUMERIC_METADATA_TYPES = (str, bytes, bytearray, int, float)
+CACHE_FRESHNESS_KINDS: dict[str, CacheFreshnessKind] = {
+    "external_read": "external_read",
+    "local_owned": "local_owned",
+    "static": "static",
+    "diagnostic": "diagnostic",
+}
 
 
 def _value_age(updated_at: float, now: float) -> float:
@@ -58,6 +66,19 @@ class CacheValueMetadata:
     confidence: float = 1.0
     last_error: str = ""
     now: float | None = None
+    freshness_kind: CacheFreshnessKind = "external_read"
+    stale_after_seconds: float | None = None
+
+
+class ExternalReadMetadata(TypedDict, total=False):
+    """Optional metadata accepted by the external-read cache boundary."""
+
+    source: str
+    status: str
+    confidence: float
+    last_error: str
+    now: float | None
+    stale_after_seconds: float | None
 
 
 def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[str, object]) -> CacheValueMetadata:
@@ -69,6 +90,10 @@ def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[s
                 confidence=_metadata_float(fields.get("confidence"), metadata.confidence),
                 last_error=str(fields.get("last_error", metadata.last_error)),
                 now=_metadata_now(fields.get("now"), metadata.now),
+                freshness_kind=_metadata_freshness_kind(fields.get("freshness_kind"), metadata.freshness_kind),
+                stale_after_seconds=_metadata_optional_float(
+                    fields.get("stale_after_seconds"), metadata.stale_after_seconds
+                ),
             )
         return metadata
     return CacheValueMetadata(
@@ -77,7 +102,44 @@ def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[s
         confidence=_metadata_float(fields.get("confidence"), 1.0),
         last_error=str(fields.get("last_error", "")),
         now=_metadata_now(fields.get("now")),
+        freshness_kind=_metadata_freshness_kind(fields.get("freshness_kind"), "external_read"),
+        stale_after_seconds=_metadata_optional_float(fields.get("stale_after_seconds")),
     )
+
+
+def _metadata_freshness_kind(value: object, fallback: CacheFreshnessKind) -> CacheFreshnessKind:
+    normalized = str(value) if value is not None else fallback
+    return CACHE_FRESHNESS_KINDS.get(normalized, fallback)
+
+
+def _is_local_cache_value(
+    item: Mapping[str, object],
+    freshness_kind: CacheFreshnessKind,
+    service_name: str,
+) -> bool:
+    if not service_name:
+        return False
+    if freshness_kind in {"local_owned", "static"}:
+        return True
+    source = item.get("source")
+    return (
+        freshness_kind == "diagnostic"
+        and isinstance(source, str)
+        and source.startswith(f"{service_name}/")
+    )
+
+
+def _local_value_status(status: str, service_registered: bool) -> str:
+    if status != "fresh":
+        return status
+    return "fresh" if service_registered else "unavailable"
+
+
+def _metadata_optional_float(value: object, fallback: float | None = None) -> float | None:
+    if value is None:
+        return fallback
+    numeric_fallback = 0.0 if fallback is None else fallback
+    return max(0.0, _metadata_float(value, numeric_fallback))
 
 
 def _metadata_now(value: object, fallback: float | None = None) -> float | None:
@@ -103,6 +165,8 @@ class DbusCacheStore:
         self.paths = paths or gateway_paths()
         self.stale_after_seconds = max(0.0, float(stale_after_seconds))
         self.sequence = 0
+        self.local_service_registered = False
+        self.local_service_name = ""
         self.values: dict[str, CommandPayload] = {}
         self.services: dict[str, CommandPayload] = {}
         self.health: CommandPayload = {
@@ -123,30 +187,79 @@ class DbusCacheStore:
     ) -> None:
         details = _cache_value_metadata(metadata, metadata_fields)
         current = _now() if details.now is None else float(details.now)
+        previous = self.values.get(str(key), {})
+        normalized_value = _json_ready(value)
+        changed_at = float_or_zero(previous.get("changed_at"))
+        if previous.get("value") != normalized_value or changed_at <= 0.0:
+            changed_at = current
         self.values[str(key)] = {
-            "value": _json_ready(value),
+            "value": normalized_value,
             "source": str(details.source),
+            "changed_at": changed_at,
+            "confirmed_at": current,
             "updated_at": current,
             "age_s": 0.0,
             "status": str(details.status),
             "last_error": str(details.last_error),
             "confidence": float(details.confidence),
+            "freshness_kind": details.freshness_kind,
+            "stale_after_s": details.stale_after_seconds,
         }
         self.sequence += 1
 
-    def mark_error(self, key: str, *, source: str, error: BaseException | str, now: float | None = None) -> None:
+    def update_external_read(
+        self,
+        key: str,
+        value: object,
+        **metadata_fields: Unpack[ExternalReadMetadata],
+    ) -> None:
+        """Record a value obtained from the external DBus boundary."""
+        self.update_value(
+            key,
+            value,
+            freshness_kind="external_read",
+            **metadata_fields,
+        )
+
+    def mark_error(
+        self,
+        key: str,
+        *,
+        source: str,
+        error: BaseException | str,
+        now: float | None = None,
+        freshness_kind: CacheFreshnessKind | None = None,
+    ) -> None:
         current = _now() if now is None else float(now)
         current_value = self.values.get(str(key), {})
+        resolved_kind = (
+            _metadata_freshness_kind(current_value.get("freshness_kind"), "external_read")
+            if freshness_kind is None
+            else freshness_kind
+        )
         self.values[str(key)] = {
             "value": current_value.get("value"),
             "source": str(source),
+            "changed_at": float_or_zero(current_value.get("changed_at")),
+            "confirmed_at": float_or_zero(current_value.get("confirmed_at")),
             "updated_at": float_or_zero(current_value.get("updated_at")),
             "error_at": current,
             "age_s": max(0.0, current - float_or_zero(current_value.get("updated_at"))),
             "status": "error",
             "last_error": str(error),
             "confidence": 0.0,
+            "freshness_kind": resolved_kind,
+            "stale_after_s": current_value.get("stale_after_s"),
         }
+        self.sequence += 1
+
+    def set_local_service_registered(self, registered: bool, *, service_name: str) -> None:
+        normalized = bool(registered)
+        normalized_name = str(service_name)
+        if normalized == self.local_service_registered and normalized_name == self.local_service_name:
+            return
+        self.local_service_registered = normalized
+        self.local_service_name = normalized_name
         self.sequence += 1
 
     def update_services(self, names: list[str], *, now: float | None = None) -> None:
@@ -167,18 +280,24 @@ class DbusCacheStore:
         }
 
     def value_snapshot(self, item: Mapping[str, object], now: float) -> CommandPayload:
-        updated_at = float_or_zero(item.get("updated_at"))
-        age = _value_age(updated_at, now)
+        confirmed_at = float_or_zero(item.get("confirmed_at"))
+        changed_at = float_or_zero(item.get("changed_at"))
+        age = _value_age(confirmed_at, now)
         status = self._value_status(item, age)
         return {
             **dict(item),
             "age_s": age,
+            "change_age_s": _value_age(changed_at, now),
             "status": status,
         }
 
     def _value_status(self, item: Mapping[str, object], age: float) -> str:
         status = str(item.get("status", "unknown"))
-        if _value_is_stale(status, age, self.stale_after_seconds):
+        freshness_kind = _metadata_freshness_kind(item.get("freshness_kind"), "external_read")
+        if _is_local_cache_value(item, freshness_kind, self.local_service_name):
+            return _local_value_status(status, self.local_service_registered)
+        stale_after = _metadata_float(item.get("stale_after_s"), self.stale_after_seconds)
+        if freshness_kind == "external_read" and _value_is_stale(status, age, stale_after):
             return "stale"
         return status
 
