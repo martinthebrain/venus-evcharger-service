@@ -1259,7 +1259,7 @@ class _TestShellyIoControllerQuaternaryPart2:
         )
         self.assertIsNone(controller.runtime_cache.cached_charger_state(now=10.0))
 
-        service._source_retry_after = None
+        service._source_retry_after = {}
         controller.runtime.clear_charger_retry()
         controller.transport.remember_success(11.0, "recovered")
         service._shelly_consecutive_errors = "invalid"

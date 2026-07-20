@@ -99,6 +99,7 @@ class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
             _worker_session=worker_session,
         )
         controller = ShellyIoController(service)
+        self.assertTrue(callable(controller.worker._fetch_pm_status))
 
         self.assertEqual(
             controller.requests.rpc_call_with_session(session, "Switch.Set", id=2, on=True),

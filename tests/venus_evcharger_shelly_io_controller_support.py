@@ -62,6 +62,7 @@ def ShellyIoController(service: object) -> _RuntimeShellyIoController:
         "_last_pm_status": None,
         "_last_pm_status_at": None,
         "_last_pm_status_confirmed": False,
+        "_last_confirmed_pm_status_at": None,
         "_last_voltage": None,
         "_last_switch_feedback_closed": None,
         "_last_switch_interlock_ok": None,

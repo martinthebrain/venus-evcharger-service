@@ -77,6 +77,73 @@ class _TestShellyIoControllerTertiaryPart2:
         self.assertEqual(controller.transport._shelly_retry_delay_seconds("http-error", 1), 5.0)
         self.assertEqual(controller.transport._shelly_retry_delay_seconds("timeout", 6), 16.0)
 
+    def test_common_network_read_failure_is_tolerated_while_success_is_fresh(self):
+        service = SimpleNamespace(
+            auto_shelly_soft_fail_seconds=10.0,
+            _shelly_last_ok_at=95.0,
+            _last_confirmed_pm_status_at=None,
+        )
+        transport = ShellyIoController(service).transport
+        timeout = requests.exceptions.ConnectTimeout("slow")
+
+        self.assertTrue(transport.read_failure_is_tolerated(timeout, 100.0))
+        service._shelly_last_ok_at = 89.9
+        self.assertFalse(transport.read_failure_is_tolerated(timeout, 100.0))
+        service._last_confirmed_pm_status_at = 99.0
+        self.assertTrue(transport.read_failure_is_tolerated(timeout, 100.0))
+        self.assertFalse(transport.read_failure_is_tolerated(json.JSONDecodeError("bad", "{}", 0), 100.0))
+        service.auto_shelly_soft_fail_seconds = None
+        self.assertFalse(transport.read_failure_is_tolerated(timeout, 100.0))
+        service.auto_shelly_soft_fail_seconds = 0.0
+        service._shelly_last_ok_at = 100.0
+        self.assertFalse(transport.read_failure_is_tolerated(timeout, 100.0))
+        service.auto_shelly_soft_fail_seconds = 1.0
+        service._shelly_last_ok_at = 99.0
+        self.assertTrue(transport.read_failure_is_tolerated(timeout, 100.0))
+        service._shelly_last_ok_at = 100.5
+        self.assertTrue(transport.read_failure_is_tolerated(timeout, 100.0))
+
+    def test_tolerated_network_read_gap_keeps_health_clear_and_snapshot_unconfirmed(self):
+        old_session = MagicMock()
+        service = SimpleNamespace(
+            time_now=MagicMock(return_value=100.0),
+            virtual_mode=1,
+            auto_shelly_soft_fail_seconds=10.0,
+            _shelly_last_ok_at=95.0,
+            _worker_session=old_session,
+        )
+        controller = ShellyIoController(service)
+        controller.worker.worker_apply_pending_relay_command = MagicMock()
+        controller.worker._fetch_pm_status = MagicMock(side_effect=requests.exceptions.ConnectTimeout("slow"))
+
+        with patch("venus_evcharger.backend.shelly_io_worker_transport.requests.Session", return_value=MagicMock()):
+            controller.io_worker_once()
+
+        service.runtime.mark_failure.assert_not_called()
+        service.runtime.warning_throttled.assert_not_called()
+        self.assertEqual(service._shelly_state, "degraded")
+        self.assertEqual(service._shelly_consecutive_errors, 1)
+        self.assertFalse(service.runtime.update_worker_snapshot.call_args_list[-1].kwargs["pm_confirmed"])
+
+    def test_network_read_grace_is_evaluated_when_timeout_finishes(self):
+        service = SimpleNamespace(
+            time_now=MagicMock(side_effect=[100.0, 102.0]),
+            virtual_mode=1,
+            auto_shelly_soft_fail_seconds=10.0,
+            _shelly_last_ok_at=91.0,
+            _worker_session=MagicMock(),
+        )
+        controller = ShellyIoController(service)
+        controller.worker.worker_apply_pending_relay_command = MagicMock()
+        controller.worker._fetch_pm_status = MagicMock(side_effect=requests.exceptions.ConnectTimeout("slow"))
+
+        with patch("venus_evcharger.backend.shelly_io_worker_transport.requests.Session", return_value=MagicMock()):
+            controller.io_worker_once()
+
+        service.runtime.mark_failure.assert_called_once_with("shelly")
+        self.assertEqual(service._shelly_last_error_at, 102.0)
+        self.assertEqual(service.runtime.update_worker_snapshot.call_args_list[-1].kwargs["captured_at"], 102.0)
+
     def test_remember_shelly_failure_passes_complete_failure_contract(self):
         service = SimpleNamespace(_shelly_consecutive_errors=2)
         controller = ShellyIoController(service)
@@ -102,14 +169,14 @@ class _TestShellyIoControllerTertiaryPart2:
         record_retry.assert_called_once_with(service, 10.0, 4.0)
         reset_session.assert_called_once_with()
 
-        missing_counter_service = SimpleNamespace()
-        missing_counter_controller = ShellyIoController(missing_counter_service)
+        zero_counter_service = SimpleNamespace(_shelly_consecutive_errors=0)
+        zero_counter_controller = ShellyIoController(zero_counter_service)
         with (
-            patch.object(missing_counter_controller.transport, "_record_shelly_failure_state") as record_state,
-            patch.object(missing_counter_controller.transport, "_record_shelly_retry_after"),
-            patch.object(missing_counter_controller.transport, "_reset_shelly_worker_session"),
+            patch.object(zero_counter_controller.transport, "_record_shelly_failure_state") as record_state,
+            patch.object(zero_counter_controller.transport, "_record_shelly_retry_after"),
+            patch.object(zero_counter_controller.transport, "_reset_shelly_worker_session"),
         ):
-            missing_counter_controller.transport.remember_failure("timeout", "poll", error, 20.0)
+            zero_counter_controller.transport.remember_failure("timeout", "poll", error, 20.0)
         self.assertEqual(record_state.call_args.args[5], 1)
 
     def test_record_shelly_failure_state_sets_diagnostics_and_offline_start_once(self):
@@ -353,8 +420,10 @@ class _TestShellyIoControllerTertiaryPart2:
         self.assertEqual(service._source_retry_after["shelly"], 0.0)
         self.assertIsNone(service._shelly_offline_since)
 
-    def test_reset_shelly_worker_session_resets_missing_worker_and_counts_from_zero(self):
+    def test_reset_shelly_worker_session_resets_empty_worker_and_counts_from_zero(self):
         service = SimpleNamespace(
+            _worker_session=None,
+            _shelly_session_reset_count=0,
             _meter_backend=None,
             _switch_backend=None,
             _charger_backend=None,

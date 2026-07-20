@@ -147,6 +147,7 @@ class ShellyTransportHost(Protocol):
     _shelly_retry_after: float
     _shelly_offline_since: float | None
     _shelly_last_ok_at: float | None
+    _last_confirmed_pm_status_at: float | None
     _shelly_session_reset_count: int
     _source_retry_after: dict[str, float]
     runtime: ShellyRuntimeOperations
