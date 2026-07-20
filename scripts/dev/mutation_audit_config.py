@@ -67,20 +67,27 @@ def restore_tool_mutmut_section(current: str, original: str) -> str:
 
 def mutmut_config_toml(target_path: str) -> str:
     test_selection = test_selection_for_target(target_path)
+    also_copy = [
+        "venus_evcharger_auto_input_helper.py",
+        "venus_evcharger_dbus_adapter.py",
+        "venus_evcharger_service.py",
+        "CONTROL_API.md",
+        "deploy/venus",
+    ]
+    if "/" not in target_path:
+        also_copy.insert(0, "venus_evcharger")
     lines = [
         "[tool.mutmut]",
         f'source_paths = ["{source_path_for_target(target_path)}"]',
         f'only_mutate = ["{target_path}"]',
         "also_copy = [",
-        '    "venus_evcharger_auto_input_helper.py",',
-        '    "venus_evcharger_dbus_adapter.py",',
-        '    "venus_evcharger_service.py",',
-        '    "CONTROL_API.md",',
-        '    "deploy/venus",',
+    ]
+    lines.extend(f'    "{path}",' for path in also_copy)
+    lines.extend([
         "]",
         'pytest_add_cli_args = ["-k", "not socket"]',
         "pytest_add_cli_args_test_selection = [",
-    ]
+    ])
     lines.extend(f'    "{path}",' for path in test_selection)
     return "\n".join([*lines, "]", ""])
 

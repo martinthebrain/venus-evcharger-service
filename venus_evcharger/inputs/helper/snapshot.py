@@ -73,6 +73,13 @@ class SnapshotStore:
             self._state = dict(snapshot)
         return snapshot
 
+    def poll(self) -> bool:
+        """Refresh due RAM-cache sources and publish one coherent snapshot."""
+        if self.stop_requested():
+            return False
+        self.writer.write(self.collect())
+        return True
+
     def refresh_source(self, source_name: str, now: float | None = None) -> None:
         current = time.time() if now is None else float(now)
         source = self._source_read(source_name)

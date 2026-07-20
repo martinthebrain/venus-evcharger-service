@@ -101,6 +101,10 @@ class AutoInputHelper:
 
     def _install_timers(self) -> None:
         GLIB_RUNTIME.timeout_add(
+            max(200, int(self.settings.poll_interval_seconds * 1000)),
+            self.snapshots.poll,
+        )
+        GLIB_RUNTIME.timeout_add(
             max(5000, int(self.settings.validation_poll_seconds * 1000)),
             self.snapshots.validation_poll,
         )
