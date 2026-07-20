@@ -40,11 +40,148 @@ ensure_updater_prereqs() {
 	require_command tar
 	require_command sha256sum
 	require_command python3
+	require_command df
 	if [ -z "$SOURCE_DIR_OVERRIDE" ]; then
 		ensure_download_tool
 	fi
 	if [ "$REQUIRE_SIGNED_MANIFEST" = "1" ]; then
 		require_command openssl
+	fi
+}
+
+numeric_greater_than() {
+	awk -v value="$1" -v limit="$2" 'BEGIN { exit !(value > limit) }'
+}
+
+resource_snapshot() {
+	RESOURCE_LOAD1=""
+	RESOURCE_LOAD5=""
+	RESOURCE_LOAD15=""
+	RESOURCE_MEM_AVAILABLE_KB=""
+	RESOURCE_DISK_AVAILABLE_KB=""
+
+	if [ -r "$RESOURCE_LOADAVG_PATH" ]; then
+		read -r RESOURCE_LOAD1 RESOURCE_LOAD5 RESOURCE_LOAD15 _ <"$RESOURCE_LOADAVG_PATH" || true
+	fi
+	RESOURCE_MEM_AVAILABLE_KB=$(read_mem_available_kb)
+	RESOURCE_DISK_AVAILABLE_KB=$(df -Pk "$WORK_ROOT" 2>/dev/null | awk 'NR == 2 { print $4 }')
+}
+
+read_mem_available_kb() {
+	if [ -r "$RESOURCE_MEMINFO_PATH" ]; then
+		awk '
+			$1 == "MemAvailable:" { print $2; found=1; exit }
+			$1 == "MemFree:" { free=$2 }
+			$1 == "Buffers:" { buffers=$2 }
+			$1 == "Cached:" { cached=$2 }
+			END { if (!found && free != "") print free + buffers + cached }
+		' "$RESOURCE_MEMINFO_PATH"
+	fi
+}
+
+resource_pressure_reason() {
+	[ "$RESOURCE_GUARD_ENABLED" = "1" ] || return 1
+	resource_snapshot
+	if [ -n "$RESOURCE_LOAD1" ] && numeric_greater_than "$RESOURCE_LOAD1" "$RESOURCE_MAX_LOAD1"; then
+		printf 'load1=%s>%s' "$RESOURCE_LOAD1" "$RESOURCE_MAX_LOAD1"
+		return 0
+	fi
+	if [ -n "$RESOURCE_LOAD5" ] && numeric_greater_than "$RESOURCE_LOAD5" "$RESOURCE_MAX_LOAD5"; then
+		printf 'load5=%s>%s' "$RESOURCE_LOAD5" "$RESOURCE_MAX_LOAD5"
+		return 0
+	fi
+	if [ -n "$RESOURCE_LOAD15" ] && numeric_greater_than "$RESOURCE_LOAD15" "$RESOURCE_MAX_LOAD15"; then
+		printf 'load15=%s>%s' "$RESOURCE_LOAD15" "$RESOURCE_MAX_LOAD15"
+		return 0
+	fi
+	if [ -n "$RESOURCE_MEM_AVAILABLE_KB" ] && [ "$RESOURCE_MEM_AVAILABLE_KB" -lt "$RESOURCE_MIN_MEM_AVAILABLE_KB" ]; then
+		printf 'mem_available_kb=%s<%s' "$RESOURCE_MEM_AVAILABLE_KB" "$RESOURCE_MIN_MEM_AVAILABLE_KB"
+		return 0
+	fi
+	if [ -n "$RESOURCE_DISK_AVAILABLE_KB" ] && [ "$RESOURCE_DISK_AVAILABLE_KB" -lt "$RESOURCE_MIN_DISK_AVAILABLE_KB" ]; then
+		printf 'disk_available_kb=%s<%s' "$RESOURCE_DISK_AVAILABLE_KB" "$RESOURCE_MIN_DISK_AVAILABLE_KB"
+		return 0
+	fi
+	return 1
+}
+
+wait_for_update_resources() {
+	phase="$1"
+	waited=0
+	while pressure_reason=$(resource_pressure_reason); do
+		if [ "$waited" -eq 0 ]; then
+			log "Resource pressure before ${phase}; waiting (${pressure_reason})"
+		fi
+		if [ "$waited" -ge "$RESOURCE_WAIT_SECONDS" ]; then
+			log "Resource pressure persisted during ${phase}; update aborted (${pressure_reason})"
+			set_failure_reason_once "resource-pressure:${phase}:${pressure_reason}"
+			return 75
+		fi
+		sleep "$RESOURCE_POLL_SECONDS"
+		waited=$((waited + RESOURCE_POLL_SECONDS))
+	done
+	if [ "$waited" -gt 0 ]; then
+		log "Resources recovered after ${waited}s; continuing ${phase}"
+	fi
+	return 0
+}
+
+run_resource_guarded_command() {
+	phase="$1"
+	shift
+	wait_for_update_resources "$phase" || return $?
+	"$@" &
+	guarded_pid=$!
+	while kill -0 "$guarded_pid" 2>/dev/null; do
+		sleep "$RESOURCE_POLL_SECONDS"
+		if pressure_reason=$(resource_pressure_reason); then
+			log "Resource pressure during ${phase}; stopping operation (${pressure_reason})"
+			kill "$guarded_pid" 2>/dev/null || true
+			wait "$guarded_pid" 2>/dev/null || true
+			set_failure_reason_once "resource-pressure:${phase}:${pressure_reason}"
+			return 75
+		fi
+	done
+	guarded_status=0
+	wait "$guarded_pid" || guarded_status=$?
+	return "$guarded_status"
+}
+
+guarded_sha256_file() {
+	input_path="$1"
+	output_path="$2"
+	run_resource_guarded_command "bundle-hash" sha256sum "$input_path" >"$output_path" || return $?
+	GUARDED_SHA256=$(awk '{print $1; exit}' "$output_path")
+	[ -n "$GUARDED_SHA256" ]
+}
+
+acquire_update_lock() {
+	mkdir -p "$STATE_DIR"
+	if mkdir "$UPDATE_LOCK_DIR" 2>/dev/null; then
+		printf '%s\n' "$$" >"${UPDATE_LOCK_DIR}/pid"
+		UPDATE_LOCK_HELD=1
+		return 0
+	fi
+	lock_pid=$(awk 'NF { print $1; exit }' "${UPDATE_LOCK_DIR}/pid" 2>/dev/null || true)
+	if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+		log "Another updater is already running with pid ${lock_pid}"
+		set_failure_reason_once "update-already-running"
+		return 73
+	fi
+	log "Removing stale updater lock"
+	rm -rf "$UPDATE_LOCK_DIR"
+	if ! mkdir "$UPDATE_LOCK_DIR"; then
+		set_failure_reason_once "update-lock-unavailable"
+		return 73
+	fi
+	printf '%s\n' "$$" >"${UPDATE_LOCK_DIR}/pid"
+	UPDATE_LOCK_HELD=1
+}
+
+release_update_lock() {
+	if [ "${UPDATE_LOCK_HELD:-0}" = "1" ]; then
+		rm -rf "$UPDATE_LOCK_DIR"
+		UPDATE_LOCK_HELD=0
 	fi
 }
 
@@ -303,90 +440,4 @@ target_is_current_for_manifest() {
 	[ "$current_hash" = "$MANIFEST_BUNDLE_SHA256" ] || return 1
 	active_dir=$(current_codebase_dir)
 	require_source_layout "$active_dir"
-}
-
-copy_item() {
-	src_root="$1"
-	dst_root="$2"
-	rel_path="$3"
-	src_path="${src_root}/${rel_path}"
-	dst_path="${dst_root}/${rel_path}"
-
-	if [ ! -e "$src_path" ]; then
-		return 0
-	fi
-
-	mkdir -p "$(dirname "$dst_path")"
-	if [ "$rel_path" = "deploy/venus" ] && [ -d "$dst_path" ]; then
-		copy_venus_layout_in_place "$src_path" "$dst_path"
-		return
-	fi
-
-	rm -rf "$dst_path"
-	if [ -d "$src_path" ]; then
-		cp -R "$src_path" "$dst_path"
-	else
-		cp "$src_path" "$dst_path"
-	fi
-}
-
-copy_service_layout_in_place() {
-	src_path="$1"
-	dst_path="$2"
-	mkdir -p "$dst_path" "$dst_path/log"
-	find "$dst_path" -mindepth 1 -maxdepth 1 ! -name log -exec rm -rf {} \;
-	find "$dst_path/log" -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
-	find "$src_path" -mindepth 1 -maxdepth 1 ! -name log -exec cp -R {} "$dst_path" \;
-	if [ -d "$src_path/log" ]; then
-		find "$src_path/log" -mindepth 1 -maxdepth 1 -exec cp -R {} "$dst_path/log" \;
-	fi
-}
-
-copy_venus_layout_in_place() {
-	src_path="$1"
-	dst_path="$2"
-	service_dirs="service_venus_evcharger service_venus_evcharger_dbus_adapter service_venus_evcharger_observer"
-
-	find "$dst_path" -mindepth 1 -maxdepth 1 \
-		! -name service_venus_evcharger \
-		! -name service_venus_evcharger_dbus_adapter \
-		! -name service_venus_evcharger_observer \
-		-exec rm -rf {} \;
-	find "$src_path" -mindepth 1 -maxdepth 1 \
-		! -name service_venus_evcharger \
-		! -name service_venus_evcharger_dbus_adapter \
-		! -name service_venus_evcharger_observer \
-		-exec cp -R {} "$dst_path" \;
-	for service_dir in $service_dirs; do
-		if [ -d "$src_path/$service_dir" ]; then
-			copy_service_layout_in_place "$src_path/$service_dir" "$dst_path/$service_dir"
-		fi
-	done
-}
-
-managed_layout_paths() {
-	printf '%s\n' \
-		install.sh \
-		LICENSE \
-		README.md \
-		SHELLY_PROFILES.md \
-		version.txt \
-		venus_evcharger_service.py \
-		venus_evcharger_dbus_adapter.py \
-		venus_evcharger_observer.py \
-		venus_evcharger_auto_input_helper.py \
-		venus_evchargerctl.py \
-		deploy/venus \
-		venus_evcharger \
-		scripts/ops
-}
-
-copy_managed_layout_items() {
-	src_dir="$1"
-	dst_dir="$2"
-	while IFS= read -r rel_path; do
-		copy_item "$src_dir" "$dst_dir" "$rel_path"
-	done <<EOF
-$(managed_layout_paths)
-EOF
 }

@@ -99,6 +99,8 @@ def normalized_bootstrap_update_status_fields(payload: Mapping[str, Any] | None)
         "source_repo": _normalized_text(raw.get("source_repo")),
         "source_channel": _normalized_text(raw.get("source_channel")),
         "deployment_receipt_path": _normalized_text(raw.get("deployment_receipt_path")),
+        "work_storage": _normalized_text(raw.get("work_storage")),
+        "work_root": _normalized_text(raw.get("work_root")),
         "bootstrap_entrypoint_path": _normalized_text(raw.get("bootstrap_entrypoint_path")),
         "bootstrap_refreshed": _normalized_bootstrap_flag(raw, "bootstrap_refreshed"),
         "current_preserved": core["current_preserved"],

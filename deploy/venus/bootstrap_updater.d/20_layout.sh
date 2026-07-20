@@ -17,12 +17,101 @@ cleanup_unwanted_paths() {
 	rm -f "${cleanup_root}/venus_evcharger_dbus_introspection_worker.py"
 }
 
+copy_item() {
+	src_root="$1"
+	dst_root="$2"
+	rel_path="$3"
+	src_path="${src_root}/${rel_path}"
+	dst_path="${dst_root}/${rel_path}"
+
+	if [ ! -e "$src_path" ]; then
+		return 0
+	fi
+	if [ "${LAYOUT_RESOURCE_CHECKS_ENABLED:-1}" = "1" ]; then
+		wait_for_update_resources "layout-copy:${rel_path}" || return $?
+	fi
+
+	mkdir -p "$(dirname "$dst_path")"
+	if [ "$rel_path" = "deploy/venus" ] && [ -d "$dst_path" ]; then
+		copy_venus_layout_in_place "$src_path" "$dst_path"
+		return
+	fi
+
+	rm -rf "$dst_path"
+	if [ -d "$src_path" ]; then
+		cp -R "$src_path" "$dst_path"
+	else
+		cp "$src_path" "$dst_path"
+	fi
+}
+
+copy_service_layout_in_place() {
+	src_path="$1"
+	dst_path="$2"
+	mkdir -p "$dst_path" "$dst_path/log"
+	find "$dst_path" -mindepth 1 -maxdepth 1 ! -name log -exec rm -rf {} \;
+	find "$dst_path/log" -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
+	find "$src_path" -mindepth 1 -maxdepth 1 ! -name log -exec cp -R {} "$dst_path" \;
+	if [ -d "$src_path/log" ]; then
+		find "$src_path/log" -mindepth 1 -maxdepth 1 -exec cp -R {} "$dst_path/log" \;
+	fi
+}
+
+copy_venus_layout_in_place() {
+	src_path="$1"
+	dst_path="$2"
+	service_dirs="service_venus_evcharger service_venus_evcharger_dbus_adapter service_venus_evcharger_observer"
+
+	find "$dst_path" -mindepth 1 -maxdepth 1 \
+		! -name service_venus_evcharger \
+		! -name service_venus_evcharger_dbus_adapter \
+		! -name service_venus_evcharger_observer \
+		-exec rm -rf {} \;
+	find "$src_path" -mindepth 1 -maxdepth 1 \
+		! -name service_venus_evcharger \
+		! -name service_venus_evcharger_dbus_adapter \
+		! -name service_venus_evcharger_observer \
+		-exec cp -R {} "$dst_path" \;
+	for service_dir in $service_dirs; do
+		if [ -d "$src_path/$service_dir" ]; then
+			copy_service_layout_in_place "$src_path/$service_dir" "$dst_path/$service_dir"
+		fi
+	done
+}
+
+managed_layout_paths() {
+	printf '%s\n' \
+		install.sh \
+		LICENSE \
+		README.md \
+		SHELLY_PROFILES.md \
+		version.txt \
+		venus_evcharger_service.py \
+		venus_evcharger_dbus_adapter.py \
+		venus_evcharger_observer.py \
+		venus_evcharger_auto_input_helper.py \
+		venus_evchargerctl.py \
+		deploy/venus \
+		venus_evcharger \
+		scripts/ops
+}
+
+copy_managed_layout_items() {
+	src_dir="$1"
+	dst_dir="$2"
+	while IFS= read -r rel_path; do
+		copy_item "$src_dir" "$dst_dir" "$rel_path"
+	done <<EOF
+$(managed_layout_paths)
+EOF
+}
+
 write_managed_layout() {
 	src_dir="$1"
 	destination_root="${2:-$TARGET_DIR}"
 	mkdir -p "$destination_root"
 
-	preserve_dir=$(mktemp -d)
+	preserve_dir=$(mktemp -d "${TMP_DIR}/preserve.XXXXXX")
 	preserve_local_config "$preserve_dir"
 
 	copy_managed_layout_items "$src_dir" "$destination_root"
@@ -60,7 +149,10 @@ write_managed_layout() {
 promote_target_layout() {
 	staged_root="$1"
 	mkdir -p "$TARGET_DIR"
+	wait_for_update_resources "layout-promotion" || return $?
+	LAYOUT_RESOURCE_CHECKS_ENABLED=0
 	copy_managed_layout_items "$staged_root" "$TARGET_DIR"
+	LAYOUT_RESOURCE_CHECKS_ENABLED=1
 	cleanup_unwanted_paths "$TARGET_DIR"
 }
 
@@ -244,14 +336,15 @@ materialize_source_from_bundle() {
 	extract_dir="$2"
 	log "Downloading code bundle${MANIFEST_VERSION:+ version $MANIFEST_VERSION}"
 	download_to "$MANIFEST_BUNDLE_URL" "$archive_path"
-	archive_hash=$(sha256sum "$archive_path" | awk '{print $1}')
+	guarded_sha256_file "$archive_path" "${TMP_DIR}/manifest-bundle.sha256" || return $?
+	archive_hash="$GUARDED_SHA256"
 	if [ "$archive_hash" != "$MANIFEST_BUNDLE_SHA256" ]; then
 		log "Bundle hash mismatch for $MANIFEST_BUNDLE_URL"
 		set_failure_reason_once "bundle-hash-mismatch"
 		exit 1
 	fi
 	mkdir -p "$extract_dir"
-	tar -xzf "$archive_path" -C "$extract_dir"
+	run_resource_guarded_command "bundle-extraction" tar -xzf "$archive_path" -C "$extract_dir" || return $?
 	SOURCE_DIR="$extract_dir"
 	if ! require_source_layout "$SOURCE_DIR"; then
 		SOURCE_DIR=$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
