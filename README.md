@@ -163,19 +163,36 @@ and multiple physical devices can share the same profile.
 
 ## Quick Start
 
-1. On Venus OS, download the repository archive into a writable path under
-   `/data`. Venus OS does not need `git` for this path:
+The production path uses one explicit signed release. Replace `v1.2.3` below
+with the published release tag you intend to install; do not substitute
+`main` on a customer device.
+
+1. Download and authenticate the release bundle under `/data`:
 
    ```bash
    mkdir -p /data/venus-evcharger
    cd /data/venus-evcharger
-   wget -O venus-evcharger-service.tar.gz https://codeload.github.com/martinthebrain/venus-evcharger-service/tar.gz/refs/heads/main
-   tar -xzf venus-evcharger-service.tar.gz
-   cd venus-evcharger-service-main
+   RELEASE_TAG=v1.2.3
+   RELEASE_BASE="https://github.com/martinthebrain/venus-evcharger-service/releases/download/$RELEASE_TAG"
+   wget "$RELEASE_BASE/bootstrap_manifest.pub"
+   wget "$RELEASE_BASE/bootstrap_manifest.json"
+   wget "$RELEASE_BASE/bootstrap_manifest.json.sig"
+   wget "$RELEASE_BASE/wallbox-bundle.tar.gz"
+   BOOTSTRAP_PUBKEY_SHA256=a6cf770bc8a2b6addf29fb85a4113c76e768900891490a83eb3e742c6f8d0642
+   printf '%s  bootstrap_manifest.pub\n' "$BOOTSTRAP_PUBKEY_SHA256" | sha256sum -c -
+   openssl dgst -sha256 -verify bootstrap_manifest.pub \
+     -signature bootstrap_manifest.json.sig bootstrap_manifest.json
+   EXPECTED_SHA256=$(python3 -c 'import json; print(json.load(open("bootstrap_manifest.json"))["bundle_sha256"])')
+   printf '%s  wallbox-bundle.tar.gz\n' "$EXPECTED_SHA256" | sha256sum -c -
+   mkdir "venus-evcharger-$RELEASE_TAG"
+   tar -xzf wallbox-bundle.tar.gz -C "venus-evcharger-$RELEASE_TAG"
+   cd "venus-evcharger-$RELEASE_TAG"
    ```
 
-   If your image has `curl` instead of `wget`, use
-   `curl -fsSL -o venus-evcharger-service.tar.gz https://codeload.github.com/martinthebrain/venus-evcharger-service/tar.gz/refs/heads/main`.
+   Use `curl -fsSLO` for the same four release URLs if the image does not
+   provide `wget`. The pinned public-key fingerprint is part of the trusted
+   installation procedure; verify any future key rotation through an
+   independent trusted channel before changing it.
 
 2. Configure the installation:
 
@@ -207,6 +224,18 @@ and multiple physical devices can share the same profile.
    physical installation.
 
 For a detailed installation walkthrough, see [INSTALL.md](INSTALL.md).
+
+### Development Installation
+
+For a disposable Pi testbed or local development checkout, the moving `main`
+archive remains available:
+
+```bash
+wget -O venus-evcharger-service.tar.gz \
+  https://codeload.github.com/martinthebrain/venus-evcharger-service/tar.gz/refs/heads/main
+```
+
+This path is not a reproducible production installation.
 
 If the service was installed before configuration, stop it first, adjust the
 config, then restart it:
@@ -287,6 +316,8 @@ The usual local check is:
 ## Documentation Map
 
 - [INSTALL.md](INSTALL.md): installation walkthrough
+- [RELEASE_PROCESS.md](RELEASE_PROCESS.md): hardware gate and signed release publication
+- [SECURITY.md](SECURITY.md): supported versions and private vulnerability reporting
 - [CONFIGURATION.md](CONFIGURATION.md): main configuration guide
 - [CHARGER_BACKENDS.md](CHARGER_BACKENDS.md): native and template charger adapters
 - [SHELLY_PROFILES.md](SHELLY_PROFILES.md): Shelly role presets and examples

@@ -280,6 +280,13 @@ class __ControlApiHttpTailCasesPart1:
         self.assertIsNone(server.authenticator.authorization_scope(_FakeHandler("/v1/capabilities", headers={"Authorization": ""})))
         self.assertIsNone(server.authenticator.authorization_scope(_FakeHandler("/v1/capabilities", authorization="Bearer wrong-token")))
 
+        with patch("venus_evcharger.control.http_api_auth.secrets.compare_digest", return_value=True) as compare:
+            self.assertTrue(server.authenticator.matches_bearer_token("Bearer supplied", "configured"))
+        compare.assert_called_once_with("Bearer supplied", "Bearer configured")
+        with patch("venus_evcharger.control.http_api_auth.secrets.compare_digest") as compare:
+            self.assertFalse(server.authenticator.matches_bearer_token("Bearer supplied", ""))
+        compare.assert_not_called()
+
     def test_effective_token_fallbacks_are_ordered_by_scope(self) -> None:
         service = control_api_http_service(
             control_command_from_payload=MagicMock(),
@@ -334,8 +341,10 @@ class __ControlApiHttpTailCasesPart1:
         self.assertEqual(control_only.authenticator.effective_update_token, "control")
 
         no_token = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
+        self.assertFalse(no_token.authenticator.has_configured_token)
         self.assertEqual(no_token.authenticator.state_token, "")
         self.assertEqual(no_token.authenticator.state_token_headers, {})
+        self.assertTrue(auth_only.authenticator.has_configured_token)
 
     def test_required_scope_for_command_payload_resolves_paths_and_falls_back_for_invalid_paths(self) -> None:
         resolved_command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
@@ -424,6 +433,7 @@ class __ControlApiHttpTailCasesPart1:
 
         with (
             patch.object(server, "prepare_unix_socket_path") as prepare_socket,
+            patch.object(server, "secure_unix_socket_path") as secure_socket,
             patch("venus_evcharger.control.http_api._ThreadingLocalControlUnixHttpServer", return_value=fake_server) as server_factory,
             patch("venus_evcharger.control.http_api.threading.Thread", return_value=fake_thread),
             patch("venus_evcharger.control.http_api.os.path.exists", return_value=True),
@@ -434,6 +444,7 @@ class __ControlApiHttpTailCasesPart1:
             server.stop()
 
         prepare_socket.assert_called_once_with("/tmp/control.sock")
+        secure_socket.assert_called_once_with("/tmp/control.sock")
         server_factory.assert_called_once()
         unlink_mock.assert_called_once_with("/tmp/control.sock")
 

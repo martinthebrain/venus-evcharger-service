@@ -42,6 +42,7 @@ UPDATER_HASH_SOURCE="${VENUS_EVCHARGER_UPDATER_HASH_SOURCE:-${UPDATER_SOURCE}.sh
 UPDATER_LIB_DIR="${BOOTSTRAP_STATE_DIR}/bootstrap_updater.d"
 BOOTSTRAP_PUBKEY_OVERRIDE="${VENUS_EVCHARGER_BOOTSTRAP_PUBKEY:-}"
 REQUIRE_SIGNED_MANIFEST="${VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST:-0}"
+INSTALL_PROFILE="${VENUS_EVCHARGER_INSTALL_PROFILE:-development}"
 INSTALLER_OVERRIDE="${VENUS_EVCHARGER_INSTALLER_PATH:-}"
 MANIFEST_UPDATER_URL=""
 MANIFEST_UPDATER_SHA256=""
@@ -79,6 +80,7 @@ ensure_bootstrap_prereqs() {
 	require_command ln
 	require_command mkdir
 	require_command awk
+	require_command grep
 	require_command mktemp
 	require_command sha256sum
 	require_command python3
@@ -86,6 +88,25 @@ ensure_bootstrap_prereqs() {
 	if [ "$REQUIRE_SIGNED_MANIFEST" = "1" ]; then
 		require_command openssl
 	fi
+}
+
+validate_install_profile() {
+	case "$INSTALL_PROFILE" in
+	development)
+		return 0
+		;;
+	production)
+		REQUIRE_SIGNED_MANIFEST=1
+		if [ ! -f "$NO_UPDATE_FILE" ] && [ -z "$MANIFEST_SOURCE" ]; then
+			log "Production profile requires VENUS_EVCHARGER_MANIFEST_SOURCE or an active noUpdate marker"
+			exit 1
+		fi
+		;;
+	*)
+		log "Unknown install profile: $INSTALL_PROFILE"
+		exit 1
+		;;
+	esac
 }
 
 download_to() {
@@ -141,13 +162,23 @@ updater_source_base() {
 install_updater_libs() {
 	selected_source="$1"
 	tmp_dir="$2"
+	manifest_path="${3:-}"
 	source_base=$(updater_source_base "$selected_source")
 	tmp_lib_dir="${tmp_dir}/bootstrap_updater.d"
 	rm -rf "$tmp_lib_dir"
 	mkdir -p "$tmp_lib_dir"
 
 	while IFS= read -r lib_name; do
-		download_to "${source_base}/bootstrap_updater.d/${lib_name}" "${tmp_lib_dir}/${lib_name}" || return 1
+		lib_path="${tmp_lib_dir}/${lib_name}"
+		download_to "${source_base}/bootstrap_updater.d/${lib_name}" "$lib_path" || return 1
+		if [ -n "$manifest_path" ]; then
+			expected_lib_hash=$(manifest_field "$manifest_path" "updater_lib_sha256" "$lib_name" || true)
+			actual_lib_hash=$(hash_file "$lib_path")
+			if ! valid_sha256 "$expected_lib_hash" || [ "$actual_lib_hash" != "$expected_lib_hash" ]; then
+				log "Manifest updater helper hash validation failed: $lib_name"
+				return 1
+			fi
+		fi
 	done <<EOF
 $(updater_lib_names)
 EOF
@@ -195,20 +226,29 @@ verify_signature() {
 manifest_field() {
 	manifest_path="$1"
 	field_name="$2"
-	python3 - "$manifest_path" "$field_name" <<'PY'
+	nested_name="${3:-}"
+	python3 - "$manifest_path" "$field_name" "$nested_name" <<'PY'
 import json
 import sys
 
-path, field = sys.argv[1], sys.argv[2]
+path, field, nested = sys.argv[1:]
 try:
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
 except Exception:
     sys.exit(1)
 value = data.get(field, "")
+if nested:
+    if not isinstance(value, dict):
+        sys.exit(1)
+    value = value.get(nested, "")
 if isinstance(value, (str, int, float)):
     print(value)
 PY
+}
+
+valid_sha256() {
+	printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{64}$'
 }
 
 load_manifest() {
@@ -260,31 +300,35 @@ ensure_updater() {
 	selected_source="$UPDATER_SOURCE"
 	expected_hash=""
 
-	if load_manifest "$manifest_path"; then
+	if [ -n "$MANIFEST_SOURCE" ]; then
+		if ! load_manifest "$manifest_path"; then
+			log "Configured bootstrap manifest could not be authenticated; refusing fallback update"
+			exit 1
+		fi
 		selected_source="$MANIFEST_UPDATER_URL"
 		expected_hash="$MANIFEST_UPDATER_SHA256"
 		log "Using updater from manifest${MANIFEST_VERSION:+ (version $MANIFEST_VERSION)}"
 		if ! download_to "$selected_source" "$candidate_path"; then
-			log "Manifest updater download failed; falling back to hash-source flow if available"
-			expected_hash=""
+			log "Manifest updater download failed; refusing fallback update"
+			exit 1
 		fi
-	fi
-
-	if [ -n "$expected_hash" ]; then
 		candidate_hash=$(hash_file "$candidate_path")
-		if [ -z "$expected_hash" ] || [ "$candidate_hash" != "$expected_hash" ]; then
-			log "Manifest updater hash validation failed; keeping local updater if available"
-		else
-			local_hash=""
-			if [ -f "$UPDATER_PATH" ]; then
-				local_hash=$(hash_file "$UPDATER_PATH")
-			fi
-			if [ ! -f "$UPDATER_PATH" ] || [ "$local_hash" != "$expected_hash" ]; then
-				cp "$candidate_path" "$UPDATER_PATH"
-				chmod 755 "$UPDATER_PATH"
-				log "Updated local bootstrap updater"
-			fi
-			install_updater_libs "$selected_source" "$tmp_dir" || log "Could not refresh updater helper files"
+		if ! valid_sha256 "$expected_hash" || [ "$candidate_hash" != "$expected_hash" ]; then
+			log "Manifest updater hash validation failed; refusing fallback update"
+			exit 1
+		fi
+		if ! install_updater_libs "$selected_source" "$tmp_dir" "$manifest_path"; then
+			log "Manifest updater helper validation failed; refusing fallback update"
+			exit 1
+		fi
+		local_hash=""
+		if [ -f "$UPDATER_PATH" ]; then
+			local_hash=$(hash_file "$UPDATER_PATH")
+		fi
+		if [ ! -f "$UPDATER_PATH" ] || [ "$local_hash" != "$expected_hash" ]; then
+			cp "$candidate_path" "$UPDATER_PATH"
+			chmod 755 "$UPDATER_PATH"
+			log "Updated local bootstrap updater"
 		fi
 	elif download_to "$UPDATER_SOURCE" "$candidate_path" && download_to "$UPDATER_HASH_SOURCE" "$candidate_hash_path"; then
 		expected_hash=$(expected_hash_from_file "$candidate_hash_path")
@@ -292,16 +336,19 @@ ensure_updater() {
 		if [ -z "$expected_hash" ] || [ "$candidate_hash" != "$expected_hash" ]; then
 			log "Remote updater hash validation failed; keeping local updater if available"
 		else
-			local_hash=""
-			if [ -f "$UPDATER_PATH" ]; then
-				local_hash=$(hash_file "$UPDATER_PATH")
+			if install_updater_libs "$UPDATER_SOURCE" "$tmp_dir"; then
+				local_hash=""
+				if [ -f "$UPDATER_PATH" ]; then
+					local_hash=$(hash_file "$UPDATER_PATH")
+				fi
+				if [ ! -f "$UPDATER_PATH" ] || [ "$local_hash" != "$expected_hash" ]; then
+					cp "$candidate_path" "$UPDATER_PATH"
+					chmod 755 "$UPDATER_PATH"
+					log "Updated local bootstrap updater"
+				fi
+			else
+				log "Could not refresh updater helper files; keeping local updater"
 			fi
-			if [ ! -f "$UPDATER_PATH" ] || [ "$local_hash" != "$expected_hash" ]; then
-				cp "$candidate_path" "$UPDATER_PATH"
-				chmod 755 "$UPDATER_PATH"
-				log "Updated local bootstrap updater"
-			fi
-			install_updater_libs "$UPDATER_SOURCE" "$tmp_dir" || log "Could not refresh updater helper files"
 		fi
 	else
 		log "Could not refresh updater from source; falling back to local updater if present"
@@ -388,14 +435,14 @@ run_resource_conscious_updater() {
 	"$UPDATER_PATH" "$TARGET_DIR"
 }
 
-ensure_bootstrap_prereqs
-
+validate_install_profile
 if [ -f "$NO_UPDATE_FILE" ]; then
 	log "noUpdate marker found; skipping updater phase"
 	run_existing_installer
 	exit $?
 fi
 
+ensure_bootstrap_prereqs
 ensure_updater
 log "Running updater for target: $TARGET_DIR"
 export VENUS_EVCHARGER_MANIFEST_SOURCE="$MANIFEST_SOURCE"

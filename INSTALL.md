@@ -11,23 +11,31 @@ This guide covers the usual installation paths for Venus OS and Cerbo GX.
 
 ## Standard Install
 
-1. Download the repository archive into a writable path under `/data`. Venus OS
-   images usually do not include `git`, so the device install path uses `wget`
-   or `curl`:
+1. Choose an explicit published release and verify its signed manifest before
+   extracting the bundle. Replace the example tag with a real release:
 
    ```bash
    mkdir -p /data/venus-evcharger
    cd /data/venus-evcharger
-   wget -O venus-evcharger-service.tar.gz https://codeload.github.com/martinthebrain/venus-evcharger-service/tar.gz/refs/heads/main
-   tar -xzf venus-evcharger-service.tar.gz
-   cd venus-evcharger-service-main
+   RELEASE_TAG=v1.2.3
+   RELEASE_BASE="https://github.com/martinthebrain/venus-evcharger-service/releases/download/$RELEASE_TAG"
+   for file in bootstrap_manifest.pub bootstrap_manifest.json bootstrap_manifest.json.sig wallbox-bundle.tar.gz; do
+     wget "$RELEASE_BASE/$file"
+   done
+   BOOTSTRAP_PUBKEY_SHA256=a6cf770bc8a2b6addf29fb85a4113c76e768900891490a83eb3e742c6f8d0642
+   printf '%s  bootstrap_manifest.pub\n' "$BOOTSTRAP_PUBKEY_SHA256" | sha256sum -c -
+   openssl dgst -sha256 -verify bootstrap_manifest.pub \
+     -signature bootstrap_manifest.json.sig bootstrap_manifest.json
+   EXPECTED_SHA256=$(python3 -c 'import json; print(json.load(open("bootstrap_manifest.json"))["bundle_sha256"])')
+   printf '%s  wallbox-bundle.tar.gz\n' "$EXPECTED_SHA256" | sha256sum -c -
+   mkdir "venus-evcharger-$RELEASE_TAG"
+   tar -xzf wallbox-bundle.tar.gz -C "venus-evcharger-$RELEASE_TAG"
+   cd "venus-evcharger-$RELEASE_TAG"
    ```
 
-   If `wget` is not available but `curl` is, replace the download line with:
-
-   ```bash
-   curl -fsSL -o venus-evcharger-service.tar.gz https://codeload.github.com/martinthebrain/venus-evcharger-service/tar.gz/refs/heads/main
-   ```
+   If `wget` is unavailable, download the same URLs with `curl -fsSLO`. Do not
+   replace the pinned public-key fingerprint merely because a downloaded
+   release publishes a different key; authenticate key rotations separately.
 
 2. Edit or generate the configuration:
 
@@ -174,6 +182,9 @@ Useful variables:
 
 The full bootstrap and updater behavior, including `noUpdate`, is documented in
 [UPDATE_FLOW.md](UPDATE_FLOW.md).
+
+For development and dedicated Pi testing only, a moving `main` checkout or
+archive can still be used. It is intentionally not the production procedure.
 
 ## Development Checkout
 

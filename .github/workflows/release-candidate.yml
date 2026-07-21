@@ -1,0 +1,49 @@
+name: Release candidate hardware gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact commit or tag to test
+        required: true
+        type: string
+      pi_target:
+        description: Dedicated Pi test target
+        required: true
+        default: root@192.168.142.129
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  hardware-gate:
+    environment: release-candidate
+    runs-on: [self-hosted, linux, venus-evcharger-release]
+    timeout-minutes: 60
+    env:
+      RELEASE_REF: ${{ inputs.ref }}
+      RELEASE_PI_TARGET: ${{ inputs.pi_target }}
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Install pinned Python development tools
+        run: bash ./scripts/dev/install_dev_tools.sh
+
+      - name: Run host and dedicated-Pi release gate
+        run: |
+          bash ./scripts/dev/run_release_candidate_gate.sh \
+            --pi "$RELEASE_PI_TARGET" \
+            --receipt /tmp/venus-evcharger-release-candidate.json
+
+      - name: Publish gate receipt in run summary
+        if: success()
+        run: |
+          printf '```json\n' >>"$GITHUB_STEP_SUMMARY"
+          cat /tmp/venus-evcharger-release-candidate.json >>"$GITHUB_STEP_SUMMARY"
+          printf '```\n' >>"$GITHUB_STEP_SUMMARY"

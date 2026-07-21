@@ -8,3 +8,8 @@ build/
 mutants/
 tests/__pycache__/
 docs/
+
+# Runtime diagnostics must stay below configured absolute runtime paths.
+/None
+/dbus-command-lifecycle.jsonl
+/dbus-health-history.jsonl

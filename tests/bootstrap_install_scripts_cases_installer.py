@@ -29,6 +29,69 @@ class _BootstrapInstallScriptsInstallerCases(_BootstrapInstallScriptsBase):
         reset_template = (UPDATER_SCRIPT.parent / "config.venus_evcharger.default.ini").read_text(encoding="utf-8")
         self.assertEqual(reset_template, config_template)
 
+    def test_production_profile_requires_a_signed_manifest_without_downgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            bootstrap_copy = root / "install.sh"
+            bootstrap_copy.write_text(BOOTSTRAP_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            bootstrap_copy.chmod(0o755)
+            clean_env = {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("VENUS_EVCHARGER_MANIFEST_")
+                and key not in {"VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST", "VENUS_EVCHARGER_INSTALL_PROFILE"}
+            }
+
+            result = subprocess.run(
+                ["bash", str(bootstrap_copy)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **clean_env,
+                    "VENUS_EVCHARGER_INSTALL_PROFILE": "production",
+                    "VENUS_EVCHARGER_TARGET_DIR": str(root / "target"),
+                },
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Production profile requires VENUS_EVCHARGER_MANIFEST_SOURCE", result.stdout)
+
+            unknown = subprocess.run(
+                ["bash", str(bootstrap_copy)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**clean_env, "VENUS_EVCHARGER_INSTALL_PROFILE": "mystery"},
+            )
+            self.assertNotEqual(unknown.returncode, 0)
+            self.assertIn("Unknown install profile: mystery", unknown.stdout)
+
+    def test_configured_manifest_failure_never_falls_back_to_moving_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            bootstrap_copy = root / "install.sh"
+            bootstrap_copy.write_text(BOOTSTRAP_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            bootstrap_copy.chmod(0o755)
+            invalid_manifest = root / "invalid-manifest.json"
+            invalid_manifest.write_text("{}\n", encoding="utf-8")
+
+            result = subprocess.run(
+                ["bash", str(bootstrap_copy)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_TARGET_DIR": str(root / "target"),
+                    "VENUS_EVCHARGER_MANIFEST_SOURCE": str(invalid_manifest),
+                    "VENUS_EVCHARGER_MANIFEST_SIG_SOURCE": str(root / "missing.sig"),
+                    "VENUS_EVCHARGER_UPDATER_SOURCE": str(root / "must-not-be-used.sh"),
+                },
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Configured bootstrap manifest could not be authenticated", result.stdout)
+            self.assertNotIn("falling back to hash-source flow", result.stdout)
+
     def test_bootstrap_installer_defaults_to_hash_validated_updater_when_manifest_is_unset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -153,30 +216,65 @@ class _BootstrapInstallScriptsInstallerCases(_BootstrapInstallScriptsBase):
 
             signing_key, public_key = self._generate_signing_keypair(root)
             expected_hash = hashlib.sha256(UPDATER_SCRIPT.read_bytes()).hexdigest()
-            manifest = {"format": 1, "channel": "stable", "version": "1.0.0", "updater_url": str(UPDATER_SCRIPT), "updater_sha256": expected_hash}
+            updater_lib_hashes = {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in UPDATER_LIB_DIR.glob("*.sh")
+            }
+            manifest = {
+                "format": 1,
+                "channel": "stable",
+                "version": "1.0.0",
+                "updater_url": str(UPDATER_SCRIPT),
+                "updater_sha256": expected_hash,
+                "updater_lib_sha256": updater_lib_hashes,
+            }
             manifest_path = root / "bootstrap_manifest.json"
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             manifest_sig_path = root / "bootstrap_manifest.json.sig"
-            subprocess.run(
-                ["openssl", "dgst", "-sha256", "-sign", str(signing_key), "-out", str(manifest_sig_path), str(manifest_path)],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
 
-            subprocess.run(
+            def write_signed_manifest() -> None:
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                subprocess.run(
+                    [
+                        "openssl",
+                        "dgst",
+                        "-sha256",
+                        "-sign",
+                        str(signing_key),
+                        "-out",
+                        str(manifest_sig_path),
+                        str(manifest_path),
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+            install_env = {
+                **os.environ,
+                "VENUS_EVCHARGER_TARGET_DIR": str(target_dir),
+                "VENUS_EVCHARGER_SOURCE_DIR": str(source_dir),
+                "VENUS_EVCHARGER_MANIFEST_SOURCE": str(manifest_path),
+                "VENUS_EVCHARGER_MANIFEST_SIG_SOURCE": str(manifest_sig_path),
+                "VENUS_EVCHARGER_BOOTSTRAP_PUBKEY": str(public_key),
+                "VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST": "1",
+            }
+            expected_core_hash = updater_lib_hashes["00_core.sh"]
+            updater_lib_hashes["00_core.sh"] = "0" * 64
+            write_signed_manifest()
+            rejected = subprocess.run(
                 ["bash", str(bootstrap_copy)],
-                check=True,
-                env={
-                    **os.environ,
-                    "VENUS_EVCHARGER_TARGET_DIR": str(target_dir),
-                    "VENUS_EVCHARGER_SOURCE_DIR": str(source_dir),
-                    "VENUS_EVCHARGER_MANIFEST_SOURCE": str(manifest_path),
-                    "VENUS_EVCHARGER_MANIFEST_SIG_SOURCE": str(manifest_sig_path),
-                    "VENUS_EVCHARGER_BOOTSTRAP_PUBKEY": str(public_key),
-                    "VENUS_EVCHARGER_REQUIRE_SIGNED_MANIFEST": "1",
-                },
+                check=False,
+                capture_output=True,
+                text=True,
+                env=install_env,
             )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("Manifest updater helper hash validation failed: 00_core.sh", rejected.stdout)
+            self.assertIn("refusing fallback update", rejected.stdout)
+            self.assertFalse((bootstrap_dir / ".venus-evcharger-bootstrap/bootstrap_updater.sh").exists())
+
+            updater_lib_hashes["00_core.sh"] = expected_core_hash
+            write_signed_manifest()
+            subprocess.run(["bash", str(bootstrap_copy)], check=True, env=install_env)
 
             self.assertTrue((bootstrap_dir / ".venus-evcharger-bootstrap/bootstrap_updater.sh").is_file())
             self._assert_cached_updater_libs(bootstrap_dir)

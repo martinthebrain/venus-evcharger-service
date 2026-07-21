@@ -37,16 +37,20 @@ class DbusAdapterJsonlContractTests(unittest.TestCase):
 
     def test_append_jsonl_uses_explicit_utf8_append_mode_and_retains(self) -> None:
         handle = mock_open()
+        path = "/tmp/events.jsonl"
         with (
             patch("builtins.open", handle),
             patch.object(jsonl, "ensure_parent_dir") as ensure_parent_dir,
             patch.object(jsonl, "retain_jsonl_tail") as retain_jsonl_tail,
         ):
-            jsonl.append_jsonl("events.jsonl", {"idx": 1}, max_bytes=123)
-        ensure_parent_dir.assert_called_once_with("events.jsonl")
-        handle.assert_called_once_with("events.jsonl", "a", encoding="utf-8")
+            jsonl.append_jsonl(path, {"idx": 1}, max_bytes=123)
+        ensure_parent_dir.assert_called_once_with(path)
+        handle.assert_called_once_with(path, "a", encoding="utf-8")
         handle().write.assert_called_once_with('{"idx":1}\n')
-        retain_jsonl_tail.assert_called_once_with("events.jsonl", max_bytes=123)
+        retain_jsonl_tail.assert_called_once_with(path, max_bytes=123)
+
+        with self.assertRaisesRegex(ValueError, "absolute .jsonl file path"):
+            jsonl.append_jsonl("events.jsonl", {"idx": 1}, max_bytes=123)
 
     def test_trim_target_is_three_quarters_with_minimum_one_byte(self) -> None:
         self.assertEqual(jsonl.trim_target_bytes(4), 3)

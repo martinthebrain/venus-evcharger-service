@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import socketserver
@@ -112,9 +113,11 @@ class LocalControlApiHttpServer:
     def start(self) -> None:
         if self._server is not None:
             return
+        self.validate_transport_security()
         server = self._build_server()
         self._server = server
         if self._unix_socket_path:
+            self.secure_unix_socket_path(self._unix_socket_path)
             self.bound_unix_socket_path = self._unix_socket_path
             self.bound_host = ""
             self.bound_port = 0
@@ -130,6 +133,28 @@ class LocalControlApiHttpServer:
         )
         self._thread.start()
         logging.info("Started local Control API v1 on %s", listen_target)
+
+    def validate_transport_security(self) -> None:
+        """Reject tokenless TCP exposure beyond the local host."""
+
+        if self._unix_socket_path or self.is_loopback_bind_host(self._host):
+            return
+        if not self.authenticator.has_configured_token:
+            raise ValueError("Control API TCP listeners outside loopback require an authentication token")
+
+    @staticmethod
+    def is_loopback_bind_host(host: str) -> bool:
+        normalized = host.strip().lower()
+        if normalized == "localhost":
+            return True
+        try:
+            return bool(ipaddress.ip_address(normalized).is_loopback)
+        except ValueError:
+            return False
+
+    @staticmethod
+    def secure_unix_socket_path(path: str) -> None:
+        os.chmod(path, 0o600)
 
     def stop(self) -> None:
         server = self._server

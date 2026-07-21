@@ -40,6 +40,7 @@ Recommended defaults:
 
 - keep `ControlApiLocalhostOnly=1`
 - keep `ControlApiHost=127.0.0.1` unless you intentionally front it with another local proxy
+- configure at least one explicit token before binding TCP outside loopback; the service refuses to start otherwise
 - use `ControlApiReadToken` for read-only clients and `ControlApiControlToken` for writers
 - use `ControlApiAdminToken` and `ControlApiUpdateToken` only when you want stricter local separation for advanced control and update operations
 - use `ControlApiAuthToken` only when one shared token for both scopes is enough
@@ -111,6 +112,8 @@ Locality rules:
 
 - when `ControlApiLocalhostOnly=1`, remote TCP clients are rejected
 - unix-socket mode is always treated as local
+- unix sockets are created with owner-only permissions
+- the API does not terminate TLS; remote TCP belongs behind an authenticated VPN or trusted local TLS proxy
 
 ## `GET /v1/capabilities`
 

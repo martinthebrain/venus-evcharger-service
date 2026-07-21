@@ -12,7 +12,6 @@ from tests.support.dbus_gateway_adapter_harness import (
     builtins,
     gateway_paths,
     install_mock,
-    jsonl_module,
     patch,
     tempfile,
     time,
@@ -65,12 +64,9 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
                 empty_adapter.write_scheduler.record_lifecycle({"kind": "noop"}, "dropped")
             empty_adapter.command_lifecycle_path = "lifecycle-without-dir.jsonl"
             lifecycle_handle = unittest.mock.mock_open()
-            with (
-                patch.object(jsonl_module.os.path, "dirname", return_value=""),
-                patch.object(builtins, "open", lifecycle_handle),
-            ):
+            with patch.object(builtins, "open", lifecycle_handle):
                 empty_adapter.write_scheduler.record_lifecycle({"kind": "noop"}, "queued")
-            lifecycle_handle.assert_called_once_with("lifecycle-without-dir.jsonl", "a", encoding="utf-8")
+            lifecycle_handle.assert_not_called()
 
     def test_process_one_can_skip_local_publish_and_process_remote_write(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

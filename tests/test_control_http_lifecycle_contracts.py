@@ -118,6 +118,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
             patch.object(server, "_build_server", return_value=transport),
             patch("venus_evcharger.control.http_api.threading.Thread", return_value=thread),
             patch("venus_evcharger.control.http_api.logging.info") as info,
+            patch.object(server, "secure_unix_socket_path") as secure_socket,
             patch("venus_evcharger.control.http_api.os.path.exists", return_value=True) as exists,
             patch("venus_evcharger.control.http_api.os.unlink") as unlink,
         ):
@@ -126,8 +127,34 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
             self.assertEqual(server.bound_unix_socket_path, "/tmp/control.sock")
             server.stop()
         info.assert_called_once_with("Started local Control API v1 on %s", "unix:///tmp/control.sock")
+        secure_socket.assert_called_once_with("/tmp/control.sock")
         exists.assert_called_once_with("/tmp/control.sock")
         unlink.assert_called_once_with("/tmp/control.sock")
+
+    def test_transport_security_rejects_tokenless_remote_tcp_before_binding(self) -> None:
+        for host in ("0.0.0.0", "::", "192.0.2.10", "external.example"):
+            with self.subTest(host=host):
+                server = LocalControlApiHttpServer(self._service(), host=host, port=8765, localhost_only=False)
+                with patch.object(server, "_build_server") as build:
+                    with self.assertRaisesRegex(ValueError, "outside loopback require an authentication token"):
+                        server.start()
+                build.assert_not_called()
+
+    def test_transport_security_allows_local_unix_and_authenticated_remote_listeners(self) -> None:
+        for host in ("localhost", "127.0.0.1", "127.0.0.9", "::1"):
+            with self.subTest(host=host):
+                LocalControlApiHttpServer(self._service(), host=host, port=8765).validate_transport_security()
+        LocalControlApiHttpServer(
+            self._service(), host="0.0.0.0", port=8765, auth_token="secret", localhost_only=False
+        ).validate_transport_security()
+        LocalControlApiHttpServer(
+            self._service(), host="ignored", port=0, unix_socket_path="/run/control.sock"
+        ).validate_transport_security()
+
+    def test_unix_socket_security_uses_owner_only_permissions(self) -> None:
+        with patch("venus_evcharger.control.http_api.os.chmod") as chmod:
+            LocalControlApiHttpServer.secure_unix_socket_path("/run/control.sock")
+        chmod.assert_called_once_with("/run/control.sock", 0o600)
 
     def test_stop_without_server_resets_all_public_bind_state(self) -> None:
         server = LocalControlApiHttpServer(self._service(), host="host", port=4)
