@@ -224,7 +224,12 @@ main() {
 			set_failure_reason_once "incomplete-local-source"
 			exit 1
 		fi
-	elif load_manifest "${TMP_DIR}/bootstrap_manifest.json"; then
+	elif [ -n "$MANIFEST_SOURCE" ]; then
+		if ! load_manifest "${TMP_DIR}/bootstrap_manifest.json"; then
+			log "Configured update manifest could not be authenticated; refusing fallback update"
+			set_failure_reason_once "manifest-authentication-failed"
+			exit 1
+		fi
 		CHANNEL="${MANIFEST_CHANNEL:-$CHANNEL}"
 		REPO_SLUG="${MANIFEST_SOURCE_REPO:-$REPO_SLUG}"
 		RUN_NEW_BUNDLE_SHA256="${MANIFEST_BUNDLE_SHA256:-}"

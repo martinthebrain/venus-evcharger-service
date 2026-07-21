@@ -1,0 +1,74 @@
+name: Publish signed release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed release tag
+        required: true
+        type: string
+      candidate_commit:
+        description: Commit that passed the hardware release-candidate gate
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      SIGNING_KEY_B64: ${{ secrets.VENUS_EVCHARGER_BOOTSTRAP_SIGNING_KEY_B64 }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable release identity
+        run: |
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'
+          printf '%s\n' "$CANDIDATE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$CANDIDATE_COMMIT"
+          test "$(sed -n 's/^[Vv]ersion:[[:space:]]*//p' version.txt | head -n 1)" = "${RELEASE_TAG#v}"
+
+      - name: Materialize signing key
+        run: |
+          test -n "$SIGNING_KEY_B64"
+          umask 077
+          printf '%s' "$SIGNING_KEY_B64" | base64 --decode >/tmp/venus-evcharger-release-signing.key
+
+      - name: Build and verify signed release assets
+        env:
+          VENUS_EVCHARGER_BOOTSTRAP_SIGNING_KEY: /tmp/venus-evcharger-release-signing.key
+          VENUS_EVCHARGER_SOURCE_COMMIT: ${{ inputs.candidate_commit }}
+        run: |
+          release_base="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+          bash scripts/dev/build_signed_release.sh /tmp/venus-evcharger-release "$release_base"
+
+      - name: Publish immutable release assets
+        run: |
+          gh release create "$RELEASE_TAG" \
+            /tmp/venus-evcharger-release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes
+
+      - name: Remove signing key
+        if: always()
+        run: |
+          if command -v shred >/dev/null 2>&1; then
+            shred -u /tmp/venus-evcharger-release-signing.key 2>/dev/null || true
+          else
+            rm -f /tmp/venus-evcharger-release-signing.key
+          fi

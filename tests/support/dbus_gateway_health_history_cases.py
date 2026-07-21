@@ -163,12 +163,9 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
             adapter.health_log_path = "health-history-without-dir.jsonl"
             adapter._last_health_log_monotonic = 0.0
             log_handle = unittest.mock.mock_open()
-            with (
-                patch.object(jsonl_module.os.path, "dirname", return_value=""),
-                patch.object(builtins, "open", log_handle),
-            ):
+            with patch.object(builtins, "open", log_handle):
                 adapter.append_health_log({"state": "ok"})
-            log_handle.assert_called_once_with("health-history-without-dir.jsonl", "a", encoding="utf-8")
+            log_handle.assert_not_called()
 
             adapter._last_health_log_monotonic = 0.0
             with patch.object(builtins, "open", side_effect=OSError("full")):

@@ -198,21 +198,37 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
         )
         custom = defaults(
             {
-                "DbusGatewayCommandLifecyclePath": " /tmp/lifecycle ",
+                "DbusGatewayCommandLifecyclePath": " /tmp/lifecycle.jsonl ",
                 "DbusGatewayCommandLifecycleMaxBytes": "-1",
-                "DbusGatewayHealthLogPath": " /tmp/health ",
+                "DbusGatewayHealthLogPath": " /tmp/health.jsonl ",
                 "DbusGatewayHealthLogIntervalSeconds": "-1",
                 "DbusGatewayHealthLogMaxBytes": "-1",
-                "DbusIntrospectionSnapshotPath": " /tmp/snapshot ",
-                "DbusIntrospectionRequestPath": " /tmp/request ",
+                "DbusIntrospectionSnapshotPath": " /tmp/snapshot.json ",
+                "DbusIntrospectionRequestPath": " /tmp/request.json ",
                 "DbusIntrospectionEnabled": "false",
             }
         )
-        self.assertEqual(config.file_settings(custom, paths), config.GatewayFileSettings("/tmp/lifecycle", 0, "/tmp/health", 0.0, 0))
+        self.assertEqual(
+            config.file_settings(custom, paths),
+            config.GatewayFileSettings("/tmp/lifecycle.jsonl", 0, "/tmp/health.jsonl", 0.0, 0),
+        )
         self.assertEqual(
             config.introspection_settings(custom, 61),
-            config.GatewayIntrospectionSettings("/tmp/snapshot", "/tmp/request", False),
+            config.GatewayIntrospectionSettings("/tmp/snapshot.json", "/tmp/request.json", False),
         )
+
+        for key, value in (
+            ("DbusGatewayCommandLifecyclePath", "relative.jsonl"),
+            ("DbusGatewayHealthLogPath", "None"),
+        ):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, key):
+                config.file_settings(defaults({key: value}), paths)
+        for key, value in (
+            ("DbusIntrospectionSnapshotPath", "."),
+            ("DbusIntrospectionRequestPath", "/tmp/request.txt"),
+        ):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, key):
+                config.introspection_settings(defaults({key: value}), 61)
 
     def test_adapter_settings_composes_all_sections_and_respects_explicit_paths(self) -> None:
         paths = gateway_paths("/run/explicit")

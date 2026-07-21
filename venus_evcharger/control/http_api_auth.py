@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ipaddress
+import secrets
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -132,7 +133,13 @@ class ControlApiHttpAuthenticator:
 
     @staticmethod
     def matches_bearer_token(header: str, token: str) -> bool:
-        return bool(token) and header == f"Bearer {token}"
+        return bool(token) and secrets.compare_digest(header, f"Bearer {token}")
+
+    @property
+    def has_configured_token(self) -> bool:
+        """Return whether any explicit authentication boundary is configured."""
+
+        return any(token for _scope_name, token in self.scope_tokens())
 
     @staticmethod
     def first_configured_token(*tokens: str) -> str:

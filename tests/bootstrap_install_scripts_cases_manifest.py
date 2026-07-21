@@ -13,6 +13,30 @@ from tests.bootstrap_install_scripts_cases_common import (
 
 
 class _BootstrapInstallScriptsManifestCases(_BootstrapInstallScriptsBase):
+    def test_updater_rejects_invalid_configured_manifest_without_channel_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target_dir = root / "target"
+            invalid_manifest = root / "invalid.json"
+            invalid_manifest.write_text("{}\n", encoding="utf-8")
+            result = subprocess.run(
+                ["bash", str(UPDATER_SCRIPT), str(target_dir)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_MANIFEST_SOURCE": str(invalid_manifest),
+                    "VENUS_EVCHARGER_MANIFEST_SIG_SOURCE": str(root / "missing.sig"),
+                    "VENUS_EVCHARGER_ARCHIVE_URL": str(root / "must-not-be-used.tar.gz"),
+                    "VENUS_EVCHARGER_UPDATER_RESOURCE_GUARD": "0",
+                },
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Configured update manifest could not be authenticated", result.stderr)
+            status = self._read_normalized_status(target_dir)
+            self.assertEqual(status["failure_reason"], "manifest-authentication-failed")
+
     def test_bootstrap_updater_keeps_current_release_when_staged_manifest_config_fails_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

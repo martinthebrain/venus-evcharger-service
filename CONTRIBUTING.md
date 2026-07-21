@@ -64,6 +64,20 @@ simulator over the real network path, runs offline gateway chaos scenarios on
 the Pi, checks gateway health/lifecycle logs, and verifies GUI-visible DBus
 values and writes.
 
+Before publishing a production release, run the complete clean-tree gate:
+
+```bash
+bash scripts/dev/run_release_candidate_gate.sh --pi root@192.168.142.129
+```
+
+The dedicated Pi must contain `/data/venus-evcharger-testbed`; deployment is
+refused before any test action when that marker is absent.
+
+The same gate can be dispatched through the self-hosted
+`Release candidate hardware gate` workflow. The signed release workflow is a
+separate, environment-protected step so untrusted testbed code never receives
+the release signing key. See [RELEASE_PROCESS.md](RELEASE_PROCESS.md).
+
 The optional audit target runs the focused pylint audit, a high-severity Bandit
 security audit, spellcheck, and the shell audit when `shellcheck` and `shfmt`
 are installed. The individual `make shell-audit` target requires both system

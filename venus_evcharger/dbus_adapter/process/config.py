@@ -12,6 +12,7 @@ from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter.jsonl import DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES, DEFAULT_HEALTH_HISTORY_MAX_BYTES
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec, ReadSpecs
 from venus_evcharger.dbus_gateway import GatewayPaths, gateway_paths
+from venus_evcharger.runtime.output_path import validated_output_file_path
 
 
 class CasePreservingConfigParser(configparser.ConfigParser):
@@ -163,19 +164,23 @@ def slo_settings(defaults: configparser.SectionProxy) -> GatewaySloSettings:
 
 def file_settings(defaults: configparser.SectionProxy, paths: GatewayPaths) -> GatewayFileSettings:
     return GatewayFileSettings(
-        command_lifecycle_path=str(
+        command_lifecycle_path=validated_output_file_path(
             defaults.get(
                 "DbusGatewayCommandLifecyclePath",
                 os.path.join(paths.run_dir, "dbus-command-lifecycle.jsonl"),
-            )
-        ).strip(),
+            ),
+            label="DbusGatewayCommandLifecyclePath",
+            suffix=".jsonl",
+        ),
         command_lifecycle_max_bytes=max(
             0,
             int(config_get_float(defaults, "DbusGatewayCommandLifecycleMaxBytes", DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES)),
         ),
-        health_log_path=str(
-            defaults.get("DbusGatewayHealthLogPath", os.path.join(paths.run_dir, "dbus-health-history.jsonl"))
-        ).strip(),
+        health_log_path=validated_output_file_path(
+            defaults.get("DbusGatewayHealthLogPath", os.path.join(paths.run_dir, "dbus-health-history.jsonl")),
+            label="DbusGatewayHealthLogPath",
+            suffix=".jsonl",
+        ),
         health_log_interval_seconds=max(
             0.0,
             config_get_float(defaults, "DbusGatewayHealthLogIntervalSeconds", 10.0),
@@ -192,18 +197,22 @@ def introspection_settings(
     device_instance: int,
 ) -> GatewayIntrospectionSettings:
     return GatewayIntrospectionSettings(
-        snapshot_path=str(
+        snapshot_path=validated_output_file_path(
             defaults.get(
                 "DbusIntrospectionSnapshotPath",
                 f"/run/dbus-venus-evcharger-dbus-map-{device_instance}.json",
-            )
-        ).strip(),
-        request_path=str(
+            ),
+            label="DbusIntrospectionSnapshotPath",
+            suffix=".json",
+        ),
+        request_path=validated_output_file_path(
             defaults.get(
                 "DbusIntrospectionRequestPath",
                 f"/run/dbus-venus-evcharger-dbus-map-requests-{device_instance}.json",
-            )
-        ).strip(),
+            ),
+            label="DbusIntrospectionRequestPath",
+            suffix=".json",
+        ),
         enabled=_truthy(defaults.get("DbusIntrospectionEnabled", "1")),
     )
 

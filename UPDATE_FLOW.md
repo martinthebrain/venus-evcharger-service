@@ -253,6 +253,20 @@ Useful inputs:
 This makes it possible to require a signed manifest before a refresh is
 accepted.
 
+Production maintenance must use the explicit production profile:
+
+```bash
+VENUS_EVCHARGER_INSTALL_PROFILE=production \
+VENUS_EVCHARGER_MANIFEST_SOURCE=https://github.com/martinthebrain/venus-evcharger-service/releases/download/v1.2.3/bootstrap_manifest.json \
+./install.sh
+```
+
+The profile forces signature verification. A missing, invalid, or unsigned
+configured manifest aborts the update; it never falls back to a branch archive.
+The default `development` profile retains branch and local-source flows for the
+dedicated Pi testbed. An active `noUpdate` marker still skips all downloading
+and runs only the already installed local installer.
+
 ## Release Layout And Rollback
 
 The updater can prepare a versioned release directory first and then move the
