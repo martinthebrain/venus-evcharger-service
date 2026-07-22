@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import configparser
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
-Formatter = Callable[[object, object], str] | None
 MonthWindow = Callable[[configparser.ConfigParser, int, str, str], object]
 
 
@@ -24,7 +23,6 @@ class BootstrapDependencies:
     read_version: Callable[[str], str]
     gobject: object
     script_path: str
-    formatters: Mapping[str, Formatter]
 
 
 @runtime_checkable
@@ -50,22 +48,6 @@ class ControllerOwnerPort(Protocol):
     def prepare_runtime_state(self) -> object: ...
 
     def initialize_runtime(self) -> object: ...
-
-
-@runtime_checkable
-class DbusServicePort(Protocol):
-    """Gateway proxy operations required by DBus path registration."""
-
-    def add_path(self, path: str, value: object, **kwargs: object) -> None: ...
-
-    def register(self) -> None: ...
-
-
-@runtime_checkable
-class DbusWriteHandlerPort(Protocol):
-    """Writable-path callback exposed by the Auto service role."""
-
-    def handle_dbus_write(self, path: str, value: object) -> bool: ...
 
 
 @runtime_checkable
@@ -97,22 +79,6 @@ def require_controller_owner(service: object) -> ControllerOwnerPort:
     if not isinstance(owner, ControllerOwnerPort):
         raise TypeError("bootstrap service does not expose ControllerOwnerPort")
     return owner
-
-
-def require_dbus_service(service: object) -> DbusServicePort:
-    """Return the gateway DBus proxy or fail at the bootstrap boundary."""
-    dbus_service = getattr(service, "_dbusservice", None)
-    if not isinstance(dbus_service, DbusServicePort):
-        raise TypeError("bootstrap service does not expose DbusServicePort")
-    return dbus_service
-
-
-def require_write_handler(service: object) -> DbusWriteHandlerPort:
-    """Return the writable-path handler or fail at the bootstrap boundary."""
-    handler = getattr(service, "auto", None)
-    if not isinstance(handler, DbusWriteHandlerPort):
-        raise TypeError("bootstrap service does not expose DbusWriteHandlerPort")
-    return handler
 
 
 def require_gobject_timers(gobject: object) -> GobjectTimersPort:

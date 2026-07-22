@@ -4,22 +4,40 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Protocol
 
-from venus_evcharger.dbus_gateway import GatewayClient, gateway_paths
+from venus_evcharger.ports.gateway_operations import EssSetpointIntent, GatewayOperationsPort
 from .victron_ess_balance_apply_sources import VictronEssSourceResolver
 
 
-VICTRON_ESS_BALANCE_WRITE_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+VICTRON_ESS_BALANCE_WRITE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+
+
+class _WarningRuntime(Protocol):  # pragma: no cover
+    def warning_throttled(
+        self,
+        key: str,
+        interval_seconds: float,
+        message: str,
+        *args: object,
+    ) -> None: ...
+
+
+class VictronEssWriteService(Protocol):  # pragma: no cover
+    runtime: _WarningRuntime
+    auto_battery_discharge_balance_victron_bias_min_update_seconds: float
+    _victron_ess_balance_last_write_at: float | None
+    _victron_ess_balance_last_setpoint_w: float | None
 
 
 class VictronEssSetpointWriter:
     """Coalesce and enqueue Victron ESS balance-bias setpoint writes through the gateway."""
 
-    def __init__(self, sources: VictronEssSourceResolver) -> None:
+    def __init__(self, sources: VictronEssSourceResolver, gateway: GatewayOperationsPort) -> None:
         self._sources = sources
+        self._gateway = gateway
 
-    def _victron_ess_balance_should_write(self, svc: Any, now: float, setpoint_w: float) -> bool:
+    def should_write(self, svc: VictronEssWriteService, now: float, setpoint_w: float) -> bool:
         min_update_seconds = max(
             0.0,
             float(getattr(svc, "auto_battery_discharge_balance_victron_bias_min_update_seconds", None) or 0.0),
@@ -27,107 +45,44 @@ class VictronEssSetpointWriter:
         last_write_at = self._sources._optional_float(getattr(svc, "_victron_ess_balance_last_write_at", None))
         if last_write_at is not None and (float(now) - float(last_write_at)) < min_update_seconds:
             return False
-        last_setpoint_w = self._victron_ess_balance_last_setpoint(svc)
+        last_setpoint_w = self.last_setpoint(svc)
         if last_setpoint_w is None:
             return True
         return abs(float(setpoint_w) - float(last_setpoint_w)) >= 1.0
 
-    def _victron_ess_balance_last_setpoint(self, svc: Any) -> float | None:
+    def last_setpoint(self, svc: VictronEssWriteService) -> float | None:
         return self._sources._optional_float(getattr(svc, "_victron_ess_balance_last_setpoint_w", None))
 
-    @staticmethod
-    def _victron_ess_balance_write_target(service_name: object, path: object) -> tuple[str, str]:
-        return str(service_name or "").strip(), str(path or "").strip()
-
-    @staticmethod
-    def _victron_ess_balance_write_payload(dbus_module: Any, value: float) -> Any:
-        del dbus_module
-        return float(value)
-
-    def _victron_ess_balance_try_write_setpoint(
+    def write_setpoint(
         self,
-        svc: Any,
-        normalized_service: str,
-        normalized_path: str,
+        svc: VictronEssWriteService,
         value: float,
-    ) -> None:
-        GatewayClient(gateway_paths(str(getattr(svc, "dbus_gateway_run_dir", None) or "") or None)).enqueue_command(
-            {
-                "kind": "set_value",
-                "source": "victron-ess-balance",
-                "service": normalized_service,
-                "path": normalized_path,
-                "value": self._victron_ess_balance_write_payload(None, value),
-                "priority": "user",
-                "coalesce_key": f"{normalized_service}:{normalized_path}",
-            }
-        )
-
-    @staticmethod
-    def _victron_ess_balance_log_write_retry(
-        normalized_service: str,
-        normalized_path: str,
-        error: Exception,
-    ) -> None:
-        logging.debug(
-            "Victron ESS balance-bias write retry for %s %s after error: %s",
-            normalized_service,
-            normalized_path,
-            error,
-        )
-
-    def _victron_ess_balance_write_setpoint(
-        self,
-        svc: Any,
-        service_name: object,
-        path: object,
-        value: float,
+        *,
+        intent: EssSetpointIntent,
     ) -> bool:
-        normalized_service, normalized_path = self._victron_ess_balance_write_target(service_name, path)
-        if not normalized_service or not normalized_path:
-            return False
-        last_error = self._victron_ess_balance_write_error(
-            svc,
-            normalized_service,
-            normalized_path,
-            value,
-        )
-        if last_error is None:
+        error = self._write_error(value, intent=intent)
+        if error is None:
             return True
         svc.runtime.warning_throttled(
             "victron-ess-balance-write-failed",
-            self._victron_ess_balance_write_warning_interval_seconds(svc),
-            "Victron ESS balance-bias write to %s %s failed: %s",
-            normalized_service,
-            normalized_path,
-            last_error,
+            self.warning_interval_seconds(svc),
+            "Victron ESS balance-bias %s operation was rejected: %s",
+            intent,
+            error,
         )
         return False
 
-    def _victron_ess_balance_write_error(
-        self,
-        svc: Any,
-        normalized_service: str,
-        normalized_path: str,
-        value: float,
-    ) -> Exception | None:
+    def _write_error(self, value: float, *, intent: EssSetpointIntent) -> Exception | None:
         try:
-            self._victron_ess_balance_try_write_setpoint(svc, normalized_service, normalized_path, value)
+            receipt = self._gateway.set_ess_grid_setpoint(float(value), intent=intent)
+            if not receipt.accepted:
+                raise RuntimeError("gateway did not accept the operation")
             return None
         except VICTRON_ESS_BALANCE_WRITE_ERRORS as error:
-            self._victron_ess_balance_log_write_retry(normalized_service, normalized_path, error)
-        try:
-            self._victron_ess_balance_try_write_setpoint(svc, normalized_service, normalized_path, value)
-            return None
-        except VICTRON_ESS_BALANCE_WRITE_ERRORS as error:
+            logging.debug("Victron ESS balance-bias %s enqueue failed: %s", intent, error)
             return error
 
     @staticmethod
-    def _victron_ess_balance_write_warning_interval_seconds(svc: Any) -> float:
+    def warning_interval_seconds(svc: VictronEssWriteService) -> float:
         configured = getattr(svc, "auto_battery_discharge_balance_victron_bias_min_update_seconds", None)
         return 5.0 if configured is None else max(5.0, float(configured))
-
-    @classmethod
-    def _victron_ess_balance_dbus_module(cls) -> Any:
-        del cls
-        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")

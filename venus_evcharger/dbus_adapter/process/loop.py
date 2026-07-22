@@ -30,7 +30,6 @@ class DbusAdapterLoop(DbusAdapterIntrospection):
         os.makedirs(self.paths.command_dir, exist_ok=True)
         os.makedirs(self.paths.core_command_dir, exist_ok=True)
         self.start_socket()
-        self.ensure_dbus_service()
         main_loop = GLib.MainLoop()
         self._main_loop = main_loop
         GLib.timeout_add(max(50, int(self.min_tick_seconds * 1000)), self.tick)
@@ -51,7 +50,6 @@ class DbusAdapterLoop(DbusAdapterIntrospection):
         self._last_tick_monotonic = tick_started
         try:
             self.process_socket_once()
-            self.process_introspection_requests_once()
             self.process_one_dbus_operation_once()
             self.publish_cache()
         except GATEWAY_TICK_RECOVERY_ERRORS as error:

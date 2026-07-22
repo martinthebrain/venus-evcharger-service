@@ -29,6 +29,11 @@ def lifecycle(
 
 
 class TestAutoInputSupervisorProcessContracts(unittest.TestCase):
+    def test_helper_snapshot_age_is_unknown_before_start_or_snapshot(self) -> None:
+        manager = lifecycle(AutoInputSupervisorServiceFake())
+
+        self.assertIsNone(manager._helper_snapshot_age(100.0))
+
     def test_stop_helper_handles_absent_exited_running_and_forced_processes(self) -> None:
         service = AutoInputSupervisorServiceFake()
         manager = lifecycle(service)
@@ -194,6 +199,10 @@ class TestAutoInputSupervisorProcessContracts(unittest.TestCase):
         manager.ensure_helper_process()
         self.assertEqual(process.terminate_calls, 1)
         self.assertEqual(service._auto_input_helper_restart_requested_at, 100.0)
+
+        service.now = 102.0
+        manager.ensure_helper_process()
+        self.assertEqual(process.kill_calls, 0)
 
         service.now = 106.0
         manager.ensure_helper_process()

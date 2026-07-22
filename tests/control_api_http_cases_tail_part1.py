@@ -38,7 +38,7 @@ class __ControlApiHttpTailCasesPart1:
     def test_response_helpers_emit_exact_json_contract(self) -> None:
         command = ControlCommand(
             name="set_mode",
-            path="/Mode",
+            target="mode",
             value=1,
             source="http",
             command_id="cmd-1",
@@ -69,7 +69,7 @@ class __ControlApiHttpTailCasesPart1:
             },
         )
         self.assertEqual(command_payload["name"], "set_mode")
-        self.assertEqual(command_payload["path"], "/Mode")
+        self.assertEqual(command_payload["target"], "mode")
         self.assertEqual(command_payload["value"], 1)
         self.assertEqual(command_payload["source"], "http")
         self.assertEqual(command_payload["command_id"], "cmd-1")
@@ -346,36 +346,29 @@ class __ControlApiHttpTailCasesPart1:
         self.assertEqual(no_token.authenticator.state_token_headers, {})
         self.assertTrue(auth_only.authenticator.has_configured_token)
 
-    def test_required_scope_for_command_payload_resolves_paths_and_falls_back_for_invalid_paths(self) -> None:
-        resolved_command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
-        invalid_path = ValueError("bad path")
+    def test_required_scope_for_command_uses_name_and_defaults_unknown_names_to_admin(self) -> None:
         service = control_api_http_service(
-            control_command_from_payload=MagicMock(
-                side_effect=[
-                    resolved_command,
-                    invalid_path,
-                ]
-            ),
+            control_command_from_payload=MagicMock(),
             handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
 
-        resolved_scope = server.authenticator.required_scope_for_command({"path": "/Mode", "value": 1})
-        fallback_scope = server.authenticator.required_scope_for_command({"path": "/Unknown", "value": 1})
-        explicit_scope = server.authenticator.required_scope_for_command({"name": "set_mode", "path": "/Mode", "value": 1})
+        resolved_scope = server.authenticator.required_scope_for_command({"name": "set_mode", "value": 1})
+        fallback_scope = server.authenticator.required_scope_for_command({"name": "unknown", "value": 1})
+        missing_name_scope = server.authenticator.required_scope_for_command({"target": "mode", "value": 1})
 
         self.assertEqual(resolved_scope, "control_basic")
         self.assertEqual(fallback_scope, "control_admin")
-        self.assertEqual(explicit_scope, "control_basic")
-        self.assertEqual(service.control_command_from_payload.call_count, 2)
-        self.assertEqual(
-            service.control_command_from_payload.call_args_list[0].args[0],
-            {"path": "/Mode", "value": 1, "command_id": "", "idempotency_key": ""},
-        )
-        self.assertEqual(service.control_command_from_payload.call_args_list[0].kwargs, {"source": "http"})
+        self.assertEqual(missing_name_scope, "control_admin")
+        service.control_command_from_payload.assert_not_called()
 
     def test_finer_scopes_gate_admin_and_update_commands(self) -> None:
-        command = ControlCommand(name="set_auto_runtime_setting", path="/Auto/StartSurplusWatts", value=1800.0, source="http")
+        command = ControlCommand(
+            name="set_auto_runtime_setting",
+            target="auto_start_surplus_watts",
+            value=1800.0,
+            source="http",
+        )
         result = ControlResult.applied_result(command)
         service = control_api_http_service(
             control_command_from_payload=MagicMock(return_value=command),
@@ -392,7 +385,7 @@ class __ControlApiHttpTailCasesPart1:
         )
         control_handler = _FakeHandler(
             "/v1/control/command",
-            body=b'{"name":"set_auto_runtime_setting","path":"/Auto/StartSurplusWatts","value":1800.0}',
+            body=b'{"name":"set_auto_runtime_setting","target":"auto_start_surplus_watts","value":1800.0}',
             authorization="Bearer control-token",
         )
         admin_handler = _FakeHandler(
@@ -409,7 +402,7 @@ class __ControlApiHttpTailCasesPart1:
         server.router.handle_post(control_handler)
         service.control_command_from_payload.return_value = ControlCommand(
             name="trigger_software_update",
-            path="/Auto/SoftwareUpdateRun",
+            target="software_update_run",
             value=1,
             source="http",
         )

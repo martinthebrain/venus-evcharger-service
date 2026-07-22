@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 from venus_evcharger.core.contracts import paired_optional_values, valid_battery_soc
 from venus_evcharger.inputs.supervisor_contracts import (
@@ -281,15 +282,8 @@ class AutoInputSnapshotValidator:
         return target if self._normalize_structured(path, source, target) else None
 
     def _timestamps_ordered(self, path: str, snapshot: SnapshotPayload) -> bool:
-        captured_at = snapshot_timestamp(snapshot.get("captured_at"))
-        heartbeat_at = snapshot_timestamp(snapshot.get("heartbeat_at"))
-        if captured_at is None or heartbeat_at is None:
-            self._invalid(
-                "auto-input-helper-schema-invalid",
-                path,
-                "Auto input helper snapshot %s requires numeric captured_at and heartbeat_at fields",
-            )
-            return False
+        captured_at = cast(float, snapshot["captured_at"])
+        heartbeat_at = cast(float, snapshot["heartbeat_at"])
         if heartbeat_at >= captured_at:
             return True
         self._invalid(

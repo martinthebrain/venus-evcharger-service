@@ -32,8 +32,8 @@ The preferred request form is canonical and command-first:
 }
 ```
 
-Compatibility `path/value` writes still exist, but they are not the primary
-mental model for new clients.
+Control commands use semantic targets. DBus paths are an adapter detail and
+are not part of the public control API.
 
 See:
 

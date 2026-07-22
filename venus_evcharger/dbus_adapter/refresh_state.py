@@ -7,7 +7,7 @@ import math
 from collections.abc import Mapping
 
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
-from venus_evcharger.dbus_gateway_command_types import CommandMapping
+from venus_evcharger.ipc.command_types import CommandMapping
 
 _TIMESTAMP_TYPES = (str, bytes, bytearray, int, float)
 

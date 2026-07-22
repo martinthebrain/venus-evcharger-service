@@ -1,17 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Async runtime state and DBus-thread guards."""
+"""Async worker, control-command, and watchdog state."""
 
 from __future__ import annotations
 
 from collections import OrderedDict
-import logging
 import threading
 import time
 from typing import Any
 
 
 class AsyncRuntimeState:
-    """Own async queue state and GLib/DBus thread ownership."""
+    """Own RAM-only worker, command, and watchdog coordination state."""
 
     def __init__(self, service: Any) -> None:
         self.service = service
@@ -24,24 +23,6 @@ class AsyncRuntimeState:
         """Initialize RAM-only queues, worker flags, and timing diagnostics."""
         svc = self.service
         now = time.time()
-        svc._dbus_mainloop_thread_id = None
-        svc._dbus_async_publish_enabled = False
-        svc._dbus_publish_queue_lock = threading.Lock()
-        svc._dbus_publish_pending = OrderedDict()
-        svc._dbus_publish_field_pending = OrderedDict()
-        svc._dbus_publish_bump_pending = 0
-        svc._dbus_publish_oldest_queued_at = None
-        svc._dbus_publish_dropped_count = 0
-        svc._dbus_publish_max_paths = 256
-        svc._dbus_publish_budget_seconds = 0.1
-        svc._dbus_publish_flush_interval_ms = 200
-        svc._last_publish_flush_duration_seconds = 0.0
-        svc._last_dbus_publish_queue_lag_seconds = 0.0
-        svc._companion_publish_lock = threading.Lock()
-        svc._companion_publish_pending = False
-        svc._companion_publish_requested_at = None
-        svc._companion_publish_now = None
-
         svc._update_worker_enabled = False
         svc._runtime_executor_event = threading.Event()
         svc._runtime_executor_stop_event = threading.Event()
@@ -80,32 +61,5 @@ class AsyncRuntimeState:
             self._float_attr(getattr(svc, "auto_watchdog_stale_seconds", None), 180.0),
         )
         svc._mainloop_watchdog_log_path = "/run/dbus-venus-evcharger-mainloop-hang.log"
-
-    def mark_mainloop_thread(self) -> None:
-        """Remember which thread owns VeDbusService writes."""
-        svc = self.service
-        svc._dbus_mainloop_thread_id = threading.get_ident()
-        svc._dbus_async_publish_enabled = True
-
-    def direct_publish_allowed(self) -> bool:
-        """Return whether the caller may touch ``VeDbusService`` directly."""
-        svc = self.service
-        if not hasattr(svc, "_dbus_async_publish_enabled"):
-            return True
-        if svc._dbus_async_publish_enabled is not True:
-            return True
-        if not hasattr(svc, "_dbus_mainloop_thread_id"):
-            return True
-        mainloop_thread_id = svc._dbus_mainloop_thread_id
-        return mainloop_thread_id is None or threading.get_ident() == int(mainloop_thread_id)
-
-    def assert_mainloop_thread(self, operation: str = "dbus access") -> None:
-        """Raise when code tries to touch a DBus service outside the GLib thread."""
-        if self.direct_publish_allowed():
-            return
-        message = f"{operation} attempted outside GLib/DBus mainloop thread"
-        logging.error(message)
-        raise RuntimeError(message)
-
 
 __all__ = ["AsyncRuntimeState"]

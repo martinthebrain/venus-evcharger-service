@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from collections import deque
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -22,7 +23,15 @@ import venus_evcharger_service  # noqa: E402
 import venus_evcharger.runtime.support as runtime_support_module  # noqa: E402
 from venus_evcharger.auto.policy import AutoPolicy, AutoThresholdProfile  # noqa: E402
 from venus_evcharger.controllers.auto import AutoDecisionController  # noqa: E402
+from venus_evcharger.control.models import ControlCommandName  # noqa: E402
 from venus_evcharger.core.common import _age_seconds, _health_code, read_version  # noqa: E402
+from venus_evcharger.dbus_adapter.publication.schema import EVCS_PUBLICATION_SPECS, validate_fields  # noqa: E402
+from venus_evcharger.ports.gateway_publication import (  # noqa: E402
+    CompanionServiceIdentity,
+    EvcsServiceIdentity,
+    PublicationPriority,
+    PublicationReceipt,
+)
 from venus_evcharger.service.auto_facade import ServiceAutoFacade  # noqa: E402
 from venus_evcharger.service.control import ServiceControlFacade  # noqa: E402
 from venus_evcharger.service.controller_owner import ServiceControllerOwner, ServiceFunctionBundle  # noqa: E402
@@ -65,6 +74,66 @@ class _TestTimers:
         return object()
 
 
+class _HelperGatewayPublication:
+    """Apply semantic publications to the fixture's adapter-facing value view."""
+
+    def __init__(self, service: ShellyWallboxService) -> None:
+        self._service = service
+
+    def register_evcs(
+        self,
+        identity: EvcsServiceIdentity,
+        initial_fields: Mapping[str, object],
+    ) -> PublicationReceipt:
+        del identity
+        self._apply_evcs_fields(initial_fields)
+        return PublicationReceipt(True, "helper-evcs-registration")
+
+    def publish_evcs_fields(
+        self,
+        fields: Mapping[str, object],
+        *,
+        priority: PublicationPriority,
+    ) -> PublicationReceipt:
+        del priority
+        self._apply_evcs_fields(fields)
+        return PublicationReceipt(True, "helper-evcs-publication")
+
+    def register_companion(
+        self,
+        identity: CompanionServiceIdentity,
+        initial_fields: Mapping[str, object],
+    ) -> PublicationReceipt:
+        del initial_fields
+        return PublicationReceipt(True, identity.service_id)
+
+    def publish_companion_fields(
+        self,
+        service_id: str,
+        fields: Mapping[str, object],
+        *,
+        priority: PublicationPriority,
+    ) -> PublicationReceipt:
+        del fields, priority
+        return PublicationReceipt(True, service_id)
+
+    def _apply_evcs_fields(self, fields: Mapping[str, object]) -> None:
+        semantic_fields = validate_fields(fields, EVCS_PUBLICATION_SPECS, surface="helper-evcs")
+        for field, value in semantic_fields.items():
+            self._service._dbusservice[EVCS_PUBLICATION_SPECS[field].path] = value
+
+
+def handle_control_surface_write(
+    service: ShellyWallboxService,
+    name: ControlCommandName,
+    target: str,
+    value: object,
+) -> bool:
+    """Exercise one GUI-equivalent write through the canonical control contract."""
+    command = service.auto.command(name, target, value, source="control-surface")
+    return bool(service.auto.handle_command(command).accepted)
+
+
 def _compose_helper_service(service: ShellyWallboxService) -> ShellyWallboxService:
     """Build the production controller graph around a lightweight test service."""
     functions = ServiceFunctionBundle(
@@ -80,7 +149,6 @@ def _compose_helper_service(service: ShellyWallboxService) -> ShellyWallboxServi
         script_path=str(venus_evcharger_service.__file__),
         config_path="/tmp/venus-evcharger-helper-test.ini",
         auto_input_helper_path="/tmp/venus_evcharger_auto_input_helper.py",
-        formatters=service._formatter_bundle,
     )
     service.controllers = ServiceControllerOwner(service, functions)
     service.runtime = ServiceRuntimeFacade(service.controllers)
@@ -88,12 +156,11 @@ def _compose_helper_service(service: ShellyWallboxService) -> ShellyWallboxServi
     service.update = ServiceUpdateFacade(service.controllers)
     service.control = ServiceControlFacade(service)
     service.auto = ServiceAutoFacade(
-        lambda: service._control_command_async_enabled,
         service.controllers,
-        service.runtime,
         service.control.publish_command_event,
     )
     service.controllers.initialize_runtime()
+    service.gateway_publication = _HelperGatewayPublication(service)
     return service
 
 
@@ -104,7 +171,7 @@ def make_helper_service() -> ShellyWallboxService:
 
 class ShellyWallboxHelpersTestBase(unittest.TestCase):
     @staticmethod
-    def _make_update_service(*, background_runtime: bool = False):
+    def _make_update_service(*, background_runtime: bool = False) -> ShellyWallboxService:
         service = ShellyWallboxService.__new__(ShellyWallboxService)
         service.config = configparser.ConfigParser()
         service.config.read_string(
@@ -256,9 +323,9 @@ ChargerType=
         return composed
 
     @staticmethod
-    def _set_worker_snapshot(service, **overrides):
+    def _set_worker_snapshot(service: object, **overrides: object) -> None:
         snapshot = runtime_support_module.RuntimeSupportController.empty_worker_snapshot()
         snapshot.update(overrides)
-        service._worker_snapshot = snapshot
+        setattr(service, "_worker_snapshot", snapshot)
 
 __all__ = [name for name in globals() if not name.startswith("__")]

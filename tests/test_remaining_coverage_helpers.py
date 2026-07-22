@@ -15,7 +15,6 @@ from tests.support.auto_input_supervisor import (
     HelperProcessFake,
     valid_snapshot,
 )
-from tests.support.publish_runtime import PublishServiceHarness
 from tests.venus_evcharger_shelly_io_controller_support import ShellyIoController
 from venus_evcharger.backend.shelly_support import ShellyBackendBase
 from venus_evcharger.bootstrap.wizard_render import (
@@ -26,23 +25,14 @@ from venus_evcharger.bootstrap.wizard_render import (
 )
 from venus_evcharger.controllers import state_runtime_snapshot_victron as snapshot_victron
 from venus_evcharger.controllers.state_restore_victron_ess import VictronEssRuntimeRestorer
-from venus_evcharger.controllers.write_snapshot import (
-    _restore_dbus_paths_direct,
-    _snapshot_dbus_paths,
-    _snapshot_direct_dbus_paths,
-)
 from venus_evcharger.core import common as common_mod
-from venus_evcharger.dbus_gateway import EVCS_FIELD_TO_PATH
 from venus_evcharger.energy import EnergySourceSnapshot
 from venus_evcharger.energy.aggregate import _effective_soc
 from venus_evcharger.energy.probe import _optional_detected_int
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
 from venus_evcharger.inputs.supervisor_snapshot_values import snapshot_int
-from venus_evcharger.publish.dbus_core import DbusPublishCore
 from venus_evcharger.publish.dbus_diagnostics_sources import DbusDiagnosticsSources
-from venus_evcharger.publish.dbus_measurements import DbusMeasurementPublisher
 from venus_evcharger.publish.dbus_runtime_view import DbusRuntimeView
-from venus_evcharger.publish.dbus_shared import DbusPublishContext
 from venus_evcharger.runtime.audit_fields import RuntimeAuditFields
 from venus_evcharger.topology.schema import (
     ActuatorConfig,
@@ -62,14 +52,6 @@ def _auto_input_supervisor(service: AutoInputSupervisorServiceFake) -> AutoInput
         config_path="/config.ini",
         helper_path="/helper.py",
     )
-
-
-def _publish_context(service: PublishServiceHarness) -> DbusPublishContext:
-    return DbusPublishContext(service=service, age_seconds=lambda *_args: 0)
-
-
-def _publish_core(service: PublishServiceHarness) -> DbusPublishCore:
-    return DbusPublishCore(_publish_context(service))
 
 
 class RemainingCoverageHelperTests(unittest.TestCase):
@@ -305,136 +287,6 @@ class RemainingCoverageHelperTests(unittest.TestCase):
     def test_diagnostics_retry_guard_path(self) -> None:
         service = SimpleNamespace(_shelly_retry_after="bad")
         self.assertEqual(DbusDiagnosticsSources._shelly_retry_remaining_value(service, 10.0), 0)
-
-    def test_write_snapshot_and_dbus_core_queue_guard_paths(self) -> None:
-        service = SimpleNamespace(
-            _dbus_publish_state={"/A": {"value": 1}},
-            _dbusservice=None,
-            _dbus_publish_direct_allowed=MagicMock(return_value=False),
-        )
-        self.assertEqual(_snapshot_dbus_paths(service, ("/A", "/B")), {"/A": 1})
-
-        self.assertEqual(_snapshot_direct_dbus_paths(SimpleNamespace(_dbusservice=None), ("/A",), {}), {})
-        _restore_dbus_paths_direct(SimpleNamespace(_dbusservice=None), {"/A": 1})
-
-        reject_enqueue = MagicMock(return_value=False)
-        reject_service = PublishServiceHarness(
-            _enqueue_dbus_publish_values=reject_enqueue,
-        )
-        self.assertFalse(_publish_core(reject_service)._enqueue_publish_values([("/A", 1)], 10.0))
-        reject_enqueue.assert_called_once_with([("/A", 1)], 10.0)
-
-        enqueue_values = MagicMock(return_value=True)
-        enqueue_fields = MagicMock(return_value=True)
-        enqueue_service = PublishServiceHarness(
-            _dbus_publish_state={},
-            _dbusservice={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _dbus_publish_direct_allowed=MagicMock(return_value=False),
-            _enqueue_dbus_publish_values=enqueue_values,
-            _enqueue_dbus_publish_fields=enqueue_fields,
-        )
-        harness = _publish_core(enqueue_service)
-        self.assertTrue(harness._enqueue_publish_values([("/A", 1)], 10.0))
-        self.assertTrue(harness._enqueue_publish_fields([("ac_power_w", 55.0)], 10.0))
-        enqueue_values.assert_called_with([("/A", 1)], 10.0)
-        enqueue_fields.assert_called_once_with([("ac_power_w", 55.0)], 10.0)
-        self.assertEqual(harness._field_items_to_path_items([("ac_power_w", 55.0), ("unknown", 1)]), [("/Ac/Power", 55.0)])
-        self.assertTrue(harness.publish_path("/A", 1, now=10.0, force=True))
-        enqueue_service._dbus_publish_state["/A"] = {"value": 1, "updated_at": 10.0}
-        self.assertEqual(harness._staged_values_for_enqueue({"/A": 1}, 10.0, None, False), [])
-        enqueue_service._dbus_publish_state["/Ac/Power"] = {"value": 55.0, "updated_at": 10.0}
-        self.assertEqual(
-            harness._staged_fields_for_enqueue(
-                {"unknown": 1, "ac_power_w": 55.0},
-                {"/Ac/Power": 55.0},
-                10.0,
-                None,
-                False,
-            ),
-            [],
-        )
-        self.assertFalse(harness._enqueue_transactional_publish({}, 10.0, None, False))
-
-        direct_service = PublishServiceHarness(
-            _dbus_publish_state={},
-            _dbusservice={"/UpdateIndex": 0},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-        )
-        _publish_core(direct_service).bump_update_index(10.0)
-        self.assertEqual(direct_service._dbusservice["/UpdateIndex"], 1)
-
-    def test_dbus_core_live_and_energy_publish_contract_fields(self) -> None:
-        service = PublishServiceHarness(
-            _dbus_publish_state={},
-            _dbusservice={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-        )
-        harness = _publish_core(service)
-        measurements = DbusMeasurementPublisher(_publish_context(service), harness)
-        phase_data = {
-            "L1": {"power": 111.0, "current": 1.1, "voltage": 229.1},
-            "L2": {"power": 222.0, "current": 2.2, "voltage": 229.2},
-            "L3": {"power": 333.0, "current": 3.3, "voltage": 229.3},
-        }
-
-        self.assertTrue(measurements.publish_live_measurements(666.0, 230.0, 6.6, phase_data, now=10.0))
-
-        expected_live_fields = {
-            "ac_power_w": 666.0,
-            "ac_voltage_v": 230.0,
-            "ac_current_a": 6.6,
-            "charge_current_a": 6.6,
-            "l1_power_w": 111.0,
-            "l1_current_a": 1.1,
-            "l1_voltage_v": 229.1,
-            "l2_power_w": 222.0,
-            "l2_current_a": 2.2,
-            "l2_voltage_v": 229.2,
-            "l3_power_w": 333.0,
-            "l3_current_a": 3.3,
-            "l3_voltage_v": 229.3,
-        }
-        for field, value in expected_live_fields.items():
-            path = EVCS_FIELD_TO_PATH[field]
-            self.assertEqual(service._dbusservice[path], value)
-            self.assertEqual(service._dbus_publish_state[path], {"value": value, "updated_at": 10.0})
-
-        self.assertFalse(measurements.publish_live_measurements(666.0, 230.0, 6.6, phase_data, now=10.5))
-        self.assertTrue(
-            harness._publish_values_transactional(
-                "forced-live",
-                {EVCS_FIELD_TO_PATH["ac_power_w"]: 666.0},
-                now=10.6,
-                interval_seconds=1.0,
-                force=True,
-            )
-        )
-        self.assertEqual(service._dbus_publish_state[EVCS_FIELD_TO_PATH["ac_power_w"]]["updated_at"], 10.6)
-
-        self.assertTrue(
-            measurements.publish_energy_time_measurements(
-                12.5,
-                {"L1": 1.1, "L2": 2.2, "L3": 3.3},
-                45,
-                4.5,
-                now=20.0,
-            )
-        )
-        expected_energy_fields = {
-            "energy_forward_kwh": 12.5,
-            "l1_energy_forward_kwh": 1.1,
-            "l2_energy_forward_kwh": 2.2,
-            "l3_energy_forward_kwh": 3.3,
-            "charging_time_s": 45,
-            "session_energy_kwh": 4.5,
-            "session_time_s": 45,
-        }
-        for field, value in expected_energy_fields.items():
-            self.assertEqual(service._dbusservice[EVCS_FIELD_TO_PATH[field]], value)
 
     def test_shelly_worker_guard_paths(self) -> None:
         service = SimpleNamespace(

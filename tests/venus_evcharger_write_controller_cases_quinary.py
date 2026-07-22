@@ -2,8 +2,8 @@
 from tests.venus_evcharger_write_controller_support import *
 
 
-class TestDbusWriteControllerQuinary(DbusWriteControllerTestBase):
-    def test_execute_write_rejects_unsupported_paths_without_persistence(self) -> None:
+class TestControlWriteControllerQuinary(ControlWriteControllerTestBase):
+    def test_execute_write_rejects_unsupported_targets_without_persistence(self) -> None:
         service = SimpleNamespace(
             _dbusservice={},
             time_now=MagicMock(return_value=42.0),
@@ -16,9 +16,9 @@ class TestDbusWriteControllerQuinary(DbusWriteControllerTestBase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "^Unsupported control path '/UnknownPath'\\.$",
+            "^Unsupported control target 'unknown_target'\\.$",
         ):
-            controller.handle_write("/UnknownPath", 1)
+            handle_control_target(controller, "unknown_target", 1)
 
         service._save_runtime_state.assert_not_called()
         service._save_runtime_overrides.assert_not_called()

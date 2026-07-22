@@ -77,7 +77,7 @@ class __ControlApiHttpTailCasesPart2:
     def test_command_role_rate_limit_replay_cache_concurrency_and_audit_paths(self) -> None:
         command = ControlCommand(
             name="set_mode",
-            path="/Mode",
+            target="mode",
             value=1,
             source="http",
             command_id="cmd-1",
@@ -216,7 +216,7 @@ class __ControlApiHttpTailCasesPart2:
         )
 
     def test_write_command_result_delegates_each_branch_with_tracked_payload_and_client_host(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         service = control_api_http_service(
             control_command_from_payload=MagicMock(return_value=command),
@@ -279,7 +279,14 @@ class __ControlApiHttpTailCasesPart2:
         write_new.assert_called_once_with(handler, tracked, command, result, "client-ok")
 
     def test_command_role_response_writers_emit_exact_audit_and_json_calls(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http", command_id="cmd-1", idempotency_key="idem-1")
+        command = ControlCommand(
+            name="set_mode",
+            target="mode",
+            value=1,
+            source="http",
+            command_id="cmd-1",
+            idempotency_key="idem-1",
+        )
         result = ControlResult.applied_result(command)
         service = control_api_http_service(
             control_command_from_payload=MagicMock(return_value=command),
@@ -298,7 +305,12 @@ class __ControlApiHttpTailCasesPart2:
 
         with patch.object(service, "record_command_audit") as audit_mock, patch.object(server.responder, "write_json") as write_mock:
             server.commands.write_replayed_response(handler, (HTTPStatus.ACCEPTED, replay_payload), "client-a")
-            server.commands.write_validation_error(handler, {"name": "bad"}, "Unsupported control path /bad.", "client-b")
+            server.commands.write_validation_error(
+                handler,
+                {"name": "bad"},
+                "Control command 'set_mode' does not support target 'bad'.",
+                "client-b",
+            )
             server.commands.write_rate_limit_error(
                 handler,
                 command,
@@ -358,7 +370,7 @@ class __ControlApiHttpTailCasesPart2:
         self.assertEqual(write_mock.call_args_list[3].kwargs["extra_headers"], {"ETag": '"state-1"', "X-State-Token": "state-1"})
 
     def test_idempotent_replay_and_cache_ignore_missing_or_blank_keys_without_store_access(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         response_payload = {"ok": True, "detail": "Applied.", "command": {}, "result": {}, "replayed": False, "error": None}
 
@@ -385,7 +397,7 @@ class __ControlApiHttpTailCasesPart2:
             store.put.assert_not_called()
 
     def test_replayed_response_uses_exact_cache_key_and_emits_exact_event_payload(self) -> None:
-        command_payload = {"name": "set_mode", "path": "/Mode", "value": 1}
+        command_payload = {"name": "set_mode", "target": "mode", "value": 1}
         result_payload = {"status": "applied", "accepted": True}
         cached_payload = {
             "ok": True,
@@ -466,7 +478,7 @@ class __ControlApiHttpTailCasesPart2:
     def test_command_response_payload_method_uses_exact_replay_flag_and_rejected_error_contract(self) -> None:
         command = ControlCommand(
             name="set_phase_selection",
-            path="/PhaseSelection",
+            target="phase_selection",
             value="P1_P2_P3",
             source="http",
             command_id="cmd-1",
@@ -498,7 +510,7 @@ class __ControlApiHttpTailCasesPart2:
                 "retryable": False,
                 "details": {
                     "status": "rejected",
-                    "path": "/PhaseSelection",
+                    "target": "phase_selection",
                     "command_id": "cmd-1",
                     "idempotency_key": "idem-1",
                 },
@@ -508,7 +520,7 @@ class __ControlApiHttpTailCasesPart2:
     def test_new_rejected_command_response_preserves_error_payload_in_audit_and_cache(self) -> None:
         command = ControlCommand(
             name="set_phase_selection",
-            path="/PhaseSelection",
+            target="phase_selection",
             value="P1_P2_P3",
             source="http",
             command_id="cmd-1",
@@ -591,13 +603,18 @@ class __ControlApiHttpTailCasesPart2:
         self.assertIsNone(handler.json_payload()["command"])
         self.assertIsNone(handler.json_payload()["result"])
 
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         self.assertEqual(http_status_for_result(ControlResult.applied_result(command)), 200)
         self.assertEqual(http_status_for_result(ControlResult.accepted_in_flight_result(command)), 202)
         self.assertEqual(http_status_for_result(ControlResult.rejected_result(command)), 409)
 
     def test_rejected_command_response_contains_structured_error(self) -> None:
-        command = ControlCommand(name="set_phase_selection", path="/PhaseSelection", value="P1_P2_P3", source="http")
+        command = ControlCommand(
+            name="set_phase_selection",
+            target="phase_selection",
+            value="P1_P2_P3",
+            source="http",
+        )
         result = ControlResult.rejected_result(command, detail="Unsupported phase selection")
         service = control_api_http_service(
             control_command_from_payload=MagicMock(return_value=command),
@@ -629,10 +646,10 @@ class __ControlApiHttpTailCasesPart2:
         self.assertEqual(handler.status_code, 400)
         self.assertEqual(handler.json_payload()["error"]["code"], "unsupported_command")
 
-    def test_real_command_boundary_rejects_unsupported_command_and_path_without_dispatch(self) -> None:
+    def test_real_command_boundary_rejects_unsupported_or_unnamed_commands_without_dispatch(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=("/SetCurrent",),
-            auto_runtime_setting_paths=set(),
+            current_setting_targets={"set_current"},
+            auto_runtime_setting_targets=set(),
         )
         dispatch = MagicMock()
         record_audit = MagicMock()
@@ -646,21 +663,23 @@ class __ControlApiHttpTailCasesPart2:
             (
                 b'{"name":"set_everything_on","value":1}',
                 "Unsupported control command 'set_everything_on'.",
+                "unsupported_command",
             ),
             (
-                b'{"path":"/Unknown","value":1}',
-                "Unsupported control path '/Unknown'.",
+                b'{"target":"unknown","value":1}',
+                "Control command payload must include 'name'.",
+                "validation_error",
             ),
         )
 
-        for body, expected_detail in scenarios:
+        for body, expected_detail, expected_code in scenarios:
             with self.subTest(body=body):
                 handler = _FakeHandler("/v1/control/command", body=body)
                 server.router.handle_post(handler)
                 payload = handler.json_payload()
                 self.assertEqual(handler.status_code, 400)
                 self.assertEqual(payload["detail"], expected_detail)
-                self.assertEqual(payload["error"]["code"], "unsupported_command")
+                self.assertEqual(payload["error"]["code"], expected_code)
                 self.assertFalse(payload["error"]["retryable"])
                 self.assertIsNone(payload["command"])
                 self.assertIsNone(payload["result"])
@@ -673,8 +692,14 @@ class __ControlApiHttpTailCasesPart2:
             payload_error_code("Control command 'set_mode' requires one of: 0, 1, 2."),
             "unsupported_command",
         )
-        self.assertEqual(payload_error_code("Unsupported control path '/Bogus'."), "unsupported_command")
-        self.assertEqual(payload_error_code("Command does not support path /Bogus."), "unsupported_command")
+        self.assertEqual(
+            payload_error_code("Control command 'set_mode' does not support target 'bogus'."),
+            "unsupported_command",
+        )
+        self.assertEqual(
+            payload_error_code("Control command 'set_current_setting' requires an explicit 'target'."),
+            "validation_error",
+        )
         self.assertEqual(payload_error_code("Plain validation failure."), "validation_error")
 
     def test_command_payload_helpers_emit_exact_structured_contracts(self) -> None:
@@ -745,7 +770,7 @@ class __ControlApiHttpTailCasesPart2:
     def test_tracking_payload_helpers_normalize_body_headers_and_missing_fields(self) -> None:
         command = ControlCommand(
             name="set_mode",
-            path="/Mode",
+            target="mode",
             value=1,
             source="http",
             command_id="old-command",
@@ -804,13 +829,13 @@ class __ControlApiHttpTailCasesPart2:
     def test_command_response_payloads_are_exact_for_accepted_replayed_and_rejected(self) -> None:
         command = ControlCommand(
             name="set_enable",
-            path="/Enable",
+            target="enable",
             value=1,
             source="http",
             command_id="cmd-1",
             idempotency_key="idem-1",
         )
-        command_payload = {"name": "set_enable", "path": "/Enable", "value": 1}
+        command_payload = {"name": "set_enable", "target": "enable", "value": 1}
         applied_result_payload = {"status": "applied", "accepted": True}
         applied = command_response_payload(
             ControlResult.applied_result(command, detail="Applied."),
@@ -852,7 +877,7 @@ class __ControlApiHttpTailCasesPart2:
                     "retryable": False,
                     "details": {
                         "status": "rejected",
-                        "path": "/Enable",
+                        "target": "enable",
                         "command_id": "cmd-1",
                         "idempotency_key": "idem-1",
                     },
@@ -861,10 +886,18 @@ class __ControlApiHttpTailCasesPart2:
         )
 
     def test_result_error_code_maps_semantic_rejections(self) -> None:
-        topology_command = ControlCommand(name="set_phase_selection", path="/PhaseSelection", value="P1_P2_P3")
-        update_command = ControlCommand(name="trigger_software_update", path="/Update/Run", value=1)
-        mode_command = ControlCommand(name="set_mode", path="/Mode", value=1)
-        health_command = ControlCommand(name="set_enable", path="/Enable", value=1)
+        topology_command = ControlCommand(
+            name="set_phase_selection",
+            target="phase_selection",
+            value="P1_P2_P3",
+        )
+        update_command = ControlCommand(
+            name="trigger_software_update",
+            target="auto_software_update_run",
+            value=1,
+        )
+        mode_command = ControlCommand(name="set_mode", target="mode", value=1)
+        health_command = ControlCommand(name="set_enable", target="enable", value=1)
 
         self.assertEqual(
             result_error_code(
@@ -937,7 +970,12 @@ class __ControlApiHttpTailCasesPart2:
         )
 
     def test_rate_limiter_and_critical_cooldown_protect_control_endpoint(self) -> None:
-        command = ControlCommand(name="trigger_software_update", path="/Auto/SoftwareUpdateRun", value=1, source="http")
+        command = ControlCommand(
+            name="trigger_software_update",
+            target="auto_software_update_run",
+            value=1,
+            source="http",
+        )
         result = ControlResult.applied_result(command)
         rate_limiter = SimpleNamespace(
             allow_request=MagicMock(side_effect=[(False, 1.5), (True, 0.0)]),

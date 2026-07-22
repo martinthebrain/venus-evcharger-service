@@ -165,10 +165,9 @@ class TestUpdateCycleControllerDenary(UpdateCycleControllerTestBase):
             charging_threshold_watts=1500.0,
             idle_status=1,
             time_now=MagicMock(return_value=123.0),
-            _bump_update_index=MagicMock(),
             virtual_startstop=1,
             service_name="com.victronenergy.evcharger.http_60",
-            _dbusservice={"/Ac/Power": 321.0},
+            _accepted_publication_fields={"ac_power_w": 321.0},
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 

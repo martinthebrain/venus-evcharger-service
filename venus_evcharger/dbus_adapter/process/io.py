@@ -17,6 +17,7 @@ import dbus
 from venus_evcharger.dbus_adapter.process.introspection_snapshot import DbusAdapterIntrospectionSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter.read.semantic import energy_inputs_snapshot
 
 _T = TypeVar("_T")
 
@@ -47,14 +48,14 @@ class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
         if not self.discovery.due(now=now, priority_allowed=self.circuit.allows_priority):
             return False
         try:
-            self.cache.update_services(self.list_services())
-            self.commands.remove_coalesced("refresh:services")
+            services = self.list_services()
+            self.cache.update_services(services, now=now)
+            self.energy_discovery.update_services(services, now=now)
             self.discovery.record_success(now=now)
             return True
         except DbusOperationDeferred:
             return False
         except DBUS_GATEWAY_OPERATION_ERRORS as error:
-            self.commands.remove_coalesced("refresh:services")
             self.discovery.record_error(error, now=now)
             return True
 
@@ -88,6 +89,15 @@ class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
             raise
 
     def publish_cache(self: DbusAdapterIoContext) -> None:
+        captured_at = time.time()
+        topology = self.energy_discovery.topology_snapshot(now=captured_at)
+        inputs = energy_inputs_snapshot(
+            self.cache.values,
+            self.energy_discovery,
+            sequence=self.cache.sequence,
+            captured_at=captured_at,
+        )
+        self.cache.set_semantic_energy_snapshots(inputs, topology)
         health = self.health_snapshot()
         self.cache.health.update(health)
         if self.cache_publish_interval_seconds > 0.0:
@@ -100,6 +110,11 @@ class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
             self._last_cache_publish_monotonic = now
             self._last_cache_publish_sequence = self.cache.sequence
         self.cache.write_snapshot_files()
+        self.write_gateway_diagnostics(
+            health=health,
+            topology=topology,
+            captured_at=captured_at,
+        )
         self.append_health_log(health)
         self.write_introspection_snapshot()
 

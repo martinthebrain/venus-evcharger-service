@@ -74,8 +74,6 @@ class _BranchCoverageVictronLearningCasesPart1:
         service = SimpleNamespace(
             auto_energy_sources=(SimpleNamespace(source_id="alpha"), SimpleNamespace(source_id=""),),
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_kp=0.2,
             auto_battery_discharge_balance_victron_bias_ki=0.02,
             auto_battery_discharge_balance_victron_bias_kd=0.01,
@@ -173,8 +171,6 @@ class _BranchCoverageVictronLearningCasesPart1:
         service = SimpleNamespace(
             auto_energy_sources=(SimpleNamespace(source_id="alpha"),),
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second=25.0,
             auto_battery_discharge_balance_victron_bias_max_abs_watts=350.0,
             auto_battery_discharge_balance_victron_bias_kp=0.2,
@@ -237,4 +233,3 @@ class _BranchCoverageVictronLearningCasesPart1:
         self.assertEqual(profiles._victron_ess_balance_profile_sample_count({}), 0)
         self.assertEqual(profiles._victron_ess_balance_profile_snapshot(service, "missing"), {})
         self.assertIsNone(profiles._victron_ess_balance_learning_profile_state(service, "missing").get("key"))
-

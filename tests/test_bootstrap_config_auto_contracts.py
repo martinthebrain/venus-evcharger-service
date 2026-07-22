@@ -8,7 +8,6 @@ from venus_evcharger.auto.policy import load_auto_policy_from_config
 from venus_evcharger.bootstrap.config_auto import AutoConfigLoader
 from venus_evcharger.bootstrap.config_auto_daytime import load_auto_daytime_policy
 from venus_evcharger.bootstrap.config_auto_helper import load_helper_and_timeout_config
-from venus_evcharger.bootstrap.config_auto_helper_gateway import load_gateway_and_introspection_config
 from venus_evcharger.bootstrap.config_auto_helper_polling import load_helper_polling_config
 from venus_evcharger.bootstrap.config_auto_helper_resilience import load_helper_resilience_config
 from venus_evcharger.bootstrap.config_auto_sources_battery import load_auto_battery_source_config
@@ -32,13 +31,6 @@ def _defaults(values: dict[str, str]) -> configparser.SectionProxy:
     parser = configparser.ConfigParser()
     parser.read_dict({"DEFAULT": values})
     return parser["DEFAULT"]
-
-
-def _battery_bool_attr(config_key: str) -> str:
-    return {
-        "AutoBatteryCapacityAutoEstimate": "auto_battery_capacity_auto_estimate",
-        "AutoAllowWithoutBatterySoc": "auto_allow_without_battery_soc",
-    }[config_key]
 
 
 def _month_window(
@@ -83,62 +75,35 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
 
         self.assertEqual(service.auto_policy.normal_profile.start_surplus_watts, 1500.0)
 
-    def test_auto_pv_source_config_uses_victron_defaults(self) -> None:
+    def test_auto_pv_source_config_exposes_only_core_polling_policy(self) -> None:
         service = SimpleNamespace()
 
         load_auto_pv_source_config(service, _defaults({}))
 
-        self.assertEqual(service.auto_pv_service, "")
-        self.assertEqual(service.auto_pv_service_prefix, "com.victronenergy.pvinverter")
-        self.assertEqual(service.auto_pv_path, "/Ac/Power")
         self.assertEqual(service.auto_pv_max_services, 10)
         self.assertEqual(service.auto_pv_scan_interval_seconds, 60.0)
-        self.assertTrue(service.auto_use_dc_pv)
-        self.assertEqual(service.auto_dc_pv_service, "com.victronenergy.system")
-        self.assertEqual(service.auto_dc_pv_path, "/Dc/Pv/Power")
+        self.assertEqual(vars(service), {"auto_pv_max_services": 10, "auto_pv_scan_interval_seconds": 60.0})
 
-    def test_auto_pv_source_config_accepts_common_true_values_for_dc_pv(self) -> None:
-        for raw_value in ("1", "true", "yes", "on", " TRUE "):
-            with self.subTest(raw_value=raw_value):
-                service = SimpleNamespace()
-
-                load_auto_pv_source_config(service, _defaults({"AutoUseDcPv": raw_value}))
-
-                self.assertTrue(service.auto_use_dc_pv)
-
-    def test_auto_battery_source_config_uses_victron_defaults(self) -> None:
+    def test_auto_battery_source_config_exposes_only_core_availability_policy(self) -> None:
         service = SimpleNamespace()
 
         load_auto_battery_source_config(service, _defaults({}))
 
-        self.assertEqual(service.auto_battery_service, "com.victronenergy.battery.socketcan_can1")
-        self.assertEqual(service.auto_battery_soc_path, "/Soc")
-        self.assertEqual(service.auto_battery_service_prefix, "com.victronenergy.battery")
         self.assertEqual(service.auto_battery_scan_interval_seconds, 60.0)
-        self.assertEqual(service.auto_battery_capacity_wh, 0.0)
-        self.assertEqual(service.auto_battery_chemistry, "lfp")
-        self.assertTrue(service.auto_battery_capacity_auto_estimate)
-        self.assertEqual(service.auto_battery_capacity_wh_path, "")
-        self.assertEqual(service.auto_battery_capacity_ah_path, "/InstalledCapacity")
-        self.assertEqual(service.auto_battery_voltage_path, "/Dc/0/Voltage")
-        self.assertEqual(service.auto_battery_capacity_estimate_min_soc, 95.0)
-        self.assertEqual(service.auto_battery_capacity_startup_recheck_seconds, 300.0)
-        self.assertEqual(service.auto_battery_power_path, "")
-        self.assertEqual(service.auto_battery_ac_power_path, "")
-        self.assertEqual(service.auto_battery_pv_power_path, "")
-        self.assertEqual(service.auto_battery_grid_interaction_path, "")
-        self.assertEqual(service.auto_battery_operating_mode_path, "")
         self.assertTrue(service.auto_allow_without_battery_soc)
+        self.assertEqual(
+            vars(service),
+            {"auto_battery_scan_interval_seconds": 60.0, "auto_allow_without_battery_soc": True},
+        )
 
     def test_auto_battery_source_config_accepts_common_true_values(self) -> None:
-        for key in ("AutoBatteryCapacityAutoEstimate", "AutoAllowWithoutBatterySoc"):
-            for raw_value in ("1", "true", "yes", "on", " TRUE "):
-                with self.subTest(key=key, raw_value=raw_value):
-                    service = SimpleNamespace()
+        for raw_value in ("1", "true", "yes", "on", " TRUE "):
+            with self.subTest(raw_value=raw_value):
+                service = SimpleNamespace()
 
-                    load_auto_battery_source_config(service, _defaults({key: raw_value}))
+                load_auto_battery_source_config(service, _defaults({"AutoAllowWithoutBatterySoc": raw_value}))
 
-                    self.assertTrue(getattr(service, _battery_bool_attr(key)))
+                self.assertTrue(service.auto_allow_without_battery_soc)
 
     def test_auto_energy_source_config_uses_backoff_defaults_and_passes_defaults_to_loader(self) -> None:
         source = EnergySourceDefinition(source_id="battery-a", service_name="battery-service")
@@ -158,27 +123,13 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
         self.assertEqual(service.auto_dbus_backoff_base_seconds, 5.0)
         self.assertEqual(service.auto_dbus_backoff_max_seconds, 60.0)
 
-    def test_auto_grid_source_config_uses_victron_defaults(self) -> None:
+    def test_auto_grid_source_config_exposes_only_core_freshness_policy(self) -> None:
         service = SimpleNamespace()
 
         load_auto_grid_source_config(service, _defaults({}))
 
-        self.assertEqual(service.auto_grid_service, "com.victronenergy.system")
-        self.assertEqual(service.auto_grid_l1_path, "/Ac/Grid/L1/Power")
-        self.assertEqual(service.auto_grid_l2_path, "/Ac/Grid/L2/Power")
-        self.assertEqual(service.auto_grid_l3_path, "/Ac/Grid/L3/Power")
-        self.assertTrue(service.auto_grid_require_all_phases)
         self.assertEqual(service.auto_grid_missing_stop_seconds, 60.0)
-        self.assertFalse(hasattr(service, "auto_grid_recovery_start_seconds"))
-
-    def test_auto_grid_source_config_accepts_common_true_values(self) -> None:
-        for raw_value in ("1", "true", "yes", "on", " TRUE "):
-            with self.subTest(raw_value=raw_value):
-                service = SimpleNamespace()
-
-                load_auto_grid_source_config(service, _defaults({"AutoGridRequireAllPhases": raw_value}))
-
-                self.assertTrue(service.auto_grid_require_all_phases)
+        self.assertEqual(vars(service), {"auto_grid_missing_stop_seconds": 60.0})
 
     def test_auto_timing_core_config_uses_defaults(self) -> None:
         service = SimpleNamespace()
@@ -248,11 +199,8 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
 
         self.assertFalse(service.auto_battery_discharge_balance_victron_bias_enabled)
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_source_id, "")
-        self.assertEqual(service.auto_battery_discharge_balance_victron_bias_service, "com.victronenergy.settings")
-        self.assertEqual(
-            service.auto_battery_discharge_balance_victron_bias_path,
-            "/Settings/CGwacs/AcPowerSetPoint",
-        )
+        self.assertFalse(hasattr(service, "auto_battery_discharge_balance_victron_bias_service"))
+        self.assertFalse(hasattr(service, "auto_battery_discharge_balance_victron_bias_path"))
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_base_setpoint_watts, 50.0)
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_deadband_watts, 100.0)
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_activation_mode, "always")
@@ -411,7 +359,7 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
         self.assertEqual(service.auto_scheduled_enabled_days, "Mon,Tue,Wed,Thu,Fri")
         self.assertEqual(service.auto_scheduled_latest_end_time, "04:30")
 
-    def test_auto_source_config_maps_configured_sources_and_dbus_paths(self) -> None:
+    def test_auto_source_config_ignores_transport_details_and_maps_core_policy(self) -> None:
         source = EnergySourceDefinition(source_id="hybrid", service_name="configured-hybrid")
         defaults = _defaults(
             {
@@ -461,42 +409,15 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
             load_auto_source_config(service, defaults)
 
         load_sources.assert_called_once_with(defaults)
-        self.assertEqual(service.auto_pv_service, "com.example.pv")
-        self.assertEqual(service.auto_pv_service_prefix, "com.example.pvprefix")
-        self.assertEqual(service.auto_pv_path, "/Pv/Power")
         self.assertEqual(service.auto_pv_max_services, 2)
         self.assertEqual(service.auto_pv_scan_interval_seconds, 12.0)
-        self.assertFalse(service.auto_use_dc_pv)
-        self.assertEqual(service.auto_dc_pv_service, "com.example.system")
-        self.assertEqual(service.auto_dc_pv_path, "/Dc/Pv")
-        self.assertEqual(service.auto_battery_service, "com.example.battery")
-        self.assertEqual(service.auto_battery_soc_path, "/Battery/Soc")
-        self.assertEqual(service.auto_battery_service_prefix, "com.example.battprefix")
         self.assertEqual(service.auto_battery_scan_interval_seconds, 25.0)
-        self.assertEqual(service.auto_battery_capacity_wh, 12345.0)
-        self.assertEqual(service.auto_battery_chemistry, "nmc")
-        self.assertFalse(service.auto_battery_capacity_auto_estimate)
-        self.assertEqual(service.auto_battery_capacity_wh_path, "/Capacity/Wh")
-        self.assertEqual(service.auto_battery_capacity_ah_path, "/Capacity/Ah")
-        self.assertEqual(service.auto_battery_voltage_path, "/Dc/Voltage")
-        self.assertEqual(service.auto_battery_capacity_estimate_min_soc, 88.0)
-        self.assertEqual(service.auto_battery_capacity_startup_recheck_seconds, 44.0)
-        self.assertEqual(service.auto_battery_power_path, "/Battery/Power")
-        self.assertEqual(service.auto_battery_ac_power_path, "/Battery/AcPower")
-        self.assertEqual(service.auto_battery_pv_power_path, "/Battery/PvPower")
-        self.assertEqual(service.auto_battery_grid_interaction_path, "/Battery/Grid")
-        self.assertEqual(service.auto_battery_operating_mode_path, "/Battery/Mode")
         self.assertFalse(service.auto_allow_without_battery_soc)
         self.assertEqual(service.auto_energy_sources, (source,))
         self.assertTrue(service.auto_use_combined_battery_soc)
         self.assertEqual(service.auto_energy_source_ids, ("hybrid",))
         self.assertEqual(service.auto_dbus_backoff_base_seconds, 3.0)
         self.assertEqual(service.auto_dbus_backoff_max_seconds, 9.0)
-        self.assertEqual(service.auto_grid_service, "com.example.grid")
-        self.assertEqual(service.auto_grid_l1_path, "/Grid/L1")
-        self.assertEqual(service.auto_grid_l2_path, "/Grid/L2")
-        self.assertEqual(service.auto_grid_l3_path, "/Grid/L3")
-        self.assertFalse(service.auto_grid_require_all_phases)
         self.assertEqual(service.auto_grid_missing_stop_seconds, 33.0)
         self.assertFalse(hasattr(service, "auto_grid_recovery_start_seconds"))
 
@@ -586,8 +507,8 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
         self.assertEqual(service.auto_battery_discharge_balance_coordination_max_penalty_watts, 201.0)
         self.assertTrue(service.auto_battery_discharge_balance_victron_bias_enabled)
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_source_id, "source-a")
-        self.assertEqual(service.auto_battery_discharge_balance_victron_bias_service, "com.example.settings")
-        self.assertEqual(service.auto_battery_discharge_balance_victron_bias_path, "/Settings/SetPoint")
+        self.assertFalse(hasattr(service, "auto_battery_discharge_balance_victron_bias_service"))
+        self.assertFalse(hasattr(service, "auto_battery_discharge_balance_victron_bias_path"))
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_base_setpoint_watts, 51.0)
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_deadband_watts, 101.0)
         self.assertEqual(service.auto_battery_discharge_balance_victron_bias_activation_mode, "auto")
@@ -684,14 +605,11 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
         self.assertEqual(service.auto_input_snapshot_path, "/run/dbus-venus-evcharger-auto-77.json")
         self.assertEqual(service.dbus_gateway_run_dir, "/tmp/gateway")
         self.assertEqual(service.dbus_gateway_cache_path, "/tmp/gateway/dbus-cache.json")
-        self.assertEqual(service.dbus_gateway_health_path, "/tmp/gateway/dbus-health.json")
+        self.assertEqual(service.gateway_health_path, "/tmp/gateway/dbus-health.json")
         self.assertEqual(service.dbus_gateway_socket_path, "/tmp/gateway/gateway.sock")
         self.assertEqual(service.dbus_gateway_command_dir, "/tmp/gateway/dbus-commands")
-        self.assertEqual(service.dbus_gateway_core_command_dir, "/tmp/gateway/core-commands")
-        self.assertFalse(service.dbus_introspection_enabled)
-        self.assertEqual(service.dbus_introspection_snapshot_path, "/run/dbus-venus-evcharger-dbus-map-77.json")
-        self.assertEqual(service.dbus_introspection_request_path, "/run/dbus-venus-evcharger-dbus-map-requests-77.json")
-        self.assertEqual(service.dbus_introspection_max_age_seconds, 123.0)
+        self.assertEqual(service.core_command_mailbox_dir, "/tmp/gateway/core-commands")
+        self.assertEqual(service.dbus_gateway_max_age_seconds, 10.0)
         self.assertEqual(service.auto_input_helper_restart_seconds, 8.0)
         self.assertEqual(service.auto_input_helper_stale_seconds, 19.0)
         self.assertEqual(service.auto_shelly_soft_fail_seconds, 17.0)
@@ -707,22 +625,35 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
         self.assertEqual(service.shelly_request_timeout_seconds, 4.5)
         self.assertEqual(service.dbus_method_timeout_seconds, 2.5)
 
-    def test_helper_and_timeout_loader_delegates_to_focused_loaders(self) -> None:
-        service = SimpleNamespace()
-        defaults = _defaults({})
+    def test_helper_and_timeout_config_maps_custom_gateway_transport_paths(self) -> None:
+        service = SimpleNamespace(deviceinstance=24)
 
-        with patch(
-            "venus_evcharger.bootstrap.config_auto_helper.load_helper_polling_config"
-        ) as polling, patch(
-            "venus_evcharger.bootstrap.config_auto_helper.load_gateway_and_introspection_config"
-        ) as gateway, patch(
-            "venus_evcharger.bootstrap.config_auto_helper.load_helper_resilience_config"
-        ) as resilience:
-            load_helper_and_timeout_config(service, defaults)
+        load_helper_and_timeout_config(
+            service,
+            _defaults(
+                {
+                    "DbusGatewayRunDir": " /tmp/run ",
+                    "DbusGatewayCachePath": " /tmp/cache.json ",
+                    "DbusGatewayHealthPath": " /tmp/health.json ",
+                    "DbusGatewaySocketPath": " /tmp/gateway.sock ",
+                    "DbusGatewayCommandDir": " /tmp/commands ",
+                    "DbusGatewayCoreCommandDir": " /tmp/core-commands ",
+                    "DbusGatewayMaxAgeSeconds": "-1",
+                    "DbusIntrospectionEnabled": "true",
+                    "DbusIntrospectionSnapshotPath": " /tmp/map.json ",
+                }
+            ),
+        )
 
-        polling.assert_called_once_with(service, defaults)
-        gateway.assert_called_once_with(service, defaults)
-        resilience.assert_called_once_with(service, defaults)
+        self.assertEqual(service.dbus_gateway_run_dir, "/tmp/run")
+        self.assertEqual(service.dbus_gateway_cache_path, "/tmp/cache.json")
+        self.assertEqual(service.gateway_health_path, "/tmp/health.json")
+        self.assertEqual(service.dbus_gateway_socket_path, "/tmp/gateway.sock")
+        self.assertEqual(service.dbus_gateway_command_dir, "/tmp/commands")
+        self.assertEqual(service.core_command_mailbox_dir, "/tmp/core-commands")
+        self.assertEqual(service.dbus_gateway_max_age_seconds, 0.0)
+        self.assertFalse(hasattr(service, "dbus_introspection_enabled"))
+        self.assertFalse(hasattr(service, "dbus_introspection_snapshot_path"))
 
     def test_helper_polling_config_uses_defaults(self) -> None:
         service = SimpleNamespace(deviceinstance=17)
@@ -761,72 +692,6 @@ class BootstrapConfigAutoContracts(unittest.TestCase):
         self.assertEqual(service.auto_pv_poll_interval_seconds, 4.0)
         self.assertEqual(service.auto_grid_poll_interval_seconds, 4.0)
         self.assertEqual(service.auto_battery_poll_interval_seconds, 4.0)
-
-    def test_gateway_and_introspection_config_uses_defaults(self) -> None:
-        service = SimpleNamespace(deviceinstance=23)
-
-        load_gateway_and_introspection_config(service, _defaults({}))
-
-        self.assertEqual(service.dbus_gateway_run_dir, "/run/venus-evcharger")
-        self.assertEqual(service.dbus_gateway_cache_path, "/run/venus-evcharger/dbus-cache.json")
-        self.assertEqual(service.dbus_gateway_health_path, "/run/venus-evcharger/dbus-health.json")
-        self.assertEqual(service.dbus_gateway_socket_path, "/run/venus-evcharger/gateway.sock")
-        self.assertEqual(service.dbus_gateway_command_dir, "/run/venus-evcharger/dbus-commands")
-        self.assertEqual(service.dbus_gateway_core_command_dir, "/run/venus-evcharger/core-commands")
-        self.assertEqual(service.dbus_gateway_max_age_seconds, 10.0)
-        self.assertTrue(service.dbus_introspection_enabled)
-        self.assertEqual(service.dbus_introspection_snapshot_path, "/run/dbus-venus-evcharger-dbus-map-23.json")
-        self.assertEqual(
-            service.dbus_introspection_request_path,
-            "/run/dbus-venus-evcharger-dbus-map-requests-23.json",
-        )
-        self.assertEqual(service.dbus_introspection_max_age_seconds, 900.0)
-
-    def test_gateway_and_introspection_config_accepts_custom_paths_and_true_values(self) -> None:
-        for raw_value in ("1", "true", "yes", "on", " TRUE "):
-            with self.subTest(raw_value=raw_value):
-                service = SimpleNamespace(deviceinstance=24)
-
-                load_gateway_and_introspection_config(
-                    service,
-                    _defaults(
-                        {
-                            "DbusGatewayRunDir": " /tmp/run ",
-                            "DbusGatewayCachePath": " /tmp/cache.json ",
-                            "DbusGatewayHealthPath": " /tmp/health.json ",
-                            "DbusGatewaySocketPath": " /tmp/gateway.sock ",
-                            "DbusGatewayCommandDir": " /tmp/commands ",
-                            "DbusGatewayCoreCommandDir": " /tmp/core-commands ",
-                            "DbusGatewayMaxAgeSeconds": "4.5",
-                            "DbusIntrospectionEnabled": raw_value,
-                            "DbusIntrospectionSnapshotPath": " /tmp/map.json ",
-                            "DbusIntrospectionRequestPath": " /tmp/map-requests.json ",
-                            "DbusIntrospectionMaxAgeSeconds": "321",
-                        }
-                    ),
-                )
-
-                self.assertEqual(service.dbus_gateway_run_dir, "/tmp/run")
-                self.assertEqual(service.dbus_gateway_cache_path, "/tmp/cache.json")
-                self.assertEqual(service.dbus_gateway_health_path, "/tmp/health.json")
-                self.assertEqual(service.dbus_gateway_socket_path, "/tmp/gateway.sock")
-                self.assertEqual(service.dbus_gateway_command_dir, "/tmp/commands")
-                self.assertEqual(service.dbus_gateway_core_command_dir, "/tmp/core-commands")
-                self.assertEqual(service.dbus_gateway_max_age_seconds, 4.5)
-                self.assertTrue(service.dbus_introspection_enabled)
-                self.assertEqual(service.dbus_introspection_snapshot_path, "/tmp/map.json")
-                self.assertEqual(service.dbus_introspection_request_path, "/tmp/map-requests.json")
-                self.assertEqual(service.dbus_introspection_max_age_seconds, 321.0)
-
-    def test_gateway_cache_max_age_clamps_negative_values(self) -> None:
-        service = SimpleNamespace(deviceinstance=25)
-
-        load_gateway_and_introspection_config(
-            service,
-            _defaults({"DbusGatewayMaxAgeSeconds": "-1"}),
-        )
-
-        self.assertEqual(service.dbus_gateway_max_age_seconds, 0.0)
 
     def test_helper_resilience_config_uses_defaults(self) -> None:
         service = SimpleNamespace()

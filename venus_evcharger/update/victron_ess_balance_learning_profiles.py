@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, TypeGuard, TypedDict
 
+from venus_evcharger.core.ess_topology import ess_learning_topology_key
+
 from .victron_ess_balance_apply_sources import VictronEssSourceResolver
 from .victron_ess_balance_learning_profiles_support import (
     _clear_victron_ess_balance_active_profile_state,
@@ -425,16 +427,7 @@ class VictronEssLearningProfiles:
         profile.update(self._victron_ess_balance_profile_limit_recommendations(svc, stability, overshoot_count))
 
     def _victron_ess_balance_current_topology_key(self, svc: Any, source_id: str) -> str:
-        energy_ids = _victron_ess_balance_energy_ids(svc)
-        service_name = str(svc.auto_battery_discharge_balance_victron_bias_service).strip()
-        path = str(svc.auto_battery_discharge_balance_victron_bias_path).strip()
-        return (
-            "victron-bias-learning/v2"
-            f"/source={str(source_id).strip()}"
-            f"/service={service_name}"
-            f"/path={path}"
-            f"/energy={','.join(sorted(energy_ids))}"
-        )
+        return ess_learning_topology_key(source_id, _victron_ess_balance_energy_ids(svc))
 
     def victron_ess_balance_learning_state_payload(self, svc: Any) -> dict[str, Any]:
         source_id = str(svc.auto_battery_discharge_balance_victron_bias_source_id).strip()

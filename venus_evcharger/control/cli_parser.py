@@ -94,7 +94,7 @@ def _add_safe_write_parser(subparsers: argparse._SubParsersAction[argparse.Argum
 def _add_command_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("name", help="Canonical command name, for example set-mode.")
     parser.add_argument("value", help="Command value. JSON scalars such as 1, 12.5, true are accepted.")
-    parser.add_argument("--path", default="", help="Explicit write path when the command family requires it.")
+    parser.add_argument("--target", default="", help="Explicit semantic target when the command family requires it.")
     parser.add_argument("--detail", default="", help="Optional detail string carried with the command.")
     parser.add_argument("--command-id", default="", help="Optional client-supplied command id.")
     parser.add_argument("--idempotency-key", default="", help="Optional replay-safe idempotency key.")

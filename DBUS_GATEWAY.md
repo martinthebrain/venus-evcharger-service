@@ -63,11 +63,28 @@ By default the gateway uses `/run/venus-evcharger`:
 - `dbus-cache.json`: atomic read cache snapshot
 - `dbus-cache.seq`: monotonic cache sequence
 - `dbus-health.json`: DBus health summary
+- `gateway-diagnostics.json`: strict semantic discovery, pending-work, and
+  source-health snapshot for operational consumers
 - `dbus-health-history.jsonl`: compact rolling health timeline for field diagnosis
 - `dbus-command-lifecycle.jsonl`: command lifecycle events such as queued,
   coalesced, applied, deferred, dropped, and expired
-- `dbus-commands/`: command inbox for DBus writes, refreshes, and introspection
-- `core-commands/`: command inbox from GUI DBus writes back to the core service
+- `dbus-commands/`: adapter-owned scheduler inbox for DBus writes, refreshes,
+  and introspection
+- `core-commands/`: transport-neutral control mailbox from control-surface
+  adapters to the core service
+
+The two directories intentionally use the same atomic JSON-file transport but
+have different semantic policies. The reusable transport, command types, and
+core-control envelope live under `venus_evcharger/ipc/`. The DBus adapter is a
+producer for `core-commands/`; the core runtime is its consumer. Neither side
+owns a second implementation of queueing or coalescing, and core modules must
+not import the DBus command scheduler policy.
+
+`gateway-diagnostics.json` is the only public diagnostics projection of
+adapter-owned discovery and inspection state. Consumers read it through
+`GatewayDiagnosticsFileReader` and the `GatewayDiagnosticsSnapshot` DTO. They
+must not read the adapter's raw introspection map or depend on DBus service
+names, paths, inspection XML, service counts, or path counts.
 
 `DbusGatewayRunDir`, `DbusGatewayCachePath`, `DbusGatewayHealthPath`,
 `DbusGatewaySocketPath`, `DbusGatewayCommandDir`, and

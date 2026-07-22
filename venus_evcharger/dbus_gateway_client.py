@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus gateway client and VeDbusService-like proxy."""
+"""Transport clients for the dedicated DBus gateway process."""
 
 from __future__ import annotations
 
 import json
 import socket
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
+from pathlib import Path
 
 from venus_evcharger.core.shared import compact_json
 from venus_evcharger.dbus_gateway_cache import DbusCacheStore
-from venus_evcharger.dbus_gateway_command_types import CommandMapping, CommandPayload
-from venus_evcharger.dbus_gateway_commands import DbusCommandInbox
+from venus_evcharger.dbus_gateway_commands import DbusGatewayCommandInbox
 from venus_evcharger.dbus_gateway_core import (
     GatewayPaths,
     _json_ready,
@@ -18,12 +18,44 @@ from venus_evcharger.dbus_gateway_core import (
     float_or_zero,
     gateway_paths,
     is_object_mapping,
-    require_gateway_read_key,
 )
 from venus_evcharger.dbus_gateway_policy import command_allowed_by_backpressure
-from venus_evcharger.dbus_gateway_surface import evcs_fields_to_paths, venus_path_writeable
-
-GatewayWriteCallback = Callable[[str, object], object]
+from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
+from venus_evcharger.ipc.energy import (
+    EnergyInputsSnapshot,
+    EnergyRefreshRequest,
+    EnergyTopologySnapshot,
+)
+from venus_evcharger.ipc.gateway_operations import (
+    ess_grid_setpoint_command,
+    gx_relay_refresh_command,
+    gx_relay_set_command,
+    gx_relay_state_key,
+)
+from venus_evcharger.ipc.gateway_publication import (
+    publish_companion_fields_command,
+    publish_evcs_fields_command,
+    register_companion_command,
+    register_evcs_command,
+)
+from venus_evcharger.ipc.generic_shelly_configuration import (
+    disable_matching_generic_shelly_once_command,
+)
+from venus_evcharger.ports.gateway_operations import (
+    EssSetpointIntent,
+    GatewayOperationReceipt,
+    GxRelaySetRequest,
+)
+from venus_evcharger.ports.gateway_publication import (
+    CompanionServiceIdentity,
+    EvcsServiceIdentity,
+    PublicationPriority,
+    PublicationReceipt,
+)
+from venus_evcharger.ports.generic_shelly_configuration import (
+    DisableMatchingGenericShellyOnceRequest,
+    GenericShellyConfigurationReceipt,
+)
 
 
 class GatewayClient:
@@ -32,7 +64,7 @@ class GatewayClient:
     def __init__(self, paths: GatewayPaths | None = None, *, timeout_seconds: float = 0.5) -> None:
         self.paths = paths or gateway_paths()
         self.timeout_seconds = max(0.05, float(timeout_seconds))
-        self.commands = DbusCommandInbox(self.paths.command_dir)
+        self.commands = DbusGatewayCommandInbox(self.paths.command_dir)
         self._backpressure_cache: tuple[float, str] = (0.0, "unknown")
 
     def send(self, payload: CommandMapping) -> CommandPayload:
@@ -56,129 +88,25 @@ class GatewayClient:
             return ""
         return self.commands.enqueue(command)
 
-    def publish_path(self, path: str, value: object, *, priority: str = "publish", source: str = "core") -> None:
-        self.enqueue_command(
-            {
-                "kind": "publish_value",
-                "source": source,
-                "path": str(path),
-                "value": _json_ready(value),
-                "priority": priority,
-                "coalesce_key": f"publish:{path}",
-            }
-        )
-
-    def publish_paths(
-        self,
-        paths: Mapping[str, object],
-        *,
-        priority: str = "publish",
-        source: str = "core",
-    ) -> None:
-        normalized = {str(path): _json_ready(value) for path, value in paths.items() if str(path)}
-        if not normalized:
-            return
-        self.enqueue_command(
-            {
-                "kind": "publish_desired",
-                "source": source,
-                "paths": normalized,
-                "priority": priority,
-                "coalesce_key": "publish:desired",
-            }
-        )
-
-    def publish_fields(
-        self,
-        fields: Mapping[str, object],
-        *,
-        priority: str = "publish",
-        source: str = "core",
-    ) -> None:
-        normalized = {str(field): _json_ready(value) for field, value in fields.items() if str(field)}
-        if not normalized:
-            return
-        self.enqueue_command(
-            {
-                "kind": "publish_fields",
-                "source": source,
-                "fields": normalized,
-                "priority": priority,
-                "coalesce_key": "publish:fields",
-            }
-        )
-
-    def register_path(self, path: str, value: object, *, writeable: bool = False, source: str = "core") -> None:
-        self.enqueue_command(
-            {
-                "kind": "register_path",
-                "source": source,
-                "path": str(path),
-                "value": _json_ready(value),
-                "writeable": bool(writeable),
-                "priority": "publish",
-                "coalesce_key": f"register:{path}",
-            }
-        )
-
-    def request_read(
-        self,
-        key: object,
-        *,
-        priority: str = "read",
-        source: str = "core",
-        reason: str = "",
-    ) -> None:
-        self.request_read_key(key, priority=priority, source=source, reason=reason)
-
-    def request_raw_value(
-        self,
-        service: str,
-        path: str,
-        *,
-        priority: str = "read",
-        source: str = "core",
-        reason: str = "",
-    ) -> None:
-        service_name = str(service)
-        object_path = str(path)
-        self.enqueue_command(
-            {
-                "kind": "refresh_value",
-                "source": source,
-                "service": service_name,
-                "path": object_path,
-                "priority": priority,
-                "reason": reason,
-                "coalesce_key": f"refresh:{service_name}:{object_path}",
-            }
-        )
-
-    def request_read_key(
-        self,
-        key: object,
-        *,
-        priority: str = "read",
-        source: str = "core",
-        reason: str = "",
-    ) -> None:
-        read_key = require_gateway_read_key(key)
-        self.enqueue_command(
-            {
-                "kind": "refresh_value",
-                "source": source,
-                "priority": priority,
-                "reason": reason,
-                "key": read_key,
-                "coalesce_key": f"refresh:{read_key}",
-            }
-        )
-
-    def read_key_value(self, key: object, *, max_age_seconds: float = 10.0) -> object:
-        return gateway_read_value(self.load_cache(max_age_seconds=max_age_seconds), key, max_age_seconds=max_age_seconds)
+    def request_energy_refresh(self, request: EnergyRefreshRequest, *, source: str) -> str:
+        return self.enqueue_command(request.to_command(source=source))
 
     def load_cache(self, *, max_age_seconds: float = 10.0) -> CommandPayload:
         return DbusCacheStore.load_snapshot(self.paths.cache_path, max_age_seconds=max_age_seconds)
+
+    def load_energy_inputs(self, *, max_age_seconds: float = 10.0) -> EnergyInputsSnapshot | None:
+        payload = self.load_cache(max_age_seconds=max_age_seconds).get("energy_inputs")
+        try:
+            return EnergyInputsSnapshot.from_payload(payload)
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def load_energy_topology(self, *, max_age_seconds: float = 30.0) -> EnergyTopologySnapshot | None:
+        payload = self.load_cache(max_age_seconds=max_age_seconds).get("energy_topology")
+        try:
+            return EnergyTopologySnapshot.from_payload(payload)
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def load_health(self, *, max_age_seconds: float = 10.0) -> CommandPayload:
         payload = DbusCacheStore.load_snapshot(self.paths.health_path, max_age_seconds=max_age_seconds)
@@ -196,74 +124,123 @@ class GatewayClient:
         return state
 
 
-class GatewayDbusServiceProxy:
-    """Minimal ``VeDbusService`` facade that only talks to the DBus gateway."""
+class GatewayOperationsClient:
+    """Typed semantic operation facade over the gateway command transport."""
 
-    def __init__(self, name: str, *, paths: GatewayPaths | None = None, client: GatewayClient | None = None) -> None:
-        self.name = str(name)
-        self._client = client or GatewayClient(paths)
-        self._values: dict[str, object] = {}
-        self._writeable: set[str] = set()
-        self._callbacks: dict[str, GatewayWriteCallback] = {}
+    def __init__(self, client: GatewayClient) -> None:
+        self._client = client
 
-    def add_path(
+    def read_gx_relay_state(
         self,
-        path: str,
-        value: object,
-        gettextcallback: object = None,
-        writeable: bool | None = None,
-        onchangecallback: GatewayWriteCallback | None = None,
-    ) -> None:
-        del gettextcallback
-        path = str(path)
-        path_writeable = venus_path_writeable(path) if writeable is None else bool(writeable)
-        self._values[path] = value
-        if path_writeable:
-            self._writeable.add(path)
-        if onchangecallback is not None:
-            self._callbacks[path] = onchangecallback
-        self._client.register_path(path, value, writeable=path_writeable)
+        relay_index: int,
+        *,
+        max_age_seconds: float,
+    ) -> int | None:
+        key = gx_relay_state_key(relay_index)
+        value = gateway_value(
+            self._client.load_cache(max_age_seconds=max_age_seconds),
+            key,
+            max_age_seconds=max_age_seconds,
+        )
+        state = _binary_integer_or_none(value)
+        if state is not None:
+            return state
+        self._client.enqueue_command(gx_relay_refresh_command(relay_index))
+        return None
 
-    def register(self) -> None:
-        self._client.enqueue_command(
-            {
-                "kind": "register_service",
-                "service": self.name,
-                "source": "core",
-                "priority": "publish",
-                "coalesce_key": "register-service",
-            }
+    def set_gx_relay_enabled(
+        self,
+        request: GxRelaySetRequest,
+    ) -> GatewayOperationReceipt:
+        command_path = self._client.enqueue_command(
+            gx_relay_set_command(
+                request.relay_index,
+                request.contact_mode,
+                request.enabled,
+                ensure_manual=request.ensure_manual,
+                verify_settle_seconds=request.verify_settle_seconds,
+                verify_retry_seconds=request.verify_retry_seconds,
+            )
+        )
+        return _operation_receipt(command_path)
+
+    def set_ess_grid_setpoint(
+        self,
+        watts: float,
+        *,
+        intent: EssSetpointIntent,
+    ) -> GatewayOperationReceipt:
+        command_path = self._client.enqueue_command(ess_grid_setpoint_command(watts, intent=intent))
+        return _operation_receipt(command_path)
+
+
+class GatewayPublicationClient:
+    """Typed publication port backed by the gateway command mailbox."""
+
+    def __init__(self, client: GatewayClient) -> None:
+        self._client = client
+
+    def register_evcs(
+        self,
+        identity: EvcsServiceIdentity,
+        initial_fields: Mapping[str, object],
+    ) -> PublicationReceipt:
+        return self._enqueue(register_evcs_command(identity, initial_fields))
+
+    def publish_evcs_fields(
+        self,
+        fields: Mapping[str, object],
+        *,
+        priority: PublicationPriority,
+    ) -> PublicationReceipt:
+        return self._enqueue(publish_evcs_fields_command(fields, priority=priority))
+
+    def register_companion(
+        self,
+        identity: CompanionServiceIdentity,
+        initial_fields: Mapping[str, object],
+    ) -> PublicationReceipt:
+        return self._enqueue(register_companion_command(identity, initial_fields))
+
+    def publish_companion_fields(
+        self,
+        service_id: str,
+        fields: Mapping[str, object],
+        *,
+        priority: PublicationPriority,
+    ) -> PublicationReceipt:
+        return self._enqueue(publish_companion_fields_command(service_id, fields, priority=priority))
+
+    def _enqueue(self, command: CommandMapping) -> PublicationReceipt:
+        command_path = self._client.enqueue_command(command)
+        return PublicationReceipt(
+            accepted=bool(command_path),
+            command_id=Path(command_path).stem if command_path else "",
         )
 
-    def __getitem__(self, path: str) -> object:
-        return self._values[str(path)]
 
-    def __setitem__(self, path: str, value: object) -> None:
-        path = str(path)
-        self._values[path] = value
-        self._client.publish_path(path, value)
+class GatewayGenericShellyConfigurationClient:
+    """Submit generic Shelly configuration intents to the gateway mailbox."""
 
-    def publish_paths(self, paths: Mapping[str, object]) -> None:
-        normalized = {str(path): value for path, value in paths.items() if str(path)}
-        self._values.update(normalized)
-        self._client.publish_paths(normalized)
+    def __init__(self, client: GatewayClient) -> None:
+        self._client = client
 
-    def publish_fields(self, fields: Mapping[str, object]) -> None:
-        paths = evcs_fields_to_paths(fields)
-        self._values.update(paths)
-        self._client.publish_fields({str(field): value for field, value in fields.items() if str(field)})
-
-    def apply_gateway_write(self, path: str, value: object) -> bool:
-        """Apply one gateway-delivered GUI write to the local value mirror."""
-        callback = self._callbacks.get(str(path))
-        if callback is None:
-            self._values[str(path)] = value
-            return True
-        return bool(callback(str(path), value))
-
-
-def gateway_read_value(snapshot: CommandMapping, key: object, *, max_age_seconds: float) -> object:
-    return gateway_value(snapshot, require_gateway_read_key(key), max_age_seconds=max_age_seconds)
+    def disable_matching_device_channel_once(
+        self,
+        request: DisableMatchingGenericShellyOnceRequest,
+    ) -> GenericShellyConfigurationReceipt:
+        command_path = self._client.enqueue_command(
+            disable_matching_generic_shelly_once_command(request)
+        )
+        if not command_path:
+            return GenericShellyConfigurationReceipt(
+                accepted=False,
+                reason="gateway did not accept the configuration command",
+            )
+        return GenericShellyConfigurationReceipt(
+            accepted=True,
+            command_id=Path(command_path).stem,
+        )
 
 
 def gateway_value(snapshot: CommandMapping, key: str, *, max_age_seconds: float) -> object:
@@ -288,3 +265,18 @@ def _backpressure_state_from_health(health: CommandMapping) -> str:
         return "unknown"
     state = backpressure.get("state")
     return str(state) if state else "unknown"
+
+
+def _operation_receipt(command_path: str) -> GatewayOperationReceipt:
+    return GatewayOperationReceipt(
+        accepted=bool(command_path),
+        command_id=Path(command_path).stem if command_path else "",
+    )
+
+
+def _binary_integer_or_none(value: object) -> int | None:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)) and int(value) in (0, 1):
+        return int(value)
+    return None

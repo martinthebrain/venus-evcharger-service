@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_update_cycle_controller_support import *
 
-from venus_evcharger.core.dbus_backpressure import CoreDbusBackpressurePolicy
+from venus_evcharger.ipc.gateway_pressure import CachedGatewayPressurePolicy
 
 
 class _UpdateCycleQuaternaryRuntimeCases:
@@ -13,7 +13,6 @@ class _UpdateCycleQuaternaryRuntimeCases:
             virtual_mode=1,
             _auto_cached_inputs_used=True,
             _auto_decide_relay=MagicMock(return_value=True),
-            _bump_update_index=MagicMock(),
             time_now=MagicMock(return_value=123.0),
             _last_successful_update_at=None,
             _last_recovery_attempt_at=1.0,
@@ -27,7 +26,7 @@ class _UpdateCycleQuaternaryRuntimeCases:
             _last_switch_feedback_closed=True,
             _contactor_fault_counts={},
             _contactor_lockout_source="",
-            _publish_companion_dbus_bridge=MagicMock(),
+            state=SimpleNamespace(publish_companion_bridge=MagicMock()),
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
@@ -37,17 +36,15 @@ class _UpdateCycleQuaternaryRuntimeCases:
         self.assertFalse(service._auto_cached_inputs_used)
 
         controller.components.runtime_cycle.complete_update_cycle(
-            False, 200.0, False, 0.0, 0.0, 0, None, None, None
+            False, 0.0, 0.0, 0, None, None, None
         )
-        service._bump_update_index.assert_not_called()
         self.assertEqual(service._last_successful_update_at, 123.0)
 
         controller.components.runtime_cycle.complete_update_cycle(
-            True, 201.0, False, 0.0, 0.0, 0, None, None, None
+            False, 0.0, 0.0, 0, None, None, None
         )
-        service._bump_update_index.assert_called_once_with(201.0)
-        self.assertEqual(service._publish_companion_dbus_bridge.call_count, 2)
-        service._publish_companion_dbus_bridge.assert_called_with(123.0)
+        self.assertEqual(service.state.publish_companion_bridge.call_count, 2)
+        service.state.publish_companion_bridge.assert_called_with(123.0)
 
         with patch.object(
             controller.components.relay.foundation.phase_switch,
@@ -166,7 +163,7 @@ class _UpdateCycleQuaternaryRuntimeCases:
                 "",
                 _software_update_next_check_at=100.0,
                 _software_update_boot_auto_due_at=100.0,
-                _dbus_backpressure_policy=CoreDbusBackpressurePolicy(
+                gateway_pressure_policy=CachedGatewayPressurePolicy(
                     str(health_path),
                     now=lambda: 120.0,
                     cache_seconds=0.0,

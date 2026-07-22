@@ -414,8 +414,6 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
     def test_topology_and_public_payloads_are_deterministic(self) -> None:
         svc = SimpleNamespace(
             auto_energy_sources=(SimpleNamespace(source_id="b"), SimpleNamespace(source_id="a")),
-            auto_battery_discharge_balance_victron_bias_service=" service ",
-            auto_battery_discharge_balance_victron_bias_path=" /path ",
             auto_battery_discharge_balance_victron_bias_source_id=" source ",
             _victron_ess_balance_learning_profiles={},
             _victron_ess_balance_last_stable_tuning={"kp": 1},
@@ -424,7 +422,7 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
         )
         self.assertEqual(
             self.profiles._victron_ess_balance_current_topology_key(svc, " source "),
-            "victron-bias-learning/v2/source=source/service=service/path=/path/energy=a,b",
+            "victron-bias-learning/v3/source=source/target=ess-grid-setpoint/energy=a,b",
         )
         state = self.profiles.victron_ess_balance_learning_state_payload(svc)
         self.assertEqual(state, {"schema_version": 2, "topology_key": self.profiles._victron_ess_balance_current_topology_key(svc, "source"),
@@ -451,8 +449,6 @@ class VictronEssBalanceLearningProfilesContracts(unittest.TestCase):
 
         minimal = SimpleNamespace(
             auto_energy_sources=(),
-            auto_battery_discharge_balance_victron_bias_service="",
-            auto_battery_discharge_balance_victron_bias_path="",
             auto_battery_discharge_balance_victron_bias_source_id="",
             _victron_ess_balance_learning_profiles={},
             _victron_ess_balance_last_stable_tuning={},

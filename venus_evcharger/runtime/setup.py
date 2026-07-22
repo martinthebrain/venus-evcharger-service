@@ -4,13 +4,12 @@
 from __future__ import annotations
 
 import os
-import threading
 import time
 from typing import Any
 
 import requests
 
-from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths
+from venus_evcharger.ipc.core_commands import DEFAULT_CORE_COMMAND_DIR, CoreCommandMailbox
 from venus_evcharger.runtime.contracts import AsyncRuntimeStatePort, HealthCode, RuntimeStateStorePort
 from venus_evcharger.runtime.setup_support import (
     _first_existing_version_line,
@@ -81,24 +80,12 @@ class RuntimeSetup:
         started_at = time.time()
         svc.last_update = 0
         svc.session = requests.Session()
-        svc._system_bus = None
-        svc._system_bus_state = threading.local()
-        svc._system_bus_generation = 0
-        svc._system_bus_generation_lock = threading.Lock()
-        svc._gateway_paths = gateway_paths(getattr(svc, "dbus_gateway_run_dir", ""))
-        svc._gateway_core_commands = DbusCommandInbox(svc._gateway_paths.core_command_dir)
-        svc._resolved_auto_pv_services = []
-        svc._auto_pv_last_scan = 0.0
+        mailbox_dir = str(getattr(svc, "core_command_mailbox_dir", "") or DEFAULT_CORE_COMMAND_DIR)
+        svc._core_command_mailbox = CoreCommandMailbox(mailbox_dir)
         svc._last_pv_missing_warning = None
-        svc._resolved_auto_battery_service = None
-        svc._auto_battery_last_scan = 0.0
-        svc._resolved_auto_energy_services = {}
-        svc._auto_energy_last_scan = {}
         svc._last_battery_missing_warning = None
         svc._last_battery_allow_warning = None
         svc._last_grid_missing_warning = None
-        svc._dbus_list_backoff_until = 0.0
-        svc._dbus_list_failures = 0
         svc._warning_state = {}
         defaults = self.state_store.observability_defaults()
         svc._error_state = defaults["_error_state"]()
@@ -155,30 +142,5 @@ class RuntimeSetup:
             boot_auto_due_at=self._boot_delayed_update_due_at(started_at, 3600.0),
         )
         self.async_state.initialize()
-
-    def reset_system_bus(self) -> None:
-        """Invalidate cached DBus connections so each thread reconnects cleanly."""
-        svc = self.service
-        self.ensure_system_bus_state()
-        with svc._system_bus_generation_lock:
-            svc._system_bus_generation += 1
-        svc._system_bus = None
-        svc._system_bus_state.bus = None
-        svc._system_bus_state.generation = -1
-
-    def ensure_system_bus_state(self) -> None:
-        """Initialize per-thread DBus connection helpers for partial test instances."""
-        svc = self.service
-        if not hasattr(svc, "_system_bus_state"):
-            svc._system_bus_state = threading.local()
-        if not hasattr(svc, "_system_bus_generation"):
-            svc._system_bus_generation = 0
-        if not hasattr(svc, "_system_bus_generation_lock"):
-            svc._system_bus_generation_lock = threading.Lock()
-
-    @staticmethod
-    def create_system_bus() -> Any:
-        """Reject direct DBus access from the core service."""
-        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
 
 __all__ = ["RuntimeSetup"]

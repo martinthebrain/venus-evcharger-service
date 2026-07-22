@@ -2,7 +2,7 @@
 from tests.venus_evcharger_write_controller_support import *
 
 
-class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
+class TestControlWriteControllerTertiary(ControlWriteControllerTestBase):
     def test_write_port_relay_payload_helpers_validate_untrusted_shapes(self) -> None:
         self.assertIsNone(WriteControllerPort._relay_output_value(None))
         self.assertIsNone(WriteControllerPort._relay_output_value({}))
@@ -47,7 +47,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/StartSurplusWatts", 1825.0))
+        self.assertTrue(handle_control_target(controller, "auto_start_surplus_watts", 1825.0))
 
         self.assertEqual(service.auto_policy.normal_profile.start_surplus_watts, 1825.0)
         self.assertFalse(hasattr(service, "auto_start_surplus_watts"))
@@ -74,7 +74,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/DbusBackoffBaseSeconds", 7.5))
+        self.assertTrue(handle_control_target(controller, "auto_dbus_backoff_base_seconds", 7.5))
 
         self.assertEqual(service.auto_dbus_backoff_base_seconds, 7.5)
         self.assertEqual(service._dbusservice["/Auto/DbusBackoffBaseSeconds"], 7.5)
@@ -108,10 +108,10 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/ScheduledEnabledDays", "Mon,Wed,Fri"))
-        self.assertTrue(controller.handle_write("/Auto/ScheduledFallbackDelaySeconds", 1800.0))
-        self.assertTrue(controller.handle_write("/Auto/ScheduledLatestEndTime", "07:15"))
-        self.assertTrue(controller.handle_write("/Auto/ScheduledNightCurrent", 11.0))
+        self.assertTrue(handle_control_target(controller, "auto_scheduled_enabled_days", "Mon,Wed,Fri"))
+        self.assertTrue(handle_control_target(controller, "auto_scheduled_fallback_delay_seconds", 1800.0))
+        self.assertTrue(handle_control_target(controller, "auto_scheduled_latest_end_time", "07:15"))
+        self.assertTrue(handle_control_target(controller, "auto_scheduled_night_current", 11.0))
 
         self.assertEqual(service.auto_scheduled_enabled_days, "Mon,Wed,Fri")
         self.assertEqual(service.auto_scheduled_night_start_delay_seconds, 1800.0)
@@ -144,7 +144,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/LearnChargePowerEnabled", 0))
+        self.assertTrue(handle_control_target(controller, "auto_learn_charge_power_enabled", 0))
 
         self.assertFalse(service.auto_policy.learn_charge_power.enabled)
         self.assertFalse(hasattr(service, "auto_learn_charge_power_enabled"))
@@ -182,7 +182,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/StartStop", 1))
+        self.assertTrue(handle_control_target(controller, "start_stop", 1))
         charger_backend.set_enabled.assert_called_once_with(True)
         service._queue_relay_command.assert_not_called()
         service._publish_local_pm_status.assert_not_called()
@@ -190,7 +190,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         self.assertEqual(service.virtual_enable, 1)
         self.assertEqual(service.manual_override_until, 400.0)
 
-        self.assertTrue(controller.handle_write("/SetCurrent", 12.5))
+        self.assertTrue(handle_control_target(controller, "set_current", 12.5))
         charger_backend.set_current.assert_called_once_with(12.5)
         self.assertEqual(service.virtual_set_current, 12.5)
         self.assertEqual(service._dbusservice["/SetCurrent"], 12.5)
@@ -216,7 +216,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/SetCurrent", 12.5))
+        self.assertTrue(handle_control_target(controller, "set_current", 12.5))
 
         charger_backend.set_current.assert_called_once_with(12.5)
         self.assertEqual(service.virtual_set_current, 12.5)
@@ -241,19 +241,19 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/StartStop", 1))
+        self.assertTrue(handle_control_target(controller, "start_stop", 1))
         self.assertEqual(service.virtual_enable, 1)
         service._queue_relay_command.assert_not_called()
 
-        self.assertTrue(controller.handle_write("/StartStop", 0))
+        self.assertTrue(handle_control_target(controller, "start_stop", 0))
         service._queue_relay_command.assert_called_once_with(False, 100.0)
         service._publish_local_pm_status.assert_called_once_with(False, 100.0)
 
         service._queue_relay_command.reset_mock()
         service._publish_local_pm_status.reset_mock()
-        self.assertTrue(controller.handle_write("/Enable", 1))
+        self.assertTrue(handle_control_target(controller, "enable", 1))
         service._queue_relay_command.assert_not_called()
-        self.assertTrue(controller.handle_write("/Enable", 0))
+        self.assertTrue(handle_control_target(controller, "enable", 0))
         service._queue_relay_command.assert_called_once_with(False, 100.0)
 
     def test_mode_transition_and_publish_helpers_cover_remaining_branches(self) -> None:
@@ -310,7 +310,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/PhaseSelection", "P1_P2"))
+        self.assertTrue(handle_control_target(controller, "phase_selection", "P1_P2"))
 
         service._apply_phase_selection.assert_called_once_with("P1_P2")
         self.assertEqual(service.requested_phase_selection, "P1_P2")
@@ -362,7 +362,7 @@ class TestDbusWriteControllerTertiary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/PhaseSelection", "P1_P2"))
+        self.assertTrue(handle_control_target(controller, "phase_selection", "P1_P2"))
         service._queue_relay_command.assert_called_once_with(False, 100.0)
         service._publish_local_pm_status.assert_called_once_with(False, 100.0)
         service._apply_phase_selection.assert_not_called()

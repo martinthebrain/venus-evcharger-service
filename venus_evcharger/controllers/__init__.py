@@ -3,10 +3,10 @@
 
 from .auto import AutoDecisionController
 from .state import ServiceStateController
-from .write import DbusWriteController
+from .write import ControlWriteController
 
 __all__ = [
     "AutoDecisionController",
     "ServiceStateController",
-    "DbusWriteController",
+    "ControlWriteController",
 ]

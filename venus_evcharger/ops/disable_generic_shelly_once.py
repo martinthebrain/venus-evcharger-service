@@ -1,37 +1,32 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Disable a matching generic dbus-shelly channel once after boot.
+"""Request one persistent disable of a matching generic Shelly channel."""
 
-This helper is optional. It is meant for installations where a generic
-dbus-shelly service and the dedicated wallbox service would otherwise talk to
-the same physical Shelly relay and fight each other.
-"""
+from __future__ import annotations
 
-from collections.abc import Callable, Sequence
 import configparser
 import logging
 import os
 import sys
 import time
-import xml.etree.ElementTree as xml_et
-from typing import Any, TypedDict
+from collections.abc import Sequence
+from typing import Literal, TypedDict
 
-from venus_evcharger.dbus_gateway import DbusCacheStore, GatewayClient, dbus_path_key, gateway_paths
 from venus_evcharger.ops.disable_generic_shelly_config import (
     ALLOW_PERSISTENT_DISABLE_KEY,
     CHANNEL_KEY,
-    DEFAULT_GATEWAY_RUN_DIR,
-    DEFAULT_SERVICE,
     DELAY_SECONDS_KEY,
     ENABLED_KEY,
-    GATEWAY_CACHE_PATH_KEY,
-    GATEWAY_RUN_DIR_KEY,
     HOST_KEY,
-    SERVICE_KEY,
     TARGET_IP_KEY,
     TARGET_MAC_KEY,
 )
-
+from venus_evcharger.ports.generic_shelly_configuration import (
+    DisableMatchingGenericShellyOnceRequest,
+    GenericShellyConfigurationPort,
+    generic_shelly_device_selector,
+    normalize_mac_address,
+)
 
 _CONFIG_SCALAR_TYPES = (str, bytes, bytearray, int, float)
 DEFAULT_CONFIG_PATH = os.path.join(
@@ -40,42 +35,42 @@ DEFAULT_CONFIG_PATH = os.path.join(
     "venus",
     "config.venus_evcharger.ini",
 )
-DEFAULT_GENERIC_SHELLY_SERVICE = DEFAULT_SERVICE
 
 GENERIC_SHELLY_HELPER_ERRORS = (
-    KeyError,
     OSError,
     RuntimeError,
     TypeError,
     ValueError,
     configparser.Error,
-    xml_et.ParseError,
 )
+
+DisableShellyRunResult = Literal[
+    "accepted",
+    "rejected",
+    "disabled-by-config",
+    "persistent-disable-blocked",
+    "no-target",
+]
 
 
 class DisableShellySettings(TypedDict):
-    """Complete normalized settings consumed by the one-shot workflow."""
+    """Normalized settings consumed by the semantic one-shot workflow."""
 
     enabled: bool
     allow_persistent_disable: bool
-    service: str
     target_ip: str
     target_mac: str
     channel: int
     delay_seconds: float
-    gateway_run_dir: str
-    gateway_cache_path: str
 
 
 def _as_bool(value: object, default: bool = False) -> bool:
-    """Convert a config value to bool."""
     if value is None:
         return bool(default)
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _as_int(value: object, default: int) -> int:
-    """Convert a config value to int, falling back for invalid input."""
     try:
         if isinstance(value, _CONFIG_SCALAR_TYPES):
             return int(value)
@@ -85,7 +80,6 @@ def _as_int(value: object, default: int) -> int:
 
 
 def _as_float(value: object, default: float) -> float:
-    """Convert a config value to float, falling back for invalid input."""
     try:
         if isinstance(value, _CONFIG_SCALAR_TYPES):
             return float(value)
@@ -95,12 +89,12 @@ def _as_float(value: object, default: float) -> float:
 
 
 def _normalize_mac(value: object) -> str:
-    """Normalize MAC-like strings for comparison."""
-    return str(value or "").replace(":", "").replace("-", "").replace(" ", "").strip().upper()
+    raw = str(value or "").strip()
+    return normalize_mac_address(raw) if raw else ""
 
 
 def load_settings(config_path: str) -> DisableShellySettings:
-    """Load helper settings from the shared wallbox config."""
+    """Load and normalize the matching intent from the wallbox config."""
     parser = configparser.ConfigParser()
     loaded = parser.read(config_path)
     if not loaded or "DEFAULT" not in parser:
@@ -108,28 +102,17 @@ def load_settings(config_path: str) -> DisableShellySettings:
 
     section = parser["DEFAULT"]
     host = _required_host(section)
-    channel = _normalized_channel(section.get(CHANNEL_KEY))
-    delay_seconds = _normalized_delay_seconds(section.get(DELAY_SECONDS_KEY))
-
     return {
         "enabled": _as_bool(section.get(ENABLED_KEY), True),
-        "allow_persistent_disable": _as_bool(
-            section.get(ALLOW_PERSISTENT_DISABLE_KEY),
-            True,
-        ),
-        "service": section.get(SERVICE_KEY, DEFAULT_GENERIC_SHELLY_SERVICE).strip()
-        or DEFAULT_GENERIC_SHELLY_SERVICE,
+        "allow_persistent_disable": _as_bool(section.get(ALLOW_PERSISTENT_DISABLE_KEY), True),
         "target_ip": section.get(TARGET_IP_KEY, host).strip(),
         "target_mac": _normalize_mac(section.get(TARGET_MAC_KEY)),
-        "channel": channel,
-        "delay_seconds": delay_seconds,
-        "gateway_run_dir": section.get(GATEWAY_RUN_DIR_KEY, DEFAULT_GATEWAY_RUN_DIR).strip(),
-        "gateway_cache_path": section.get(GATEWAY_CACHE_PATH_KEY, "").strip(),
+        "channel": _normalized_channel(section.get(CHANNEL_KEY)),
+        "delay_seconds": _normalized_delay_seconds(section.get(DELAY_SECONDS_KEY)),
     }
 
 
 def _required_host(section: configparser.SectionProxy) -> str:
-    """Return the required default Host from the shared config."""
     host = section.get(HOST_KEY, "").strip()
     if not host:
         raise ValueError("DEFAULT Host is required in the config")
@@ -137,15 +120,11 @@ def _required_host(section: configparser.SectionProxy) -> str:
 
 
 def _normalized_channel(value: object) -> int:
-    """Return a valid generic Shelly channel number."""
-    channel = _as_int(value, 1)
-    return max(1, channel)
+    return max(1, _as_int(value, 1))
 
 
 def _normalized_delay_seconds(value: object) -> float:
-    """Return a non-negative startup delay for the one-shot helper."""
-    delay_seconds = _as_float(value, 180.0)
-    return max(0.0, delay_seconds)
+    return max(0.0, _as_float(value, 180.0))
 
 
 def matches_device(
@@ -155,212 +134,88 @@ def matches_device(
     target_ip: str,
     target_mac: str,
 ) -> bool:
-    """Return True if the generic Shelly entry matches the configured target."""
+    """Pure reference matcher retained for adapter contract tests."""
     if target_ip:
-        return str(ip_value or "").strip() == target_ip
+        return _matches_ip(ip_value, target_ip)
     if target_mac:
-        return _normalize_mac(mac_value or serial) == _normalize_mac(target_mac)
+        return _matches_mac(serial, mac_value, target_mac)
     return False
 
 
-def get_system_bus() -> Any:
-    """Direct DBus connections are forbidden outside the gateway."""
-    raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
+def _matches_ip(ip_value: object, target_ip: str) -> bool:
+    return str(ip_value or "").strip() == target_ip
 
 
-def _bus_item_interface(bus: Any, service_name: str, path: str) -> Any:
-    del bus, service_name, path
-    raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
+def _matches_mac(serial: object, mac_value: object, target_mac: str) -> bool:
+    candidate = str(mac_value or serial or "")
+    try:
+        return normalize_mac_address(candidate) == normalize_mac_address(target_mac)
+    except (TypeError, ValueError):
+        return False
 
 
-def get_dbus_value(bus: Any, service_name: str, path: str, timeout: float = 1.0) -> Any:
-    """Read a DBus value from the gateway cache."""
-    del timeout
-    cache_path = str(bus)
-    entry = DbusCacheStore.value_entry(DbusCacheStore.load_snapshot(cache_path), dbus_path_key(service_name, path))
-    return None if entry is None else entry.get("value")
-
-
-def set_dbus_value(
-    bus: Any,
-    service_name: str,
-    path: str,
-    value: Any,
-    timeout: float = 1.0,
-) -> Any:
-    """Queue a DBus write through the gateway."""
-    del timeout
-    run_dir = str(bus)
-    GatewayClient(gateway_paths(run_dir or None)).enqueue_command(
-        {
-            "kind": "set_value",
-            "source": "disable-generic-shelly-once",
-            "service": service_name,
-            "path": path,
-            "value": value,
-            "priority": "user",
-            "coalesce_key": f"{service_name}:{path}",
-        }
-    )
-    return True
-
-
-def get_dbus_child_nodes(bus: Any, service_name: str, path: str, timeout: float = 1.0) -> list[str]:
-    """Return child nodes from gateway-owned introspection cache."""
-    del timeout
-    run_dir = str(bus)
-    paths = gateway_paths(run_dir or None)
-    snapshot = DbusCacheStore.load_snapshot(paths.cache_path)
-    entry = DbusCacheStore.value_entry(snapshot, f"introspection:{service_name}:{path}")
-    if entry is None:
-        GatewayClient(paths).enqueue_command(
-            {
-                "kind": "introspect",
-                "source": "disable-generic-shelly-once",
-                "service": service_name,
-                "path": path,
-                "priority": "discovery",
-                "coalesce_key": f"introspect:{service_name}:{path}",
-            }
-        )
-        return []
-    xml_data = entry["value"]
-    root = xml_et.fromstring(str(xml_data))
-    child_nodes: list[str] = []
-    for node in root.findall("node"):
-        name = node.attrib.get("name")
-        if name:
-            child_nodes.append(name)
-    return child_nodes
-
-
-def disable_matching_device(
-    settings: DisableShellySettings,
-    list_nodes: Callable[[str, str], list[str]],
-    get_value: Callable[[str, str], Any],
-    set_value: Callable[[str, str, Any], Any],
-    logger: Any | None = None,
-) -> str:
-    """Disable the first matching generic Shelly device and return a status label."""
-    resolved_logger: Any = logging if logger is None else logger
-    precondition_result = _disable_precondition_result(settings, resolved_logger)
-    if precondition_result is not None:
-        return precondition_result
-
-    service_name = settings["service"]
-    for serial in list_nodes(service_name, "/Devices"):
-        if not _device_matches_target(settings, service_name, serial, get_value):
-            continue
-        return _disable_device_channel(settings, service_name, serial, get_value, set_value, resolved_logger)
-
-    target_ip = settings["target_ip"]
-    target_mac = settings["target_mac"]
-    resolved_logger.info("No matching generic Shelly device found for IP %s MAC %s", target_ip, target_mac)
-    return "not-found"
-
-
-def _disable_precondition_result(settings: DisableShellySettings, logger: Any) -> str | None:
-    """Return an early result when helper configuration forbids any disable action."""
+def _precondition_result(settings: DisableShellySettings) -> DisableShellyRunResult | None:
     if not settings["enabled"]:
-        logger.info("Generic Shelly one-shot helper disabled by config")
+        logging.info("Generic Shelly one-shot helper disabled by config")
         return "disabled-by-config"
     if not settings["allow_persistent_disable"]:
-        logger.info("Generic Shelly one-shot helper blocked by config")
+        logging.info("Generic Shelly one-shot helper blocked by config")
         return "persistent-disable-blocked"
-    if _has_no_disable_target(settings):
-        logger.warning("Generic Shelly one-shot helper has no target IP or MAC configured")
+    if not settings["target_ip"] and not settings["target_mac"]:
+        logging.warning("Generic Shelly one-shot helper has no target IP or MAC configured")
         return "no-target"
     return None
 
 
-def _has_no_disable_target(settings: DisableShellySettings) -> bool:
-    """Return whether neither target IP nor target MAC is configured."""
-    return not settings["target_ip"] and not settings["target_mac"]
-
-
-def _device_matches_target(
-    settings: DisableShellySettings,
-    service_name: str,
-    serial: str,
-    get_value: Callable[[str, str], Any],
-) -> bool:
-    """Return whether one generic Shelly device entry matches the configured target."""
-    ip_value = get_value(service_name, f"/Devices/{serial}/Ip")
-    mac_value = get_value(service_name, f"/Devices/{serial}/Mac")
-    return matches_device(
-        serial,
-        ip_value,
-        mac_value,
-        settings["target_ip"],
-        settings["target_mac"],
-    )
-
-
-def _enabled_path(settings: DisableShellySettings, serial: str) -> str:
-    """Return the Enabled DBus path for one generic Shelly device/channel."""
-    return f"/Devices/{serial}/{settings['channel']}/Enabled"
-
-
-def _device_already_disabled(
-    service_name: str,
-    enabled_path: str,
-    get_value: Callable[[str, str], Any],
-) -> bool:
-    """Return whether the target generic Shelly channel is already disabled."""
-    enabled_value = get_value(service_name, enabled_path)
-    return int(enabled_value or 0) == 0
-
-
-def _disable_device_channel(
-    settings: DisableShellySettings,
-    service_name: str,
-    serial: str,
-    get_value: Callable[[str, str], Any],
-    set_value: Callable[[str, str, Any], Any],
-    logger: Any,
-) -> str:
-    """Disable one matched generic Shelly device/channel and return its outcome label."""
-    enabled_path = _enabled_path(settings, serial)
-    if _device_already_disabled(service_name, enabled_path, get_value):
-        logger.info("Generic Shelly device %s already disabled on %s", serial, enabled_path)
-        return "already-disabled"
-    set_value(service_name, enabled_path, 0)
-    logger.info("Disabled generic Shelly device %s on %s", serial, enabled_path)
-    return "disabled"
-
-
-def run_once(config_path: str = DEFAULT_CONFIG_PATH) -> str:
-    """Execute the delayed one-shot disable check."""
+def run_once(
+    config_path: str = DEFAULT_CONFIG_PATH,
+    *,
+    configuration_port: GenericShellyConfigurationPort,
+) -> DisableShellyRunResult:
+    """Submit one semantic request and report only asynchronous acceptance."""
     settings = load_settings(config_path)
+    precondition = _precondition_result(settings)
+    if precondition is not None:
+        return precondition
+
     delay_seconds = settings["delay_seconds"]
-    if delay_seconds > 0:
-        logging.info("Waiting %.0f seconds before generic Shelly one-shot check", delay_seconds)
+    if delay_seconds > 0.0:
+        logging.info("Waiting %.0f seconds before generic Shelly one-shot request", delay_seconds)
         time.sleep(delay_seconds)
 
-    run_dir = settings["gateway_run_dir"] or DEFAULT_GATEWAY_RUN_DIR
-    cache_path = settings["gateway_cache_path"] or gateway_paths(run_dir).cache_path
-    timeout = 1.0
-    return disable_matching_device(
-        settings,
-        lambda service_name, path: get_dbus_child_nodes(run_dir, service_name, path, timeout=timeout),
-        lambda service_name, path: get_dbus_value(cache_path, service_name, path, timeout=timeout),
-        lambda service_name, path, value: set_dbus_value(run_dir, service_name, path, value, timeout=timeout),
+    selector = generic_shelly_device_selector(
+        target_ip=settings["target_ip"],
+        target_mac=settings["target_mac"],
     )
+    request = DisableMatchingGenericShellyOnceRequest(selector, settings["channel"])
+    receipt = configuration_port.disable_matching_device_channel_once(request)
+    if receipt.accepted:
+        logging.info("Gateway accepted generic Shelly disable request %s", receipt.command_id)
+        return "accepted"
+    logging.warning("Gateway rejected generic Shelly disable request: %s", receipt.reason)
+    return "rejected"
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """CLI entry point."""
-    argv = list(sys.argv[1:] if argv is None else argv)
-    config_path = argv[0] if argv else DEFAULT_CONFIG_PATH
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    configuration_port: GenericShellyConfigurationPort | None = None,
+) -> int:
+    """CLI entry point; production composition must provide the semantic port."""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    config_path = arguments[0] if arguments else DEFAULT_CONFIG_PATH
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if configuration_port is None:
+        logging.error("Generic Shelly configuration port is not configured")
+        return 1
+    return _run_main(config_path, configuration_port)
+
+
+def _run_main(config_path: str, configuration_port: GenericShellyConfigurationPort) -> int:
     try:
-        result = run_once(config_path)
+        result = run_once(config_path, configuration_port=configuration_port)
     except GENERIC_SHELLY_HELPER_ERRORS as error:
         logging.exception("Generic Shelly one-shot helper failed: %s", error)
         return 1
     logging.info("Generic Shelly one-shot helper finished: %s", result)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return 1 if result == "rejected" else 0

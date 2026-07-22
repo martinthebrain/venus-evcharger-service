@@ -6,15 +6,18 @@ from __future__ import annotations
 from tests.support.dbus_gateway_adapter_harness import (
     DbusAdapter,
     GatewayAdapterContractCase,
+    MagicMock,
     Path,
     SocketClientStub,
     SocketServerStub,
     gateway_paths,
+    install_mock,
     json,
     patch,
     process_socket_module,
     tempfile,
 )
+from venus_evcharger.ipc.energy import EnergyRefreshRequest
 
 
 class GatewaySocketCases(GatewayAdapterContractCase):
@@ -46,8 +49,24 @@ class GatewaySocketCases(GatewayAdapterContractCase):
             self.assertFalse(adapter.handle_socket_payload("[]")["ok"])
             self.assertTrue(adapter.handle_socket_payload('{"type":"snapshot"}')["ok"])
             self.assertTrue(adapter.handle_socket_payload('{"type":"health"}')["ok"])
-            for request_type in ("refresh_value", "refresh_services", "publish_desired", "publish_value", "set_value"):
-                self.assertTrue(adapter.handle_socket_payload(json.dumps({"type": request_type}))["ok"])
+            enqueue = install_mock(adapter.commands, "enqueue", MagicMock(return_value="queued.json"))
+            refresh = EnergyRefreshRequest(
+                request_id="socket-grid",
+                scope="grid",
+                max_age_seconds=2.0,
+                urgency="priority",
+                reason="socket-test",
+            ).to_command(source="socket-test")
+            self.assertTrue(adapter.handle_socket_payload(json.dumps(refresh))["ok"])
+            enqueue.assert_called_once_with(refresh)
+            for request_type in (
+                "refresh_value",
+                "refresh_services",
+                "publish_desired",
+                "publish_value",
+                "set_value",
+            ):
+                self.assertFalse(adapter.handle_socket_payload(json.dumps({"type": request_type}))["ok"])
             self.assertFalse(adapter.handle_socket_payload('{"type":"wat"}')["ok"])
 
             adapter._server = None
@@ -81,8 +100,20 @@ class GatewaySocketCases(GatewayAdapterContractCase):
             Path(adapter.paths.socket_path).parent.mkdir(parents=True, exist_ok=True)
             Path(adapter.paths.socket_path).write_text("stale", encoding="utf-8")
 
-            adapter.start_socket()
-            self.assertIsNotNone(adapter._server)
+            server = MagicMock()
+            with patch.object(process_socket_module.socket, "socket", return_value=server) as socket_factory:
+                adapter.start_socket()
+            socket_factory.assert_called_once_with(
+                process_socket_module.socket.AF_UNIX,
+                process_socket_module.socket.SOCK_STREAM,
+            )
+            server.bind.assert_called_once_with(adapter.paths.socket_path)
+            server.listen.assert_called_once_with(8)
+            server.setblocking.assert_called_once_with(False)
+            self.assertIs(adapter._server, server)
+            self.assertFalse(Path(adapter.paths.socket_path).exists())
+
             adapter.close_socket()
+            server.close.assert_called_once_with()
             self.assertIsNone(adapter._server)
             adapter.close_socket()

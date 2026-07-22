@@ -15,7 +15,6 @@ class OfflineAutoPort(Protocol):
 
 
 class OfflineStatePort(Protocol):
-    def bump_update_index(self, now: float) -> None: ...
     def publish_live_measurements(
         self,
         power: float,
@@ -153,7 +152,7 @@ class OfflinePublisher:
         phase_data = self._telemetry._phase_data_for_pm_status(svc, offline_pm_status, power, voltage)
         svc.auto.set_health(self._offline_health_reason(svc), cached=False)
         total_current = self._total_phase_current(phase_data)
-        changed = self._publish_offline_live_state(
+        self._publish_offline_live_state(
             svc,
             power=power,
             voltage=voltage,
@@ -164,8 +163,6 @@ class OfflinePublisher:
             energy_forward=energy_forward,
             relay_on=relay_on,
         )
-        if changed:
-            svc.state.bump_update_index(now)
         completed_at = self._mark_offline_update_completed(svc)
         svc.state.publish_companion_bridge(completed_at)
         return True

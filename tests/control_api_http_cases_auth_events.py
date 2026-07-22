@@ -200,7 +200,7 @@ class _ControlApiHttpAuthEventsCases:
         self.assertIsNone(LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, localhost_only=False).authenticator.locality_error(remote_post))
 
     def test_idempotency_key_replays_matching_payload_and_rejects_conflicts(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         record_audit = MagicMock()
         service = control_api_http_service(
@@ -241,7 +241,7 @@ class _ControlApiHttpAuthEventsCases:
         self.assertEqual(record_audit.call_args_list[2].kwargs["status_code"], 409)
 
     def test_idempotency_key_replays_after_server_restart_when_runtime_store_is_shared(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         with TemporaryDirectory() as tmpdir:
             store = ControlApiIdempotencyStore(path=f"{tmpdir}/idempotency.json")
@@ -273,7 +273,7 @@ class _ControlApiHttpAuthEventsCases:
         service.handle_control_command.assert_called_once()
 
     def test_replayed_idempotent_response_publishes_command_event_when_supported(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         publish_event = MagicMock()
         service = control_api_http_service(

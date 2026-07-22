@@ -12,8 +12,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.backend import factory, probe, registry
 from venus_evcharger.backend.models import BackendRuntimeSummary
+from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsUnavailable
 from venus_evcharger.topology.config import parse_topology_config
 from venus_evcharger.topology.schema import ActuatorConfig, ChargerConfig, EvChargerTopologyConfig, MeasurementConfig, TopologyConfig
 
@@ -112,6 +114,17 @@ class _NoSettingsSwitchBackend(_FakeBackend):
 class _NoSettingsChargerBackend(_FakeBackend):
     def read_charger_state(self) -> dict[str, object]:
         return {}
+
+
+class _GatewayDiagnosticsReader:
+    def __init__(self, *, unavailable: bool = False) -> None:
+        self.snapshot = gateway_diagnostics_snapshot()
+        self.unavailable = unavailable
+
+    def read_snapshot(self):
+        if self.unavailable:
+            raise GatewayDiagnosticsUnavailable("offline")
+        return self.snapshot
 
 
 def _parser_from_text(text: str) -> configparser.ConfigParser:
@@ -538,6 +551,11 @@ class TestBackendFactoryContracts(unittest.TestCase):
 
 
 class TestBackendProbeContracts(unittest.TestCase):
+    def test_config_loader_rejects_an_invalid_boundary_result(self) -> None:
+        with patch("venus_evcharger.backend.probe.load_required_backend_config", return_value=object()):
+            with self.assertRaisesRegex(TypeError, "must return ConfigParser"):
+                probe._config("config.ini")
+
     def test_probe_service_defaults_are_stable_for_standalone_backend_construction(self) -> None:
         session = object()
         with patch("venus_evcharger.backend.probe.requests.Session", return_value=session):
@@ -595,67 +613,31 @@ class TestBackendProbeContracts(unittest.TestCase):
                 self.assertEqual(service.phase, "L1")
                 self.assertEqual(service.max_current, 16.0)
 
-    def test_dbus_introspection_helpers_normalize_snapshot_contract(self) -> None:
-        defaults = _parser_from_text(
-            "[DEFAULT]\n"
-            "DeviceInstance=61\nDbusIntrospectionEnabled=true\n"
-            "DbusIntrospectionSnapshotPath=/run/custom-map.json\n"
-            "DbusIntrospectionMaxAgeSeconds=12.5\n"
-        )["DEFAULT"]
-        snapshot = {"worker_state": "ok", "queue_depth": "7", "services": {"svc.a": {}, "svc.b": {}}}
-
-        with patch("venus_evcharger.backend.probe.load_introspection_snapshot", return_value=snapshot) as load_snapshot:
-            payload = probe._dbus_introspection_probe_summary(defaults)
-
-        load_snapshot.assert_called_once_with("/run/custom-map.json", max_age_seconds=12.5)
+    def test_gateway_diagnostics_summary_uses_only_semantic_snapshot_fields(self) -> None:
+        reader = _GatewayDiagnosticsReader()
+        payload = probe._gateway_diagnostics_probe_summary(reader, now=110.0, max_age_seconds=20.0)
         self.assertEqual(
             payload,
             {
-                "enabled": True,
-                "snapshot_path": "/run/custom-map.json",
-                "snapshot_fresh": True,
-                "worker_state": "ok",
-                "queue_depth": 7,
-                "service_count": 2,
+                "available": True,
+                "fresh": True,
+                "sequence": 7,
+                "age_seconds": 10.0,
+                "gateway_state": "ok",
+                "gateway_stale": False,
+                "discovery": reader.snapshot.discovery.to_payload(),
+                "critical_unavailable_fields": [],
             },
         )
-
-    def test_dbus_introspection_helpers_handle_disabled_and_non_mapping_values(self) -> None:
-        defaults = _parser_from_text("[DEFAULT]\nDbusIntrospectionEnabled=0\n")["DEFAULT"]
-
-        self.assertFalse(probe._dbus_introspection_enabled(defaults))
-        self.assertEqual(probe._dbus_introspection_gateway_state(object()), "")
-        self.assertEqual(probe._dbus_introspection_queue_depth(object()), 0)
-        self.assertEqual(probe._dbus_introspection_service_count(object()), 0)
-        self.assertEqual(probe._dbus_introspection_gateway_state({}), "")
-        self.assertEqual(probe._dbus_introspection_queue_depth({}), 0)
-
-        with patch("venus_evcharger.backend.probe.load_introspection_snapshot", return_value={}) as load_snapshot:
-            payload = probe._dbus_introspection_probe_summary(_parser_from_text("[DEFAULT]\n")["DEFAULT"])
-        load_snapshot.assert_called_once()
-        self.assertEqual(payload["worker_state"], "")
-        self.assertEqual(payload["queue_depth"], 0)
-        self.assertEqual(payload["service_count"], 0)
-
-    def test_dbus_introspection_helpers_use_device_instance_default_path_and_max_age(self) -> None:
-        defaults = _parser_from_text("[DEFAULT]\nDeviceInstance=62\n")["DEFAULT"]
-        with patch("venus_evcharger.backend.probe.load_introspection_snapshot", return_value={}) as load_snapshot:
-            payload = probe._dbus_introspection_probe_summary(defaults)
-
-        load_snapshot.assert_called_once_with(
-            "/run/dbus-venus-evcharger-dbus-map-62.json",
-            max_age_seconds=900.0,
+        self.assertFalse(
+            probe._gateway_diagnostics_probe_summary(reader, now=120.1, max_age_seconds=20.0)["fresh"]
         )
-        self.assertEqual(payload["snapshot_path"], "/run/dbus-venus-evcharger-dbus-map-62.json")
-        self.assertEqual(payload["enabled"], True)
 
-        with patch("venus_evcharger.backend.probe.load_introspection_snapshot", return_value={}) as default_snapshot:
-            default_payload = probe._dbus_introspection_probe_summary(_parser_from_text("[DEFAULT]\n")["DEFAULT"])
-        default_snapshot.assert_called_once_with(
-            "/run/dbus-venus-evcharger-dbus-map-60.json",
-            max_age_seconds=900.0,
+    def test_gateway_diagnostics_summary_reports_transport_unavailability(self) -> None:
+        self.assertEqual(
+            probe._gateway_diagnostics_probe_summary(_GatewayDiagnosticsReader(unavailable=True)),
+            {"available": False, "fresh": False, "error": "offline"},
         )
-        self.assertEqual(default_payload["snapshot_path"], "/run/dbus-venus-evcharger-dbus-map-60.json")
 
     def test_adapter_type_contract_handles_adapter_default_and_legacy_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -886,15 +868,18 @@ class TestBackendProbeContracts(unittest.TestCase):
                     "venus_evcharger.backend.probe.backend_selection_view",
                     return_value={"mode": "split"},
                 ),
-                patch("venus_evcharger.backend.probe._dbus_introspection_probe_summary", return_value={"enabled": True}),
+                patch(
+                    "venus_evcharger.backend.probe._gateway_diagnostics_probe_summary",
+                    return_value={"available": True},
+                ),
             ):
                 payload = probe.validate_wallbox_config(path)
 
-        self.assertEqual(set(payload), {"path", "runtime", "selection", "resolved_roles", "dbus_introspection"})
+        self.assertEqual(set(payload), {"path", "runtime", "selection", "resolved_roles", "gateway_diagnostics"})
         self.assertEqual(payload["path"], path)
         self.assertEqual(payload["selection"], {"mode": "split"})
         self.assertEqual(payload["resolved_roles"], {"meter": False, "switch": True, "charger": True})
-        self.assertEqual(payload["dbus_introspection"], {"enabled": True})
+        self.assertEqual(payload["gateway_diagnostics"], {"available": True})
 
 
 if __name__ == "__main__":

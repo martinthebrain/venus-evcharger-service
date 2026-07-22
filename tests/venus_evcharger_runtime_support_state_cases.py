@@ -3,6 +3,7 @@ import os
 import tempfile
 import threading
 import time
+import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -11,11 +12,40 @@ from venus_evcharger.runtime.async_mainloop_watchdog import MainloopWatchdog
 from venus_evcharger.runtime.setup import RuntimeSetup
 from venus_evcharger.runtime import async_mainloop_executor as executor_module
 from venus_evcharger.control import ControlCommand
-from tests.venus_evcharger_runtime_support_support import RuntimeSupportController, RuntimeSupportTestCaseBase
+from venus_evcharger.ipc.core_commands import (
+    CORE_COMMAND_QUEUE_CLASS,
+    CORE_COMMAND_SCHEMA_VERSION,
+    CoreControlCommand,
+)
+from tests.venus_evcharger_runtime_support_support import RuntimeSupportController
 from tests.venus_evcharger_test_fixtures import make_runtime_support_service
 
 
-class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
+class TestRuntimeSupportControllerState(unittest.TestCase):
+    @staticmethod
+    def _age_zero(_captured_at: float | int | None, _now: float | int | None) -> int:
+        return 0
+
+    @staticmethod
+    def _age_five(_captured_at: float | int | None, _now: float | int | None) -> int:
+        return 5
+
+    @staticmethod
+    def _health_zero(_reason: str) -> int:
+        return 0
+
+    @staticmethod
+    def _health_nine(_reason: str) -> int:
+        return 9
+
+    @staticmethod
+    def _health_ten(_reason: str) -> int:
+        return 10
+
+    @staticmethod
+    def _always_stale(_now: float) -> bool:
+        return True
+
     def test_runtime_and_worker_state_helpers_cover_defaults_snapshot_and_retries(self) -> None:
         service = make_runtime_support_service(time_now=lambda: 100.0)
         controller = RuntimeSupportController(service, self._age_five, self._health_nine)
@@ -101,7 +131,8 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
             path = f"{temp_dir}/auto.log"
             service = make_runtime_support_service(time_now=lambda: 1000.0, _last_pm_status=None, virtual_startstop=1, _last_auto_metrics={"surplus": None, "grid": None, "soc": None}, auto_audit_log_path=path, auto_audit_log_max_age_hours=0.0, auto_audit_log_repeat_seconds=0.0, _last_auto_audit_event_at=995.0, auto_watchdog_stale_seconds=0.0, started_at=900.0, auto_watchdog_recovery_seconds=0.0, _last_recovery_attempt_at=990.0)
             controller = RuntimeSupportController(service, self._age_zero, self._health_ten)
-            controller.reset_system_bus = MagicMock()
+            refresh_snapshot = MagicMock()
+            service.runtime = SimpleNamespace(refresh_auto_input_snapshot=refresh_snapshot)
             self.assertEqual(controller.audit._relay_state_for_audit(service), 0)
             self.assertIn("surplus=na", controller.audit._format_auto_audit_line(service, "waiting", False, 1000.0))
             self.assertEqual(controller.audit._prune_auto_audit_payload(["", "bad-line", "500\told\n", "1500\tnew\n"], 1000.0), ["bad-line", "1500\tnew\n"])
@@ -111,7 +142,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
             service.started_at = 0.0
             service._is_update_stale = self._always_stale
             controller.watchdog_recover(20.0)
-            controller.reset_system_bus.assert_called_once_with()
+            refresh_snapshot.assert_called_once_with()
 
     def test_audit_prefers_last_confirmed_relay_state_over_local_placeholder(self) -> None:
         service = make_runtime_support_service(_last_pm_status={"output": True}, _last_pm_status_confirmed=False, _last_confirmed_pm_status={"output": False}, _last_confirmed_pm_status_at=95.0, virtual_startstop=1)
@@ -137,10 +168,12 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
                 handle.write("999999\tfresh\n")
             service = make_runtime_support_service(time_now=lambda: 1000.0, auto_audit_log=False, auto_audit_log_path=path, _last_pm_status=None, _last_auto_metrics={"surplus": None, "grid": None, "soc": None}, _last_recovery_attempt_at=995.0, _is_update_stale=self._always_stale)
             controller = RuntimeSupportController(service, self._age_zero, self._health_ten)
+            refresh_snapshot = MagicMock()
+            service.runtime = SimpleNamespace(refresh_auto_input_snapshot=refresh_snapshot)
             controller.audit._cleanup_auto_audit_log(1000.0)
             controller.write_auto_audit_event("waiting-grid", cached=False)
             controller.watchdog_recover(1000.0)
-            service._reset_system_bus.assert_not_called()
+            refresh_snapshot.assert_not_called()
 
     def test_watchdog_retry_helpers_cover_suppression_and_remaining_time_paths(self) -> None:
         service = make_runtime_support_service(
@@ -165,7 +198,8 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
             started_at=0.0,
         )
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.reset_system_bus = MagicMock()
+        refresh_snapshot = MagicMock()
+        service.runtime = SimpleNamespace(refresh_auto_input_snapshot=refresh_snapshot)
 
         with patch.object(controller.health, "_exit_for_watchdog_restart") as restart, patch(
             "venus_evcharger.runtime.health.faulthandler.dump_traceback"
@@ -173,7 +207,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
             controller.watchdog_recover(100.0)
 
         restart.assert_called_once_with()
-        controller.reset_system_bus.assert_called_once_with()
+        refresh_snapshot.assert_called_once_with()
 
     def test_watchdog_does_not_restart_unconfigured_service(self) -> None:
         service = make_runtime_support_service(
@@ -188,13 +222,14 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
             started_at=0.0,
         )
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.reset_system_bus = MagicMock()
+        refresh_snapshot = MagicMock()
+        service.runtime = SimpleNamespace(refresh_auto_input_snapshot=refresh_snapshot)
 
         with patch.object(controller.health, "_exit_for_watchdog_restart") as restart:
             controller.watchdog_recover(100.0)
 
         restart.assert_not_called()
-        controller.reset_system_bus.assert_called_once_with()
+        refresh_snapshot.assert_called_once_with()
 
     def test_health_helpers_ignore_unknown_failure_keys(self) -> None:
         service = make_runtime_support_service(
@@ -208,93 +243,6 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
 
         self.assertEqual(service._error_state, {"dbus": 0})
         self.assertEqual(service._failure_active, {"dbus": False})
-
-    def test_async_publish_queue_coalesces_and_flushes_from_mainloop(self) -> None:
-        service = make_runtime_support_service()
-        service._dbusservice = {"/A": 0, "/UpdateIndex": 0}
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        service._dbus_publish_state = {}
-
-        controller.enqueue_dbus_publish_values([("/A", 1), ("/A", 2)], 100.0)
-        controller.enqueue_dbus_update_index_bump(100.0)
-        self.assertTrue(controller.flush_dbus_publish_queue())
-
-        self.assertEqual(service._dbusservice["/A"], 2)
-        self.assertEqual(service._dbusservice["/UpdateIndex"], 1)
-        self.assertEqual(service._dbus_publish_state["/A"], {"value": 2, "updated_at": 100.0})
-
-    def test_async_publish_flush_batches_gateway_proxy_writes(self) -> None:
-        service = make_runtime_support_service()
-        gateway_proxy = SimpleNamespace(publish_paths=MagicMock(), publish_fields=MagicMock())
-        service._dbusservice = gateway_proxy
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        controller.mark_mainloop_thread()
-        service._dbus_publish_state = {}
-
-        controller.enqueue_dbus_publish_values([("/A", 1), ("/B", 2)], 100.0)
-        controller.enqueue_dbus_publish_fields([("ac_power_w", 1200.0), ("session_time_s", 30)], 101.0)
-        self.assertTrue(controller.flush_dbus_publish_queue())
-
-        gateway_proxy.publish_paths.assert_called_once_with({"/A": 1, "/B": 2})
-        gateway_proxy.publish_fields.assert_called_once_with({"ac_power_w": 1200.0, "session_time_s": 30})
-        self.assertEqual(service._dbus_publish_state["/A"], {"value": 1, "updated_at": 100.0})
-        self.assertEqual(service._dbus_publish_state["/B"], {"value": 2, "updated_at": 100.0})
-        self.assertEqual(service._dbus_publish_state["/Ac/Power"], {"value": 1200.0, "updated_at": 101.0})
-        self.assertEqual(service._dbus_publish_state["/Session/Time"], {"value": 30, "updated_at": 101.0})
-
-    def test_async_publish_fields_skip_empty_and_fallback_to_paths_without_gateway_fields(self) -> None:
-        service = make_runtime_support_service()
-        service._dbusservice = {"/Ac/Power": 0, "/Session/Time": 0, "/UpdateIndex": 0}
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        controller.mark_mainloop_thread()
-        service._dbus_publish_state = {}
-
-        self.assertFalse(controller.enqueue_dbus_publish_fields([], 100.0))
-        self.assertTrue(controller.enqueue_dbus_publish_fields([("ac_power_w", 1200.0)], 101.0))
-        self.assertTrue(controller.flush_dbus_publish_queue())
-
-        self.assertEqual(service._dbusservice["/Ac/Power"], 1200.0)
-        self.assertEqual(service._dbus_publish_state["/Ac/Power"], {"value": 1200.0, "updated_at": 101.0})
-
-    def test_async_publish_fields_report_gateway_field_failures_as_paths(self) -> None:
-        service = make_runtime_support_service()
-        gateway_proxy = SimpleNamespace(publish_fields=MagicMock(side_effect=RuntimeError("fields down")))
-        service._dbusservice = gateway_proxy
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-
-        failures = controller.publish_queue._apply_gateway_publish_fields(
-            service,
-            [("ac_power_w", (1200.0, 101.0, 99.0)), ("unknown_field", (1, 101.0, 99.0))],
-            gateway_proxy.publish_fields,
-        )
-
-        gateway_proxy.publish_fields.assert_called_once_with({"ac_power_w": 1200.0, "unknown_field": 1})
-        self.assertEqual(failures, ["/Ac/Power"])
-
-    def test_async_gateway_publish_edges_skip_empty_and_retry_failed_batch(self) -> None:
-        service = make_runtime_support_service()
-        gateway_proxy = SimpleNamespace(publish_paths=MagicMock(side_effect=RuntimeError("gateway down")))
-        service._dbusservice = gateway_proxy
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        controller.mark_mainloop_thread()
-        service._dbus_publish_state = {}
-        controller.mark_failure = MagicMock()
-
-        self.assertEqual(controller.publish_queue._apply_gateway_publish_values(service, [], gateway_proxy.publish_paths), [])
-        gateway_proxy.publish_paths.assert_not_called()
-
-        controller.enqueue_dbus_publish_values([("/A", 1), ("/B", 2)], 100.0)
-        self.assertTrue(controller.flush_dbus_publish_queue())
-
-        gateway_proxy.publish_paths.assert_called_once_with({"/A": 1, "/B": 2})
-        self.assertEqual(list(service._dbus_publish_pending), [])
-        self.assertEqual(service._dbus_publish_state, {})
-        controller.mark_failure.assert_called_once_with("dbus")
 
     def test_update_worker_scheduler_returns_while_cycle_is_blocked(self) -> None:
         started = threading.Event()
@@ -329,7 +277,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
     def test_control_command_worker_returns_while_backend_command_is_blocked(self) -> None:
         started = threading.Event()
         release = threading.Event()
-        command = ControlCommand(name="set_start_stop", path="/StartStop", value=1)
+        command = ControlCommand(name="set_start_stop", target="start_stop", value=1)
         service = make_runtime_support_service()
 
         def blocking_command(_command: ControlCommand) -> SimpleNamespace:
@@ -346,7 +294,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
             self.assertTrue(controller.enqueue_control_command(command))
             self.assertLess(time.monotonic() - enqueue_started, 0.1)
             self.assertTrue(started.wait(1.0))
-            self.assertEqual(service._desired_control_values["/StartStop"], 1)
+            self.assertEqual(service._desired_control_values["start_stop"], 1)
         finally:
             release.set()
             service._control_command_stop_event.set()
@@ -355,10 +303,19 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
 
     def test_runtime_executor_serializes_commands_before_update_cycles(self) -> None:
         order: list[str] = []
-        command = ControlCommand(name="set_start_stop", path="/StartStop", value=1)
+        command = ControlCommand(name="set_start_stop", target="start_stop", value=1)
         service = make_runtime_support_service()
-        service.handle_control_command = MagicMock(side_effect=lambda _command: order.append("command") or SimpleNamespace(accepted=True))
-        service._update = MagicMock(side_effect=lambda: order.append("update") or True)
+
+        def record_command(_command: ControlCommand) -> SimpleNamespace:
+            order.append("command")
+            return SimpleNamespace(accepted=True)
+
+        def record_update() -> bool:
+            order.append("update")
+            return True
+
+        service.handle_control_command = MagicMock(side_effect=record_command)
+        service._update = MagicMock(side_effect=record_update)
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
         controller.initialize_runtime_support()
         controller.start_update_worker()
@@ -490,9 +447,9 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
             (False, True, False, True),
             (False, False, True, True),
         )
-        for gateway_work, control_work, update_work, expected in cases:
+        for core_command_work, control_work, update_work, expected in cases:
             with (
-                patch.object(controller.executor, "drain_gateway_commands_once", return_value=gateway_work),
+                patch.object(controller.executor, "drain_core_commands_once", return_value=core_command_work),
                 patch.object(controller.control_commands, "drain_once", return_value=control_work),
                 patch.object(controller.executor, "run_pending_update_once", return_value=update_work),
             ):
@@ -649,114 +606,6 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         dump_traceback.assert_called_once_with(service)
         exit_restart.assert_called_once_with()
 
-    def test_companion_publish_is_coalesced_and_flushed_in_mainloop(self) -> None:
-        service = make_runtime_support_service()
-        service._companion_dbus_bridge = SimpleNamespace(publish=MagicMock(return_value=True))
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        controller.mark_mainloop_thread()
-
-        self.assertTrue(controller.enqueue_companion_dbus_publish(123.0))
-        self.assertTrue(controller.mainloop_watchdog.flush_companion_publish())
-
-        service._companion_dbus_bridge.publish.assert_called_once_with(123.0)
-
-    def test_dbus_thread_guard_rejects_worker_thread_access(self) -> None:
-        service = make_runtime_support_service()
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        controller.mark_mainloop_thread()
-        errors: list[Exception] = []
-        done = threading.Event()
-
-        def worker() -> None:
-            try:
-                controller.assert_dbus_mainloop_thread("test dbus write")
-            except Exception as error:  # pylint: disable=broad-except
-                errors.append(error)
-            finally:
-                done.set()
-
-        thread = threading.Thread(target=worker)
-        thread.start()
-        self.assertTrue(done.wait(1.0))
-        thread.join(1.0)
-
-        self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], RuntimeError)
-
-    def test_async_publish_queue_covers_empty_trim_lag_failure_and_budget_paths(self) -> None:
-        service = make_runtime_support_service()
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        controller.mark_mainloop_thread()
-        self.assertFalse(controller.enqueue_dbus_publish_values([], 100.0))
-
-        service._dbus_publish_max_paths = 1
-        self.assertTrue(controller.enqueue_dbus_publish_values([("/A", 1), ("/B", 2)], 100.0))
-        self.assertEqual(service._dbus_publish_dropped_count, 1)
-        self.assertEqual(list(service._dbus_publish_pending), ["/B"])
-
-        controller.publish_queue._remember_oldest_dbus_publish(service, service._dbus_publish_pending.__class__())
-        service._dbusservice = {"/UpdateIndex": 255}
-        service._dbus_publish_state = {}
-        controller.enqueue_dbus_update_index_bump(100.0)
-        self.assertIsNotNone(service._dbus_publish_oldest_queued_at)
-
-        class FailingDbus(dict):
-            def __setitem__(self, key: str, value: object) -> None:
-                if key == "/B":
-                    raise RuntimeError("dbus down")
-                super().__setitem__(key, value)
-
-        service._dbusservice = FailingDbus({"/UpdateIndex": 255})
-        controller.mark_failure = MagicMock()
-        service._dbus_publish_budget_seconds = -1.0
-        with patch("venus_evcharger.runtime.async_mainloop_publish.logging.warning") as warning:
-            self.assertTrue(controller.flush_dbus_publish_queue())
-
-        controller.mark_failure.assert_called_once_with("dbus")
-        self.assertEqual(service._dbusservice["/UpdateIndex"], 0)
-        self.assertGreaterEqual(service._last_dbus_publish_queue_lag_seconds, 0.0)
-        self.assertGreaterEqual(warning.call_count, 2)
-
-    def test_async_publish_flush_returns_when_no_dbus_service_and_stops_failed_bumps(self) -> None:
-        service = make_runtime_support_service()
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-        self.assertTrue(controller.flush_dbus_publish_queue())
-
-        service._dbusservice = {}
-        service._dbus_publish_state = {}
-        self.assertFalse(controller.publish_queue._bump_update_index_best_effort(service, 100.0))
-        controller.publish_queue._flush_update_index_bumps(service, 100.0, 2)
-
-        fresh_service = make_runtime_support_service()
-        fresh_controller = RuntimeSupportController(fresh_service, self._age_zero, self._health_zero)
-        fresh_controller.initialize_runtime_support()
-        fresh_controller.enqueue_dbus_update_index_bump(100.0)
-        self.assertIsNotNone(fresh_service._dbus_publish_oldest_queued_at)
-        fresh_controller.publish_queue._remember_dbus_publish_queue_lag(fresh_service, 100.0, None)
-        failure_runtime = SimpleNamespace(mark_failure=MagicMock())
-        fresh_controller.publish_queue._report_dbus_publish_failures(
-            SimpleNamespace(runtime=failure_runtime),
-            ["/Path"],
-        )
-        failure_runtime.mark_failure.assert_called_once_with("dbus")
-
-    def test_async_publish_queue_contract_rejects_malformed_pending_queue(self) -> None:
-        service = make_runtime_support_service()
-        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
-        controller.initialize_runtime_support()
-
-        service._dbus_publish_pending["/bad"] = ("payload", object(), 1.0)
-        with self.assertRaisesRegex(TypeError, "_dbus_publish_pending current must be float"):
-            controller.enqueue_dbus_publish_values([("/A", 1)], 100.0)
-
-        service._dbus_publish_pending = {}
-        with self.assertRaisesRegex(TypeError, "_dbus_publish_pending must be OrderedDict"):
-            controller.enqueue_dbus_publish_values([("/A", 1)], 100.0)
-
     def test_runtime_executor_covers_sync_fallbacks_errors_trimming_and_budget_warnings(self) -> None:
         service = make_runtime_support_service()
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
@@ -766,21 +615,21 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         self.assertTrue(controller.schedule_update_cycle())
         service._update.assert_called_once_with()
 
-        command = ControlCommand(name="set_start_stop", path="/StartStop", value=1)
+        command = ControlCommand(name="set_start_stop", target="start_stop", value=1)
         service.handle_control_command = MagicMock(return_value=SimpleNamespace(accepted=True))
         self.assertTrue(controller.enqueue_control_command(command))
         service.handle_control_command.assert_called_once_with(command)
 
         service._control_command_async_enabled = True
         service._control_command_max_paths = 1
-        first = ControlCommand(name="set_mode", path="/Mode", value=1)
-        second = ControlCommand(name="set_current", path="/Current", value=12)
-        third = ControlCommand(name="set_current", path="/Current", value=13)
+        first = ControlCommand(name="set_mode", target="mode", value=1)
+        second = ControlCommand(name="set_current_setting", target="set_current", value=12)
+        third = ControlCommand(name="set_current_setting", target="set_current", value=13)
         self.assertTrue(controller.enqueue_control_command(first))
         self.assertTrue(controller.enqueue_control_command(second))
         self.assertTrue(controller.enqueue_control_command(third))
-        self.assertNotIn("/Mode", service._desired_control_values)
-        self.assertEqual(service._desired_control_values["/Current"], 13)
+        self.assertNotIn("mode", service._desired_control_values)
+        self.assertEqual(service._desired_control_values["set_current"], 13)
 
         service.handle_control_command = MagicMock(side_effect=RuntimeError("boom"))
         service._write_command_budget_seconds = -1.0
@@ -806,7 +655,7 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
         controller.initialize_runtime_support()
         service._control_command_async_enabled = True
-        command = ControlCommand(name="set_mode", path="/Mode", value=1)
+        command = ControlCommand(name="set_mode", target="mode", value=1)
 
         service._control_command_pending["/bad"] = (True, time.time(), command)
         with self.assertRaisesRegex(TypeError, "_control_command_pending sequence must be int"):
@@ -816,102 +665,133 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         with self.assertRaisesRegex(TypeError, "_control_command_pending must be OrderedDict"):
             controller.enqueue_control_command(command)
 
-    def test_runtime_executor_gateway_core_command_paths(self) -> None:
+    def test_runtime_executor_core_command_mailbox_targets(self) -> None:
         service = make_runtime_support_service()
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
         controller.initialize_runtime_support()
 
-        if hasattr(service, "_gateway_core_commands"):
-            delattr(service, "_gateway_core_commands")
-        self.assertFalse(controller.executor.drain_gateway_commands_once())
+        if hasattr(service, "_core_command_mailbox"):
+            delattr(service, "_core_command_mailbox")
+        self.assertFalse(controller.executor.drain_core_commands_once())
 
-        service._gateway_core_commands = None
-        self.assertFalse(controller.executor.drain_gateway_commands_once())
+        service._core_command_mailbox = None
+        self.assertFalse(controller.executor.drain_core_commands_once())
 
         inbox = SimpleNamespace(load_pending=MagicMock(return_value=[]))
-        service._gateway_core_commands = inbox
-        self.assertFalse(controller.executor.drain_gateway_commands_once())
+        service._core_command_mailbox = inbox
+        self.assertFalse(controller.executor.drain_core_commands_once())
 
         first_payload = {
+            "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+            "queue_class": CORE_COMMAND_QUEUE_CLASS,
             "kind": "user_command",
-            "source": "dbus-gui",
-            "origin": "gateway-local-write-callback",
+            "name": "set_mode",
+            "target": "mode",
+            "source": "control-surface",
+            "origin": "gateway-gui",
             "id": "cmd-mode",
             "created_at": 98.5,
-            "path": "/Mode",
             "value": 2,
+            "priority": "user",
+            "coalesce_key": "core:set_mode:mode",
         }
-        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=True))
         inbox.load_pending = MagicMock(return_value=[("first", first_payload)])
         inbox.coalesce = MagicMock(return_value=[("first", first_payload)])
         inbox.remove = MagicMock()
-        service._dbusservice = SimpleNamespace()
-        self.assertFalse(controller.executor.apply_gateway_write_if_supported({"path": "/Mode", "value": 2}))
+        service.handle_control_command = MagicMock(return_value=SimpleNamespace(accepted=True))
 
-        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=True))
         with patch("venus_evcharger.runtime.async_mainloop_executor.time.time", return_value=100.0), patch(
             "venus_evcharger.runtime.async_mainloop_executor.logging.info"
         ) as log_info:
-            self.assertTrue(controller.executor.drain_gateway_commands_once())
-        service._dbusservice.apply_gateway_write.assert_called_once_with("/Mode", 2)
+            self.assertTrue(controller.executor.drain_core_commands_once())
+        service.handle_control_command.assert_called_once_with(
+            ControlCommand(
+                name="set_mode",
+                target="mode",
+                value=2,
+                source="control-surface",
+                command_id="cmd-mode",
+            )
+        )
         inbox.coalesce.assert_called_once_with([("first", first_payload)])
         log_info.assert_called_once_with(
-            "Gateway user command source=%s origin=%s id=%s path=%s value=%r age_s=%s file=%s",
-            "dbus-gui",
-            "gateway-local-write-callback",
+            "Core control command source=%s origin=%s id=%s name=%s target=%s value=%r age_s=%s file=%s",
+            "control-surface",
+            "gateway-gui",
             "cmd-mode",
-            "/Mode",
+            "set_mode",
+            "mode",
             2,
             "1.500",
             "first",
         )
         inbox.remove.assert_called_once_with("first")
 
-        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value="yes"))
-        with self.assertRaisesRegex(TypeError, "apply_gateway_write must return bool"):
-            controller.executor.apply_gateway_write_if_supported({"path": "/Mode", "value": 1})
-
-        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=False))
-        service._control_command_from_write = MagicMock(return_value=ControlCommand(name="set_mode", path="/Mode", value=1))
-        service.handle_control_command = MagicMock()
+        service.handle_control_command.reset_mock()
         inbox.coalesce.return_value = [
-            ("ignored", {"kind": "refresh_value", "path": "/Mode", "value": 3}),
-            ("second", {"kind": "user_command", "path": "/Mode", "value": 1}),
+            ("ignored", {"kind": "refresh_value", "target": "mode", "value": 3}),
+            (
+                "second",
+                {
+                    "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+                    "queue_class": CORE_COMMAND_QUEUE_CLASS,
+                    "kind": "user_command",
+                    "name": "set_mode",
+                    "target": "mode",
+                    "source": "control-surface",
+                    "origin": "gateway-gui",
+                    "id": "cmd-second",
+                    "created_at": 99.0,
+                    "value": 1,
+                    "priority": "user",
+                    "coalesce_key": "core:set_mode:mode",
+                },
+            ),
         ]
-        self.assertTrue(controller.executor.drain_gateway_commands_once())
-        service._control_command_from_write.assert_called_once_with("/Mode", 1, source="dbus")
-        service.handle_control_command.assert_called_once()
+        self.assertTrue(controller.executor.drain_core_commands_once())
+        service.handle_control_command.assert_called_once_with(
+            ControlCommand(
+                name="set_mode",
+                target="mode",
+                value=1,
+                source="control-surface",
+                command_id="cmd-second",
+            )
+        )
         self.assertEqual(inbox.remove.call_args_list[-2][0][0], "ignored")
         self.assertEqual(inbox.remove.call_args_list[-1][0][0], "second")
 
-    def test_runtime_executor_gateway_command_boundary_contracts(self) -> None:
+    def test_runtime_executor_core_command_boundary_contracts(self) -> None:
         service = make_runtime_support_service()
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
         controller.initialize_runtime_support()
 
-        self.assertTrue(controller.executor.is_gateway_user_command({"type": "user_command"}))
-        self.assertFalse(controller.executor.is_gateway_user_command({}))
-
-        if hasattr(service, "_dbusservice"):
-            delattr(service, "_dbusservice")
-        self.assertFalse(controller.executor.apply_gateway_write_if_supported({"path": "/Mode", "value": 1}))
-
-        service._dbusservice = SimpleNamespace(apply_gateway_write=MagicMock(return_value=True))
-        self.assertTrue(controller.executor.apply_gateway_write_if_supported({"value": 5}))
-        service._dbusservice.apply_gateway_write.assert_called_once_with("", 5)
-
-        command = ControlCommand(name="set_mode", path="", value=1)
-        service._control_command_from_write = MagicMock(return_value=command)
         service.handle_control_command = MagicMock()
-        controller.executor.dispatch_gateway_control_command({"value": 1})
-        service._control_command_from_write.assert_called_once_with("", 1, source="dbus")
-        service.handle_control_command.assert_called_once_with(command)
+        command = CoreControlCommand(
+            name="set_mode",
+            target="mode",
+            value=1,
+            source="control-surface",
+            origin="gateway-gui",
+            command_id="cmd",
+            created_at=1.0,
+        )
+        controller.executor.dispatch_core_control_command(command)
+        service.handle_control_command.assert_called_once_with(
+            ControlCommand(
+                name="set_mode",
+                target="mode",
+                value=1,
+                source="control-surface",
+                command_id="cmd",
+            )
+        )
 
-        with patch("venus_evcharger.runtime.async_mainloop_executor.logging.info") as log_info:
-            controller.executor.handle_gateway_command({"kind": "user_command", "path": "/Mode", "value": 1})
-        self.assertEqual(log_info.call_args.args[-1], "unknown")
+        with patch("venus_evcharger.runtime.async_mainloop_executor.logging.warning") as log_warning:
+            controller.executor.handle_core_command({"kind": "invalid"})
+        log_warning.assert_called_once_with("Dropping invalid core control command file=%s", "unknown")
 
-    def test_runtime_executor_gateway_command_metadata_helpers(self) -> None:
+    def test_runtime_executor_core_command_metadata_helpers(self) -> None:
         self.assertFalse(executor_module._update_worker_enabled(SimpleNamespace()))
         self.assertFalse(executor_module._update_worker_enabled(SimpleNamespace(_update_worker_enabled=False)))
         self.assertTrue(executor_module._update_worker_enabled(SimpleNamespace(_update_worker_enabled=True)))
@@ -919,34 +799,41 @@ class TestRuntimeSupportControllerState(RuntimeSupportTestCaseBase):
         self.assertEqual(executor_module._update_worker_budget_seconds(SimpleNamespace(_update_worker_budget_seconds="bad")), 5.0)
         self.assertEqual(executor_module._update_worker_budget_seconds(SimpleNamespace(_update_worker_budget_seconds=0.0)), 0.0)
         self.assertEqual(executor_module._update_worker_budget_seconds(SimpleNamespace(_update_worker_budget_seconds=2.5)), 2.5)
-        self.assertEqual(executor_module._gateway_command_text({"source": " dbus-gui "}, "source", "unknown"), "dbus-gui")
-        self.assertEqual(executor_module._gateway_command_text({"source": " "}, "source", "unknown"), "unknown")
-        self.assertEqual(executor_module._gateway_command_age_label({"created_at": 98.0}, 100.0), "2.000")
-        self.assertEqual(executor_module._gateway_command_age_label({"created_at": 101.0}, 100.0), "0.000")
-        self.assertEqual(executor_module._gateway_command_age_label({"created_at": 1.0}, 100.0), "99.000")
-        self.assertEqual(executor_module._gateway_command_age_label({"created_at": 0.0}, 100.0), "unknown")
-        self.assertEqual(executor_module._gateway_command_age_label({"created_at": "bad"}, 100.0), "unknown")
+        def command_at(created_at: float) -> CoreControlCommand:
+            return CoreControlCommand(
+                name="set_mode",
+                target="mode",
+                value=1,
+                source="control-surface",
+                origin="gateway-gui",
+                command_id="cmd",
+                created_at=created_at,
+            )
+
+        command = command_at(98.0)
+        self.assertEqual(executor_module._core_command_age_label(command, 100.0), "2.000")
+        self.assertEqual(executor_module._core_command_age_label(command_at(101.0), 100.0), "0.000")
+        self.assertEqual(executor_module._core_command_age_label(command_at(1.0), 100.0), "99.000")
+        self.assertEqual(executor_module._core_command_age_label(command_at(0.0), 100.0), "unknown")
         with patch("venus_evcharger.runtime.async_mainloop_executor.logging.info") as log_info:
-            executor_module._log_gateway_user_command({}, command_file="", now=100.0)
+            executor_module._log_core_control_command(command, command_file="", now=100.0)
         log_info.assert_called_once_with(
-            "Gateway user command source=%s origin=%s id=%s path=%s value=%r age_s=%s file=%s",
-            "unknown",
-            "unknown",
-            "unknown",
-            "",
-            None,
-            "unknown",
+            "Core control command source=%s origin=%s id=%s name=%s target=%s value=%r age_s=%s file=%s",
+            "control-surface",
+            "gateway-gui",
+            "cmd",
+            "set_mode",
+            "mode",
+            1,
+            "2.000",
             "unknown",
         )
 
-    def test_companion_flush_heartbeat_watchdog_start_and_dump_paths(self) -> None:
+    def test_heartbeat_watchdog_start_and_dump_paths(self) -> None:
         service = make_runtime_support_service()
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
         controller.initialize_runtime_support()
 
-        self.assertFalse(controller.mainloop_watchdog.flush_companion_publish())
-        self.assertTrue(controller.enqueue_companion_dbus_publish())
-        self.assertFalse(controller.mainloop_watchdog.flush_companion_publish())
         self.assertTrue(controller.mainloop_heartbeat_tick())
         self.assertIsNotNone(service._mainloop_heartbeat_at)
 

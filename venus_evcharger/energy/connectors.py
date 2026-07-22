@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Connector registry facade for DBus and external energy-source transports."""
+"""Connector registry facade for external energy-source transports."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 import json
 import subprocess
@@ -11,8 +12,6 @@ from venus_evcharger.backend.modbus_client import ModbusClient
 from venus_evcharger.backend.modbus_transport import create_modbus_transport
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 from venus_evcharger.backend.template_support import TemplateAuthSettings
-from venus_evcharger.core.return_contracts import require_instance
-
 from .connectors_command import (
     CommandJsonEnergySourceSettings,
     _build_command_json_energy_source_snapshot,
@@ -54,6 +53,8 @@ from .connectors_template import (
 )
 from .models import EnergySourceDefinition, EnergySourceSnapshot
 
+EnergySourceReader = Callable[[Any, EnergySourceDefinition, float], EnergySourceSnapshot]
+
 __all__ = [
     "CommandJsonEnergySourceSettings",
     "ModbusEnergyFieldSettings",
@@ -94,19 +95,16 @@ __all__ = [
 def read_energy_source_snapshot(owner: Any, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
     """Read one energy-source snapshot through the configured connector layer."""
     connector_type = _normalized_connector_type(source.connector_type)
-    if connector_type == "template_http":
-        return _template_http_energy_source_snapshot(owner, source, now)
-    if connector_type == "opendtu_http":
-        return _opendtu_energy_source_snapshot(owner, source, now)
-    if connector_type == "modbus":
-        return _modbus_energy_source_snapshot(owner, source, now)
-    if connector_type == "command_json":
-        return _command_json_energy_source_snapshot(owner, source, now)
-    return require_instance(
-        owner._dbus_energy_source_snapshot(source, now),
-        "_dbus_energy_source_snapshot",
-        EnergySourceSnapshot,
-    )
+    readers: dict[str, EnergySourceReader] = {
+        "template_http": _template_http_energy_source_snapshot,
+        "opendtu_http": _opendtu_energy_source_snapshot,
+        "modbus": _modbus_energy_source_snapshot,
+        "command_json": _command_json_energy_source_snapshot,
+    }
+    reader = readers.get(connector_type)
+    if reader is None:
+        raise ValueError(f"Unsupported energy-source connector: {connector_type or '<empty>'}")
+    return reader(owner, source, now)
 
 
 def _modbus_energy_source_client(

@@ -3,41 +3,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, TypeAlias, TypeGuard
+
+from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsReader
+from venus_evcharger.ports.gateway_publication import GatewayPublicationPort
 
 PublishValue: TypeAlias = object
 PublishStateEntry: TypeAlias = dict[str, PublishValue]
 PhaseMeasurement: TypeAlias = dict[str, float]
 PhaseData: TypeAlias = dict[str, PhaseMeasurement]
-PublishServiceValueSnapshot: TypeAlias = tuple[bool, PublishValue]
 AgeTimestamp: TypeAlias = float | int | None
 AgeSeconds: TypeAlias = Callable[[AgeTimestamp, AgeTimestamp], int | float]
 
 
-class DbusValueStore(Protocol):  # pragma: no cover - static contract
-    """Minimal mapping surface exposed by the gateway-backed DBus service."""
-
-    def __getitem__(self, path: str, /) -> PublishValue: ...
-
-    def __setitem__(self, path: str, value: PublishValue, /) -> None: ...
-
-    def __delitem__(self, path: str, /) -> None: ...
-
-
 class PublishRuntimePort(Protocol):  # pragma: no cover - static contract
-    """Runtime operations used by the DBus publisher."""
-
-    def assert_dbus_mainloop_thread(self, operation: str = "dbus access") -> None: ...
-
-    def dbus_publish_direct_allowed(self) -> bool: ...
-
-    def enqueue_dbus_publish_fields(self, fields: list[tuple[str, object]], current: float) -> bool: ...
-
-    def enqueue_dbus_publish_values(self, values: list[tuple[str, object]], current: float) -> bool: ...
-
-    def enqueue_dbus_update_index_bump(self, current: float) -> None: ...
+    """Health operations used when publication transport fails."""
 
     def mark_failure(self, source_key: str) -> None: ...
 
@@ -58,8 +40,6 @@ class PublishRuntimePort(Protocol):  # pragma: no cover - static contract
 class PublishServicePort(Protocol):  # pragma: no cover - static contract
     """Mandatory runtime state consumed by the publish boundary."""
 
-    _dbusservice: DbusValueStore
-    _dbus_publish_state: MutableMapping[str, PublishStateEntry]
     _dbus_live_publish_interval_seconds: float
     _dbus_slow_publish_interval_seconds: float
     _last_health_code: int
@@ -73,6 +53,7 @@ class PublishServicePort(Protocol):  # pragma: no cover - static contract
     last_status: int
     started_at: float
     virtual_set_current: float
+    gateway_publication: GatewayPublicationPort
     runtime: PublishRuntimePort
 
 
@@ -82,6 +63,7 @@ class DbusPublishContext:
 
     service: PublishServicePort
     age_seconds: AgeSeconds
+    gateway_diagnostics: GatewayDiagnosticsReader
 
     def age(self, timestamp: object, now: float) -> float:
         """Normalize a dynamic timestamp before invoking the service age policy."""

@@ -15,6 +15,7 @@ class DbusServiceLike(Protocol):  # pragma: no cover
         path: str,
         value: object,
         *,
+        gettextcallback: Callable[[str, object], str] | None = None,
         writeable: bool = False,
         onchangecallback: Callable[[str, object], object] | None = None,
     ) -> object: ...

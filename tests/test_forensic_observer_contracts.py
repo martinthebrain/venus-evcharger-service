@@ -11,7 +11,20 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.ops import forensic_observer as observer
+from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsUnavailable
+
+
+class _DiagnosticsReader:
+    def __init__(self, *, error: str = "") -> None:
+        self.snapshot = gateway_diagnostics_snapshot()
+        self.error = error
+
+    def read_snapshot(self):
+        if self.error:
+            raise GatewayDiagnosticsUnavailable(self.error)
+        return self.snapshot
 
 
 def _defaults(text: str) -> configparser.SectionProxy:
@@ -25,7 +38,6 @@ class ForensicObserverContractTests(unittest.TestCase):
         expectations = {
             observer.read_mounts: {"path": "/proc/mounts"},
             observer.command_output: {"timeout": 3.0},
-            observer.read_dbus_paths: {"cache_path": ""},
             observer.fetch_shelly_status: {"timeout": 2.0},
             observer.tail_file: {"max_bytes": 20000},
             observer.tail_log_dir: {"max_bytes": 20000},
@@ -38,39 +50,27 @@ class ForensicObserverContractTests(unittest.TestCase):
     def test_config_parser_and_derived_paths_are_exact(self) -> None:
         defaults = _defaults(
             "DeviceInstance=71\n"
-            "ServiceName= com.example.ev \n"
             "AutoInputSnapshotPath= /tmp/auto \n"
-            "DbusIntrospectionSnapshotPath= /tmp/map \n"
-            "DbusGatewayCachePath= /tmp/cache \n"
+            "GatewayDiagnosticsSnapshotPath= /tmp/diagnostics \n"
             "Host= host.example \n"
         )
         self.assertEqual(observer.device_instance(defaults), 71)
-        self.assertEqual(observer.evcharger_service_name(defaults), "com.example.ev.http_71")
         self.assertEqual(observer.auto_input_snapshot_path(defaults), "/tmp/auto")
-        self.assertEqual(observer.dbus_introspection_snapshot_path(defaults), "/tmp/map")
-        self.assertEqual(observer.dbus_gateway_cache_path(defaults), "/tmp/cache")
+        self.assertEqual(observer.gateway_diagnostics_snapshot_path(defaults), "/tmp/diagnostics")
         self.assertEqual(observer.runtime_state_path(defaults), "/run/dbus-venus-evcharger-71.json")
         self.assertEqual(observer.configured_host(defaults), "host.example")
 
         empty = _defaults("")
         self.assertEqual(observer.device_instance(empty), 60)
-        self.assertEqual(observer.evcharger_service_name(empty), "com.victronenergy.evcharger.http_60")
         self.assertEqual(observer.configured_host(empty), "")
-        with patch.object(observer, "gateway_paths", return_value=SimpleNamespace(cache_path="default-cache")) as default_paths:
-            self.assertEqual(observer.dbus_gateway_cache_path(empty), "default-cache")
-        default_paths.assert_called_once_with("/run/venus-evcharger")
-
-        fallback = _defaults("DeviceInstance=invalid\nServiceName= \nDbusGatewayRunDir= /tmp/run \n")
-        with patch.object(observer, "gateway_paths", return_value=SimpleNamespace(cache_path="derived")) as paths:
-            self.assertEqual(observer.dbus_gateway_cache_path(fallback), "derived")
-        paths.assert_called_once_with("/tmp/run")
-        self.assertEqual(observer.device_instance(fallback), 60)
-        self.assertEqual(observer.evcharger_service_name(fallback), "com.victronenergy.evcharger.http_60")
-        self.assertEqual(observer.auto_input_snapshot_path(fallback), "/run/dbus-venus-evcharger-auto-60.json")
         self.assertEqual(
-            observer.dbus_introspection_snapshot_path(fallback),
-            "/run/dbus-venus-evcharger-dbus-map-60.json",
+            observer.gateway_diagnostics_snapshot_path(empty),
+            "/run/venus-evcharger/gateway-diagnostics.json",
         )
+
+        fallback = _defaults("DeviceInstance=invalid\n")
+        self.assertEqual(observer.device_instance(fallback), 60)
+        self.assertEqual(observer.auto_input_snapshot_path(fallback), "/run/dbus-venus-evcharger-auto-60.json")
 
     def test_load_defaults_preserves_case_sensitive_keys(self) -> None:
         with tempfile.NamedTemporaryFile("w+", suffix=".ini") as handle:
@@ -142,44 +142,22 @@ class ForensicObserverContractTests(unittest.TestCase):
         ):
             self.assertFalse(observer.command_output(["cmd"])["ok"])
 
-    def test_json_ready_recursively_normalizes_only_complex_values(self) -> None:
-        marker = object()
-        self.assertIsNone(observer.json_ready(None))
-        self.assertEqual(observer.json_ready({1: (True, marker)}), {"1": [True, str(marker)]})
-        self.assertTrue(observer._is_json_scalar(1.5))
-        self.assertFalse(observer._is_json_scalar([]))
-
-    def test_gateway_read_contract_reports_each_missing_path(self) -> None:
-        snapshot = {"snapshot": True}
-        with (
-            patch.object(observer.DbusCacheStore, "load_snapshot", return_value=snapshot) as load,
-            patch.object(observer.DbusCacheStore, "value_entry", side_effect=[{"value": 4}, None]) as entry,
-            patch.object(observer, "dbus_path_key", side_effect=lambda service, path: f"{service}:{path}"),
-        ):
-            result = observer.read_dbus_paths("svc", ("/Mode", "/Missing"), cache_path="cache")
-        load.assert_called_once_with("cache")
-        self.assertEqual(entry.call_args_list, [call(snapshot, "svc:/Mode"), call(snapshot, "svc:/Missing")])
+    def test_gateway_reader_envelope_is_semantic_and_reports_unavailability(self) -> None:
+        reader = _DiagnosticsReader()
         self.assertEqual(
-            result,
-            {
-                "ok": False,
-                "values": {"/Mode": 4},
-                "errors": {"/Missing": "missing-from-gateway-cache"},
-            },
+            observer.read_gateway_diagnostics(reader),
+            {"available": True, "snapshot": reader.snapshot.to_payload()},
         )
-        with (
-            patch.object(observer.DbusCacheStore, "load_snapshot", return_value=snapshot),
-            patch.object(observer.DbusCacheStore, "value_entry", side_effect=[None, {"value": 5}]),
-        ):
-            continued = observer.read_dbus_paths("svc", ("/Missing", "/Mode"), cache_path="cache")
-        self.assertEqual(continued["values"], {"/Mode": 5})
-        self.assertEqual(continued["errors"], {"/Missing": "missing-from-gateway-cache"})
+        self.assertEqual(
+            observer.read_gateway_diagnostics(_DiagnosticsReader(error="offline")),
+            {"available": False, "error": "offline"},
+        )
 
-    def test_incident_reasons_ignore_malformed_dbus_error_payload(self) -> None:
+    def test_incident_reasons_ignore_unavailable_gateway_diagnostics(self) -> None:
         self.assertEqual(
             observer.incident_reasons(
                 {
-                    "dbus": {"errors": "not-a-mapping"},
+                    "gateway_diagnostics": {"available": False, "error": "offline"},
                     "svstat": {"ok": True, "stdout": "service up"},
                     "trace_markers": [],
                 }
@@ -270,18 +248,27 @@ class ForensicObserverContractTests(unittest.TestCase):
             self.assertEqual(observer.helper_processes("ps"), [{"pid": "1"}])
         matching.assert_called_once_with("ps", "venus_evcharger_auto_input_helper.py")
 
-    def test_incident_reason_contract_covers_dbus_runit_markers_and_deduplication(self) -> None:
+    def test_incident_reason_contract_covers_gateway_runit_markers_and_deduplication(self) -> None:
+        diagnostics = gateway_diagnostics_snapshot(
+            status_overrides={
+                "operating_mode": "error",
+                "charging_enabled": "unavailable",
+                "ac_power_w": "unknown",
+            },
+            health_state="protective",
+        )
         snapshot = {
-            "dbus": {"errors": {"/Mode": "x", "/StartStop": "x", "/Ac/Power": "x", "/Other": "x"}},
+            "gateway_diagnostics": {"available": True, "snapshot": diagnostics.to_payload()},
             "svstat": {"ok": True, "stdout": "service: down"},
             "trace_markers": ["NoReply", "NoReply", "malloc()"],
         }
         self.assertEqual(
             observer.incident_reasons(snapshot),
             [
-                "dbus-/Ac/Power-failed",
-                "dbus-/Mode-failed",
-                "dbus-/StartStop-failed",
+                "gateway-ac-power-w-unavailable",
+                "gateway-charging-enabled-unavailable",
+                "gateway-health-protective",
+                "gateway-operating-mode-unavailable",
                 "log-marker-malloc",
                 "log-marker-noreply",
                 "runit-not-up",
@@ -292,52 +279,46 @@ class ForensicObserverContractTests(unittest.TestCase):
         self.assertEqual(observer._runit_incident_reasons({"svstat": {"ok": True, "stdout": "service up now"}}), [])
         self.assertEqual(observer._runit_incident_reasons({"svstat": {"ok": True}}), ["runit-not-up"])
         self.assertEqual(observer.incident_reasons({}), [])
+        invalid = {"gateway_diagnostics": {"available": True, "snapshot": {}}, "trace_markers": []}
+        self.assertEqual(observer.incident_reasons(invalid), ["gateway-diagnostics-invalid"])
         self.assertEqual(observer._slug(" A/B ++ "), "a-b")
         self.assertEqual(observer._slug("---"), "event")
 
     def test_collect_snapshot_wires_every_source_into_stable_schema(self) -> None:
         defaults = _defaults("Host=host\n")
+        reader = _DiagnosticsReader()
         command_results = [
             {"ok": True, "stdout": "11 root venus_evcharger_auto_input_helper.py\n"},
             {"ok": True, "stdout": "up"},
             {"ok": True, "stdout": "uptime"},
         ]
-        bus_factory = MagicMock()
         with (
             patch.object(observer, "load_defaults", return_value=defaults) as load_defaults,
-            patch.object(observer, "evcharger_service_name", return_value="svc") as service_name,
             patch.object(observer, "tail_log_dir", return_value={"current": "NoReply", "old": "stale"}) as tail_logs,
             patch.object(observer, "command_output", side_effect=command_results) as command,
             patch.object(observer.time, "time", return_value=123.5),
-            patch.object(observer, "dbus_gateway_cache_path", return_value="cache") as cache_path,
-            patch.object(observer, "read_dbus_paths", return_value={"ok": True}) as dbus,
+            patch.object(observer, "read_gateway_diagnostics", return_value={"available": True}) as gateway,
             patch.object(observer, "auto_input_snapshot_path", return_value="auto") as auto_path,
-            patch.object(observer, "dbus_introspection_snapshot_path", return_value="map") as map_path,
             patch.object(observer, "runtime_state_path", return_value="runtime") as runtime_path,
-            patch.object(observer, "read_json_file", side_effect=[{"auto": 1}, {"map": 1}, {"runtime": 1}]) as read_json,
+            patch.object(observer, "read_json_file", side_effect=[{"auto": 1}, {"runtime": 1}]) as read_json,
             patch.object(observer, "fetch_shelly_status", return_value={"shelly": 1}) as shelly,
         ):
-            snapshot = observer.collect_snapshot("config", bus_factory=bus_factory)
+            snapshot = observer.collect_snapshot("config", diagnostics_reader=reader)
         load_defaults.assert_called_once_with("config")
-        service_name.assert_called_once_with(defaults)
         tail_logs.assert_called_once_with("/var/volatile/log/dbus-venus-evcharger")
         self.assertEqual(command.call_args_list, [call(["ps", "w"]), call(["svstat", "/service/dbus-venus-evcharger"]), call(["uptime"])])
-        dbus.assert_called_once_with("svc", bus_factory=bus_factory, cache_path="cache")
-        cache_path.assert_called_once_with(defaults)
+        gateway.assert_called_once_with(reader)
         shelly.assert_called_once_with("host")
         auto_path.assert_called_once_with(defaults)
-        map_path.assert_called_once_with(defaults)
         runtime_path.assert_called_once_with(defaults)
-        self.assertEqual(read_json.call_args_list, [call("auto"), call("map"), call("runtime")])
+        self.assertEqual(read_json.call_args_list, [call("auto"), call("runtime")])
         self.assertEqual(
             snapshot,
             {
                 "timestamp": 123.5,
-                "service_name": "svc",
                 "config_path": "config",
-                "dbus": {"ok": True},
+                "gateway_diagnostics": {"available": True},
                 "auto_input_snapshot": {"auto": 1},
-                "dbus_introspection_snapshot": {"map": 1},
                 "runtime_state": {"runtime": 1},
                 "helper_processes": [{"pid": "11", "line": "11 root venus_evcharger_auto_input_helper.py"}],
                 "shelly": {"shelly": 1},
@@ -350,6 +331,8 @@ class ForensicObserverContractTests(unittest.TestCase):
         )
 
     def test_write_incident_persists_exact_payload_and_redacted_config(self) -> None:
+        with self.assertRaisesRegex(ValueError, "timestamp must be numeric"):
+            observer.write_incident("log", {"timestamp": True}, "config", ["reason"])
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "nested" / "evidence"
             config = Path(temp_dir) / "config.ini"
@@ -408,7 +391,13 @@ class ForensicObserverContractTests(unittest.TestCase):
             patch.object(observer, "collect_snapshot") as collect,
         ):
             self.assertEqual(
-                observer._observer_iteration("config", 5.0, incident_cooldown=10.0, mounts_path="mounts-file", bus_factory=None),
+                observer._observer_iteration(
+                    "config",
+                    5.0,
+                    incident_cooldown=10.0,
+                    mounts_path="mounts-file",
+                    diagnostics_reader=None,
+                ),
                 5.0,
             )
         read_mounts.assert_called_once_with("mounts-file")
@@ -427,10 +416,16 @@ class ForensicObserverContractTests(unittest.TestCase):
             patch.object(observer, "write_incident") as write,
         ):
             self.assertEqual(
-                observer._observer_iteration("config", 10.0, incident_cooldown=10.0, mounts_path="mounts", bus_factory="factory"),
+                observer._observer_iteration(
+                    "config",
+                    10.0,
+                    incident_cooldown=10.0,
+                    mounts_path="mounts",
+                    diagnostics_reader="reader",
+                ),
                 20.0,
             )
-        collect.assert_called_once_with("config", bus_factory="factory")
+        collect.assert_called_once_with("config", diagnostics_reader="reader")
         reasons.assert_called_once_with(snapshot)
         write.assert_called_once_with("log", snapshot, "config", ["reason"])
 
@@ -444,7 +439,13 @@ class ForensicObserverContractTests(unittest.TestCase):
             patch.object(observer, "write_incident") as no_write,
         ):
             self.assertEqual(
-                observer._observer_iteration("config", 10.0, incident_cooldown=10.0, mounts_path="mounts", bus_factory=None),
+                observer._observer_iteration(
+                    "config",
+                    10.0,
+                    incident_cooldown=10.0,
+                    mounts_path="mounts",
+                    diagnostics_reader=None,
+                ),
                 10.0,
             )
         no_write.assert_not_called()
@@ -472,14 +473,26 @@ class ForensicObserverContractTests(unittest.TestCase):
                     interval=0.5,
                     incident_cooldown=9.0,
                     mounts_path="mounts",
-                    bus_factory="factory",
+                    diagnostics_reader="reader",
                 )
         self.assertEqual(sleeps, [0.0, 1.0, 1.0])
         self.assertEqual(
             iteration.call_args_list,
             [
-                call("config", 0.0, incident_cooldown=9.0, mounts_path="mounts", bus_factory="factory"),
-                call("config", 7.0, incident_cooldown=9.0, mounts_path="mounts", bus_factory="factory"),
+                call(
+                    "config",
+                    0.0,
+                    incident_cooldown=9.0,
+                    mounts_path="mounts",
+                    diagnostics_reader="reader",
+                ),
+                call(
+                    "config",
+                    7.0,
+                    incident_cooldown=9.0,
+                    mounts_path="mounts",
+                    diagnostics_reader="reader",
+                ),
             ],
         )
 
@@ -487,11 +500,10 @@ class ForensicObserverContractTests(unittest.TestCase):
         defaults = _defaults("")
         with (
             patch.object(observer, "load_defaults", return_value=defaults),
-            patch.object(observer, "evcharger_service_name", return_value="svc"),
             patch.object(observer, "tail_log_dir", return_value={}),
             patch.object(observer, "command_output", side_effect=[{"ok": False}, {}, {}]),
             patch.object(observer, "helper_processes", return_value=[]) as helpers,
-            patch.object(observer, "read_dbus_paths", return_value={}),
+            patch.object(observer, "read_gateway_diagnostics", return_value={}),
             patch.object(observer, "read_json_file", return_value={}),
             patch.object(observer, "fetch_shelly_status", return_value={}),
         ):

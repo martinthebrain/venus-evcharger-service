@@ -9,45 +9,35 @@ from typing import Any
 
 ENERGY_SOURCE_ROLES = frozenset({"battery", "hybrid-inverter", "inverter"})
 ENERGY_SOURCE_CONNECTOR_TYPES = frozenset(
-    {"dbus", "template_http", "template_http_energy", "modbus", "command_json", "opendtu_http"}
+    {"template_http", "template_http_energy", "modbus", "command_json", "opendtu_http"}
 )
 DEFAULT_BATTERY_CHEMISTRY = "lfp"
 
 
 @dataclass(frozen=True)
 class EnergySourceDefinition:
-    """Describe one battery or inverter-like DBus-backed energy source."""
+    """Describe one explicitly configured external energy source."""
 
     source_id: str
     profile_name: str = ""
     role: str = "battery"
-    connector_type: str = "dbus"
+    connector_type: str = ""
     config_path: str = ""
     service_name: str = ""
-    service_prefix: str = ""
-    soc_path: str = "/Soc"
     usable_capacity_wh: float | None = None
     battery_chemistry: str = DEFAULT_BATTERY_CHEMISTRY
     capacity_auto_estimate: bool = True
-    capacity_wh_path: str = ""
-    capacity_ah_path: str = "/InstalledCapacity"
-    voltage_path: str = "/Dc/0/Voltage"
     capacity_estimate_min_soc: float = 95.0
     capacity_startup_recheck_seconds: float = 300.0
     estimated_capacity_wh: float | None = None
     estimated_capacity_ah: float | None = None
     estimated_capacity_nominal_voltage_v: float | None = None
     estimated_capacity_cell_count: int | None = None
-    battery_power_path: str = ""
-    ac_power_path: str = ""
-    pv_power_path: str = ""
-    grid_interaction_path: str = ""
-    operating_mode_path: str = ""
 
 
 @dataclass(frozen=True)
 class EnergySourceSnapshot:
-    """Runtime snapshot for one external or Victron-backed energy source."""
+    """Runtime snapshot for one normalized energy source."""
 
     source_id: str
     role: str

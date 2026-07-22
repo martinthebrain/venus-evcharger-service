@@ -11,25 +11,25 @@ from venus_evcharger.control.models import ControlCommand, ControlCommandName
 from venus_evcharger.control.service import ControlApiV1Service
 
 
-CURRENT_PATHS = ("/SetCurrent", "/CurrentLimit")
-CUSTOM_AUTO_PATH = "/Auto/Custom"
+CURRENT_TARGETS = frozenset({"set_current", "max_current"})
+CUSTOM_AUTO_TARGET = "auto_custom"
 
 
 class ControlServiceContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        auto_paths = (
-            ControlApiV1Service._FLOAT_AUTO_RUNTIME_PATHS
-            | ControlApiV1Service._STRING_AUTO_RUNTIME_PATHS
-            | ControlApiV1Service._BINARY_AUTO_RUNTIME_PATHS
-            | ControlApiV1Service._INTEGER_AUTO_RUNTIME_PATHS
-            | {CUSTOM_AUTO_PATH}
+        auto_targets = (
+            ControlApiV1Service._FLOAT_AUTO_RUNTIME_TARGETS
+            | ControlApiV1Service._STRING_AUTO_RUNTIME_TARGETS
+            | ControlApiV1Service._BINARY_AUTO_RUNTIME_TARGETS
+            | ControlApiV1Service._INTEGER_AUTO_RUNTIME_TARGETS
+            | {CUSTOM_AUTO_TARGET}
         )
         self.api = ControlApiV1Service(
-            current_setting_paths=CURRENT_PATHS,
-            auto_runtime_setting_paths=set(auto_paths),
+            current_setting_targets=CURRENT_TARGETS,
+            auto_runtime_setting_targets=auto_targets,
         )
 
-    def test_command_name_and_direct_path_contract_is_complete(self) -> None:
+    def test_command_name_and_default_target_contract_is_complete(self) -> None:
         expected_names = frozenset(
             {
                 "reset_contactor_lockout",
@@ -44,105 +44,121 @@ class ControlServiceContractTests(unittest.TestCase):
                 "trigger_software_update",
             }
         )
-        expected_paths: dict[str, ControlCommandName] = {
-            "/Mode": "set_mode",
-            "/AutoStart": "set_auto_start",
-            "/StartStop": "set_start_stop",
-            "/Enable": "set_enable",
-            "/PhaseSelection": "set_phase_selection",
-            "/Auto/PhaseLockoutReset": "reset_phase_lockout",
-            "/Auto/ContactorLockoutReset": "reset_contactor_lockout",
-            "/Auto/SoftwareUpdateRun": "trigger_software_update",
+        expected_defaults: dict[ControlCommandName, str] = {
+            "reset_contactor_lockout": "auto_contactor_lockout_reset",
+            "reset_phase_lockout": "auto_phase_lockout_reset",
+            "set_auto_start": "auto_start",
+            "set_enable": "enable",
+            "set_mode": "mode",
+            "set_phase_selection": "phase_selection",
+            "set_start_stop": "start_stop",
+            "trigger_software_update": "auto_software_update_run",
         }
         self.assertEqual(ControlApiV1Service._COMMAND_NAMES, expected_names)
-        self.assertEqual(ControlApiV1Service._DIRECT_PATH_COMMANDS, expected_paths)
-        self.assertEqual(
-            ControlApiV1Service._COMMAND_DEFAULT_PATHS,
-            {name: path for path, name in expected_paths.items()},
-        )
+        self.assertEqual(ControlApiV1Service._COMMAND_DEFAULT_TARGETS, expected_defaults)
         for name in expected_names:
             self.assertTrue(ControlApiV1Service._is_command_name(name), name)
         self.assertFalse(ControlApiV1Service._is_command_name(""))
         self.assertFalse(ControlApiV1Service._is_command_name("set_unknown"))
 
-    def test_every_write_path_produces_the_complete_canonical_command(self) -> None:
-        for path, name in ControlApiV1Service._DIRECT_PATH_COMMANDS.items():
-            with self.subTest(path=path):
+    def test_command_for_target_builds_complete_canonical_commands(self) -> None:
+        for name, target in ControlApiV1Service._COMMAND_DEFAULT_TARGETS.items():
+            value: object = "P1" if name == "set_phase_selection" else 1
+            with self.subTest(name=name):
                 self.assertEqual(
-                    self.api.command_for_write(path, 1, source="mqtt"),
-                    ControlCommand(name=name, path=path, value=1, source="mqtt"),
+                    self.api.command_for_target(name, target, value, source="mqtt"),
+                    ControlCommand(name=name, target=target, value=value, source="mqtt"),
                 )
-        for path in CURRENT_PATHS:
+        for target in CURRENT_TARGETS:
             self.assertEqual(
-                self.api.command_for_write(path, 7.5, source="internal"),
-                ControlCommand(name="set_current_setting", path=path, value=7.5, source="internal"),
+                self.api.command_for_target("set_current_setting", target, 7.5),
+                ControlCommand(
+                    name="set_current_setting",
+                    target=target,
+                    value=7.5,
+                    source="internal",
+                ),
             )
+        opaque = {"opaque": True}
         self.assertEqual(
-            self.api.command_for_write(CUSTOM_AUTO_PATH, {"opaque": True}, source="http"),
+            self.api.command_for_target(
+                "set_auto_runtime_setting",
+                CUSTOM_AUTO_TARGET,
+                opaque,
+                source="http",
+            ),
             ControlCommand(
                 name="set_auto_runtime_setting",
-                path=CUSTOM_AUTO_PATH,
-                value={"opaque": True},
+                target=CUSTOM_AUTO_TARGET,
+                value=opaque,
                 source="http",
             ),
         )
-        for source in ("dbus", "mqtt"):
-            with self.subTest(source=source), self.assertRaisesRegex(
-                ValueError,
-                "^Unsupported control path '/Unknown'\\.$",
-            ):
-                self.api.command_for_write("/Unknown", 9, source=source)
-        self.assertEqual(
-            self.api.command_for_dbus_write("/Mode", 2),
-            ControlCommand(name="set_mode", path="/Mode", value=2, source="dbus"),
-        )
-        self.assertEqual(
-            self.api.command_for_write("/Mode", 1),
-            ControlCommand(name="set_mode", path="/Mode", value=1, source="dbus"),
-        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "^Control command 'set_mode' does not support target 'unknown'\\.$",
+        ):
+            self.api.command_for_target("set_mode", "unknown", 1)
 
-    def test_named_and_path_payloads_preserve_and_normalize_all_fields(self) -> None:
+    def test_named_payloads_preserve_tracking_and_resolve_optional_target(self) -> None:
         tracking = {
             "detail": "  requested by operator  ",
             "command_id": "  command-7  ",
             "idempotency_key": "  idem-9  ",
         }
+        expected = ControlCommand(
+            name="set_mode",
+            target="mode",
+            value=2,
+            source="http",
+            detail="requested by operator",
+            command_id="command-7",
+            idempotency_key="idem-9",
+        )
         self.assertEqual(
             self.api.command_from_payload(
                 {"name": " set_mode ", "value": 2, **tracking},
                 source="http",
             ),
-            ControlCommand(
-                name="set_mode",
-                path="/Mode",
-                value=2,
-                source="http",
-                detail="requested by operator",
-                command_id="command-7",
-                idempotency_key="idem-9",
-            ),
-        )
-        self.assertEqual(
-            self.api.command_from_payload({"path": "/Mode", "value": 0}),
-            ControlCommand(name="set_mode", path="/Mode", value=0, source="http"),
+            expected,
         )
         self.assertEqual(
             self.api.command_from_payload(
-                {"path": " /Mode ", "value": 1, **tracking},
-                source="mqtt",
+                {"name": "set_mode", "target": " mode ", "value": 2, **tracking}
             ),
-            ControlCommand(
-                name="set_mode",
-                path="/Mode",
-                value=1,
-                source="mqtt",
-                detail="requested by operator",
-                command_id="command-7",
-                idempotency_key="idem-9",
-            ),
+            expected,
         )
 
-    def test_all_default_commands_accept_their_exact_path_and_valid_value(self) -> None:
+    def test_specialized_commands_require_an_explicit_target(self) -> None:
+        cases = (
+            (
+                "set_current_setting",
+                "set_current",
+                6.0,
+                ControlCommand("set_current_setting", "set_current", 6.0, "http"),
+            ),
+            (
+                "set_auto_runtime_setting",
+                "auto_min_soc",
+                20.0,
+                ControlCommand("set_auto_runtime_setting", "auto_min_soc", 20.0, "http"),
+            ),
+        )
+        for name, target, value, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    self.api.command_from_payload(
+                        {"name": name, "target": target, "value": value}
+                    ),
+                    expected,
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"^Control command '{name}' requires an explicit 'target'\\.$",
+                ):
+                    self.api.command_from_payload({"name": name, "value": value})
+
+    def test_default_commands_accept_omitted_or_exact_targets(self) -> None:
         values: dict[ControlCommandName, Any] = {
             "reset_contactor_lockout": 1,
             "reset_phase_lockout": False,
@@ -154,11 +170,19 @@ class ControlServiceContractTests(unittest.TestCase):
             "trigger_software_update": False,
         }
         for name, value in values.items():
-            path = ControlApiV1Service._COMMAND_DEFAULT_PATHS[name]
-            with self.subTest(name=name):
+            target = ControlApiV1Service._COMMAND_DEFAULT_TARGETS[name]
+            expected = ControlCommand(name=name, target=target, value=value, source="http")
+            with self.subTest(name=name, target="omitted"):
                 self.assertEqual(
-                    self.api.command_from_payload({"name": name, "path": path, "value": value}),
-                    ControlCommand(name=name, path=path, value=value, source="http"),
+                    self.api.command_from_payload({"name": name, "value": value}),
+                    expected,
+                )
+            with self.subTest(name=name, target="explicit"):
+                self.assertEqual(
+                    self.api.command_from_payload(
+                        {"name": name, "target": target, "value": value}
+                    ),
+                    expected,
                 )
 
     def test_primitive_value_validators_have_exact_type_boundaries(self) -> None:
@@ -177,31 +201,35 @@ class ControlServiceContractTests(unittest.TestCase):
 
     def test_runtime_setting_groups_and_boundaries_are_exhaustive(self) -> None:
         groups = (
-            (ControlApiV1Service._FLOAT_AUTO_RUNTIME_PATHS, "float", 0.0),
-            (ControlApiV1Service._STRING_AUTO_RUNTIME_PATHS, "string", "value"),
-            (ControlApiV1Service._BINARY_AUTO_RUNTIME_PATHS, "binary", 1),
-            (ControlApiV1Service._INTEGER_AUTO_RUNTIME_PATHS, "integer", 0),
+            (ControlApiV1Service._FLOAT_AUTO_RUNTIME_TARGETS, "float", 0.0),
+            (ControlApiV1Service._STRING_AUTO_RUNTIME_TARGETS, "string", "value"),
+            (ControlApiV1Service._BINARY_AUTO_RUNTIME_TARGETS, "binary", 1),
+            (ControlApiV1Service._INTEGER_AUTO_RUNTIME_TARGETS, "integer", 0),
         )
-        for paths, kind, valid_value in groups:
-            for path in paths:
-                with self.subTest(path=path):
-                    self.assertEqual(self.api._auto_runtime_value_kind(path), kind)
-                    if path == "/Auto/LearnChargePowerAlpha":
-                        valid_value = 1.0
-                    elif path == "/Auto/ScheduledLatestEndTime":
-                        valid_value = "23:59"
-                    self.assertTrue(self.api._auto_runtime_value_validator(path)(valid_value))
-        self.assertEqual(self.api._auto_runtime_value_kind(CUSTOM_AUTO_PATH), "any")
-        self.assertTrue(self.api._auto_runtime_value_validator(CUSTOM_AUTO_PATH)(object()))
+        for targets, kind, default_value in groups:
+            for target in targets:
+                valid_value: object = default_value
+                if target == "auto_learn_charge_power_alpha":
+                    valid_value = 1.0
+                elif target == "auto_scheduled_latest_end_time":
+                    valid_value = "23:59"
+                with self.subTest(target=target):
+                    self.assertEqual(self.api._auto_runtime_value_kind(target), kind)
+                    self.assertTrue(
+                        self.api._auto_runtime_value_validator(target)(valid_value)
+                    )
+        self.assertEqual(self.api._auto_runtime_value_kind(CUSTOM_AUTO_TARGET), "any")
+        self.assertTrue(self.api._auto_runtime_value_validator(CUSTOM_AUTO_TARGET)(object()))
 
-        for path in ("/Auto/MinSoc", "/Auto/ResumeSoc"):
-            self.assertTrue(self.api._within_auto_runtime_bounds(path, 0.0))
-            self.assertTrue(self.api._within_auto_runtime_bounds(path, 100.0))
-            self.assertFalse(self.api._within_auto_runtime_bounds(path, 100.0001))
-        self.assertFalse(self.api._within_auto_runtime_bounds("/Auto/LearnChargePowerAlpha", 0.0))
-        self.assertTrue(self.api._within_auto_runtime_bounds("/Auto/LearnChargePowerAlpha", 0.0001))
-        self.assertTrue(self.api._within_auto_runtime_bounds("/Auto/LearnChargePowerAlpha", 1.0))
-        self.assertFalse(self.api._within_auto_runtime_bounds("/Auto/LearnChargePowerAlpha", 1.0001))
+        for target in ("auto_min_soc", "auto_resume_soc"):
+            self.assertTrue(self.api._within_auto_runtime_bounds(target, 0.0))
+            self.assertTrue(self.api._within_auto_runtime_bounds(target, 100.0))
+            self.assertFalse(self.api._within_auto_runtime_bounds(target, 100.0001))
+        alpha = "auto_learn_charge_power_alpha"
+        self.assertFalse(self.api._within_auto_runtime_bounds(alpha, 0.0))
+        self.assertTrue(self.api._within_auto_runtime_bounds(alpha, 0.0001))
+        self.assertTrue(self.api._within_auto_runtime_bounds(alpha, 1.0))
+        self.assertFalse(self.api._within_auto_runtime_bounds(alpha, 1.0001))
 
     def test_scheduled_time_contract_covers_format_and_numeric_edges(self) -> None:
         for value in ("00:00", "0:0", "09:07", "23:59", " 12:30 "):
@@ -217,25 +245,24 @@ class ControlServiceContractTests(unittest.TestCase):
 
     def test_invalid_payloads_return_exact_contract_errors(self) -> None:
         cases = (
-            ({}, "Control command payload must include either 'name' or 'path'."),
-            ({"path": " ", "value": 1}, "Control command payload field 'path' must be a non-empty string."),
-            ({"path": "/Unknown", "value": 1}, "Unsupported control path '/Unknown'."),
+            ({}, "Control command payload must include 'name'."),
+            ({"target": "mode", "value": 1}, "Control command payload must include 'name'."),
             ({"name": "unknown", "value": 1}, "Unsupported control command 'unknown'."),
+            (
+                {"name": "set_mode", "path": "/Mode", "value": 1},
+                "Unsupported payload field(s): path.",
+            ),
             (
                 {"name": "set_mode", "value": 1, "z": 1, "a": 2},
                 "Unsupported payload field(s): a, z.",
             ),
             (
-                {"name": "set_mode", "path": "/Enable", "value": 1},
-                "Control command 'set_mode' does not support path '/Enable'.",
+                {"name": "set_mode", "target": "enable", "value": 1},
+                "Control command 'set_mode' does not support target 'enable'.",
             ),
             (
-                {"name": "set_current_setting", "value": 1},
-                "Control command 'set_current_setting' requires an explicit 'path'.",
-            ),
-            (
-                {"name": "set_current_setting", "path": "/Bad", "value": 1},
-                "Control command 'set_current_setting' requires one of: /CurrentLimit, /SetCurrent.",
+                {"name": "set_current_setting", "target": "bad", "value": 1},
+                "Control command 'set_current_setting' requires one of: max_current, set_current.",
             ),
             (
                 {"name": "set_mode", "value": True},
@@ -246,32 +273,32 @@ class ControlServiceContractTests(unittest.TestCase):
                 "Control command 'set_phase_selection' requires one of: P1, P1_P2, P1_P2_P3.",
             ),
             (
-                {"name": "set_current_setting", "path": "/SetCurrent", "value": -0.01},
-                "Control command 'set_current_setting' requires a non-negative numeric value for path '/SetCurrent'.",
+                {"name": "set_current_setting", "target": "set_current", "value": -0.01},
+                "Control command 'set_current_setting' requires a non-negative numeric value for target 'set_current'.",
             ),
             (
-                {"name": "set_auto_runtime_setting", "path": "/Auto/MinSoc", "value": 100.01},
-                "Control command 'set_auto_runtime_setting' requires a numeric value between 0 and 100 for path '/Auto/MinSoc'.",
+                {"name": "set_auto_runtime_setting", "target": "auto_min_soc", "value": 100.01},
+                "Control command 'set_auto_runtime_setting' requires a numeric value between 0 and 100 for target 'auto_min_soc'.",
             ),
             (
-                {"name": "set_auto_runtime_setting", "path": "/Auto/LearnChargePowerAlpha", "value": 0.0},
-                "Control command 'set_auto_runtime_setting' requires a numeric value in the interval (0, 1] for path '/Auto/LearnChargePowerAlpha'.",
+                {"name": "set_auto_runtime_setting", "target": "auto_learn_charge_power_alpha", "value": 0.0},
+                "Control command 'set_auto_runtime_setting' requires a numeric value in the interval (0, 1] for target 'auto_learn_charge_power_alpha'.",
             ),
             (
-                {"name": "set_auto_runtime_setting", "path": "/Auto/ScheduledEnabledDays", "value": " "},
-                "Control command 'set_auto_runtime_setting' requires a non-empty string value for path '/Auto/ScheduledEnabledDays'.",
+                {"name": "set_auto_runtime_setting", "target": "auto_scheduled_enabled_days", "value": " "},
+                "Control command 'set_auto_runtime_setting' requires a non-empty string value for target 'auto_scheduled_enabled_days'.",
             ),
             (
-                {"name": "set_auto_runtime_setting", "path": "/Auto/ScheduledLatestEndTime", "value": "24:00"},
-                "Control command 'set_auto_runtime_setting' requires a HH:MM time string for path '/Auto/ScheduledLatestEndTime'.",
+                {"name": "set_auto_runtime_setting", "target": "auto_scheduled_latest_end_time", "value": "24:00"},
+                "Control command 'set_auto_runtime_setting' requires a HH:MM time string for target 'auto_scheduled_latest_end_time'.",
             ),
             (
-                {"name": "set_auto_runtime_setting", "path": "/Auto/PhaseSwitching", "value": 2},
-                "Control command 'set_auto_runtime_setting' requires a boolean or binary integer value (0 or 1) for path '/Auto/PhaseSwitching'.",
+                {"name": "set_auto_runtime_setting", "target": "auto_phase_switching", "value": 2},
+                "Control command 'set_auto_runtime_setting' requires a boolean or binary integer value (0 or 1) for target 'auto_phase_switching'.",
             ),
             (
-                {"name": "set_auto_runtime_setting", "path": "/Auto/PhaseMismatchLockoutCount", "value": -1},
-                "Control command 'set_auto_runtime_setting' requires a non-negative integer value for path '/Auto/PhaseMismatchLockoutCount'.",
+                {"name": "set_auto_runtime_setting", "target": "auto_phase_mismatch_lockout_count", "value": -1},
+                "Control command 'set_auto_runtime_setting' requires a non-negative integer value for target 'auto_phase_mismatch_lockout_count'.",
             ),
         )
         for payload, expected in cases:
@@ -279,36 +306,28 @@ class ControlServiceContractTests(unittest.TestCase):
                 self.api.command_from_payload(payload)
             self.assertEqual(str(raised.exception), expected)
 
-    def test_private_path_and_error_contracts_cover_all_fallbacks(self) -> None:
-        self.assertEqual(self.api._validated_explicit_path({"path": 17}), "17")
-        with self.assertRaises(ValueError) as raised:
-            self.api._validated_explicit_path({})
+    def test_private_target_and_error_contracts_cover_fallbacks(self) -> None:
         self.assertEqual(
-            str(raised.exception),
-            "Control command payload field 'path' must be a non-empty string.",
-        )
-        self.assertEqual(
-            self.api._specialized_command_path_error("set_auto_runtime_setting", "/Auto/Invalid"),
+            self.api._specialized_command_target_error(
+                "set_auto_runtime_setting", "auto_invalid"
+            ),
             "Control command 'set_auto_runtime_setting' requires one of: "
-            + ", ".join(sorted(self.api._auto_runtime_setting_paths))
+            + ", ".join(sorted(self.api._auto_runtime_setting_targets))
             + ".",
         )
+        self.assertEqual(self.api._specialized_command_target_error("set_mode", "mode"), "")
         self.assertEqual(
-            self.api._specialized_command_path_error("set_mode", "/Mode"),
-            "",
+            self.api._auto_runtime_numeric_error("auto_resume_soc"),
+            "Control command 'set_auto_runtime_setting' requires a numeric value between 0 and 100 for target 'auto_resume_soc'.",
         )
         self.assertEqual(
-            self.api._auto_runtime_numeric_error("/Auto/ResumeSoc"),
-            "Control command 'set_auto_runtime_setting' requires a numeric value between 0 and 100 for path '/Auto/ResumeSoc'.",
+            self.api._auto_runtime_numeric_error("auto_stop_delay_seconds"),
+            "Control command 'set_auto_runtime_setting' requires a non-negative numeric value for target 'auto_stop_delay_seconds'.",
         )
+        self.assertEqual(self.api._auto_runtime_error_kind(CUSTOM_AUTO_TARGET), "generic")
         self.assertEqual(
-            self.api._auto_runtime_numeric_error("/Auto/StopDelaySeconds"),
-            "Control command 'set_auto_runtime_setting' requires a non-negative numeric value for path '/Auto/StopDelaySeconds'.",
-        )
-        self.assertEqual(self.api._auto_runtime_error_kind(CUSTOM_AUTO_PATH), "generic")
-        self.assertEqual(
-            self.api._auto_runtime_value_error(CUSTOM_AUTO_PATH),
-            "Control command 'set_auto_runtime_setting' received an invalid value for path '/Auto/Custom'.",
+            self.api._auto_runtime_value_error(CUSTOM_AUTO_TARGET),
+            "Control command 'set_auto_runtime_setting' received an invalid value for target 'auto_custom'.",
         )
 
     def test_execute_rejects_a_runtime_forged_command_before_dispatch(self) -> None:
@@ -321,62 +340,39 @@ class ControlServiceContractTests(unittest.TestCase):
         ):
             self.api.execute(
                 controller,
-                ControlCommand(name=forged_name, path="/Mode", value=1),
+                ControlCommand(name=forged_name, target="mode", value=1),
             )
-
         controller.assert_not_called()
 
-    def test_path_payloads_apply_path_specific_validation(self) -> None:
-        cases = (
-            (
-                {"path": "/SetCurrent", "value": -1},
-                "Control command 'set_current_setting' requires a non-negative numeric value for path '/SetCurrent'.",
-            ),
-            (
-                {"path": "/Auto/MinSoc", "value": 101},
-                "Control command 'set_auto_runtime_setting' requires a numeric value between 0 and 100 for path '/Auto/MinSoc'.",
-            ),
-        )
-        for payload, expected in cases:
-            with self.subTest(payload=payload), self.assertRaises(ValueError) as raised:
-                self.api.command_from_payload(payload)
-            self.assertEqual(str(raised.exception), expected)
-
-    def test_execute_dispatches_every_command_to_its_declared_handler_shape(self) -> None:
+    def test_execute_dispatches_every_command_to_declared_handler_shape(self) -> None:
         controller = type("Controller", (), {})()
         handlers: dict[str, MagicMock] = {}
-        for handler_name, _include_path in ControlApiV1Service._HANDLER_SPECS.values():
+        for handler_name, _include_target in ControlApiV1Service._HANDLER_SPECS.values():
             handler = MagicMock()
             setattr(controller, handler_name, handler)
             handlers[handler_name] = handler
 
         commands: dict[ControlCommandName, ControlCommand] = {
-            "reset_contactor_lockout": ControlCommand(
-                name="reset_contactor_lockout", path="/Auto/ContactorLockoutReset", value=1
-            ),
-            "reset_phase_lockout": ControlCommand(
-                name="reset_phase_lockout", path="/Auto/PhaseLockoutReset", value=1
-            ),
-            "set_auto_runtime_setting": ControlCommand(
-                name="set_auto_runtime_setting", path="/Auto/StartSurplusWatts", value=1.0
-            ),
-            "set_auto_start": ControlCommand(name="set_auto_start", path="/AutoStart", value=1),
-            "set_current_setting": ControlCommand(name="set_current_setting", path="/SetCurrent", value=1.0),
-            "set_enable": ControlCommand(name="set_enable", path="/Enable", value=1),
-            "set_mode": ControlCommand(name="set_mode", path="/Mode", value=1),
-            "set_phase_selection": ControlCommand(
-                name="set_phase_selection", path="/PhaseSelection", value="P1"
-            ),
-            "set_start_stop": ControlCommand(name="set_start_stop", path="/StartStop", value=1),
-            "trigger_software_update": ControlCommand(
-                name="trigger_software_update", path="/Auto/SoftwareUpdateRun", value=1
-            ),
+            "reset_contactor_lockout": ControlCommand("reset_contactor_lockout", "auto_contactor_lockout_reset", 1),
+            "reset_phase_lockout": ControlCommand("reset_phase_lockout", "auto_phase_lockout_reset", 1),
+            "set_auto_runtime_setting": ControlCommand("set_auto_runtime_setting", "auto_start_surplus_watts", 1.0),
+            "set_auto_start": ControlCommand("set_auto_start", "auto_start", 1),
+            "set_current_setting": ControlCommand("set_current_setting", "set_current", 1.0),
+            "set_enable": ControlCommand("set_enable", "enable", 1),
+            "set_mode": ControlCommand("set_mode", "mode", 1),
+            "set_phase_selection": ControlCommand("set_phase_selection", "phase_selection", "P1"),
+            "set_start_stop": ControlCommand("set_start_stop", "start_stop", 1),
+            "trigger_software_update": ControlCommand("trigger_software_update", "auto_software_update_run", 1),
         }
-        for name, (handler_name, include_path) in ControlApiV1Service._HANDLER_SPECS.items():
+        for name, (handler_name, include_target) in ControlApiV1Service._HANDLER_SPECS.items():
             with self.subTest(name=name):
                 command = commands[name]
                 self.api.execute(controller, command)
-                expected_args = (command.path, command.value) if include_path else (command.value,)
+                expected_args = (
+                    (command.target, command.value)
+                    if include_target
+                    else (command.value,)
+                )
                 handlers[handler_name].assert_called_once_with(*expected_args)
                 handlers[handler_name].reset_mock()
 

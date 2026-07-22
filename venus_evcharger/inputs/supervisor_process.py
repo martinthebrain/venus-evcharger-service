@@ -9,12 +9,12 @@ import subprocess
 import sys
 import uuid
 
-from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.inputs.supervisor_contracts import (
     AutoInputSupervisorService,
     HelperProcess,
     SnapshotRefreshPort,
 )
+from venus_evcharger.ipc.gateway_pressure import service_gateway_pressure_policy
 
 
 class AutoInputProcessLifecycle:
@@ -203,7 +203,7 @@ class AutoInputProcessLifecycle:
 
     def _handle_stale_running_helper(self, process: HelperProcess, current: float, snapshot_age: float | None) -> bool:
         svc = self._service
-        policy = service_dbus_backpressure_policy(svc)
+        policy = service_gateway_pressure_policy(svc)
         stale_seconds = policy.liveness_timeout_seconds(svc.auto_input_helper_stale_seconds)
         if snapshot_age is None or snapshot_age <= stale_seconds:
             return False
@@ -241,7 +241,7 @@ class AutoInputProcessLifecycle:
 
     def _helper_restart_cooldown_active(self, current: float) -> bool:
         svc = self._service
-        restart_seconds = service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
+        restart_seconds = service_gateway_pressure_policy(svc).liveness_timeout_seconds(
             svc.auto_input_helper_restart_seconds,
         )
         return bool(
@@ -258,7 +258,7 @@ class AutoInputProcessLifecycle:
                 "auto-input-helper-start-failed",
                 max(
                     1.0,
-                    service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
+                    service_gateway_pressure_policy(svc).liveness_timeout_seconds(
                         svc.auto_input_helper_restart_seconds,
                     ),
                 ),

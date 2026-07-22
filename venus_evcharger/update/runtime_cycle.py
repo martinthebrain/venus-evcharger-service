@@ -45,8 +45,6 @@ class RuntimeCycleCoordinator:
 
     def complete_update_cycle(
         self,
-        changed: bool,
-        now: float,
         relay_on: bool,
         power: float,
         current: float,
@@ -57,8 +55,6 @@ class RuntimeCycleCoordinator:
     ) -> None:
         """Finalize a successful update cycle and log the current state."""
         svc = self.service
-        if changed:
-            svc.state.bump_update_index(now)
         completed_at = svc.time_now()
         svc._last_successful_update_at = completed_at
         svc._last_recovery_attempt_at = None
@@ -154,7 +150,7 @@ class RuntimeCycleCoordinator:
             now,
         )
         self._apply_post_decision_health(relay_on, relay_confirmed, now, charger_health)
-        changed = self._relay.status.publish_online_update(
+        self._relay.status.publish_online_update(
             self.service,
             pm_status,
             status,
@@ -175,8 +171,6 @@ class RuntimeCycleCoordinator:
         if learning_state_changed or learning_updated:
             self._state.save_runtime_state_best_effort("learning-state")
         self.complete_update_cycle(
-            changed,
-            now,
             relay_on,
             power,
             current,

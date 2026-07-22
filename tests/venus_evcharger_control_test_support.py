@@ -25,12 +25,12 @@ from venus_evcharger.control import (
 from venus_evcharger.control.models import ControlCommandSource
 
 
-def _auto_runtime_setting_paths() -> set[str]:
+def _auto_runtime_setting_targets() -> set[str]:
     return set().union(
-        ControlApiV1Service._FLOAT_AUTO_RUNTIME_PATHS,
-        ControlApiV1Service._STRING_AUTO_RUNTIME_PATHS,
-        ControlApiV1Service._BINARY_AUTO_RUNTIME_PATHS,
-        ControlApiV1Service._INTEGER_AUTO_RUNTIME_PATHS,
+        ControlApiV1Service._FLOAT_AUTO_RUNTIME_TARGETS,
+        ControlApiV1Service._STRING_AUTO_RUNTIME_TARGETS,
+        ControlApiV1Service._BINARY_AUTO_RUNTIME_TARGETS,
+        ControlApiV1Service._INTEGER_AUTO_RUNTIME_TARGETS,
     )
 
 
@@ -39,8 +39,8 @@ class LiveControlApiTestService:
 
     def __init__(self, *, audit_path: str = "", idempotency_path: str = "") -> None:
         self._mapper = ControlApiV1Service(
-            current_setting_paths=("/SetCurrent",),
-            auto_runtime_setting_paths=_auto_runtime_setting_paths(),
+            current_setting_targets={"set_current"},
+            auto_runtime_setting_targets=_auto_runtime_setting_targets(),
         )
         self._event_bus = ControlApiEventBus()
         self._audit_trail = ControlApiAuditTrail(history_limit=50, path=audit_path)
@@ -77,7 +77,7 @@ Type=actuator_native
         self.requested_phase_selection = "P1"
         self.active_phase_selection = "P1"
         self.current_setting = 6.0
-        self.runtime_settings: dict[str, Any] = {"/Auto/StartSurplusWatts": 1700.0}
+        self.runtime_settings: dict[str, Any] = {"auto_start_surplus_watts": 1700.0}
         self._software_update_state = "idle"
         self._revision = 0
 
@@ -129,7 +129,7 @@ Type=actuator_native
         return ControlResult.applied_result(command, detail="phase selection updated")
 
     def _apply_runtime_setting_command(self, command: ControlCommand) -> ControlResult:
-        self.runtime_settings[command.path] = command.value
+        self.runtime_settings[command.target] = command.value
         return ControlResult.applied_result(command, detail="runtime setting updated")
 
     def _apply_software_update_command(self, command: ControlCommand) -> ControlResult:
@@ -331,7 +331,7 @@ Type=actuator_native
             {
                 "command": {
                     "name": command.name,
-                    "path": command.path,
+                    "target": command.target,
                     "value": command.value,
                     "source": command.source,
                     "detail": command.detail,
@@ -385,7 +385,7 @@ Type=actuator_native
             return {}
         return {
             "name": command.name,
-            "path": command.path,
+            "target": command.target,
             "value": command.value,
             "source": command.source,
             "detail": command.detail,

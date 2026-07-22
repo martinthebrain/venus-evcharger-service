@@ -10,13 +10,11 @@ from typing import Protocol, runtime_checkable
 from venus_evcharger.bootstrap.runtime_metadata import topology_configured
 
 class _RuntimeFacade(Protocol):
-    def mark_mainloop_thread(self) -> None: ...
     def start_io_worker(self) -> None: ...
     def start_update_worker(self) -> None: ...
     def start_control_command_worker(self) -> None: ...
     def start_mainloop_watchdog(self) -> None: ...
     def schedule_update_cycle(self) -> bool: ...
-    def flush_dbus_publish_queue(self) -> bool: ...
     def mainloop_heartbeat_tick(self) -> bool: ...
 
 
@@ -44,7 +42,6 @@ class RuntimeLoopService(Protocol):
     sign_of_life_minutes: int
     runtime_state_path: str
     topology_configured: bool
-    _dbus_publish_flush_interval_ms: int
 
 
 class _GobjectTimers(Protocol):
@@ -57,13 +54,11 @@ def register_runtime_timers(svc: RuntimeLoopService, gobject_module: _GobjectTim
         svc.poll_interval_ms,
         svc.runtime.schedule_update_cycle,
     )
-    gobject_module.timeout_add(svc._dbus_publish_flush_interval_ms, svc.runtime.flush_dbus_publish_queue)
     gobject_module.timeout_add(1000, svc.runtime.mainloop_heartbeat_tick)
 
 
 def start_runtime_loops(svc: RuntimeLoopService, gobject_module: _GobjectTimers) -> None:
     """Register DBus paths, start background workers, and arm timers."""
-    svc.runtime.mark_mainloop_thread()
     if topology_configured(svc):
         svc.runtime.start_io_worker()
     else:

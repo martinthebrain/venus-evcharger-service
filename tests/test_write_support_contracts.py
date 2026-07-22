@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 from venus_evcharger.controllers import write_support as support_module
-from venus_evcharger.controllers.write import DbusWriteController
+from venus_evcharger.controllers.write import ControlWriteController
 
 
 class TestWriteSupportBoundaryContracts(unittest.TestCase):
@@ -16,22 +16,21 @@ class TestWriteSupportBoundaryContracts(unittest.TestCase):
         svc = SimpleNamespace()
         snapshot = {"attrs": {}}
         with patch.object(support_module, "capture_write_state", return_value=snapshot) as capture:
-            self.assertIs(DbusWriteController._snapshot_write_state(svc), snapshot)
+            self.assertIs(ControlWriteController._snapshot_write_state(svc), snapshot)
         capture.assert_called_once_with(
             svc,
-            attrs=DbusWriteController.SNAPSHOT_ATTRS,
-            deque_attrs=DbusWriteController.SNAPSHOT_DEQUE_ATTRS,
-            value_attrs=DbusWriteController.SNAPSHOT_VALUE_ATTRS,
-            mapping_attrs=DbusWriteController.SNAPSHOT_MAPPING_ATTRS,
-            dbus_paths=DbusWriteController.SNAPSHOT_DBUS_PATHS,
+            attrs=ControlWriteController.SNAPSHOT_ATTRS,
+            deque_attrs=ControlWriteController.SNAPSHOT_DEQUE_ATTRS,
+            value_attrs=ControlWriteController.SNAPSHOT_VALUE_ATTRS,
+            mapping_attrs=ControlWriteController.SNAPSHOT_MAPPING_ATTRS,
         )
         with patch.object(support_module, "restore_write_state") as restore:
-            DbusWriteController._restore_write_state(svc, snapshot)
+            ControlWriteController._restore_write_state(svc, snapshot)
         restore.assert_called_once_with(svc, snapshot)
 
     def test_relay_queue_and_explicit_marker_set_irreversible_boundary(self) -> None:
         svc = SimpleNamespace(queue_relay_command=MagicMock())
-        controller = DbusWriteController(SimpleNamespace())
+        controller = ControlWriteController(SimpleNamespace())
         controller._queue_relay_command(svc, True, 10.0)
         svc.queue_relay_command.assert_called_once_with(True, 10.0)
         self.assertIs(controller._external_side_effect_started, True)
@@ -42,14 +41,14 @@ class TestWriteSupportBoundaryContracts(unittest.TestCase):
     def test_local_placeholder_publish_logs_exact_failure_and_succeeds_silently(self) -> None:
         success = SimpleNamespace(publish_local_pm_status=MagicMock())
         with patch.object(support_module.logging, "warning") as warning:
-            DbusWriteController._publish_local_pm_status_best_effort(success, True, 10.0)
+            ControlWriteController._publish_local_pm_status_best_effort(success, True, 10.0)
         success.publish_local_pm_status.assert_called_once_with(True, 10.0)
         warning.assert_not_called()
 
         error = KeyError("dbus")
         failed = SimpleNamespace(publish_local_pm_status=MagicMock(side_effect=error))
         with patch.object(support_module.logging, "warning") as warning:
-            DbusWriteController._publish_local_pm_status_best_effort(failed, False, 11.0)
+            ControlWriteController._publish_local_pm_status_best_effort(failed, False, 11.0)
         warning.assert_called_once_with(
             "Local relay placeholder publish failed after queuing relay=%s: %s",
             0,
@@ -57,7 +56,7 @@ class TestWriteSupportBoundaryContracts(unittest.TestCase):
             exc_info=error,
         )
         with patch.object(support_module.logging, "warning") as warning:
-            DbusWriteController._publish_local_pm_status_best_effort(failed, True, 12.0)
+            ControlWriteController._publish_local_pm_status_best_effort(failed, True, 12.0)
         warning.assert_called_once_with(
             "Local relay placeholder publish failed after queuing relay=%s: %s",
             1,
@@ -67,11 +66,11 @@ class TestWriteSupportBoundaryContracts(unittest.TestCase):
 
     def test_mode_normalization_log_is_emitted_only_for_changed_mode(self) -> None:
         with patch.object(support_module.logging, "info") as log:
-            DbusWriteController._log_normalized_mode(1, 1)
+            ControlWriteController._log_normalized_mode(1, 1)
             log.assert_not_called()
-            DbusWriteController._log_normalized_mode(5, 2)
+            ControlWriteController._log_normalized_mode(5, 2)
         log.assert_called_once_with(
-            "Unsupported mode %s requested on /Mode, normalizing to %s",
+            "Unsupported mode %s requested for target mode, normalizing to %s",
             5,
             2,
         )
@@ -86,11 +85,11 @@ class TestWriteSupportModeContracts(unittest.TestCase):
             auto_mode_cutover_pending=True,
             ignore_min_offtime_once=True,
         )
-        DbusWriteController._reset_auto_decision_state(svc)
+        ControlWriteController._reset_auto_decision_state(svc)
         self.assertIsNone(svc.auto_start_condition_since)
         self.assertIsNone(svc.auto_stop_condition_since)
         svc.clear_auto_samples.assert_called_once_with()
-        DbusWriteController._activate_auto_without_cutover(svc)
+        ControlWriteController._activate_auto_without_cutover(svc)
         self.assertIs(svc.auto_mode_cutover_pending, False)
         self.assertIs(svc.ignore_min_offtime_once, False)
 
@@ -101,7 +100,7 @@ class TestWriteSupportModeContracts(unittest.TestCase):
             auto_mode_cutover_pending=False,
             ignore_min_offtime_once=True,
         )
-        controller = DbusWriteController(SimpleNamespace())
+        controller = ControlWriteController(SimpleNamespace())
         with (
             patch.object(controller, "_queue_relay_command") as queue,
             patch.object(controller, "_publish_local_pm_status_best_effort") as publish,
@@ -119,7 +118,7 @@ class TestWriteSupportModeContracts(unittest.TestCase):
             relay_may_be_on_for_cutover=MagicMock(),
             manual_override_until=5.0,
         )
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with patch.object(controller, "_queue_auto_cutover") as queue:
             controller._handle_mode_transition_to_auto(1, 10.0)
         queue.assert_not_called()
@@ -145,8 +144,8 @@ class TestWriteSupportModeContracts(unittest.TestCase):
             get_worker_snapshot=MagicMock(return_value=snapshot),
             update_worker_snapshot=MagicMock(),
         )
-        DbusWriteController._snapshot_for_mode(svc, 10.0, False)
-        DbusWriteController._snapshot_for_mode(svc, 11.0, True)
+        ControlWriteController._snapshot_for_mode(svc, 10.0, False)
+        ControlWriteController._snapshot_for_mode(svc, 11.0, True)
         self.assertEqual(
             svc.update_worker_snapshot.call_args_list,
             [
@@ -161,27 +160,27 @@ class TestWriteSupportModeContracts(unittest.TestCase):
             virtual_startstop=0,
             virtual_mode=2,
             mode_uses_auto_logic=MagicMock(return_value=True),
-            publish_dbus_field=MagicMock(),
+            publish_field=MagicMock(),
         )
-        self.assertEqual(DbusWriteController._auto_startstop_value(svc), 1)
-        self.assertEqual(DbusWriteController._startstop_value_for_mode(svc, True), 1)
-        self.assertEqual(DbusWriteController._startstop_value_for_mode(svc, False), 0)
-        DbusWriteController._publish_startstop_enable(svc, 10.0)
+        self.assertEqual(ControlWriteController._auto_startstop_value(svc), 1)
+        self.assertEqual(ControlWriteController._startstop_value_for_mode(svc, True), 1)
+        self.assertEqual(ControlWriteController._startstop_value_for_mode(svc, False), 0)
+        ControlWriteController._publish_startstop_enable(svc, 10.0)
         self.assertEqual(
-            svc.publish_dbus_field.call_args_list,
+            svc.publish_field.call_args_list,
             [
                 call("start_stop", 1, 10.0, force=True),
                 call("enable", 1, 10.0, force=True),
             ],
         )
-        svc.publish_dbus_field.reset_mock()
-        with patch.object(support_module._DbusWriteSupport, "_publish_startstop_enable") as publish_state:
-            DbusWriteController._publish_mode_paths(svc, 11.0, True)
-        publish_state.assert_called_once_with(svc, 11.0, True)
+        svc.publish_field.reset_mock()
+        ControlWriteController._publish_mode_paths(svc, 11.0, True)
         self.assertEqual(
-            svc.publish_dbus_field.call_args_list,
+            svc.publish_field.call_args_list,
             [
                 call("mode", 2, 11.0, force=True),
+                call("start_stop", 1, 11.0, force=True),
+                call("enable", 1, 11.0, force=True),
             ],
         )
 
@@ -198,7 +197,7 @@ class TestWriteSupportPhaseContracts(unittest.TestCase):
             "effective_supported_phase_selections",
             return_value=("P1",),
         ) as effective:
-            self.assertEqual(DbusWriteController._supported_phase_selection_text(svc, 10.0), "P1")
+            self.assertEqual(ControlWriteController._supported_phase_selection_text(svc, 10.0), "P1")
         effective.assert_called_once_with(
             ("P1", "P1_P2"),
             lockout_selection="P1_P2",
@@ -211,7 +210,7 @@ class TestWriteSupportPhaseContracts(unittest.TestCase):
             "effective_supported_phase_selections",
             return_value=("P1",),
         ) as effective:
-            self.assertEqual(DbusWriteController._supported_phase_selection_text(empty, 12.0), "P1")
+            self.assertEqual(ControlWriteController._supported_phase_selection_text(empty, 12.0), "P1")
         effective.assert_called_once_with(
             ("P1",),
             lockout_selection=None,
@@ -223,9 +222,9 @@ class TestWriteSupportPhaseContracts(unittest.TestCase):
         svc = SimpleNamespace(
             requested_phase_selection="P1",
             active_phase_selection="P1",
-            publish_dbus_field=MagicMock(),
+            publish_field=MagicMock(),
         )
-        DbusWriteController._queue_phase_switch_state(
+        ControlWriteController._queue_phase_switch_state(
             svc,
             "P1_P2",
             10.0,
@@ -239,14 +238,14 @@ class TestWriteSupportPhaseContracts(unittest.TestCase):
         self.assertIs(svc._phase_switch_resume_relay, True)
 
         with patch.object(
-            DbusWriteController,
+            ControlWriteController,
             "_supported_phase_selection_text",
             return_value="P1,P1_P2",
         ) as supported:
-            DbusWriteController._publish_phase_selection_paths(svc, 11.0)
+            ControlWriteController._publish_phase_selection_paths(svc, 11.0)
         supported.assert_called_once_with(svc, 11.0)
         self.assertEqual(
-            svc.publish_dbus_field.call_args_list,
+            svc.publish_field.call_args_list,
             [
                 call("phase_selection", "P1_P2", 11.0, force=True),
                 call("phase_selection_active", "P1", 11.0, force=True),
@@ -254,25 +253,25 @@ class TestWriteSupportPhaseContracts(unittest.TestCase):
             ],
         )
 
-        default_svc = SimpleNamespace(publish_dbus_field=MagicMock())
+        default_svc = SimpleNamespace(publish_field=MagicMock())
         with patch.object(
-            DbusWriteController,
+            ControlWriteController,
             "_supported_phase_selection_text",
             return_value="P1",
         ) as supported:
-            DbusWriteController._publish_phase_lockout_paths(default_svc, 12.0)
+            ControlWriteController._publish_phase_lockout_paths(default_svc, 12.0)
         supported.assert_called_once_with(default_svc, 12.0)
         self.assertEqual(
-            default_svc.publish_dbus_field.call_args_list[3],
+            default_svc.publish_field.call_args_list[3],
             call("auto_phase_supported_configured", "P1", 12.0, force=True),
         )
 
     def test_phase_lockout_clear_and_publish_cover_complete_public_state(self) -> None:
         svc = SimpleNamespace(
             supported_phase_selections=("P1", "P1_P2"),
-            publish_dbus_field=MagicMock(),
+            publish_field=MagicMock(),
         )
-        DbusWriteController._clear_phase_lockout_state(svc)
+        ControlWriteController._clear_phase_lockout_state(svc)
         self.assertEqual(svc._phase_switch_mismatch_counts, {})
         self.assertIs(svc._phase_switch_mismatch_active, False)
         self.assertIsNone(svc._phase_switch_last_mismatch_selection)
@@ -282,10 +281,10 @@ class TestWriteSupportPhaseContracts(unittest.TestCase):
         self.assertIsNone(svc._phase_switch_lockout_at)
         self.assertIsNone(svc._phase_switch_lockout_until)
 
-        with patch.object(DbusWriteController, "_supported_phase_selection_text", return_value="P1"):
-            DbusWriteController._publish_phase_lockout_paths(svc, 10.0)
+        with patch.object(ControlWriteController, "_supported_phase_selection_text", return_value="P1"):
+            ControlWriteController._publish_phase_lockout_paths(svc, 10.0)
         self.assertEqual(
-            svc.publish_dbus_field.call_args_list,
+            svc.publish_field.call_args_list,
             [
                 call("auto_phase_lockout_active", 0, 10.0, force=True),
                 call("auto_phase_lockout_target", "", 10.0, force=True),
@@ -301,8 +300,8 @@ class TestWriteSupportPhaseContracts(unittest.TestCase):
 
 class TestWriteSupportContactorAndManualContracts(unittest.TestCase):
     def test_contactor_clear_and_publish_cover_complete_public_state(self) -> None:
-        svc = SimpleNamespace(publish_dbus_field=MagicMock())
-        DbusWriteController._clear_contactor_lockout_state(svc)
+        svc = SimpleNamespace(publish_field=MagicMock())
+        ControlWriteController._clear_contactor_lockout_state(svc)
         self.assertEqual(svc._contactor_fault_counts, {})
         for name in (
             "_contactor_fault_active_reason",
@@ -314,9 +313,9 @@ class TestWriteSupportContactorAndManualContracts(unittest.TestCase):
             self.assertIsNone(getattr(svc, name))
         self.assertEqual(svc._contactor_lockout_reason, "")
         self.assertEqual(svc._contactor_lockout_source, "")
-        DbusWriteController._publish_contactor_lockout_paths(svc, 10.0)
+        ControlWriteController._publish_contactor_lockout_paths(svc, 10.0)
         self.assertEqual(
-            svc.publish_dbus_field.call_args_list,
+            svc.publish_field.call_args_list,
             [
                 call("auto_contactor_fault_count", 0, 10.0, force=True),
                 call("auto_contactor_lockout_active", 0, 10.0, force=True),
@@ -334,7 +333,7 @@ class TestWriteSupportContactorAndManualContracts(unittest.TestCase):
             auto_manual_override_seconds=30.0,
             charger_enable_available=MagicMock(return_value=False),
         )
-        controller = DbusWriteController(SimpleNamespace())
+        controller = ControlWriteController(SimpleNamespace())
         with (
             patch.object(controller, "_queue_relay_command") as queue,
             patch.object(controller, "_publish_local_pm_status_best_effort") as publish,
@@ -362,7 +361,7 @@ class TestWriteSupportContactorAndManualContracts(unittest.TestCase):
             charger_enable_available=MagicMock(return_value=True),
             charger_set_enabled=MagicMock(),
         )
-        controller = DbusWriteController(SimpleNamespace())
+        controller = ControlWriteController(SimpleNamespace())
         with (
             patch.object(controller, "_queue_relay_command") as queue,
             patch.object(controller, "_publish_local_pm_status_best_effort") as publish,
@@ -388,7 +387,7 @@ class TestWriteSupportContactorAndManualContracts(unittest.TestCase):
             auto_manual_override_seconds=30.0,
             charger_enable_available=MagicMock(return_value=False),
         )
-        controller = DbusWriteController(SimpleNamespace())
+        controller = ControlWriteController(SimpleNamespace())
         with (
             patch.object(controller, "_queue_relay_command") as queue,
             patch.object(controller, "_publish_local_pm_status_best_effort") as publish,

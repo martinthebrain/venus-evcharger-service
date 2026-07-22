@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -13,14 +14,28 @@ from venus_evcharger.runtime.setup_support import empty_worker_snapshot
 from venus_evcharger.runtime.state_store import RuntimeStateStore
 
 
-def _setup(service: object) -> RuntimeSetup:
+@dataclass(frozen=True)
+class RuntimeSetupFixture:
+    setup: RuntimeSetup
+    health_code: MagicMock
+    state_store: MagicMock
+    async_state: MagicMock
+
+
+def _setup(service: object) -> RuntimeSetupFixture:
     health_code = MagicMock(return_value=17)
     state_store = MagicMock()
+    async_state = MagicMock()
     state_store.observability_defaults.return_value = {
         "_error_state": lambda: {"error": 3},
         "_failure_active": lambda: {"failure": True},
     }
-    return RuntimeSetup(service, health_code, state_store, MagicMock())
+    return RuntimeSetupFixture(
+        setup=RuntimeSetup(service, health_code, state_store, async_state),
+        health_code=health_code,
+        state_store=state_store,
+        async_state=async_state,
+    )
 
 
 def _assert_attributes(
@@ -79,17 +94,16 @@ class RuntimeSetupContractTests(unittest.TestCase):
         )
 
     def test_initialize_runtime_support_owns_exact_initial_state(self) -> None:
-        service = SimpleNamespace()
-        setup = _setup(service)
-        paths = SimpleNamespace(core_command_dir="/run/gateway/core")
+        service = SimpleNamespace(core_command_mailbox_dir="/run/gateway/core")
+        fixture = _setup(service)
+        setup = fixture.setup
         inbox = object()
         session = object()
         metrics = {"state": "contract"}
         with (
             patch("venus_evcharger.runtime.setup.time.time", return_value=123.0),
             patch("venus_evcharger.runtime.setup.requests.Session", return_value=session),
-            patch("venus_evcharger.runtime.setup.gateway_paths", return_value=paths) as paths_for,
-            patch("venus_evcharger.runtime.setup.DbusCommandInbox", return_value=inbox) as inbox_type,
+            patch("venus_evcharger.runtime.setup.CoreCommandMailbox", return_value=inbox) as inbox_type,
             patch("venus_evcharger.runtime.setup.default_auto_metrics", return_value=metrics),
             patch("venus_evcharger.runtime.setup.initialize_victron_balance_runtime_state") as init_balance,
             patch("venus_evcharger.runtime.setup.initialize_runtime_override_state") as init_overrides,
@@ -100,7 +114,6 @@ class RuntimeSetupContractTests(unittest.TestCase):
         ):
             setup.initialize_runtime_support()
 
-        paths_for.assert_called_once_with("")
         inbox_type.assert_called_once_with("/run/gateway/core")
         repo_root.assert_called_once_with(service)
         local_version.assert_called_once_with("/repo")
@@ -114,33 +127,20 @@ class RuntimeSetupContractTests(unittest.TestCase):
             current_version="2.4.1",
             boot_auto_due_at=456.0,
         )
-        setup.async_state.initialize.assert_called_once_with()
-        setup._health_code.assert_called_once_with("init")
+        fixture.async_state.initialize.assert_called_once_with()
+        fixture.health_code.assert_called_once_with("init")
         self.assertIs(service.session, session)
-        self.assertIs(service._gateway_paths, paths)
-        self.assertIs(service._gateway_core_commands, inbox)
+        self.assertIs(service._core_command_mailbox, inbox)
         self.assertIs(service._last_auto_metrics, metrics)
-        self.assertIsInstance(service._system_bus_state, threading.local)
-        self.assertTrue(hasattr(service._system_bus_generation_lock, "acquire"))
         _assert_attributes(
             self,
             service,
             {
                 "last_update": 0,
-                "_system_bus": None,
-                "_system_bus_generation": 0,
-                "_resolved_auto_pv_services": [],
-                "_auto_pv_last_scan": 0.0,
                 "_last_pv_missing_warning": None,
-                "_resolved_auto_battery_service": None,
-                "_auto_battery_last_scan": 0.0,
-                "_resolved_auto_energy_services": {},
-                "_auto_energy_last_scan": {},
                 "_last_battery_missing_warning": None,
                 "_last_battery_allow_warning": None,
                 "_last_grid_missing_warning": None,
-                "_dbus_list_backoff_until": 0.0,
-                "_dbus_list_failures": 0,
                 "_warning_state": {},
                 "_error_state": {"error": 3},
                 "_failure_active": {"failure": True},
@@ -188,13 +188,11 @@ class RuntimeSetupContractTests(unittest.TestCase):
             },
         )
 
-    def test_initialize_runtime_support_uses_configured_gateway_directory(self) -> None:
-        service = SimpleNamespace(dbus_gateway_run_dir="/run/configured")
-        setup = _setup(service)
-        paths = SimpleNamespace(core_command_dir="/run/configured/core")
+    def test_initialize_runtime_support_uses_configured_core_mailbox_directory(self) -> None:
+        service = SimpleNamespace(core_command_mailbox_dir="/run/configured/core")
+        setup = _setup(service).setup
         with (
-            patch("venus_evcharger.runtime.setup.gateway_paths", return_value=paths) as paths_for,
-            patch("venus_evcharger.runtime.setup.DbusCommandInbox"),
+            patch("venus_evcharger.runtime.setup.CoreCommandMailbox") as mailbox_type,
             patch("venus_evcharger.runtime.setup.initialize_victron_balance_runtime_state"),
             patch("venus_evcharger.runtime.setup.initialize_runtime_override_state"),
             patch("venus_evcharger.runtime.setup.initialize_software_update_runtime_state"),
@@ -203,36 +201,7 @@ class RuntimeSetupContractTests(unittest.TestCase):
             patch.object(setup, "_boot_delayed_update_due_at", return_value=None),
         ):
             setup.initialize_runtime_support()
-        paths_for.assert_called_once_with("/run/configured")
-
-    def test_system_bus_state_reset_cache_and_direct_access_guard(self) -> None:
-        service = SimpleNamespace()
-        setup = _setup(service)
-        setup.ensure_system_bus_state()
-        original_state = service._system_bus_state
-        original_lock = service._system_bus_generation_lock
-        self.assertEqual(service._system_bus_generation, 0)
-        service._system_bus_generation = 7
-        setup.ensure_system_bus_state()
-        self.assertIs(service._system_bus_state, original_state)
-        self.assertIs(service._system_bus_generation_lock, original_lock)
-        self.assertEqual(service._system_bus_generation, 7)
-
-        service._system_bus = "legacy"
-        service._system_bus_state.bus = "cached"
-        service._system_bus_state.generation = 0
-        setup.reset_system_bus()
-        self.assertEqual(service._system_bus_generation, 8)
-        self.assertIsNone(service._system_bus)
-        self.assertIsNone(service._system_bus_state.bus)
-        self.assertEqual(service._system_bus_state.generation, -1)
-
-        with self.assertRaises(RuntimeError) as error:
-            setup.create_system_bus()
-        self.assertEqual(
-            error.exception.args,
-            ("Direct DBus access is disabled; use the DBus gateway adapter",),
-        )
+        mailbox_type.assert_called_once_with("/run/configured/core")
 
     def test_worker_snapshot_is_deep_copied_at_mutable_payload_boundaries(self) -> None:
         status = {"output": True}

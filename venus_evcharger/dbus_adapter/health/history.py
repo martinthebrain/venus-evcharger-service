@@ -8,7 +8,7 @@ import time
 from collections.abc import Mapping
 
 from venus_evcharger.dbus_adapter.jsonl import DEFAULT_HEALTH_HISTORY_MAX_BYTES, append_jsonl
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.ipc.command_types import CommandPayload
 
 
 def append_health_log(

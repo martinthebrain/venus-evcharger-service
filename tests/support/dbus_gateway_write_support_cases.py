@@ -1,108 +1,90 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Gateway adapter write support helper contracts."""
+"""Pure helper contracts for semantic write scheduling."""
 
 from __future__ import annotations
 
 from tests.support.dbus_gateway_adapter_harness import (
     GatewayAdapterContractCase,
+    evcs_publication,
     patch,
     write_support_module,
 )
+from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command
 
 
 class GatewayWriteSupportCases(GatewayAdapterContractCase):
-    """Exercise write support helper contracts."""
+    """Exercise transport-neutral scheduler helper contracts."""
 
-    def test_write_scheduler_support_helper_contracts(self) -> None:
-        self.assertEqual(write_support_module.priority_rank(" safety "), 0)
-        self.assertEqual(write_support_module.priority_rank("USER"), 1)
-        self.assertEqual(write_support_module.priority_rank("publish"), 2)
-        self.assertEqual(write_support_module.priority_rank("read"), 3)
-        self.assertEqual(write_support_module.priority_rank("normal"), 4)
-        self.assertEqual(write_support_module.priority_rank("optional"), 5)
-        self.assertEqual(write_support_module.priority_rank("discovery"), 5)
-        self.assertEqual(write_support_module.priority_rank("diagnostic"), 6)
-        self.assertEqual(write_support_module.priority_rank("unknown"), 6)
-        self.assertEqual(write_support_module.priority_rank(None), 6)
-
+    def test_priority_deadline_and_command_kind_normalization(self) -> None:
+        expected = {
+            " safety ": 0,
+            "USER": 1,
+            "publish": 2,
+            "read": 3,
+            "normal": 4,
+            "optional": 5,
+            "discovery": 5,
+            "diagnostic": 6,
+            "unknown": 6,
+            None: 6,
+        }
+        for priority, rank in expected.items():
+            self.assertEqual(write_support_module.priority_rank(priority), rank)
         self.assertEqual(write_support_module.deadline_pair({"deadline_s": "2.5", "created_at": "4"}), (2.5, 4.0))
+        self.assertEqual(write_support_module.command_kind({"kind": "semantic", "type": "fallback"}), "semantic")
+        self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "fallback")
+        self.assertEqual(write_support_module.command_kind({}), "")
+
+    def test_only_semantic_field_publications_are_local_burst_commands(self) -> None:
+        self.assertTrue(write_support_module.is_local_publish_command(evcs_publication()))
         self.assertTrue(
-            write_support_module.has_startup_registration(
-                commands=[
-                    ("path", {"kind": "register_path"}),
-                    ("publish", {"kind": "publish_value"}),
-                ]
+            write_support_module.is_local_publish_command(
+                {"kind": "publish_companion_fields", "service_id": "grid", "fields": {"connected": 1}}
             )
         )
-        self.assertTrue(
-            write_support_module.has_startup_registration(commands=[("service", {"kind": "register_service"})])
-        )
-        self.assertFalse(
-            write_support_module.has_startup_registration(commands=[("publish", {"kind": "publish_value"})])
-        )
-        self.assertTrue(write_support_module.is_local_publish_command({"kind": "publish_value"}))
-        self.assertTrue(write_support_module.is_local_publish_command({"type": "publish_desired"}))
-        self.assertTrue(write_support_module.is_local_publish_command({"kind": "publish_fields"}))
-        self.assertFalse(write_support_module.is_local_publish_command({"kind": "set_value"}))
-        self.assertTrue(write_support_module.should_follow_with_local_burst({"kind": "publish_value"}, "applied"))
-        self.assertTrue(write_support_module.should_follow_with_local_burst({"kind": "publish_desired"}, "dropped"))
-        self.assertTrue(write_support_module.should_follow_with_local_burst({"kind": "publish_fields"}, "applied"))
-        self.assertFalse(write_support_module.should_follow_with_local_burst({"kind": "publish_value"}, "deferred"))
-        self.assertFalse(write_support_module.should_follow_with_local_burst({"kind": "set_value"}, "applied"))
+        self.assertFalse(write_support_module.is_local_publish_command({"kind": "register_evcs"}))
+        self.assertFalse(write_support_module.is_local_publish_command(gx_relay_refresh_command(0)))
 
+    def test_local_burst_action_and_time_budget_helpers(self) -> None:
         self.assertEqual(write_support_module.local_publish_action_result(3, "break"), (3, True))
         self.assertEqual(write_support_module.local_publish_action_result(3, "processed"), (4, False))
         self.assertEqual(write_support_module.local_publish_action_result(3, "skip"), (3, False))
-        with patch.object(write_support_module.time, "monotonic", return_value=15.0):
+        with patch.object(vars(write_support_module)["time"], "monotonic", return_value=15.0):
             self.assertFalse(write_support_module.budget_elapsed(10.0, 5.1))
             self.assertTrue(write_support_module.budget_elapsed(10.0, 5.0))
-        self.assertEqual(
-            write_support_module.command_kind({"kind": "publish_value", "type": "set_value"}), "publish_value"
-        )
-        self.assertEqual(write_support_module.command_kind({"type": "set_value"}), "set_value")
-        self.assertEqual(write_support_module.command_kind({}), "")
-        self.assertEqual(
-            write_support_module.register_service_command(
-                [
-                    ("first", {"kind": "register_service"}),
-                    ("path", {"kind": "register_path"}),
-                    ("second", {"kind": "register_service"}),
-                    ("third", {"kind": "register_service"}),
-                ]
-            ),
-            ("third", {"kind": "register_service"}),
-        )
-        self.assertIsNone(write_support_module.register_service_command([("path", {"kind": "register_path"})]))
+
+    def test_stale_coalesced_path_selection_is_transport_neutral(self) -> None:
         self.assertEqual(
             write_support_module.stale_coalesced_paths(
                 [
-                    ("processed", {"coalesce_key": "same"}),
-                    ("stale", {"coalesce_key": "same"}),
-                    ("other", {"coalesce_key": "other"}),
+                    ("processed", {"coalesce_key": "semantic:evcs:live"}),
+                    ("stale", {"coalesce_key": "semantic:evcs:live"}),
+                    ("other", {"coalesce_key": "semantic:evcs:critical"}),
                     ("missing", {}),
                 ],
                 processed_path="processed",
-                key="same",
+                key="semantic:evcs:live",
             ),
             ["stale"],
         )
+
+    def test_lifecycle_payload_preserves_semantic_command_identity(self) -> None:
+        command = {
+            **evcs_publication({"mode": 1}),
+            "id": "cmd-1",
+        }
         self.assertEqual(
-            write_support_module.lifecycle_payload(
-                {"kind": "publish_value", "id": "cmd-1", "coalesce_key": "path:/Mode"},
-                "applied",
-                "gui-critical-publish",
-                123.5,
-            ),
+            write_support_module.lifecycle_payload(command, "applied", "gui-critical-publish", 123.5),
             {
                 "at": 123.5,
                 "state": "applied",
                 "queue_class": "gui-critical-publish",
-                "kind": "publish_value",
+                "kind": "publish_evcs_fields",
                 "id": "cmd-1",
-                "coalesce_key": "path:/Mode",
+                "coalesce_key": "gateway-publication:evcs:live",
             },
         )
-        self.assertEqual(
-            write_support_module.lifecycle_payload({"type": "refresh_services"}, "", "", 0.0),
-            {"at": 0.0, "state": "", "queue_class": "", "kind": "refresh_services", "id": "", "coalesce_key": ""},
-        )
+
+    def test_command_ready_honors_async_not_before_boundary(self) -> None:
+        self.assertTrue(write_support_module.command_ready({"not_before": 10.0}, 10.0))
+        self.assertFalse(write_support_module.command_ready({"not_before": 10.1}, 10.0))

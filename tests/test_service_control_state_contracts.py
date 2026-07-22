@@ -33,7 +33,7 @@ from venus_evcharger.service.control_state_victron import ControlStateVictron
 def _command() -> ControlCommand:
     return ControlCommand(
         name="set_mode",
-        path="/Mode",
+        target="mode",
         value=2,
         source="http",
         detail="scheduled",
@@ -309,7 +309,7 @@ class TestControlRuntimeMutationContracts(unittest.TestCase):
         runtime = ControlRuntime(SimpleNamespace(), MagicMock())
         command = ControlCommand(
             name="set_mode",
-            path="/Mode",
+            target="mode",
             value=2,
             source="",
             detail="scheduled",
@@ -341,7 +341,7 @@ class TestControlRuntimeMutationContracts(unittest.TestCase):
                 "replayed": False,
                 "command": {
                     "name": "set_mode",
-                    "path": "/Mode",
+                    "target": "mode",
                     "value": 2,
                     "source": "http",
                     "detail": "scheduled",
@@ -369,7 +369,7 @@ class TestControlRuntimeMutationContracts(unittest.TestCase):
             {
                 "command": {
                     "name": "set_mode",
-                    "path": "/Mode",
+                    "target": "mode",
                     "value": 2,
                     "source": "internal",
                     "detail": "scheduled",
@@ -486,10 +486,16 @@ class TestControlStateConfigContracts(unittest.TestCase):
 
     def test_effective_payload_composes_all_sections_and_filters_blank_source_ids(self) -> None:
         owner = SimpleNamespace(
+            deviceinstance="61",
+            product_name="Venus EV Charger",
+            custom_name="Garage",
+            service_name="must-not-leak",
             host="192.0.2.10",
             control_api_port="8765",
             control_api_read_token="read-token",
             control_api_control_token="",
+            companion_publication_enabled=True,
+            companion_dbus_bridge_enabled=True,
             companion_grid_authoritative_source=17,
             companion_grid_hold_seconds="4.5",
             auto_energy_sources=(
@@ -499,6 +505,10 @@ class TestControlStateConfigContracts(unittest.TestCase):
             auto_use_combined_battery_soc=False,
             auto_battery_discharge_balance_warn_error_watts="321.5",
             auto_battery_discharge_balance_victron_bias_kp="0.42",
+            auto_battery_discharge_balance_victron_bias_service="must-not-leak",
+            auto_battery_discharge_balance_victron_bias_path="/must-not-leak",
+            companion_battery_service_name="must-not-leak",
+            companion_source_battery_service_prefix="must-not-leak",
         )
 
         def backend_type(_owner: object, role: str, _default: str) -> str:
@@ -519,10 +529,14 @@ class TestControlStateConfigContracts(unittest.TestCase):
 
         state = payload["state"]
         self.assertEqual((payload["ok"], payload["api_version"], payload["kind"]), (True, "v1", "config-effective"))
+        self.assertEqual(state["instance_id"], 61)
+        self.assertEqual(state["product_name"], "Venus EV Charger")
+        self.assertEqual(state["display_name"], "Garage")
         self.assertEqual(state["host"], "192.0.2.10")
         self.assertEqual(state["control_api_port"], 8765)
         self.assertTrue(state["control_api_read_token_configured"])
         self.assertFalse(state["control_api_control_token_configured"])
+        self.assertTrue(state["companion_publication_enabled"])
         self.assertEqual(state["companion_grid_authoritative_source"], "17")
         self.assertEqual(state["companion_grid_hold_seconds"], 4.5)
         self.assertEqual(state["backend_mode"], "split")
@@ -548,6 +562,16 @@ class TestControlStateConfigContracts(unittest.TestCase):
         self.assertFalse(state["auto_use_combined_battery_soc"])
         self.assertEqual(state["auto_battery_discharge_balance_warn_error_watts"], 321.5)
         self.assertEqual(state["auto_battery_discharge_balance_victron_bias_kp"], 0.42)
+        forbidden_identity_fields = {
+            "deviceinstance",
+            "service_name",
+            "companion_dbus_bridge_enabled",
+            "companion_battery_service_name",
+            "companion_source_battery_service_prefix",
+            "auto_battery_discharge_balance_victron_bias_service",
+            "auto_battery_discharge_balance_victron_bias_path",
+        }
+        self.assertTrue(forbidden_identity_fields.isdisjoint(state))
 
     def test_energy_source_defaults_keep_combined_soc_enabled(self) -> None:
         self.assertEqual(
@@ -578,7 +602,10 @@ class TestControlStateCoreContracts(unittest.TestCase):
             supported_phase_selections=(),
             active_phase_selection="P1_P2_P3",
             requested_phase_selection="P1_P2",
-            service_name="com.example.evcharger",
+            deviceinstance=73,
+            product_name="Venus EV Charger",
+            custom_name="Garage Wallbox",
+            service_name="must-not-leak",
             connection_name="test",
             _software_update_current_version="1.0.0",
             _software_update_available_version="1.1.0",
@@ -688,7 +715,9 @@ class TestControlStateCoreContracts(unittest.TestCase):
                 "requested_phase_selection": "P1_P2",
                 "supported_phase_selections": ["P1"],
                 "available_modes": [0, 1, 2],
-                "service_name": "com.example.evcharger",
+                "instance_id": 73,
+                "product_name": "Venus EV Charger",
+                "display_name": "Garage Wallbox",
                 "connection_name": "test",
             },
         }
@@ -732,7 +761,9 @@ class TestControlStateCoreContracts(unittest.TestCase):
                         "requested_phase_selection": "P1",
                         "supported_phase_selections": ["P1"],
                         "available_modes": [0, 1, 2],
-                        "service_name": "",
+                        "instance_id": 0,
+                        "product_name": "",
+                        "display_name": "",
                         "connection_name": "",
                     },
                 },
@@ -908,7 +939,8 @@ class TestControlStateMetaContracts(unittest.TestCase):
             _software_update_current_version="2.1.0",
             firmware_version="2.0.0",
             product_name="EVCS",
-            service_name="com.example.evcharger",
+            deviceinstance=60,
+            service_name="must-not-leak",
             hardware_version="gx",
             connection_name="network",
             runtime_state_path="/run/state.json",
@@ -937,7 +969,7 @@ class TestControlStateMetaContracts(unittest.TestCase):
                     "service_version": "2.1.0",
                     "api_version": "v1",
                     "product_name": "EVCS",
-                    "service_name": "com.example.evcharger",
+                    "instance_id": 60,
                 },
             },
         )

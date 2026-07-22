@@ -43,7 +43,6 @@ FOCUSED_TEST_SELECTIONS_BOOTSTRAP: tuple[tuple[str, tuple[str, ...]], ...] = (('
  ('venus_evcharger/bootstrap/controller.py',
   ('tests/test_venus_evcharger_bootstrap_controller.py',
    'tests/test_auto_backend_bootstrap_edge_contracts.py')),
- ('venus_evcharger/bootstrap/paths.py', ('tests/venus_evcharger_bootstrap_controller_path_cases.py',)),
  ('venus_evcharger/bootstrap/runtime.py', ('tests/venus_evcharger_bootstrap_controller_runtime_cases.py',)),
  ('venus_evcharger/bootstrap/runtime_loops.py', ('tests/test_bootstrap_runtime_loops.py',)),
  ('venus_evcharger/bootstrap/runtime_metadata.py', ('tests/test_bootstrap_runtime_metadata.py',)),

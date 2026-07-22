@@ -3,8 +3,23 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
 from tests.support.publish_runtime import PublishServiceHarness as SimpleNamespace
-from venus_evcharger.publish.dbus import DbusPublishController
+from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsReader
+from venus_evcharger.publish.dbus import DbusPublishController as _DbusPublishController
+
+
+def build_publish_controller(
+    service: SimpleNamespace,
+    age_seconds: Any,
+    gateway_diagnostics: GatewayDiagnosticsReader | None = None,
+) -> _DbusPublishController:
+    """Build a publisher against the real semantic gateway diagnostics port."""
+    return _DbusPublishController(
+        service,
+        age_seconds,
+        gateway_diagnostics or gateway_diagnostics_reader(),
+    )
 
 
 class DbusPublishControllerTestCase(unittest.TestCase):
@@ -25,9 +40,9 @@ class DbusPublishControllerTestCase(unittest.TestCase):
 
 __all__ = [
     "Any",
-    "DbusPublishController",
     "DbusPublishControllerTestCase",
     "MagicMock",
     "SimpleNamespace",
+    "build_publish_controller",
     "patch",
 ]

@@ -3,19 +3,16 @@ from tests.venus_evcharger_update_cycle_controller_support import *
 
 
 class TestUpdateCycleControllerSexdecenary(UpdateCycleControllerTestBase):
-    def test_runtime_cycle_completion_records_success_and_bridge_publish(self):
+    def test_runtime_cycle_completion_records_success_and_companion_publish(self):
         service = SimpleNamespace(
             time_now=MagicMock(return_value=105.5),
-            _bump_update_index=MagicMock(),
-            _publish_companion_dbus_bridge=MagicMock(),
+            state=SimpleNamespace(publish_companion_bridge=MagicMock()),
             virtual_mode=2,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
         with patch("venus_evcharger.update.runtime_cycle.logging.debug") as debug:
             controller.components.runtime_cycle.complete_update_cycle(
-                True,
-                100.0,
                 True,
                 1234.5,
                 5.5,
@@ -25,29 +22,28 @@ class TestUpdateCycleControllerSexdecenary(UpdateCycleControllerTestBase):
                 -50.0,
             )
 
-        service._bump_update_index.assert_called_once_with(100.0)
         self.assertEqual(service._last_successful_update_at, 105.5)
         self.assertIsNone(service._last_recovery_attempt_at)
         self.assertEqual(service.last_update, 105.5)
-        service._publish_companion_dbus_bridge.assert_called_once_with(105.5)
+        service.state.publish_companion_bridge.assert_called_once_with(105.5)
         self.assertEqual(
             debug.call_args.args[0],
             "Wallbox relay=%s power=%sW current=%sA status=%s pv=%sW soc=%s%% grid=%sW mode=%s",
         )
         self.assertEqual(debug.call_args.args[1:], (True, 1234.5, 5.5, 2, 777.0, 80.0, -50.0, 2))
 
-    def test_runtime_cycle_completion_without_change_keeps_update_index(self):
+    def test_runtime_cycle_completion_records_zero_measurements(self):
         service = SimpleNamespace(
             time_now=MagicMock(return_value=205.0),
-            _bump_update_index=MagicMock(),
+            state=SimpleNamespace(publish_companion_bridge=MagicMock()),
             virtual_mode=0,
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        controller.components.runtime_cycle.complete_update_cycle(False, 200.0, False, 0.0, 0.0, 6, None, None, None)
+        controller.components.runtime_cycle.complete_update_cycle(False, 0.0, 0.0, 6, None, None, None)
 
-        service._bump_update_index.assert_not_called()
         self.assertEqual(service.last_update, 205.0)
+        service.state.publish_companion_bridge.assert_called_once_with(205.0)
 
     def test_run_update_cycle_routes_offline_and_online_paths(self):
         service = SimpleNamespace(time_now=MagicMock(return_value=100.0))
@@ -132,8 +128,6 @@ class TestUpdateCycleControllerSexdecenary(UpdateCycleControllerTestBase):
         )
         controller.components.state.save_runtime_state_best_effort.assert_called_once_with("learning-state")
         controller.components.runtime_cycle.complete_update_cycle.assert_called_once_with(
-            True,
-            100.0,
             False,
             0.0,
             0.0,

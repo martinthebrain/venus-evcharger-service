@@ -240,7 +240,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
         service = self._service()
         server = LocalControlApiHttpServer(service, host="localhost", port=1)
         tracked = ControlCommand(
-            name="set_mode", path="/Mode", value=1, source="http", command_id="c", idempotency_key="i"
+            name="set_mode", target="mode", value=1, source="http", command_id="c", idempotency_key="i"
         )
         result = ControlResult.applied_result(tracked)
         service.control_command_from_payload.return_value = tracked
@@ -252,9 +252,9 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
         service.control_command_from_payload.assert_called_once_with(payload, source="http")
         service.handle_control_command.assert_called_once_with(tracked)
 
-        untracked = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        untracked = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         replacement = ControlCommand(
-            name="set_mode", path="/Mode", value=1, source="http", command_id="new", idempotency_key="new-i"
+            name="set_mode", target="mode", value=1, source="http", command_id="new", idempotency_key="new-i"
         )
         replacement_result = ControlResult.applied_result(replacement)
         service.control_command_from_payload.return_value = untracked
@@ -265,7 +265,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
         service.handle_control_command.assert_called_with(replacement)
 
         command_id_only = ControlCommand(
-            name="set_mode", path="/Mode", value=1, source="http", command_id="existing"
+            name="set_mode", target="mode", value=1, source="http", command_id="existing"
         )
         service.control_command_from_payload.return_value = command_id_only
         with patch("venus_evcharger.control.http_api_commands.tracked_command", return_value=replacement) as rebuild:
@@ -275,7 +275,7 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
         for idempotency_key in ("None", "XXXX"):
             command_with_default_sentinel = ControlCommand(
                 name="set_mode",
-                path="/Mode",
+                target="mode",
                 value=1,
                 source="http",
                 command_id="existing",

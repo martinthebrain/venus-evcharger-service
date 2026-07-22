@@ -12,15 +12,11 @@ import sys
 
 from venus_evcharger.inputs.helper.config_runtime import load_auto_input_helper_settings
 from venus_evcharger.inputs.helper.contracts import MainLoopPort
+from venus_evcharger.inputs.helper.energy_gateway import EnergyRefreshCoordinator, GatewayEnergySnapshots
 from venus_evcharger.inputs.helper.glib_runtime import GLIB_RUNTIME
-from venus_evcharger.inputs.helper.liveness import HelperLiveness, WarningThrottle
+from venus_evcharger.inputs.helper.liveness import HelperLiveness
 from venus_evcharger.inputs.helper.snapshot import AtomicSnapshotWriter, SnapshotStore
-from venus_evcharger.inputs.helper.sources import AutoInputSources, BatterySourceReader
-from venus_evcharger.inputs.helper.sources_dbus_gateway import GatewayCacheReader
-from venus_evcharger.inputs.helper.sources_dbus_primary import EnergySourceCatalog
-from venus_evcharger.inputs.helper.sources_dbus_resolve import EnergyServiceResolver
-from venus_evcharger.inputs.helper.sources_pv_grid import PvGridSourceReader
-from venus_evcharger.inputs.helper.subscriptions import SubscriptionManager
+from venus_evcharger.inputs.helper.sources import AutoInputSources
 
 
 class AutoInputHelper:
@@ -41,11 +37,8 @@ class AutoInputHelper:
             helper_generation,
             runtime_instance_id,
         )
-        self.gateway = GatewayCacheReader(self.settings)
-        self.catalog = EnergySourceCatalog(self.settings, self.gateway)
-        self.resolver = EnergyServiceResolver(self.settings, self.gateway, self.catalog)
-        self.pv_grid = PvGridSourceReader(self.settings, self.gateway)
-        self.sources = AutoInputSources(self.pv_grid, BatterySourceReader(self.gateway))
+        self.gateway = GatewayEnergySnapshots(self.settings)
+        self.sources = AutoInputSources(self.settings, self.gateway)
         self.liveness = HelperLiveness(self.settings)
         self.snapshots = SnapshotStore(
             self.settings,
@@ -53,14 +46,9 @@ class AutoInputHelper:
             AtomicSnapshotWriter(self.settings),
             self.liveness.stop_requested,
         )
-        self.subscriptions = SubscriptionManager(
-            self.settings,
+        self.refresh_coordinator = EnergyRefreshCoordinator(
             self.gateway,
-            self.pv_grid,
-            self.catalog,
-            self.resolver,
             self.snapshots,
-            WarningThrottle(),
             self.liveness.stop_requested,
         )
         self._main_loop: MainLoopPort | None = None
@@ -85,7 +73,7 @@ class AutoInputHelper:
             main_loop.run()
         finally:
             self.liveness.stop()
-            self.subscriptions.reset()
+            self.refresh_coordinator.reset()
             logging.info("Auto input helper stopping pid=%s", os.getpid())
 
     def _handle_signal(self, signum: int, _frame: object) -> None:
@@ -109,8 +97,8 @@ class AutoInputHelper:
             self.snapshots.validation_poll,
         )
         GLIB_RUNTIME.timeout_add(
-            max(1000, int(self.settings.subscription_refresh_seconds * 1000)),
-            self.subscriptions.timer_tick,
+            max(5000, int(self.settings.topology_refresh_seconds * 1000)),
+            self.refresh_coordinator.timer_tick,
         )
         GLIB_RUNTIME.timeout_add(1000, self.liveness.parent_watchdog_tick)
 
@@ -119,7 +107,7 @@ class AutoInputHelper:
             if self.liveness.stop_requested():
                 return False
             self.snapshots.write_lifecycle("initializing")
-            return self.subscriptions.refresh()
+            return self.refresh_coordinator.refresh()
 
         GLIB_RUNTIME.idle_add(refresh)
 

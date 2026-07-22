@@ -23,21 +23,24 @@ sys.path.insert(
     ),
 )
 
-from venus_evcharger.dbus_adapter.contracts import DbusServiceLike
 from venus_evcharger.dbus_adapter.process.config import adapter_settings, load_adapter_config
 from venus_evcharger.dbus_adapter.process.loop import DbusAdapterLoop
 from venus_evcharger.dbus_adapter.process.protocols.runtime import MainLoopLike
+from venus_evcharger.dbus_adapter.publication import GatewayPublicationRegistry
 from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusConnectionManager, DbusRateLimiter
+from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.executor import DbusReadExecutor
 from venus_evcharger.dbus_adapter.resources import ResourceMonitor, TickHealth
 from venus_evcharger.dbus_adapter.scheduling import AtomicJsonWriter, DbusDiscoveryManager, DbusReadScheduler
 from venus_evcharger.dbus_adapter.write.scheduler import DbusWriteScheduler
 from venus_evcharger.dbus_gateway import (
     DbusCacheStore,
-    DbusCommandInbox,
+    DbusGatewayCommandInbox,
     GatewayPaths,
 )
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.ipc.command_mailbox import CommandMailbox
+from venus_evcharger.ipc.command_types import CommandPayload
+from venus_evcharger.ipc.core_commands import CoreCommandMailbox
 
 
 class DbusAdapter(DbusAdapterLoop):
@@ -60,16 +63,25 @@ class DbusAdapter(DbusAdapterLoop):
             self.paths,
             stale_after_seconds=settings.stale_after_seconds,
         )
-        self.commands = DbusCommandInbox(self.paths.command_dir)
-        self.core_commands = DbusCommandInbox(self.paths.core_command_dir)
+        self.commands = DbusGatewayCommandInbox(self.paths.command_dir)
+        self.core_command_mailbox: CommandMailbox = CoreCommandMailbox(self.paths.core_command_dir)
         self.service_name = settings.service_name
-        self._dbusservice: DbusServiceLike | None = None
-        self._dbusservice_registered = False
+        self.publication_registry = GatewayPublicationRegistry(
+            self.config,
+            evcs_service_name=self.service_name,
+            cache=self.cache,
+            core_commands=self.core_command_mailbox,
+            timed_publish=self.timed_local_publish,
+        )
         self.write_scheduler = DbusWriteScheduler(self)
         self._stop = False
         self._server: socket.socket | None = None
         self._main_loop: MainLoopLike | None = None
         self.read_scheduler = DbusReadScheduler(settings.read_specs)
+        self.energy_discovery = DbusEnergyDiscoveryManager(
+            settings.read_specs,
+            max_prefix_services=max(1, int(defaults.get("AutoPvMaxServices", "10"))),
+        )
         self.read_executor = DbusReadExecutor(self)
         self.min_tick_seconds = settings.timing.min_tick_seconds
         self.max_tick_seconds = settings.timing.max_tick_seconds
@@ -89,7 +101,6 @@ class DbusAdapter(DbusAdapterLoop):
         self.health_log_interval_seconds = settings.files.health_log_interval_seconds
         self.health_log_max_bytes = settings.files.health_log_max_bytes
         self.dbus_introspection_snapshot_path = settings.introspection.snapshot_path
-        self.dbus_introspection_request_path = settings.introspection.request_path
         self.dbus_introspection_enabled = settings.introspection.enabled
         self._last_introspection_full_scan_at = 0.0
         self._introspection_queue_depth = 0

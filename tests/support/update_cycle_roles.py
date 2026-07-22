@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from collections.abc import Mapping
 from typing import Protocol, TypeVar, cast
 
 
@@ -214,8 +215,11 @@ class UpdateCycleStateRole:
     def publish_field(self, field: str, value: object, now: float, *, force: bool = False) -> bool:
         return bool(_fixture_callable(self._owner, "_publish_dbus_field")(field, value, now, force=force))
 
-    def bump_update_index(self, now: float) -> None:
-        _fixture_callable(self._owner, "_bump_update_index")(now)
+    def last_accepted_field(self, field: str) -> object:
+        values = getattr(self._owner, "_accepted_publication_fields", {})
+        if not isinstance(values, Mapping):
+            raise TypeError("accepted publication fields must be a mapping")
+        return values.get(field)
 
     def publish_companion_bridge(self, now: float | None = None) -> bool:
         return bool(_fixture_callable(self._owner, "_publish_companion_dbus_bridge")(now))
@@ -257,7 +261,6 @@ def _install_fixture_defaults(fixture: object) -> None:
     callback_defaults: dict[str, Callable[..., object]] = {
         "_apply_phase_selection": lambda selection: selection,
         "_auto_decide_relay": lambda relay_on, _pv, _soc, _grid: relay_on,
-        "_bump_update_index": lambda _now: None,
         "_ensure_auto_input_helper_process": lambda _now: None,
         "_ensure_observability_state": lambda: None,
         "_ensure_worker_state": lambda: None,
@@ -290,6 +293,7 @@ def _install_fixture_defaults(fixture: object) -> None:
     }
     value_defaults: dict[str, object] = {
         "_contactor_fault_counts": {},
+        "_accepted_publication_fields": {},
         "_last_auto_metrics": {},
         "_last_charger_fault_active": 0,
         "_last_charger_transport_source": "",

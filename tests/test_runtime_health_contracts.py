@@ -11,11 +11,12 @@ from venus_evcharger.runtime.health import RuntimeHealthMonitor
 
 
 def _health(service: object) -> RuntimeHealthMonitor:
-    return RuntimeHealthMonitor(
-        service,
-        MagicMock(return_value=17),
-        MagicMock(),
-    )
+    age_seconds_mock = MagicMock(return_value=17)
+    state_store_mock = MagicMock()
+    setattr(service, "_test_age_seconds_mock", age_seconds_mock)
+    setattr(service, "_test_state_store_mock", state_store_mock)
+    monitor = RuntimeHealthMonitor(service, age_seconds_mock, state_store_mock)
+    return monitor
 
 
 def _service(**overrides: object) -> SimpleNamespace:
@@ -30,10 +31,7 @@ def _service(**overrides: object) -> SimpleNamespace:
         "topology_configured": True,
         "host_configured": True,
         "_recovery_attempts": 0,
-        "_reset_system_bus": MagicMock(),
-        "_invalidate_auto_pv_services": MagicMock(),
-        "_invalidate_auto_battery_service": MagicMock(),
-        "_dbus_list_backoff_until": 9.0,
+        "_refresh_auto_input_snapshot": MagicMock(),
         "_is_update_stale": MagicMock(return_value=False),
         "_state_summary": MagicMock(return_value="state"),
         "_warning_state": {},
@@ -44,10 +42,8 @@ def _service(**overrides: object) -> SimpleNamespace:
     }
     values.update(overrides)
     service = SimpleNamespace(**values)
-    service.runtime = SimpleNamespace(reset_system_bus=service._reset_system_bus)
-    service.auto = SimpleNamespace(
-        invalidate_pv_services=service._invalidate_auto_pv_services,
-        invalidate_battery_service=service._invalidate_auto_battery_service,
+    service.runtime = SimpleNamespace(
+        refresh_auto_input_snapshot=service._refresh_auto_input_snapshot,
     )
     service.state = SimpleNamespace(summary=service._state_summary)
     return service
@@ -68,7 +64,7 @@ class RuntimeHealthContractTests(unittest.TestCase):
         self.assertTrue(health.is_update_stale(100.01))
         service.auto_watchdog_stale_seconds = 0.0
         self.assertFalse(health.is_update_stale(1000.0))
-        self.assertEqual(health.state_store.ensure_observability_state.call_count, 3)
+        self.assertEqual(service._test_state_store_mock.ensure_observability_state.call_count, 3)
 
     def test_update_stale_uses_started_at_until_first_success_and_system_clock(self) -> None:
         service = _service(_last_successful_update_at=None, started_at=90.0)
@@ -82,13 +78,12 @@ class RuntimeHealthContractTests(unittest.TestCase):
 
     def test_update_stale_handles_partially_initialized_runtime_state(self) -> None:
         ensure_state = MagicMock()
-        health = _health(
-            SimpleNamespace(
-                _ensure_observability_state=ensure_state,
-                started_at=-100.0,
-                _last_successful_update_at=None,
-            )
+        service = SimpleNamespace(
+            _ensure_observability_state=ensure_state,
+            started_at=-100.0,
+            _last_successful_update_at=None,
         )
+        health = _health(service)
         self.assertFalse(health.is_update_stale(100.0))
 
         health.service = SimpleNamespace(
@@ -111,7 +106,7 @@ class RuntimeHealthContractTests(unittest.TestCase):
             _last_successful_update_at=None,
         )
         self.assertTrue(health.is_update_stale(11.0))
-        self.assertEqual(health.state_store.ensure_observability_state.call_count, 4)
+        self.assertEqual(service._test_state_store_mock.ensure_observability_state.call_count, 4)
 
     def test_watchdog_base_timestamp_prefers_success_then_start_and_default(self) -> None:
         self.assertEqual(RuntimeHealthMonitor._watchdog_base_timestamp(_service()), 90.0)
@@ -162,13 +157,10 @@ class RuntimeHealthContractTests(unittest.TestCase):
         )
         self.assertFalse(RuntimeHealthMonitor._watchdog_recovery_suppressed(SimpleNamespace(), 100.0))
 
-    def test_watchdog_reset_calls_all_invalidation_hooks_and_clears_backoff(self) -> None:
+    def test_watchdog_reset_refreshes_the_semantic_input_snapshot(self) -> None:
         service = _service()
         RuntimeHealthMonitor._perform_watchdog_reset(service)
-        service._reset_system_bus.assert_called_once_with()
-        service._invalidate_auto_pv_services.assert_called_once_with()
-        service._invalidate_auto_battery_service.assert_called_once_with()
-        self.assertEqual(service._dbus_list_backoff_until, 0.0)
+        service._refresh_auto_input_snapshot.assert_called_once_with()
 
     def test_watchdog_restart_attempts_validate_type_sign_and_truncation(self) -> None:
         self.assertEqual(RuntimeHealthMonitor._watchdog_restart_attempts(_service(auto_watchdog_restart_attempts=3.9)), 3)
@@ -228,7 +220,7 @@ class RuntimeHealthContractTests(unittest.TestCase):
         ):
             health._restart_process_after_stale_watchdog(service, 100.0)
         base.assert_called_once_with(service)
-        health._age_seconds.assert_called_once_with(80.0, 100.0)
+        service._test_age_seconds_mock.assert_called_once_with(80.0, 100.0)
         service._state_summary.assert_called_once_with()
         critical.assert_called_once_with(
             "Watchdog restart after %s stale recovery attempts over %ss (%s)",
@@ -260,11 +252,11 @@ class RuntimeHealthContractTests(unittest.TestCase):
         service = _service()
         health = _health(service)
         health.watchdog_recover(100.0)
-        service._reset_system_bus.assert_not_called()
+        service._refresh_auto_input_snapshot.assert_not_called()
         service._last_successful_update_at = 80.0
         service._last_recovery_attempt_at = 99.0
         health.watchdog_recover(100.0)
-        service._reset_system_bus.assert_not_called()
+        service._refresh_auto_input_snapshot.assert_not_called()
 
     def test_watchdog_recover_updates_state_resets_logs_and_checks_restart(self) -> None:
         service = _service(_last_successful_update_at=80.0, _recovery_attempts=1)
@@ -280,7 +272,7 @@ class RuntimeHealthContractTests(unittest.TestCase):
         self.assertEqual(service._recovery_attempts, 2)
         reset.assert_called_once_with(service)
         base.assert_called_once_with(service)
-        health._age_seconds.assert_called_once_with(80.0, 100.0)
+        service._test_age_seconds_mock.assert_called_once_with(80.0, 100.0)
         service._state_summary.assert_called_once_with()
         warning.assert_called_once_with(
             "Watchdog recovery attempt %s after stale update period of %ss (%s)",
@@ -321,7 +313,7 @@ class RuntimeHealthContractTests(unittest.TestCase):
             [call("message %s", "second", extra={"x": 2}), call("new message")],
         )
         self.assertEqual(service._warning_state, {"key": 100.01, "new": 100.02})
-        self.assertEqual(health.state_store.ensure_observability_state.call_count, 3)
+        self.assertEqual(service._test_state_store_mock.ensure_observability_state.call_count, 3)
 
     def test_failure_and_recovery_tracking_only_changes_known_counters(self) -> None:
         service = _service()

@@ -22,11 +22,13 @@ from tests.support.dbus_gateway_adapter_harness import (
     logging,
     patch,
     process_io_module,
+    process_socket_module,
     read_json_file,
     runtime_module,
     tempfile,
     time,
 )
+from venus_evcharger.ipc.energy import EnergyRefreshRequest
 
 
 class GatewayProcessIoCases(GatewayAdapterContractCase):
@@ -143,8 +145,11 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             Path(adapter.paths.socket_path).parent.mkdir(parents=True, exist_ok=True)
-            adapter.start_socket()
+            server = MagicMock()
+            with patch.object(process_socket_module.socket, "socket", return_value=server):
+                adapter.start_socket()
             adapter.close_socket()
+            server.close.assert_called_once_with()
             install_mock(adapter.cache, "write_snapshot_files", MagicMock())
             adapter.publish_cache()
             adapter.cache.write_snapshot_files.assert_called_once()
@@ -164,12 +169,19 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
 
             self.assertEqual(adapter.process_non_write_command({}), "dropped")
             self.assertEqual(adapter.process_non_write_command({"kind": "nope"}), "dropped")
-            install_mock(adapter.read_executor, "refresh_requested_value", MagicMock(return_value="applied"))
-            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_value"}), "applied")
-            install_mock(adapter, "list_services", MagicMock(return_value=["svc"]))
-            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_services"}), "applied")
+            force_due = install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            refresh = EnergyRefreshRequest(
+                request_id="io-pv",
+                scope="pv",
+                max_age_seconds=0.0,
+                urgency="priority",
+                reason="io-contract",
+            )
+            self.assertEqual(adapter.process_non_write_command(refresh.to_command(source="test")), "applied")
+            force_due.assert_called_once_with(("pv_power_w",))
+            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_value"}), "dropped")
+            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_services"}), "dropped")
             adapter.circuit.degraded_until = time.time() + 10.0
-            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_services"}), "deferred")
             self.assertEqual(adapter.process_non_write_command({"kind": "introspect"}), "deferred")
             adapter.circuit.degraded_until = 0.0
             self.assertEqual(adapter.introspect_command({}), "dropped")

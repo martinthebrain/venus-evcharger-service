@@ -19,12 +19,9 @@ from venus_evcharger.dbus_adapter.read.aggregate import (
     AggregateStore,
 )
 from venus_evcharger.dbus_adapter.read.protocols import DbusReadAdapter
-from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS, pv_total_members
+from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
 from venus_evcharger.dbus_adapter.read.targets import ReadTarget, read_target
-from venus_evcharger.dbus_adapter.refresh_state import cached_refresh_outcome
-from venus_evcharger.dbus_gateway import dbus_path_key
-from venus_evcharger.dbus_gateway_command_types import CommandMapping
 
 DBUS_READ_ERRORS = DBUS_GATEWAY_OPERATION_ERRORS
 
@@ -50,50 +47,6 @@ class DbusReadExecutor:
         self._aggregates = AggregateStore()
         self._stale_after_by_key: dict[str, float | None] = {}
         self.last_operation_performed = False
-
-    def refresh_requested_value(self, command: CommandMapping) -> CommandOutcome:
-        key = str(command["key"] or "") if "key" in command else ""
-        cached_outcome = self._cached_refresh_outcome(command, key)
-        if cached_outcome is not None:
-            return cached_outcome
-        if key in self.adapter.read_scheduler.specs:
-            return self.poll_read_spec(key, self.adapter.read_scheduler.specs[key])
-        return self._refresh_direct_value(command)
-
-    def _cached_refresh_outcome(self, command: CommandMapping, key: str) -> CommandOutcome | None:
-        if key:
-            return cached_refresh_outcome(self.adapter.cache.values.get(key), command)
-        target = self._direct_refresh_target(command)
-        if target is None:
-            return None
-        cache_key = dbus_path_key(target.service, target.path)
-        return cached_refresh_outcome(self.adapter.cache.values.get(cache_key), command)
-
-    def _refresh_direct_value(self, command: CommandMapping) -> CommandOutcome:
-        target = self._direct_refresh_target(command)
-        if target is None:
-            return "dropped"
-        return self._read_direct_refresh(target)
-
-    @staticmethod
-    def _direct_refresh_target(command: CommandMapping) -> ReadTarget | None:
-        return read_target(command.get("service"), command.get("path"))
-
-    def _read_direct_refresh(self, target: ReadTarget) -> CommandOutcome:
-        try:
-            value = self.read_busitem(target.service, target.path)
-        except DbusOperationDeferred:
-            return "deferred"
-        except DBUS_READ_ERRORS as error:
-            self.adapter.cache.mark_error(target.cache_key, source=target.source, error=error)
-            logging.debug("DBus adapter direct refresh failed key=%s: %s", target.cache_key, error)
-            return "dropped"
-        self.adapter.cache.update_external_read(
-            target.cache_key,
-            value,
-            source=target.source,
-        )
-        return "applied"
 
     def poll_read_spec(self, key: str, spec: ReadSpec) -> CommandOutcome:
         self.last_operation_performed = False
@@ -191,10 +144,8 @@ class DbusReadExecutor:
         return self._poll_aggregate_step(key, ("services-sum", path, tuple(services)), [(service, path) for service in services])
 
     def _poll_pv_total_step(self, key: str, spec: ReadSpec) -> CommandOutcome:
-        members = self._in_progress_pv_total_members(key) or pv_total_members(
-            spec,
-            self._services_for_sum(spec),
-            self.adapter.cache.values,
+        members = self._in_progress_pv_total_members(key) or self.adapter.energy_discovery.pv_members(
+            spec, self.adapter.cache.values
         )
         if not members:
             raise RuntimeError("No available AC or DC PV source candidates")
@@ -212,10 +163,10 @@ class DbusReadExecutor:
     def _poll_first_service(self, key: str, spec: ReadSpec) -> CommandOutcome:
         path = _spec_text(spec, "path")
         prefix = _spec_text(spec, "prefix")
-        services = self._prefixed_services(prefix)
-        if not services:
+        service = self.adapter.energy_discovery.first_service(spec)
+        if service is None:
             raise RuntimeError(f"No cached services for prefix '{prefix}'")
-        target = read_target(services[0], path)
+        target = read_target(service, path)
         if target is None:
             return "dropped"
         value = self.read_busitem(target.service, target.path)
@@ -223,11 +174,7 @@ class DbusReadExecutor:
         return "applied"
 
     def _services_for_sum(self, spec: ReadSpec) -> list[str]:
-        explicit = _spec_text(spec, "service")
-        return [explicit] if explicit else self._prefixed_services(_spec_text(spec, "prefix"))
-
-    def _prefixed_services(self, prefix: str) -> list[str]:
-        return sorted(name for name in self.adapter.cache.services if name.startswith(prefix))
+        return self.adapter.energy_discovery.services_for(spec)
 
     def _poll_aggregate_step(
         self,

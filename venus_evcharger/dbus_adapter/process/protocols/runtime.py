@@ -4,15 +4,13 @@
 
 from __future__ import annotations
 
-import configparser
 import socket
 from collections.abc import Callable
 from typing import Protocol
 
-from venus_evcharger.dbus_adapter.contracts import DbusServiceLike
-from venus_evcharger.dbus_adapter.write.scheduler import DbusWriteScheduler
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, GatewayPaths
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.dbus_adapter.publication import GatewayPublicationRegistry
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusGatewayCommandInbox, GatewayPaths
+from venus_evcharger.ipc.command_types import CommandPayload
 
 
 class MainLoopLike(Protocol):  # pragma: no cover
@@ -34,7 +32,7 @@ class DbusAdapterSocketContext(Protocol):  # pragma: no cover
 
     paths: GatewayPaths
     cache: DbusCacheStore
-    commands: DbusCommandInbox
+    commands: DbusGatewayCommandInbox
     _server: socket.socket | None
 
     def handle_socket_payload(self, data: str) -> CommandPayload: ...
@@ -47,24 +45,13 @@ class DbusAdapterSocketContext(Protocol):  # pragma: no cover
     def health_snapshot(self) -> CommandPayload: ...
 
 
-class DbusAdapterIdentityContext(Protocol):  # pragma: no cover
-    """EV-charger DBus service identity surface required by ``DbusAdapterIdentity``."""
+class DbusAdapterPublicationContext(Protocol):  # pragma: no cover
+    """Publication registry surface required by ``DbusAdapterPublication``."""
 
-    config: configparser.ConfigParser
-    cache: DbusCacheStore
-    write_scheduler: DbusWriteScheduler
-    service_name: str
-    _dbusservice: DbusServiceLike | None
-    _dbusservice_registered: bool
+    publication_registry: GatewayPublicationRegistry
 
     @property
-    def dbus_service(self) -> DbusServiceLike: ...
+    def evcs_service_registered(self) -> bool: ...
+
     @property
-    def dbus_service_registered(self) -> bool: ...
-    def set_dbus_service(self, service: DbusServiceLike, *, registered: bool = False) -> None: ...
-    def ensure_dbus_service(self) -> None: ...
-    def register_dbus_service_name(self) -> None: ...
-    def register_identity_paths(self) -> None: ...
-    def identity_path_values(self, defaults: configparser.SectionProxy) -> CommandPayload: ...
-    def add_owned_path(self, path: str, value: object) -> None: ...
-    def configured_for_identity(self, defaults: configparser.SectionProxy) -> bool: ...
+    def registered_publication_path_count(self) -> int: ...

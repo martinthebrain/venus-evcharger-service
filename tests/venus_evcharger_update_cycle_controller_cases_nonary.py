@@ -1124,7 +1124,6 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             _publish_config_paths=MagicMock(return_value=False),
             _publish_diagnostic_paths=MagicMock(return_value=False),
             _publish_dbus_field=MagicMock(return_value=False),
-            _bump_update_index=MagicMock(),
             _save_runtime_state=MagicMock(),
             _ensure_observability_state=MagicMock(),
             _mode_uses_auto_logic=lambda mode: int(mode) in (1, 2),
@@ -1153,7 +1152,6 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         service._watchdog_recover.assert_called_once_with(200.0)
         service._publish_live_measurements.assert_called_once()
         service._set_health.assert_called_once_with("shelly-offline", cached=False)
-        service._bump_update_index.assert_called_once_with(200.0)
         self.assertEqual(service.virtual_startstop, 0)
         self.assertEqual(service.last_update, 200.0)
         self.assertEqual(service._last_successful_update_at, 200.0)

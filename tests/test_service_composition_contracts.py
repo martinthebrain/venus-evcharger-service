@@ -14,13 +14,12 @@ from requests.auth import HTTPDigestAuth
 
 from venus_evcharger.backend.shelly_io_types import ShellyHttpSession, ShellyPmStatus
 from venus_evcharger.control import ControlCommand, ControlResult
-from venus_evcharger.control.models import ControlCommandSource
+from venus_evcharger.control.models import ControlCommandName, ControlCommandSource
 from venus_evcharger.service import controller_owner as owner_module
 from venus_evcharger.service.auto_facade import ServiceAutoFacade
 from venus_evcharger.service.composition_guards import (
     require_auto_input_service,
     require_backend_target,
-    require_dbus_input_service,
     require_publish_service,
     require_update_cycle_service,
 )
@@ -43,48 +42,14 @@ class _CallLog:
 
 
 class _RuntimeDouble(_CallLog):
-    direct_publish = True
-
     def initialize_runtime_support(self) -> None:
         self.add("initialize_runtime_support")
-
-    def reset_system_bus(self) -> None:
-        self.add("reset_system_bus")
 
     def init_worker_state(self) -> None:
         self.add("init_worker_state")
 
     def ensure_worker_state(self) -> None:
         self.add("ensure_worker_state")
-
-    def mark_mainloop_thread(self) -> None:
-        self.add("mark_mainloop_thread")
-
-    def dbus_publish_direct_allowed(self) -> bool:
-        self.add("dbus_publish_direct_allowed")
-        return self.direct_publish
-
-    def assert_dbus_mainloop_thread(self, operation: str = "dbus access") -> None:
-        self.add("assert_dbus_mainloop_thread", operation)
-
-    def enqueue_dbus_publish_values(self, values: list[tuple[str, object]], current: float) -> bool:
-        self.add("enqueue_dbus_publish_values", values, current)
-        return True
-
-    def enqueue_dbus_publish_fields(self, fields: list[tuple[str, object]], current: float) -> bool:
-        self.add("enqueue_dbus_publish_fields", fields, current)
-        return True
-
-    def enqueue_dbus_update_index_bump(self, current: float) -> None:
-        self.add("enqueue_dbus_update_index_bump", current)
-
-    def enqueue_companion_dbus_publish(self, now: float | None = None) -> bool:
-        self.add("enqueue_companion_dbus_publish", now)
-        return True
-
-    def flush_dbus_publish_queue(self) -> bool:
-        self.add("flush_dbus_publish_queue")
-        return True
 
     def start_update_worker(self) -> None:
         self.add("start_update_worker")
@@ -187,19 +152,24 @@ class _WriteDouble(_CallLog):
         self.accepted = True
 
     @staticmethod
-    def _command(path: str, value: object, source: ControlCommandSource) -> ControlCommand:
-        del value
-        return ControlCommand(name="set_mode", path=path, value=1, source=source)
+    def _command(
+        name: ControlCommandName,
+        target: str,
+        value: object,
+        source: ControlCommandSource,
+    ) -> ControlCommand:
+        return ControlCommand(name=name, target=target, value=value, source=source)
 
     def build_control_command(
         self,
-        path: str,
+        name: ControlCommandName,
+        target: str,
         value: object,
         *,
-        source: ControlCommandSource = "dbus",
+        source: ControlCommandSource = "internal",
     ) -> ControlCommand:
-        self.add("build_control_command", path, value, source)
-        return self._command(path, value, source)
+        self.add("build_control_command", name, target, value, source)
+        return self._command(name, target, value, source)
 
     def build_control_command_from_payload(
         self,
@@ -208,21 +178,18 @@ class _WriteDouble(_CallLog):
         source: ControlCommandSource = "http",
     ) -> ControlCommand:
         self.add("build_control_command_from_payload", payload, source)
-        return self._command(str(payload["path"]), payload.get("value"), source)
+        return self._command(
+            str(payload["name"]),
+            str(payload["target"]),
+            payload.get("value"),
+            source,
+        )
 
     def handle_control_command(self, command: ControlCommand) -> ControlResult:
         self.add("handle_control_command", command)
         if self.accepted:
             return ControlResult.applied_result(command)
         return ControlResult.rejected_result(command)
-
-
-class _DbusInputDouble(_CallLog):
-    def invalidate_auto_pv_services(self) -> None:
-        self.add("invalidate_auto_pv_services")
-
-    def invalidate_auto_battery_service(self) -> None:
-        self.add("invalidate_auto_battery_service")
 
 
 class _AutoInputDouble(_CallLog):
@@ -341,8 +308,9 @@ class _PublisherDouble(_CallLog):
         self.add("publish_field", field, value, now, interval_seconds, force)
         return True
 
-    def bump_update_index(self, now: float | None = None) -> None:
-        self.add("bump_update_index", now)
+    def last_accepted_field(self, field: str) -> object:
+        self.add("last_accepted_field", field)
+        return 2
 
     def publish_live_measurements(
         self,
@@ -468,7 +436,6 @@ def _functions() -> ServiceFunctionBundle:
         script_path="service.py",
         config_path="config.ini",
         auto_input_helper_path="helper.py",
-        formatters={},
     )
 
 
@@ -482,7 +449,6 @@ def _owner() -> tuple[_OwnerDouble, _RuntimeDouble, _WriteDouble]:
         shelly=_ShellyDouble(),
         write=write,
         auto_input=_AutoInputDouble(),
-        dbus_input=_DbusInputDouble(),
         update=_UpdateDouble(),
         companion=_CompanionDouble(),
     )
@@ -540,8 +506,7 @@ class ServiceCompositionContractTests(unittest.TestCase):
             runtime=runtime,
             auto=auto,
             state=state,
-            _dbusservice={},
-            _dbus_publish_state={},
+            gateway_publication=object(),
             _dbus_live_publish_interval_seconds=1.0,
             _dbus_slow_publish_interval_seconds=5.0,
             _last_health_code=0,
@@ -555,54 +520,17 @@ class ServiceCompositionContractTests(unittest.TestCase):
             virtual_mode=1,
             _auto_input_helper_generation=1,
             _auto_input_runtime_instance_id="instance",
-            dbus_gateway_cache_path="/run/cache.json",
-            dbus_gateway_run_dir="/run",
-            dbus_gateway_max_age_seconds=10.0,
-            auto_dbus_backoff_base_seconds=1.0,
-            auto_dbus_backoff_max_seconds=60.0,
-            auto_pv_scan_interval_seconds=30.0,
-            auto_pv_service="",
-            auto_pv_service_prefix="com.victronenergy.pvinverter",
-            auto_pv_max_services=8,
-            auto_battery_scan_interval_seconds=30.0,
-            auto_battery_service="",
-            auto_battery_service_prefix="com.victronenergy.battery",
-            auto_battery_soc_path="/Soc",
-            auto_battery_capacity_wh=None,
-            auto_battery_power_path="/Dc/0/Power",
-            auto_battery_ac_power_path="/Ac/Power",
-            auto_battery_pv_power_path="/Dc/Pv/Power",
-            auto_battery_grid_interaction_path="/Ac/Grid/Power",
-            auto_battery_operating_mode_path="/Settings/CGwacs/BatteryLife/State",
-            auto_grid_service="com.victronenergy.system",
-            auto_energy_sources=(),
-            auto_use_combined_battery_soc=False,
-            _last_dbus_ok_at=0.0,
-            _last_pv_missing_warning=None,
-            _dbus_list_backoff_until=0.0,
-            _dbus_list_failures=0,
-            _resolved_auto_pv_services=[],
-            _auto_pv_last_scan=0.0,
-            _resolved_auto_battery_service=None,
-            _auto_battery_last_scan=0.0,
-            _resolved_auto_energy_services={},
-            _auto_energy_last_scan={},
-            _last_energy_learning_profiles={},
-            _last_energy_cluster={},
-            service_name="com.victronenergy.evcharger.http_60",
             _readback_store=object(),
             time_now=time_now,
         )
 
         self.assertIs(require_publish_service(host), host)
         self.assertIs(require_auto_input_service(host), host)
-        self.assertIs(require_dbus_input_service(host), host)
         self.assertIs(require_update_cycle_service(host), host)
         self.assertIs(require_backend_target(host), host)
         for requirement in (
             require_publish_service,
             require_auto_input_service,
-            require_dbus_input_service,
             require_update_cycle_service,
             require_backend_target,
         ):
@@ -611,10 +539,8 @@ class ServiceCompositionContractTests(unittest.TestCase):
 
     def test_auto_facade_coordinates_decisions_commands_and_invalidations(self) -> None:
         owner, runtime_controller, write = _owner()
-        async_enabled = False
         events: list[tuple[ControlCommand, ControlResult]] = []
-        runtime = ServiceRuntimeFacade(owner)
-        facade = ServiceAutoFacade(lambda: async_enabled, owner, runtime, lambda command, result: events.append((command, result)))
+        facade = ServiceAutoFacade(owner, lambda command, result: events.append((command, result)))
 
         self.assertTrue(facade.mode_uses_auto_logic(2))
         self.assertEqual(facade.normalize_mode("1"), 1)
@@ -622,39 +548,24 @@ class ServiceCompositionContractTests(unittest.TestCase):
         facade.mark_relay_changed(True, 3.0)
         facade.set_health("ok", True)
         self.assertTrue(facade.decide_relay(False, 100.0, 80.0, -10.0))
-        command = facade.command_from_write("/Mode", 1)
-        payload_command = facade.command_from_payload({"path": "/Mode", "value": 2})
+        command = facade.command("set_mode", "mode", 1)
+        payload_command = facade.command_from_payload(
+            {"name": "set_mode", "target": "mode", "value": 2}
+        )
         self.assertEqual(payload_command.source, "http")
         self.assertTrue(facade.handle_command(command).accepted)
-        self.assertTrue(facade.handle_dbus_write("/Mode", 1))
         write.accepted = False
-        self.assertFalse(facade.handle_dbus_write("/Mode", 1))
-        async_enabled = True
-        self.assertTrue(facade.handle_dbus_write("/Mode", 1))
-        self.assertEqual(runtime_controller.calls[-1][0], "enqueue_control_command")
-        facade.invalidate_pv_services()
-        facade.invalidate_battery_service()
-        self.assertEqual(len(events), 3)
+        self.assertFalse(facade.handle_command(command).accepted)
+        self.assertEqual(len(events), 2)
 
     def test_runtime_facade_exposes_the_typed_runtime_and_shelly_surface(self) -> None:
         owner, runtime_controller, _write = _owner()
         facade = ServiceRuntimeFacade(owner)
         session = _SessionDouble()
-        command = ControlCommand(name="set_mode", path="/Mode", value=1)
+        command = ControlCommand(name="set_mode", target="mode", value=1)
 
-        facade.reset_system_bus()
-        with self.assertRaisesRegex(RuntimeError, "Direct DBus access"):
-            facade.get_system_bus()
         facade.initialize_worker_state()
         facade.ensure_worker_state()
-        facade.mark_mainloop_thread()
-        self.assertTrue(facade.dbus_publish_direct_allowed())
-        facade.assert_dbus_mainloop_thread("publish")
-        self.assertTrue(facade.enqueue_dbus_publish_values([("/Mode", 1)], 1.0))
-        self.assertTrue(facade.enqueue_dbus_publish_fields([("mode", 1)], 1.0))
-        facade.enqueue_dbus_update_index_bump(1.0)
-        self.assertTrue(facade.enqueue_companion_dbus_publish(2.0))
-        self.assertTrue(facade.flush_dbus_publish_queue())
         facade.start_update_worker()
         self.assertTrue(facade.schedule_update_cycle())
         facade.start_control_command_worker()
@@ -694,10 +605,10 @@ class ServiceCompositionContractTests(unittest.TestCase):
         self.assertTrue(facade.set_relay(True)["output"])
         self.assertTrue(facade.phase_selection_requires_pause())
         self.assertEqual(facade.apply_phase_selection("P1"), "P1")
-        self.assertEqual(runtime_controller.calls[0][0], "reset_system_bus")
+        self.assertEqual(runtime_controller.calls[0][0], "init_worker_state")
 
     def test_state_and_update_facades_cover_all_routes(self) -> None:
-        owner, runtime_controller, _write = _owner()
+        owner, _runtime_controller, _write = _owner()
         runtime = ServiceRuntimeFacade(owner)
         state = ServiceStateFacade(owner, runtime)
         update = ServiceUpdateFacade(owner)
@@ -713,7 +624,7 @@ class ServiceCompositionContractTests(unittest.TestCase):
         self.assertIsInstance(state.load_config(), configparser.ConfigParser)
         state.ensure_publish_state()
         self.assertTrue(state.publish_field("mode", 2, 4.0, force=True))
-        state.bump_update_index(4.0)
+        self.assertEqual(state.last_accepted_field("mode"), 2)
         phase_data = {"L1": {"power": 100.0, "voltage": 230.0, "current": 0.4}}
         self.assertTrue(state.publish_live_measurements(100.0, 230.0, 0.4, phase_data, 4.0))
         self.assertTrue(state.publish_energy_time_measurements(2.0, {"L1": 2.0}, 60, 1.0, 4.0))
@@ -721,10 +632,7 @@ class ServiceCompositionContractTests(unittest.TestCase):
         self.assertTrue(state.publish_diagnostic_paths(4.0))
         state.start_companion_bridge()
         state.stop_companion_bridge()
-        runtime_controller.direct_publish = False
         self.assertTrue(state.publish_companion_bridge(4.0))
-        runtime_controller.direct_publish = True
-        self.assertTrue(state.publish_companion_bridge(5.0))
         self.assertTrue(update.update())
         self.assertTrue(update.sign_of_life())
 
@@ -736,7 +644,6 @@ class ServiceCompositionContractTests(unittest.TestCase):
         shelly = _ShellyDouble()
         write = _WriteDouble()
         auto_input = _AutoInputDouble()
-        dbus_input = _DbusInputDouble()
         update = _UpdateDouble()
         companion = _CompanionDouble()
         state = _StateDouble()
@@ -751,11 +658,10 @@ class ServiceCompositionContractTests(unittest.TestCase):
             "AutoDecisionController": auto,
             "DbusPublishController": publisher,
             "ShellyIoController": shelly,
-            "DbusWriteController": write,
+            "ControlWriteController": write,
             "AutoInputSupervisor": auto_input,
-            "DbusInputController": dbus_input,
             "UpdateCycleController": update,
-            "EnergyCompanionDbusBridge": companion,
+            "EnergyCompanionPublisher": companion,
         }
 
         def factory(value: object) -> Callable[..., object]:
@@ -773,7 +679,6 @@ class ServiceCompositionContractTests(unittest.TestCase):
             [
                 patch.object(owner_module, "require_publish_service", identity),
                 patch.object(owner_module, "require_auto_input_service", identity),
-                patch.object(owner_module, "require_dbus_input_service", identity),
                 patch.object(owner_module, "require_update_cycle_service", identity),
                 patch.object(owner_module, "build_service_backends", resolved_backends),
             ]
@@ -785,6 +690,8 @@ class ServiceCompositionContractTests(unittest.TestCase):
         owner = ServiceControllerOwner(service, _functions())
         with self.assertRaisesRegex(RuntimeError, "not initialized"):
             _ = owner.runtime
+        with self.assertRaisesRegex(RuntimeError, "semantic gateway operations are not initialized"):
+            owner._required_gateway_operations()
         controllers = owner.initialize_runtime()
         self.assertIs(controllers.runtime, runtime)
         self.assertIs(owner.runtime, controllers)

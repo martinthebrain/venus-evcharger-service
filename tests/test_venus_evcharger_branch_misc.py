@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
+
 sys.modules["vedbus"] = MagicMock()
 
 from venus_evcharger.backend.shelly_io_split import ShellyBackendReadback
@@ -44,7 +46,7 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
         )
         self.assertEqual(ReadbackResolver(SimpleNamespace(snapshot=MagicMock()), update_service).max_age_seconds(), 2.0)
 
-    def test_dbus_core_group_failure_uses_runtime_port(self) -> None:
+    def test_gateway_publication_failure_uses_runtime_port(self) -> None:
         runtime = SimpleNamespace(
             mark_failure=MagicMock(),
             warning_throttled=MagicMock(),
@@ -56,17 +58,24 @@ class TestShellyWallboxBranchMisc(unittest.TestCase):
             _dbus_slow_publish_interval_seconds=5.0,
             runtime=runtime,
         )
-        harness = DbusPublishCore(DbusPublishContext(service=service, age_seconds=lambda *_args: 0))
+        harness = DbusPublishCore(
+            DbusPublishContext(
+                service=service,
+                age_seconds=lambda *_args: 0,
+                gateway_diagnostics=gateway_diagnostics_reader(),
+            )
+        )
 
-        harness._publish_group_failure("diag", ["/Path"])
+        error = RuntimeError("mailbox rejected publication")
+        harness._publication_failure("diag", error)
 
         runtime.mark_failure.assert_called_once_with("dbus")
         runtime.warning_throttled.assert_called_once_with(
-            "dbus-publish-diag-failed",
+            "gateway-publication-diag-failed",
             1.0,
-            "DBus publish group %s failed for paths %s",
+            "Gateway publication group %s was not accepted: %s",
             "diag",
-            "/Path",
+            error,
         )
 
     def test_input_cache_and_offline_publish_cover_remaining_age_fallbacks(self) -> None:

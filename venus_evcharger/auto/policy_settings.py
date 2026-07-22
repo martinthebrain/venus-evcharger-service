@@ -25,7 +25,7 @@ def _scalar_input(value: object) -> bool | float | int | str:
 class AutoPolicySetting:
     """One externally writable setting backed directly by ``AutoPolicy``."""
 
-    dbus_path: str
+    target: str
     config_key: str
     value_kind: PolicyValueKind
     getter: PolicyGetter
@@ -54,168 +54,168 @@ class AutoPolicySetting:
 
 AUTO_POLICY_SETTINGS: tuple[AutoPolicySetting, ...] = (
     AutoPolicySetting(
-        "/Auto/StartSurplusWatts",
+        "auto_start_surplus_watts",
         "AutoStartSurplusWatts",
         "float",
         lambda policy: policy.normal_profile.start_surplus_watts,
         lambda policy, value: setattr(policy.normal_profile, "start_surplus_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/StopSurplusWatts",
+        "auto_stop_surplus_watts",
         "AutoStopSurplusWatts",
         "float",
         lambda policy: policy.normal_profile.stop_surplus_watts,
         lambda policy, value: setattr(policy.normal_profile, "stop_surplus_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/MinSoc",
+        "auto_min_soc",
         "AutoMinSoc",
         "float",
         lambda policy: policy.min_soc,
         lambda policy, value: setattr(policy, "min_soc", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/ResumeSoc",
+        "auto_resume_soc",
         "AutoResumeSoc",
         "float",
         lambda policy: policy.resume_soc,
         lambda policy, value: setattr(policy, "resume_soc", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/GridRecoveryStartSeconds",
+        "auto_grid_recovery_start_seconds",
         "AutoGridRecoveryStartSeconds",
         "float",
         lambda policy: policy.grid_recovery_start_seconds,
         lambda policy, value: setattr(policy, "grid_recovery_start_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/StopSurplusDelaySeconds",
+        "auto_stop_surplus_delay_seconds",
         "AutoStopSurplusDelaySeconds",
         "float",
         lambda policy: policy.stop_surplus_delay_seconds,
         lambda policy, value: setattr(policy, "stop_surplus_delay_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/StopSurplusVolatilityLowWatts",
+        "auto_stop_surplus_volatility_low_watts",
         "AutoStopSurplusVolatilityLowWatts",
         "float",
         lambda policy: policy.ewma.volatility_low_watts,
         lambda policy, value: setattr(policy.ewma, "volatility_low_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/StopSurplusVolatilityHighWatts",
+        "auto_stop_surplus_volatility_high_watts",
         "AutoStopSurplusVolatilityHighWatts",
         "float",
         lambda policy: policy.ewma.volatility_high_watts,
         lambda policy, value: setattr(policy.ewma, "volatility_high_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/ReferenceChargePowerWatts",
+        "auto_reference_charge_power_watts",
         "AutoReferenceChargePowerWatts",
         "float",
         lambda policy: policy.learn_charge_power.reference_power_watts,
         lambda policy, value: setattr(policy.learn_charge_power, "reference_power_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/LearnChargePowerEnabled",
+        "auto_learn_charge_power_enabled",
         "AutoLearnChargePower",
         "bool",
         lambda policy: policy.learn_charge_power.enabled,
         lambda policy, value: setattr(policy.learn_charge_power, "enabled", bool(value)),
     ),
     AutoPolicySetting(
-        "/Auto/LearnChargePowerMinWatts",
+        "auto_learn_charge_power_min_watts",
         "AutoLearnChargePowerMinWatts",
         "float",
         lambda policy: policy.learn_charge_power.min_watts,
         lambda policy, value: setattr(policy.learn_charge_power, "min_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/LearnChargePowerAlpha",
+        "auto_learn_charge_power_alpha",
         "AutoLearnChargePowerAlpha",
         "float",
         lambda policy: policy.learn_charge_power.alpha,
         lambda policy, value: setattr(policy.learn_charge_power, "alpha", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/LearnChargePowerStartDelaySeconds",
+        "auto_learn_charge_power_start_delay_seconds",
         "AutoLearnChargePowerStartDelaySeconds",
         "float",
         lambda policy: policy.learn_charge_power.start_delay_seconds,
         lambda policy, value: setattr(policy.learn_charge_power, "start_delay_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/LearnChargePowerWindowSeconds",
+        "auto_learn_charge_power_window_seconds",
         "AutoLearnChargePowerWindowSeconds",
         "float",
         lambda policy: policy.learn_charge_power.window_seconds,
         lambda policy, value: setattr(policy.learn_charge_power, "window_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/LearnChargePowerMaxAgeSeconds",
+        "auto_learn_charge_power_max_age_seconds",
         "AutoLearnChargePowerMaxAgeSeconds",
         "float",
         lambda policy: policy.learn_charge_power.max_age_seconds,
         lambda policy, value: setattr(policy.learn_charge_power, "max_age_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseSwitching",
+        "auto_phase_switching",
         "AutoPhaseSwitching",
         "bool",
         lambda policy: policy.phase.enabled,
         lambda policy, value: setattr(policy.phase, "enabled", bool(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhasePreferLowestWhenIdle",
+        "auto_phase_prefer_lowest_when_idle",
         "AutoPhasePreferLowestWhenIdle",
         "bool",
         lambda policy: policy.phase.prefer_lowest_phase_when_idle,
         lambda policy, value: setattr(policy.phase, "prefer_lowest_phase_when_idle", bool(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseUpshiftDelaySeconds",
+        "auto_phase_upshift_delay_seconds",
         "AutoPhaseUpshiftDelaySeconds",
         "float",
         lambda policy: policy.phase.upshift_delay_seconds,
         lambda policy, value: setattr(policy.phase, "upshift_delay_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseDownshiftDelaySeconds",
+        "auto_phase_downshift_delay_seconds",
         "AutoPhaseDownshiftDelaySeconds",
         "float",
         lambda policy: policy.phase.downshift_delay_seconds,
         lambda policy, value: setattr(policy.phase, "downshift_delay_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseUpshiftHeadroomWatts",
+        "auto_phase_upshift_headroom_watts",
         "AutoPhaseUpshiftHeadroomWatts",
         "float",
         lambda policy: policy.phase.upshift_headroom_watts,
         lambda policy, value: setattr(policy.phase, "upshift_headroom_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseDownshiftMarginWatts",
+        "auto_phase_downshift_margin_watts",
         "AutoPhaseDownshiftMarginWatts",
         "float",
         lambda policy: policy.phase.downshift_margin_watts,
         lambda policy, value: setattr(policy.phase, "downshift_margin_watts", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseMismatchRetrySeconds",
+        "auto_phase_mismatch_retry_seconds",
         "AutoPhaseMismatchRetrySeconds",
         "float",
         lambda policy: policy.phase.mismatch_retry_seconds,
         lambda policy, value: setattr(policy.phase, "mismatch_retry_seconds", float(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseMismatchLockoutCount",
+        "auto_phase_mismatch_lockout_count",
         "AutoPhaseMismatchLockoutCount",
         "int",
         lambda policy: policy.phase.mismatch_lockout_count,
         lambda policy, value: setattr(policy.phase, "mismatch_lockout_count", int(value)),
     ),
     AutoPolicySetting(
-        "/Auto/PhaseMismatchLockoutSeconds",
+        "auto_phase_mismatch_lockout_seconds",
         "AutoPhaseMismatchLockoutSeconds",
         "float",
         lambda policy: policy.phase.mismatch_lockout_seconds,
@@ -223,8 +223,8 @@ AUTO_POLICY_SETTINGS: tuple[AutoPolicySetting, ...] = (
     ),
 )
 
-AUTO_POLICY_SETTING_BY_PATH: dict[str, AutoPolicySetting] = {
-    setting.dbus_path: setting for setting in AUTO_POLICY_SETTINGS
+AUTO_POLICY_SETTING_BY_TARGET: dict[str, AutoPolicySetting] = {
+    setting.target: setting for setting in AUTO_POLICY_SETTINGS
 }
 AUTO_POLICY_SETTING_BY_CONFIG_KEY: dict[str, AutoPolicySetting] = {
     setting.config_key: setting for setting in AUTO_POLICY_SETTINGS
@@ -232,5 +232,5 @@ AUTO_POLICY_SETTING_BY_CONFIG_KEY: dict[str, AutoPolicySetting] = {
 
 
 def auto_policy_control_values(policy: AutoPolicy) -> dict[str, PolicyValue]:
-    """Return all writable Auto-policy values keyed by their control path."""
-    return {setting.dbus_path: setting.read(policy) for setting in AUTO_POLICY_SETTINGS}
+    """Return all writable Auto-policy values keyed by semantic target."""
+    return {setting.target: setting.read(policy) for setting in AUTO_POLICY_SETTINGS}

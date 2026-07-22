@@ -177,7 +177,7 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
         )
 
     def test_topology_and_adaptive_state_defaults_are_exact(self) -> None:
-        topology = "victron-bias-learning/v2/source=/service=/path=/energy="
+        topology = "victron-bias-learning/v3/source=/target=ess-grid-setpoint/energy="
         self.assertEqual(
             RuntimeStateSnapshotBuilder._victron_ess_balance_runtime_topology_key(self.empty, ""),
             topology,
@@ -280,21 +280,12 @@ class TestStateRuntimeSnapshotDefaultsContracts(unittest.TestCase):
         svc = SimpleNamespace()
         with (
             patch.object(snapshot_module, "_victron_ess_balance_energy_ids", return_value=["z", "a"]) as energy_ids,
-            patch.object(snapshot_module, "_victron_ess_balance_runtime_string", side_effect=("service", "/path")) as text,
+            patch.object(snapshot_module, "ess_learning_topology_key", return_value="topology") as topology_key,
         ):
             result = RuntimeStateSnapshotBuilder._victron_ess_balance_runtime_topology_key(svc, " source ")
-        self.assertEqual(
-            result,
-            "victron-bias-learning/v2/source=source/service=service/path=/path/energy=a,z",
-        )
+        self.assertEqual(result, "topology")
         energy_ids.assert_called_once_with(svc)
-        self.assertEqual(
-            text.call_args_list,
-            [
-                call(svc, "auto_battery_discharge_balance_victron_bias_service"),
-                call(svc, "auto_battery_discharge_balance_victron_bias_path"),
-            ],
-        )
+        topology_key.assert_called_once_with(" source ", ["z", "a"])
 
     def test_learning_and_adaptive_builders_forward_normalized_identity(self) -> None:
         svc = SimpleNamespace(

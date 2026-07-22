@@ -17,6 +17,8 @@ from venus_evcharger.core.contracts import (
     normalized_state_api_topology_fields,
     normalized_state_api_update_fields,
 )
+
+
 def _plain_state_mapping(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
@@ -100,8 +102,10 @@ class ControlStateCore:
                     "requested_phase_selection": getattr(service, "requested_phase_selection", "P1"),
                     "supported_phase_selections": list(supported),
                     "available_modes": [0, 1, 2],
-                    "service_name": getattr(service, "service_name", ""),
-                    "connection_name": getattr(service, "connection_name", ""),
+                    "instance_id": int(getattr(service, "deviceinstance", 0)),
+                    "product_name": str(getattr(service, "product_name", "")),
+                    "display_name": str(getattr(service, "custom_name", "")),
+                    "connection_name": str(getattr(service, "connection_name", "")),
                 },
             }
         )

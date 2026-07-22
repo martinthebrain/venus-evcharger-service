@@ -12,16 +12,27 @@ from venus_evcharger.dbus_adapter.health.queue import (
     queue_class_health,
     queue_health,
 )
-from venus_evcharger.dbus_gateway_command_types import CommandFileList
+from venus_evcharger.ipc.command_types import CommandFileList
+from venus_evcharger.ipc.energy import EnergyRefreshRequest
+from venus_evcharger.ipc.gateway_publication import publish_evcs_fields_command
 
 
 def pending_commands() -> CommandFileList:
+    gui_publication = publish_evcs_fields_command({"mode": 1}, priority="critical")
+    gui_publication["created_at"] = 98.0
+    fast_refresh = EnergyRefreshRequest(
+        "health-grid",
+        "grid",
+        0.0,
+        urgency="priority",
+    ).to_command(source="health-test")
+    fast_refresh["created_at"] = 96.0
     return [
         ("slow-old.json", {"queue_class": "read-slow", "created_at": 90.0}),
         ("slow-updated.json", {"queue_class": "read-slow", "created_at": 1.0, "updated_at": 97.0}),
         ("remote.json", {"queue_class": "remote-write", "created_at": 95.0}),
-        ("fast-fallback.json", {"kind": "refresh_value", "key": "grid_power_w", "created_at": 96.0}),
-        ("gui-fallback.json", {"kind": "publish_value", "path": "/Mode", "created_at": 98.0}),
+        ("fast-fallback.json", fast_refresh),
+        ("gui-fallback.json", gui_publication),
     ]
 
 

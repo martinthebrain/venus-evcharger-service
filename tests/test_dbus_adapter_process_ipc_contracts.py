@@ -156,11 +156,7 @@ class DbusAdapterIpcContractTests(unittest.TestCase):
             {
                 "snapshot",
                 "health",
-                "refresh_value",
-                "refresh_services",
-                "publish_desired",
-                "publish_value",
-                "set_value",
+                "refresh_energy_inputs",
             },
         )
 

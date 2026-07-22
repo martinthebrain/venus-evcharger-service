@@ -51,10 +51,9 @@ class AutoInputHelperProcessTests(unittest.TestCase):
             config_path = Path(tmp_dir) / "config.ini"
             config_path.write_text(source, encoding="utf-8")
             helper = AutoInputHelper(str(config_path), str(Path(tmp_dir) / "snapshot.json"), None, 1, "runtime")
-        self.assertIs(helper.catalog.gateway, helper.gateway)
-        self.assertIs(helper.resolver.gateway, helper.gateway)
-        self.assertIs(helper.sources.pv_grid, helper.pv_grid)
-        self.assertIs(helper.subscriptions.snapshots, helper.snapshots)
+        self.assertIs(helper.sources.gateway, helper.gateway)
+        self.assertIs(helper.refresh_coordinator.gateway, helper.gateway)
+        self.assertIs(helper.refresh_coordinator.snapshots, helper.snapshots)
 
     def test_signal_handler_requests_component_stop(self) -> None:
         helper = object.__new__(AutoInputHelper)
@@ -67,7 +66,7 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         helper.settings = helper_settings()
         helper.liveness = MagicMock()
         helper.snapshots = MagicMock()
-        helper.subscriptions = MagicMock()
+        helper.refresh_coordinator = MagicMock()
         loop = FakeLoop()
         with patch.object(helper, "_install_signal_handlers"), patch.object(helper, "_install_timers"), patch.object(
             helper, "_schedule_initial_refresh"
@@ -77,7 +76,7 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         helper.snapshots.write_lifecycle.assert_called_once_with("starting")
         helper.liveness.start.assert_called_once_with()
         helper.liveness.stop.assert_called_once_with()
-        helper.subscriptions.reset.assert_called_once_with()
+        helper.refresh_coordinator.reset.assert_called_once_with()
 
     def test_signal_installation_contains_foreign_runtime_errors(self) -> None:
         helper = object.__new__(AutoInputHelper)
@@ -92,7 +91,7 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         helper = object.__new__(AutoInputHelper)
         helper.settings = helper_settings()
         helper.snapshots = MagicMock()
-        helper.subscriptions = MagicMock()
+        helper.refresh_coordinator = MagicMock()
         helper.liveness = MagicMock()
         with patch("venus_evcharger_auto_input_helper.GLIB_RUNTIME.timeout_add") as timeout_add:
             helper._install_timers()
@@ -106,7 +105,7 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         helper = object.__new__(AutoInputHelper)
         helper.settings = replace(helper_settings(), poll_interval_seconds=0.001)
         helper.snapshots = MagicMock()
-        helper.subscriptions = MagicMock()
+        helper.refresh_coordinator = MagicMock()
         helper.liveness = MagicMock()
         with patch("venus_evcharger_auto_input_helper.GLIB_RUNTIME.timeout_add") as timeout_add:
             helper._install_timers()
@@ -116,13 +115,13 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         helper = object.__new__(AutoInputHelper)
         helper.liveness = MagicMock()
         helper.snapshots = MagicMock()
-        helper.subscriptions = MagicMock()
+        helper.refresh_coordinator = MagicMock()
         with patch("venus_evcharger_auto_input_helper.GLIB_RUNTIME.idle_add", side_effect=run_callback):
             helper.liveness.stop_requested.return_value = True
             helper._schedule_initial_refresh()
             helper.snapshots.write_lifecycle.assert_not_called()
             helper.liveness.stop_requested.return_value = False
-            helper.subscriptions.refresh.return_value = False
+            helper.refresh_coordinator.refresh.return_value = False
             helper._schedule_initial_refresh()
         helper.snapshots.write_lifecycle.assert_called_once_with("initializing")
 

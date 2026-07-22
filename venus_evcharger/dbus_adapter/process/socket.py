@@ -13,14 +13,14 @@ from collections.abc import Callable
 from contextlib import suppress
 
 from venus_evcharger.core.shared import compact_json
-from venus_evcharger.dbus_adapter.process.identity import DbusAdapterIdentity
 from venus_evcharger.dbus_adapter.process.protocols.runtime import DbusAdapterSocketContext
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.dbus_adapter.process.publication import DbusAdapterPublication
+from venus_evcharger.ipc.command_types import CommandPayload
 
 SocketHandler = Callable[[CommandPayload, str], CommandPayload]
 
 
-class DbusAdapterSocket(DbusAdapterIdentity):
+class DbusAdapterSocket(DbusAdapterPublication):
     _server: socket.socket | None
 
     def start_socket(self: DbusAdapterSocketContext) -> None:
@@ -78,11 +78,7 @@ class DbusAdapterSocket(DbusAdapterIdentity):
         return {
             "snapshot": self.socket_snapshot,
             "health": self.socket_health,
-            "refresh_value": self.socket_enqueue,
-            "refresh_services": self.socket_enqueue,
-            "publish_desired": self.socket_enqueue,
-            "publish_value": self.socket_enqueue,
-            "set_value": self.socket_enqueue,
+            "refresh_energy_inputs": self.socket_enqueue,
         }
 
     def socket_snapshot(

@@ -11,7 +11,7 @@ from contextlib import suppress
 import dbus
 
 from venus_evcharger.dbus_gateway import LatencyWindow
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.ipc.command_types import CommandPayload
 
 DBUS_OPERATION_KIND = "dbus"
 DBUS_EXCEPTION_ATTRIBUTE = "DBusException"

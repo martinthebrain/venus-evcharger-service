@@ -112,8 +112,8 @@ def _command_payload(namespace: argparse.Namespace) -> dict[str, Any]:
         "name": _normalized_command_name(namespace.name),
         "value": _parse_cli_value(namespace.value),
     }
-    if namespace.path:
-        payload["path"] = namespace.path
+    if namespace.target:
+        payload["target"] = namespace.target
     if namespace.detail:
         payload["detail"] = namespace.detail
     return payload
@@ -334,7 +334,7 @@ def _doctor_safe_write_namespace(
         {
             "name": "set-mode",
             "value": str(mode_value),
-            "path": "",
+            "target": "",
             "detail": "doctor-safe-write",
             "command_id": "doctor-safe-write",
             "idempotency_key": "doctor-safe-write",

@@ -9,6 +9,7 @@ from venus_evcharger.controllers.state_contracts import (
     string_key_items,
 )
 from venus_evcharger.core.contracts import non_negative_float_or_none, non_negative_int
+from venus_evcharger.core.ess_topology import ess_learning_topology_key
 
 
 class VictronEssRuntimeRestorer:
@@ -38,7 +39,7 @@ class VictronEssRuntimeRestorer:
         if raw_topology_key is None:
             return False
         payload_topology_key = str(raw_topology_key).strip()
-        return payload_topology_key in {expected_topology_key, expected_topology_key.replace("/v2", "/v1")}
+        return payload_topology_key == expected_topology_key
 
     @staticmethod
     def _normalized_victron_ess_balance_learning_text(
@@ -197,21 +198,7 @@ class VictronEssRuntimeRestorer:
 
     @staticmethod
     def _victron_ess_balance_runtime_topology_key(svc: object, source_id: str) -> str:
-        energy_ids = _victron_ess_balance_energy_ids(svc)
-        service_name = _victron_ess_balance_runtime_string(
-            svc, "auto_battery_discharge_balance_victron_bias_service"
-        )
-        path = _victron_ess_balance_runtime_string(
-            svc, "auto_battery_discharge_balance_victron_bias_path"
-        )
-        normalized_source_id = str(source_id).strip() if source_id else ""
-        return (
-            "victron-bias-learning/v2"
-            f"/source={normalized_source_id}"
-            f"/service={service_name}"
-            f"/path={path}"
-            f"/energy={','.join(sorted(energy_ids))}"
-        )
+        return ess_learning_topology_key(source_id, _victron_ess_balance_energy_ids(svc))
 
     @classmethod
     def restore_runtime_state(cls, svc: object, state: dict[str, object]) -> None:
@@ -441,7 +428,3 @@ def _victron_ess_balance_energy_ids(svc: object) -> list[str]:
         if normalized_id:
             energy_ids.append(normalized_id)
     return energy_ids
-
-
-def _victron_ess_balance_runtime_string(svc: object, attr_name: str) -> str:
-    return str(getattr(svc, attr_name, None) or "").strip()

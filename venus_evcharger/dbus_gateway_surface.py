@@ -13,14 +13,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
+from venus_evcharger.control.models import ControlCommandName, ControlRoute
 from venus_evcharger.core.contracts_control_surface import (
-    EVCS_CONTACTOR_AGE_PATHS,
-    EVCS_CONTACTOR_CONTROL_PATHS,
-    EVCS_PHASE_CONTROL_PATHS,
-    EVCS_PRIMARY_CONTROL_PATHS,
-    EVCS_REQUIRED_CONTROL_PATHS,
-    EVCS_SOFTWARE_UPDATE_CONTROL_PATHS,
-    EVCS_WRITABLE_PATHS,
+    CONTROL_DIRECT_TARGET_COMMANDS,
+    CONTROL_REQUIRED_TARGETS,
+    CONTROL_TARGET_BY_NAME,
+    CONTROL_WRITABLE_TARGETS,
+    CONTROL_WRITE_SNAPSHOT_TARGETS,
 )
 from venus_evcharger.dbus_gateway_core import CacheFreshnessKind
 
@@ -34,6 +33,127 @@ class VenusDbusPathContract:
     path: str
     role: VenusPathRole
     writeable: bool = False
+
+
+def _snake_case(value: str) -> str:
+    underscored = re.sub(r"(?<!^)(?=[A-Z])", "_", value)
+    return re.sub(r"[^a-zA-Z0-9]+", "_", underscored).strip("_").lower()
+
+
+_VENUS_DIRECT_CONTROL_PATHS = (
+    "/Mode",
+    "/AutoStart",
+    "/StartStop",
+    "/Enable",
+    "/PhaseSelection",
+)
+_VENUS_PHASE_STATUS_PATHS = (
+    "/PhaseSelectionActive",
+    "/SupportedPhaseSelections",
+    "/Auto/PhaseLockoutActive",
+    "/Auto/PhaseLockoutTarget",
+    "/Auto/PhaseLockoutReason",
+    "/Auto/PhaseSupportedConfigured",
+    "/Auto/PhaseSupportedEffective",
+    "/Auto/PhaseDegradedActive",
+)
+_VENUS_CONTACTOR_STATUS_PATHS = (
+    "/Auto/ContactorFaultCount",
+    "/Auto/ContactorLockoutActive",
+    "/Auto/ContactorLockoutReason",
+    "/Auto/ContactorLockoutSource",
+    "/Auto/ContactorLockoutAge",
+)
+_VENUS_CURRENT_SETTING_PATHS = ("/SetCurrent", "/MinCurrent", "/MaxCurrent")
+_VENUS_AUTO_RUNTIME_PATHS = (
+    "/Auto/StartSurplusWatts",
+    "/Auto/StopSurplusWatts",
+    "/Auto/MinSoc",
+    "/Auto/ResumeSoc",
+    "/Auto/StartDelaySeconds",
+    "/Auto/StopDelaySeconds",
+    "/Auto/ScheduledEnabledDays",
+    "/Auto/ScheduledFallbackDelaySeconds",
+    "/Auto/ScheduledLatestEndTime",
+    "/Auto/ScheduledNightCurrent",
+    "/Auto/DbusBackoffBaseSeconds",
+    "/Auto/DbusBackoffMaxSeconds",
+    "/Auto/GridRecoveryStartSeconds",
+    "/Auto/StopSurplusDelaySeconds",
+    "/Auto/StopSurplusVolatilityLowWatts",
+    "/Auto/StopSurplusVolatilityHighWatts",
+    "/Auto/ReferenceChargePowerWatts",
+    "/Auto/LearnChargePowerEnabled",
+    "/Auto/LearnChargePowerMinWatts",
+    "/Auto/LearnChargePowerAlpha",
+    "/Auto/LearnChargePowerStartDelaySeconds",
+    "/Auto/LearnChargePowerWindowSeconds",
+    "/Auto/LearnChargePowerMaxAgeSeconds",
+    "/Auto/PhaseSwitching",
+    "/Auto/PhasePreferLowestWhenIdle",
+    "/Auto/PhaseUpshiftDelaySeconds",
+    "/Auto/PhaseDownshiftDelaySeconds",
+    "/Auto/PhaseUpshiftHeadroomWatts",
+    "/Auto/PhaseDownshiftMarginWatts",
+    "/Auto/PhaseMismatchRetrySeconds",
+    "/Auto/PhaseMismatchLockoutCount",
+    "/Auto/PhaseMismatchLockoutSeconds",
+)
+_VENUS_PHASE_RESET_PATH = "/Auto/PhaseLockoutReset"
+_VENUS_CONTACTOR_RESET_PATH = "/Auto/ContactorLockoutReset"
+_VENUS_SOFTWARE_UPDATE_PATH = "/Auto/SoftwareUpdateRun"
+
+VENUS_CONTROL_PATHS = (
+    *_VENUS_DIRECT_CONTROL_PATHS,
+    *_VENUS_PHASE_STATUS_PATHS,
+    _VENUS_PHASE_RESET_PATH,
+    *_VENUS_CONTACTOR_STATUS_PATHS,
+    _VENUS_CONTACTOR_RESET_PATH,
+    *_VENUS_CURRENT_SETTING_PATHS,
+    *_VENUS_AUTO_RUNTIME_PATHS,
+    _VENUS_SOFTWARE_UPDATE_PATH,
+)
+VENUS_CONTROL_PATH_TO_TARGET = {path: _snake_case(path) for path in VENUS_CONTROL_PATHS}
+VENUS_CONTROL_TARGET_TO_PATH = {target: path for path, target in VENUS_CONTROL_PATH_TO_TARGET.items()}
+
+
+def _validate_control_target_coverage(
+    gateway_targets: Mapping[str, object],
+    domain_targets: Mapping[str, object],
+) -> None:
+    if set(gateway_targets) != set(domain_targets):
+        raise ValueError("Venus control paths and domain control targets are out of sync.")
+
+
+_validate_control_target_coverage(VENUS_CONTROL_TARGET_TO_PATH, CONTROL_TARGET_BY_NAME)
+
+
+def _command_for_target(target: str) -> ControlCommandName | None:
+    direct = CONTROL_DIRECT_TARGET_COMMANDS.get(target)
+    if direct is not None:
+        return direct
+    contract = CONTROL_TARGET_BY_NAME[target]
+    if contract.value_kind == "current":
+        return "set_current_setting"
+    if target.startswith("auto_") and contract.writable:
+        return "set_auto_runtime_setting"
+    return None
+
+
+VENUS_CONTROL_ROUTES = {
+    path: ControlRoute(command, target)
+    for path, target in VENUS_CONTROL_PATH_TO_TARGET.items()
+    if (command := _command_for_target(target)) is not None
+}
+VENUS_EV_CHARGER_WRITABLE_PATHS = frozenset(
+    VENUS_CONTROL_TARGET_TO_PATH[target] for target in CONTROL_WRITABLE_TARGETS
+)
+VENUS_EV_CHARGER_REQUIRED_CONTROL_PATHS = tuple(
+    VENUS_CONTROL_TARGET_TO_PATH[target] for target in CONTROL_REQUIRED_TARGETS
+)
+VENUS_EV_CHARGER_WRITE_SNAPSHOT_PATHS = tuple(
+    VENUS_CONTROL_TARGET_TO_PATH[target] for target in CONTROL_WRITE_SNAPSHOT_TARGETS
+)
 
 
 VENUS_EV_CHARGER_IDENTITY_PATHS = (
@@ -73,8 +193,6 @@ VENUS_EV_CHARGER_STATUS_PATHS = (
     "/Auto/StatusSource",
 )
 
-VENUS_EV_CHARGER_WRITABLE_PATHS = EVCS_WRITABLE_PATHS
-
 VENUS_EV_CHARGER_REQUIRED_CONTRACTS = tuple(
     VenusDbusPathContract(path, "identity") for path in VENUS_EV_CHARGER_IDENTITY_PATHS
 ) + tuple(VenusDbusPathContract(path, "measurement") for path in VENUS_EV_CHARGER_MEASUREMENT_PATHS) + tuple(
@@ -82,7 +200,7 @@ VENUS_EV_CHARGER_REQUIRED_CONTRACTS = tuple(
     for path in VENUS_EV_CHARGER_STATUS_PATHS
 ) + tuple(
     VenusDbusPathContract(path, "control", True)
-    for path in EVCS_REQUIRED_CONTROL_PATHS
+    for path in VENUS_EV_CHARGER_REQUIRED_CONTROL_PATHS
 )
 
 EVCS_LIVE_MEASUREMENT_FIELDS = {
@@ -121,9 +239,23 @@ def _field_name_from_venus_path(path: str) -> str:
     return _snake_case(str(path))
 
 
-def _snake_case(value: str) -> str:
-    underscored = re.sub(r"(?<!^)(?=[A-Z])", "_", value)
-    return re.sub(r"[^a-zA-Z0-9]+", "_", underscored).strip("_").lower()
+EVCS_PRIMARY_CONTROL_PATHS = (
+    *_VENUS_DIRECT_CONTROL_PATHS,
+    *_VENUS_PHASE_STATUS_PATHS[:2],
+    *_VENUS_CURRENT_SETTING_PATHS,
+    *_VENUS_AUTO_RUNTIME_PATHS,
+)
+EVCS_PHASE_CONTROL_PATHS = (
+    *_VENUS_PHASE_STATUS_PATHS[2:5],
+    _VENUS_PHASE_RESET_PATH,
+    *_VENUS_PHASE_STATUS_PATHS[5:],
+)
+EVCS_CONTACTOR_AGE_PATHS = (_VENUS_CONTACTOR_STATUS_PATHS[-1],)
+EVCS_CONTACTOR_CONTROL_PATHS = (
+    *_VENUS_CONTACTOR_STATUS_PATHS[:-1],
+    _VENUS_CONTACTOR_RESET_PATH,
+)
+EVCS_SOFTWARE_UPDATE_CONTROL_PATHS = (_VENUS_SOFTWARE_UPDATE_PATH,)
 
 
 EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
@@ -161,7 +293,7 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/Auto/SoftwareUpdateLastCheckAge",
     "/Auto/SoftwareUpdateLastRunAge",
     "/Auto/StaleSeconds",
-    "/Auto/DbusIntrospectionSnapshotAge",
+    "/Auto/GatewayDiagnosticsAge",
     "/Auto/PhaseCurrent",
     "/Auto/PhaseObserved",
     "/Auto/PhaseTarget",
@@ -179,9 +311,6 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/Auto/UpdateWorkerDurationSeconds",
     "/Auto/UpdateWorkerPending",
     "/Auto/UpdateWorkerSkipped",
-    "/Auto/PublishFlushDurationSeconds",
-    "/Auto/PublishQueueLagSeconds",
-    "/Auto/PublishQueueDropped",
     "/Auto/WriteCommandDurationSeconds",
     "/Auto/WriteCommandQueueLagSeconds",
     "/Auto/MainloopHeartbeatAge",
@@ -245,10 +374,10 @@ EVCS_CONFIG_AND_DIAGNOSTIC_PATHS = (
     "/Auto/ShellyLastError",
     "/Auto/ShellyRetryRemaining",
     "/Auto/ShellyConsecutiveErrors",
-    "/Auto/DbusIntrospectionState",
-    "/Auto/DbusIntrospectionQueueDepth",
-    "/Auto/DbusIntrospectionServiceCount",
-    "/Auto/DbusIntrospectionUnusablePathCount",
+    "/Auto/GatewayDiscoveryState",
+    "/Auto/GatewayDiscoveryPendingWork",
+    "/Auto/GatewayDiscoveredSourceCount",
+    "/Auto/GatewayUnusableSourceCount",
 )
 
 EVCS_FIELD_TO_PATH.update({
@@ -273,6 +402,16 @@ def evcs_fields_to_paths(fields: Mapping[str, object]) -> dict[str, object]:
         if path:
             paths[path] = value
     return paths
+
+
+def venus_control_route(path: str) -> ControlRoute | None:
+    """Resolve a writable Venus path to its transport-neutral control route."""
+    return VENUS_CONTROL_ROUTES.get(str(path))
+
+
+def venus_path_for_control_target(target: str) -> str:
+    """Return the adapter-owned Venus path for one semantic control target."""
+    return VENUS_CONTROL_TARGET_TO_PATH.get(str(target), "")
 
 
 def missing_required_venus_paths(registered_paths: set[str] | frozenset[str]) -> tuple[str, ...]:

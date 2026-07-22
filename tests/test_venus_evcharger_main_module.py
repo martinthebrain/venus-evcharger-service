@@ -47,12 +47,9 @@ class TestShellyWallboxMainModule(unittest.TestCase):
         state_factory.assert_called_once_with(owner, runtime)
         update_factory.assert_called_once_with(owner)
         control_factory.assert_called_once_with(service)
-        async_enabled, auto_owner, auto_runtime, event_publisher = auto_factory.call_args.args
+        auto_owner, event_publisher = auto_factory.call_args.args
         self.assertIs(auto_owner, owner)
-        self.assertIs(auto_runtime, runtime)
         self.assertIs(event_publisher, control.publish_command_event)
-        service._control_command_async_enabled = True
-        self.assertTrue(async_enabled())
         owner.bootstrap.initialize_service.assert_called_once_with()
 
     def test_main_delegates_with_state_facade_config_path(self) -> None:

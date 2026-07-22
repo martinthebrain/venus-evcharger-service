@@ -40,7 +40,7 @@ class TestControlRuntimeContracts(unittest.TestCase):
     def test_command_and_result_payloads_have_one_exact_shape(self) -> None:
         command = ControlCommand(
             name="set_mode",
-            path="/Mode",
+            target="mode",
             value=2,
             source="http",
             detail="scheduled",
@@ -64,7 +64,7 @@ class TestControlRuntimeContracts(unittest.TestCase):
             ControlRuntime.command_payload(command, "ignored"),
             {
                 "name": "set_mode",
-                "path": "/Mode",
+                "target": "mode",
                 "value": 2,
                 "source": "http",
                 "detail": "scheduled",

@@ -1,18 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Helpers for capturing and restoring DBus write-path state."""
+"""Helpers for capturing and restoring reversible control state."""
 
 from __future__ import annotations
 
 import copy
-import time
 from collections import deque
-from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
-from venus_evcharger.controllers.errors import WRITE_SNAPSHOT_DBUS_ERRORS
-from venus_evcharger.core.contracts_control_surface import EVCS_WRITE_SNAPSHOT_PATHS
 
-SNAPSHOT_DBUS_PATHS = EVCS_WRITE_SNAPSHOT_PATHS
 SNAPSHOT_ATTRS = (
     "virtual_mode",
     "virtual_autostart",
@@ -74,7 +69,6 @@ SNAPSHOT_VALUE_ATTRS = (
     "_stop_smoothed_grid_power",
 )
 SNAPSHOT_MAPPING_ATTRS = (
-    "_dbus_publish_state",
     "_worker_snapshot",
     "_last_pm_status",
     "_last_confirmed_pm_status",
@@ -113,56 +107,6 @@ def _snapshot_mappings(svc: Any, attr_names: tuple[str, ...]) -> dict[str, dict[
     return captured
 
 
-def _snapshot_dbus_paths(svc: Any, dbus_paths: tuple[str, ...]) -> dict[str, Any]:
-    """Capture writable DBus paths from local publish bookkeeping only."""
-    captured = _snapshot_publish_state_paths(svc, dbus_paths)
-    if not _direct_dbus_snapshot_allowed(svc):
-        return captured
-    captured.update(_snapshot_direct_dbus_paths(svc, dbus_paths, captured))
-    return captured
-
-
-def _snapshot_publish_state_paths(svc: Any, dbus_paths: tuple[str, ...]) -> dict[str, Any]:
-    """Capture DBus path values from the publish-state cache."""
-    publish_state = getattr(svc, "_dbus_publish_state", None)
-    captured: dict[str, Any] = {}
-    if not isinstance(publish_state, dict):
-        return captured
-    for path in dbus_paths:
-        entry = publish_state.get(path)
-        if isinstance(entry, dict) and "value" in entry:
-            captured[path] = copy.deepcopy(entry["value"])
-    return captured
-
-
-def _direct_dbus_snapshot_allowed(svc: Any) -> bool:
-    """Return whether direct DBus reads are safe in the current thread."""
-    direct_allowed = getattr(svc, "_dbus_publish_direct_allowed", None)
-    if callable(direct_allowed) and not bool(direct_allowed()):
-        return False
-    return True
-
-
-def _snapshot_direct_dbus_paths(
-    svc: Any,
-    dbus_paths: tuple[str, ...],
-    captured: dict[str, Any],
-) -> dict[str, Any]:
-    """Capture uncached DBus paths directly on best effort."""
-    dbus_service = getattr(svc, "_dbusservice", None)
-    direct: dict[str, Any] = {}
-    if dbus_service is None:
-        return direct
-    for path in dbus_paths:
-        if path in captured:
-            continue
-        try:
-            direct[path] = dbus_service[path]
-        except WRITE_SNAPSHOT_DBUS_ERRORS:
-            continue
-    return direct
-
-
 def capture_write_state(
     svc: Any,
     *,
@@ -170,7 +114,6 @@ def capture_write_state(
     deque_attrs: tuple[str, ...] = SNAPSHOT_DEQUE_ATTRS,
     value_attrs: tuple[str, ...] = SNAPSHOT_VALUE_ATTRS,
     mapping_attrs: tuple[str, ...] = SNAPSHOT_MAPPING_ATTRS,
-    dbus_paths: tuple[str, ...] = SNAPSHOT_DBUS_PATHS,
 ) -> dict[str, Any]:
     """Capture mutable write-path state so failed writes can be rolled back."""
     return {
@@ -178,7 +121,6 @@ def capture_write_state(
         "deques": _snapshot_deques(svc, deque_attrs),
         "values": _snapshot_attrs(svc, value_attrs),
         "mappings": _snapshot_mappings(svc, mapping_attrs),
-        "dbus_paths": _snapshot_dbus_paths(svc, dbus_paths),
     }
 
 
@@ -204,38 +146,6 @@ def _restore_mappings(svc: Any, saved_mappings: dict[str, dict[str, Any]]) -> No
         setattr(svc, attr_name, copy.deepcopy(saved))
 
 
-def _restore_dbus_paths(svc: Any, saved_paths: dict[str, Any]) -> None:
-    """Restore writable DBus paths on best effort without worker-thread DBus access."""
-    if not saved_paths:
-        return
-    if _restore_dbus_paths_via_queue(svc, saved_paths):
-        return
-    _restore_dbus_paths_direct(svc, saved_paths)
-
-
-def _restore_dbus_paths_via_queue(svc: Any, saved_paths: dict[str, Any]) -> bool:
-    """Restore DBus paths through the mainloop publish queue when available."""
-    enqueue_publish = getattr(svc, "_enqueue_dbus_publish_values", None)
-    if not callable(enqueue_publish):
-        return False
-    now_func = getattr(svc, "time_now", None)
-    current = float(cast(Callable[[], float], now_func)()) if callable(now_func) else time.time()
-    enqueue_publish(list(saved_paths.items()), current)
-    return True
-
-
-def _restore_dbus_paths_direct(svc: Any, saved_paths: dict[str, Any]) -> None:
-    """Restore DBus paths directly as a fallback."""
-    dbus_service = getattr(svc, "_dbusservice", None)
-    if dbus_service is None:
-        return
-    for path, value in saved_paths.items():
-        try:
-            dbus_service[path] = value
-        except WRITE_SNAPSHOT_DBUS_ERRORS:
-            continue
-
-
 def restore_write_state(svc: Any, snapshot: dict[str, Any]) -> None:
     """Restore one previously captured write-path snapshot."""
     for attr_name, value in snapshot["attrs"].items():
@@ -244,4 +154,3 @@ def restore_write_state(svc: Any, snapshot: dict[str, Any]) -> None:
         setattr(svc, attr_name, value)
     _restore_deques(svc, snapshot["deques"])
     _restore_mappings(svc, snapshot["mappings"])
-    _restore_dbus_paths(svc, snapshot.get("dbus_paths", {}))

@@ -5,6 +5,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from venus_evcharger.ports.gateway_operations import (
+    EssSetpointIntent,
+    GatewayOperationReceipt,
+    GxRelaySetRequest,
+)
 from venus_evcharger.update.victron_ess_balance_adaptive import VictronEssAdaptiveTuner
 from venus_evcharger.update.victron_ess_balance_apply import VictronEssBalanceExecutor
 from venus_evcharger.update.victron_ess_balance_apply_pid import VictronEssPidController
@@ -17,6 +22,33 @@ from venus_evcharger.update.victron_ess_balance_recommendation_support import Vi
 from venus_evcharger.update.victron_ess_balance_safety import VictronEssSafetyController
 from venus_evcharger.update.victron_ess_balance_safety_support import VictronEssSafetyRecovery
 from venus_evcharger.update.victron_ess_balance_scoring import VictronEssTelemetryScorer
+
+
+class AcceptingGatewayOperations:
+    """Semantic gateway test port that records accepted ESS operations."""
+
+    def __init__(self) -> None:
+        self.ess_operations: list[tuple[float, EssSetpointIntent]] = []
+
+    def read_gx_relay_state(self, relay_index: int, *, max_age_seconds: float) -> int | None:
+        del relay_index, max_age_seconds
+        return None
+
+    def set_gx_relay_enabled(
+        self,
+        request: GxRelaySetRequest,
+    ) -> GatewayOperationReceipt:
+        del request
+        return GatewayOperationReceipt(accepted=True, command_id="relay")
+
+    def set_ess_grid_setpoint(
+        self,
+        watts: float,
+        *,
+        intent: EssSetpointIntent,
+    ) -> GatewayOperationReceipt:
+        self.ess_operations.append((float(watts), intent))
+        return GatewayOperationReceipt(accepted=True, command_id="ess")
 
 
 @dataclass(frozen=True)
@@ -40,7 +72,7 @@ def build_victron_ess_components() -> VictronEssComponentGraph:
     scorer = VictronEssTelemetryScorer()
     profiles = VictronEssLearningProfiles(sources, scorer)
     pid = VictronEssPidController(sources)
-    writer = VictronEssSetpointWriter(sources)
+    writer = VictronEssSetpointWriter(sources, AcceptingGatewayOperations())
     recovery = VictronEssSafetyRecovery(sources, profiles)
     safety = VictronEssSafetyController(sources, pid, recovery)
     policy = VictronEssRecommendationPolicy()

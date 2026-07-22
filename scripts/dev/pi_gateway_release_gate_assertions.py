@@ -22,9 +22,9 @@ def exercise_gui_write(pi: PiSession, service: str, run_dir: str, remote_dir: st
     original = _gateway_get(pi, run_dir, service, "/Mode")
     target = 1 if _float_value(original) != 1.0 else 0
     mode_target = (service, "/Mode")
-    _enqueue_gateway_write(pi, remote_dir, run_dir, mode_target, target)
+    _enqueue_core_control(pi, remote_dir, run_dir, target)
     _wait_for_gateway_value(pi, run_dir, mode_target, target, timeout=8.0)
-    _enqueue_gateway_write(pi, remote_dir, run_dir, mode_target, original)
+    _enqueue_core_control(pi, remote_dir, run_dir, original)
     _wait_for_gateway_value(pi, run_dir, mode_target, original, timeout=8.0)
 
 
@@ -40,33 +40,25 @@ def _gateway_get(pi: PiSession, run_dir: str, service: str, path: str) -> object
     return entry.get("value")
 
 
-def _enqueue_gateway_write(
+def _enqueue_core_control(
     pi: PiSession,
     remote_dir: str,
     run_dir: str,
-    target: tuple[str, str],
     value: object,
 ) -> None:
-    service, path = target
-    payload = {
-        "kind": "set_value",
-        "source": "pi-release-gate",
-        "service": service,
-        "path": path,
-        "value": value,
-        "priority": "user",
-        "coalesce_key": f"release-gate:{service}:{path}",
-    }
     code = (
         "import json;"
-        "from venus_evcharger.dbus_gateway import GatewayClient,gateway_paths;"
-        f"client=GatewayClient(gateway_paths({run_dir!r}),timeout_seconds=2.0);"
-        f"print(json.dumps(client.send({payload!r})))"
+        "from venus_evcharger.dbus_gateway import gateway_paths;"
+        "from venus_evcharger.ipc.core_commands import CoreCommandMailbox,core_control_command_payload;"
+        f"mailbox=CoreCommandMailbox(gateway_paths({run_dir!r}).core_command_dir);"
+        f"command=core_control_command_payload('set_mode','mode',{value!r},"
+        "source='control-surface',origin='pi-release-gate');"
+        "print(json.dumps({'ok':bool(mailbox.enqueue(command))}))"
     )
     raw = pi.ssh(f"cd {shlex.quote(remote_dir)} && python3 -c {shlex.quote(code)}", timeout=8.0)
-    response = json_object(raw, detail="gateway write response")
+    response = json_object(raw, detail="core control response")
     if response.get("ok") is not True:
-        raise GateFailure(f"gateway rejected write for {service}{path}: {response!r}")
+        raise GateFailure(f"core mailbox rejected mode write: {response!r}")
 
 
 def _float_value(value: object) -> float:

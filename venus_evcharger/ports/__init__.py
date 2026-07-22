@@ -2,11 +2,11 @@
 """Typed controller ports packaged under ``venus_evcharger.ports``."""
 
 from .auto import AutoDecisionPort
-from .dbus import DbusInputPort
+from .gateway_publication import GatewayPublicationPort
 from .write import WriteControllerPort
 
 __all__ = [
     "WriteControllerPort",
-    "DbusInputPort",
     "AutoDecisionPort",
+    "GatewayPublicationPort",
 ]

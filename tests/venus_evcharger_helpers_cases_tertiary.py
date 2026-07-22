@@ -102,7 +102,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.controllers.runtime.shelly.publish_local_pm_status = MagicMock()
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
-            result = service.auto.handle_dbus_write("/StartStop", 1)
+            result = handle_control_surface_write(service, "set_start_stop", "start_stop", 1)
 
         self.assertTrue(result)
         service.controllers.runtime.shelly.queue_relay_command.assert_called_once_with(True, 100.0)
@@ -129,7 +129,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.controllers.runtime.shelly.publish_local_pm_status = MagicMock()
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
-            result = service.auto.handle_dbus_write("/Enable", 1)
+            result = handle_control_surface_write(service, "set_enable", "enable", 1)
 
         self.assertTrue(result)
         service.controllers.runtime.shelly.queue_relay_command.assert_called_once_with(True, 100.0)
@@ -155,7 +155,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.controllers.runtime.shelly.queue_relay_command = MagicMock()
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
-            result = service.auto.handle_dbus_write("/Enable", 1)
+            result = handle_control_surface_write(service, "set_enable", "enable", 1)
 
         self.assertTrue(result)
         service.controllers.runtime.shelly.queue_relay_command.assert_not_called()
@@ -180,7 +180,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.controllers.runtime.shelly.queue_relay_command = MagicMock()
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
-            result = service.auto.handle_dbus_write("/StartStop", 1)
+            result = handle_control_surface_write(service, "set_start_stop", "start_stop", 1)
 
         self.assertTrue(result)
         service.controllers.runtime.shelly.queue_relay_command.assert_not_called()
@@ -201,7 +201,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.auto_samples = deque([(205.0, 2200.0, -2200.0)])
         service._dbusservice = {"/Mode": 1, "/StartStop": 1}
 
-        result = service.auto.handle_dbus_write("/Mode", 0)
+        result = handle_control_surface_write(service, "set_mode", "mode", 0)
 
         self.assertTrue(result)
         self.assertEqual(service.virtual_mode, 0)
@@ -222,7 +222,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.auto_samples = deque()
         service._dbusservice = {"/Mode": 0, "/StartStop": 0, "/Enable": 1}
 
-        result = service.auto.handle_dbus_write("/Mode", 1)
+        result = handle_control_surface_write(service, "set_mode", "mode", 1)
 
         self.assertTrue(result)
         self.assertEqual(service.virtual_mode, 1)
@@ -241,7 +241,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.auto_samples = deque()
         service._dbusservice = {"/Mode": 0, "/StartStop": 0, "/Enable": 1}
 
-        result = service.auto.handle_dbus_write("/Mode", 2)
+        result = handle_control_surface_write(service, "set_mode", "mode", 2)
 
         self.assertTrue(result)
         self.assertEqual(service.virtual_mode, 2)
@@ -266,7 +266,7 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         service.controllers.runtime.shelly.publish_local_pm_status = MagicMock()
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=200.0):
-            result = service.auto.handle_dbus_write("/Mode", 1)
+            result = handle_control_surface_write(service, "set_mode", "mode", 1)
 
         self.assertTrue(result)
         self.assertEqual(service.virtual_mode, 1)

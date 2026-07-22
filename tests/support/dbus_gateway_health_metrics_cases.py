@@ -70,8 +70,18 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
             ("slow-old.json", {"queue_class": "read-slow", "created_at": 90.0}),
             ("slow-updated.json", {"queue_class": "read-slow", "created_at": 1.0, "updated_at": 97.0}),
             ("remote.json", {"queue_class": "remote-write", "created_at": 95.0}),
-            ("fast-fallback.json", {"kind": "refresh_value", "key": "grid_power_w", "created_at": 96.0}),
-            ("gui-fallback.json", {"kind": "publish_value", "path": "/Mode", "created_at": 98.0}),
+            (
+                "fast-fallback.json",
+                {"kind": "refresh_energy_inputs", "scope": "grid", "created_at": 96.0},
+            ),
+            (
+                "gui-fallback.json",
+                {
+                    "kind": "publish_evcs_fields",
+                    "publication_priority": "critical",
+                    "created_at": 98.0,
+                },
+            ),
         ]
         core_pending = [
             ("core.json", {"created_at": 80.0}),

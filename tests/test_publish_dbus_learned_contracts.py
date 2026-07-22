@@ -6,12 +6,19 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
 from venus_evcharger.publish.dbus_learned import DbusPublishLearned, _optional_binary_flag_int
 from venus_evcharger.publish.dbus_shared import DbusPublishContext
 
 
 def _learned(service: object) -> DbusPublishLearned:
-    return DbusPublishLearned(DbusPublishContext(service=service, age_seconds=lambda _timestamp, _now: 0))
+    return DbusPublishLearned(
+        DbusPublishContext(
+            service=service,
+            age_seconds=lambda _timestamp, _now: 0,
+            gateway_diagnostics=gateway_diagnostics_reader(),
+        )
+    )
 
 
 def _service(**overrides: object) -> SimpleNamespace:

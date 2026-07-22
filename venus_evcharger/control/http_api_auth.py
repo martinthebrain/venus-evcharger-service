@@ -180,14 +180,6 @@ class ControlApiHttpAuthenticator:
 
     def required_scope_for_command(self, payload: dict[str, Any]) -> str:
         command_name = str(payload.get("name", "")).strip()
-        if not command_name and "path" in payload:
-            try:
-                command_name = self._service.control_command_from_payload(
-                    {**payload, "command_id": "", "idempotency_key": ""},
-                    source="http",
-                ).name
-            except ValueError:
-                return "control_admin"
         return CONTROL_API_COMMAND_SCOPE_REQUIREMENTS.get(command_name, "control_admin")
 
     @staticmethod

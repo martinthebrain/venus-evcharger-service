@@ -297,7 +297,7 @@ class TestShellyWallboxHelpersQuinary(ShellyWallboxHelpersTestBase):
 
         service.virtual_mode = 0
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=132.0):
-            self.assertTrue(service.auto.handle_dbus_write("/StartStop", 1))
+            self.assertTrue(handle_control_surface_write(service, "set_start_stop", "start_stop", 1))
 
         service.virtual_mode = 1
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=150.0):

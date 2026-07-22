@@ -8,11 +8,11 @@ import os
 import time
 from typing import Any
 
-from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.core.common_auto import _fresh_confirmed_relay_output
 from venus_evcharger.core.contracts_basic import normalized_auto_state_pair
 from venus_evcharger.core.contracts_outward import sanitized_auto_metrics
 from venus_evcharger.core.shared import write_text_atomically
+from venus_evcharger.ipc.gateway_pressure import service_gateway_pressure_policy
 from venus_evcharger.runtime.contracts import AuditFieldsPort, RuntimeStateStorePort
 
 AUDIT_LOG_READ_ERRORS = (OSError, RuntimeError, UnicodeDecodeError)
@@ -325,7 +325,7 @@ class RuntimeAuditLogger:
         svc = self.service
         if not path:
             return False
-        cleanup_interval = float(service_dbus_backpressure_policy(svc).audit_cleanup_interval_seconds(300.0))
+        cleanup_interval = float(service_gateway_pressure_policy(svc).audit_cleanup_interval_seconds(300.0))
         return (now - float(svc._last_auto_audit_cleanup_at)) >= cleanup_interval
 
     @staticmethod
@@ -388,7 +388,7 @@ class RuntimeAuditLogger:
             return
         now = svc.time_now()
         audit_key = self._auto_audit_key(svc, reason, cached)
-        repeat_seconds = service_dbus_backpressure_policy(svc).audit_repeat_seconds(
+        repeat_seconds = service_gateway_pressure_policy(svc).audit_repeat_seconds(
             float(svc.auto_audit_log_repeat_seconds)
         )
         last_audit_key = svc._last_auto_audit_key

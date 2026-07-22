@@ -8,21 +8,18 @@ import time
 from collections import deque
 from collections.abc import Mapping
 
-import dbus
-
 from venus_evcharger.core.shared import config_get_float
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.health.slo import GatewayPressureState, pressure_limited_queue_budgets
 from venus_evcharger.dbus_adapter.jsonl import append_jsonl
 from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
-from venus_evcharger.dbus_adapter.write.publish import DbusWriteSchedulerPublish
+from venus_evcharger.dbus_adapter.write.semantic import DbusWriteSchedulerSemantic
 from venus_evcharger.dbus_adapter.write.support import (
     float_or_zero,
     lifecycle_payload,
     priority_rank,
 )
-from venus_evcharger.dbus_gateway import command_queue_class, dbus_path_key
-from venus_evcharger.dbus_gateway_command_types import CommandFileList, CommandMapping, CommandPayload
+from venus_evcharger.dbus_gateway import command_queue_class
+from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping, CommandPayload
 
 _QUEUE_CLASS_RANKS = {
     "startup/register": 0,
@@ -42,7 +39,7 @@ _AGING_QUEUE_CLASSES = {"read-fast", "read-slow", "discovery", "introspection"}
 UNKNOWN_QUEUE_CLASS_RANK = max(_QUEUE_CLASS_RANKS.values()) + 1
 
 
-class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
+class DbusWriteSchedulerHealth(DbusWriteSchedulerSemantic):
     adapter: DbusWriteSchedulerAdapter
     base_queue_class_budgets: dict[str, int]
     dynamic_local_publish_burst_limit: int
@@ -50,8 +47,6 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
     local_publish_burst_limit: int
     local_publish_tick_budget_seconds: float
     queue_class_budgets: dict[str, int]
-    startup_registration_batch_limit: int
-    startup_registration_tick_budget_seconds: float
     _budget_events: deque[tuple[float, str]]
     _lifecycle_counts: dict[str, int]
     _lifecycle_events: deque[tuple[float, str, str]]
@@ -67,8 +62,6 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
             "local_publish_burst_limit": self.local_publish_burst_limit,
             "dynamic_local_publish_burst_limit": self.dynamic_local_publish_burst_limit,
             "local_publish_tick_budget_ms": self.local_publish_tick_budget_seconds * 1000.0,
-            "startup_registration_batch_limit": self.startup_registration_batch_limit,
-            "startup_registration_tick_budget_ms": self.startup_registration_tick_budget_seconds * 1000.0,
             "queue_class_budgets": dict(sorted(self.queue_class_budgets.items())),
             "queue_class_usage_1s": self.queue_class_usage_1s(),
             "lifecycle_counts": dict(sorted(self._lifecycle_counts.items())),
@@ -198,32 +191,6 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerPublish):
             counts[state] = counts.get(state, 0) + 1
         return dict(sorted(counts.items()))
 
-    def set_remote_value(self, command: CommandMapping) -> CommandOutcome:
-        target = remote_command_target(command)
-        if target is None:
-            return "dropped"
-        service, path = target
-        value = command.get("value")
-
-        self.adapter.timed_dbus_operation(
-            "write",
-            lambda: self._write_remote_value(service, path, value, remote_command_timeout(command)),
-        )
-        self.adapter.cache.update_value(
-            dbus_path_key(service, path),
-            value,
-            source=f"{service}{path}",
-            confidence=0.9,
-            freshness_kind="external_read",
-        )
-        return "applied"
-
-    def _write_remote_value(self, service: str, path: str, value: object, timeout: float) -> None:
-        obj = self.adapter.connection.get_object(service, path, introspect=False)
-        iface = dbus.Interface(obj, "com.victronenergy.BusItem")
-        iface.SetValue(value, timeout=timeout)
-
-
 def effective_command_priority_rank(command: CommandMapping, now: float) -> float:
     rank = float(priority_rank(command.get("priority")))
     if aged_refresh_command(command, now):
@@ -235,13 +202,3 @@ def aged_refresh_command(command: CommandMapping, now: float) -> bool:
     queue_class = str(command.get("queue_class") or command_queue_class(command))
     created_at = float_or_zero(command.get("created_at"))
     return queue_class in _AGING_QUEUE_CLASSES and created_at > 0.0 and now - created_at >= _AGED_REFRESH_SECONDS
-
-
-def remote_command_target(command: CommandMapping) -> tuple[str, str] | None:
-    service = str(command.get("service") or "")
-    path = str(command.get("path") or "")
-    return (service, path) if service and path else None
-
-
-def remote_command_timeout(command: CommandMapping) -> float:
-    return float_or_zero(command.get("timeout")) or 1.0

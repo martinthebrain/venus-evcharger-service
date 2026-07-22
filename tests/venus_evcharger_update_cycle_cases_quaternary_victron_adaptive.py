@@ -7,8 +7,6 @@ class _UpdateCycleQuaternaryVictronAdaptiveCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -46,7 +44,7 @@ class _UpdateCycleQuaternaryVictronAdaptiveCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True):
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = 400.0
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 101.0, True)
@@ -169,8 +167,6 @@ class _UpdateCycleQuaternaryVictronAdaptiveCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -211,7 +207,7 @@ class _UpdateCycleQuaternaryVictronAdaptiveCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True):
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = -320.0
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 104.0, True)
@@ -258,8 +254,6 @@ class _UpdateCycleQuaternaryVictronAdaptiveCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -295,7 +289,7 @@ class _UpdateCycleQuaternaryVictronAdaptiveCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True):
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = 250.0
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 103.0, True)
@@ -315,8 +309,6 @@ class _UpdateCycleQuaternaryVictronAdaptiveCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",

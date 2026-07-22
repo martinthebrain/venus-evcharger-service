@@ -23,4 +23,4 @@ RUNTIME_PERSISTENCE_WRITE_ERRORS = (
     ValueError,
 )
 
-WRITE_SNAPSHOT_DBUS_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+CONTROL_PUBLICATION_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)

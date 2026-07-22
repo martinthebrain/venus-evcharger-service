@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Support helpers shared by the DBus write controller."""
+"""Support helpers shared by the semantic control-write controller."""
 
 from __future__ import annotations
 
@@ -7,13 +7,12 @@ import logging
 from typing import Any, ClassVar
 
 from venus_evcharger.backend.models import effective_supported_phase_selections
-from venus_evcharger.controllers.errors import WRITE_SNAPSHOT_DBUS_ERRORS
+from venus_evcharger.controllers.errors import CONTROL_PUBLICATION_ERRORS
 from venus_evcharger.controllers.write_snapshot import capture_write_state, restore_write_state
 
 
-class _DbusWriteSupport:
+class _ControlWriteSupport:
     SNAPSHOT_ATTRS: ClassVar[tuple[str, ...]]
-    SNAPSHOT_DBUS_PATHS: ClassVar[tuple[str, ...]]
     SNAPSHOT_DEQUE_ATTRS: ClassVar[tuple[str, ...]]
     SNAPSHOT_MAPPING_ATTRS: ClassVar[tuple[str, ...]]
     SNAPSHOT_VALUE_ATTRS: ClassVar[tuple[str, ...]]
@@ -27,7 +26,6 @@ class _DbusWriteSupport:
             deque_attrs=cls.SNAPSHOT_DEQUE_ATTRS,
             value_attrs=cls.SNAPSHOT_VALUE_ATTRS,
             mapping_attrs=cls.SNAPSHOT_MAPPING_ATTRS,
-            dbus_paths=cls.SNAPSHOT_DBUS_PATHS,
         )
 
     @staticmethod
@@ -45,7 +43,7 @@ class _DbusWriteSupport:
     def _publish_local_pm_status_best_effort(svc: Any, relay_on: bool, current_time: float) -> None:
         try:
             svc.publish_local_pm_status(relay_on, current_time)
-        except WRITE_SNAPSHOT_DBUS_ERRORS as error:
+        except CONTROL_PUBLICATION_ERRORS as error:
             logging.warning(
                 "Local relay placeholder publish failed after queuing relay=%s: %s",
                 int(bool(relay_on)),
@@ -58,7 +56,7 @@ class _DbusWriteSupport:
         if applied_mode == requested_mode:
             return
         logging.info(
-            "Unsupported mode %s requested on /Mode, normalizing to %s",
+            "Unsupported mode %s requested for target mode, normalizing to %s",
             requested_mode,
             applied_mode,
         )
@@ -120,18 +118,18 @@ class _DbusWriteSupport:
         auto_mode_active: bool | None = None,
     ) -> None:
         resolved_auto_mode_active = svc.mode_uses_auto_logic(svc.virtual_mode) if auto_mode_active is None else auto_mode_active
-        svc.publish_dbus_field(
+        svc.publish_field(
             "start_stop",
             cls._startstop_value_for_mode(svc, resolved_auto_mode_active),
             current_time,
             force=True,
         )
-        svc.publish_dbus_field("enable", int(svc.virtual_enable), current_time, force=True)
+        svc.publish_field("enable", int(svc.virtual_enable), current_time, force=True)
 
     @staticmethod
     def _publish_mode_paths(svc: Any, current_time: float, auto_mode_active: bool) -> None:
-        svc.publish_dbus_field("mode", svc.virtual_mode, current_time, force=True)
-        _DbusWriteSupport._publish_startstop_enable(svc, current_time, auto_mode_active)
+        svc.publish_field("mode", svc.virtual_mode, current_time, force=True)
+        _ControlWriteSupport._publish_startstop_enable(svc, current_time, auto_mode_active)
 
     @staticmethod
     def _supported_phase_selection_text(svc: Any, current_time: float) -> str:
@@ -160,9 +158,9 @@ class _DbusWriteSupport:
 
     @classmethod
     def _publish_phase_selection_paths(cls, svc: Any, current_time: float) -> None:
-        svc.publish_dbus_field("phase_selection", svc.requested_phase_selection, current_time, force=True)
-        svc.publish_dbus_field("phase_selection_active", svc.active_phase_selection, current_time, force=True)
-        svc.publish_dbus_field(
+        svc.publish_field("phase_selection", svc.requested_phase_selection, current_time, force=True)
+        svc.publish_field("phase_selection_active", svc.active_phase_selection, current_time, force=True)
+        svc.publish_field(
             "supported_phase_selections",
             cls._supported_phase_selection_text(svc, current_time),
             current_time,
@@ -184,14 +182,14 @@ class _DbusWriteSupport:
     def _publish_phase_lockout_paths(cls, svc: Any, current_time: float) -> None:
         configured_supported = ",".join(tuple(getattr(svc, "supported_phase_selections", ("P1",))))
         effective_supported = cls._supported_phase_selection_text(svc, current_time)
-        svc.publish_dbus_field("auto_phase_lockout_active", 0, current_time, force=True)
-        svc.publish_dbus_field("auto_phase_lockout_target", "", current_time, force=True)
-        svc.publish_dbus_field("auto_phase_lockout_reason", "", current_time, force=True)
-        svc.publish_dbus_field("auto_phase_supported_configured", configured_supported, current_time, force=True)
-        svc.publish_dbus_field("auto_phase_supported_effective", effective_supported, current_time, force=True)
-        svc.publish_dbus_field("auto_phase_degraded_active", int(configured_supported != effective_supported), current_time, force=True)
-        svc.publish_dbus_field("auto_phase_lockout_age", -1, current_time, force=True)
-        svc.publish_dbus_field("auto_phase_lockout_reset", 0, current_time, force=True)
+        svc.publish_field("auto_phase_lockout_active", 0, current_time, force=True)
+        svc.publish_field("auto_phase_lockout_target", "", current_time, force=True)
+        svc.publish_field("auto_phase_lockout_reason", "", current_time, force=True)
+        svc.publish_field("auto_phase_supported_configured", configured_supported, current_time, force=True)
+        svc.publish_field("auto_phase_supported_effective", effective_supported, current_time, force=True)
+        svc.publish_field("auto_phase_degraded_active", int(configured_supported != effective_supported), current_time, force=True)
+        svc.publish_field("auto_phase_lockout_age", -1, current_time, force=True)
+        svc.publish_field("auto_phase_lockout_reset", 0, current_time, force=True)
 
     @staticmethod
     def _clear_contactor_lockout_state(svc: Any) -> None:
@@ -206,12 +204,12 @@ class _DbusWriteSupport:
 
     @staticmethod
     def _publish_contactor_lockout_paths(svc: Any, current_time: float) -> None:
-        svc.publish_dbus_field("auto_contactor_fault_count", 0, current_time, force=True)
-        svc.publish_dbus_field("auto_contactor_lockout_active", 0, current_time, force=True)
-        svc.publish_dbus_field("auto_contactor_lockout_reason", "", current_time, force=True)
-        svc.publish_dbus_field("auto_contactor_lockout_source", "", current_time, force=True)
-        svc.publish_dbus_field("auto_contactor_lockout_age", -1, current_time, force=True)
-        svc.publish_dbus_field("auto_contactor_lockout_reset", 0, current_time, force=True)
+        svc.publish_field("auto_contactor_fault_count", 0, current_time, force=True)
+        svc.publish_field("auto_contactor_lockout_active", 0, current_time, force=True)
+        svc.publish_field("auto_contactor_lockout_reason", "", current_time, force=True)
+        svc.publish_field("auto_contactor_lockout_source", "", current_time, force=True)
+        svc.publish_field("auto_contactor_lockout_age", -1, current_time, force=True)
+        svc.publish_field("auto_contactor_lockout_reset", 0, current_time, force=True)
 
     def _apply_auto_disable(self, svc: Any, current_time: float) -> None:
         self._queue_relay_command(svc, False, current_time)

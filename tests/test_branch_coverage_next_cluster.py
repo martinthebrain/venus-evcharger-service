@@ -198,14 +198,19 @@ class BranchCoverageNextAggregateCases(unittest.TestCase):
         self.assertEqual(empty_metrics["eligible_source_count"], 0)
         self.assertEqual(empty_metrics["active_source_count"], 0)
 
-        definition = EnergySourceDefinition(source_id="hybrid", profile_name="dbus", role="battery", connector_type="dbus")
+        definition = EnergySourceDefinition(
+            source_id="hybrid",
+            profile_name="modbus-hybrid",
+            role="battery",
+            connector_type="modbus",
+        )
         self.assertEqual(
             aggregate_mod._discharge_control_source_context(weighted_source, None),
             ("", "battery", "battery"),
         )
         self.assertEqual(
             aggregate_mod._defined_discharge_control_source_context(weighted_source, definition),
-            ("dbus", "dbus", "battery"),
+            ("modbus-hybrid", "modbus", "battery"),
         )
         self.assertEqual(aggregate_mod._discharge_control_reason(True, "supported"), "profile_write_supported")
 

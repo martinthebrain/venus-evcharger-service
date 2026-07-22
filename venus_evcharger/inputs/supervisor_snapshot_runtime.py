@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 from venus_evcharger.core.contracts import timestamp_not_future
-from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
 from venus_evcharger.inputs.supervisor_contracts import (
     AutoInputSupervisorService,
     SnapshotPayload,
@@ -14,6 +13,9 @@ from venus_evcharger.inputs.supervisor_contracts import (
 )
 from venus_evcharger.inputs.supervisor_snapshot_validation import AutoInputSnapshotValidator
 from venus_evcharger.inputs.supervisor_snapshot_values import snapshot_int, snapshot_timestamp
+from venus_evcharger.ipc.gateway_pressure import service_gateway_pressure_policy
+
+SnapshotFileSignature = tuple[int, int, int, int]
 
 
 class AutoInputSnapshotRuntime:
@@ -28,13 +30,22 @@ class AutoInputSnapshotRuntime:
         self._service = service
         self._schema = schema
         self._validator = validator
+        self._last_snapshot_signature: SnapshotFileSignature | None = None
 
-    def _snapshot_mtime_ns(self, path: str) -> int | None:
+    @staticmethod
+    def _snapshot_file_metadata(path: str) -> tuple[int, SnapshotFileSignature] | None:
         try:
             stat_result = os.stat(path)
         except OSError:
             return None
-        return stat_result.st_mtime_ns
+        mtime_ns = int(stat_result.st_mtime_ns)
+        signature = (
+            mtime_ns,
+            int(getattr(stat_result, "st_ino", 0)),
+            int(getattr(stat_result, "st_size", 0)),
+            int(getattr(stat_result, "st_ctime_ns", mtime_ns)),
+        )
+        return mtime_ns, signature
 
     def _load_snapshot_dict(self, path: str) -> SnapshotPayload | None:
         svc = self._service
@@ -58,7 +69,7 @@ class AutoInputSnapshotRuntime:
         heartbeat_at = snapshot_timestamp(snapshot.get("heartbeat_at"))
         freshness_timestamp = heartbeat_at if heartbeat_at is not None else captured_at
         snapshot_age = None if freshness_timestamp is None else max(0.0, current - freshness_timestamp)
-        stale_after = service_dbus_backpressure_policy(svc).liveness_timeout_seconds(
+        stale_after = service_gateway_pressure_policy(svc).liveness_timeout_seconds(
             svc.auto_input_helper_stale_seconds,
         )
         stale = snapshot_age is not None and snapshot_age > stale_after
@@ -109,9 +120,13 @@ class AutoInputSnapshotRuntime:
         current: float,
         fields: SnapshotPayload,
         seen_for_current_helper: bool,
+        *,
+        file_signature: SnapshotFileSignature | None = None,
     ) -> None:
         svc = self._service
         svc._auto_input_snapshot_mtime_ns = mtime_ns
+        if file_signature is not None:
+            self._last_snapshot_signature = file_signature
         self._apply_snapshot_last_seen(freshness_timestamp, seen_for_current_helper)
         svc._auto_input_snapshot_seen_for_current_helper = bool(seen_for_current_helper)
         svc._auto_input_snapshot_last_captured_at = snapshot_timestamp(fields.get("captured_at"))
@@ -237,15 +252,22 @@ class AutoInputSnapshotRuntime:
     def _snapshot_path_changed(path: str, mtime_ns: int | None, previous_mtime_ns: int | None) -> bool:
         return bool(path) and mtime_ns is not None and previous_mtime_ns != mtime_ns
 
+    def _snapshot_file_changed(self, path: str, metadata: tuple[int, SnapshotFileSignature]) -> bool:
+        mtime_ns, file_signature = metadata
+        if self._snapshot_path_changed(path, mtime_ns, self._service._auto_input_snapshot_mtime_ns):
+            return True
+        return self._last_snapshot_signature is not None and self._last_snapshot_signature != file_signature
+
     def _refresh_snapshot_payload(
         self,
         path: str,
         current: float,
-    ) -> tuple[int | None, float | None, bool, SnapshotPayload] | None:
+    ) -> tuple[int, float | None, bool, SnapshotPayload, SnapshotFileSignature] | None:
         svc = self._service
-        mtime_ns = self._snapshot_mtime_ns(path)
-        if not self._snapshot_path_changed(path, mtime_ns, svc._auto_input_snapshot_mtime_ns):
+        metadata = self._snapshot_file_metadata(path)
+        if metadata is None or not self._snapshot_file_changed(path, metadata):
             return None
+        mtime_ns, file_signature = metadata
         snapshot = self._load_snapshot_dict(path)
         if snapshot is None:
             return None
@@ -256,7 +278,7 @@ class AutoInputSnapshotRuntime:
         self._copy_snapshot_identity_fields(fields, snapshot)
         self._copy_snapshot_diagnostic_fields(fields, snapshot)
         seen_for_current_helper = self._snapshot_seen_for_current_helper(snapshot, freshness_timestamp, stale)
-        return mtime_ns, freshness_timestamp, seen_for_current_helper, fields
+        return mtime_ns, freshness_timestamp, seen_for_current_helper, fields, file_signature
 
     def _copy_snapshot_identity_fields(self, fields: SnapshotPayload, snapshot: SnapshotPayload) -> None:
         fields["snapshot_version"] = snapshot["snapshot_version"]
@@ -279,5 +301,12 @@ class AutoInputSnapshotRuntime:
         payload = self._refresh_snapshot_payload(path, current)
         if payload is None:
             return
-        mtime_ns, freshness_timestamp, seen_for_current_helper, fields = payload
-        self._apply_snapshot(mtime_ns, freshness_timestamp, current, fields, seen_for_current_helper)
+        mtime_ns, freshness_timestamp, seen_for_current_helper, fields, file_signature = payload
+        self._apply_snapshot(
+            mtime_ns,
+            freshness_timestamp,
+            current,
+            fields,
+            seen_for_current_helper,
+            file_signature=file_signature,
+        )

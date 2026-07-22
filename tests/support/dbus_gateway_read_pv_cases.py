@@ -25,6 +25,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\nAutoPvServicePrefix=com.victronenergy.pvinverter\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
             calls: list[tuple[str, str]] = []
 
             def fake_read(service: str, path: str) -> float:
@@ -50,6 +51,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_busitem_now",
@@ -75,6 +77,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_busitem_now",
@@ -90,7 +93,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                     "path": "/Ac/Power",
                     "dc_service": "",
                     "dc_path": "",
-                    "use_dc_pv": "false",
+                    "use_dc_pv": False,
                 },
             )
 
@@ -215,6 +218,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
             values = {
                 ("com.victronenergy.pvinverter.http_1", "/Ac/Power"): 120.0,
                 ("com.victronenergy.system", "/Dc/Pv/Power"): 30.0,
@@ -241,6 +245,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_2"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_2"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
@@ -252,7 +257,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                 "path": "/Ac/Power",
                 "dc_service": "com.victronenergy.system",
                 "dc_path": "/Dc/Pv/Power",
-                "use_dc_pv": "true",
+                "use_dc_pv": True,
                 "optional_confidence": 0.6,
             }
 
@@ -270,6 +275,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_2"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_2"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
@@ -281,7 +287,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                 "path": "/Ac/Power",
                 "dc_service": "",
                 "dc_path": "",
-                "use_dc_pv": "false",
+                "use_dc_pv": False,
             }
 
             self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
@@ -322,6 +328,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                     "com.victronenergy.battery.socketcan_can1",
                 ]
             )
+            adapter.energy_discovery.update_services(sorted(adapter.cache.services), now=1.0)
 
             def members(spec: dict[str, object], *, now: float | None = None) -> list[tuple[str, str]]:
                 prefix = str(spec.get("prefix") or "")

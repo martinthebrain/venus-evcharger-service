@@ -17,10 +17,10 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             separators=(",", ":"),
             ensure_ascii=True,
         ).encode("utf-8")
-        self.assertEqual(len(canonical), 47486)
+        self.assertEqual(len(canonical), 41665)
         self.assertEqual(
             hashlib.sha256(canonical).hexdigest(),
-            "e26e4893af1bf60f89fe96cfe0e70c09bf135a40716f734a7c9672cfd11ffd7f",
+            "a58776a597645f148c559acef380542fe4fd822b4875f95aa8cc46103d309178",
         )
 
     def test_string_schema_supports_optional_enum_and_default(self) -> None:
@@ -246,8 +246,8 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             [0, 1, 2],
         )
         self.assertIn(
-            "/Auto/ScheduledLatestEndTime",
-            schemas["SetAutoRuntimeStringCommandRequest"]["properties"]["path"]["enum"],
+            "auto_scheduled_latest_end_time",
+            schemas["SetAutoRuntimeStringCommandRequest"]["properties"]["target"]["enum"],
         )
 
         error_schema = schemas["ControlError"]
@@ -304,31 +304,18 @@ class TestVenusEvchargerControlOpenApi(unittest.TestCase):
             ],
             "request_schema_refs": [
                 "ResetContactorLockoutCommandRequest",
-                "ResetContactorLockoutPathRequest",
                 "ResetPhaseLockoutCommandRequest",
-                "ResetPhaseLockoutPathRequest",
                 "SetAutoRuntimeBinaryCommandRequest",
-                "SetAutoRuntimeBinaryPathRequest",
                 "SetAutoRuntimeFloatCommandRequest",
-                "SetAutoRuntimeFloatPathRequest",
                 "SetAutoRuntimeIntegerCommandRequest",
-                "SetAutoRuntimeIntegerPathRequest",
                 "SetAutoRuntimeStringCommandRequest",
-                "SetAutoRuntimeStringPathRequest",
                 "SetAutoStartCommandRequest",
-                "SetAutoStartPathRequest",
                 "SetCurrentSettingCommandRequest",
-                "SetCurrentSettingPathRequest",
                 "SetEnableCommandRequest",
-                "SetEnablePathRequest",
                 "SetModeCommandRequest",
-                "SetModePathRequest",
                 "SetPhaseSelectionCommandRequest",
-                "SetPhaseSelectionPathRequest",
                 "SetStartStopCommandRequest",
-                "SetStartStopPathRequest",
                 "TriggerSoftwareUpdateCommandRequest",
-                "TriggerSoftwareUpdatePathRequest",
             ],
             "error_codes": [
                 "bad_request",

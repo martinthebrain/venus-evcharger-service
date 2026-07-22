@@ -11,40 +11,12 @@ from tests.venus_evcharger_test_fixtures import make_runtime_support_service
 
 def _controller() -> tuple[SimpleNamespace, RuntimeSupportController]:
     service = make_runtime_support_service()
-    controller = RuntimeSupportController(service, lambda _value, _now: 0.0, lambda _reason: 0)
+    controller = RuntimeSupportController(service, lambda _value, _now: 0, lambda _reason: 0)
     controller.initialize_runtime_support()
     return service, controller
 
 
 class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
-    def test_companion_flush_handles_empty_missing_and_exact_publish(self) -> None:
-        service, controller = _controller()
-        controller.async_state.assert_mainloop_thread = MagicMock()
-        self.assertFalse(controller.mainloop_watchdog.flush_companion_publish())
-
-        service._companion_publish_pending = True
-        service._companion_publish_now = 55.0
-        self.assertFalse(controller.mainloop_watchdog.flush_companion_publish())
-        self.assertIs(service._companion_publish_pending, False)
-        self.assertIsNone(service._companion_publish_now)
-        controller.async_state.assert_mainloop_thread.assert_not_called()
-
-        bridge = SimpleNamespace(publish=MagicMock(return_value=False))
-        service._companion_dbus_bridge = bridge
-        service._companion_publish_pending = True
-        service._companion_publish_now = 56.0
-        self.assertFalse(controller.mainloop_watchdog.flush_companion_publish())
-        self.assertIs(service._companion_publish_pending, False)
-        self.assertIsNone(service._companion_publish_now)
-        controller.async_state.assert_mainloop_thread.assert_called_once_with("companion DBus publish flush")
-        bridge.publish.assert_called_once_with(56.0)
-
-        bridge.publish.return_value = True
-        service._companion_publish_pending = True
-        service._companion_publish_now = None
-        self.assertTrue(controller.mainloop_watchdog.flush_companion_publish())
-        bridge.publish.assert_called_with(None)
-
     def test_heartbeat_records_exact_time_and_returns_true(self) -> None:
         service, controller = _controller()
         with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=123.5):
@@ -77,78 +49,82 @@ class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
         service._mainloop_watchdog_interval_seconds = 1.5
         service._mainloop_watchdog_stale_seconds = 0.0
         service._mainloop_watchdog_stop_event.wait = MagicMock(side_effect=(False, True))
-        controller.mainloop_watchdog.dump_traceback = MagicMock()
-        controller.mainloop_watchdog.exit_for_restart = MagicMock()
-
-        controller.mainloop_watchdog.check = MagicMock()
-        with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time") as now:
+        with (
+            patch.object(controller.mainloop_watchdog, "check") as check,
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time") as now,
+        ):
             controller.mainloop_watchdog._watchdog_loop()
 
         self.assertEqual(service._mainloop_watchdog_stop_event.wait.call_args_list[0].args, (1.5,))
         self.assertEqual(service._mainloop_watchdog_stop_event.wait.call_count, 2)
         now.assert_not_called()
-        controller.mainloop_watchdog.check.assert_called_once_with(service)
+        check.assert_called_once_with(service)
 
     def test_watchdog_loop_ignores_recent_heartbeat(self) -> None:
         service, controller = _controller()
         service._mainloop_heartbeat_at = 95.0
         service._mainloop_watchdog_stale_seconds = 10.0
-        controller.mainloop_watchdog.dump_traceback = MagicMock()
-        controller.mainloop_watchdog.exit_for_restart = MagicMock()
 
-        with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=100.0) as now:
+        with (
+            patch.object(controller.mainloop_watchdog, "dump_traceback") as dump_traceback,
+            patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=100.0) as now,
+        ):
             controller.mainloop_watchdog.check(service)
 
         now.assert_called_once_with()
-        controller.mainloop_watchdog.dump_traceback.assert_not_called()
-        controller.mainloop_watchdog.exit_for_restart.assert_not_called()
+        dump_traceback.assert_not_called()
+        exit_for_restart.assert_not_called()
 
     def test_watchdog_loop_dumps_logs_and_exits_on_stale_heartbeat(self) -> None:
         service, controller = _controller()
         service._mainloop_heartbeat_at = 80.0
         service._mainloop_watchdog_stale_seconds = 0.5
-        controller.mainloop_watchdog.dump_traceback = MagicMock()
-        controller.mainloop_watchdog.exit_for_restart = MagicMock()
 
         with (
+            patch.object(controller.mainloop_watchdog, "dump_traceback") as dump_traceback,
+            patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
             patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=101.0),
             patch("venus_evcharger.runtime.async_mainloop_watchdog.logging.critical") as critical,
         ):
             controller.mainloop_watchdog.check(service)
 
-        controller.mainloop_watchdog.dump_traceback.assert_called_once_with(service)
+        dump_traceback.assert_called_once_with(service)
         critical.assert_called_once_with(
             "Mainloop heartbeat stale for %.1fs; exiting for supervisor restart",
             21.0,
         )
-        controller.mainloop_watchdog.exit_for_restart.assert_called_once_with()
+        exit_for_restart.assert_called_once_with()
 
     def test_watchdog_check_disables_non_positive_threshold_without_reading_time(self) -> None:
         service, controller = _controller()
-        controller.mainloop_watchdog.dump_traceback = MagicMock()
-        controller.mainloop_watchdog.exit_for_restart = MagicMock()
+        with (
+            patch.object(controller.mainloop_watchdog, "dump_traceback") as dump_traceback,
+            patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
+        ):
+            for stale_seconds in (0.0, -1.0):
+                service._mainloop_watchdog_stale_seconds = stale_seconds
+                with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time") as now:
+                    controller.mainloop_watchdog.check(service)
+                now.assert_not_called()
 
-        for stale_seconds in (0.0, -1.0):
-            service._mainloop_watchdog_stale_seconds = stale_seconds
-            with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time") as now:
-                controller.mainloop_watchdog.check(service)
-            now.assert_not_called()
-
-        controller.mainloop_watchdog.dump_traceback.assert_not_called()
-        controller.mainloop_watchdog.exit_for_restart.assert_not_called()
+        dump_traceback.assert_not_called()
+        exit_for_restart.assert_not_called()
 
     def test_watchdog_check_treats_exact_stale_threshold_as_healthy(self) -> None:
         service, controller = _controller()
         service._mainloop_heartbeat_at = 90.0
         service._mainloop_watchdog_stale_seconds = 10.0
-        controller.mainloop_watchdog.dump_traceback = MagicMock()
-        controller.mainloop_watchdog.exit_for_restart = MagicMock()
 
-        with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=100.0):
+        with (
+            patch.object(controller.mainloop_watchdog, "dump_traceback") as dump_traceback,
+            patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=100.0),
+        ):
             controller.mainloop_watchdog.check(service)
 
-        controller.mainloop_watchdog.dump_traceback.assert_not_called()
-        controller.mainloop_watchdog.exit_for_restart.assert_not_called()
+        dump_traceback.assert_not_called()
+        exit_for_restart.assert_not_called()
 
     def test_traceback_dump_uses_exact_path_content_and_faulthandler_options(self) -> None:
         service, controller = _controller()

@@ -9,8 +9,6 @@ from venus_evcharger.energy import profiles
 
 
 _PROFILE_NAMES = (
-    "dbus-battery",
-    "dbus-hybrid",
     "template-http-hybrid",
     "modbus-hybrid",
     "command-json-hybrid",
@@ -67,18 +65,8 @@ def _base_profile(**overrides: object) -> dict[str, object]:
         "family_name": "",
         "access_mode": "",
         "firmware_class": "",
-        "service_prefix": "",
-        "soc_path": "",
-        "battery_power_path": "",
-        "ac_power_path": "",
-        "pv_power_path": "",
-        "grid_interaction_path": "",
-        "operating_mode_path": "",
         "battery_chemistry": "lfp",
         "capacity_auto_estimate": True,
-        "capacity_wh_path": "",
-        "capacity_ah_path": "/InstalledCapacity",
-        "voltage_path": "/Dc/0/Voltage",
         "capacity_estimate_min_soc": 95.0,
         "capacity_startup_recheck_seconds": 300.0,
         "default_host": "",
@@ -146,8 +134,6 @@ class EnergyProfilesContractTests(unittest.TestCase):
     def test_profile_catalog_order_and_aliases_are_exact(self) -> None:
         self.assertEqual(profiles.available_energy_source_profiles(), _PROFILE_NAMES)
         expected_aliases = {
-            "battery": "dbus-battery",
-            "hybrid": "dbus-hybrid",
             "template-http": "template-http-hybrid",
             "http-hybrid": "template-http-hybrid",
             "modbus": "modbus-hybrid",
@@ -175,28 +161,13 @@ class EnergyProfilesContractTests(unittest.TestCase):
                 self.assertEqual(resolved.profile_name, canonical)
         self.assertIsNone(profiles.resolve_energy_source_profile(" "))
         self.assertIsNone(profiles.resolve_energy_source_profile("unknown"))
+        self.assertIsNone(profiles.resolve_energy_source_profile("dbus-battery"))
+        self.assertIsNone(profiles.resolve_energy_source_profile("dbus-hybrid"))
+        self.assertIsNone(profiles.resolve_energy_source_profile("battery"))
+        self.assertIsNone(profiles.resolve_energy_source_profile("hybrid"))
 
     def test_core_profile_payloads_are_exact(self) -> None:
         expected = {
-            "dbus-battery": _base_profile(
-                profile_name="dbus-battery",
-                role="battery",
-                connector_type="dbus",
-                service_prefix="com.victronenergy.battery",
-                soc_path="/Soc",
-                battery_power_path="/Dc/0/Power",
-            ),
-            "dbus-hybrid": _base_profile(
-                profile_name="dbus-hybrid",
-                role="hybrid-inverter",
-                connector_type="dbus",
-                soc_path="/Soc",
-                battery_power_path="/Dc/0/Power",
-                ac_power_path="/Ac/Power",
-                pv_power_path="/Pv/Power",
-                grid_interaction_path="/Grid/Power",
-                operating_mode_path="/Mode",
-            ),
             "template-http-hybrid": _base_profile(
                 profile_name="template-http-hybrid",
                 role="hybrid-inverter",
@@ -292,23 +263,13 @@ class EnergyProfilesContractTests(unittest.TestCase):
         self.assertEqual(profiles.energy_source_profile_details("unknown"), {})
         self.assertEqual(profiles.energy_source_profile_probe_plan("unknown"), {})
         self.assertEqual(
-            profiles.energy_source_profile_defaults("dbus-battery"),
+            profiles.energy_source_profile_defaults("template-http-hybrid"),
             {
-                "Profile": "dbus-battery",
-                "Role": "battery",
-                "Type": "dbus",
-                "ServicePrefix": "com.victronenergy.battery",
-                "SocPath": "/Soc",
-                "BatteryPowerPath": "/Dc/0/Power",
-                "AcPowerPath": "",
-                "PvPowerPath": "",
-                "GridInteractionPath": "",
-                "OperatingModePath": "",
+                "Profile": "template-http-hybrid",
+                "Role": "hybrid-inverter",
+                "Type": "template_http",
                 "BatteryChemistry": "lfp",
                 "CapacityAutoEstimate": True,
-                "CapacityWhPath": "",
-                "CapacityAhPath": "/InstalledCapacity",
-                "VoltagePath": "/Dc/0/Voltage",
                 "CapacityEstimateMinSoc": 95.0,
                 "CapacityStartupRecheckSeconds": 300.0,
             },

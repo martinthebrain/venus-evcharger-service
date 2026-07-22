@@ -190,7 +190,7 @@ OVERRIDE_EXPECTED = _typed_values(
         "_runtime_overrides_pending_due_at", "_last_auto_audit_key", "_last_auto_audit_event_at",
     ),
     false=("_runtime_overrides_active",),
-    empty_dicts=("_runtime_overrides_values", "_dbus_publish_state"),
+    empty_dicts=("_runtime_overrides_values",),
     floats=("_last_auto_audit_cleanup_at",),
     ones=("runtime_overrides_write_min_interval_seconds", "_dbus_live_publish_interval_seconds"),
     fives=("_dbus_slow_publish_interval_seconds",),
@@ -274,7 +274,6 @@ class RuntimeSetupSupportContractTests(unittest.TestCase):
         initialize_runtime_override_state(second)
         _assert_typed_mapping(self, vars(first), OVERRIDE_EXPECTED)
         self.assertIsNot(first._runtime_overrides_values, second._runtime_overrides_values)
-        self.assertIsNot(first._dbus_publish_state, second._dbus_publish_state)
 
     def test_empty_worker_snapshot_is_complete_typed_and_independent(self) -> None:
         first = empty_worker_snapshot()
@@ -289,30 +288,36 @@ class RuntimeSetupSupportContractTests(unittest.TestCase):
         clone_worker_status_payload(snapshot)
         self.assertEqual(snapshot["pm_status"], status)
         self.assertIsNot(snapshot["pm_status"], status)
-        scalar_snapshot = {"pm_status": "unknown"}
-        clone_worker_status_payload(scalar_snapshot)
-        self.assertEqual(scalar_snapshot, {"pm_status": "unknown"})
+        status_scalar_snapshot: dict[str, object] = {"pm_status": "unknown"}
+        clone_worker_status_payload(status_scalar_snapshot)
+        self.assertEqual(status_scalar_snapshot, {"pm_status": "unknown"})
 
         source = {"id": "battery"}
         sources: list[object] = [source, "offline"]
         snapshot = {"battery_sources": sources}
         clone_worker_battery_sources_payload(snapshot)
         self.assertIsNot(snapshot["battery_sources"], sources)
-        self.assertIsNot(snapshot["battery_sources"][0], source)
+        cloned_sources = snapshot["battery_sources"]
+        if not isinstance(cloned_sources, list):
+            self.fail("battery_sources clone must remain a list")
+        self.assertIsNot(cloned_sources[0], source)
         self.assertEqual(snapshot["battery_sources"], sources)
-        scalar_snapshot = {"battery_sources": None}
-        clone_worker_battery_sources_payload(scalar_snapshot)
-        self.assertEqual(scalar_snapshot, {"battery_sources": None})
+        sources_scalar_snapshot: dict[str, object] = {"battery_sources": None}
+        clone_worker_battery_sources_payload(sources_scalar_snapshot)
+        self.assertEqual(sources_scalar_snapshot, {"battery_sources": None})
 
         profile = {"samples": 3}
         profiles: dict[object, object] = {7: profile, "raw": "value"}
         snapshot = {"battery_learning_profiles": profiles}
         clone_worker_learning_profiles_payload(snapshot)
         self.assertEqual(snapshot["battery_learning_profiles"], {"7": profile, "raw": "value"})
-        self.assertIsNot(snapshot["battery_learning_profiles"]["7"], profile)
-        scalar_snapshot = {"battery_learning_profiles": []}
-        clone_worker_learning_profiles_payload(scalar_snapshot)
-        self.assertEqual(scalar_snapshot, {"battery_learning_profiles": []})
+        cloned_profiles = snapshot["battery_learning_profiles"]
+        if not isinstance(cloned_profiles, dict):
+            self.fail("battery_learning_profiles clone must remain a dict")
+        self.assertIsNot(cloned_profiles["7"], profile)
+        profiles_scalar_snapshot: dict[str, object] = {"battery_learning_profiles": []}
+        clone_worker_learning_profiles_payload(profiles_scalar_snapshot)
+        self.assertEqual(profiles_scalar_snapshot, {"battery_learning_profiles": []})
 
 
 if __name__ == "__main__":

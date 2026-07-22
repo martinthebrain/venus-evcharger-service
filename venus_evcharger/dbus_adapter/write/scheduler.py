@@ -14,8 +14,6 @@ from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapt
 class DbusWriteScheduler(DbusWriteSchedulerHealth):
     def __init__(self, adapter: DbusWriteSchedulerAdapter) -> None:
         self.adapter = adapter
-        self.registered_paths: set[str] = set()
-        self.last_values: dict[str, object] = {}
         defaults = adapter.config["DEFAULT"]
         self.local_publish_burst_limit = max(1, int(config_get_float(defaults, "DbusGatewayLocalPublishBurstLimit", 20.0)))
         self.local_publish_tick_budget_seconds = max(
@@ -23,14 +21,6 @@ class DbusWriteScheduler(DbusWriteSchedulerHealth):
             config_get_float(defaults, "DbusGatewayLocalPublishTickBudgetMs", 75.0) / 1000.0,
         )
         self.dynamic_local_publish_burst_limit = self.local_publish_burst_limit
-        self.startup_registration_batch_limit = max(
-            1,
-            int(config_get_float(defaults, "DbusGatewayStartupRegistrationBatchLimit", 100.0)),
-        )
-        self.startup_registration_tick_budget_seconds = max(
-            0.001,
-            config_get_float(defaults, "DbusGatewayStartupRegistrationTickBudgetMs", 150.0) / 1000.0,
-        )
         self.queue_class_budgets = self._queue_class_budgets(defaults)
         self.base_queue_class_budgets = dict(self.queue_class_budgets)
         self._processed_events: deque[float] = deque()

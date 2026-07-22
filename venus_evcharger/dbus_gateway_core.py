@@ -21,17 +21,6 @@ DEFAULT_DBUS_HEALTH_NAME = "dbus-health.json"
 DEFAULT_DBUS_COMMAND_DIR_NAME = "dbus-commands"
 DEFAULT_CORE_COMMAND_DIR_NAME = "core-commands"
 
-PRIORITY_VALUES = {
-    "safety": 0,
-    "user": 1,
-    "publish": 2,
-    "read": 3,
-    "normal": 4,
-    "optional": 5,
-    "discovery": 5,
-    "diagnostic": 6,
-}
-
 PUBLISH_PATH_RANKS = {
     "/UpdateIndex": 0,
     "/Connected": 0,
@@ -75,34 +64,8 @@ GUI_CRITICAL_PUBLISH_PATHS = {
     "/Session/Energy",
 }
 
-GatewayReadKey = Literal["grid_power_w", "pv_power_w", "battery_soc"]
 CacheFreshnessKind = Literal["external_read", "local_owned", "static", "diagnostic"]
 CacheSourceState = Literal["active", "unavailable", "error"]
-
-GRID_POWER_READ_KEY: GatewayReadKey = "grid_power_w"
-PV_POWER_READ_KEY: GatewayReadKey = "pv_power_w"
-BATTERY_SOC_READ_KEY: GatewayReadKey = "battery_soc"
-FAST_READ_KEYS: frozenset[GatewayReadKey] = frozenset(
-    {
-        GRID_POWER_READ_KEY,
-        PV_POWER_READ_KEY,
-        BATTERY_SOC_READ_KEY,
-    }
-)
-
-
-def require_gateway_read_key(value: object) -> GatewayReadKey:
-    """Return one supported semantic read key, or raise for raw DBus details."""
-    if value is None:
-        raise ValueError(f"Unsupported gateway read key: {value!r}")
-    key = str(value).strip()
-    if key == GRID_POWER_READ_KEY:
-        return GRID_POWER_READ_KEY
-    if key == PV_POWER_READ_KEY:
-        return PV_POWER_READ_KEY
-    if key == BATTERY_SOC_READ_KEY:
-        return BATTERY_SOC_READ_KEY
-    raise ValueError(f"Unsupported gateway read key: {value!r}")
 
 @dataclass(frozen=True)
 class GatewayPaths:
@@ -132,12 +95,6 @@ def gateway_paths(run_dir: str | None = None) -> GatewayPaths:
 
 def _now() -> float:
     return time.time()
-
-
-def priority_rank(priority: object) -> int:
-    if not priority:
-        return PRIORITY_VALUES["diagnostic"]
-    return PRIORITY_VALUES.get(str(priority).strip().lower(), PRIORITY_VALUES["diagnostic"])
 
 
 def is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:

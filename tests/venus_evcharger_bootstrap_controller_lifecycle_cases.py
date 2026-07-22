@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from collections.abc import Callable
+
 from tests.venus_evcharger_bootstrap_controller_support import (
     MagicMock,
     ServiceBootstrapControllerTestCase,
@@ -13,27 +15,48 @@ from tests.venus_evcharger_bootstrap_controller_support import (
 
 
 class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase):
-    def test_initialize_service_runs_full_startup_sequence(self):
+    def test_initialize_service_runs_full_startup_sequence(self) -> None:
         service = MagicMock()
         controller = self._controller(service)
-        calls = []
-        controller.load_runtime_configuration = MagicMock(side_effect=lambda: calls.append("config"))
-        controller.prepare_runtime_state = MagicMock(side_effect=lambda: calls.append("prepare"))
-        controller.initialize_controllers = MagicMock(side_effect=lambda: calls.append("controllers"))
-        controller.initialize_virtual_state = MagicMock(side_effect=lambda: calls.append("virtual"))
-        controller.restore_runtime_state = MagicMock(side_effect=lambda: calls.append("restore"))
-        controller.apply_device_metadata = MagicMock(side_effect=lambda: calls.append("metadata"))
-        controller.start_runtime_loops = MagicMock(side_effect=lambda: calls.append("loops"))
-        controller.initialize_dbus_service = MagicMock(side_effect=lambda: calls.append("dbus"))
-        controller.register_paths = MagicMock(side_effect=lambda: calls.append("paths"))
-        controller.publish_dbus_service = MagicMock(side_effect=lambda: calls.append("publish"))
-
-        with patch("venus_evcharger.bootstrap.controller.logging.info") as info_mock:
+        calls: list[str] = []
+        with patch.object(
+            controller,
+            "load_runtime_configuration",
+            side_effect=lambda: calls.append("config"),
+        ), patch.object(
+            controller,
+            "prepare_runtime_state",
+            side_effect=lambda: calls.append("prepare"),
+        ), patch.object(
+            controller,
+            "initialize_controllers",
+            side_effect=lambda: calls.append("controllers"),
+        ), patch.object(
+            controller,
+            "initialize_virtual_state",
+            side_effect=lambda: calls.append("virtual"),
+        ), patch.object(
+            controller,
+            "restore_runtime_state",
+            side_effect=lambda: calls.append("restore"),
+        ), patch.object(
+            controller,
+            "apply_device_metadata",
+            side_effect=lambda: calls.append("metadata"),
+        ), patch.object(
+            controller,
+            "register_evcs_publication",
+            side_effect=lambda: calls.append("publication"),
+        ), patch.object(
+            controller,
+            "start_runtime_loops",
+            side_effect=lambda: calls.append("loops"),
+        ), patch("venus_evcharger.bootstrap.controller.logging.info") as info_mock:
             controller.initialize_service()
 
         self.assertEqual(
             calls,
-            ["config", "prepare", "virtual", "dbus", "controllers", "restore", "metadata", "paths", "publish", "loops"],
+            ["config", "prepare", "virtual", "controllers", "restore", "metadata", "publication", "loops"],
         )
         self.assertEqual(
             [call.args for call in info_mock.call_args_list],
@@ -44,46 +67,43 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
                 ("Bootstrap step complete: %s", "prepare-runtime-state"),
                 ("Bootstrap step start: %s", "initialize-virtual-state"),
                 ("Bootstrap step complete: %s", "initialize-virtual-state"),
-                ("Bootstrap step start: %s", "initialize-dbus-service"),
-                ("Bootstrap step complete: %s", "initialize-dbus-service"),
                 ("Bootstrap step start: %s", "initialize-controllers"),
                 ("Bootstrap step complete: %s", "initialize-controllers"),
                 ("Bootstrap step start: %s", "restore-runtime-state"),
                 ("Bootstrap step complete: %s", "restore-runtime-state"),
                 ("Bootstrap step start: %s", "apply-device-metadata"),
                 ("Bootstrap step complete: %s", "apply-device-metadata"),
-                ("Bootstrap step start: %s", "register-dbus-paths"),
-                ("Bootstrap step complete: %s", "register-dbus-paths"),
-                ("Bootstrap step start: %s", "publish-dbus-service"),
-                ("Bootstrap step complete: %s", "publish-dbus-service"),
+                ("Bootstrap step start: %s", "register-evcs-publication"),
+                ("Bootstrap step complete: %s", "register-evcs-publication"),
                 ("Bootstrap step start: %s", "start-runtime-loops"),
                 ("Bootstrap step complete: %s", "start-runtime-loops"),
             ],
         )
 
-    def test_initialize_service_does_not_start_runtime_loops_when_publish_fails(self):
+    def test_initialize_service_does_not_start_runtime_loops_when_publication_fails(self) -> None:
         service = MagicMock()
         controller = self._controller(service)
-        controller.load_runtime_configuration = MagicMock()
-        controller.prepare_runtime_state = MagicMock()
-        controller.initialize_controllers = MagicMock()
-        controller.initialize_virtual_state = MagicMock()
-        controller.restore_runtime_state = MagicMock()
-        controller.apply_device_metadata = MagicMock()
-        controller.initialize_dbus_service = MagicMock()
-        controller.register_paths = MagicMock()
-        controller.publish_dbus_service = MagicMock(side_effect=RuntimeError("boom"))
-        controller.start_runtime_loops = MagicMock()
+        with patch.object(controller, "load_runtime_configuration"), patch.object(
+            controller,
+            "prepare_runtime_state",
+        ), patch.object(controller, "initialize_controllers"), patch.object(
+            controller,
+            "initialize_virtual_state",
+        ), patch.object(controller, "restore_runtime_state"), patch.object(
+            controller,
+            "apply_device_metadata",
+        ), patch.object(
+            controller,
+            "register_evcs_publication",
+            side_effect=RuntimeError("boom"),
+        ) as registration, patch.object(controller, "start_runtime_loops") as start_runtime_loops:
+            with self.assertRaises(RuntimeError):
+                controller.initialize_service()
 
-        with self.assertRaises(RuntimeError):
-            controller.initialize_service()
+        registration.assert_called_once_with()
+        start_runtime_loops.assert_not_called()
 
-        controller.initialize_dbus_service.assert_called_once_with()
-        controller.register_paths.assert_called_once_with()
-        controller.publish_dbus_service.assert_called_once_with()
-        controller.start_runtime_loops.assert_not_called()
-
-    def test_request_mainloop_quit_uses_idle_add_when_available_and_falls_back(self):
+    def test_request_mainloop_quit_uses_idle_add_when_available_and_falls_back(self) -> None:
         mainloop = MagicMock()
         gobject_module = MagicMock()
 
@@ -95,11 +115,11 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         _request_mainloop_quit(gobject_module, mainloop)
         mainloop.quit.assert_called()
 
-        gobject_module = object()
-        _request_mainloop_quit(gobject_module, mainloop)
+        fallback_gobject = object()
+        _request_mainloop_quit(fallback_gobject, mainloop)
         self.assertTrue(mainloop.quit.called)
 
-    def test_run_service_loop_instantiates_service_and_runs_mainloop(self):
+    def test_run_service_loop_instantiates_service_and_runs_mainloop(self) -> None:
         mainloop = MagicMock()
         gobject_module = MagicMock()
         gobject_module.MainLoop.return_value = mainloop
@@ -114,11 +134,11 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         gobject_module.idle_add.assert_called_once_with(mainloop.quit)
         mainloop.run.assert_called_once_with()
 
-    def test_enable_fault_diagnostics_swallows_failures(self):
+    def test_enable_fault_diagnostics_swallows_failures(self) -> None:
         with patch("venus_evcharger.bootstrap.controller.faulthandler.enable", side_effect=RuntimeError("nope")):
             _enable_fault_diagnostics()
 
-    def test_run_service_main_runs_loop_and_logs_critical_on_failure(self):
+    def test_run_service_main_runs_loop_and_logs_critical_on_failure(self) -> None:
         gobject_module = MagicMock()
         with patch("venus_evcharger.bootstrap.controller._enable_fault_diagnostics") as enable_faults:
             with patch("venus_evcharger.bootstrap.controller._run_service_loop") as run_loop:
@@ -133,7 +153,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
                     run_service_main(lambda: None, "/tmp/does-not-matter.ini", gobject_module)
         critical_mock.assert_called_once()
 
-    def test_run_service_main_reads_config_and_wires_logging_and_loop_arguments(self):
+    def test_run_service_main_reads_config_and_wires_logging_and_loop_arguments(self) -> None:
         gobject_module = MagicMock()
         service_factory = MagicMock()
 
@@ -157,7 +177,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         enable_faults.assert_called_once_with()
         run_loop.assert_called_once_with(service_factory, gobject_module)
 
-    def test_run_service_main_logs_pid_and_exception_object_on_startup_failure(self):
+    def test_run_service_main_logs_pid_and_exception_object_on_startup_failure(self) -> None:
         gobject_module = MagicMock()
         error = RuntimeError("boom")
 
@@ -170,11 +190,11 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         self.assertIs(raised.exception, error)
         critical_mock.assert_called_once_with("Error at main pid=%s", 9876, exc_info=error)
 
-    def test_install_signal_logging_requests_clean_shutdown(self):
-        handlers = {}
-        quit_calls = []
+    def test_install_signal_logging_requests_clean_shutdown(self) -> None:
+        handlers: dict[int, Callable[[int, object], None]] = {}
+        quit_calls: list[str] = []
 
-        def _capture_handler(signum, handler):
+        def _capture_handler(signum: int, handler: Callable[[int, object], None]) -> None:
             handlers[signum] = handler
 
         with patch("venus_evcharger.bootstrap.controller.signal.signal", side_effect=_capture_handler):
@@ -184,10 +204,10 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
         handlers[next(iter(handlers))](15, None)
         self.assertEqual(quit_calls, ["quit"])
 
-    def test_install_signal_logging_handles_missing_callback_and_registration_failures(self):
-        handlers = {}
+    def test_install_signal_logging_handles_missing_callback_and_registration_failures(self) -> None:
+        handlers: dict[int, Callable[[int, object], None]] = {}
 
-        def _capture_handler(signum, handler):
+        def _capture_handler(signum: int, handler: Callable[[int, object], None]) -> None:
             if not handlers:
                 raise RuntimeError("nope")
             handlers[signum] = handler

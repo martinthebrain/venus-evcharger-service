@@ -298,7 +298,7 @@ class _EnergyAggregateProfileCases:
                 ),
             ),
             {
-                "victron": EnergySourceDefinition(source_id="victron", profile_name="dbus-battery", role="battery"),
+                "victron": EnergySourceDefinition(source_id="victron", role="battery"),
                 "huawei": EnergySourceDefinition(
                     source_id="huawei",
                     profile_name="huawei_ma_native_ap",
@@ -699,7 +699,7 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(cluster.combined_pv_input_power_w, 600.0)
         self.assertEqual(cluster.inverter_source_count, 1)
 
-    def test_load_energy_source_settings_supports_dynamic_sources_and_legacy_defaults(self) -> None:
+    def test_load_energy_source_settings_supports_explicit_external_sources_only(self) -> None:
         legacy_sources, use_combined = load_energy_source_settings(
             {
                 "AutoBatteryService": "com.victronenergy.battery.legacy",
@@ -719,28 +719,15 @@ class _EnergyAggregateProfileCases:
             }
         )
         self.assertTrue(use_combined)
-        self.assertEqual(len(legacy_sources), 1)
-        self.assertEqual(legacy_sources[0].source_id, "primary_battery")
-        self.assertEqual(legacy_sources[0].connector_type, "dbus")
-        self.assertEqual(legacy_sources[0].usable_capacity_wh, 5120.0)
-        self.assertEqual(legacy_sources[0].battery_chemistry, "lfp")
-        self.assertTrue(legacy_sources[0].capacity_auto_estimate)
-        self.assertEqual(legacy_sources[0].capacity_ah_path, "/InstalledCapacity")
-        self.assertEqual(legacy_sources[0].voltage_path, "/Dc/0/Voltage")
-        self.assertEqual(legacy_sources[0].capacity_estimate_min_soc, 95.0)
-        self.assertEqual(legacy_sources[0].capacity_startup_recheck_seconds, 300.0)
-        self.assertEqual(legacy_sources[0].estimated_capacity_wh, 4800.0)
-        self.assertEqual(legacy_sources[0].estimated_capacity_ah, 100.0)
-        self.assertEqual(legacy_sources[0].estimated_capacity_nominal_voltage_v, 48.0)
-        self.assertEqual(legacy_sources[0].estimated_capacity_cell_count, 15)
+        self.assertEqual(legacy_sources, ())
 
         configured_sources, use_combined = load_energy_source_settings(
             {
                 "AutoEnergySources": "victron,hybrid",
                 "AutoUseCombinedBatterySoc": "0",
                 "AutoEnergySource.victron.Role": "battery",
+                "AutoEnergySource.victron.Type": "command_json",
                 "AutoEnergySource.victron.Service": "com.victronenergy.battery.victron",
-                "AutoEnergySource.victron.SocPath": "/Soc",
                 "AutoEnergySource.victron.UsableCapacityWh": "5000",
                 "AutoEnergySource.victron.CapacityEstimatedWh": "9600",
                 "AutoEnergySource.victron.CapacityEstimatedAh": "200",
@@ -750,13 +737,7 @@ class _EnergyAggregateProfileCases:
                 "AutoEnergySource.hybrid.Type": "template_http_energy",
                 "AutoEnergySource.hybrid.ConfigPath": "/data/etc/external-hybrid.ini",
                 "AutoEnergySource.hybrid.Service": "com.victronenergy.hybrid.hybrid",
-                "AutoEnergySource.hybrid.SocPath": "/Soc",
                 "AutoEnergySource.hybrid.UsableCapacityWh": "10000",
-                "AutoEnergySource.hybrid.BatteryPowerPath": "/Dc/0/Power",
-                "AutoEnergySource.hybrid.AcPowerPath": "/Ac/Power",
-                "AutoEnergySource.hybrid.PvPowerPath": "/Pv/Power",
-                "AutoEnergySource.hybrid.GridInteractionPath": "/Grid/Power",
-                "AutoEnergySource.hybrid.OperatingModePath": "/Mode",
             }
         )
         self.assertFalse(use_combined)
@@ -768,10 +749,6 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(configured_sources[1].role, "hybrid-inverter")
         self.assertEqual(configured_sources[1].connector_type, "template_http")
         self.assertEqual(configured_sources[1].config_path, "/data/etc/external-hybrid.ini")
-        self.assertEqual(configured_sources[1].battery_power_path, "/Dc/0/Power")
-        self.assertEqual(configured_sources[1].pv_power_path, "/Pv/Power")
-        self.assertEqual(configured_sources[1].grid_interaction_path, "/Grid/Power")
-        self.assertEqual(configured_sources[1].operating_mode_path, "/Mode")
 
         connector_sources, _ = load_energy_source_settings(
             {
@@ -812,54 +789,29 @@ class _EnergyAggregateProfileCases:
         self.assertTrue(use_combined)
         self.assertEqual(len(configured_sources), 1)
         self.assertEqual(configured_sources[0].role, "battery")
-        self.assertEqual(configured_sources[0].connector_type, "dbus")
+        self.assertEqual(configured_sources[0].connector_type, "")
         self.assertIsNone(configured_sources[0].usable_capacity_wh)
 
-    def test_load_energy_source_settings_applies_profile_defaults_and_explicit_overrides(self) -> None:
+    def test_load_energy_source_settings_applies_external_profile_defaults(self) -> None:
         configured_sources, use_combined = load_energy_source_settings(
             {
-                "AutoEnergySources": "victron,external",
+                "AutoEnergySources": "external",
                 "AutoUseCombinedBatterySoc": "1",
-                "AutoEnergySource.victron.Profile": "dbus-battery",
-                "AutoEnergySource.victron.Service": "com.victronenergy.battery.lynxparallel",
-                "AutoEnergySource.victron.UsableCapacityWh": "10240",
-                "AutoEnergySource.victron.Chemistry": "LFP",
-                "AutoEnergySource.victron.CapacityAutoEstimate": "1",
                 "AutoEnergySource.external.Profile": "http-hybrid",
                 "AutoEnergySource.external.ConfigPath": "/data/etc/external-energy.ini",
                 "AutoEnergySource.external.UsableCapacityWh": "14000",
-                "AutoEnergySource.external.AcPowerPath": "/custom/ac",
             }
         )
 
         self.assertTrue(use_combined)
-        self.assertEqual(configured_sources[0].profile_name, "dbus-battery")
-        self.assertEqual(configured_sources[0].role, "battery")
-        self.assertEqual(configured_sources[0].connector_type, "dbus")
-        self.assertEqual(configured_sources[0].service_prefix, "com.victronenergy.battery")
-        self.assertEqual(configured_sources[0].battery_power_path, "/Dc/0/Power")
-        self.assertEqual(configured_sources[0].battery_chemistry, "lfp")
-        self.assertTrue(configured_sources[0].capacity_auto_estimate)
-        self.assertEqual(configured_sources[0].capacity_ah_path, "/InstalledCapacity")
-        self.assertEqual(configured_sources[0].voltage_path, "/Dc/0/Voltage")
-        self.assertEqual(configured_sources[1].profile_name, "template-http-hybrid")
-        self.assertEqual(configured_sources[1].role, "hybrid-inverter")
-        self.assertEqual(configured_sources[1].connector_type, "template_http")
-        self.assertEqual(configured_sources[1].config_path, "/data/etc/external-energy.ini")
-        self.assertEqual(configured_sources[1].ac_power_path, "/custom/ac")
+        self.assertEqual(configured_sources[0].profile_name, "template-http-hybrid")
+        self.assertEqual(configured_sources[0].role, "hybrid-inverter")
+        self.assertEqual(configured_sources[0].connector_type, "template_http")
+        self.assertEqual(configured_sources[0].config_path, "/data/etc/external-energy.ini")
 
     def test_energy_source_profiles_support_aliases_and_unknown_names(self) -> None:
         available = available_energy_source_profiles()
-        self.assertEqual(
-            available[:5],
-            (
-                "dbus-battery",
-                "dbus-hybrid",
-                "template-http-hybrid",
-                "modbus-hybrid",
-                "command-json-hybrid",
-            ),
-        )
+        self.assertEqual(available[:3], ("template-http-hybrid", "modbus-hybrid", "command-json-hybrid"))
         self.assertIn("opendtu-pvinverter", available)
         self.assertIn("huawei_ma_native_ap", available)
         self.assertIn("huawei_ma_smartlogger_modbus_tcp", available)

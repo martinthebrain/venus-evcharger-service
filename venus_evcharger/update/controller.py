@@ -18,6 +18,7 @@ from venus_evcharger.update.runtime_cycle_contracts import UpdateCycleServicePor
 from venus_evcharger.update.software_update_controller import SoftwareUpdateController
 from venus_evcharger.update.state import UpdateStateController
 from venus_evcharger.update.victron_ess_balance import VictronEssBalanceController
+from venus_evcharger.ports.gateway_operations import GatewayOperationsPort, UnavailableGatewayOperations
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,8 @@ class UpdateCycleController:
         service: UpdateCycleServicePort,
         phase_values_func: Callable[[float, float, object, object], object],
         health_code_func: Callable[[str], int],
+        *,
+        gateway_operations: GatewayOperationsPort | None = None,
     ) -> None:
         self.service = service
         readbacks = ReadbackResolver(service._readback_store, service, service.time_now)
@@ -60,7 +63,7 @@ class UpdateCycleController:
         inputs = InputCacheResolver(service)
         offline = OfflinePublisher(service, relay_foundation.telemetry, state)
         learning = LearningController(service)
-        victron_ess_balance = VictronEssBalanceController()
+        victron_ess_balance = VictronEssBalanceController(gateway_operations or UnavailableGatewayOperations())
         runtime_cycle = RuntimeCycleCoordinator(
             service,
             state,
@@ -87,7 +90,8 @@ class UpdateCycleController:
     def sign_of_life(self) -> bool:
         """Periodic heartbeat log for troubleshooting."""
         svc = self.service
-        logging.info("[%s] Last '/Ac/Power': %s", svc.service_name, svc._dbusservice["/Ac/Power"])
+        value = svc.state.last_accepted_field("ac_power_w")
+        logging.info("Last accepted AC power publication: %s", value)
         return True
 
     def update(self) -> bool:

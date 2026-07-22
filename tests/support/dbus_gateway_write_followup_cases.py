@@ -1,251 +1,283 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Gateway adapter follow-up burst and remote-write scenarios."""
+"""Semantic command completion, retry, and follow-up scenarios."""
 
 from __future__ import annotations
 
 from tests.support.dbus_gateway_adapter_harness import (
-    BusItemInterfaceStub,
-    DbusAdapter,
     DbusOperationDeferred,
     GatewayAdapterContractCase,
     MagicMock,
     Path,
-    RecordingDbusService,
-    gateway_paths,
+    evcs_publication,
     install_mock,
     patch,
     read_json_file,
-    tempfile,
     time,
     write_core_module,
-    write_health_module,
 )
+from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command, gx_relay_set_command
 
 
 class GatewayWriteFollowupCases(GatewayAdapterContractCase):
-    """Exercise follow-up burst and remote-write scenarios."""
+    """Exercise lifecycle decisions independently of concrete DBus targets."""
 
-    def test_next_scheduled_command_runs_followup_burst_only_after_local_publish_completion(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\nDbusGatewayLocalPublishBurstLimit=4\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            self.assertIsNone(adapter.write_scheduler.last_scheduled_outcome)
+    def test_process_loaded_command_removes_applied_and_dropped_commands(self) -> None:
+        with self.adapter_scenario("[DEFAULT]\nDbusGatewayQueueBudgetRemoteWrite=1\n") as scenario:
+            adapter = scenario.adapter
+            for outcome in ("applied", "dropped"):
+                command_path = adapter.commands.enqueue(
+                    {
+                        **evcs_publication({"mode": 1}),
+                        "coalesce_key": f"semantic:{outcome}",
+                    }
+                )
+                command = read_json_file(command_path)
+                assert isinstance(command, dict)
+                install_mock(adapter.write_scheduler, "process_command", MagicMock(return_value=outcome))
+
+                self.assertEqual(adapter.write_scheduler.process_loaded_command(command_path, command), outcome)
+                self.assertFalse(Path(command_path).exists())
+
+    def test_deferred_command_is_retained_and_consumes_budget(self) -> None:
+        with self.adapter_scenario("[DEFAULT]\nDbusGatewayQueueBudgetRemoteWrite=1\n") as scenario:
+            adapter = scenario.adapter
+            command_path = adapter.commands.enqueue(
+                gx_relay_set_command(
+                    0,
+                    "NO",
+                    True,
+                    ensure_manual=False,
+                    verify_settle_seconds=0.1,
+                    verify_retry_seconds=1.0,
+                )
+            )
+            command = read_json_file(command_path)
+            assert isinstance(command, dict)
+            install_mock(adapter.write_scheduler, "process_command", MagicMock(return_value="deferred"))
+
+            self.assertEqual(adapter.write_scheduler.process_loaded_command(command_path, command), "deferred")
+
+            self.assertTrue(Path(command_path).exists())
+            self.assertFalse(adapter.write_scheduler.budget_available(command, time.time()))
+
+    def test_expired_semantic_command_is_dropped_without_dispatch(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            command = {
+                **gx_relay_refresh_command(0),
+                "created_at": time.time() - 10.0,
+                "deadline_s": 1.0,
+            }
+            command_path = adapter.commands.enqueue(command)
+            process_command = install_mock(
+                adapter.write_scheduler,
+                "process_command",
+                MagicMock(return_value="applied"),
+            )
+
+            self.assertEqual(adapter.write_scheduler.process_loaded_command(command_path, command), "dropped")
+
+            self.assertFalse(Path(command_path).exists())
+            process_command.assert_not_called()
+            health = adapter.write_scheduler.health()
+            lifecycle_counts = health["lifecycle_counts"]
+            self.assertIsInstance(lifecycle_counts, dict)
+            assert isinstance(lifecycle_counts, dict)
+            self.assertEqual(lifecycle_counts["expired"], 1)
+
+    def test_command_outcome_turns_transient_failures_into_retry(self) -> None:
+        with self.adapter_scenario() as scenario:
+            scheduler = scenario.adapter.write_scheduler
+            command = gx_relay_refresh_command(0)
+            process_command = install_mock(
+                scheduler,
+                "process_command",
+                MagicMock(side_effect=DbusOperationDeferred("busy")),
+            )
+            self.assertEqual(scheduler.command_outcome("relay.json", command), "deferred")
+
+            process_command.side_effect = RuntimeError("offline")
+            with patch.object(vars(write_core_module)["logging"], "exception") as logged:
+                self.assertEqual(scheduler.command_outcome("relay.json", command), "deferred")
+            process_command.assert_called_with(command, command_file="relay.json")
+            logged.assert_called_once_with(
+                "Gateway command failed; keeping for retry path=%s: %s",
+                "relay.json",
+                process_command.side_effect,
+            )
+
+    def test_command_outcome_forwards_command_file_on_success(self) -> None:
+        with self.adapter_scenario() as scenario:
+            scheduler = scenario.adapter.write_scheduler
+            command = gx_relay_refresh_command(0)
+            process_command = install_mock(
+                scheduler,
+                "process_command",
+                MagicMock(return_value="applied"),
+            )
+
+            self.assertEqual(scheduler.command_outcome("relay.json", command), "applied")
+
+            process_command.assert_called_once_with(command, command_file="relay.json")
+
+    def test_process_one_resets_and_reports_last_outcome(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
             adapter.write_scheduler.last_scheduled_outcome = "deferred"
-            install_mock(adapter.commands, "load_pending", MagicMock(return_value=[]))
             self.assertFalse(adapter.write_scheduler.process_one())
             self.assertIsNone(adapter.write_scheduler.last_scheduled_outcome)
+
+            adapter.commands.enqueue(gx_relay_refresh_command(0))
             install_mock(adapter.write_scheduler, "process_loaded_command", MagicMock(return_value="applied"))
-            install_mock(adapter.write_scheduler, "process_local_publish_burst", MagicMock())
+            self.assertTrue(adapter.write_scheduler.process_one())
+            self.assertEqual(adapter.write_scheduler.last_scheduled_outcome, "applied")
 
-            self.assertTrue(
-                adapter.write_scheduler.process_next_scheduled_command(
-                    [("publish.json", {"kind": "publish_value", "path": "/Mode"})],
-                    include_local_publish=True,
-                )
-            )
-            adapter.write_scheduler.process_local_publish_burst.assert_called_once_with(3)
+    def test_process_one_forwards_the_loaded_pending_snapshot(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            scheduler = adapter.write_scheduler
+            command = gx_relay_refresh_command(0)
+            pending = [("relay.json", command)]
+            load_pending = install_mock(adapter.commands, "load_pending", MagicMock(return_value=pending))
+            coalesce = install_mock(adapter.commands, "coalesce", MagicMock(return_value=pending))
+            prioritize = install_mock(scheduler, "prioritized_commands", MagicMock(return_value=pending))
+            select = install_mock(scheduler, "select_next_command", MagicMock(return_value=pending[0]))
+            process_loaded = install_mock(scheduler, "process_loaded_command", MagicMock(return_value="applied"))
 
-            adapter.write_scheduler.process_local_publish_burst.reset_mock()
-            install_mock(adapter.write_scheduler, "process_loaded_command", MagicMock(return_value="deferred"))
-            self.assertTrue(
-                adapter.write_scheduler.process_next_scheduled_command(
-                    [("publish.json", {"kind": "publish_value", "path": "/Mode"})],
-                    include_local_publish=True,
-                )
-            )
-            self.assertEqual(adapter.write_scheduler.last_scheduled_outcome, "deferred")
-            adapter.write_scheduler.process_local_publish_burst.assert_not_called()
+            self.assertTrue(scheduler.process_one())
 
-            install_mock(adapter.write_scheduler, "process_loaded_command", MagicMock(return_value="applied"))
-            self.assertTrue(
-                adapter.write_scheduler.process_next_scheduled_command(
-                    [("remote.json", {"kind": "set_value", "service": "svc", "path": "/Remote"})],
-                    include_local_publish=True,
-                )
-            )
-            adapter.write_scheduler.process_local_publish_burst.assert_not_called()
+            load_pending.assert_called_once_with()
+            coalesce.assert_called_once_with(pending)
+            prioritize.assert_called_once_with(pending)
+            select.assert_called_once_with(pending, include_local_publish=True)
+            process_loaded.assert_called_once_with("relay.json", command, pending_commands=pending)
 
-            adapter.write_scheduler.local_publish_burst_limit = 0
-            install_mock(adapter.write_scheduler, "process_loaded_command", MagicMock(return_value="applied"))
-            self.assertTrue(
-                adapter.write_scheduler.process_next_scheduled_command(
-                    [("publish.json", {"kind": "publish_value", "path": "/Mode"})],
-                    include_local_publish=True,
-                )
-            )
-            adapter.write_scheduler.process_local_publish_burst.assert_called_once_with(0)
-
-    def test_process_loaded_command_applies_drop_defer_and_expiry_lifecycle(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-
-            applied = adapter.commands.enqueue({"kind": "set_value", "priority": "user", "created_at": 1.0})
-            install_mock(adapter.write_scheduler, "process_command", MagicMock(return_value="applied"))
-            self.assertEqual(
-                adapter.write_scheduler.process_loaded_command(applied, read_json_file(applied, {})),
-                "applied",
-            )
-            self.assertFalse(Path(applied).exists())
-
-            dropped = adapter.commands.enqueue({"kind": "set_value", "priority": "user", "created_at": 2.0})
-            install_mock(adapter.write_scheduler, "process_command", MagicMock(return_value="dropped"))
-            self.assertEqual(
-                adapter.write_scheduler.process_loaded_command(dropped, read_json_file(dropped, {})),
-                "dropped",
-            )
-            self.assertFalse(Path(dropped).exists())
-
-            deferred = adapter.commands.enqueue({"kind": "set_value", "priority": "user", "created_at": 3.0})
-            install_mock(adapter.write_scheduler, "process_command", MagicMock(return_value="deferred"))
-            self.assertEqual(
-                adapter.write_scheduler.process_loaded_command(deferred, read_json_file(deferred, {})),
-                "deferred",
-            )
-            self.assertTrue(Path(deferred).exists())
-
-            expired = adapter.commands.enqueue(
-                {"kind": "set_value", "priority": "user", "created_at": time.time() - 10.0, "deadline_s": 1.0}
-            )
-            self.assertEqual(
-                adapter.write_scheduler.process_loaded_command(expired, read_json_file(expired, {})),
-                "dropped",
-            )
-            self.assertFalse(Path(expired).exists())
-            lifecycle = adapter.write_scheduler.health(now=time.time())["lifecycle_counts"]
-            self.assertGreaterEqual(lifecycle["applied"], 1)
-            self.assertGreaterEqual(lifecycle["dropped"], 1)
-            self.assertGreaterEqual(lifecycle["deferred"], 1)
-            self.assertGreaterEqual(lifecycle["expired"], 1)
-
-    def test_process_loaded_command_forwards_pending_commands_to_stale_cleanup(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            pending = [("stale.json", {"coalesce_key": "same"})]
-            command = {"kind": "set_value", "priority": "user", "created_at": 1.0, "coalesce_key": "same"}
-            install_mock(adapter.write_scheduler, "process_command", MagicMock(return_value="applied"))
-            install_mock(adapter.write_scheduler, "drop_stale_coalesced_commands", MagicMock())
+    def test_process_loaded_command_preserves_orchestration_arguments(self) -> None:
+        with self.adapter_scenario() as scenario:
+            scheduler = scenario.adapter.write_scheduler
+            command = gx_relay_refresh_command(0)
+            pending = [("relay.json", command)]
+            install_mock(scheduler, "command_expired", MagicMock(return_value=False))
+            command_outcome = install_mock(scheduler, "command_outcome", MagicMock(return_value="applied"))
+            apply_result = install_mock(scheduler, "_apply_command_result", MagicMock())
+            lifecycle = install_mock(scheduler, "record_lifecycle", MagicMock())
 
             self.assertEqual(
-                adapter.write_scheduler.process_loaded_command("command.json", command, pending_commands=pending),
+                scheduler.process_loaded_command("relay.json", command, pending_commands=pending),
                 "applied",
             )
 
-            adapter.write_scheduler.drop_stale_coalesced_commands.assert_called_once_with(
-                "command.json",
+            command_outcome.assert_called_once_with("relay.json", command)
+            apply_result.assert_called_once_with(
+                "relay.json",
+                command,
+                "applied",
+                pending_commands=pending,
+            )
+            lifecycle.assert_called_once_with(command, "applied")
+
+    def test_expired_command_forwards_pending_snapshot_to_drop(self) -> None:
+        with self.adapter_scenario() as scenario:
+            scheduler = scenario.adapter.write_scheduler
+            command = gx_relay_refresh_command(0)
+            pending = [("relay.json", command)]
+            install_mock(scheduler, "command_expired", MagicMock(return_value=True))
+            drop_expired = install_mock(scheduler, "_drop_expired_command", MagicMock(return_value="dropped"))
+
+            self.assertEqual(
+                scheduler.process_loaded_command("relay.json", command, pending_commands=pending),
+                "dropped",
+            )
+
+            drop_expired.assert_called_once_with(
+                "relay.json",
                 command,
                 pending_commands=pending,
             )
 
-            expired = {"kind": "set_value", "created_at": time.time() - 10.0, "deadline_s": 1.0, "coalesce_key": "same"}
-            adapter.write_scheduler.drop_stale_coalesced_commands.reset_mock()
+    def test_drop_expired_command_records_exact_cleanup_sequence(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            scheduler = adapter.write_scheduler
+            command = gx_relay_refresh_command(0)
+            pending = [("relay.json", command)]
+            remove = install_mock(adapter.commands, "remove", MagicMock())
+            drop_stale = install_mock(scheduler, "drop_stale_coalesced_commands", MagicMock())
+            lifecycle = install_mock(scheduler, "record_lifecycle", MagicMock())
+            processed = install_mock(scheduler, "record_processed", MagicMock())
+
             self.assertEqual(
-                adapter.write_scheduler.process_loaded_command("expired.json", expired, pending_commands=pending),
+                scheduler._drop_expired_command("relay.json", command, pending_commands=pending),
                 "dropped",
             )
-            adapter.write_scheduler.drop_stale_coalesced_commands.assert_called_once_with(
-                "expired.json",
-                expired,
+
+            remove.assert_called_once_with("relay.json")
+            drop_stale.assert_called_once_with("relay.json", command, pending_commands=pending)
+            lifecycle.assert_called_once_with(command, "expired")
+            processed.assert_called_once_with()
+
+    def test_applied_result_uses_exact_cleanup_arguments(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            scheduler = adapter.write_scheduler
+            command = gx_relay_refresh_command(0)
+            pending = [("relay.json", command)]
+            remove = install_mock(adapter.commands, "remove", MagicMock())
+            drop_stale = install_mock(scheduler, "drop_stale_coalesced_commands", MagicMock())
+            processed = install_mock(scheduler, "record_processed", MagicMock())
+            budget = install_mock(scheduler, "record_budget", MagicMock())
+
+            scheduler._apply_command_result(
+                "relay.json",
+                command,
+                "applied",
                 pending_commands=pending,
             )
 
-    def test_command_expired_handles_created_at_and_boundary_edges(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            with patch.object(write_core_module.time, "time", return_value=10.0):
-                self.assertFalse(adapter.write_scheduler.command_expired({"created_at": 0.0, "deadline_s": 1.0}))
-                self.assertTrue(adapter.write_scheduler.command_expired({"created_at": 1.0, "deadline_s": 1.0}))
-                self.assertFalse(adapter.write_scheduler.command_expired({"created_at": 9.0, "deadline_s": 1.0}))
-                self.assertFalse(adapter.write_scheduler.command_expired({"created_at": 12.0, "deadline_s": 1.0}))
+            remove.assert_called_once_with("relay.json")
+            drop_stale.assert_called_once_with("relay.json", command, pending_commands=pending)
+            processed.assert_called_once_with()
+            budget.assert_called_once_with(command)
 
-    def test_command_outcome_returns_deferred_and_logs_retry_context(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            command = {"kind": "set_value", "priority": "user"}
+    def test_not_before_delays_a_semantic_operation(self) -> None:
+        with self.adapter_scenario() as scenario:
+            scheduler = scenario.adapter.write_scheduler
+            now = time.time()
+            delayed = {**gx_relay_refresh_command(0), "not_before": now + 10.0}
+            ready = {**gx_relay_refresh_command(1), "not_before": now - 1.0}
 
-            install_mock(
-                adapter.write_scheduler,
-                "process_command",
-                MagicMock(side_effect=DbusOperationDeferred("wait")),
+            with patch.object(vars(write_core_module)["time"], "time", return_value=now):
+                selected = scheduler.select_next_command([("delayed", delayed), ("ready", ready)])
+
+            self.assertEqual(selected, ("ready", ready))
+
+    def test_include_local_publish_flag_filters_only_field_publications(self) -> None:
+        with self.adapter_scenario() as scenario:
+            scheduler = scenario.adapter.write_scheduler
+            publication = evcs_publication({"mode": 2})
+            operation = gx_relay_refresh_command(0)
+
+            selected = scheduler.select_next_command(
+                [("publication", dict(publication)), ("operation", dict(operation))],
+                include_local_publish=False,
             )
-            self.assertEqual(adapter.write_scheduler.command_outcome("defer.json", command), "deferred")
 
-            install_mock(
-                adapter.write_scheduler,
-                "process_command",
-                MagicMock(side_effect=RuntimeError("boom")),
-            )
-            with patch("venus_evcharger.dbus_adapter.write.core.logging.exception") as logged:
-                self.assertEqual(adapter.write_scheduler.command_outcome("retry.json", command), "deferred")
+            self.assertEqual(selected, ("operation", operation))
 
-            logged.assert_called_once()
-            self.assertEqual(logged.call_args.args[0], "Gateway command failed; keeping for retry path=%s: %s")
-            self.assertEqual(logged.call_args.args[1], "retry.json")
-            self.assertIsInstance(logged.call_args.args[2], RuntimeError)
+    def test_select_next_command_includes_local_publication_by_default(self) -> None:
+        with self.adapter_scenario() as scenario:
+            publication = evcs_publication({"mode": 2})
 
-    def test_local_publish_burst_can_run_before_non_local_scheduler_slot(self) -> None:
-        with self.adapter_scenario(
-            "[DEFAULT]\nDbusGatewayLocalPublishBurstLimit=2\nDbusIntrospectionEnabled=0\n",
-        ) as scenario:
-            adapter = scenario.adapter
-            adapter.cache.update_services(["svc"])
-            adapter.write_scheduler.registered_paths.update({"/Session/Time", "/Ac/Power"})
-            service = RecordingDbusService()
-            adapter.set_dbus_service(service, registered=True)
-            adapter.commands.enqueue(
-                {
-                    "kind": "publish_value",
-                    "path": "/Session/Time",
-                    "value": 10,
-                    "coalesce_key": "publish:/Session/Time",
-                    "priority": "publish",
-                }
-            )
-            adapter.commands.enqueue(
-                {
-                    "kind": "publish_value",
-                    "path": "/Ac/Power",
-                    "value": 2000,
-                    "coalesce_key": "publish:/Ac/Power",
-                    "priority": "publish",
-                }
-            )
-            adapter.commands.enqueue({"kind": "refresh_services", "priority": "read"})
-            install_mock(adapter, "poll_one_due_read_once", MagicMock(return_value=False))
-            install_mock(adapter, "refresh_services_if_due_once", MagicMock(return_value=False))
-            install_mock(adapter, "enqueue_background_introspection_if_due", MagicMock())
-            install_mock(adapter, "list_services", MagicMock(return_value=["svc"]))
-            install_mock(adapter.discovery, "refresh_services", MagicMock(return_value=["svc"]))
+            selected = scenario.adapter.write_scheduler.select_next_command([("publication", publication)])
 
-            self.assertTrue(adapter.process_one_dbus_operation_once())
+            self.assertEqual(selected, ("publication", publication))
 
-            self.assertCountEqual(service.writes, [("/Ac/Power", 2000), ("/Session/Time", 10)])
-            self.assertEqual(adapter.commands.load_pending(), [])
-            self.assertGreaterEqual(adapter.write_scheduler.health(now=time.time())["processed_commands_60s"], 3)
+    def test_command_expiry_uses_strict_positive_and_elapsed_boundaries(self) -> None:
+        with self.adapter_scenario() as scenario:
+            command_expired = scenario.adapter.write_scheduler.command_expired
 
-    def test_write_scheduler_set_remote_value_uses_dbus_and_updates_cache(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            fake_iface = BusItemInterfaceStub()
-            fake_obj = object()
-            get_object = install_mock(adapter.connection, "get_object", MagicMock(return_value=fake_obj))
-
-            with patch.object(write_health_module.dbus, "Interface", return_value=fake_iface):
-                outcome = adapter.write_scheduler.set_remote_value(
-                    {"service": "svc", "path": "/Set", "value": 9, "timeout": 2.0}
-                )
-
-            self.assertEqual(outcome, "applied")
-            get_object.assert_called_once_with("svc", "/Set", introspect=False)
-            self.assertEqual(fake_iface.set_calls, [(9, 2.0)])
-            self.assertEqual(adapter.cache.values["path:svc/Set"]["value"], 9)
+            with patch.object(vars(write_core_module)["time"], "time", return_value=2.0):
+                self.assertFalse(command_expired({"deadline_s": 1.0, "created_at": 0.0}))
+                self.assertFalse(command_expired({"deadline_s": 1.0, "created_at": 1.0}))
+            with patch.object(vars(write_core_module)["time"], "time", return_value=2.001):
+                self.assertTrue(command_expired({"deadline_s": 1.0, "created_at": 1.0}))

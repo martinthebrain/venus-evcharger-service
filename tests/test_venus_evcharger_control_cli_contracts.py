@@ -177,8 +177,11 @@ class TestControlCliContracts(unittest.TestCase):
             _positional_action(command_parser, "value").help,
             "Command value. JSON scalars such as 1, 12.5, true are accepted.",
         )
-        self.assertEqual(_option_action(command_parser, "--path").default, "")
-        self.assertEqual(_option_action(command_parser, "--path").help, "Explicit write path when the command family requires it.")
+        self.assertEqual(_option_action(command_parser, "--target").default, "")
+        self.assertEqual(
+            _option_action(command_parser, "--target").help,
+            "Explicit semantic target when the command family requires it.",
+        )
         self.assertEqual(_option_action(command_parser, "--detail").default, "")
         self.assertEqual(_option_action(command_parser, "--detail").help, "Optional detail string carried with the command.")
         self.assertEqual(_option_action(command_parser, "--command-id").default, "")
@@ -229,8 +232,8 @@ class TestControlCliContracts(unittest.TestCase):
                 "command",
                 "set-mode",
                 "2",
-                "--path",
-                "/Mode",
+                "--target",
+                "mode",
                 "--detail",
                 "manual",
                 "--command-id",
@@ -244,7 +247,7 @@ class TestControlCliContracts(unittest.TestCase):
         self.assertEqual(command.subcommand, "command")
         self.assertEqual(command.name, "set-mode")
         self.assertEqual(command.value, "2")
-        self.assertEqual(command.path, "/Mode")
+        self.assertEqual(command.target, "mode")
         self.assertEqual(command.detail, "manual")
         self.assertEqual(command.command_id, "cmd")
         self.assertEqual(command.idempotency_key, "idem")
@@ -347,9 +350,9 @@ class TestControlCliContracts(unittest.TestCase):
             "Canonical command name, for example set-mode.",
             "Command value. JSON scalars such as 1, 12.5, true are",
             "accepted.",
-            "--path PATH",
-            "Explicit write path when the command family requires",
-            "it.",
+            "--target TARGET",
+            "Explicit semantic target when the command family",
+            "requires it.",
             "--detail DETAIL",
             "Optional detail string carried with the command.",
             "--command-id COMMAND_ID",
@@ -524,7 +527,7 @@ class TestControlCliContracts(unittest.TestCase):
         namespace = argparse.Namespace(
             name="set-mode",
             value="1",
-            path="/Mode",
+            target="mode",
             detail="manual",
             limit=10,
             after=2,
@@ -537,7 +540,7 @@ class TestControlCliContracts(unittest.TestCase):
 
         self.assertEqual(
             cli._command_payload(namespace),
-            {"name": "set_mode", "value": 1, "path": "/Mode", "detail": "manual"},
+            {"name": "set_mode", "value": 1, "target": "mode", "detail": "manual"},
         )
         self.assertEqual(
             cli._event_request_kwargs(namespace),
@@ -587,7 +590,7 @@ class TestControlCliContracts(unittest.TestCase):
             state_name="summary",
             name="set-mode",
             value="1",
-            path="",
+            target="",
             detail="",
             idempotency_key="idem",
             command_id="cmd",
@@ -631,7 +634,7 @@ class TestControlCliContracts(unittest.TestCase):
             state_name="health",
             name="set-current",
             value="6",
-            path="/SetCurrent",
+            target="set_current",
             detail="limit",
             idempotency_key="idem",
             command_id="cmd",
@@ -670,7 +673,12 @@ class TestControlCliContracts(unittest.TestCase):
                 (
                     "command",
                     {
-                        "payload": {"name": "set_current", "value": 6, "path": "/SetCurrent", "detail": "limit"},
+                        "payload": {
+                            "name": "set_current",
+                            "value": 6,
+                            "target": "set_current",
+                            "detail": "limit",
+                        },
                         "kwargs": {"idempotency_key": "idem", "command_id": "cmd", "if_match": "state-token"},
                     },
                 )
@@ -723,7 +731,7 @@ class TestControlCliContracts(unittest.TestCase):
             state_endpoint="health",
             name="set-mode",
             value="1",
-            path="",
+            target="",
             detail="manual",
         )
         missing_token_client = _FakeClient(ControlApiClientResponse(status=200, headers={}, body='{"state":{}}'))
@@ -859,7 +867,7 @@ class TestControlCliContracts(unittest.TestCase):
         derived = cli._doctor_safe_write_namespace(safe_namespace, "reader", operational_response)
         self.assertEqual(derived.name, "set-mode")
         self.assertEqual(derived.value, "2")
-        self.assertEqual(derived.path, "")
+        self.assertEqual(derived.target, "")
         self.assertEqual(derived.detail, "doctor-safe-write")
         self.assertEqual(derived.command_id, "doctor-safe-write")
         self.assertEqual(derived.idempotency_key, "doctor-safe-write")
@@ -981,7 +989,7 @@ class TestControlCliContracts(unittest.TestCase):
                         timeout=2.0,
                         name="set-mode",
                         value="1",
-                        path="",
+                        target="",
                         detail="doctor-safe-write",
                         command_id="doctor-safe-write",
                         idempotency_key="doctor-safe-write",
@@ -1001,7 +1009,7 @@ class TestControlCliContracts(unittest.TestCase):
                         timeout=2.0,
                         name="set-mode",
                         value="1",
-                        path="",
+                        target="",
                         detail="doctor-safe-write",
                         command_id="doctor-safe-write",
                         idempotency_key="doctor-safe-write",

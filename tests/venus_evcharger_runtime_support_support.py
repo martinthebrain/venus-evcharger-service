@@ -11,9 +11,6 @@ class _RuntimeAutoRole:
     def __init__(self, service: Any) -> None:
         self.service = service
 
-    def command_from_write(self, path: str, value: object, *, source: str) -> Any:
-        return self.service._control_command_from_write(path, value, source=source)
-
     def handle_command(self, command: object) -> Any:
         return self.service.handle_control_command(command)
 

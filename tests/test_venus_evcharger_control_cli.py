@@ -46,11 +46,11 @@ class TestVenusEvchargerControlCli(unittest.TestCase):
         self.assertEqual(cli._parse_cli_value("raw-text"), "raw-text")
 
     def test_command_payload_and_compact_helpers_cover_optional_branches(self) -> None:
-        namespace = SimpleNamespace(name="set-current-setting", value="12.5", path="/SetCurrent", detail="manual")
+        namespace = SimpleNamespace(name="set-current-setting", value="12.5", target="set_current", detail="manual")
         payload = cli._command_payload(namespace)
         self.assertEqual(
             payload,
-            {"name": "set_current_setting", "path": "/SetCurrent", "value": 12.5, "detail": "manual"},
+            {"name": "set_current_setting", "target": "set_current", "value": 12.5, "detail": "manual"},
         )
 
         compact_stdout = io.StringIO()

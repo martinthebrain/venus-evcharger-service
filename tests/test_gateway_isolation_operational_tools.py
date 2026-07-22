@@ -46,6 +46,7 @@ class GatewayIsolationOperationalToolsTests(unittest.TestCase):
         sys.path.insert(0, str(DEV_SCRIPTS))
         cls.assertions = importlib.import_module("pi_gateway_release_gate_assertions")
         cls.isolation = importlib.import_module("check_dbus_isolation")
+        cls.remote = importlib.import_module("pi_gateway_release_gate_remote")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -72,7 +73,7 @@ class GatewayIsolationOperationalToolsTests(unittest.TestCase):
         self.assertEqual(numeric["/Ac/Power"], 2000.0)
         self.assertTrue(all(command.startswith("cat ") for command in pi.commands))
 
-    def test_release_gate_write_uses_gateway_client_and_restores_mode(self) -> None:
+    def test_release_gate_write_uses_semantic_core_mailbox_and_restores_mode(self) -> None:
         service = "com.victronenergy.evcharger.http_60"
         pi = _PiSession(service, {"/Mode": 2})
 
@@ -80,11 +81,27 @@ class GatewayIsolationOperationalToolsTests(unittest.TestCase):
 
         write_commands = [command for command in pi.commands if not command.startswith("cat ")]
         self.assertEqual(len(write_commands), 2)
-        self.assertTrue(all("GatewayClient" in command and "set_value" in command for command in write_commands))
-        self.assertIn("'value': 1", shlex.split(write_commands[0])[-1])
-        self.assertIn("'value': 2", shlex.split(write_commands[1])[-1])
+        self.assertTrue(
+            all(
+                "CoreCommandMailbox" in command
+                and "core_control_command_payload" in command
+                and "set_value" not in command
+                for command in write_commands
+            )
+        )
+        self.assertIn("'set_mode','mode',1", shlex.split(write_commands[0])[-1])
+        self.assertIn("'set_mode','mode',2", shlex.split(write_commands[1])[-1])
         self.assertTrue(all(self.isolation.FORBIDDEN_CLI_PATTERN.search(command) is None for command in write_commands))
         self.assertEqual(pi.values["/Mode"], 2)
+
+    def test_release_gate_deploy_excludes_local_development_artifacts(self) -> None:
+        excludes = set(self.remote.DEPLOY_EXCLUDES)
+
+        self.assertIn("--exclude=.venv*", excludes)
+        self.assertIn("--exclude=.mutmut-cache", excludes)
+        self.assertIn("--exclude=.coverage", excludes)
+        self.assertIn("--exclude=coverage.xml", excludes)
+        self.assertIn("--exclude=__pycache__", excludes)
 
     def test_isolation_pattern_rejects_supported_direct_clients_only_as_commands(self) -> None:
         forbidden = (

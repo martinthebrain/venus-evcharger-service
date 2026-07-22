@@ -2,138 +2,78 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 from unittest.mock import patch
 
-from venus_evcharger.dbus_gateway import BATTERY_SOC_READ_KEY, dbus_path_key
-from venus_evcharger.inputs.helper.sources_dbus_gateway import GatewayCacheReader
 from tests.support.auto_input_helper import FakeGatewayClient, helper_settings
+from venus_evcharger.inputs.helper.energy_gateway import GatewayEnergySnapshots
+from venus_evcharger.ipc.energy import (
+    EnergyInputsSnapshot,
+    EnergySourceDescriptor,
+    EnergyTopologySnapshot,
+    MeasuredValue,
+)
+
+
+def _inputs() -> EnergyInputsSnapshot:
+    return EnergyInputsSnapshot(
+        sequence=2,
+        captured_at=100.0,
+        topology_generation=3,
+        grid_power_w=MeasuredValue(-20.0, 99.0, "fresh", 1.0),
+        pv_power_w=MeasuredValue(500.0, 99.0, "fresh", 0.9, ("pv-ac-a",)),
+        battery_soc=MeasuredValue(72.0, 98.0, "stale", 0.8, ("battery-a",)),
+    )
+
+
+def _topology() -> EnergyTopologySnapshot:
+    return EnergyTopologySnapshot(
+        generation=3,
+        captured_at=100.0,
+        sources=(EnergySourceDescriptor("pv-ac-a", "pv_ac", "online", ("power",)),),
+    )
 
 
 class AutoInputHelperGatewayContracts(unittest.TestCase):
     def setUp(self) -> None:
         self.client = FakeGatewayClient()
-        self.reader = GatewayCacheReader(helper_settings(), self.client)
+        self.reader = GatewayEnergySnapshots(helper_settings(), self.client)
 
-    def test_fresh_raw_value_is_returned_without_request(self) -> None:
-        snapshot = {"values": {dbus_path_key("svc", "/Value"): {"status": "fresh", "value": 12.5}}}
-        with patch.object(self.reader, "cache_snapshot", return_value=snapshot):
-            self.assertEqual(self.reader.cached_value("svc", "/Value"), 12.5)
-        self.assertEqual(self.client.commands, [])
+    def test_loads_typed_inputs_topology_and_measurements(self) -> None:
+        self.client.inputs = _inputs()
+        self.client.topology = _topology()
+        self.assertIs(self.reader.refresh_inputs(), self.client.inputs)
+        self.assertIs(self.reader.refresh_topology(), self.client.topology)
+        self.assertEqual(self.reader.measurement("pv"), self.client.inputs.pv_power_w)
+        self.assertEqual(self.reader.measurement("grid"), self.client.inputs.grid_power_w)
+        self.assertEqual(self.reader.measurement("battery"), self.client.inputs.battery_soc)
+        self.assertIsNone(self.reader.measurement("topology"))
 
-    def test_known_unusable_path_requests_introspection_without_raw_refresh(self) -> None:
-        with patch.object(self.reader, "_introspection_says_skip", return_value=True), patch.object(
-            self.reader, "request_introspection"
-        ) as request:
-            self.assertIsNone(self.reader.cached_value("svc", "/Missing"))
-        request.assert_called_once()
+    def test_missing_snapshot_and_reset_are_explicit(self) -> None:
+        self.assertIsNone(self.reader.refresh_inputs())
+        self.assertIsNone(self.reader.refresh_topology())
+        self.assertIsNone(self.reader.measurement("pv"))
+        self.reader.reset()
+        self.assertIsNone(self.reader.measurement("battery"))
 
-    def test_cache_miss_requests_value_and_recent_error_is_suppressed(self) -> None:
-        with patch.object(self.reader, "cache_snapshot", return_value={"values": {}}):
-            self.assertIsNone(self.reader.cached_value("svc", "/Value"))
-        self.assertEqual(len(self.client.commands), 1)
-        self.client.commands.clear()
-        error = {"values": {dbus_path_key("svc", "/Value"): {"status": "error", "error_at": 100.0}}}
-        with patch.object(self.reader, "cache_snapshot", return_value=error), patch(
-            "venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=101.0
-        ):
-            self.assertIsNone(self.reader.cached_value("svc", "/Value"))
-        self.assertEqual(self.client.commands, [])
+    def test_refresh_uses_typed_scope_and_rate_limits_duplicates(self) -> None:
+        with patch("venus_evcharger.inputs.helper.energy_gateway.time.monotonic", side_effect=(10.0, 11.0, 41.0)):
+            self.assertTrue(self.reader.request_refresh("pv", reason="missing", priority=True))
+            self.assertFalse(self.reader.request_refresh("pv", reason="duplicate", priority=True))
+            self.assertTrue(self.reader.request_refresh("pv", reason="retry"))
+        first, source = self.client.refresh_requests[0]
+        self.assertEqual(source, "auto-input-helper")
+        self.assertEqual(first.scope, "pv")
+        self.assertEqual(first.urgency, "priority")
+        self.assertEqual(first.max_age_seconds, self.reader.settings.gateway_max_age_seconds)
 
-    def test_semantic_read_returns_fresh_value_or_requests_refresh(self) -> None:
-        snapshot = {"values": {BATTERY_SOC_READ_KEY: {"status": "fresh", "value": 65.0, "age_s": 0.0}}}
-        with patch.object(self.reader, "cache_snapshot", return_value=snapshot):
-            self.assertEqual(self.reader.semantic_value(BATTERY_SOC_READ_KEY, reason="test"), 65.0)
-        with patch.object(self.reader, "cache_snapshot", return_value={}):
-            self.assertIsNone(self.reader.semantic_value(BATTERY_SOC_READ_KEY, reason="test"))
-        self.assertEqual(len(self.client.read_requests), 1)
-
-    def test_semantic_recent_error_is_not_requeued(self) -> None:
-        snapshot = {
-            "values": {BATTERY_SOC_READ_KEY: {"status": "error", "error_at": 100.0, "value": None, "age_s": 0.0}}
-        }
-        with patch.object(self.reader, "cache_snapshot", return_value=snapshot), patch(
-            "venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=101.0
-        ):
-            self.assertIsNone(self.reader.semantic_value(BATTERY_SOC_READ_KEY, reason="test"))
-        self.assertEqual(self.client.read_requests, [])
-
-    def test_service_discovery_uses_cache_and_backoff(self) -> None:
-        with patch.object(self.reader, "cache_snapshot", return_value={"services": {"svc.a": {}, "svc.b": {}}}):
-            self.assertEqual(self.reader.service_names(), ["svc.a", "svc.b"])
-        with patch.object(self.reader, "cache_snapshot", return_value={}), patch(
-            "venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=100.0
-        ):
-            self.assertEqual(self.reader.service_names(), [])
-        self.assertGreater(self.reader._list_backoff_until, 100.0)
-        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=101.0):
-            self.assertEqual(self.reader.service_names(), [])
-        uncapped = GatewayCacheReader(replace(helper_settings(), auto_dbus_backoff_max_seconds=0.0), self.client)
-        with patch.object(uncapped, "cache_snapshot", return_value={}), patch(
-            "venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=200.0
-        ):
-            self.assertEqual(uncapped.service_names(), [])
-
-    def test_retry_window_is_owned_by_gateway_reader(self) -> None:
-        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=10.0):
-            self.reader.delay_source_retry("pv")
-            self.assertFalse(self.reader.source_retry_ready("pv"))
-        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", return_value=20.0):
-            self.assertTrue(self.reader.source_retry_ready("pv"))
-
-    def test_client_cache_path_and_service_available_are_explicit(self) -> None:
-        reader = GatewayCacheReader(replace(helper_settings(), dbus_gateway_cache_path=""))
-        client = FakeGatewayClient("/run/fallback.json")
-        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.GatewayClient", return_value=client) as factory, patch(
-            "venus_evcharger.inputs.helper.sources_dbus_gateway.DbusCacheStore.load_snapshot", return_value={}
-        ) as load:
-            reader.cache_snapshot()
-            reader.cache_snapshot()
-        factory.assert_called_once()
-        self.assertEqual(load.call_count, 2)
-        load.assert_called_with("/run/fallback.json", max_age_seconds=10.0)
-        with patch.object(self.reader, "service_names", return_value=["svc"]):
-            self.assertTrue(self.reader.service_available("svc"))
-            self.assertFalse(self.reader.service_available(""))
-
-    def test_introspection_children_are_cached_or_requested(self) -> None:
-        fresh = {
-            "schema_version": 1,
-            "captured_at": 100.0,
-            "heartbeat_at": 100.0,
-            "services": {"svc": {"paths": {"/": {"status": "fresh", "children": ["A"]}}}},
-        }
-        with patch.object(self.reader, "_fresh_introspection_snapshot", return_value=fresh):
-            self.assertEqual(self.reader.child_nodes("svc", "/"), ["A"])
-        with patch.object(self.reader, "_fresh_introspection_snapshot", return_value={}), patch.object(
-            self.reader, "request_introspection"
-        ) as request:
-            self.assertEqual(self.reader.child_nodes("svc", "/"), [])
-        request.assert_called_once()
-
-    def test_introspection_snapshot_reloads_at_most_every_five_seconds(self) -> None:
-        with patch("venus_evcharger.inputs.helper.sources_dbus_gateway.time.time", side_effect=[10.0, 12.0]), patch(
-            "venus_evcharger.inputs.helper.sources_dbus_gateway.load_introspection_snapshot", return_value={"fresh": True}
-        ) as load:
-            self.assertEqual(self.reader._fresh_introspection_snapshot(), {"fresh": True})
-            self.assertEqual(self.reader._fresh_introspection_snapshot(), {"fresh": True})
-        load.assert_called_once()
-
-    def test_introspection_skip_logs_reason(self) -> None:
-        with patch.object(self.reader, "_fresh_introspection_snapshot", return_value={}), patch(
-            "venus_evcharger.inputs.helper.sources_dbus_gateway.path_unusable_until",
-            return_value=(True, "known-missing"),
-        ), patch("venus_evcharger.inputs.helper.sources_dbus_gateway.logging.debug") as debug:
-            self.assertTrue(self.reader._introspection_says_skip("svc", "/P"))
-        debug.assert_called_once()
-
-    def test_gateway_request_failures_remain_best_effort(self) -> None:
-        self.client.enqueue_error = OSError("socket gone")
-        self.reader.request_value("svc", "/P", priority=80, reason="test")
-        self.reader.request_introspection("svc", "/", priority=60, reason="test")
-        self.assertFalse(self.reader.request_service_refresh())
-        self.client.read_error = OSError("socket gone")
-        self.reader.request_read_key(BATTERY_SOC_READ_KEY, reason="test")
+    def test_topology_refresh_uses_topology_age_and_errors_remain_best_effort(self) -> None:
+        with patch("venus_evcharger.inputs.helper.energy_gateway.time.monotonic", return_value=10.0):
+            self.assertTrue(self.reader.request_refresh("topology", reason="periodic"))
+        request = self.client.refresh_requests[-1][0]
+        self.assertEqual(request.max_age_seconds, self.reader.settings.topology_refresh_seconds)
+        self.client.error = OSError("mailbox unavailable")
+        with patch("venus_evcharger.inputs.helper.energy_gateway.time.monotonic", return_value=100.0):
+            self.assertFalse(self.reader.request_refresh("battery", reason="missing"))
 
 
 if __name__ == "__main__":

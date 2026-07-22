@@ -7,7 +7,7 @@ import os
 from abc import abstractmethod
 from typing import Any, BinaryIO
 
-from venus_evcharger.core.dbus_backpressure import service_dbus_backpressure_policy
+from venus_evcharger.ipc.gateway_pressure import service_gateway_pressure_policy
 from venus_evcharger.update.software_update_errors import SOFTWARE_UPDATE_PROCESS_ERRORS
 from venus_evcharger.update.software_update_contracts import (
     SoftwareUpdateLastResult,
@@ -308,7 +308,7 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
     @staticmethod
     def _defer_optional_software_update_work(svc: Any, now: float, due_attr: str) -> bool:
         """Defer automatic updater work while the DBus gateway reports pressure."""
-        policy = service_dbus_backpressure_policy(svc)
+        policy = service_gateway_pressure_policy(svc)
         if not policy.should_throttle_optional_work():
             return False
         setattr(svc, due_attr, float(now) + policy.optional_work_interval_seconds(60.0))

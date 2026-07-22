@@ -94,7 +94,7 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
         self._make_executable(entrypoint_path)
 
     def _stub_disable_helper(self, repo_copy: Path, helper_marker: Path) -> None:
-        helper_path = repo_copy / "venus_evcharger/ops/disable_generic_shelly_once.py"
+        helper_path = repo_copy / "venus_evcharger_generic_shelly_configuration.py"
         helper_path.write_text(
             "#!/usr/bin/env python3\n"
             "from pathlib import Path\n"

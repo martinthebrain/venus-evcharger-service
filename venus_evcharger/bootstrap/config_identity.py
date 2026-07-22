@@ -59,15 +59,13 @@ class IdentityConfigLoader:
         self._load_device_identity(defaults)
         self._load_control_api(defaults)
         self._load_companion_features(defaults)
-        self._load_companion_instances(defaults)
-        self._load_companion_names(defaults)
         self._reset_control_api_bindings()
 
     def _load_device_identity(self, defaults: configparser.SectionProxy) -> None:
         svc = self._service
-        deviceinstance = _config_int(defaults, "DeviceInstance", 60)
+        instance_id = _config_int(defaults, "DeviceInstance", 60)
         host = _config_text(defaults, "Host")
-        setattr(svc, "deviceinstance", deviceinstance)
+        setattr(svc, "deviceinstance", instance_id)
         setattr(svc, "host", host)
         setattr(svc, "host_configured", _host_is_configured(host))
         setattr(svc, "phase", self._normalize_phase(defaults.get("Phase", "L1")))
@@ -86,15 +84,14 @@ class IdentityConfigLoader:
         setattr(svc, "pm_component", _config_text(defaults, "ShellyComponent", "Switch"))
         setattr(svc, "pm_id", _config_int(defaults, "ShellyId", 0))
         setattr(svc, "custom_name_override", _config_text(defaults, "Name"))
-        setattr(svc, "service_name", _config_text(defaults, "ServiceName", "com.victronenergy.evcharger"))
         setattr(svc, "connection_name", _config_text(defaults, "Connection", "Shelly 1PM Gen4 RPC"))
         setattr(
             svc,
             "runtime_state_path",
-            _config_text(defaults, "RuntimeStatePath", f"/run/dbus-venus-evcharger-{deviceinstance}.json"),
+            _config_text(defaults, "RuntimeStatePath", f"/run/dbus-venus-evcharger-{instance_id}.json"),
         )
         overrides_fallback = str(
-            getattr(svc, "runtime_overrides_path", f"/run/dbus-venus-evcharger-overrides-{deviceinstance}.ini")
+            getattr(svc, "runtime_overrides_path", f"/run/dbus-venus-evcharger-overrides-{instance_id}.ini")
         )
         setattr(
             svc,
@@ -161,7 +158,7 @@ class IdentityConfigLoader:
     def _load_companion_features(self, defaults: configparser.SectionProxy) -> None:
         svc = self._service
         bool_values = (
-            ("companion_dbus_bridge_enabled", "CompanionDbusBridgeEnabled", False),
+            ("companion_publication_enabled", "CompanionDbusBridgeEnabled", False),
             ("companion_battery_service_enabled", "CompanionBatteryServiceEnabled", True),
             ("companion_pvinverter_service_enabled", "CompanionPvInverterServiceEnabled", True),
             ("companion_grid_service_enabled", "CompanionGridServiceEnabled", False),
@@ -189,64 +186,6 @@ class IdentityConfigLoader:
         )
         for attribute, key, float_fallback in float_values:
             setattr(svc, attribute, _config_float(defaults, key, float_fallback))
-
-    def _load_companion_instances(self, defaults: configparser.SectionProxy) -> None:
-        svc = self._service
-        deviceinstance = _integer_attribute(svc, "deviceinstance")
-        values = (
-            ("companion_battery_deviceinstance", "CompanionBatteryDeviceInstance", 40),
-            ("companion_pvinverter_deviceinstance", "CompanionPvInverterDeviceInstance", 41),
-            ("companion_grid_deviceinstance", "CompanionGridDeviceInstance", 42),
-            ("companion_source_battery_deviceinstance_base", "CompanionSourceBatteryDeviceInstanceBase", 140),
-            (
-                "companion_source_pvinverter_deviceinstance_base",
-                "CompanionSourcePvInverterDeviceInstanceBase",
-                240,
-            ),
-            ("companion_source_grid_deviceinstance_base", "CompanionSourceGridDeviceInstanceBase", 340),
-        )
-        for attribute, key, offset in values:
-            setattr(svc, attribute, _config_int(defaults, key, deviceinstance + offset))
-
-    def _load_companion_names(self, defaults: configparser.SectionProxy) -> None:
-        svc = self._service
-        battery_instance = _integer_attribute(svc, "companion_battery_deviceinstance")
-        pv_instance = _integer_attribute(svc, "companion_pvinverter_deviceinstance")
-        grid_instance = _integer_attribute(svc, "companion_grid_deviceinstance")
-        values = (
-            (
-                "companion_battery_service_name",
-                "CompanionBatteryServiceName",
-                f"com.victronenergy.battery.external_{battery_instance}",
-            ),
-            (
-                "companion_pvinverter_service_name",
-                "CompanionPvInverterServiceName",
-                f"com.victronenergy.pvinverter.external_{pv_instance}",
-            ),
-            (
-                "companion_grid_service_name",
-                "CompanionGridServiceName",
-                f"com.victronenergy.grid.external_{grid_instance}",
-            ),
-            (
-                "companion_source_battery_service_prefix",
-                "CompanionSourceBatteryServicePrefix",
-                "com.victronenergy.battery.external",
-            ),
-            (
-                "companion_source_pvinverter_service_prefix",
-                "CompanionSourcePvInverterServicePrefix",
-                "com.victronenergy.pvinverter.external",
-            ),
-            (
-                "companion_source_grid_service_prefix",
-                "CompanionSourceGridServicePrefix",
-                "com.victronenergy.grid.external",
-            ),
-        )
-        for attribute, key, fallback in values:
-            setattr(svc, attribute, _config_text(defaults, key, fallback))
 
     def _reset_control_api_bindings(self) -> None:
         setattr(self._service, "control_api_listen_host", "")

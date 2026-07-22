@@ -8,8 +8,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import float_or_zero
+from venus_evcharger.ipc.command_types import CommandPayload
 
 GatewayPressureState = Literal["ok", "congested", "slow", "protective"]
 _PRESSURE_RANK: dict[GatewayPressureState, int] = {

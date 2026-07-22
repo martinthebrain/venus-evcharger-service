@@ -96,12 +96,12 @@ python3 ./venus_evchargerctl.py \
   safe-write set-mode 1
 ```
 
-Change current with an explicit compatibility path:
+Change the current setting through its semantic target:
 
 ```bash
 python3 ./venus_evchargerctl.py \
   --token dev-control-token \
-  command set-current-setting 12.5 --path /SetCurrent
+  command set-current-setting 12.5 --target set_current
 ```
 
 If you want an optimistic concurrency check, fetch the current state token and

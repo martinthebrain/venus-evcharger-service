@@ -12,95 +12,11 @@ sys.modules["vedbus"] = MagicMock()
 
 from tests.venus_evcharger_test_fixtures import make_runtime_state_service
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
-from venus_evcharger.companion import dbus_bridge_grid as bridge_grid_mod
 from venus_evcharger.controllers import state_json as state_json_mod
 from venus_evcharger.controllers import state_runtime_snapshot as runtime_snapshot_mod
 from venus_evcharger.controllers import state_runtime_snapshot_victron as snapshot_victron
 from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNormalizer
 from venus_evcharger.energy import probe_core as probe_core_mod
-
-
-class _DummyGridBridge(bridge_grid_mod._EnergyCompanionDbusBridgeGrid):
-    def __init__(self, service: object) -> None:
-        self.service = service
-        self._grid_hold_state: dict[str, dict[str, object]] = {}
-
-    @staticmethod
-    def _normalized_source_snapshots(snapshot: dict[str, object]) -> list[dict[str, object]]:
-        sources = snapshot.get("battery_sources", [])
-        return list(sources) if isinstance(sources, list) else []
-
-
-class BranchCoverageNextClusterTwoDbusBridgeGridCases(unittest.TestCase):
-    def test_grid_bridge_helpers_cover_direct_numeric_hold_and_authoritative_paths(self) -> None:
-        service = SimpleNamespace(
-            companion_grid_authoritative_source="missing",
-            companion_grid_hold_seconds=5.0,
-            companion_grid_smoothing_alpha=1.0,
-            companion_grid_smoothing_max_jump_watts=0.0,
-            companion_source_grid_hold_seconds=5.0,
-            companion_source_grid_smoothing_alpha=0.5,
-            companion_source_grid_smoothing_max_jump_watts=25.0,
-        )
-        bridge = _DummyGridBridge(service)
-
-        missing_source_snapshot = {
-            "battery_combined_grid_interaction_w": 500.0,
-            "battery_online_source_count": 1,
-            "battery_sources": [{"source_id": "other", "grid_interaction_w": 123.0, "online": True}],
-        }
-        self.assertEqual(bridge._grid_connected(missing_source_snapshot, 100.0), 0)
-        self.assertEqual(bridge._grid_power_w(missing_source_snapshot, 100.0), 0.0)
-        self.assertIsNone(bridge._find_source_snapshot(missing_source_snapshot, "missing"))
-
-        aggregate_snapshot = {
-            "battery_combined_grid_interaction_w": 120.0,
-            "battery_online_source_count": 1,
-        }
-        service.companion_grid_authoritative_source = ""
-        self.assertEqual(bridge._grid_connected(aggregate_snapshot, 101.0), 1)
-        self.assertEqual(bridge._grid_power_w(aggregate_snapshot, 101.0), 120.0)
-
-        self.assertIsNone(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_numeric_value("x"))
-        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_normalized_alpha(-1.0), 0.0)
-        self.assertEqual(bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_normalized_alpha(5.0), 1.0)
-        self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, None, 0.5, 0.0),
-            200.0,
-        )
-        self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, 100.0, 0.0, 0.0),
-            200.0,
-        )
-        self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(200.0, 100.0, 0.5, 50.0),
-            200.0,
-        )
-        self.assertEqual(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_smoothed_value(130.0, 100.0, 0.5, 50.0),
-            115.0,
-        )
-        self.assertFalse(
-            bridge_grid_mod._EnergyCompanionDbusBridgeGrid._grid_within_hold_window({}, 100.0, 5.0)
-        )
-        self.assertEqual(
-            bridge._grid_source_values(
-                {
-                    "source_id": "hybrid",
-                    "grid_interaction_w": 250.0,
-                    "online": True,
-                },
-                102.0,
-            ),
-            {
-                "/Connected": 1,
-                "/Ac/Power": 250.0,
-                "/Ac/L1/Power": 250.0,
-                "/Ac/L2/Power": 0.0,
-                "/Ac/L3/Power": 0.0,
-            },
-        )
-
 
 class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
     def test_runtime_snapshot_helpers_cover_profile_payloads_and_state_loading(self) -> None:
@@ -108,8 +24,6 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
             virtual_mode=0,
             auto_energy_sources=(SimpleNamespace(source_id="hybrid"), SimpleNamespace(source_id="victron"), SimpleNamespace(source_id=""),),
             auto_battery_discharge_balance_victron_bias_source_id=" victron ",
-            auto_battery_discharge_balance_victron_bias_service=" com.victronenergy.settings ",
-            auto_battery_discharge_balance_victron_bias_path=" /Settings/CGwacs/AcPowerSetPoint ",
             auto_battery_discharge_balance_victron_bias_kp=0.2,
             auto_battery_discharge_balance_victron_bias_ki=0.02,
             auto_battery_discharge_balance_victron_bias_kd=0.01,
@@ -205,7 +119,6 @@ class BranchCoverageNextClusterTwoStateRuntimeSnapshotCases(unittest.TestCase):
             self.assertIsNone(state_json_mod.json_object_payload({1: "bad-key"}))
 
         self.assertEqual(snapshot_victron._victron_ess_balance_energy_ids(service), ["hybrid", "victron"])
-        self.assertEqual(snapshot_victron._victron_ess_balance_runtime_string(service, "auto_battery_discharge_balance_victron_bias_service"), "com.victronenergy.settings")
         self.assertEqual(snapshot_victron._victron_ess_balance_runtime_non_negative_int(-5), 0)
         self.assertEqual(
             snapshot_victron._victron_ess_balance_runtime_attr_text(service, "auto_battery_discharge_balance_victron_bias_activation_mode", normalize_lower=True),

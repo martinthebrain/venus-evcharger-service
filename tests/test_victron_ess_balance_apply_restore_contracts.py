@@ -120,9 +120,9 @@ class ApplyRestoreContracts(unittest.TestCase):
         self.sources._merge_victron_ess_balance_metrics = MagicMock(
             side_effect=lambda *_: self.events.append("merge")
         )
-        self.writer._victron_ess_balance_last_setpoint = MagicMock(return_value=70.0)
-        self.writer._victron_ess_balance_should_write = MagicMock(return_value=True)
-        self.writer._victron_ess_balance_write_setpoint = MagicMock(return_value=True)
+        self.writer.last_setpoint = MagicMock(return_value=70.0)
+        self.writer.should_write = MagicMock(return_value=True)
+        self.writer.write_setpoint = MagicMock(return_value=True)
 
     def _restore(self, reason: str = "blocked") -> None:
         self.subject._restore_victron_ess_balance_base_setpoint(self.svc, 20.0, self.metrics, reason)
@@ -148,43 +148,35 @@ class ApplyRestoreContracts(unittest.TestCase):
         self.sources._merge_victron_ess_balance_metrics.assert_called_once_with(self.svc, self.metrics)
 
     def test_no_previous_setpoint_finalizes_without_write_decision(self) -> None:
-        self.writer._victron_ess_balance_last_setpoint.return_value = None
+        self.writer.last_setpoint.return_value = None
         self._restore()
         self._assert_common_initialization()
         self._assert_common_finalization()
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_reason"], "blocked")
-        self.writer._victron_ess_balance_should_write.assert_not_called()
-        self.writer._victron_ess_balance_write_setpoint.assert_not_called()
+        self.writer.should_write.assert_not_called()
+        self.writer.write_setpoint.assert_not_called()
 
     def test_rate_limited_restore_holds_active_state(self) -> None:
-        self.writer._victron_ess_balance_should_write.return_value = False
+        self.writer.should_write.return_value = False
         self._restore("safety")
         self._assert_common_initialization("safety")
         self._assert_common_finalization()
-        self.writer._victron_ess_balance_should_write.assert_called_once_with(self.svc, 20.0, 50.0)
+        self.writer.should_write.assert_called_once_with(self.svc, 20.0, 50.0)
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_active"], 1)
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_reason"], "safety-holding")
-        self.writer._victron_ess_balance_write_setpoint.assert_not_called()
+        self.writer.write_setpoint.assert_not_called()
 
     def test_successful_restore_clears_last_setpoint_and_records_time(self) -> None:
         self._restore()
         self._assert_common_initialization()
         self._assert_common_finalization()
-        self.writer._victron_ess_balance_write_setpoint.assert_called_once_with(
-            self.svc, "settings-service", "/Setpoint", 50.0
-        )
+        self.writer.write_setpoint.assert_called_once_with(self.svc, 50.0, intent="restore")
         self.assertEqual(self.svc._victron_ess_balance_last_write_at, 20.0)
         self.assertIsNone(self.svc._victron_ess_balance_last_setpoint_w)
         self.assertEqual(self.metrics["battery_discharge_balance_victron_bias_reason"], "blocked-restored")
 
-    def test_successful_restore_uses_empty_gateway_target_when_config_is_absent(self) -> None:
-        del self.svc.auto_battery_discharge_balance_victron_bias_service
-        del self.svc.auto_battery_discharge_balance_victron_bias_path
-        self._restore()
-        self.writer._victron_ess_balance_write_setpoint.assert_called_once_with(self.svc, "", "", 50.0)
-
     def test_failed_restore_remains_active_and_reports_exact_reason(self) -> None:
-        self.writer._victron_ess_balance_write_setpoint.return_value = False
+        self.writer.write_setpoint.return_value = False
         self._restore("offline")
         self._assert_common_initialization("offline")
         self._assert_common_finalization()

@@ -7,8 +7,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from venus_evcharger.dbus_gateway import command_queue_class
-from venus_evcharger.dbus_gateway_command_types import CommandFileList, CommandMapping, CommandPayload
 from venus_evcharger.dbus_gateway_core import float_or_zero
+from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping, CommandPayload
 
 
 def queue_class_health(pending: CommandFileList, now: float) -> CommandPayload:

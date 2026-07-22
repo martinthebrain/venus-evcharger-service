@@ -6,10 +6,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any
 
+from venus_evcharger.control import ControlCommand
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.core.return_contracts import require_bool
+from venus_evcharger.ipc.command_types import CommandMapping
+from venus_evcharger.ipc.core_commands import CoreControlCommand, parse_core_control_command
 from venus_evcharger.runtime.contracts import ControlCommandQueuePort
 
 ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
@@ -91,14 +93,14 @@ class RuntimeExecutor:
 
     def run_once(self) -> bool:
         """Run one serialized runtime executor pass."""
-        gateway_work = self.drain_gateway_commands_once()
+        core_command_work = self.drain_core_commands_once()
         did_work = self.control_commands.drain_once()
-        return bool(self.run_pending_update_once() or did_work or gateway_work)
+        return bool(self.run_pending_update_once() or did_work or core_command_work)
 
-    def drain_gateway_commands_once(self) -> bool:
-        """Handle GUI/user commands delivered by the DBus gateway."""
+    def drain_core_commands_once(self) -> bool:
+        """Handle external control commands delivered through the IPC boundary."""
         svc = self.service
-        inbox = getattr(svc, "_gateway_core_commands", None)
+        inbox = getattr(svc, "_core_command_mailbox", None)
         if inbox is None:
             return False
         pending = inbox.load_pending()
@@ -106,40 +108,31 @@ class RuntimeExecutor:
             return False
         for path, payload in inbox.coalesce(pending):
             try:
-                self.handle_gateway_command(payload, command_file=path)
+                self.handle_core_command(payload, command_file=path)
             finally:
                 inbox.remove(path)
         return True
 
-    def handle_gateway_command(self, payload: Mapping[str, Any], *, command_file: str = "") -> None:
-        """Translate one gateway command file into an existing control command."""
-        if not self.is_gateway_user_command(payload):
+    def handle_core_command(self, payload: CommandMapping, *, command_file: str = "") -> None:
+        """Validate and dispatch one command from the core IPC mailbox."""
+        command = parse_core_control_command(payload)
+        if command is None:
+            logging.warning("Dropping invalid core control command file=%s", command_file or "unknown")
             return
-        _log_gateway_user_command(payload, command_file=command_file, now=time.time())
-        if self.apply_gateway_write_if_supported(payload):
-            return
-        self.dispatch_gateway_control_command(payload)
+        _log_core_control_command(command, command_file=command_file, now=time.time())
+        self.dispatch_core_control_command(command)
 
-    @staticmethod
-    def is_gateway_user_command(payload: Mapping[str, Any]) -> bool:
-        """Return whether a gateway command is intended for the core command API."""
-        return (payload.get("kind") or payload.get("type")) == "user_command"
-
-    def apply_gateway_write_if_supported(self, payload: Mapping[str, Any]) -> bool:
-        """Let the DBus proxy consume gateway writes that map directly to local paths."""
+    def dispatch_core_control_command(self, command: CoreControlCommand) -> None:
+        """Dispatch a validated semantic IPC command to the control core."""
         svc = self.service
-        path = str(payload.get("path") or "")
-        apply_gateway_write = getattr(getattr(svc, "_dbusservice", None), "apply_gateway_write", None)
-        if not callable(apply_gateway_write):
-            return False
-        return bool(require_bool(apply_gateway_write(path, payload.get("value")), "apply_gateway_write"))
-
-    def dispatch_gateway_control_command(self, payload: Mapping[str, Any]) -> None:
-        """Dispatch a gateway command through the existing control command path."""
-        svc = self.service
-        path = str(payload.get("path") or "")
-        command = svc.auto.command_from_write(path, payload.get("value"), source="dbus")
-        svc.auto.handle_command(command)
+        control_command = ControlCommand(
+            name=command.name,
+            target=command.target,
+            value=command.value,
+            source=command.source,
+            command_id=command.command_id,
+        )
+        svc.auto.handle_command(control_command)
 
     def run_pending_update_once(self) -> bool:
         svc = self.service
@@ -181,26 +174,21 @@ def _update_worker_budget_seconds(svc: Any) -> float:
     return budget if budget is not None else 5.0
 
 
-def _log_gateway_user_command(payload: Mapping[str, Any], *, command_file: str, now: float) -> None:
+def _log_core_control_command(command: CoreControlCommand, *, command_file: str, now: float) -> None:
     logging.info(
-        "Gateway user command source=%s origin=%s id=%s path=%s value=%r age_s=%s file=%s",
-        _gateway_command_text(payload, "source", "unknown"),
-        _gateway_command_text(payload, "origin", "unknown"),
-        _gateway_command_text(payload, "id", "unknown"),
-        _gateway_command_text(payload, "path", ""),
-        payload.get("value"),
-        _gateway_command_age_label(payload, now),
+        "Core control command source=%s origin=%s id=%s name=%s target=%s value=%r age_s=%s file=%s",
+        command.source,
+        command.origin,
+        command.command_id,
+        command.name,
+        command.target,
+        command.value,
+        _core_command_age_label(command, now),
         command_file or "unknown",
     )
 
 
-def _gateway_command_text(payload: Mapping[str, Any], key: str, default: str) -> str:
-    text = str(payload.get(key) or "").strip()
-    return text or default
-
-
-def _gateway_command_age_label(payload: Mapping[str, Any], now: float) -> str:
-    created_at = finite_float_or_none(payload.get("created_at"))
-    if created_at is None or created_at <= 0.0:
+def _core_command_age_label(command: CoreControlCommand, now: float) -> str:
+    if command.created_at <= 0.0:
         return "unknown"
-    return f"{max(0.0, float(now) - created_at):.3f}"
+    return f"{max(0.0, float(now) - command.created_at):.3f}"

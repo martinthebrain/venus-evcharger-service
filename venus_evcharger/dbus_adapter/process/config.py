@@ -57,7 +57,6 @@ class GatewayFileSettings:
 @dataclass(frozen=True)
 class GatewayIntrospectionSettings:
     snapshot_path: str
-    request_path: str
     enabled: bool
 
 
@@ -203,14 +202,6 @@ def introspection_settings(
                 f"/run/dbus-venus-evcharger-dbus-map-{device_instance}.json",
             ),
             label="DbusIntrospectionSnapshotPath",
-            suffix=".json",
-        ),
-        request_path=validated_output_file_path(
-            defaults.get(
-                "DbusIntrospectionRequestPath",
-                f"/run/dbus-venus-evcharger-dbus-map-requests-{device_instance}.json",
-            ),
-            label="DbusIntrospectionRequestPath",
             suffix=".json",
         ),
         enabled=_truthy(defaults.get("DbusIntrospectionEnabled", "1")),

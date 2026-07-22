@@ -35,7 +35,7 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             )
             aggregate = install_mock(adapter.read_executor, "_poll_aggregate_step", MagicMock(return_value="deferred"))
 
-            with patch.object(read_module, "pv_total_members") as discover:
+            with patch.object(adapter.energy_discovery, "pv_members") as discover:
                 self.assertEqual(
                     adapter.read_executor._poll_pv_total_step(
                         "pv_power_w",
@@ -154,11 +154,12 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             self.assertEqual(adapter.cache.values["empty_optional"]["source"], "empty_optional")
 
             adapter.cache.update_services(["svc.z", "svc.a"])
+            adapter.energy_discovery.update_services(["svc.z", "svc.a"], now=1.0)
             install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=77.0))
             self.assertEqual(
                 adapter.read_executor._poll_first_service(
                     "first_default",
-                    {"aggregate": "first-service", "path": "/Soc", "interval": 2.0},
+                    {"aggregate": "first-service", "prefix": "svc.", "path": "/Soc", "interval": 2.0},
                 ),
                 "applied",
             )

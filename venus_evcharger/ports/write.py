@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from venus_evcharger.backend.models import (
@@ -16,11 +17,20 @@ from venus_evcharger.core.return_contracts import require_str
 from venus_evcharger.ports.write_runtime import WriteControllerRuntimePort
 
 
+@dataclass(frozen=True)
+class _PendingFieldPublication:
+    field: str
+    value: object
+    current_time: float
+    force: bool
+
+
 class WriteControllerPort(WriteControllerRuntimePort):
-    """Expose only the write-path surface needed by ``DbusWriteController``."""
+    """Expose only the state and hardware surface needed by control writes."""
 
     def __init__(self, service: Any) -> None:
         super().__init__(service)
+        self._pending_publications: list[_PendingFieldPublication] | None = None
 
     def clear_auto_samples(self) -> object:
         return self._service.auto.clear_samples()
@@ -147,8 +157,41 @@ class WriteControllerPort(WriteControllerRuntimePort):
     def update_worker_snapshot(self, **kwargs: object) -> object:
         return self._service.runtime.update_worker_snapshot(**kwargs)
 
-    def publish_dbus_field(self, field: str, value: object, current_time: float, force: bool = False) -> object:
+    def publish_field(self, field: str, value: object, current_time: float, force: bool = False) -> object:
+        if self._pending_publications is not None:
+            self._pending_publications.append(
+                _PendingFieldPublication(str(field), value, float(current_time), bool(force))
+            )
+            return True
         return self._service.state.publish_field(field, value, current_time, force=force)
+
+    def begin_publication_transaction(self) -> None:
+        """Defer semantic GUI publication until a control command is durable."""
+        if self._pending_publications is not None:
+            raise RuntimeError("Control publication transaction is already active")
+        self._pending_publications = []
+
+    def commit_publication_transaction(self) -> None:
+        """Publish all fields staged by the active control transaction."""
+        pending = self._active_pending_publications()
+        for publication in pending:
+            self._service.state.publish_field(
+                publication.field,
+                publication.value,
+                publication.current_time,
+                force=publication.force,
+            )
+        self._pending_publications = None
+
+    def discard_publication_transaction(self) -> None:
+        """Drop fields staged by a rejected reversible command."""
+        self._pending_publications = None
+
+    def _active_pending_publications(self) -> list[_PendingFieldPublication]:
+        pending = self._pending_publications
+        if pending is None:
+            raise RuntimeError("No control publication transaction is active")
+        return list(pending)
 
     def time_now(self) -> float:
         return float(self._service.time_now())

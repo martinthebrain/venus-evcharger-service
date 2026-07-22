@@ -11,6 +11,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     gateway_paths,
     health_slo_module,
     install_mock,
+    evcs_publication,
     patch,
     process_health_module,
     tempfile,
@@ -34,7 +35,9 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             now = time.time()
-            adapter.commands.enqueue({"kind": "publish_value", "path": "/Mode", "created_at": now - 10.0})
+            stale_publication = evcs_publication({"mode": 1}, priority="live")
+            stale_publication["created_at"] = now - 10.0
+            adapter.commands.enqueue(stale_publication)
             adapter.cache.update_value("grid_power_w", 1.0, source="grid", now=now - 10.0)
             adapter.read_scheduler.next_read_at = {key: now + 1000.0 for key in adapter.read_scheduler.specs}
 
@@ -79,8 +82,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                 (
                     "stale-local.json",
                     {
-                        "kind": "publish_value",
-                        "path": "/Mode",
+                        **evcs_publication({"mode": 1}, priority="live"),
                         "queue_class": "local-publish",
                         "created_at": 980.0,
                     },

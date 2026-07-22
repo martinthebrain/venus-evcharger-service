@@ -19,6 +19,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     tempfile,
     time,
 )
+from venus_evcharger.ipc.energy import EnergyRefreshRequest
 
 
 class GatewayAggregateReadCases(GatewayAdapterContractCase):
@@ -96,6 +97,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
 
             def fake_read(service: str, path: str) -> float:
                 if service == "com.victronenergy.pvinverter.http_1":
@@ -122,6 +124,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
@@ -136,7 +139,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                         "path": "/Ac/Power",
                         "dc_service": "",
                         "dc_path": "",
-                        "use_dc_pv": "false",
+                        "use_dc_pv": False,
                         "optional_confidence": 0.7,
                     },
                 )
@@ -168,6 +171,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["svc.optional"])
+            adapter.energy_discovery.update_services(["svc.optional"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
@@ -181,7 +185,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                     "path": "/Power",
                     "dc_service": "",
                     "dc_path": "",
-                    "use_dc_pv": "false",
+                    "use_dc_pv": False,
                 },
             )
 
@@ -195,6 +199,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["svc.optional"])
+            adapter.energy_discovery.update_services(["svc.optional"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
@@ -208,7 +213,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                     "path": "NotAbsolute",
                     "dc_service": "",
                     "dc_path": "",
-                    "use_dc_pv": "false",
+                    "use_dc_pv": False,
                 },
             )
 
@@ -269,6 +274,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.cache.update_services(["com.victronenergy.battery.socketcan_can1"])
+            adapter.energy_discovery.update_services(["com.victronenergy.battery.socketcan_can1"], now=1.0)
             install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=74.0))
 
             self.assertEqual(
@@ -324,6 +330,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             self.assertEqual(adapter.cache.values["path:svc/L1"]["value"], 1.5)
             self.assertEqual(adapter.cache.values["path:svc/L2"]["value"], None)
             adapter.cache.update_services(["pv.1"])
+            adapter.energy_discovery.update_services(["pv.1"], now=1.0)
             self.assertEqual(
                 adapter.read_executor.poll_read_spec(
                     "pv", {"aggregate": "services-sum", "prefix": "pv.", "path": "/P"}
@@ -339,11 +346,14 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 adapter.read_executor.poll_read_spec("invalid", {"service": "svc", "path": "Path"}), "dropped"
             )
             self.assertNotIn("path:svcPath", adapter.cache.values)
+            force_due = install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            grid_refresh = EnergyRefreshRequest("grid-refresh", "grid", 0.0, urgency="priority")
             self.assertEqual(
-                adapter.read_executor.refresh_requested_value({"service": "svc", "path": "/Path"}), "applied"
+                adapter.process_non_write_command(grid_refresh.to_command(source="test")),
+                "applied",
             )
-            self.assertEqual(adapter.read_executor.refresh_requested_value({"key": "grid_power_w"}), "deferred")
-            self.assertEqual(adapter.read_executor.refresh_requested_value({}), "dropped")
+            force_due.assert_called_once_with(("grid_power_w",))
+            self.assertEqual(adapter.process_non_write_command({}), "dropped")
 
             install_mock(
                 adapter.read_executor,
@@ -351,18 +361,14 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 MagicMock(side_effect=RuntimeError("read failed")),
             )
             self.assertEqual(
-                adapter.read_executor.refresh_requested_value({"service": "svc", "path": "/Broken"}), "dropped"
+                adapter.read_executor.poll_read_spec(
+                    "broken",
+                    {"service": "svc", "path": "/Broken"},
+                ),
+                "dropped",
             )
-            self.assertEqual(adapter.cache.values["path:svc/Broken"]["status"], "error")
-            refresh_path = adapter.commands.enqueue(
-                {
-                    "kind": "refresh_value",
-                    "service": "svc",
-                    "path": "/Broken",
-                    "priority": "read",
-                    "coalesce_key": "refresh:svc:/Broken",
-                }
-            )
+            self.assertEqual(adapter.cache.values["broken"]["status"], "error")
+            refresh_path = adapter.commands.enqueue(grid_refresh.to_command(source="test"))
             self.assertTrue(adapter.write_scheduler.process_one())
             self.assertFalse(Path(refresh_path).exists())
             self.assertEqual(adapter.read_executor.poll_read_spec("bad", {"service": "svc", "path": "/Bad"}), "dropped")
@@ -373,19 +379,12 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 MagicMock(side_effect=DbusOperationDeferred("read")),
             )
             self.assertEqual(
-                adapter.read_executor.refresh_requested_value({"service": "svc", "path": "/Deferred"}), "deferred"
+                adapter.read_executor.poll_read_spec(
+                    "deferred",
+                    {"service": "svc", "path": "/Deferred"},
+                ),
+                "deferred",
             )
-            deferred_refresh_path = adapter.commands.enqueue(
-                {
-                    "kind": "refresh_value",
-                    "service": "svc",
-                    "path": "/Deferred",
-                    "priority": "read",
-                    "coalesce_key": "refresh:svc:/Deferred",
-                }
-            )
-            self.assertTrue(adapter.write_scheduler.process_one())
-            self.assertTrue(Path(deferred_refresh_path).exists())
             self.assertEqual(
                 adapter.read_executor.poll_read_spec("later", {"service": "svc", "path": "/Later"}), "deferred"
             )

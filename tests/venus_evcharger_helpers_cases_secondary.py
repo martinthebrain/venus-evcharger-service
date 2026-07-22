@@ -1,36 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_helpers_support import *
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths
 
 
 class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
-    def test_get_dbus_value_uses_gateway_cache_and_requests_missing_value(self):
-        service = make_helper_service()
-        temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(temp_dir.cleanup)
-        paths = gateway_paths(f"{temp_dir.name}/run")
-        store = DbusCacheStore(paths)
-        store.update_value(dbus_path_key("com.victronenergy.system", "/Dc/Pv/Power"), 42.0, source="test")
-        store.write_snapshot_files()
-        service.dbus_gateway_run_dir = paths.run_dir
-        service.dbus_gateway_cache_path = paths.cache_path
-        service.controllers.runtime.runtime.mark_recovery = MagicMock()
-        service.controllers.runtime.runtime.mark_failure = MagicMock()
-        service._dbus_input_controller = None
-
-        self.assertEqual(service.controllers.runtime.dbus_input.get_dbus_value("com.victronenergy.system", "/Dc/Pv/Power"), 42.0)
-        self.assertIsNone(service.controllers.runtime.dbus_input.get_dbus_value("com.victronenergy.system", "/Missing"))
-        commands = [payload for _path, payload in DbusCommandInbox(paths.command_dir).load_pending()]
-        self.assertTrue(any(command.get("kind") == "refresh_value" and command.get("path") == "/Missing" for command in commands))
-        service.controllers.runtime.runtime.mark_recovery.assert_called()
-        service.controllers.runtime.runtime.mark_failure.assert_called_with("dbus")
-
-    def test_system_bus_access_is_disabled(self):
-        service = make_helper_service()
-        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            service.runtime.get_system_bus()
-        service.runtime.reset_system_bus()
-
     def test_request_uses_configured_shelly_timeout(self):
         service = make_helper_service()
         service.shelly_request_timeout_seconds = 1.5

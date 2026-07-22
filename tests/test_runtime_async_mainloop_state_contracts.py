@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import unittest
 from collections import OrderedDict
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from venus_evcharger.runtime.async_mainloop_state import AsyncRuntimeState
 from tests.venus_evcharger_test_fixtures import make_runtime_support_service
 
 
-def _controller(**service_values: object) -> tuple[object, AsyncRuntimeState]:
+def _controller(**service_values: object) -> tuple[SimpleNamespace, AsyncRuntimeState]:
     service = make_runtime_support_service(**service_values)
     controller = AsyncRuntimeState(service)
     return service, controller
@@ -28,19 +29,6 @@ class RuntimeAsyncMainloopStateContractTests(unittest.TestCase):
             controller.initialize()
 
         expected = {
-            "_dbus_mainloop_thread_id": None,
-            "_dbus_async_publish_enabled": False,
-            "_dbus_publish_bump_pending": 0,
-            "_dbus_publish_oldest_queued_at": None,
-            "_dbus_publish_dropped_count": 0,
-            "_dbus_publish_max_paths": 256,
-            "_dbus_publish_budget_seconds": 0.1,
-            "_dbus_publish_flush_interval_ms": 200,
-            "_last_publish_flush_duration_seconds": 0.0,
-            "_last_dbus_publish_queue_lag_seconds": 0.0,
-            "_companion_publish_pending": False,
-            "_companion_publish_requested_at": None,
-            "_companion_publish_now": None,
             "_update_worker_enabled": False,
             "_runtime_executor_thread": None,
             "_update_worker_thread": None,
@@ -72,15 +60,10 @@ class RuntimeAsyncMainloopStateContractTests(unittest.TestCase):
         service, controller = _controller()
         controller.initialize()
 
-        self.assertEqual(service._dbus_publish_pending, OrderedDict())
-        self.assertEqual(service._dbus_publish_field_pending, OrderedDict())
         self.assertEqual(service._control_command_pending, OrderedDict())
         self.assertEqual(service._desired_control_values, {})
-        self.assertIsNot(service._dbus_publish_pending, service._dbus_publish_field_pending)
 
         locks = (
-            service._dbus_publish_queue_lock,
-            service._companion_publish_lock,
             service._update_worker_lock,
             service._control_command_lock,
         )
@@ -88,7 +71,7 @@ class RuntimeAsyncMainloopStateContractTests(unittest.TestCase):
             with self.subTest(lock=lock):
                 self.assertTrue(lock.acquire(blocking=False))
                 lock.release()
-        self.assertEqual(len({id(lock) for lock in locks}), 4)
+        self.assertEqual(len({id(lock) for lock in locks}), 2)
 
         events = (
             service._runtime_executor_event,
@@ -124,50 +107,6 @@ class RuntimeAsyncMainloopStateContractTests(unittest.TestCase):
         controller.initialize()
         self.assertEqual(service._update_worker_budget_seconds, 5.0)
         self.assertEqual(service._mainloop_watchdog_stale_seconds, 180.0)
-
-    def test_mark_and_direct_access_follow_exact_thread_ownership_rules(self) -> None:
-        service, controller = _controller()
-        self.assertTrue(controller.direct_publish_allowed())
-        controller.initialize()
-        self.assertTrue(controller.direct_publish_allowed())
-
-        service._dbus_async_publish_enabled = True
-        service._dbus_mainloop_thread_id = None
-        self.assertTrue(controller.direct_publish_allowed())
-        del service._dbus_mainloop_thread_id
-        self.assertTrue(controller.direct_publish_allowed())
-        service._dbus_mainloop_thread_id = None
-
-        with patch("venus_evcharger.runtime.async_mainloop_state.threading.get_ident", return_value=42):
-            controller.mark_mainloop_thread()
-            self.assertEqual(service._dbus_mainloop_thread_id, 42)
-            self.assertTrue(service._dbus_async_publish_enabled)
-            self.assertTrue(controller.direct_publish_allowed())
-        with patch("venus_evcharger.runtime.async_mainloop_state.threading.get_ident", return_value=43):
-            self.assertFalse(controller.direct_publish_allowed())
-
-    def test_thread_assertion_is_silent_when_allowed_and_exact_when_denied(self) -> None:
-        service, controller = _controller()
-        controller.initialize()
-        with patch("venus_evcharger.runtime.async_mainloop_state.logging.error") as error_log:
-            controller.assert_mainloop_thread("publish")
-        error_log.assert_not_called()
-
-        service._dbus_async_publish_enabled = True
-        service._dbus_mainloop_thread_id = 42
-        with (
-            patch("venus_evcharger.runtime.async_mainloop_state.threading.get_ident", return_value=43),
-            patch("venus_evcharger.runtime.async_mainloop_state.logging.error") as error_log,
-            self.assertRaisesRegex(RuntimeError, "^publish attempted outside GLib/DBus mainloop thread$"),
-        ):
-            controller.assert_mainloop_thread("publish")
-        error_log.assert_called_once_with("publish attempted outside GLib/DBus mainloop thread")
-
-        with (
-            patch.object(controller, "direct_publish_allowed", return_value=False),
-            self.assertRaisesRegex(RuntimeError, "^dbus access attempted outside GLib/DBus mainloop thread$"),
-        ):
-            controller.assert_mainloop_thread()
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -2,22 +2,7 @@
 from tests.venus_evcharger_write_controller_support import *
 
 
-class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
-    def test_snapshot_dbus_paths_returns_empty_mapping_without_dbusservice(self) -> None:
-        self.assertEqual(_snapshot_dbus_paths(SimpleNamespace(), ("/Mode",)), {})
-
-    def test_snapshot_dbus_paths_uses_publish_state_without_touching_dbusservice(self) -> None:
-        class FailingDbusService(dict[str, object]):
-            def __getitem__(self, key: str) -> object:
-                raise RuntimeError("must not touch dbus")
-
-        service = SimpleNamespace(
-            _dbusservice=FailingDbusService({"/Mode": 99}),
-            _dbus_publish_state={"/Mode": {"value": 1, "updated_at": 100.0}},
-        )
-
-        self.assertEqual(_snapshot_dbus_paths(service, ("/Mode",)), {"/Mode": 1})
-
+class TestControlWriteControllerPrimary(ControlWriteControllerTestBase):
     def test_handle_mode_write_manual_to_auto_queues_clean_cutover(self) -> None:
         service = SimpleNamespace(
             virtual_mode=0,
@@ -49,7 +34,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = write_controller(service)
-        result = controller.handle_write("/Mode", 1)
+        result = handle_control_target(controller, "mode", 1)
 
         self.assertTrue(result)
         self.assertEqual(service.virtual_mode, 1)
@@ -98,7 +83,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 1))
+        self.assertTrue(handle_control_target(controller, "mode", 1))
 
         self.assertTrue(service._auto_mode_cutover_pending)
         service._queue_relay_command.assert_called_once_with(False, 200.0)
@@ -136,7 +121,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 1))
+        self.assertTrue(handle_control_target(controller, "mode", 1))
 
         self.assertTrue(service._auto_mode_cutover_pending)
         service._queue_relay_command.assert_called_once_with(False, 200.0)
@@ -176,7 +161,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 1))
+        self.assertTrue(handle_control_target(controller, "mode", 1))
 
         self.assertTrue(service._auto_mode_cutover_pending)
         service._queue_relay_command.assert_called_once_with(False, 200.0)
@@ -227,7 +212,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 1))
+        self.assertTrue(handle_control_target(controller, "mode", 1))
 
         self.assertFalse(service._auto_mode_cutover_pending)
         self.assertFalse(service._ignore_min_offtime_once)
@@ -249,24 +234,25 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/SoftwareUpdateRun", 1))
+        self.assertTrue(handle_control_target(controller, "auto_software_update_run", 1))
 
         self.assertEqual(service._software_update_run_requested_at, 200.0)
         self.assertEqual(service._dbusservice["/Auto/SoftwareUpdateRun"], 0)
         service._save_runtime_state.assert_called_once()
         service._save_runtime_overrides.assert_called_once()
 
-    def test_snapshot_write_state_skips_non_mapping_dbusservice_objects(self) -> None:
+    def test_snapshot_write_state_captures_only_declared_semantic_mappings(self) -> None:
         service = SimpleNamespace(
             _dbusservice=object(),
             _dbus_publish_state={"/Mode": {"value": 0}},
             _worker_snapshot={"captured_at": 1.0},
         )
 
-        snapshot = DbusWriteController._snapshot_write_state(service)
+        snapshot = ControlWriteController._snapshot_write_state(service)
 
         self.assertNotIn("_dbusservice", snapshot["mappings"])
-        self.assertIn("_dbus_publish_state", snapshot["mappings"])
+        self.assertNotIn("_dbus_publish_state", snapshot["mappings"])
+        self.assertEqual(snapshot["mappings"]["_worker_snapshot"], {"captured_at": 1.0})
 
     def test_handle_enable_write_in_manual_mode_switches_relay(self) -> None:
         service = SimpleNamespace(
@@ -287,7 +273,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
 
         controller = write_controller(service)
-        result = controller.handle_write("/Enable", 1)
+        result = handle_control_target(controller, "enable", 1)
 
         self.assertTrue(result)
         self.assertEqual(service.virtual_enable, 1)
@@ -321,7 +307,7 @@ class TestDbusWriteControllerPrimary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Enable", 1))
+        self.assertTrue(handle_control_target(controller, "enable", 1))
 
         charger_backend.set_enabled.assert_called_once_with(True)
         service._queue_relay_command.assert_not_called()
