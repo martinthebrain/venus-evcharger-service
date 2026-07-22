@@ -69,6 +69,34 @@ AutoBatteryPollIntervalMs=2000
             with self.assertRaisesRegex(ValueError, "must cover"):
                 load_auto_input_helper_settings(str(path), None, None, None, None)
 
+    def test_disabled_grid_fusion_uses_gateway_freshness_for_the_victron_source(self) -> None:
+        config = """[DEFAULT]
+DbusGatewayMaxAgeSeconds=10
+AutoGridFusionEnabled=0
+AutoGridFusionBackupMaxAgeSeconds=6
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.ini"
+            path.write_text(config, encoding="utf-8")
+            settings = load_auto_input_helper_settings(str(path), None, None, None, None)
+
+        self.assertEqual(settings.gateway_max_age_seconds, 10.0)
+        self.assertEqual(settings.grid_fusion_config.backup_max_age_seconds, 10.0)
+
+    def test_enabled_grid_fusion_keeps_its_explicit_backup_freshness(self) -> None:
+        config = """[DEFAULT]
+DbusGatewayMaxAgeSeconds=10
+AutoGridFusionEnabled=1
+AutoGridFusionPrimarySource=huawei
+AutoGridFusionBackupMaxAgeSeconds=6
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.ini"
+            path.write_text(config, encoding="utf-8")
+            settings = load_auto_input_helper_settings(str(path), None, None, None, None)
+
+        self.assertEqual(settings.grid_fusion_config.backup_max_age_seconds, 6.0)
+
 
 if __name__ == "__main__":
     unittest.main()
