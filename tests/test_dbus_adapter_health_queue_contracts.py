@@ -8,6 +8,7 @@ import unittest
 from venus_evcharger.dbus_adapter.health.queue import (
     command_activity_at,
     oldest_command_age,
+    oldest_slo_command_age,
     physical_command_count_from_pending,
     queue_class_health,
     queue_health,
@@ -51,6 +52,16 @@ class DbusAdapterHealthQueueContractTests(unittest.TestCase):
         self.assertEqual(oldest_command_age([("tiny.json", {"created_at": 99.5})], 100.0), 0.5)
         self.assertEqual(oldest_command_age([("invalid.json", {"created_at": "bad"})], 100.0), 0.0)
         self.assertEqual(oldest_command_age([], 100.0), 0.0)
+
+    def test_slo_age_excludes_advisory_work_but_preserves_actionable_age(self) -> None:
+        pending = pending_commands() + [
+            ("introspection.json", {"queue_class": "introspection", "created_at": 5.0}),
+            ("discovery.json", {"queue_class": "discovery", "created_at": 10.0}),
+            ("diagnostic.json", {"queue_class": "diagnostic", "created_at": 15.0}),
+        ]
+        self.assertEqual(oldest_command_age(pending, 100.0), 95.0)
+        self.assertEqual(oldest_slo_command_age(pending, 100.0), 10.0)
+        self.assertEqual(oldest_slo_command_age(pending[-3:], 100.0), 0.0)
 
     def test_physical_count_distinguishes_files_from_coalesced_commands(self) -> None:
         pending = pending_commands()
@@ -96,6 +107,7 @@ class DbusAdapterHealthQueueContractTests(unittest.TestCase):
                 "pending_command_count": 5,
                 "physical_command_count": 7,
                 "oldest_command_age_s": 10.0,
+                "oldest_slo_command_age_s": 10.0,
                 "core_command_count": 2,
                 "oldest_core_command_age_s": 20.0,
                 "processed_commands_60s": 30,
@@ -110,6 +122,7 @@ class DbusAdapterHealthQueueContractTests(unittest.TestCase):
             "pending_command_count": 5,
             "physical_command_count": 5,
             "oldest_command_age_s": 10.0,
+            "oldest_slo_command_age_s": 10.0,
             "core_command_count": 0,
             "oldest_core_command_age_s": 0.0,
             "processed_commands_60s": 0,

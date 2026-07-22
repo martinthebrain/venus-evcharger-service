@@ -30,6 +30,7 @@ def health_log_payload(health: Mapping[str, object]) -> CommandPayload:
         "state": health.get("state", "unknown"),
         "backpressure": backpressure.get("state", "unknown"),
         "queue_oldest_age_s": queues.get("oldest_command_age_s", 0.0),
+        "queue_oldest_slo_age_s": queues.get("oldest_slo_command_age_s", 0.0),
         "core_queue_oldest_age_s": queues.get("oldest_core_command_age_s", 0.0),
         "max_tick_gap_ms_60s": eventloop.get("max_tick_gap_ms_60s", 0.0),
         "timeouts_60s": health.get("timeouts_60s", 0),

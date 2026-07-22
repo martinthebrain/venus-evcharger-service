@@ -26,7 +26,14 @@ from venus_evcharger.dbus_adapter.health.gui import (
     GUI_MEASUREMENT_FRESHNESS_FIELDS,
 )
 from venus_evcharger.dbus_adapter.health.history import append_health_log
-from venus_evcharger.dbus_adapter.health.queue import oldest_command_age, queue_class_health, queue_health
+from venus_evcharger.dbus_adapter.health.queue import (
+    ADVISORY_QUEUE_CLASSES,
+    command_queue_class_name,
+    oldest_command_age,
+    oldest_slo_command_age,
+    queue_class_health,
+    queue_health,
+)
 from venus_evcharger.dbus_adapter.health.slo import (
     SloThresholds,
     effective_gui_max_age_seconds,
@@ -174,7 +181,7 @@ class DbusAdapterHealth(DbusAdapterDiagnostics):
             "gui_control_missing_field_count": self.missing_publication_field_count(GUI_CONTROL_FRESHNESS_FIELDS),
             "gui_session_missing_field_count": self.missing_publication_field_count(session_fields),
             "core_read_max_age_s": max_core_read_age(cache_freshness),
-            "queue_oldest_age_s": float_or_zero(queue_health.get("oldest_command_age_s")),
+            "queue_oldest_age_s": float_or_zero(queue_health.get("oldest_slo_command_age_s")),
             "mainloop_max_gap_ms_60s": float_or_zero(eventloop.get("max_tick_gap_ms_60s")),
         }
 
@@ -201,12 +208,16 @@ class DbusAdapterHealth(DbusAdapterDiagnostics):
     def apply_slo_regulation(self: DbusAdapterHealthContext) -> None:
         now = time.time()
         pending = self.commands.coalesce(self.commands.load_pending())
-        queue_age = oldest_command_age(pending, now)
+        total_queue_age = oldest_command_age(pending, now)
+        queue_age = oldest_slo_command_age(pending, now)
         cache_freshness = self.cache_freshness_snapshot(now)
         core_read_age = max_core_read_age(cache_freshness)
         eventloop_gap_ms = float_or_zero(self.tick_health.snapshot().get("max_tick_gap_ms_60s"))
         thresholds = self.slo_thresholds()
-        queue_metrics = {"oldest_command_age_s": queue_age}
+        queue_metrics = {
+            "oldest_command_age_s": total_queue_age,
+            "oldest_slo_command_age_s": queue_age,
+        }
         slo = self.slo_snapshot(
             queue_health=queue_metrics,
             cache_freshness=cache_freshness,
@@ -241,13 +252,18 @@ class DbusAdapterHealth(DbusAdapterDiagnostics):
                     max_age_seconds=self.slo_core_read_max_age_seconds,
                 )
             )
-        if self.circuit.state() != "ok" or pressure_state in {"slow", "protective"}:
-            self.quiet_discovery_and_introspection(now)
+        if self.circuit.state() != "ok" or pressure_state != "ok":
+            self.suspend_advisory_work(now)
 
-    def quiet_discovery_and_introspection(self: DbusAdapterHealthContext, now: float) -> None:
+    def suspend_advisory_work(self: DbusAdapterHealthContext, now: float) -> None:
         quiet_until = now + 60.0
         self.discovery.next_scan_at = max(self.discovery.next_scan_at, quiet_until)
         self._last_introspection_full_scan_at = max(self._last_introspection_full_scan_at, now)
+        for path, command in self.commands.load_pending():
+            if command_queue_class_name(command) not in ADVISORY_QUEUE_CLASSES:
+                continue
+            self.commands.remove(path)
+            self.write_scheduler.record_lifecycle(command, "dropped")
 
     def max_publication_field_age(
         self: DbusAdapterHealthContext,

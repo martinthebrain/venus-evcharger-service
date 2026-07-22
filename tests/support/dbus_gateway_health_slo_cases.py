@@ -93,7 +93,9 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             monotonic_now = time.monotonic()
             adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=monotonic_now - 3.0)
             adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=monotonic_now)
-            refresh = EnergyRefreshRequest("health-stale", "topology", 0.0).to_command(source="health-test")
+            refresh = EnergyRefreshRequest("health-stale", "grid", 0.0, urgency="priority").to_command(
+                source="health-test"
+            )
             refresh["created_at"] = now - 5.0
             adapter.commands.enqueue(refresh)
 
@@ -191,7 +193,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 42.0}))
 
             observed = adapter.slo_observed(
-                {"oldest_command_age_s": 3.0},
+                {"oldest_command_age_s": 99.0, "oldest_slo_command_age_s": 3.0},
                 {"grid_power_w_age_s": 4.0},
                 now=100.0,
                 current_monotonic=777.0,

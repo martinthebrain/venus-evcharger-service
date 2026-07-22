@@ -177,19 +177,26 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
             pressure_limited_publish_burst(1, base_burst=1, pressure_state=json.loads('"invalid"'))
 
     def test_queue_pressure_caps_copy_budgets_and_do_not_increase_existing_limits(self) -> None:
-        budgets = {"gui-critical-publish": 50, "local-publish": 30, "diagnostic": 1, "remote-write": 4}
+        budgets = {
+            "gui-critical-publish": 50,
+            "local-publish": 30,
+            "diagnostic": 1,
+            "discovery": 1,
+            "introspection": 1,
+            "remote-write": 4,
+        }
         self.assertEqual(pressure_limited_queue_budgets(budgets, base_local_publish_burst=20, pressure_state="ok"), budgets)
         self.assertEqual(
             pressure_limited_queue_budgets(budgets, base_local_publish_burst=20, pressure_state="congested"),
-            {"gui-critical-publish": 10, "local-publish": 5, "diagnostic": 0, "remote-write": 4},
+            {"gui-critical-publish": 10, "local-publish": 5, "diagnostic": 0, "discovery": 0, "introspection": 0, "remote-write": 4},
         )
         self.assertEqual(
             pressure_limited_queue_budgets(budgets, base_local_publish_burst=20, pressure_state="slow"),
-            {"gui-critical-publish": 5, "local-publish": 1, "diagnostic": 0, "remote-write": 4},
+            {"gui-critical-publish": 5, "local-publish": 1, "diagnostic": 0, "discovery": 0, "introspection": 0, "remote-write": 4},
         )
         self.assertEqual(
             pressure_limited_queue_budgets(budgets, base_local_publish_burst=20, pressure_state="protective"),
-            {"gui-critical-publish": 1, "local-publish": 1, "diagnostic": 0, "remote-write": 4},
+            {"gui-critical-publish": 1, "local-publish": 1, "diagnostic": 0, "discovery": 0, "introspection": 0, "remote-write": 4},
         )
         self.assertEqual(
             pressure_limited_queue_budgets(
@@ -197,28 +204,64 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
                 base_local_publish_burst=20,
                 pressure_state="congested",
             ),
-            {"gui-critical-publish": 2, "local-publish": 0, "diagnostic": 0},
+            {
+                "gui-critical-publish": 2,
+                "local-publish": 0,
+                "diagnostic": 0,
+                "discovery": 0,
+                "introspection": 0,
+            },
         )
         self.assertEqual(
             pressure_limited_queue_budgets({}, base_local_publish_burst=7, pressure_state="slow"),
-            {"gui-critical-publish": 1, "local-publish": 1, "diagnostic": 0},
+            {
+                "gui-critical-publish": 1,
+                "local-publish": 1,
+                "diagnostic": 0,
+                "discovery": 0,
+                "introspection": 0,
+            },
         )
         self.assertEqual(
             pressure_limited_queue_budgets({}, base_local_publish_burst=7, pressure_state="congested"),
-            {"gui-critical-publish": 3, "local-publish": 1, "diagnostic": 0},
+            {
+                "gui-critical-publish": 3,
+                "local-publish": 1,
+                "diagnostic": 0,
+                "discovery": 0,
+                "introspection": 0,
+            },
         )
         high = {"gui-critical-publish": 50, "local-publish": 50, "diagnostic": 1}
         self.assertEqual(
             pressure_limited_queue_budgets(high, base_local_publish_burst=7, pressure_state="slow"),
-            {"gui-critical-publish": 1, "local-publish": 1, "diagnostic": 0},
+            {
+                "gui-critical-publish": 1,
+                "local-publish": 1,
+                "diagnostic": 0,
+                "discovery": 0,
+                "introspection": 0,
+            },
         )
         self.assertEqual(
             pressure_limited_queue_budgets(high, base_local_publish_burst=7, pressure_state="congested"),
-            {"gui-critical-publish": 3, "local-publish": 1, "diagnostic": 0},
+            {
+                "gui-critical-publish": 3,
+                "local-publish": 1,
+                "diagnostic": 0,
+                "discovery": 0,
+                "introspection": 0,
+            },
         )
         self.assertEqual(
             pressure_limited_queue_budgets(high, base_local_publish_burst=1, pressure_state="congested"),
-            {"gui-critical-publish": 1, "local-publish": 1, "diagnostic": 0},
+            {
+                "gui-critical-publish": 1,
+                "local-publish": 1,
+                "diagnostic": 0,
+                "discovery": 0,
+                "introspection": 0,
+            },
         )
         with self.assertRaisesRegex(ValueError, "^base publish burst must be positive$"):
             pressure_limited_queue_budgets({}, base_local_publish_burst=0, pressure_state="ok")
@@ -228,7 +271,17 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
                 base_local_publish_burst=1,
                 pressure_state=json.loads('"invalid"'),
             )
-        self.assertEqual(budgets, {"gui-critical-publish": 50, "local-publish": 30, "diagnostic": 1, "remote-write": 4})
+        self.assertEqual(
+            budgets,
+            {
+                "gui-critical-publish": 50,
+                "local-publish": 30,
+                "diagnostic": 1,
+                "discovery": 1,
+                "introspection": 1,
+                "remote-write": 4,
+            },
+        )
 
 
 if __name__ == "__main__":

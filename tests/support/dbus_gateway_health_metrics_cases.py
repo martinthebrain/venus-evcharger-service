@@ -137,6 +137,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
                 "pending_command_count": 5,
                 "physical_command_count": 7,
                 "oldest_command_age_s": 10.0,
+                "oldest_slo_command_age_s": 10.0,
                 "core_command_count": 2,
                 "oldest_core_command_age_s": 20.0,
                 "processed_commands_60s": 30,
@@ -403,5 +404,11 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
                 base_local_publish_burst=20,
                 pressure_state="slow",
             ),
-            {"gui-critical-publish": 5, "local-publish": 1, "diagnostic": 0},
+            {
+                "gui-critical-publish": 5,
+                "local-publish": 1,
+                "diagnostic": 0,
+                "discovery": 0,
+                "introspection": 0,
+            },
         )

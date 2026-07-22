@@ -20,7 +20,7 @@ def backpressure_snapshot(
     slo: Mapping[str, object],
     queue_max_age_seconds: float,
 ) -> CommandPayload:
-    queue_age = float_or_zero(queue_health.get("oldest_command_age_s"))
+    queue_age = float_or_zero(queue_health.get("oldest_slo_command_age_s"))
     reasons = backpressure_reasons(circuit_state, queue_age, slo, queue_max_age_seconds=queue_max_age_seconds)
     state = backpressure_state(circuit_state, queue_age, reasons, queue_max_age_seconds=queue_max_age_seconds)
     return {
