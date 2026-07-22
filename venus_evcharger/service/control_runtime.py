@@ -111,7 +111,7 @@ class ControlRuntime:
             return {}
         return {
             "name": command.name,
-            "path": command.path,
+            "target": command.target,
             "value": command.value,
             "source": command.source or transport,
             "detail": command.detail,

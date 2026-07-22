@@ -51,7 +51,7 @@ class EnergyConnectorsCommonContractTests(unittest.TestCase):
     def test_connector_and_optional_path_normalization_is_exact(self) -> None:
         self.assertEqual(_normalized_connector_type(" TEMPLATE_HTTP_ENERGY "), "template_http")
         self.assertEqual(_normalized_connector_type(" MODBUS "), "modbus")
-        self.assertEqual(_normalized_connector_type("  "), "dbus")
+        self.assertEqual(_normalized_connector_type("  "), "")
 
         self.assertIsNone(_optional_path("  "))
         self.assertIsNone(_optional_path(None))

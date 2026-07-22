@@ -98,7 +98,7 @@ CONTROL_API_COMMAND_REFERENCE_BY_NAME = {
 }
 
 
-_PREFERRED_FIELD_ORDER = ("name", "path", "value", "detail", "command_id", "idempotency_key")
+_PREFERRED_FIELD_ORDER = ("name", "target", "value", "detail", "command_id", "idempotency_key")
 _VALUE_TYPE_ORDER = {
     "boolean or `0/1`": 0,
     "integer": 1,
@@ -226,7 +226,7 @@ def _minimum_label(schema: Mapping[str, Any]) -> str | None:
     return f"`>= {minimum_scalar}`"
 
 
-def _joined_labels(labels: set[str], *, path_specific: bool) -> str:
+def _joined_labels(labels: set[str], *, target_specific: bool) -> str:
     ordered = sorted(labels, key=lambda item: (_VALUE_TYPE_ORDER.get(item, 99), item))
     if len(ordered) == 1:
         return ordered[0]
@@ -234,8 +234,8 @@ def _joined_labels(labels: set[str], *, path_specific: bool) -> str:
         joined = f"{ordered[0]} or {ordered[1]}"
     else:
         joined = f"{', '.join(ordered[:-1])}, or {ordered[-1]}"
-    if path_specific:
-        return f"{joined} depending on `path`"
+    if target_specific:
+        return f"{joined} depending on `target`"
     return joined
 
 
@@ -243,9 +243,9 @@ def _command_contract_summary(name: str) -> tuple[tuple[str, ...], str, str]:
     schemas = _named_request_schemas_by_command()[name]
     required_fields = _collected_required_fields(schemas)
     value_types, allowed_values = _collected_value_contract_labels(schemas)
-    path_specific = len(schemas) > 1
-    value_type = _joined_labels(value_types, path_specific=path_specific)
-    allowed = allowed_values.pop() if len(allowed_values) == 1 else "path-specific schema"
+    target_specific = len(schemas) > 1
+    value_type = _joined_labels(value_types, target_specific=target_specific)
+    allowed = allowed_values.pop() if len(allowed_values) == 1 else "target-specific schema"
     return _sorted_required_fields(required_fields), value_type, allowed
 
 

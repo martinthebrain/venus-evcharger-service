@@ -1,39 +1,47 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
 
 from tests.venus_evcharger_publisher_support import (
-    DbusPublishController,
     DbusPublishControllerTestCase,
     MagicMock,
     SimpleNamespace,
+    build_publish_controller,
     patch,
 )
+from venus_evcharger.ipc.gateway_pressure import CachedGatewayPressurePolicy
+from venus_evcharger.ports.gateway_publication import GatewayPublicationPort, PublicationReceipt
+
+
+def _publication(*, accepted: bool = True) -> MagicMock:
+    publication = MagicMock(spec=GatewayPublicationPort)
+    publication.publish_evcs_fields.return_value = PublicationReceipt(accepted, "test-publication")
+    return publication
+
+
+def _publish_service(publication: MagicMock | None = None, **values: object) -> SimpleNamespace:
+    return SimpleNamespace(
+        gateway_publication=publication or _publication(),
+        _dbus_live_publish_interval_seconds=1.0,
+        _dbus_slow_publish_interval_seconds=5.0,
+        **values,
+    )
 
 
 class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
-    def test_publish_path_handles_change_and_interval_throttling(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={},
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-        )
-        controller = DbusPublishController(service, self._age_seconds)
+    def test_publish_field_handles_change_and_interval_throttling(self) -> None:
+        publication = _publication()
+        controller = build_publish_controller(_publish_service(publication), self._age_seconds)
 
-        self.assertTrue(controller.publish_path("/Path", 1, now=100.0))
-        self.assertFalse(controller.publish_path("/Path", 1, now=101.0))
-
-        service._dbus_publish_state["/IntervalMissing"] = {"value": 5}
-        self.assertTrue(controller.publish_path("/IntervalMissing", 5, now=100.0, interval_seconds=5.0))
-
-        service._dbus_publish_state["/Corrupt"] = "bad"
-        self.assertTrue(controller.publish_path("/Corrupt", 9, now=100.0, interval_seconds=5.0))
-        self.assertEqual(service._dbus_publish_state["/Corrupt"], {"value": 9, "updated_at": 100.0})
-
-        self.assertFalse(controller.publish_path("/IntervalMissing", 7, now=103.0, interval_seconds=5.0))
-        self.assertTrue(controller.publish_path("/IntervalMissing", 7, now=106.0, interval_seconds=5.0))
+        self.assertTrue(controller.publish_field("mode", 1, now=100.0))
+        self.assertFalse(controller.publish_field("mode", 1, now=101.0))
+        self.assertFalse(controller.publish_field("mode", 2, now=103.0, interval_seconds=5.0))
+        self.assertTrue(controller.publish_field("mode", 2, now=106.0, interval_seconds=5.0))
+        self.assertEqual(controller.last_accepted_field("mode"), 2)
+        self.assertEqual(publication.publish_evcs_fields.call_count, 2)
 
     def test_publish_intervals_follow_gateway_backpressure_without_blocking_force(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -47,43 +55,30 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
                 ),
                 encoding="utf-8",
             )
-            service = SimpleNamespace(
-                _dbusservice={},
-                _dbus_publish_state={},
-                _dbus_live_publish_interval_seconds=1.0,
-                _dbus_slow_publish_interval_seconds=5.0,
-                dbus_gateway_health_path=health_path,
+            publication = _publication()
+            service = _publish_service(
+                publication,
+                gateway_pressure_policy=CachedGatewayPressurePolicy(health_path, now=lambda: 100.0),
             )
-            controller = DbusPublishController(service, self._age_seconds)
+            controller = build_publish_controller(service, self._age_seconds)
 
-            self.assertTrue(controller.publish_path("/Optional", 1, now=100.0, interval_seconds=1.0))
-            self.assertFalse(controller.publish_path("/Optional", 2, now=104.0, interval_seconds=1.0))
-            self.assertTrue(controller.publish_path("/Optional", 2, now=112.0, interval_seconds=1.0))
-            self.assertTrue(controller.publish_path("/Optional", 3, now=113.0, interval_seconds=1.0, force=True))
+            self.assertTrue(controller.publish_field("diagnostic_text", "one", now=100.0, interval_seconds=1.0))
+            self.assertFalse(controller.publish_field("diagnostic_text", "two", now=104.0, interval_seconds=1.0))
+            self.assertTrue(controller.publish_field("diagnostic_text", "two", now=112.0, interval_seconds=1.0))
+            self.assertTrue(
+                controller.publish_field("diagnostic_text", "three", now=113.0, interval_seconds=1.0, force=True)
+            )
+            self.assertEqual(publication.publish_evcs_fields.call_count, 3)
 
-    def test_publish_live_measurements_rolls_back_publish_state_and_marks_failure(self) -> None:
-        class FlakyDbusService(dict[str, float]):
-            def __init__(self) -> None:
-                super().__init__({"/Ac/Power": 10.0})
-                self.writes: list[tuple[str, float]] = []
-
-            def __setitem__(self, key: str, value: float) -> None:
-                self.writes.append((key, value))
-                if key == "/Ac/Voltage":
-                    raise RuntimeError("dbus write failed")
-                super().__setitem__(key, value)
-
-        service = SimpleNamespace(
-            _dbusservice=FlakyDbusService(),
-            _dbus_publish_state={
-                "/Ac/Power": {"value": 10.0, "updated_at": 90.0},
-            },
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
+    def test_publish_live_measurements_does_not_accept_fields_after_gateway_error(self) -> None:
+        publication = _publication()
+        publication.publish_evcs_fields.side_effect = RuntimeError("gateway unavailable")
+        service = _publish_service(
+            publication,
             _mark_failure=MagicMock(),
             _warning_throttled=MagicMock(),
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         changed = controller.publish_live_measurements(
             1000.0,
@@ -98,25 +93,15 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
 
         self.assertFalse(changed)
-        self.assertEqual(service._dbusservice["/Ac/Power"], 10.0)
-        self.assertEqual(service._dbus_publish_state["/Ac/Power"], {"value": 10.0, "updated_at": 90.0})
+        self.assertIsNone(controller.last_accepted_field("ac_power_w"))
+        self.assertIsNone(controller.last_accepted_field("ac_voltage_v"))
         service._mark_failure.assert_called_once_with("dbus")
         service._warning_throttled.assert_called_once()
 
-    def test_publish_config_paths_is_all_or_nothing_for_publish_state(self) -> None:
-        class FlakyDbusService(dict[str, object]):
-            def __setitem__(self, key: str, value: object) -> None:
-                if key == "/Enable":
-                    raise RuntimeError("dbus write failed")
-                super().__setitem__(key, value)
-
-        service = SimpleNamespace(
-            _dbusservice=FlakyDbusService(),
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
+    def test_publish_config_fields_is_all_or_nothing_at_gateway_boundary(self) -> None:
+        publication = _publication(accepted=False)
+        service = _publish_service(
+            publication,
             virtual_mode=1,
             virtual_autostart=1,
             virtual_enable=1,
@@ -127,21 +112,20 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
             min_current=6.0,
             max_current=16.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
-        changed = controller.publish_config_paths(1, 100.0)
+        self.assertFalse(controller.publish_config_paths(1, 100.0))
+        self.assertIsNone(controller.last_accepted_field("mode"))
+        self.assertIsNone(controller.last_accepted_field("enable"))
+        fields = publication.publish_evcs_fields.call_args.args[0]
+        self.assertEqual(fields["mode"], 1)
+        self.assertEqual(fields["enable"], 1)
+        self.assertEqual(publication.publish_evcs_fields.call_args.kwargs["priority"], "critical")
 
-        self.assertFalse(changed)
-        self.assertNotIn("/Mode", service._dbus_publish_state)
-        self.assertNotIn("/Enable", service._dbus_publish_state)
-        service._mark_failure.assert_called_once_with("dbus")
-
-    def test_publish_config_paths_refreshes_unchanged_gui_controls_on_slow_interval(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={},
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
+    def test_publish_config_fields_refreshes_unchanged_gui_controls_on_slow_interval(self) -> None:
+        publication = _publication()
+        service = _publish_service(
+            publication,
             virtual_mode=1,
             virtual_autostart=1,
             virtual_enable=1,
@@ -152,11 +136,12 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
             min_current=6.0,
             max_current=16.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         self.assertTrue(controller.publish_config_paths(1, 100.0))
         self.assertFalse(controller.publish_config_paths(1, 101.0))
         self.assertTrue(controller.publish_config_paths(1, 105.0))
+        self.assertEqual(publication.publish_evcs_fields.call_count, 2)
 
     def test_learned_display_helpers_cover_empty_scalar_and_fault_paths(self) -> None:
         service = SimpleNamespace(
@@ -174,7 +159,7 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
             _last_charger_state_fault="contactor-lockout-open",
             _last_charger_state_at=100.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         self.assertIsNone(controller.learned._charger_current_readback(100.0))
         self.assertFalse(controller.learned._learned_charge_power_expired_for_display(100.0))
@@ -188,16 +173,8 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         self.assertIsNone(controller.learned._derived_learned_set_current(100.0))
         self.assertEqual(controller.runtime_view.fault_active(service), 1)
 
-    def test_publish_helpers_cover_delete_failure_and_display_fallback_edges(self) -> None:
-        class _DeleteFailingDbusService(dict[str, object]):
-            def __delitem__(self, key: str) -> None:
-                raise RuntimeError("cannot delete")
-
+    def test_learned_display_falls_back_to_minimum_current_without_backend_readback(self) -> None:
         service = SimpleNamespace(
-            _dbusservice=_DeleteFailingDbusService({"/Ghost": 1}),
-            _dbus_publish_state={"/Ghost": {"value": 1, "updated_at": 1.0}},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
             _charger_backend=None,
             virtual_set_current=16.0,
             learned_charge_power_state="stable",
@@ -211,28 +188,13 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
             voltage_mode="phase",
             phase="L1",
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
-        self.assertTrue(controller.publish_path("/Ghost", None, now=10.0, force=True))
         self.assertEqual(controller.learned.display_set_current(100.0), 6.0)
 
-    def test_publish_helpers_cover_remaining_restore_and_learned_display_edges(self) -> None:
-        class _DeleteFailingDbusService(dict[str, object]):
-            def __delitem__(self, key: str) -> None:
-                raise RuntimeError("cannot delete")
-
-        service = SimpleNamespace(
-            _dbusservice=_DeleteFailingDbusService({"/Ghost": 1}),
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            min_current=6.0,
-            max_current=16.0,
-            voltage_mode="phase",
-        )
-        controller = DbusPublishController(service, self._age_seconds)
-
-        controller.core._restore_service_values(["/Ghost"], {})
+    def test_learned_display_helpers_cover_remaining_fallback_edges(self) -> None:
+        service = SimpleNamespace(min_current=6.0, max_current=16.0, voltage_mode="phase")
+        controller = build_publish_controller(service, self._age_seconds)
 
         with patch.object(controller.learned, "_learned_display_current_allowed", return_value=True):
             with patch.object(controller.learned, "_raw_learned_display_values", return_value=None):
@@ -260,121 +222,96 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
             min_current=None,
             max_current=0.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         self.assertEqual(controller.learned._charger_state_max_age_seconds(), 2.0)
         self.assertEqual(controller.learned._clamped_display_current(12.5), 12.5)
 
-    def test_publish_transactional_removes_new_paths_when_group_write_fails(self) -> None:
-        class FlakyDbusService(dict[str, int]):
-            def __setitem__(self, key: str, value: int) -> None:
-                if key == "/B":
-                    raise RuntimeError("group write failed")
-                super().__setitem__(key, value)
+    def test_rejected_group_does_not_partially_update_accepted_fields(self) -> None:
+        publication = _publication(accepted=False)
+        controller = build_publish_controller(_publish_service(publication), self._age_seconds)
 
-        service = SimpleNamespace(
-            _dbusservice=FlakyDbusService(),
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _mark_failure=MagicMock(),
-            _warning_throttled=MagicMock(),
-        )
-        controller = DbusPublishController(service, self._age_seconds)
-
-        changed = controller.core._publish_values_transactional(
+        changed = controller.core.publish_fields(
             "generic",
-            {"/A": 1, "/B": 2},
+            {"ac_power_w": 1, "ac_voltage_v": 2},
             100.0,
             force=True,
         )
 
         self.assertFalse(changed)
-        self.assertNotIn("/A", service._dbusservice)
-        self.assertNotIn("/B", service._dbusservice)
-        self.assertEqual(service._dbus_publish_state, {})
-        service._mark_failure.assert_called_once_with("dbus")
+        self.assertIsNone(controller.last_accepted_field("ac_power_w"))
+        self.assertIsNone(controller.last_accepted_field("ac_voltage_v"))
+        publication.publish_evcs_fields.assert_called_once_with(
+            {"ac_power_w": 1, "ac_voltage_v": 2},
+            priority="live",
+        )
 
     def test_publish_group_failure_uses_runtime_logging_without_custom_warning_callback(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={},
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _mark_failure=MagicMock(),
-        )
-        controller = DbusPublishController(service, self._age_seconds)
+        publication = _publication()
+        publication.publish_evcs_fields.side_effect = RuntimeError("mailbox unavailable")
+        service = _publish_service(publication, _mark_failure=MagicMock())
+        controller = build_publish_controller(service, self._age_seconds)
 
         with patch("logging.warning") as warning:
-            controller.core._publish_group_failure("diagnostic", ["/Path"])
+            changed = controller.core.publish_fields(
+                "diagnostic-summary",
+                {"auto_health_reason": "offline"},
+                100.0,
+                force=True,
+            )
 
+        self.assertFalse(changed)
         service._mark_failure.assert_called_once_with("dbus")
         warning.assert_called_once()
 
-    def test_publish_values_returns_false_when_group_is_fully_throttled(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={"/Path": 5},
-            _dbus_publish_state={
-                "/Path": {"value": 5, "updated_at": 95.0},
-            },
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-        )
-        controller = DbusPublishController(service, self._age_seconds)
+    def test_publish_fields_returns_false_when_group_is_fully_throttled(self) -> None:
+        publication = _publication()
+        controller = build_publish_controller(_publish_service(publication), self._age_seconds)
 
-        changed = controller.core._publish_values({"/Path": 5}, 100.0, interval_seconds=10.0)
+        self.assertTrue(controller.core.publish_fields("generic", {"ac_power_w": 5}, 95.0, force=True))
+        publication.publish_evcs_fields.reset_mock()
+        changed = controller.core.publish_fields(
+            "generic",
+            {"ac_power_w": 5},
+            100.0,
+            interval_seconds=10.0,
+        )
 
         self.assertFalse(changed)
-        self.assertEqual(service._dbusservice["/Path"], 5)
-        self.assertEqual(service._dbus_publish_state["/Path"], {"value": 5, "updated_at": 95.0})
+        self.assertEqual(controller.last_accepted_field("ac_power_w"), 5)
+        publication.publish_evcs_fields.assert_not_called()
 
-    def test_off_mainloop_publish_is_queued_without_touching_dbus_service(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={"/Path": 1},
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _dbus_publish_direct_allowed=MagicMock(return_value=False),
-            _enqueue_dbus_publish_values=MagicMock(return_value=True),
+    def test_semantic_field_group_is_forwarded_without_paths_or_transport_helpers(self) -> None:
+        publication = _publication()
+        service = _publish_service(publication)
+        controller = build_publish_controller(service, self._age_seconds)
+
+        changed = controller.core.publish_fields(
+            "generic",
+            {"mode": 2, "enable": 1},
+            100.0,
+            force=True,
         )
-        controller = DbusPublishController(service, self._age_seconds)
-
-        changed = controller.core._publish_values({"/Path": 2, "/Other": 3}, 100.0, force=True)
 
         self.assertTrue(changed)
-        self.assertEqual(service._dbusservice["/Path"], 1)
-        service._enqueue_dbus_publish_values.assert_called_once_with(
-            [("/Path", 2), ("/Other", 3)],
-            100.0,
+        publication.publish_evcs_fields.assert_called_once_with(
+            {"mode": 2, "enable": 1},
+            priority="critical",
         )
+        self.assertFalse(any(field.startswith("/") for field in publication.publish_evcs_fields.call_args.args[0]))
 
-    def test_off_mainloop_update_index_bump_is_queued(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={"/UpdateIndex": 7},
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _dbus_publish_direct_allowed=MagicMock(return_value=False),
-            _enqueue_dbus_publish_values=MagicMock(return_value=True),
-            _enqueue_dbus_update_index_bump=MagicMock(),
-        )
-        controller = DbusPublishController(service, self._age_seconds)
+    def test_update_index_is_gateway_owned_not_published_by_backend(self) -> None:
+        publication = _publication()
+        controller = build_publish_controller(_publish_service(publication), self._age_seconds)
 
-        controller.bump_update_index(100.0)
+        self.assertTrue(controller.publish_field("mode", 2, now=100.0, force=True))
 
-        self.assertEqual(service._dbusservice["/UpdateIndex"], 7)
-        service._enqueue_dbus_update_index_bump.assert_called_once_with(100.0)
+        publication.publish_evcs_fields.assert_called_once_with({"mode": 2}, priority="critical")
+        self.assertNotIn("update_index", publication.publish_evcs_fields.call_args.args[0])
 
-    def test_off_mainloop_live_measurements_are_queued_as_gateway_fields(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={"/Ac/Power": 1},
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _dbus_publish_direct_allowed=MagicMock(return_value=False),
-            _enqueue_dbus_publish_fields=MagicMock(return_value=True),
-        )
-        controller = DbusPublishController(service, self._age_seconds)
+    def test_live_measurements_are_forwarded_as_one_semantic_gateway_transaction(self) -> None:
+        publication = _publication()
+        controller = build_publish_controller(_publish_service(publication), self._age_seconds)
 
         changed = controller.publish_live_measurements(
             1000.0,
@@ -389,61 +326,42 @@ class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):
         )
 
         self.assertTrue(changed)
-        service._enqueue_dbus_publish_fields.assert_called_once()
-        fields, current = service._enqueue_dbus_publish_fields.call_args.args
-        self.assertEqual(current, 100.0)
-        self.assertIn(("ac_power_w", 1000.0), fields)
-        self.assertIn(("charge_current_a", 4.3), fields)
-        self.assertIn(("l1_voltage_v", 230.0), fields)
+        publication.publish_evcs_fields.assert_called_once()
+        fields = publication.publish_evcs_fields.call_args.args[0]
+        self.assertEqual(publication.publish_evcs_fields.call_args.kwargs["priority"], "live")
+        self.assertEqual(fields["ac_power_w"], 1000.0)
+        self.assertEqual(fields["charge_current_a"], 4.3)
+        self.assertEqual(fields["l1_voltage_v"], 230.0)
+        self.assertFalse(any(field.startswith("/") for field in fields))
 
-    def test_direct_dbus_publish_guard_fails_when_wrong_thread_touches_service(self) -> None:
-        service = SimpleNamespace(
-            _dbusservice={"/Path": 1},
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
-            _dbus_publish_direct_allowed=MagicMock(return_value=True),
-            _assert_dbus_mainloop_thread=MagicMock(side_effect=RuntimeError("wrong thread")),
-        )
-        controller = DbusPublishController(service, self._age_seconds)
-
-        with self.assertRaisesRegex(RuntimeError, "wrong thread"):
-            controller.publish_path("/Path", 2, now=100.0, force=True)
-
-    def test_publish_values_ignores_restore_failure_after_group_write_error(self) -> None:
-        class FlakyRestoreDbusService(dict[str, int]):
-            def __init__(self) -> None:
-                super().__init__({"/A": 1})
-                self.restore_attempts = 0
-
-            def __setitem__(self, key: str, value: int) -> None:
-                if key == "/A" and value == 1:
-                    self.restore_attempts += 1
-                    raise RuntimeError("restore failed")
-                if key == "/B":
-                    raise RuntimeError("group write failed")
-                super().__setitem__(key, value)
-
-        service = SimpleNamespace(
-            _dbusservice=FlakyRestoreDbusService(),
-            _dbus_publish_state={},
-            _dbus_live_publish_interval_seconds=1.0,
-            _dbus_slow_publish_interval_seconds=5.0,
+    def test_gateway_exception_is_contained_without_accepting_the_field(self) -> None:
+        publication = _publication()
+        publication.publish_evcs_fields.side_effect = RuntimeError("gateway unavailable")
+        service = _publish_service(
+            publication,
             _mark_failure=MagicMock(),
             _warning_throttled=MagicMock(),
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
-        changed = controller.core._publish_values_transactional(
-            "generic",
-            {"/A": 2, "/B": 3},
-            100.0,
-            force=True,
+        self.assertFalse(controller.publish_field("mode", 2, now=100.0, force=True))
+        service._mark_failure.assert_called_once_with("dbus")
+        service._warning_throttled.assert_called_once()
+        self.assertIsNone(controller.last_accepted_field("mode"))
+
+    def test_failed_newer_publication_preserves_last_accepted_semantic_value(self) -> None:
+        publication = _publication()
+        service = _publish_service(
+            publication,
+            _mark_failure=MagicMock(),
+            _warning_throttled=MagicMock(),
         )
+        controller = build_publish_controller(service, self._age_seconds)
 
-        self.assertFalse(changed)
-        self.assertEqual(service._dbusservice["/A"], 2)
-        self.assertEqual(service._dbus_publish_state, {})
-        self.assertEqual(service._dbusservice.restore_attempts, 1)
+        self.assertTrue(controller.publish_field("mode", 1, now=90.0, force=True))
+        publication.publish_evcs_fields.side_effect = RuntimeError("gateway unavailable")
+        self.assertFalse(controller.publish_field("mode", 2, now=100.0, force=True))
+
+        self.assertEqual(controller.last_accepted_field("mode"), 1)
         service._mark_failure.assert_called_once_with("dbus")
         service._warning_throttled.assert_called_once()

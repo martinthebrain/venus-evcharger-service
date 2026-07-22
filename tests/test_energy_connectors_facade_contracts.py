@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import call, patch
 
 from venus_evcharger.energy import connectors
 from venus_evcharger.energy.models import EnergySourceDefinition, EnergySourceSnapshot
@@ -32,20 +32,15 @@ class EnergyConnectorsFacadeContractTests(unittest.TestCase):
                 self.assertIs(connectors.read_energy_source_snapshot(owner, source, now), result)
                 reader.assert_called_once_with(owner, source, now)
 
-        source = EnergySourceDefinition(source_id="dbus", connector_type="dbus")
-        dbus_result = EnergySourceSnapshot(source_id="dbus", role="battery", service_name="dbus")
-        dbus_method = MagicMock(return_value=dbus_result)
-        dbus_reader = SimpleNamespace(_dbus_energy_source_snapshot=dbus_method)
-        self.assertIs(connectors.read_energy_source_snapshot(dbus_reader, source, now), dbus_result)
-        dbus_method.assert_called_once_with(source, now)
-
-        wrong_type_reader = SimpleNamespace(_dbus_energy_source_snapshot=MagicMock(return_value=object()))
-        with self.assertRaises(TypeError) as raised:
-            connectors.read_energy_source_snapshot(wrong_type_reader, source, now)
-        self.assertEqual(
-            str(raised.exception),
-            "_dbus_energy_source_snapshot must return EnergySourceSnapshot, got object",
-        )
+        for source, expected in (
+            (EnergySourceDefinition(source_id="missing"), "<empty>"),
+            (EnergySourceDefinition(source_id="retired", connector_type="dbus"), "dbus"),
+        ):
+            with self.subTest(connector=expected), self.assertRaisesRegex(
+                ValueError,
+                f"Unsupported energy-source connector: {expected}",
+            ):
+                connectors.read_energy_source_snapshot(owner, source, now)
 
     def test_modbus_client_cache_is_keyed_by_config_path_and_uses_transport_settings(self) -> None:
         runtime = SimpleNamespace()

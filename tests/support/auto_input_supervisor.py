@@ -84,6 +84,7 @@ class AutoInputSupervisorServiceFake:
     auto_input_helper_restart_seconds: float = 5.0
     auto_input_helper_stale_seconds: float = 15.0
     auto_input_snapshot_path: str = "/tmp/auto-input.json"
+    gateway_health_path: str = ""
     virtual_mode: int = 1
     now: float = 100.0
     _auto_input_helper_generation: int = 0

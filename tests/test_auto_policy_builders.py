@@ -12,7 +12,7 @@ from venus_evcharger.auto.policy_builders import (
 )
 from venus_evcharger.auto.policy_settings import (
     AUTO_POLICY_SETTING_BY_CONFIG_KEY,
-    AUTO_POLICY_SETTING_BY_PATH,
+    AUTO_POLICY_SETTING_BY_TARGET,
     AUTO_POLICY_SETTINGS,
     auto_policy_control_values,
 )
@@ -314,10 +314,10 @@ class TestAutoPolicyBuilders(unittest.TestCase):
 
     def test_runtime_setting_registry_has_unique_complete_boundaries(self) -> None:
         self.assertEqual(len(AUTO_POLICY_SETTINGS), 24)
-        self.assertEqual(len(AUTO_POLICY_SETTING_BY_PATH), len(AUTO_POLICY_SETTINGS))
+        self.assertEqual(len(AUTO_POLICY_SETTING_BY_TARGET), len(AUTO_POLICY_SETTINGS))
         self.assertEqual(len(AUTO_POLICY_SETTING_BY_CONFIG_KEY), len(AUTO_POLICY_SETTINGS))
         self.assertEqual(
-            set(AUTO_POLICY_SETTING_BY_PATH.values()),
+            set(AUTO_POLICY_SETTING_BY_TARGET.values()),
             set(AUTO_POLICY_SETTINGS),
         )
         self.assertEqual(
@@ -327,24 +327,24 @@ class TestAutoPolicyBuilders(unittest.TestCase):
 
     def test_runtime_settings_read_and_update_only_the_canonical_policy(self) -> None:
         raw_values: dict[str, object] = {
-            "/Auto/StartSurplusWatts": 2500,
-            "/Auto/StopSurplusWatts": 900,
-            "/Auto/MinSoc": 20,
-            "/Auto/ResumeSoc": 40,
-            "/Auto/StopSurplusVolatilityHighWatts": 500,
-            "/Auto/ReferenceChargePowerWatts": 2100,
-            "/Auto/LearnChargePowerMinWatts": 600,
-            "/Auto/LearnChargePowerAlpha": 0.4,
-            "/Auto/LearnChargePowerEnabled": 0,
-            "/Auto/PhaseSwitching": 0,
-            "/Auto/PhasePreferLowestWhenIdle": 0,
-            "/Auto/PhaseMismatchLockoutCount": "7",
+            "auto_start_surplus_watts": 2500,
+            "auto_stop_surplus_watts": 900,
+            "auto_min_soc": 20,
+            "auto_resume_soc": 40,
+            "auto_stop_surplus_volatility_high_watts": 500,
+            "auto_reference_charge_power_watts": 2100,
+            "auto_learn_charge_power_min_watts": 600,
+            "auto_learn_charge_power_alpha": 0.4,
+            "auto_learn_charge_power_enabled": 0,
+            "auto_phase_switching": 0,
+            "auto_phase_prefer_lowest_when_idle": 0,
+            "auto_phase_mismatch_lockout_count": "7",
         }
         policy = AutoPolicy()
 
         for setting in AUTO_POLICY_SETTINGS:
-            with self.subTest(path=setting.dbus_path):
-                raw_value = raw_values.get(setting.dbus_path, 12)
+            with self.subTest(path=setting.target):
+                raw_value = raw_values.get(setting.target, 12)
                 stored_value = setting.update(policy, raw_value)
                 self.assertEqual(setting.read(policy), stored_value)
                 if setting.value_kind == "bool":
@@ -355,17 +355,17 @@ class TestAutoPolicyBuilders(unittest.TestCase):
                     self.assertIsInstance(stored_value, float)
 
         self.assertEqual(auto_policy_control_values(policy), {
-            setting.dbus_path: setting.read(policy) for setting in AUTO_POLICY_SETTINGS
+            setting.target: setting.read(policy) for setting in AUTO_POLICY_SETTINGS
         })
 
     def test_runtime_setting_normalization_rejects_non_scalars(self) -> None:
-        setting = AUTO_POLICY_SETTING_BY_PATH["/Auto/StartSurplusWatts"]
+        setting = AUTO_POLICY_SETTING_BY_TARGET["auto_start_surplus_watts"]
 
         with self.assertRaisesRegex(TypeError, "requires a scalar value"):
             setting.normalize(object())
 
     def test_boolean_runtime_setting_preserves_historical_positive_rule(self) -> None:
-        setting = AUTO_POLICY_SETTING_BY_PATH["/Auto/LearnChargePowerEnabled"]
+        setting = AUTO_POLICY_SETTING_BY_TARGET["auto_learn_charge_power_enabled"]
 
         self.assertIs(setting.normalize("1"), True)
         self.assertIs(setting.normalize(-1), False)

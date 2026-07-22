@@ -1,11 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Typed registry for the public EVCS control surface.
-
-This module contains data only and deliberately has no runtime dependency on
-the DBus gateway, HTTP adapter, or write controller.  Those boundaries derive
-their path and command views from this registry instead of maintaining parallel
-lists that can drift apart.
-"""
+"""Transport-neutral contracts for externally writable control targets."""
 
 from __future__ import annotations
 
@@ -31,10 +25,10 @@ ControlValueKind = Literal[
 
 
 @dataclass(frozen=True, slots=True)
-class EvcsControlPathContract:
-    """One path shared by the EVCS gateway and control boundaries."""
+class ControlTargetContract:
+    """One stable domain target exposed through external control adapters."""
 
-    path: str
+    target: str
     writable: bool = True
     rollback_snapshot: bool = True
     direct_command: ControlCommandName | None = None
@@ -42,204 +36,185 @@ class EvcsControlPathContract:
     required_order: int | None = None
 
 
-_DIRECT_CONTROL_PATHS = (
-    EvcsControlPathContract("/Mode", direct_command="set_mode", value_kind="mode", required_order=0),
-    EvcsControlPathContract("/AutoStart", direct_command="set_auto_start", value_kind="binary", required_order=4),
-    EvcsControlPathContract("/StartStop", direct_command="set_start_stop", value_kind="binary", required_order=1),
-    EvcsControlPathContract("/Enable", direct_command="set_enable", value_kind="binary", required_order=2),
-    EvcsControlPathContract(
-        "/PhaseSelection",
+_DIRECT_CONTROL_TARGETS = (
+    ControlTargetContract("mode", direct_command="set_mode", value_kind="mode", required_order=0),
+    ControlTargetContract("auto_start", direct_command="set_auto_start", value_kind="binary", required_order=4),
+    ControlTargetContract("start_stop", direct_command="set_start_stop", value_kind="binary", required_order=1),
+    ControlTargetContract("enable", direct_command="set_enable", value_kind="binary", required_order=2),
+    ControlTargetContract(
+        "phase_selection",
         direct_command="set_phase_selection",
         value_kind="phase_selection",
     ),
 )
 
-_PHASE_STATUS_PATHS = (
-    "/PhaseSelectionActive",
-    "/SupportedPhaseSelections",
-    "/Auto/PhaseLockoutActive",
-    "/Auto/PhaseLockoutTarget",
-    "/Auto/PhaseLockoutReason",
-    "/Auto/PhaseSupportedConfigured",
-    "/Auto/PhaseSupportedEffective",
-    "/Auto/PhaseDegradedActive",
+_PHASE_STATUS_TARGETS = (
+    "phase_selection_active",
+    "supported_phase_selections",
+    "auto_phase_lockout_active",
+    "auto_phase_lockout_target",
+    "auto_phase_lockout_reason",
+    "auto_phase_supported_configured",
+    "auto_phase_supported_effective",
+    "auto_phase_degraded_active",
 )
 
-_CONTACTOR_STATUS_PATHS = (
-    "/Auto/ContactorFaultCount",
-    "/Auto/ContactorLockoutActive",
-    "/Auto/ContactorLockoutReason",
-    "/Auto/ContactorLockoutSource",
-    "/Auto/ContactorLockoutAge",
+_CONTACTOR_STATUS_TARGETS = (
+    "auto_contactor_fault_count",
+    "auto_contactor_lockout_active",
+    "auto_contactor_lockout_reason",
+    "auto_contactor_lockout_source",
+    "auto_contactor_lockout_age",
 )
 
-_CURRENT_SETTING_PATHS = (
-    EvcsControlPathContract("/SetCurrent", value_kind="current", required_order=3),
-    EvcsControlPathContract("/MinCurrent", value_kind="current"),
-    EvcsControlPathContract("/MaxCurrent", value_kind="current"),
+_CURRENT_SETTING_TARGETS = (
+    ControlTargetContract("set_current", value_kind="current", required_order=3),
+    ControlTargetContract("min_current", value_kind="current"),
+    ControlTargetContract("max_current", value_kind="current"),
 )
 
-_PHASE_LOCKOUT_RESET_CONTRACT = EvcsControlPathContract(
-    "/Auto/PhaseLockoutReset",
+_PHASE_LOCKOUT_RESET_CONTRACT = ControlTargetContract(
+    "auto_phase_lockout_reset",
     direct_command="reset_phase_lockout",
     value_kind="binary",
 )
 
-_CONTACTOR_LOCKOUT_RESET_CONTRACT = EvcsControlPathContract(
-    "/Auto/ContactorLockoutReset",
+_CONTACTOR_LOCKOUT_RESET_CONTRACT = ControlTargetContract(
+    "auto_contactor_lockout_reset",
     direct_command="reset_contactor_lockout",
     value_kind="binary",
 )
 
-_AUTO_RUNTIME_PATH_SPECS: tuple[tuple[str, ControlValueKind], ...] = (
-    ("/Auto/StartSurplusWatts", "float"),
-    ("/Auto/StopSurplusWatts", "float"),
-    ("/Auto/MinSoc", "float"),
-    ("/Auto/ResumeSoc", "float"),
-    ("/Auto/StartDelaySeconds", "float"),
-    ("/Auto/StopDelaySeconds", "float"),
-    ("/Auto/ScheduledEnabledDays", "string"),
-    ("/Auto/ScheduledFallbackDelaySeconds", "float"),
-    ("/Auto/ScheduledLatestEndTime", "string"),
-    ("/Auto/ScheduledNightCurrent", "float"),
-    ("/Auto/DbusBackoffBaseSeconds", "float"),
-    ("/Auto/DbusBackoffMaxSeconds", "float"),
-    ("/Auto/GridRecoveryStartSeconds", "float"),
-    ("/Auto/StopSurplusDelaySeconds", "float"),
-    ("/Auto/StopSurplusVolatilityLowWatts", "float"),
-    ("/Auto/StopSurplusVolatilityHighWatts", "float"),
-    ("/Auto/ReferenceChargePowerWatts", "float"),
-    ("/Auto/LearnChargePowerEnabled", "binary"),
-    ("/Auto/LearnChargePowerMinWatts", "float"),
-    ("/Auto/LearnChargePowerAlpha", "float"),
-    ("/Auto/LearnChargePowerStartDelaySeconds", "float"),
-    ("/Auto/LearnChargePowerWindowSeconds", "float"),
-    ("/Auto/LearnChargePowerMaxAgeSeconds", "float"),
-    ("/Auto/PhaseSwitching", "binary"),
-    ("/Auto/PhasePreferLowestWhenIdle", "binary"),
-    ("/Auto/PhaseUpshiftDelaySeconds", "float"),
-    ("/Auto/PhaseDownshiftDelaySeconds", "float"),
-    ("/Auto/PhaseUpshiftHeadroomWatts", "float"),
-    ("/Auto/PhaseDownshiftMarginWatts", "float"),
-    ("/Auto/PhaseMismatchRetrySeconds", "float"),
-    ("/Auto/PhaseMismatchLockoutCount", "integer"),
-    ("/Auto/PhaseMismatchLockoutSeconds", "float"),
+_AUTO_RUNTIME_TARGET_SPECS: tuple[tuple[str, ControlValueKind], ...] = (
+    ("auto_start_surplus_watts", "float"),
+    ("auto_stop_surplus_watts", "float"),
+    ("auto_min_soc", "float"),
+    ("auto_resume_soc", "float"),
+    ("auto_start_delay_seconds", "float"),
+    ("auto_stop_delay_seconds", "float"),
+    ("auto_scheduled_enabled_days", "string"),
+    ("auto_scheduled_fallback_delay_seconds", "float"),
+    ("auto_scheduled_latest_end_time", "string"),
+    ("auto_scheduled_night_current", "float"),
+    ("auto_dbus_backoff_base_seconds", "float"),
+    ("auto_dbus_backoff_max_seconds", "float"),
+    ("auto_grid_recovery_start_seconds", "float"),
+    ("auto_stop_surplus_delay_seconds", "float"),
+    ("auto_stop_surplus_volatility_low_watts", "float"),
+    ("auto_stop_surplus_volatility_high_watts", "float"),
+    ("auto_reference_charge_power_watts", "float"),
+    ("auto_learn_charge_power_enabled", "binary"),
+    ("auto_learn_charge_power_min_watts", "float"),
+    ("auto_learn_charge_power_alpha", "float"),
+    ("auto_learn_charge_power_start_delay_seconds", "float"),
+    ("auto_learn_charge_power_window_seconds", "float"),
+    ("auto_learn_charge_power_max_age_seconds", "float"),
+    ("auto_phase_switching", "binary"),
+    ("auto_phase_prefer_lowest_when_idle", "binary"),
+    ("auto_phase_upshift_delay_seconds", "float"),
+    ("auto_phase_downshift_delay_seconds", "float"),
+    ("auto_phase_upshift_headroom_watts", "float"),
+    ("auto_phase_downshift_margin_watts", "float"),
+    ("auto_phase_mismatch_retry_seconds", "float"),
+    ("auto_phase_mismatch_lockout_count", "integer"),
+    ("auto_phase_mismatch_lockout_seconds", "float"),
 )
 
-_SOFTWARE_UPDATE_CONTRACT = EvcsControlPathContract(
-    "/Auto/SoftwareUpdateRun",
+_SOFTWARE_UPDATE_CONTRACT = ControlTargetContract(
+    "auto_software_update_run",
     rollback_snapshot=False,
     direct_command="trigger_software_update",
     value_kind="binary",
 )
 
-
-EVCS_CONTROL_PATH_CONTRACTS = (
-    *_DIRECT_CONTROL_PATHS,
-    *(EvcsControlPathContract(path, writable=False) for path in _PHASE_STATUS_PATHS),
+CONTROL_TARGET_CONTRACTS = (
+    *_DIRECT_CONTROL_TARGETS,
+    *(ControlTargetContract(target, writable=False) for target in _PHASE_STATUS_TARGETS),
     _PHASE_LOCKOUT_RESET_CONTRACT,
-    *(EvcsControlPathContract(path, writable=False) for path in _CONTACTOR_STATUS_PATHS),
+    *(ControlTargetContract(target, writable=False) for target in _CONTACTOR_STATUS_TARGETS),
     _CONTACTOR_LOCKOUT_RESET_CONTRACT,
-    *_CURRENT_SETTING_PATHS,
-    *(EvcsControlPathContract(path, value_kind=value_kind) for path, value_kind in _AUTO_RUNTIME_PATH_SPECS),
+    *_CURRENT_SETTING_TARGETS,
+    *(ControlTargetContract(target, value_kind=value_kind) for target, value_kind in _AUTO_RUNTIME_TARGET_SPECS),
     _SOFTWARE_UPDATE_CONTRACT,
 )
 
 
-def _path_index(
-    contracts: tuple[EvcsControlPathContract, ...],
-) -> Mapping[str, EvcsControlPathContract]:
-    indexed = {contract.path: contract for contract in contracts}
+def _target_index(contracts: tuple[ControlTargetContract, ...]) -> Mapping[str, ControlTargetContract]:
+    indexed = {contract.target: contract for contract in contracts}
     if len(indexed) != len(contracts):
-        raise ValueError("EVCS control path registry contains duplicate paths.")
+        raise ValueError("Control target registry contains duplicate targets.")
     return MappingProxyType(indexed)
 
 
-EVCS_CONTROL_PATH_BY_PATH = _path_index(EVCS_CONTROL_PATH_CONTRACTS)
-EVCS_WRITABLE_PATHS = frozenset(
-    contract.path for contract in EVCS_CONTROL_PATH_CONTRACTS if contract.writable
+CONTROL_TARGET_BY_NAME = _target_index(CONTROL_TARGET_CONTRACTS)
+CONTROL_WRITABLE_TARGETS = frozenset(
+    contract.target for contract in CONTROL_TARGET_CONTRACTS if contract.writable
 )
-EVCS_WRITE_SNAPSHOT_PATHS = tuple(
-    contract.path for contract in EVCS_CONTROL_PATH_CONTRACTS if contract.rollback_snapshot
+CONTROL_WRITE_SNAPSHOT_TARGETS = tuple(
+    contract.target for contract in CONTROL_TARGET_CONTRACTS if contract.rollback_snapshot
 )
-EVCS_REQUIRED_CONTROL_PATHS = tuple(
-    contract.path
+CONTROL_REQUIRED_TARGETS = tuple(
+    contract.target
     for contract in sorted(
-        (item for item in EVCS_CONTROL_PATH_CONTRACTS if item.required_order is not None),
+        (item for item in CONTROL_TARGET_CONTRACTS if item.required_order is not None),
         key=lambda item: item.required_order if item.required_order is not None else -1,
     )
 )
-
-# Ordered views preserve the established field-map order without repeating
-# transport path literals outside this registry.
-EVCS_PRIMARY_CONTROL_PATHS = (
-    *(contract.path for contract in _DIRECT_CONTROL_PATHS),
-    *_PHASE_STATUS_PATHS[:2],
-    *(contract.path for contract in _CURRENT_SETTING_PATHS),
-    *(path for path, _value_kind in _AUTO_RUNTIME_PATH_SPECS),
-)
-EVCS_PHASE_CONTROL_PATHS = (
-    *_PHASE_STATUS_PATHS[2:5],
-    _PHASE_LOCKOUT_RESET_CONTRACT.path,
-    *_PHASE_STATUS_PATHS[5:],
-)
-EVCS_CONTACTOR_AGE_PATHS = (_CONTACTOR_STATUS_PATHS[-1],)
-EVCS_CONTACTOR_CONTROL_PATHS = (
-    *_CONTACTOR_STATUS_PATHS[:-1],
-    _CONTACTOR_LOCKOUT_RESET_CONTRACT.path,
-)
-EVCS_SOFTWARE_UPDATE_CONTROL_PATHS = (_SOFTWARE_UPDATE_CONTRACT.path,)
-
-CONTROL_DIRECT_PATH_COMMANDS: Mapping[str, ControlCommandName] = MappingProxyType(
+CONTROL_DIRECT_TARGET_COMMANDS: Mapping[str, ControlCommandName] = MappingProxyType(
     {
-        contract.path: contract.direct_command
-        for contract in EVCS_CONTROL_PATH_CONTRACTS
+        contract.target: contract.direct_command
+        for contract in CONTROL_TARGET_CONTRACTS
         if contract.direct_command is not None
     }
 )
-CONTROL_COMMAND_DEFAULT_PATHS: Mapping[ControlCommandName, str] = MappingProxyType(
-    {command_name: path for path, command_name in CONTROL_DIRECT_PATH_COMMANDS.items()}
+CONTROL_COMMAND_DEFAULT_TARGETS: Mapping[ControlCommandName, str] = MappingProxyType(
+    {command_name: target for target, command_name in CONTROL_DIRECT_TARGET_COMMANDS.items()}
 )
+CONTROL_CURRENT_SETTING_TARGETS = frozenset(
+    contract.target for contract in _CURRENT_SETTING_TARGETS
+)
+CONTROL_PHASE_SELECTIONS = frozenset({"P1", "P1_P2", "P1_P2_P3"})
+CONTROL_AUTO_RUNTIME_TARGETS = frozenset(target for target, _value_kind in _AUTO_RUNTIME_TARGET_SPECS)
 
 _NON_DIRECT_COMMAND_NAMES: tuple[ControlCommandName, ...] = (
     "set_auto_runtime_setting",
     "set_current_setting",
 )
 CONTROL_COMMAND_NAMES: frozenset[ControlCommandName] = frozenset(
-    (*_NON_DIRECT_COMMAND_NAMES, *CONTROL_DIRECT_PATH_COMMANDS.values())
+    (*_NON_DIRECT_COMMAND_NAMES, *CONTROL_DIRECT_TARGET_COMMANDS.values())
 )
 CONTROL_BINARY_COMMANDS: frozenset[ControlCommandName] = frozenset(
     contract.direct_command
-    for contract in EVCS_CONTROL_PATH_CONTRACTS
+    for contract in CONTROL_TARGET_CONTRACTS
     if contract.direct_command is not None and contract.value_kind == "binary"
 )
 
 
-def _auto_runtime_paths(value_kind: ControlValueKind) -> frozenset[str]:
+def _auto_runtime_targets(value_kind: ControlValueKind) -> frozenset[str]:
     return frozenset(
-        contract.path
-        for contract in EVCS_CONTROL_PATH_CONTRACTS
+        contract.target
+        for contract in CONTROL_TARGET_CONTRACTS
         if contract.direct_command is None
-        and contract.path.startswith("/Auto/")
+        and contract.target in CONTROL_AUTO_RUNTIME_TARGETS
         and contract.value_kind == value_kind
     )
 
 
-CONTROL_FLOAT_AUTO_RUNTIME_PATHS = _auto_runtime_paths("float")
-CONTROL_STRING_AUTO_RUNTIME_PATHS = _auto_runtime_paths("string")
-CONTROL_BINARY_AUTO_RUNTIME_PATHS = _auto_runtime_paths("binary")
-CONTROL_INTEGER_AUTO_RUNTIME_PATHS = _auto_runtime_paths("integer")
-_AUTO_RUNTIME_PATH_GROUPS: tuple[tuple[ControlValueKind, frozenset[str]], ...] = (
-    ("float", CONTROL_FLOAT_AUTO_RUNTIME_PATHS),
-    ("string", CONTROL_STRING_AUTO_RUNTIME_PATHS),
-    ("binary", CONTROL_BINARY_AUTO_RUNTIME_PATHS),
-    ("integer", CONTROL_INTEGER_AUTO_RUNTIME_PATHS),
+CONTROL_FLOAT_AUTO_RUNTIME_TARGETS = _auto_runtime_targets("float")
+CONTROL_STRING_AUTO_RUNTIME_TARGETS = _auto_runtime_targets("string")
+CONTROL_BINARY_AUTO_RUNTIME_TARGETS = _auto_runtime_targets("binary")
+CONTROL_INTEGER_AUTO_RUNTIME_TARGETS = _auto_runtime_targets("integer")
+_AUTO_RUNTIME_TARGET_GROUPS: tuple[tuple[ControlValueKind, frozenset[str]], ...] = (
+    ("float", CONTROL_FLOAT_AUTO_RUNTIME_TARGETS),
+    ("string", CONTROL_STRING_AUTO_RUNTIME_TARGETS),
+    ("binary", CONTROL_BINARY_AUTO_RUNTIME_TARGETS),
+    ("integer", CONTROL_INTEGER_AUTO_RUNTIME_TARGETS),
 )
-CONTROL_AUTO_RUNTIME_VALUE_KIND_BY_PATH: Mapping[str, ControlValueKind] = MappingProxyType(
+CONTROL_AUTO_RUNTIME_VALUE_KIND_BY_TARGET: Mapping[str, ControlValueKind] = MappingProxyType(
     {
-        path: value_kind
-        for value_kind, paths in _AUTO_RUNTIME_PATH_GROUPS
-        for path in paths
+        target: value_kind
+        for value_kind, targets in _AUTO_RUNTIME_TARGET_GROUPS
+        for target in targets
     }
 )
 
@@ -265,25 +240,23 @@ CONTROL_API_STATE_ENDPOINTS = frozenset(
 
 __all__ = [
     "CONTROL_API_STATE_ENDPOINTS",
-    "CONTROL_AUTO_RUNTIME_VALUE_KIND_BY_PATH",
-    "CONTROL_BINARY_AUTO_RUNTIME_PATHS",
+    "CONTROL_AUTO_RUNTIME_TARGETS",
+    "CONTROL_AUTO_RUNTIME_VALUE_KIND_BY_TARGET",
+    "CONTROL_BINARY_AUTO_RUNTIME_TARGETS",
     "CONTROL_BINARY_COMMANDS",
-    "CONTROL_COMMAND_DEFAULT_PATHS",
+    "CONTROL_COMMAND_DEFAULT_TARGETS",
     "CONTROL_COMMAND_NAMES",
-    "CONTROL_DIRECT_PATH_COMMANDS",
-    "CONTROL_FLOAT_AUTO_RUNTIME_PATHS",
-    "CONTROL_INTEGER_AUTO_RUNTIME_PATHS",
-    "CONTROL_STRING_AUTO_RUNTIME_PATHS",
-    "EVCS_CONTROL_PATH_BY_PATH",
-    "EVCS_CONTROL_PATH_CONTRACTS",
-    "EVCS_CONTACTOR_AGE_PATHS",
-    "EVCS_CONTACTOR_CONTROL_PATHS",
-    "EVCS_PHASE_CONTROL_PATHS",
-    "EVCS_PRIMARY_CONTROL_PATHS",
-    "EVCS_REQUIRED_CONTROL_PATHS",
-    "EVCS_SOFTWARE_UPDATE_CONTROL_PATHS",
-    "EVCS_WRITABLE_PATHS",
-    "EVCS_WRITE_SNAPSHOT_PATHS",
+    "CONTROL_CURRENT_SETTING_TARGETS",
+    "CONTROL_DIRECT_TARGET_COMMANDS",
+    "CONTROL_FLOAT_AUTO_RUNTIME_TARGETS",
+    "CONTROL_INTEGER_AUTO_RUNTIME_TARGETS",
+    "CONTROL_PHASE_SELECTIONS",
+    "CONTROL_REQUIRED_TARGETS",
+    "CONTROL_STRING_AUTO_RUNTIME_TARGETS",
+    "CONTROL_TARGET_BY_NAME",
+    "CONTROL_TARGET_CONTRACTS",
+    "CONTROL_WRITABLE_TARGETS",
+    "CONTROL_WRITE_SNAPSHOT_TARGETS",
+    "ControlTargetContract",
     "ControlValueKind",
-    "EvcsControlPathContract",
 ]

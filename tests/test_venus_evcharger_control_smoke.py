@@ -74,7 +74,11 @@ class TestVenusEvchargerControlSmoke(unittest.TestCase):
             self.assertEqual(capabilities.json()["api_version"], "v1")
 
             command = control_client.command(
-                {"name": "set_current_setting", "path": "/SetCurrent", "value": 12.5},
+                {
+                    "name": "set_current_setting",
+                    "target": "set_current",
+                    "value": 12.5,
+                },
                 command_id="unix-current",
                 idempotency_key="unix-current",
             )

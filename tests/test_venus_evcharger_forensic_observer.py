@@ -2,14 +2,14 @@
 import runpy
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
+from venus_evcharger.ipc.gateway_diagnostics import encode_gateway_diagnostics
 from venus_evcharger.ops import forensic_observer as observer
-from venus_evcharger.dbus_gateway import DbusCacheStore, dbus_path_key, gateway_paths
 
 
 def _repository_script(name: str) -> Path:
@@ -20,37 +20,7 @@ def _repository_script(name: str) -> Path:
     raise FileNotFoundError(name)
 
 
-class _FakeDbusObject:
-    def __init__(self, values, path):
-        self._values = values
-        self._path = path
-
-    def get_dbus_method(self, _name, _interface):
-        def _method(timeout=1.0):
-            if self._path == "/StartStop":
-                raise RuntimeError(f"timeout {timeout}")
-            return self._values[self._path]
-
-        return _method
-
-
-class _FakeDbusBus:
-    def __init__(self):
-        self.values = {"/Mode": 1, "/Ac/Power": object()}
-
-    def get_object(self, _service_name, path, introspect=True):
-        return _FakeDbusObject(self.values, path)
-
-
 class ForensicObserverTests(unittest.TestCase):
-    def _write_gateway_cache(self, temp_dir: str, service_name: str, values: dict[str, object]) -> str:
-        paths = gateway_paths(str(Path(temp_dir) / "run"))
-        store = DbusCacheStore(paths)
-        for path, value in values.items():
-            store.update_value(dbus_path_key(service_name, path), value, source=f"{service_name}{path}", now=time.time())
-        store.write_snapshot_files()
-        return paths.cache_path
-
     def test_config_identity_redaction_mounts_and_writable_dir(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -61,13 +31,11 @@ class ForensicObserverTests(unittest.TestCase):
             defaults = observer.load_defaults(str(config_path))
 
             self.assertEqual(observer.device_instance(defaults), 70)
-            self.assertEqual(observer.evcharger_service_name(defaults), "com.example.ev.http_70")
             self.assertEqual(observer.configured_host(defaults), "192.0.2.1")
             self.assertIn("Password=<redacted>", observer.redact_config_text(config_path.read_text(encoding="utf-8")))
             config_path.write_text("[DEFAULT]\nDeviceInstance=bad\nServiceName=\n", encoding="utf-8")
             invalid_defaults = observer.load_defaults(str(config_path))
             self.assertEqual(observer.device_instance(invalid_defaults), 60)
-            self.assertEqual(observer.evcharger_service_name(invalid_defaults), "com.victronenergy.evcharger.http_60")
             self.assertEqual(observer.auto_input_snapshot_path(invalid_defaults), "/run/dbus-venus-evcharger-auto-60.json")
             self.assertEqual(observer.runtime_state_path(invalid_defaults), "/run/dbus-venus-evcharger-60.json")
             self.assertEqual(
@@ -85,52 +53,36 @@ class ForensicObserverTests(unittest.TestCase):
             self.assertEqual(observer.read_mounts(str(Path(temp_dir) / "missing-mounts")), "")
             config_path.write_text("[DEFAULT]\nAutoInputSnapshotPath=/tmp/custom-auto.json\n", encoding="utf-8")
             self.assertEqual(observer.auto_input_snapshot_path(observer.load_defaults(str(config_path))), "/tmp/custom-auto.json")
-            config_path.write_text("[DEFAULT]\nDbusIntrospectionSnapshotPath=/tmp/custom-map.json\n", encoding="utf-8")
-            self.assertEqual(observer.dbus_introspection_snapshot_path(observer.load_defaults(str(config_path))), "/tmp/custom-map.json")
-
-    def test_dbus_snapshot_and_incident_reasons(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cache_path = self._write_gateway_cache(
-                temp_dir,
-                "com.example.ev.http_70",
-                {"/Mode": 1, "/Ac/Power": object()},
-            )
-            dbus_state = observer.read_dbus_paths(
-                "com.example.ev.http_70",
-                paths=("/Mode", "/StartStop", "/Ac/Power"),
-                cache_path=cache_path,
+            config_path.write_text("[DEFAULT]\nGatewayDiagnosticsSnapshotPath=/tmp/diagnostics.json\n", encoding="utf-8")
+            self.assertEqual(
+                observer.gateway_diagnostics_snapshot_path(observer.load_defaults(str(config_path))),
+                "/tmp/diagnostics.json",
             )
 
-        self.assertFalse(dbus_state["ok"])
-        self.assertEqual(dbus_state["values"]["/Mode"], 1)
-        self.assertIn("/StartStop", dbus_state["errors"])
-        self.assertIn("object object", dbus_state["values"]["/Ac/Power"])
-
+    def test_semantic_gateway_snapshot_and_incident_reasons(self):
+        gateway = gateway_diagnostics_snapshot(
+            status_overrides={"charging_enabled": "unavailable"}
+        )
         reasons = observer.incident_reasons(
             {
-                "dbus": dbus_state,
+                "gateway_diagnostics": {"available": True, "snapshot": gateway.to_payload()},
                 "svstat": {"ok": True, "stdout": "/service/dbus-venus-evcharger: down\n"},
                 "trace_markers": ["NoReply", "malloc()"],
             }
         )
 
-        self.assertIn("dbus-/StartStop-failed", reasons)
+        self.assertIn("gateway-charging-enabled-unavailable", reasons)
         self.assertIn("runit-not-up", reasons)
         self.assertIn("log-marker-noreply", reasons)
         self.assertIn("log-marker-malloc", reasons)
-        self.assertEqual(observer.incident_reasons({"dbus": "bad", "svstat": "bad", "trace_markers": []}), [])
-        json_payload = observer.json_ready({"a": [object(), 1]})
-        self.assertTrue(json_payload["a"][0].startswith("<object object"))
-        self.assertEqual(json_payload["a"][1], 1)
+        self.assertEqual(
+            observer.incident_reasons(
+                {"gateway_diagnostics": "bad", "svstat": "bad", "trace_markers": []}
+            ),
+            [],
+        )
 
-    def test_default_dbus_import_path_and_successful_fetches(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cache_path = self._write_gateway_cache(temp_dir, "com.example.ev.http_70", {"/Mode": 1})
-            dbus_state = observer.read_dbus_paths("com.example.ev.http_70", paths=("/Mode",), cache_path=cache_path)
-
-        self.assertTrue(dbus_state["ok"])
-        self.assertEqual(dbus_state["values"]["/Mode"], 1)
-
+    def test_successful_commands_and_fetches(self):
         completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
         with patch.object(observer.subprocess, "run", return_value=completed):
             self.assertTrue(observer.command_output(["true"])["ok"])
@@ -170,7 +122,7 @@ class ForensicObserverTests(unittest.TestCase):
                 str(target),
                 {"timestamp": 100.0, "dbus": {"ok": False}, "trace_markers": []},
                 str(config_path),
-                ["dbus-/Mode-failed"],
+                ["gateway-operating-mode-unavailable"],
             )
 
             self.assertTrue((Path(incident_dir) / "snapshot.json").is_file())
@@ -180,11 +132,14 @@ class ForensicObserverTests(unittest.TestCase):
     def test_collect_snapshot_uses_helpers_and_open_failures_are_reported(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
-            run_dir = Path(temp_dir) / "run"
-            cache_path = self._write_gateway_cache(temp_dir, "com.victronenergy.evcharger.http_70", {"/Mode": 1})
+            diagnostics_path = Path(temp_dir) / "gateway-diagnostics.json"
+            diagnostics_path.write_text(
+                encode_gateway_diagnostics(gateway_diagnostics_snapshot()),
+                encoding="utf-8",
+            )
             config_path.write_text(
                 "[DEFAULT]\nDeviceInstance=70\nHost=\n"
-                f"DbusGatewayRunDir={run_dir}\nDbusGatewayCachePath={cache_path}\n",
+                f"GatewayDiagnosticsSnapshotPath={diagnostics_path}\n",
                 encoding="utf-8",
             )
 
@@ -192,15 +147,19 @@ class ForensicObserverTests(unittest.TestCase):
                 patch.object(observer, "tail_log_dir", return_value={"current": "NoReply\n"}),
                 patch.object(observer, "command_output", return_value={"ok": True, "stdout": " up "}),
             ):
-                snapshot = observer.collect_snapshot(str(config_path), bus_factory=MagicMock(side_effect=RuntimeError("dbus down")))
+                snapshot = observer.collect_snapshot(str(config_path))
 
-        self.assertEqual(snapshot["service_name"], "com.victronenergy.evcharger.http_70")
         self.assertEqual(snapshot["trace_markers"], ["NoReply"])
-        self.assertFalse(snapshot["dbus"]["ok"])
+        self.assertTrue(snapshot["gateway_diagnostics"]["available"])
         self.assertIn("auto_input_snapshot", snapshot)
         self.assertIn("runtime_state", snapshot)
         self.assertIn("helper_processes", snapshot)
-        self.assertEqual(observer.incident_reasons({"dbus": {"errors": {}}, "svstat": {"ok": False}, "trace_markers": []}), ["runit-status-failed"])
+        self.assertEqual(
+            observer.incident_reasons(
+                {"gateway_diagnostics": {"available": False}, "svstat": {"ok": False}, "trace_markers": []}
+            ),
+            ["runit-status-failed"],
+        )
 
     def test_json_file_and_helper_process_diagnostics(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -246,7 +205,11 @@ class ForensicObserverTests(unittest.TestCase):
                 patch.object(observer, "read_mounts", return_value="mounted\n"),
                 patch.object(observer, "mounted_storage_candidates", return_value=[str(card)]),
                 patch.object(observer, "collect_snapshot", return_value={"timestamp": 100.0}),
-                patch.object(observer, "incident_reasons", return_value=["dbus-/Mode-failed"]),
+                patch.object(
+                    observer,
+                    "incident_reasons",
+                    return_value=["gateway-operating-mode-unavailable"],
+                ),
             ):
                 with self.assertRaises(KeyboardInterrupt):
                     observer.observer_loop(str(config_path), start_delay=0, interval=1, incident_cooldown=900)

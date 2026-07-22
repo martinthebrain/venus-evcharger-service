@@ -5,10 +5,10 @@ from unittest.mock import patch
 from venus_evcharger.core.common import DEFAULT_SCHEDULED_ENABLED_DAYS
 
 from tests.venus_evcharger_publisher_support import (
-    DbusPublishController,
     DbusPublishControllerTestCase,
     MagicMock,
     SimpleNamespace,
+    build_publish_controller,
 )
 
 
@@ -65,7 +65,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             voltage_mode="phase",
             last_status=6,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(1, now=100.0)
 
@@ -140,7 +140,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             voltage_mode="phase",
             auto_learn_charge_power_max_age_seconds=21600.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(1, now=100.0)
 
@@ -148,7 +148,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
     def test_config_values_publish_exact_default_surface_for_minimal_service(self) -> None:
         service = SimpleNamespace(virtual_set_current=11.0)
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(0, now=100.0)
 
@@ -204,7 +204,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
     def test_config_values_use_virtual_enable_without_live_charger_readback(self) -> None:
         service = SimpleNamespace(virtual_enable=0, virtual_set_current=11.0)
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(1, now=100.0)
 
@@ -232,7 +232,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             auto_learn_charge_power_max_age_seconds=21600.0,
             _charger_backend=SimpleNamespace(set_current=MagicMock()),
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(1, now=100.0)
 
@@ -252,7 +252,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             _phase_switch_lockout_selection="P1_P2_P3",
             _phase_switch_lockout_until=140.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(1, now=100.0)
 
@@ -285,7 +285,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             _last_charger_state_fault="vehicle-sleeping",
             _last_charger_state_at=99.5,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(1, now=100.0)
 
@@ -311,7 +311,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             _last_charger_state_current_amps=14.0,
             _last_charger_state_at=99.5,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(0, now=100.0)
 
@@ -339,7 +339,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             _last_pm_status_at=90.0,
             auto_shelly_soft_fail_seconds=10.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         self.assertEqual(controller.config._config_values(1, now=100.0)["connected"], 1)
         service._shelly_state = "offline"
@@ -367,7 +367,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             _last_charger_transport_at=None,
             auto_shelly_soft_fail_seconds=10.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         self.assertEqual(controller.config._config_values(1, now=100.0)["connected"], 1)
         service._last_charger_state_at = 70.0
@@ -386,7 +386,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             _contactor_fault_active_reason="contactor-suspected-open",
             _contactor_fault_counts=[],
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         self.assertEqual(controller.runtime_view.backend_mode_value(service), "combined")
         self.assertEqual(controller.runtime_view.backend_type_value(service, "meter_backend_type", "meter"), "meter")
@@ -408,7 +408,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             switch_backend_type="shelly_combined",
             charger_backend_type=None,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         self.assertEqual(controller.runtime_view.backend_mode_value(service), "split")
         self.assertEqual(controller.runtime_view.backend_type_value(service, "meter_backend_type", "meter"), "template_meter")
@@ -435,14 +435,14 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
             voltage_mode="line_to_line",
             auto_learn_charge_power_max_age_seconds=21600.0,
         )
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
 
         values = controller.config._config_values(1, now=100.0)
 
         self.assertEqual(values["set_current"], 15.0)
 
     def test_config_helper_contracts_cover_backend_phase_contactor_and_schedule_edges(self) -> None:
-        controller = DbusPublishController(SimpleNamespace(), self._age_seconds)
+        controller = build_publish_controller(SimpleNamespace(), self._age_seconds)
         service = SimpleNamespace(
             topology_configured=True,
             host_configured=False,
@@ -659,7 +659,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         self.assertEqual(controller.runtime_view.contactor_fault_count(service), 0)
 
     def test_config_helper_contracts_cover_missing_runtime_defaults(self) -> None:
-        controller = DbusPublishController(SimpleNamespace(), self._age_seconds)
+        controller = build_publish_controller(SimpleNamespace(), self._age_seconds)
 
         snapshot = controller.runtime_view.scheduled_snapshot(SimpleNamespace(virtual_mode=2), 1719817200.0)
         self.assertIsNotNone(snapshot)
@@ -711,7 +711,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         self.assertEqual(controller.runtime_view.phase_degraded_active(expired_lockout, 100.0), 0)
 
     def test_scheduled_snapshot_passes_explicit_schedule_boundary_contract(self) -> None:
-        controller = DbusPublishController(SimpleNamespace(), self._age_seconds)
+        controller = build_publish_controller(SimpleNamespace(), self._age_seconds)
         service = SimpleNamespace(
             virtual_mode=2,
             auto_schedule_timezone="Europe/Berlin",
@@ -746,7 +746,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
         )
 
     def test_scheduled_snapshot_passes_default_schedule_boundary_contract(self) -> None:
-        controller = DbusPublishController(SimpleNamespace(), self._age_seconds)
+        controller = build_publish_controller(SimpleNamespace(), self._age_seconds)
         service = SimpleNamespace(virtual_mode=2)
         scheduled_when = object()
         expected_snapshot = object()
@@ -775,7 +775,7 @@ class TestDbusPublishControllerConfig(DbusPublishControllerTestCase):
 
     def test_publish_config_paths_uses_config_transaction_contract(self) -> None:
         service = SimpleNamespace(_dbus_slow_publish_interval_seconds=12.5)
-        controller = DbusPublishController(service, self._age_seconds)
+        controller = build_publish_controller(service, self._age_seconds)
         controller.config._config_values = MagicMock(return_value={"mode": 2})
         controller.core.publish_fields = MagicMock(return_value=True)
 

@@ -296,8 +296,6 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
                 runtime_state_path=path,
                 auto_energy_sources=(SimpleNamespace(source_id="victron"), SimpleNamespace(source_id="hybrid")),
                 auto_battery_discharge_balance_victron_bias_source_id="victron",
-                auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-                auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
                 auto_battery_discharge_balance_victron_bias_activation_mode="export_and_above_reserve_band",
                 auto_battery_discharge_balance_victron_bias_kp=0.23,
                 auto_battery_discharge_balance_victron_bias_ki=0.022,
@@ -355,7 +353,7 @@ class TestServiceStateControllerQuaternary(ServiceStateControllerTestBase):
             self.assertEqual(saved["victron_ess_balance_learning_state"]["schema_version"], 2)
             self.assertEqual(
                 saved["victron_ess_balance_learning_state"]["topology_key"],
-                "victron-bias-learning/v2/source=victron/service=com.victronenergy.settings/path=/Settings/CGwacs/AcPowerSetPoint/energy=hybrid,victron",
+                "victron-bias-learning/v3/source=victron/target=ess-grid-setpoint/energy=hybrid,victron",
             )
             self.assertIn(
                 "more_export:export:day:above_reserve_band",

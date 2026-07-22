@@ -426,11 +426,43 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/core/return_contracts.py": (
                 "tests/test_core_return_contracts.py",
-                "tests/test_runtime_async_mainloop_types.py",
             ),
             "venus_evcharger/core/shared.py": (
                 "tests/test_core_shared_contracts.py",
                 "tests/test_venus_evcharger_shared.py",
+            ),
+            "venus_evcharger/ipc/command_mailbox.py": (
+                "tests/test_ipc_command_mailbox_contracts.py",
+            ),
+            "venus_evcharger/ipc/core_commands.py": (
+                "tests/test_ipc_command_mailbox_contracts.py",
+            ),
+            "venus_evcharger/ipc/energy_refresh.py": (
+                "tests/test_energy_ipc_contracts.py",
+            ),
+            "venus_evcharger/ipc/energy_snapshots.py": (
+                "tests/test_energy_ipc_contracts.py",
+            ),
+            "venus_evcharger/ipc/energy_types.py": (
+                "tests/test_energy_ipc_contracts.py",
+            ),
+            "venus_evcharger/ipc/energy_validation.py": (
+                "tests/test_energy_ipc_contracts.py",
+            ),
+            "venus_evcharger/ipc/energy_values.py": (
+                "tests/test_energy_ipc_contracts.py",
+            ),
+            "venus_evcharger/ipc/gateway_diagnostics.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+            ),
+            "venus_evcharger/ipc/gateway_operations.py": (
+                "tests/test_gateway_semantic_operations.py",
+            ),
+            "venus_evcharger/ipc/gateway_pressure.py": (
+                "tests/test_gateway_pressure_contracts.py",
+            ),
+            "venus_evcharger/ipc/gateway_publication.py": (
+                "tests/test_gateway_publication_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/rate.py": (
                 "tests/test_dbus_gateway_adapter_scheduler.py",
@@ -463,17 +495,10 @@ class MutationAuditScriptTests(unittest.TestCase):
             "venus_evcharger/dbus_adapter/process/config.py": (
                 "tests/test_dbus_adapter_process_config_contracts.py",
             ),
-            "venus_evcharger/dbus_adapter/process/identity.py": (
-                "tests/test_dbus_adapter_process_identity_contracts.py",
-            ),
             "venus_evcharger/dbus_adapter/process/introspection.py": (
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_processes_legacy_introspection_request_file",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_request_and_background_edges",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_request_contracts",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_file_payload_uses_utf8_and_dict_payloads",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_enqueue_introspection_requests_contracts",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_introspection_enqueue_command_payload_contracts",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_background_introspection_spec_contracts",
+                "tests/test_energy_ipc_contracts.py",
+                "tests/test_gateway_energy_snapshot_contracts.py",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_background_introspection_uses_discovery_targets_and_opaque_topology",
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_non_write_introspection_command_contracts",
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_non_write_introspection_timed_logging_main_and_json_ready",
             ),
@@ -494,6 +519,16 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_dbus_adapter_process_ipc_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/read/aggregate.py": ("tests/test_dbus_adapter_read_aggregate_contracts.py",),
+            "venus_evcharger/dbus_adapter/read/discovery.py": (
+                "tests/test_gateway_energy_snapshot_contracts.py",
+                "tests/test_dbus_adapter_discovery_mutation_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter/read/keys.py": (
+                "tests/test_gateway_energy_snapshot_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter/read/semantic.py": (
+                "tests/test_gateway_energy_snapshot_contracts.py",
+            ),
             "venus_evcharger/dbus_adapter/read/targets.py": (
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_read_target_contract_requires_service_and_absolute_path",
             ),
@@ -501,16 +536,21 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_read_spec_from_mapping_validates_known_fields",
             ),
             "venus_evcharger/dbus_adapter/write/scheduler.py": (
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_health_budgets_lifecycle_and_remote_write_edges",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_next_scheduled_command_runs_followup_burst_only_after_local_publish_completion",
+                "tests/test_dbus_gateway_adapter_scheduler.py",
             ),
             "venus_evcharger/dbus_adapter/write/support.py": (
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_write_scheduler_support_helper_contracts",
+                "tests/test_dbus_gateway_adapter_scheduler.py",
+            ),
+            "venus_evcharger/dbus_adapter/write/publish.py": (
+                "tests/test_dbus_gateway_adapter_scheduler.py",
+                "tests/test_dbus_adapter_write_publish_mutation_contracts.py",
+            ),
+            "venus_evcharger/dbus_adapter/write/semantic.py": (
+                "tests/test_dbus_adapter_write_semantic_mutation_contracts.py",
             ),
             "venus_evcharger/dbus_gateway_surface.py": ("tests/test_dbus_gateway_primitives.py",),
-            "venus_evcharger/dbus_introspection.py": (
-                "tests/test_dbus_introspection_gateway_cache.py",
-                "tests/test_dbus_introspection_contracts.py",
+            "venus_evcharger/publish/gateway_diagnostics.py": (
+                "tests/test_publish_gateway_diagnostics_contracts.py",
             ),
             "venus_evcharger/energy/config.py": (
                 "tests/test_energy_config_contracts.py",
@@ -558,20 +598,6 @@ class MutationAuditScriptTests(unittest.TestCase):
             "venus_evcharger/energy/recommendation_schema.py": (
                 "tests/test_energy_recommendation_schema_contracts.py",
             ),
-            "venus_evcharger/inputs/dbus.py": (
-                "tests/test_input_boundary_contracts.py",
-                "tests/test_venus_evcharger_dbus_inputs_controller.py",
-                "tests/test_input_edge_contracts.py",
-                "tests/test_storage_gateway_boundary_contracts.py",
-            ),
-            "venus_evcharger/inputs/energy_snapshot_contracts.py": (
-                "tests/test_input_boundary_contracts.py",
-            ),
-            "venus_evcharger/inputs/gateway_read.py": (
-                "tests/test_gateway_input_reader_contracts.py",
-                "tests/test_input_edge_contracts.py",
-                "tests/test_storage_gateway_boundary_contracts.py",
-            ),
             "venus_evcharger/inputs/helper/capacity_persistence.py": (
                 "tests/test_auto_input_capacity_persistence.py",
             ),
@@ -586,26 +612,38 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_auto_input_helper_sources_contracts.py",
                 "tests/test_auto_input_helper_snapshot_liveness_contracts.py",
             ),
-            "venus_evcharger/inputs/helper/sources_dbus_primary.py": (
-                "tests/test_auto_input_helper_sources_contracts.py",
+            "venus_evcharger/inputs/helper/energy_gateway.py": (
+                "tests/test_auto_input_helper_gateway_contracts.py",
+                "tests/test_auto_input_helper_refresh_contracts.py",
             ),
-            "venus_evcharger/inputs/helper/sources_dbus_resolve.py": (
-                "tests/test_auto_input_helper_sources_contracts.py",
+            "venus_evcharger/ports/gateway_diagnostic_values.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_diagnostics.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_diagnostics_validation.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_operations.py": (
+                "tests/test_gateway_semantic_operations.py",
+            ),
+            "venus_evcharger/ports/gateway_pressure.py": (
+                "tests/test_gateway_pressure_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_publication.py": (
+                "tests/test_gateway_publication_contracts.py",
+            ),
+            "venus_evcharger/runtime/async_control_types.py": (
+                "tests/test_runtime_async_control_types.py",
             ),
             "venus_evcharger/runtime/async_mainloop_control.py": (
                 "tests/test_runtime_async_mainloop_control_contracts.py",
                 "tests/test_venus_evcharger_runtime_support_controller.py",
             ),
-            "venus_evcharger/runtime/async_mainloop_publish.py": (
-                "tests/test_runtime_async_mainloop_publish_contracts.py",
-                "tests/test_venus_evcharger_runtime_support_controller.py",
-            ),
             "venus_evcharger/runtime/async_mainloop_state.py": (
                 "tests/test_runtime_async_mainloop_state_contracts.py",
                 "tests/test_venus_evcharger_runtime_support_controller.py",
-            ),
-            "venus_evcharger/runtime/async_mainloop_types.py": (
-                "tests/test_runtime_async_mainloop_types.py",
             ),
             "venus_evcharger/runtime/async_mainloop_watchdog.py": (
                 "tests/test_runtime_async_mainloop_watchdog_contracts.py",
@@ -687,16 +725,6 @@ class MutationAuditScriptTests(unittest.TestCase):
             "tests/test_phase_switch_persistence_contracts.py": (
                 "venus_evcharger/update/relay_phase_switch_policy.py",
             ),
-            "tests/test_storage_cluster_resilience_contracts.py": (
-                "venus_evcharger/inputs/storage.py",
-            ),
-            "tests/test_storage_gateway_boundary_contracts.py": (
-                "venus_evcharger/inputs/dbus.py",
-                "venus_evcharger/inputs/gateway_read.py",
-                "venus_evcharger/inputs/storage_support.py",
-                "venus_evcharger/ports/dbus.py",
-                "venus_evcharger/service/composition_guards.py",
-            ),
         }
         for contract_suite, targets in contract_targets.items():
             for target in targets:
@@ -719,16 +747,6 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "venus_evcharger/ports/write.py",
                 "venus_evcharger/ports/write_runtime.py",
                 "venus_evcharger/publish/dbus_diagnostics_sources.py",
-            ),
-            "tests/test_input_edge_contracts.py": (
-                "venus_evcharger/inputs/dbus.py",
-                "venus_evcharger/inputs/gateway_read.py",
-                "venus_evcharger/inputs/storage.py",
-                "venus_evcharger/inputs/storage_support.py",
-                "venus_evcharger/inputs/supervisor.py",
-                "venus_evcharger/inputs/supervisor_process.py",
-                "venus_evcharger/inputs/supervisor_snapshot_runtime.py",
-                "venus_evcharger/inputs/supervisor_snapshot_validation.py",
             ),
             "tests/test_service_control_state_contracts.py": (
                 "venus_evcharger/service/control.py",

@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from venus_evcharger.ports.gateway_operations import GatewayOperationsPort
+
 from .victron_ess_balance_adaptive import VictronEssAdaptiveTuner
 from .victron_ess_balance_apply import VictronEssBalanceExecutor
 from .victron_ess_balance_apply_pid import VictronEssPidController
@@ -41,12 +43,12 @@ class VictronEssBalanceComponents:
 class VictronEssBalanceController:
     """Apply and learn the optional Victron ESS balance bias."""
 
-    def __init__(self) -> None:
+    def __init__(self, gateway_operations: GatewayOperationsPort) -> None:
         sources = VictronEssSourceResolver()
         scorer = VictronEssTelemetryScorer()
         profiles = VictronEssLearningProfiles(sources, scorer)
         pid = VictronEssPidController(sources)
-        writer = VictronEssSetpointWriter(sources)
+        writer = VictronEssSetpointWriter(sources, gateway_operations)
         recovery = VictronEssSafetyRecovery(sources, profiles)
         safety = VictronEssSafetyController(sources, pid, recovery)
         recommendation_policy = VictronEssRecommendationPolicy()

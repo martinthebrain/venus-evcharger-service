@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""DBus write-handling helpers for the Venus EV charger service.
+"""Semantic control-command handling for the Venus EV charger service.
 
-Victron GUI writes arrive here through writable DBus paths such as /Mode,
-/Enable, /StartStop, and /AutoStart. The controller translates those user
-actions into wallbox-specific state changes and Shelly relay commands.
+External adapters translate their transport-specific routes into stable
+targets before commands arrive here. The controller translates those user
+actions into wallbox-specific state changes and hardware commands.
 
 This module is where "operator intent" enters the service. Because writes can
 trigger real-world side effects, the code has to distinguish between two
@@ -20,31 +20,29 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from venus_evcharger.auto.policy_settings import AUTO_POLICY_SETTING_BY_PATH
+from venus_evcharger.auto.policy_settings import AUTO_POLICY_SETTING_BY_TARGET
 from venus_evcharger.control import ControlApiV1Service, ControlCommand, ControlResult
-from venus_evcharger.control.models import ControlCommandSource
+from venus_evcharger.control.models import ControlCommandName, ControlCommandSource
 from venus_evcharger.core.contracts import write_failure_is_reversible
 from venus_evcharger.controllers.errors import CONTROL_COMMAND_ERRORS
-from venus_evcharger.controllers.write_support import _DbusWriteSupport
+from venus_evcharger.controllers.write_support import _ControlWriteSupport
 from venus_evcharger.controllers.write_snapshot import (
     SNAPSHOT_ATTRS,
-    SNAPSHOT_DBUS_PATHS,
     SNAPSHOT_DEQUE_ATTRS,
     SNAPSHOT_MAPPING_ATTRS,
     SNAPSHOT_VALUE_ATTRS,
 )
-from venus_evcharger.dbus_gateway import evcs_path_to_field
 
 
-class DbusWriteController(_DbusWriteSupport):
-    """Encapsulate writable DBus path handling for the Venus EV charger service.
+class ControlWriteController(_ControlWriteSupport):
+    """Apply validated semantic control commands to the wallbox service.
 
     A write handler in this project is more than a simple setter. It may need
     to:
 
     - normalize GUI input into supported values
     - update several related runtime attributes together
-    - publish derived DBus paths immediately
+    - publish derived semantic fields immediately
     - queue hardware actions
     - preserve a rollback snapshot until the write is known to be safe
 
@@ -52,38 +50,37 @@ class DbusWriteController(_DbusWriteSupport):
     to test and easier to extend when new writable paths are added.
     """
 
-    SNAPSHOT_DBUS_PATHS = SNAPSHOT_DBUS_PATHS
     SNAPSHOT_ATTRS = SNAPSHOT_ATTRS
     SNAPSHOT_DEQUE_ATTRS = SNAPSHOT_DEQUE_ATTRS
     SNAPSHOT_VALUE_ATTRS = SNAPSHOT_VALUE_ATTRS
     SNAPSHOT_MAPPING_ATTRS = SNAPSHOT_MAPPING_ATTRS
-    CURRENT_SETTING_PATHS = ("/SetCurrent", "/MaxCurrent", "/MinCurrent")
+    CURRENT_SETTING_TARGETS = frozenset({"set_current", "max_current", "min_current"})
     CURRENT_SETTING_FIELDS = {
-        "/SetCurrent": "set_current",
-        "/MaxCurrent": "max_current",
-        "/MinCurrent": "min_current",
+        "set_current": "set_current",
+        "max_current": "max_current",
+        "min_current": "min_current",
     }
     AUTO_RUNTIME_SETTING_SPECS: dict[str, tuple[str, Callable[[Any], Any]]] = {
-        "/Auto/StartDelaySeconds": ("auto_start_delay_seconds", float),
-        "/Auto/StopDelaySeconds": ("auto_stop_delay_seconds", float),
-        "/Auto/ScheduledEnabledDays": ("auto_scheduled_enabled_days", str),
-        "/Auto/ScheduledFallbackDelaySeconds": ("auto_scheduled_night_start_delay_seconds", float),
-        "/Auto/ScheduledLatestEndTime": ("auto_scheduled_latest_end_time", str),
-        "/Auto/ScheduledNightCurrent": ("auto_scheduled_night_current_amps", float),
-        "/Auto/DbusBackoffBaseSeconds": ("auto_dbus_backoff_base_seconds", float),
-        "/Auto/DbusBackoffMaxSeconds": ("auto_dbus_backoff_max_seconds", float),
+        "auto_start_delay_seconds": ("auto_start_delay_seconds", float),
+        "auto_stop_delay_seconds": ("auto_stop_delay_seconds", float),
+        "auto_scheduled_enabled_days": ("auto_scheduled_enabled_days", str),
+        "auto_scheduled_fallback_delay_seconds": ("auto_scheduled_night_start_delay_seconds", float),
+        "auto_scheduled_latest_end_time": ("auto_scheduled_latest_end_time", str),
+        "auto_scheduled_night_current": ("auto_scheduled_night_current_amps", float),
+        "auto_dbus_backoff_base_seconds": ("auto_dbus_backoff_base_seconds", float),
+        "auto_dbus_backoff_max_seconds": ("auto_dbus_backoff_max_seconds", float),
     }
-    AUTO_RUNTIME_SETTING_PATHS = set(AUTO_RUNTIME_SETTING_SPECS) | set(AUTO_POLICY_SETTING_BY_PATH)
+    AUTO_RUNTIME_SETTING_TARGETS = set(AUTO_RUNTIME_SETTING_SPECS) | set(AUTO_POLICY_SETTING_BY_TARGET)
     AUTO_RUNTIME_SETTING_FIELDS = {
-        path: evcs_path_to_field(path)
-        for path in AUTO_RUNTIME_SETTING_PATHS
+        target: target
+        for target in AUTO_RUNTIME_SETTING_TARGETS
     }
 
     def __init__(self, port: Any) -> None:
         self.port = port
         self._control_api = ControlApiV1Service(
-            current_setting_paths=self.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=self.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=self.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=self.AUTO_RUNTIME_SETTING_TARGETS,
         )
         self._external_side_effect_started = False
 
@@ -94,13 +91,14 @@ class DbusWriteController(_DbusWriteSupport):
 
     def build_control_command(
         self,
-        path: str,
+        name: ControlCommandName,
+        target: str,
         value: Any,
         *,
-        source: ControlCommandSource = "dbus",
+        source: ControlCommandSource = "internal",
     ) -> ControlCommand:
-        """Build one canonical control command from one transport-level write."""
-        return self._control_api.command_for_write(path, value, source=source)
+        """Build one canonical control command from a semantic target."""
+        return self._control_api.command_for_target(name, target, value, source=source)
 
     def build_control_command_from_payload(
         self,
@@ -125,7 +123,7 @@ class DbusWriteController(_DbusWriteSupport):
         self._snapshot_for_mode(port, current_time, auto_mode_active)
         self._publish_mode_paths(port, current_time, auto_mode_active)
         logging.info(
-            "DBus write /Mode requested=%s previous=%s applied=%s %s",
+            "Control target mode requested=%s previous=%s applied=%s %s",
             requested_mode,
             previous_mode,
             port.virtual_mode,
@@ -135,9 +133,9 @@ class DbusWriteController(_DbusWriteSupport):
     def _handle_autostart_write(self, value: Any) -> None:
         port = self.port
         port.virtual_autostart = int(value)
-        port.publish_dbus_field("auto_start", port.virtual_autostart, port.time_now(), force=True)
+        port.publish_field("auto_start", port.virtual_autostart, port.time_now(), force=True)
         logging.info(
-            "DBus write /AutoStart=%s %s",
+            "Control target auto_start=%s %s",
             port.virtual_autostart,
             port.state_summary(),
         )
@@ -159,7 +157,7 @@ class DbusWriteController(_DbusWriteSupport):
             self._apply_manual_startstop_request(port, wanted_on, current_time)
             self._publish_startstop_enable(port, current_time, auto_mode_active=False)
         logging.info(
-            "DBus write /StartStop=%s auto_mode=%s %s",
+            "Control target start_stop=%s auto_mode=%s %s",
             int(wanted_on),
             int(port.mode_uses_auto_logic(port.virtual_mode)),
             port.state_summary(),
@@ -181,49 +179,49 @@ class DbusWriteController(_DbusWriteSupport):
             auto_mode_active=port.mode_uses_auto_logic(port.virtual_mode),
         )
         logging.info(
-            "DBus write /Enable=%s auto_mode=%s %s",
+            "Control target enable=%s auto_mode=%s %s",
             int(wanted_on),
             int(port.mode_uses_auto_logic(port.virtual_mode)),
             port.state_summary(),
         )
 
-    def _handle_current_setting_write(self, path: str, value: Any) -> None:
+    def _handle_current_setting_write(self, target: str, value: Any) -> None:
         port = self.port
         current_time = port.time_now()
-        if path == "/SetCurrent":
+        if target == "set_current":
             requested_current = float(value)
             if port.charger_current_available():
                 port.charger_set_current(requested_current)
                 self._mark_external_side_effect_started()
             port.virtual_set_current = requested_current
             target_value = port.virtual_set_current
-        elif path == "/MaxCurrent":
+        elif target == "max_current":
             port.max_current = float(value)
             target_value = port.max_current
         else:
             port.min_current = float(value)
             target_value = port.min_current
-        port.publish_dbus_field(self.CURRENT_SETTING_FIELDS[path], target_value, current_time, force=True)
+        port.publish_field(self.CURRENT_SETTING_FIELDS[target], target_value, current_time, force=True)
 
     @classmethod
-    def _apply_auto_runtime_setting(cls, port: Any, path: str, value: Any) -> Any:
+    def _apply_auto_runtime_setting(cls, port: Any, target: str, value: Any) -> Any:
         """Apply one Auto runtime setting using its declarative normalization spec."""
-        policy_setting = AUTO_POLICY_SETTING_BY_PATH.get(path)
+        policy_setting = AUTO_POLICY_SETTING_BY_TARGET.get(target)
         if policy_setting is not None:
             target_value = policy_setting.update(port.auto_policy, value)
             port.validate_runtime_config()
             return target_value
-        attr_name, normalizer = cls.AUTO_RUNTIME_SETTING_SPECS[path]
+        attr_name, normalizer = cls.AUTO_RUNTIME_SETTING_SPECS[target]
         setattr(port, attr_name, normalizer(value))
         port.validate_runtime_config()
         return getattr(port, attr_name)
 
-    def _handle_auto_runtime_setting_write(self, path: str, value: Any) -> None:
+    def _handle_auto_runtime_setting_write(self, target: str, value: Any) -> None:
         """Apply one writable Auto tuning value that may persist in runtime overrides."""
         port = self.port
         current_time = port.time_now()
-        target_value = self._apply_auto_runtime_setting(port, path, value)
-        port.publish_dbus_field(self.AUTO_RUNTIME_SETTING_FIELDS[path], target_value, current_time, force=True)
+        target_value = self._apply_auto_runtime_setting(port, target, value)
+        port.publish_field(self.AUTO_RUNTIME_SETTING_FIELDS[target], target_value, current_time, force=True)
 
     def _handle_phase_selection_write(self, value: Any) -> None:
         """Apply one phase selection when the current backend can do so safely."""
@@ -246,7 +244,7 @@ class DbusWriteController(_DbusWriteSupport):
             self._publish_local_pm_status_best_effort(port, False, current_time)
             self._publish_phase_selection_paths(port, current_time)
             logging.info(
-                "DBus write /PhaseSelection requested=%s staged=%s %s",
+                "Control target phase_selection requested=%s staged=%s %s",
                 value,
                 requested_selection,
                 port.state_summary(),
@@ -257,7 +255,7 @@ class DbusWriteController(_DbusWriteSupport):
         port.active_phase_selection = applied_selection
         self._publish_phase_selection_paths(port, current_time)
         logging.info(
-            "DBus write /PhaseSelection requested=%s applied=%s %s",
+            "Control target phase_selection requested=%s applied=%s %s",
             value,
             applied_selection,
             port.state_summary(),
@@ -268,24 +266,24 @@ class DbusWriteController(_DbusWriteSupport):
         port = self.port
         current_time = port.time_now()
         if not bool(int(value)):
-            port.publish_dbus_field("auto_phase_lockout_reset", 0, current_time, force=True)
+            port.publish_field("auto_phase_lockout_reset", 0, current_time, force=True)
             return
         self._clear_phase_lockout_state(port._service)
         self._publish_phase_selection_paths(port, current_time)
         self._publish_phase_lockout_paths(port, current_time)
-        logging.info("DBus write /Auto/PhaseLockoutReset=1 cleared phase lockout state %s", port.state_summary())
+        logging.info("Control target auto_phase_lockout_reset=1 cleared phase lockout state %s", port.state_summary())
 
     def _handle_contactor_lockout_reset_write(self, value: Any) -> None:
         """Clear latched contactor-fault state on explicit operator request."""
         port = self.port
         current_time = port.time_now()
         if not bool(int(value)):
-            port.publish_dbus_field("auto_contactor_lockout_reset", 0, current_time, force=True)
+            port.publish_field("auto_contactor_lockout_reset", 0, current_time, force=True)
             return
         self._clear_contactor_lockout_state(port._service)
         self._publish_contactor_lockout_paths(port, current_time)
         logging.info(
-            "DBus write /Auto/ContactorLockoutReset=1 cleared contactor lockout state %s",
+            "Control target auto_contactor_lockout_reset=1 cleared contactor lockout state %s",
             port.state_summary(),
         )
 
@@ -294,22 +292,22 @@ class DbusWriteController(_DbusWriteSupport):
         port = self.port
         current_time = port.time_now()
         if not bool(int(value)):
-            port.publish_dbus_field("auto_software_update_run", 0, current_time, force=True)
+            port.publish_field("auto_software_update_run", 0, current_time, force=True)
             return
         port._software_update_run_requested_at = current_time
-        port.publish_dbus_field("auto_software_update_run", 0, current_time, force=True)
-        logging.info("DBus write /Auto/SoftwareUpdateRun=1 queued a software update request %s", port.state_summary())
+        port.publish_field("auto_software_update_run", 0, current_time, force=True)
+        logging.info("Control target auto_software_update_run=1 queued a software update request %s", port.state_summary())
 
     def _handle_mode_value_write(self, value: Any) -> None:
-        """Normalize and dispatch one /Mode write value."""
+        """Normalize and dispatch one mode target value."""
         self._handle_mode_write(int(value))
 
     def _handle_startstop_value_write(self, value: Any) -> None:
-        """Normalize and dispatch one /StartStop write value."""
+        """Normalize and dispatch one start-stop target value."""
         self._handle_startstop_write(bool(int(value)))
 
     def _handle_enable_value_write(self, value: Any) -> None:
-        """Normalize and dispatch one /Enable write value."""
+        """Normalize and dispatch one enable target value."""
         self._handle_enable_write(bool(int(value)))
 
     def handle_control_command(self, command: ControlCommand) -> ControlResult:
@@ -317,32 +315,39 @@ class DbusWriteController(_DbusWriteSupport):
         port = self.port
         snapshot = self._snapshot_write_state(port._service)
         self._external_side_effect_started = False
+        persistence_completed = False
+        port.begin_publication_transaction()
         try:
             self._control_api.execute(self, command)
             port.save_runtime_state()
+            persistence_completed = True
             port.save_runtime_overrides()
+            port.commit_publication_transaction()
             return ControlResult.applied_result(
                 command,
                 external_side_effect_started=self._external_side_effect_started,
             )
         except CONTROL_COMMAND_ERRORS as error:
             detail = self._write_failure_detail(error)
-            if write_failure_is_reversible(self._external_side_effect_started):
+            irreversible = self._external_side_effect_started or persistence_completed
+            if write_failure_is_reversible(irreversible):
+                port.discard_publication_transaction()
                 self._restore_write_state(port._service, snapshot)
                 logging.warning(
-                    "Control command %s path=%s value=%s failed: %s",
+                    "Control command %s target=%s value=%s failed: %s",
                     command.name,
-                    command.path,
+                    command.target,
                     command.value,
                     error,
                     exc_info=error,
                 )
                 return ControlResult.rejected_result(command, detail=detail)
+            self._commit_in_flight_publications(port)
             logging.warning(
-                "Control command %s path=%s value=%s failed after external side effects started; "
+                "Control command %s target=%s value=%s failed after external side effects started; "
                 "keeping in-flight state: %s",
                 command.name,
-                command.path,
+                command.target,
                 command.value,
                 error,
                 exc_info=error,
@@ -350,13 +355,20 @@ class DbusWriteController(_DbusWriteSupport):
             return ControlResult.accepted_in_flight_result(
                 command,
                 detail=detail,
-                external_side_effect_started=self._external_side_effect_started,
+                external_side_effect_started=irreversible,
             )
         finally:
+            port.discard_publication_transaction()
             self._external_side_effect_started = False
 
-    def handle_write(self, path: str, value: Any) -> bool:
-        """Handle writable DBus path updates from Venus OS."""
-        command = self.build_control_command(path, value, source="dbus")
-        result = self.handle_control_command(command)
-        return result.accepted
+    @staticmethod
+    def _commit_in_flight_publications(port: Any) -> None:
+        """Best-effort publish state after an irreversible partial command."""
+        try:
+            port.commit_publication_transaction()
+        except CONTROL_COMMAND_ERRORS as publication_error:
+            logging.warning(
+                "Control state publication failed after an irreversible command: %s",
+                publication_error,
+                exc_info=publication_error,
+            )

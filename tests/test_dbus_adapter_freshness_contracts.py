@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import dataclass
 from unittest.mock import patch
 
 from venus_evcharger import dbus_gateway_cache
@@ -14,12 +15,30 @@ from venus_evcharger.dbus_adapter.health.freshness import (
     count_status,
     important_freshness,
     max_cached_path_age,
+    max_publication_field_age,
     missing_cached_path_count,
+    missing_publication_field_count,
     optional_source_error_count,
     optional_source_unavailable_count,
+    publication_field_age,
+    publication_field_float,
     status_counts,
     values_for_kinds,
 )
+
+
+@dataclass(frozen=True)
+class _Observation:
+    value: object
+    observed_at: float
+
+
+class _Observations:
+    def __init__(self, values: dict[str, _Observation]) -> None:
+        self.values = values
+
+    def evcs_field_observation(self, field: str) -> _Observation | None:
+        return self.values.get(field)
 from venus_evcharger.dbus_gateway import (
     CacheValueMetadata,
     CacheFreshnessKind,
@@ -100,6 +119,28 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         for entry in (None, object(), [], {}, {"value": object()}):
             with self.subTest(entry=entry):
                 self.assertEqual(cached_entry_float(entry), 0.0)
+
+    def test_semantic_publication_field_metrics_use_registry_observations(self) -> None:
+        observations = _Observations(
+            {
+                "old": _Observation("12.5", 90.0),
+                "recent": _Observation(-3, 98.0),
+                "future": _Observation(object(), 110.0),
+                "zero": _Observation(5, 0.0),
+            }
+        )
+
+        self.assertEqual(max_publication_field_age(observations, {"old", "recent", "missing"}, 100.0), 10.0)
+        self.assertEqual(max_publication_field_age(observations, set(), 100.0), 0.0)
+        self.assertEqual(missing_publication_field_count(observations, {"old", "missing"}), 1.0)
+        self.assertEqual(missing_publication_field_count(observations, frozenset()), 0.0)
+        self.assertEqual(publication_field_age(observations.evcs_field_observation("future"), 100.0), 0.0)
+        self.assertEqual(publication_field_age(observations.evcs_field_observation("zero"), 100.0), 0.0)
+        self.assertEqual(publication_field_age(None, 100.0), 0.0)
+        self.assertEqual(publication_field_float(observations.evcs_field_observation("old")), 12.5)
+        self.assertEqual(publication_field_float(observations.evcs_field_observation("recent")), -3.0)
+        self.assertEqual(publication_field_float(observations.evcs_field_observation("future")), 0.0)
+        self.assertEqual(publication_field_float(None), 0.0)
 
     def test_cache_freshness_combines_count_status_and_important_fields(self) -> None:
         cache = DbusCacheStore(stale_after_seconds=10.0)

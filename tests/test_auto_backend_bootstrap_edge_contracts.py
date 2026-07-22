@@ -7,6 +7,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.venus_evcharger_bootstrap_controller_support import (
+    ServiceBootstrapControllerTestCase,
+    _RecordingGatewayPublication,
+)
 from venus_evcharger.auto.component_context import AutoDecisionContext
 from venus_evcharger.auto.logic_learning import AutoLearningPolicy
 from venus_evcharger.auto.logic_samples import AutoSampleTracker
@@ -16,23 +20,8 @@ from venus_evcharger.bootstrap.controller import ServiceBootstrapController
 from venus_evcharger.ports.auto import AutoDecisionPort
 
 
-class _GobjectTimers:
-    def timeout_add(self, interval: int, callback: object) -> object:
-        return interval, callback
-
-
 def _bootstrap_controller(service: object) -> ServiceBootstrapController:
-    return ServiceBootstrapController(
-        service,
-        normalize_phase_func=lambda value: str(value),
-        normalize_mode_func=lambda value: int(str(value)),
-        mode_uses_auto_logic_func=lambda mode: int(str(mode)) in (1, 2),
-        month_window_func=lambda *_args: ((8, 0), (18, 0)),
-        read_version_func=lambda _path: "1.0",
-        gobject_module=_GobjectTimers(),
-        script_path="/tmp/venus_evcharger_service.py",
-        formatters={},
-    )
+    return ServiceBootstrapControllerTestCase._controller(service)
 
 
 class AutoBackendBootstrapEdgeContractTests(unittest.TestCase):
@@ -88,31 +77,39 @@ class AutoBackendBootstrapEdgeContractTests(unittest.TestCase):
                     operation()
                 delegated.assert_called_once_with()
 
-    def test_controller_validates_identity_before_constructing_gateway_proxy(self) -> None:
-        service = SimpleNamespace(service_name="com.example.evcharger", deviceinstance=60)
+    def test_controller_validates_identity_before_semantic_gateway_registration(self) -> None:
+        publication = _RecordingGatewayPublication()
+        service = SimpleNamespace(
+            product_name="EVCS",
+            custom_name="Garage",
+            firmware_version="1.2.3",
+            hardware_version="Shelly",
+            serial="AA:BB:CC",
+            connection_name="Local network",
+            gateway_publication=publication,
+        )
         controller = _bootstrap_controller(service)
-        proxy = object()
+        with patch.object(controller.components.publication, "initial_fields", return_value={"mode": 2}):
+            controller.register_evcs_publication()
 
-        with patch(
-            "venus_evcharger.bootstrap.controller.GatewayDbusServiceProxy",
-            return_value=proxy,
-        ) as proxy_factory:
-            controller.initialize_dbus_service()
-
-        proxy_factory.assert_called_once_with("com.example.evcharger.http_60")
-        self.assertIs(service._dbusservice, proxy)
+        self.assertEqual(len(publication.evcs_registrations), 1)
+        identity, fields = publication.evcs_registrations[0]
+        self.assertEqual(identity.product_name, "EVCS")
+        self.assertEqual(identity.custom_name, "Garage")
+        self.assertEqual(identity.process_name, "/tmp/venus_evcharger_service.py")
+        self.assertEqual(fields, {"mode": 2})
 
         invalid_identities = (
-            SimpleNamespace(service_name=None, deviceinstance=60),
-            SimpleNamespace(service_name="com.example.evcharger", deviceinstance="60"),
+            SimpleNamespace(),
+            SimpleNamespace(product_name=None),
         )
         for invalid_service in invalid_identities:
             with self.subTest(service=invalid_service):
                 with self.assertRaisesRegex(
                     TypeError,
-                    "service identity must be loaded before DBus initialization",
+                    "EVCS identity attribute product_name is missing",
                 ):
-                    _bootstrap_controller(invalid_service).initialize_dbus_service()
+                    _bootstrap_controller(invalid_service).components.publication.identity()
 
 
 if __name__ == "__main__":

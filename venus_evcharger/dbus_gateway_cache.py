@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import TypedDict, Unpack
 
 from venus_evcharger.core.shared import write_text_atomically
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import (
     DBUS_GATEWAY_SCHEMA_VERSION,
     CacheFreshnessKind,
@@ -23,6 +22,8 @@ from venus_evcharger.dbus_gateway_core import (
     read_json_file,
     write_json_file,
 )
+from venus_evcharger.ipc.command_types import CommandPayload
+from venus_evcharger.ipc.energy import EnergyInputsSnapshot, EnergyTopologySnapshot
 
 NumericMetadataValue = str | bytes | bytearray | int | float
 NUMERIC_METADATA_TYPES = (str, bytes, bytearray, int, float)
@@ -196,6 +197,8 @@ class DbusCacheStore:
         self.local_service_name = ""
         self.values: dict[str, CommandPayload] = {}
         self.services: dict[str, CommandPayload] = {}
+        self.energy_inputs: CommandPayload = {}
+        self.energy_topology: CommandPayload = {}
         self.health: CommandPayload = {
             "state": "init",
             "degraded_until": 0.0,
@@ -334,6 +337,15 @@ class DbusCacheStore:
         self.services = {str(name): {"seen_at": current, "status": "present"} for name in names}
         self.sequence += 1
 
+    def set_semantic_energy_snapshots(
+        self,
+        inputs: EnergyInputsSnapshot,
+        topology: EnergyTopologySnapshot,
+    ) -> None:
+        """Attach adapter-derived public snapshots without changing raw cache state."""
+        self.energy_inputs = inputs.to_payload()
+        self.energy_topology = topology.to_payload()
+
     def snapshot(self, *, now: float | None = None) -> CommandPayload:
         current = _now() if now is None else float(now)
         values = {key: self.value_snapshot(item, current) for key, item in self.values.items()}
@@ -342,6 +354,8 @@ class DbusCacheStore:
             "sequence": self.sequence,
             "captured_at": current,
             "dbus_health": dict(self.health),
+            "energy_inputs": dict(self.energy_inputs),
+            "energy_topology": dict(self.energy_topology),
             "values": values,
             "services": dict(self.services),
         }

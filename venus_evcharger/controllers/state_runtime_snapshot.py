@@ -19,9 +19,9 @@ from venus_evcharger.controllers.state_runtime_snapshot_victron import (
     _victron_ess_balance_runtime_profile_metric,
     _victron_ess_balance_runtime_profile_response_metrics,
     _victron_ess_balance_runtime_profile_sample_count,
-    _victron_ess_balance_runtime_string,
 )
 from venus_evcharger.core.contracts import finite_float_or_none
+from venus_evcharger.core.ess_topology import ess_learning_topology_key
 
 _DEFAULT_VICTRON_BIAS_ACTIVATION_MODE = "always"
 
@@ -299,20 +299,7 @@ class RuntimeStateSnapshotBuilder:
 
     @staticmethod
     def _victron_ess_balance_runtime_topology_key(svc: object, source_id: str) -> str:
-        energy_ids = _victron_ess_balance_energy_ids(svc)
-        service_name = _victron_ess_balance_runtime_string(
-            svc, "auto_battery_discharge_balance_victron_bias_service"
-        )
-        path = _victron_ess_balance_runtime_string(
-            svc, "auto_battery_discharge_balance_victron_bias_path"
-        )
-        return (
-            "victron-bias-learning/v2"
-            f"/source={str(source_id or '').strip()}"
-            f"/service={service_name}"
-            f"/path={path}"
-            f"/energy={','.join(sorted(energy_ids))}"
-        )
+        return ess_learning_topology_key(source_id, _victron_ess_balance_energy_ids(svc))
 
     @staticmethod
     def _victron_ess_balance_runtime_profile_snapshot(profile_key: str, raw_profile: object) -> dict[str, object]:

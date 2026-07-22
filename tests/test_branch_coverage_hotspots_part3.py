@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.test_branch_coverage_hotspots_support import *  # noqa: F401,F403
-from venus_evcharger.dbus_gateway import DbusCommandInbox, gateway_paths
 
 class _BranchCoverageVictronApplyCasesPart1:
     def test_victron_apply_helper_branches(self) -> None:
@@ -29,8 +28,6 @@ class _BranchCoverageVictronApplyCasesPart1:
             auto_battery_discharge_balance_victron_bias_max_abs_watts=200.0,
             auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second=10.0,
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
-            auto_battery_discharge_balance_victron_bias_service="",
-            auto_battery_discharge_balance_victron_bias_path="",
             dbus_method_timeout_seconds=1.0,
             runtime=SimpleNamespace(warning_throttled=MagicMock()),
             _last_auto_metrics=None,
@@ -100,59 +97,20 @@ class _BranchCoverageVictronApplyCasesPart1:
             )
         )
 
-        self.assertFalse(writer._victron_ess_balance_should_write(service, 105.0, 80.0))
-        self.assertFalse(writer._victron_ess_balance_write_setpoint(service, "", "", 10.0))
-        self.assertEqual(writer._victron_ess_balance_write_target(None, None), ("", ""))
-        self.assertEqual(writer._victron_ess_balance_write_payload(object(), 12.5), 12.5)
-
-        with patch.object(writer, "_victron_ess_balance_write_error", return_value=RuntimeError("boom")):
-            self.assertFalse(writer._victron_ess_balance_write_setpoint(service, "svc", "/path", 10.0))
-            service.runtime.warning_throttled.assert_called()
-
-        with patch.object(
-            writer,
-            "_victron_ess_balance_try_write_setpoint",
-            side_effect=[RuntimeError("first"), None],
-        ), patch.object(writer, "_victron_ess_balance_log_write_retry") as log_retry:
-            self.assertIsNone(writer._victron_ess_balance_write_error(service, "svc", "/path", 10.0))
-            log_retry.assert_called_once()
-        with patch.object(
-            writer,
-            "_victron_ess_balance_try_write_setpoint",
-            side_effect=[RuntimeError("first"), RuntimeError("second")],
-        ), patch.object(writer, "_victron_ess_balance_log_write_retry") as log_retry:
-            last_error = writer._victron_ess_balance_write_error(service, "svc", "/path", 10.0)
-            self.assertEqual(str(last_error), "second")
-            log_retry.assert_called_once()
-
-        writer._victron_ess_balance_try_write_setpoint(service, "svc", "/path", 12.0)
-        commands = DbusCommandInbox(gateway_paths(service.dbus_gateway_run_dir).command_dir).load_pending()
-        self.assertTrue(
-            any(
-                payload.get("kind") == "set_value"
-                and payload.get("service") == "svc"
-                and payload.get("path") == "/path"
-                and payload.get("value") == 12.0
-                for _path, payload in commands
-            )
-        )
-
-        with patch("venus_evcharger.update.victron_ess_balance_apply.logging.debug") as debug_log:
-            writer._victron_ess_balance_log_write_retry("svc", "/path", RuntimeError("boom"))
-            debug_log.assert_called_once()
+        self.assertFalse(writer.should_write(service, 105.0, 80.0))
 
         self.assertEqual(pid._victron_ess_balance_pid_output(service, 150.0, 101.0), 10.0)
         self.assertEqual(pid._victron_ess_balance_pid_output(service, 0.0, 102.0), 0.0)
 
-        with patch.object(writer, "_victron_ess_balance_should_write", return_value=False):
+        with patch.object(writer, "should_write", return_value=False):
             controller._victron_ess_balance_tracking_write_state(service, 110.0, 75.0, 25.0, "profile", metrics)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "holding")
         service._victron_ess_balance_last_setpoint_w = None
         metrics = {}
-        with patch.object(writer, "_victron_ess_balance_should_write", return_value=False):
+        with patch.object(writer, "should_write", return_value=False):
             controller._victron_ess_balance_tracking_write_state(service, 110.5, 75.0, 25.0, "profile", metrics)
         self.assertEqual(metrics, {})
-        with patch.object(writer, "_victron_ess_balance_should_write", return_value=True), patch.object(
+        with patch.object(writer, "should_write", return_value=True), patch.object(
             controller, "_victron_ess_balance_apply_write_outcome"
         ) as apply_outcome:
             controller._victron_ess_balance_tracking_write_state(service, 111.0, 75.0, 25.0, "profile", {})
@@ -166,7 +124,7 @@ class _BranchCoverageVictronApplyCasesPart1:
             controller._restore_victron_ess_balance_base_setpoint(service, 120.0, metrics, "blocked")
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "blocked")
 
-        with patch.object(writer, "_victron_ess_balance_should_write", return_value=False), patch.object(
+        with patch.object(writer, "should_write", return_value=False), patch.object(
             recommendation, "_populate_victron_ess_balance_telemetry_metrics"
         ), patch.object(adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation"), patch.object(
             sources, "_merge_victron_ess_balance_metrics"
@@ -176,8 +134,8 @@ class _BranchCoverageVictronApplyCasesPart1:
             controller._restore_victron_ess_balance_base_setpoint(service, 121.0, metrics, "blocked")
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "blocked-holding")
 
-        with patch.object(writer, "_victron_ess_balance_should_write", return_value=True), patch.object(
-            writer, "_victron_ess_balance_write_setpoint", return_value=False
+        with patch.object(writer, "should_write", return_value=True), patch.object(
+            writer, "write_setpoint", return_value=False
         ), patch.object(recommendation, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
             adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation"
         ), patch.object(sources, "_merge_victron_ess_balance_metrics"):
@@ -251,10 +209,10 @@ class _BranchCoverageVictronApplyCasesPart1:
         self.assertEqual(pid._victron_ess_balance_pid_clamped_output_w(12.0, 0.0), 12.0)
         self.assertEqual(pid._victron_ess_balance_pid_ramped_output_w(1.0, 5.0, 0.0, 10.0), 5.0)
         service._victron_ess_balance_last_setpoint_w = None
-        self.assertTrue(writer._victron_ess_balance_should_write(service, 120.0, 80.0))
+        self.assertTrue(writer.should_write(service, 120.0, 80.0))
         service._victron_ess_balance_last_setpoint_w = 75.0
         service._victron_ess_balance_last_write_at = 100.0
-        self.assertTrue(writer._victron_ess_balance_should_write(service, 120.0, 90.0))
+        self.assertTrue(writer.should_write(service, 120.0, 90.0))
 
         metrics = {}
         with patch.object(
@@ -357,12 +315,9 @@ class _BranchCoverageVictronApplyCasesPart1:
         with patch.object(telemetry, "_update_victron_ess_balance_telemetry") as update_telemetry:
             controller._victron_ess_balance_update_tracking_telemetry(service, 132.0, {"cluster": 1}, -10.0, "profile", {})
             update_telemetry.assert_called_once()
-        with patch.object(writer, "_victron_ess_balance_write_setpoint", return_value=False):
+        with patch.object(writer, "write_setpoint", return_value=False):
             metrics = {}
             controller._victron_ess_balance_apply_write_outcome(service, 133.0, 70.0, -20.0, "profile", metrics)
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "write-failed")
-        with patch.object(writer, "_victron_ess_balance_write_error", return_value=None):
-            self.assertTrue(writer._victron_ess_balance_write_setpoint(service, "svc", "/path", 10.0))
-
         sources._merge_victron_ess_balance_metrics(service, {"x": 1})
         self.assertEqual(service._last_auto_metrics, {"x": 1})

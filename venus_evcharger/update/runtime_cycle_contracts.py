@@ -65,6 +65,7 @@ class UpdateCycleStatePort(StatePublishPort, PhaseSwitchStatePort, OfflineStateP
     def flush_runtime_overrides(self, now: float | None = None) -> None: ...
     def summary(self) -> str: ...
     def publish_companion_bridge(self, now: float | None = None) -> bool: ...
+    def last_accepted_field(self, field: str) -> object: ...
 
 
 class UpdateCycleReadbackPort(
@@ -76,10 +77,6 @@ class UpdateCycleReadbackPort(
     """Fresh atomic charger and switch readbacks."""
 
     def resolve(self, now: float | None = None) -> FreshReadbacks: ...
-
-
-class DbusPathReader(Protocol):
-    def __getitem__(self, path: str) -> object: ...
 
 
 class UpdateCycleServicePort(
@@ -106,8 +103,6 @@ class UpdateCycleServicePort(
     @property
     def state(self) -> UpdateCycleStatePort: ...
 
-    service_name: str
-    _dbusservice: DbusPathReader
     _readback_store: ReadbackStore
 
     @property
@@ -118,7 +113,6 @@ class UpdateCycleServicePort(
 
 
 __all__ = [
-    "DbusPathReader",
     "UpdateCycleAutoPort",
     "UpdateCycleReadbackPort",
     "UpdateCycleRuntimePort",

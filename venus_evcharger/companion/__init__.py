@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Companion DBus bridge helpers for optional Venus-GUI visibility."""
+"""Semantic energy-companion publication."""
 
-from .dbus_bridge import EnergyCompanionDbusBridge
+from .publication import EnergyCompanionPublisher
 
-__all__ = ["EnergyCompanionDbusBridge"]
+__all__ = ["EnergyCompanionPublisher"]

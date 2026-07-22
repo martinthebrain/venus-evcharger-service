@@ -8,7 +8,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from tests.support.auto_input_supervisor import (
     AutoInputSupervisorServiceFake,
@@ -26,6 +27,42 @@ def write_snapshot(path: Path, payload: object, mtime_ns: int) -> None:
 class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
     def supervisor(self, service: AutoInputSupervisorServiceFake) -> AutoInputSupervisor:
         return AutoInputSupervisor(service, config_path="/config.ini", helper_path="/helper.py")
+
+    def test_public_process_commands_delegate_without_transport_knowledge(self) -> None:
+        supervisor = self.supervisor(AutoInputSupervisorServiceFake())
+        supervisor.process_lifecycle.stop_helper = MagicMock()
+        supervisor.process_lifecycle.spawn_helper = MagicMock()
+        supervisor.process_lifecycle.ensure_helper_process = MagicMock()
+
+        supervisor.stop_helper(force=True)
+        supervisor.spawn_helper(123.0)
+        supervisor.ensure_helper_process(124.0)
+
+        supervisor.process_lifecycle.stop_helper.assert_called_once_with(True)
+        supervisor.process_lifecycle.spawn_helper.assert_called_once_with(123.0)
+        supervisor.process_lifecycle.ensure_helper_process.assert_called_once_with(124.0)
+
+    def test_apply_snapshot_without_file_signature_preserves_last_signature(self) -> None:
+        service = AutoInputSupervisorServiceFake()
+        runtime = self.supervisor(service).snapshot_runtime
+        signature = (11, 12, 13, 14)
+        runtime._last_snapshot_signature = signature
+
+        runtime._apply_snapshot(None, 100.0, 100.0, valid_snapshot(), True)
+
+        self.assertEqual(runtime._last_snapshot_signature, signature)
+        self.assertEqual(service.runtime.snapshots[-1]["captured_at"], 100.0)
+
+    def test_missing_freshness_timestamp_is_not_in_the_future(self) -> None:
+        supervisor = self.supervisor(AutoInputSupervisorServiceFake())
+
+        self.assertTrue(
+            supervisor.snapshot_runtime._snapshot_freshness_not_future(
+                "/run/auto-input.json",
+                None,
+                100.0,
+            )
+        )
 
     def test_refresh_applies_fresh_snapshot_and_all_identity_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -134,6 +171,39 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
             service._auto_input_snapshot_mtime_ns = 40
             supervisor.refresh_snapshot()
         self.assertEqual(service.runtime.snapshots, [])
+
+    def test_atomic_replacement_with_same_mtime_is_applied(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "snapshot.json"
+            replacement = Path(temp_dir) / "replacement.json"
+            write_snapshot(path, valid_snapshot(pv_power=900.0), 40)
+            service = AutoInputSupervisorServiceFake(auto_input_snapshot_path=str(path), now=100.0)
+            supervisor = self.supervisor(service)
+            supervisor.refresh_snapshot()
+
+            write_snapshot(replacement, valid_snapshot(pv_power=1200.0), 40)
+            replacement.replace(path)
+            supervisor.refresh_snapshot()
+
+        self.assertEqual([snapshot["pv_power"] for snapshot in service.runtime.snapshots], [900.0, 1200.0])
+
+    def test_snapshot_file_signature_and_change_detection_are_exact(self) -> None:
+        service = AutoInputSupervisorServiceFake(_auto_input_snapshot_mtime_ns=10)
+        runtime = self.supervisor(service).snapshot_runtime
+        stat_result = SimpleNamespace(st_mtime_ns=10, st_ino=20, st_size=30, st_ctime_ns=40)
+        with patch("venus_evcharger.inputs.supervisor_snapshot_runtime.os.stat", return_value=stat_result):
+            metadata = runtime._snapshot_file_metadata("/run/snapshot.json")
+        self.assertEqual(metadata, (10, (10, 20, 30, 40)))
+        assert metadata is not None
+
+        self.assertFalse(runtime._snapshot_file_changed("/run/snapshot.json", metadata))
+        runtime._last_snapshot_signature = metadata[1]
+        self.assertFalse(runtime._snapshot_file_changed("/run/snapshot.json", metadata))
+        self.assertTrue(runtime._snapshot_file_changed("/run/snapshot.json", (10, (10, 21, 30, 40))))
+        self.assertTrue(runtime._snapshot_file_changed("/run/snapshot.json", (11, (11, 20, 30, 40))))
+
+        with patch("venus_evcharger.inputs.supervisor_snapshot_runtime.os.stat", side_effect=OSError("missing")):
+            self.assertIsNone(runtime._snapshot_file_metadata("/missing/snapshot.json"))
 
     def test_invalid_json_and_schema_failures_are_warned_without_apply(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

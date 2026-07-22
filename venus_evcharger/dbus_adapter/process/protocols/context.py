@@ -14,7 +14,7 @@ from venus_evcharger.dbus_adapter.process.protocols.introspection import (
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
 from venus_evcharger.dbus_adapter.process.protocols.loop import DbusAdapterLoopContext
 from venus_evcharger.dbus_adapter.process.protocols.runtime import (
-    DbusAdapterIdentityContext,
+    DbusAdapterPublicationContext,
     DbusAdapterRuntimeContext,
     DbusAdapterSocketContext,
 )
@@ -23,10 +23,10 @@ from venus_evcharger.dbus_adapter.process.protocols.runtime import (
 class DbusAdapterProcessContext(
     DbusAdapterRuntimeContext,
     DbusAdapterSocketContext,
-    DbusAdapterIdentityContext,
     DbusAdapterLoopContext,
     DbusAdapterIoContext,
     DbusAdapterHealthContext,
+    DbusAdapterPublicationContext,
     DbusAdapterIntrospectionContext,
     DbusAdapterIntrospectionSnapshotContext,
     Protocol,

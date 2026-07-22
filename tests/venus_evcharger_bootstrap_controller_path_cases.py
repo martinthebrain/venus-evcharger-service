@@ -1,5 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-from tests.venus_evcharger_bootstrap_controller_path_cases_part1 import TestServiceBootstrapPathRegistration
-from tests.venus_evcharger_bootstrap_controller_path_cases_part2 import TestServiceBootstrapPathComposition
-
-__all__ = ["TestServiceBootstrapPathComposition", "TestServiceBootstrapPathRegistration"]

@@ -102,7 +102,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
             _software_update_last_run_at=current_time - 3600.0,
             started_at=current_time - 10.0,
         ), mode="split", meter_type="template_meter", switch_type="template_switch", charger_type="smartevse_charger")
-        controller = DbusPublishController(service, self._real_age_seconds)
+        controller = build_publish_controller(service, self._real_age_seconds)
 
         counter_values = controller.diagnostics.counter_values(current_time)
         age_values = controller.diagnostics.age_values(current_time)
@@ -272,7 +272,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
             started_at=current_time - 10.0,
         )
 
-        counter_values = DbusPublishController(service, self._real_age_seconds).diagnostics.counter_values(current_time)
+        counter_values = build_publish_controller(service, self._real_age_seconds).diagnostics.counter_values(current_time)
 
         self.assertEqual(counter_values["auto_backend_mode"], "split")
         self.assertEqual(counter_values["auto_meter_backend"], "template_meter")
@@ -280,7 +280,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
         self.assertEqual(counter_values["auto_charger_backend"], "smartevse_charger")
 
         service._error_state = "bad"
-        counter_values = DbusPublishController(service, self._real_age_seconds).diagnostics.counter_values(current_time)
+        counter_values = build_publish_controller(service, self._real_age_seconds).diagnostics.counter_values(current_time)
         self.assertEqual(counter_values["auto_error_count"], 0)
         self.assertEqual(counter_values["auto_dbus_read_errors"], 0)
 
@@ -315,7 +315,7 @@ class _TestDbusPublishControllerDiagnosticsPart1:
             _last_successful_update_at=90.0,
             started_at=90.0,
         )
-        controller = DbusPublishController(service, self._real_age_seconds)
+        controller = build_publish_controller(service, self._real_age_seconds)
 
         age_values = controller.diagnostics.age_values(100.0)
 

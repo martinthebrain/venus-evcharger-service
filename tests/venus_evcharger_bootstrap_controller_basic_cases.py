@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+from collections.abc import Callable
+
 from tests.venus_evcharger_bootstrap_controller_support import (
     MagicMock,
     ServiceBootstrapController,
@@ -13,7 +15,7 @@ from tests.venus_evcharger_bootstrap_controller_support import (
 
 
 class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
-    def test_constructor_wires_all_runtime_dependencies(self):
+    def test_constructor_wires_all_runtime_dependencies(self) -> None:
         service = SimpleNamespace()
         normalize_phase = MagicMock(return_value="L1")
         normalize_mode = MagicMock(return_value=2)
@@ -21,21 +23,24 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         month_window = MagicMock(return_value=((7, 0), (19, 0)))
         read_version = MagicMock(return_value="1.2.3")
         gobject_module = _FakeGobjectTimers()
-        formatters = {"w": MagicMock(return_value="123 W")}
 
-        controller = ServiceBootstrapController(
-            service,
-            normalize_phase_func=normalize_phase,
-            normalize_mode_func=normalize_mode,
-            mode_uses_auto_logic_func=mode_uses_auto_logic,
-            month_window_func=month_window,
-            read_version_func=read_version,
-            gobject_module=gobject_module,
+        functions = self._function_bundle(
+            normalize_phase=normalize_phase,
+            normalize_mode=normalize_mode,
+            mode_uses_auto_logic=mode_uses_auto_logic,
+            month_window=month_window,
+            read_version=read_version,
+            gobject=gobject_module,
             script_path="/tmp/custom-service.py",
-            formatters=formatters,
         )
+        owner = self._owner(service, functions)
+        controller = owner.bootstrap
+        self.assertIsInstance(controller, ServiceBootstrapController)
+        assert isinstance(controller, ServiceBootstrapController)
 
         self.assertIs(controller.service, service)
+        self.assertIs(owner.functions, functions)
+        self.assertIs(service.controllers, owner)
         self.assertIs(controller.dependencies.normalize_phase, normalize_phase)
         self.assertIs(controller.dependencies.normalize_mode, normalize_mode)
         self.assertIs(controller.dependencies.mode_uses_auto_logic, mode_uses_auto_logic)
@@ -43,16 +48,15 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         self.assertIs(controller.dependencies.read_version, read_version)
         self.assertIs(controller.dependencies.gobject, gobject_module)
         self.assertEqual(controller.dependencies.script_path, "/tmp/custom-service.py")
-        self.assertIs(controller.dependencies.formatters, formatters)
         self.assertIs(controller.components.config.identity, controller.components.identity)
         self.assertIs(controller.components.config.backend, controller.components.backend)
         self.assertIs(controller.components.config.auto, controller.components.auto)
 
-        controller.components.runtime.prepare_runtime_state = MagicMock()
-        controller.prepare_runtime_state()
-        controller.components.runtime.prepare_runtime_state.assert_called_once_with()
+        with patch.object(controller.components.runtime, "prepare_runtime_state") as prepare_runtime_state:
+            controller.prepare_runtime_state()
+        prepare_runtime_state.assert_called_once_with()
 
-    def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self):
+    def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self) -> None:
         service = SimpleNamespace(
             startup_device_info_retries=2,
             startup_device_info_retry_seconds=0,
@@ -63,13 +67,13 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         self.assertEqual(controller.fetch_device_info_with_fallback(), {})
         self.assertEqual(service.runtime.rpc_call.call_count, 3)
 
-    def test_logging_level_and_signal_install_cover_default_and_error_paths(self):
+    def test_logging_level_and_signal_install_cover_default_and_error_paths(self) -> None:
         empty_config = configparser.ConfigParser(default_section="NOT_DEFAULT")
         self.assertEqual(_logging_level_from_config(empty_config, "WARNING"), "WARNING")
 
-        handlers = {}
+        handlers: dict[int, Callable[[int, object], None]] = {}
 
-        def fake_signal(signum, handler):
+        def fake_signal(signum: int, handler: Callable[[int, object], None]) -> None:
             handlers[signum] = handler
 
         with patch("venus_evcharger.bootstrap.controller.signal.SIGTERM", 15), patch(
@@ -85,7 +89,7 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
             handlers[15](15, None)
         debug_mock.assert_called_once()
 
-    def test_fetch_device_info_with_fallback_logs_retry_and_sleeps(self):
+    def test_fetch_device_info_with_fallback_logs_retry_and_sleeps(self) -> None:
         service = SimpleNamespace(
             startup_device_info_retries=1,
             startup_device_info_retry_seconds=2.5,
@@ -103,7 +107,7 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         sleep_mock.assert_called_once_with(2.5)
         self.assertGreaterEqual(warning_mock.call_count, 1)
 
-    def test_fetch_device_info_with_fallback_ignores_non_mapping_payload(self):
+    def test_fetch_device_info_with_fallback_ignores_non_mapping_payload(self) -> None:
         service = SimpleNamespace(
             startup_device_info_retries=0,
             startup_device_info_retry_seconds=0,

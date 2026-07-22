@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from venus_evcharger.control.service import ControlApiV1Service
 from venus_evcharger.core.contracts import (
     CONTROL_API_ENDPOINTS,
     CONTROL_API_ERROR_CODES,
@@ -19,6 +18,16 @@ from venus_evcharger.core.contracts import (
     CONTROL_COMMAND_SOURCES,
     CONTROL_COMMAND_STATUSES,
     STATE_API_KINDS,
+)
+from venus_evcharger.core.contracts_control_surface import (
+    CONTROL_BINARY_AUTO_RUNTIME_TARGETS,
+    CONTROL_COMMAND_DEFAULT_TARGETS,
+    CONTROL_CURRENT_SETTING_TARGETS,
+    CONTROL_DIRECT_TARGET_COMMANDS,
+    CONTROL_FLOAT_AUTO_RUNTIME_TARGETS,
+    CONTROL_INTEGER_AUTO_RUNTIME_TARGETS,
+    CONTROL_PHASE_SELECTIONS,
+    CONTROL_STRING_AUTO_RUNTIME_TARGETS,
 )
 
 from .openapi_helpers import (
@@ -65,102 +74,76 @@ def _named_command_request_schema(
     name: str,
     value_schema: Mapping[str, Any],
     *,
-    path_schema: Mapping[str, Any] | None = None,
+    target_schema: Mapping[str, Any] | None = None,
+    target_required: bool = False,
 ) -> dict[str, Any]:
     properties = {"name": _const_schema(name), "value": dict(value_schema), **_tracking_properties()}
     required = ["name", "value"]
-    if path_schema is not None:
-        properties["path"] = dict(path_schema)
-        required.append("path")
+    if target_schema is not None:
+        properties["target"] = dict(target_schema)
+    if target_required:
+        required.append("target")
     return _object_schema(properties, required=required)
 
 
-def _path_command_request_schema(path_schema: Mapping[str, Any], value_schema: Mapping[str, Any]) -> dict[str, Any]:
-    return _object_schema(
-        {"path": dict(path_schema), "value": dict(value_schema), **_tracking_properties()},
-        required=("path", "value"),
-    )
-
-
 def _control_request_schemas() -> dict[str, Any]:
-    direct_binary_path_names = {
-        "/Auto/ContactorLockoutReset": "ResetContactorLockout",
-        "/Auto/PhaseLockoutReset": "ResetPhaseLockout",
-        "/Auto/SoftwareUpdateRun": "TriggerSoftwareUpdate",
-        "/AutoStart": "SetAutoStart",
-        "/Enable": "SetEnable",
-        "/StartStop": "SetStartStop",
+    direct_binary_target_names = {
+        "auto_contactor_lockout_reset": "ResetContactorLockout",
+        "auto_phase_lockout_reset": "ResetPhaseLockout",
+        "auto_software_update_run": "TriggerSoftwareUpdate",
+        "auto_start": "SetAutoStart",
+        "enable": "SetEnable",
+        "start_stop": "SetStartStop",
     }
     binary_schema = _boolean_or_binary_integer_schema()
     request_schemas: dict[str, Any] = {
         "SetModeCommandRequest": _named_command_request_schema(
             "set_mode",
             _integer_schema(enum=(0, 1, 2)),
-            path_schema=_const_schema("/Mode"),
+            target_schema=_const_schema(CONTROL_COMMAND_DEFAULT_TARGETS["set_mode"]),
         ),
-        "SetModePathRequest": _path_command_request_schema(_const_schema("/Mode"), _integer_schema(enum=(0, 1, 2))),
         "SetPhaseSelectionCommandRequest": _named_command_request_schema(
             "set_phase_selection",
-            _string_schema(enum=sorted(ControlApiV1Service._KNOWN_PHASE_SELECTIONS)),
-            path_schema=_const_schema("/PhaseSelection"),
-        ),
-        "SetPhaseSelectionPathRequest": _path_command_request_schema(
-            _const_schema("/PhaseSelection"),
-            _string_schema(enum=sorted(ControlApiV1Service._KNOWN_PHASE_SELECTIONS)),
+            _string_schema(enum=sorted(CONTROL_PHASE_SELECTIONS)),
+            target_schema=_const_schema(CONTROL_COMMAND_DEFAULT_TARGETS["set_phase_selection"]),
         ),
         "SetCurrentSettingCommandRequest": _named_command_request_schema(
-            "set_current_setting",
-            _number_schema(minimum=0.0),
-            path_schema={"type": "string", "enum": ["/SetCurrent"]},
-        ),
-        "SetCurrentSettingPathRequest": _path_command_request_schema(
-            {"type": "string", "enum": ["/SetCurrent"]},
-            _number_schema(minimum=0.0),
+        "set_current_setting",
+        _number_schema(minimum=0.0),
+        target_schema={"type": "string", "enum": sorted(CONTROL_CURRENT_SETTING_TARGETS)},
+        target_required=True,
         ),
     }
-    for path, schema_name in direct_binary_path_names.items():
-        command_name = ControlApiV1Service._DIRECT_PATH_COMMANDS[path]
+    for target, schema_name in direct_binary_target_names.items():
+        command_name = CONTROL_DIRECT_TARGET_COMMANDS[target]
         request_schemas[f"{schema_name}CommandRequest"] = _named_command_request_schema(
             command_name,
             binary_schema,
-            path_schema=_const_schema(path),
+            target_schema=_const_schema(target),
         )
-        request_schemas[f"{schema_name}PathRequest"] = _path_command_request_schema(_const_schema(path), binary_schema)
     request_schemas["SetAutoRuntimeFloatCommandRequest"] = _named_command_request_schema(
         "set_auto_runtime_setting",
         _number_schema(minimum=0.0),
-        path_schema={"type": "string", "enum": sorted(ControlApiV1Service._FLOAT_AUTO_RUNTIME_PATHS)},
+        target_schema={"type": "string", "enum": sorted(CONTROL_FLOAT_AUTO_RUNTIME_TARGETS)},
+        target_required=True,
     )
     request_schemas["SetAutoRuntimeStringCommandRequest"] = _named_command_request_schema(
         "set_auto_runtime_setting",
         _string_schema(),
-        path_schema={"type": "string", "enum": sorted(ControlApiV1Service._STRING_AUTO_RUNTIME_PATHS)},
+        target_schema={"type": "string", "enum": sorted(CONTROL_STRING_AUTO_RUNTIME_TARGETS)},
+        target_required=True,
     )
     request_schemas["SetAutoRuntimeBinaryCommandRequest"] = _named_command_request_schema(
         "set_auto_runtime_setting",
         binary_schema,
-        path_schema={"type": "string", "enum": sorted(ControlApiV1Service._BINARY_AUTO_RUNTIME_PATHS)},
+        target_schema={"type": "string", "enum": sorted(CONTROL_BINARY_AUTO_RUNTIME_TARGETS)},
+        target_required=True,
     )
     request_schemas["SetAutoRuntimeIntegerCommandRequest"] = _named_command_request_schema(
         "set_auto_runtime_setting",
         _integer_schema(minimum=0),
-        path_schema={"type": "string", "enum": sorted(ControlApiV1Service._INTEGER_AUTO_RUNTIME_PATHS)},
-    )
-    request_schemas["SetAutoRuntimeFloatPathRequest"] = _path_command_request_schema(
-        {"type": "string", "enum": sorted(ControlApiV1Service._FLOAT_AUTO_RUNTIME_PATHS)},
-        _number_schema(minimum=0.0),
-    )
-    request_schemas["SetAutoRuntimeStringPathRequest"] = _path_command_request_schema(
-        {"type": "string", "enum": sorted(ControlApiV1Service._STRING_AUTO_RUNTIME_PATHS)},
-        _string_schema(),
-    )
-    request_schemas["SetAutoRuntimeBinaryPathRequest"] = _path_command_request_schema(
-        {"type": "string", "enum": sorted(ControlApiV1Service._BINARY_AUTO_RUNTIME_PATHS)},
-        binary_schema,
-    )
-    request_schemas["SetAutoRuntimeIntegerPathRequest"] = _path_command_request_schema(
-        {"type": "string", "enum": sorted(ControlApiV1Service._INTEGER_AUTO_RUNTIME_PATHS)},
-        _integer_schema(minimum=0),
+        target_schema={"type": "string", "enum": sorted(CONTROL_INTEGER_AUTO_RUNTIME_TARGETS)},
+        target_required=True,
     )
     return request_schemas
 
@@ -202,14 +185,14 @@ def _component_schemas() -> dict[str, Any]:
         "ControlCommand": _object_schema(
             {
                 "name": _string_schema(enum=CONTROL_COMMAND_NAMES),
-                "path": _string_schema(),
+                "target": _string_schema(),
                 "value": {},
                 "source": _string_schema(enum=CONTROL_COMMAND_SOURCES, default="http"),
                 "detail": _string_schema(),
                 "command_id": _string_schema(),
                 "idempotency_key": _string_schema(),
             },
-            required=("name", "path", "value", "source", "detail", "command_id", "idempotency_key"),
+            required=("name", "target", "value", "source", "detail", "command_id", "idempotency_key"),
         ),
         "ControlResult": _object_schema(
             {

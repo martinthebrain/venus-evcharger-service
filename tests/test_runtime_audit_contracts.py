@@ -642,7 +642,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
         )
         audit = _audit(service)
         policy = SimpleNamespace(audit_cleanup_interval_seconds=MagicMock(return_value=300.0))
-        with patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy", return_value=policy) as resolve:
+        with patch("venus_evcharger.runtime.audit.service_gateway_pressure_policy", return_value=policy) as resolve:
             self.assertFalse(audit._auto_audit_cleanup_due("", 300.0))
             self.assertFalse(audit._auto_audit_cleanup_due("audit.log", 399.999))
             self.assertTrue(audit._auto_audit_cleanup_due("audit.log", 400.0))
@@ -709,7 +709,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
         audit._write_auto_audit_line = MagicMock()
         policy = SimpleNamespace(audit_repeat_seconds=MagicMock(return_value=41.0))
 
-        with patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy", return_value=policy) as resolve:
+        with patch("venus_evcharger.runtime.audit.service_gateway_pressure_policy", return_value=policy) as resolve:
             audit.write_auto_audit_event("reason", cached=True)
 
         audit.state_store.ensure_observability_state.assert_called_once_with()
@@ -746,7 +746,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
         audit._write_auto_audit_line = MagicMock()
         policy = SimpleNamespace(audit_repeat_seconds=MagicMock(return_value=30.0))
 
-        with patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy", return_value=policy):
+        with patch("venus_evcharger.runtime.audit.service_gateway_pressure_policy", return_value=policy):
             audit.write_auto_audit_event("reason")
 
         audit._cleanup_auto_audit_log.assert_called_once_with(100.0)
@@ -756,7 +756,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
         service = SimpleNamespace(auto_audit_log=False, time_now=MagicMock())
         audit = _audit(service)
         audit.state_store.ensure_observability_state = MagicMock()
-        with patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy") as policy:
+        with patch("venus_evcharger.runtime.audit.service_gateway_pressure_policy") as policy:
             audit.write_auto_audit_event("reason")
         audit.state_store.ensure_observability_state.assert_called_once_with()
         service.time_now.assert_not_called()
@@ -778,7 +778,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
         audit._cleanup_auto_audit_log = MagicMock()
         audit._write_auto_audit_line = MagicMock()
         policy = SimpleNamespace(audit_repeat_seconds=MagicMock(return_value=30.0))
-        with patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy", return_value=policy):
+        with patch("venus_evcharger.runtime.audit.service_gateway_pressure_policy", return_value=policy):
             audit.write_auto_audit_event("reason")
         policy.audit_repeat_seconds.assert_called_once_with(30.0)
         audit._auto_audit_key.assert_called_once_with(service, "reason", False)
@@ -811,7 +811,7 @@ class RuntimeAuditContractTests(unittest.TestCase):
         audit._write_auto_audit_line = MagicMock(side_effect=error)
         policy = SimpleNamespace(audit_repeat_seconds=MagicMock(return_value=30.0))
         with (
-            patch("venus_evcharger.runtime.audit.service_dbus_backpressure_policy", return_value=policy),
+            patch("venus_evcharger.runtime.audit.service_gateway_pressure_policy", return_value=policy),
             patch("venus_evcharger.runtime.audit.logging.debug") as debug,
         ):
             audit.write_auto_audit_event("reason")

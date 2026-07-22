@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, call, patch
 
 from venus_evcharger.control import ControlResult
 from venus_evcharger.controllers import write as write_module
-from venus_evcharger.controllers.write import DbusWriteController
+from venus_evcharger.controllers.write import ControlWriteController
 
 
 def _port(**overrides: object) -> SimpleNamespace:
@@ -17,7 +17,10 @@ def _port(**overrides: object) -> SimpleNamespace:
         "_service": SimpleNamespace(),
         "time_now": MagicMock(return_value=50.0),
         "state_summary": MagicMock(return_value="state"),
-        "publish_dbus_field": MagicMock(),
+        "publish_field": MagicMock(),
+        "begin_publication_transaction": MagicMock(),
+        "commit_publication_transaction": MagicMock(),
+        "discard_publication_transaction": MagicMock(),
         "mode_uses_auto_logic": MagicMock(return_value=False),
     }
     values.update(overrides)
@@ -27,14 +30,14 @@ def _port(**overrides: object) -> SimpleNamespace:
 class TestWriteControllerSimpleHandlerContracts(unittest.TestCase):
     def test_autostart_write_normalizes_publishes_and_logs_exactly(self) -> None:
         port = _port()
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with patch.object(write_module.logging, "info") as log:
             controller._handle_autostart_write("1")
         self.assertEqual(port.virtual_autostart, 1)
-        port.publish_dbus_field.assert_called_once_with("auto_start", 1, 50.0, force=True)
-        log.assert_called_once_with("DBus write /AutoStart=%s %s", 1, "state")
+        port.publish_field.assert_called_once_with("auto_start", 1, 50.0, force=True)
+        log.assert_called_once_with("Control target auto_start=%s %s", 1, "state")
 
-    def test_current_setting_paths_publish_exact_fields_and_side_effect_state(self) -> None:
+    def test_current_setting_targets_publish_exact_fields_and_side_effect_state(self) -> None:
         port = _port(
             charger_current_available=MagicMock(return_value=True),
             charger_set_current=MagicMock(),
@@ -42,14 +45,14 @@ class TestWriteControllerSimpleHandlerContracts(unittest.TestCase):
             max_current=0.0,
             min_current=0.0,
         )
-        controller = DbusWriteController(port)
-        controller._handle_current_setting_write("/SetCurrent", "12.5")
+        controller = ControlWriteController(port)
+        controller._handle_current_setting_write("set_current", "12.5")
         port.charger_set_current.assert_called_once_with(12.5)
         self.assertTrue(controller._external_side_effect_started)
-        controller._handle_current_setting_write("/MaxCurrent", "16")
-        controller._handle_current_setting_write("/MinCurrent", "6")
+        controller._handle_current_setting_write("max_current", "16")
+        controller._handle_current_setting_write("min_current", "6")
         self.assertEqual(
-            port.publish_dbus_field.call_args_list,
+            port.publish_field.call_args_list,
             [
                 call("set_current", 12.5, 50.0, force=True),
                 call("max_current", 16.0, 50.0, force=True),
@@ -66,13 +69,13 @@ class TestWriteControllerSimpleHandlerContracts(unittest.TestCase):
         for method_name, field in cases:
             with self.subTest(method=method_name):
                 port = _port()
-                controller = DbusWriteController(port)
+                controller = ControlWriteController(port)
                 getattr(controller, method_name)(0)
-                port.publish_dbus_field.assert_called_once_with(field, 0, 50.0, force=True)
+                port.publish_field.assert_called_once_with(field, 0, 50.0, force=True)
 
     def test_phase_lockout_reset_clears_and_publishes_all_derived_paths(self) -> None:
         port = _port()
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with (
             patch.object(controller, "_clear_phase_lockout_state") as clear,
             patch.object(controller, "_publish_phase_selection_paths") as selection,
@@ -84,13 +87,13 @@ class TestWriteControllerSimpleHandlerContracts(unittest.TestCase):
         selection.assert_called_once_with(port, 50.0)
         lockout.assert_called_once_with(port, 50.0)
         log.assert_called_once_with(
-            "DBus write /Auto/PhaseLockoutReset=1 cleared phase lockout state %s",
+            "Control target auto_phase_lockout_reset=1 cleared phase lockout state %s",
             "state",
         )
 
     def test_contactor_lockout_reset_clears_and_publishes_all_derived_paths(self) -> None:
         port = _port()
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with (
             patch.object(controller, "_clear_contactor_lockout_state") as clear,
             patch.object(controller, "_publish_contactor_lockout_paths") as publish,
@@ -100,21 +103,21 @@ class TestWriteControllerSimpleHandlerContracts(unittest.TestCase):
         clear.assert_called_once_with(port._service)
         publish.assert_called_once_with(port, 50.0)
         log.assert_called_once_with(
-            "DBus write /Auto/ContactorLockoutReset=1 cleared contactor lockout state %s",
+            "Control target auto_contactor_lockout_reset=1 cleared contactor lockout state %s",
             "state",
         )
 
     def test_software_update_request_records_time_acknowledges_and_logs(self) -> None:
         port = _port()
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with patch.object(write_module.logging, "info") as log:
             controller._handle_software_update_run_write(1)
         self.assertEqual(port._software_update_run_requested_at, 50.0)
-        port.publish_dbus_field.assert_called_once_with(
+        port.publish_field.assert_called_once_with(
             "auto_software_update_run", 0, 50.0, force=True
         )
         log.assert_called_once_with(
-            "DBus write /Auto/SoftwareUpdateRun=1 queued a software update request %s",
+            "Control target auto_software_update_run=1 queued a software update request %s",
             "state",
         )
 
@@ -126,7 +129,7 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
             normalize_mode=MagicMock(return_value=1),
             mode_uses_auto_logic=MagicMock(return_value=True),
         )
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with (
             patch.object(controller, "_log_normalized_mode") as normalized,
             patch.object(controller, "_handle_mode_transition_to_auto") as transition,
@@ -145,7 +148,7 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
         publish.assert_called_once_with(port, 50.0, True)
         self.assertEqual(port.virtual_mode, 1)
         log.assert_called_once_with(
-            "DBus write /Mode requested=%s previous=%s applied=%s %s",
+            "Control target mode requested=%s previous=%s applied=%s %s",
             5,
             0,
             1,
@@ -154,7 +157,7 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
 
     def test_startstop_auto_disable_and_manual_request_use_distinct_pipelines(self) -> None:
         auto_port = _port(virtual_mode=1, mode_uses_auto_logic=MagicMock(return_value=True))
-        auto = DbusWriteController(auto_port)
+        auto = ControlWriteController(auto_port)
         with (
             patch.object(auto, "_apply_auto_disable") as disable,
             patch.object(auto, "_publish_startstop_enable") as publish,
@@ -163,10 +166,10 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
             auto._handle_startstop_write(False)
         disable.assert_called_once_with(auto_port, 50.0)
         publish.assert_called_once_with(auto_port, 50.0, auto_mode_active=True)
-        log.assert_called_once_with("DBus write /StartStop=%s auto_mode=%s %s", 0, 1, "state")
+        log.assert_called_once_with("Control target start_stop=%s auto_mode=%s %s", 0, 1, "state")
 
         manual_port = _port(virtual_mode=0, mode_uses_auto_logic=MagicMock(return_value=False))
-        manual = DbusWriteController(manual_port)
+        manual = ControlWriteController(manual_port)
         with (
             patch.object(manual, "_apply_manual_startstop_request") as apply,
             patch.object(manual, "_publish_startstop_enable") as publish,
@@ -175,14 +178,14 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
             manual._handle_startstop_write(True)
         apply.assert_called_once_with(manual_port, True, 50.0)
         publish.assert_called_once_with(manual_port, 50.0, auto_mode_active=False)
-        log.assert_called_once_with("DBus write /StartStop=%s auto_mode=%s %s", 1, 0, "state")
+        log.assert_called_once_with("Control target start_stop=%s auto_mode=%s %s", 1, 0, "state")
 
         allow_port = _port(
             virtual_mode=1,
             virtual_enable=0,
             mode_uses_auto_logic=MagicMock(return_value=True),
         )
-        allow = DbusWriteController(allow_port)
+        allow = ControlWriteController(allow_port)
         with (
             patch.object(allow, "_publish_startstop_enable"),
             patch.object(write_module.logging, "info"),
@@ -200,7 +203,7 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
             virtual_enable=0,
             mode_uses_auto_logic=MagicMock(return_value=True),
         )
-        auto = DbusWriteController(auto_port)
+        auto = ControlWriteController(auto_port)
         with (
             patch.object(auto, "_apply_auto_disable") as disable,
             patch.object(auto, "_publish_startstop_enable") as publish,
@@ -210,10 +213,10 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
         disable.assert_not_called()
         self.assertEqual(auto_port.virtual_enable, 1)
         publish.assert_called_once_with(auto_port, 50.0, auto_mode_active=True)
-        log.assert_called_once_with("DBus write /Enable=%s auto_mode=%s %s", 1, 1, "state")
+        log.assert_called_once_with("Control target enable=%s auto_mode=%s %s", 1, 1, "state")
 
         manual_port = _port(virtual_mode=0, mode_uses_auto_logic=MagicMock(return_value=False))
-        manual = DbusWriteController(manual_port)
+        manual = ControlWriteController(manual_port)
         with (
             patch.object(manual, "_apply_manual_enable_request") as apply,
             patch.object(manual, "_publish_startstop_enable") as publish,
@@ -222,7 +225,7 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
             manual._handle_enable_write(False)
         apply.assert_called_once_with(manual_port, False, 50.0)
         publish.assert_called_once_with(manual_port, 50.0, auto_mode_active=False)
-        log.assert_called_once_with("DBus write /Enable=%s auto_mode=%s %s", 0, 0, "state")
+        log.assert_called_once_with("Control target enable=%s auto_mode=%s %s", 0, 0, "state")
         self.assertEqual(
             manual_port.mode_uses_auto_logic.call_args_list,
             [call(0), call(0), call(0)],
@@ -230,12 +233,35 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
 
 
 class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
+    def test_in_flight_publication_commits_pending_transaction_once(self) -> None:
+        port = _port()
+
+        with patch.object(write_module.logging, "warning") as warning:
+            ControlWriteController._commit_in_flight_publications(port)
+
+        port.commit_publication_transaction.assert_called_once_with()
+        warning.assert_not_called()
+
+    def test_in_flight_publication_failure_is_logged_and_suppressed(self) -> None:
+        error = ValueError("publish failed")
+        port = _port(commit_publication_transaction=MagicMock(side_effect=error))
+
+        with patch.object(write_module.logging, "warning") as warning:
+            ControlWriteController._commit_in_flight_publications(port)
+
+        port.commit_publication_transaction.assert_called_once_with()
+        warning.assert_called_once_with(
+            "Control state publication failed after an irreversible command: %s",
+            error,
+            exc_info=error,
+        )
+
     def test_unsupported_phase_selection_reports_value_and_supported_set(self) -> None:
         port = _port(
             supported_phase_selections=("P1", "P1_P2"),
             normalize_phase_selection=MagicMock(return_value="P1_P2_P3"),
         )
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with self.assertRaisesRegex(
             ValueError,
             r"^Unsupported phase selection 'requested' \(supported: P1,P1_P2\)$",
@@ -249,7 +275,7 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
             phase_selection_requires_pause=MagicMock(return_value=True),
             relay_may_be_on_for_cutover=MagicMock(return_value=True),
         )
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with (
             patch.object(controller, "_queue_phase_switch_state") as queue_phase,
             patch.object(controller, "_queue_relay_command") as queue_relay,
@@ -268,7 +294,7 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
         local_status.assert_called_once_with(port, False, 50.0)
         publish.assert_called_once_with(port, 50.0)
         log.assert_called_once_with(
-            "DBus write /PhaseSelection requested=%s staged=%s %s",
+            "Control target phase_selection requested=%s staged=%s %s",
             "requested",
             "P1_P2",
             "state",
@@ -282,7 +308,7 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
             relay_may_be_on_for_cutover=MagicMock(return_value=False),
             apply_phase_selection=MagicMock(return_value="P1_P2"),
         )
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         with (
             patch.object(controller, "_publish_phase_selection_paths") as publish,
             patch.object(write_module.logging, "info") as log,
@@ -294,7 +320,7 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
         self.assertEqual(port.active_phase_selection, "P1_P2")
         publish.assert_called_once_with(port, 50.0)
         log.assert_called_once_with(
-            "DBus write /PhaseSelection requested=%s applied=%s %s",
+            "Control target phase_selection requested=%s applied=%s %s",
             "requested",
             "P1_P2",
             "state",
@@ -307,8 +333,8 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
             save_runtime_state=MagicMock(),
             save_runtime_overrides=MagicMock(),
         )
-        controller = DbusWriteController(port)
-        command = SimpleNamespace(name="set_mode", path="/Mode", value=1)
+        controller = ControlWriteController(port)
+        command = SimpleNamespace(name="set_mode", target="mode", value=1)
         controller._control_api = MagicMock()
         controller._control_api.execute.side_effect = ValueError("bad")
         rejected = MagicMock(spec=ControlResult)
@@ -324,9 +350,9 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
         restore.assert_called_once_with(service, "snapshot")
         result.assert_called_once_with(command, detail="bad")
         warning.assert_called_once_with(
-            "Control command %s path=%s value=%s failed: %s",
+            "Control command %s target=%s value=%s failed: %s",
             "set_mode",
-            "/Mode",
+            "mode",
             1,
             controller._control_api.execute.side_effect,
             exc_info=controller._control_api.execute.side_effect,
@@ -340,8 +366,8 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
             save_runtime_state=MagicMock(),
             save_runtime_overrides=MagicMock(),
         )
-        controller = DbusWriteController(port)
-        command = SimpleNamespace(name="set_mode", path="/Mode", value=1)
+        controller = ControlWriteController(port)
+        command = SimpleNamespace(name="set_mode", target="mode", value=1)
         error = ValueError("bad")
 
         def fail_after_side_effect(_controller: object, _command: object) -> None:
@@ -371,10 +397,10 @@ class TestWriteControllerPhaseAndFailureContracts(unittest.TestCase):
             external_side_effect_started=True,
         )
         warning.assert_called_once_with(
-            "Control command %s path=%s value=%s failed after external side effects started; "
+            "Control command %s target=%s value=%s failed after external side effects started; "
             "keeping in-flight state: %s",
             "set_mode",
-            "/Mode",
+            "mode",
             1,
             error,
             exc_info=error,

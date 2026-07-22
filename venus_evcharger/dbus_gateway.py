@@ -3,7 +3,7 @@
 
 This facade intentionally does not import ``dbus`` or ``vedbus``. It re-exports
 the file/socket protocol used between the core service and the dedicated DBus
-adapter process, plus a small ``VeDbusService``-like proxy for the core.
+adapter process. No DBus-shaped object is exposed to consumers.
 """
 
 from __future__ import annotations
@@ -14,13 +14,13 @@ from pathlib import Path
 from venus_evcharger.dbus_gateway_cache import CacheValueMetadata, DbusCacheStore
 from venus_evcharger.dbus_gateway_client import (
     GatewayClient,
-    GatewayDbusServiceProxy,
-    gateway_read_value,
+    GatewayGenericShellyConfigurationClient,
+    GatewayOperationsClient,
+    GatewayPublicationClient,
     gateway_value,
 )
-from venus_evcharger.dbus_gateway_commands import DbusCommandInbox
+from venus_evcharger.dbus_gateway_commands import DbusGatewayCommandInbox
 from venus_evcharger.dbus_gateway_core import (
-    BATTERY_SOC_READ_KEY,
     DBUS_GATEWAY_SCHEMA_VERSION,
     DEFAULT_CORE_COMMAND_DIR_NAME,
     DEFAULT_DBUS_CACHE_NAME,
@@ -29,20 +29,14 @@ from venus_evcharger.dbus_gateway_core import (
     DEFAULT_DBUS_HEALTH_NAME,
     DEFAULT_GATEWAY_RUN_DIR,
     DEFAULT_GATEWAY_SOCKET_NAME,
-    FAST_READ_KEYS,
-    GRID_POWER_READ_KEY,
     GUI_CRITICAL_PUBLISH_PATHS,
-    PRIORITY_VALUES,
     PUBLISH_PATH_RANKS,
-    PV_POWER_READ_KEY,
     CacheFreshnessKind,
     CacheSourceState,
     GatewayPaths,
-    GatewayReadKey,
     dbus_path_key,
     gateway_paths,
     read_json_file,
-    require_gateway_read_key,
     write_json_file,
 )
 from venus_evcharger.dbus_gateway_latency import LatencyWindow
@@ -60,11 +54,11 @@ from venus_evcharger.dbus_gateway_surface import (
     evcs_path_to_field,
     mismatched_venus_writeability,
     missing_required_venus_paths,
+    venus_control_route,
     venus_path_writeable,
 )
 
 __all__ = [
-    "BATTERY_SOC_READ_KEY",
     "DBUS_GATEWAY_SCHEMA_VERSION",
     "DEFAULT_CORE_COMMAND_DIR_NAME",
     "DEFAULT_DBUS_CACHE_NAME",
@@ -77,23 +71,20 @@ __all__ = [
     "EVCS_FIELD_TO_PATH",
     "EVCS_LIVE_MEASUREMENT_FIELDS",
     "EVCS_PATH_TO_FIELD",
-    "FAST_READ_KEYS",
-    "GRID_POWER_READ_KEY",
     "GUI_CRITICAL_PUBLISH_PATHS",
-    "PRIORITY_VALUES",
     "PUBLISH_PATH_RANKS",
-    "PV_POWER_READ_KEY",
     "VENUS_EV_CHARGER_REQUIRED_CONTRACTS",
     "VENUS_EV_CHARGER_WRITABLE_PATHS",
     "CacheFreshnessKind",
     "CacheSourceState",
     "CacheValueMetadata",
     "DbusCacheStore",
-    "DbusCommandInbox",
+    "DbusGatewayCommandInbox",
     "GatewayClient",
-    "GatewayDbusServiceProxy",
+    "GatewayGenericShellyConfigurationClient",
+    "GatewayOperationsClient",
     "GatewayPaths",
-    "GatewayReadKey",
+    "GatewayPublicationClient",
     "LatencyWindow",
     "Path",
     "VenusDbusPathContract",
@@ -104,13 +95,12 @@ __all__ = [
     "evcs_path_freshness_kind",
     "evcs_path_to_field",
     "gateway_paths",
-    "gateway_read_value",
     "gateway_value",
     "mismatched_venus_writeability",
     "missing_required_venus_paths",
     "read_json_file",
-    "require_gateway_read_key",
     "socket",
+    "venus_control_route",
     "venus_path_writeable",
     "write_json_file",
 ]

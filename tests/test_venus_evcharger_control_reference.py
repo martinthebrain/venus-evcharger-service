@@ -123,23 +123,23 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
         self.assertIsNone(control_reference._const_label({"const": None}))
         self.assertEqual(control_reference._schema_allowed_values({"const": "value"}), "`value`")
         self.assertEqual(control_reference._schema_allowed_values({"type": "string"}), "implementation-defined")
-        self.assertEqual(control_reference._joined_labels({"string"}, path_specific=True), "string")
-        self.assertEqual(control_reference._joined_labels({"integer", "string"}, path_specific=False), "integer or string")
+        self.assertEqual(control_reference._joined_labels({"string"}, target_specific=True), "string")
+        self.assertEqual(control_reference._joined_labels({"integer", "string"}, target_specific=False), "integer or string")
         self.assertEqual(
-            control_reference._joined_labels({"string", "integer"}, path_specific=True),
-            "integer or string depending on `path`",
+            control_reference._joined_labels({"string", "integer"}, target_specific=True),
+            "integer or string depending on `target`",
         )
         self.assertEqual(
-            control_reference._joined_labels({"string", "number", "integer"}, path_specific=True),
-            "integer, number, or string depending on `path`",
+            control_reference._joined_labels({"string", "number", "integer"}, target_specific=True),
+            "integer, number, or string depending on `target`",
         )
         self.assertEqual(
-            control_reference._joined_labels({"custom", "number", "string"}, path_specific=False),
+            control_reference._joined_labels({"custom", "number", "string"}, target_specific=False),
             "number, string, or custom",
         )
         with patch.dict(control_reference._VALUE_TYPE_ORDER, {"late": 100}):
             self.assertEqual(
-                control_reference._joined_labels({"late", "unknown"}, path_specific=False),
+                control_reference._joined_labels({"late", "unknown"}, target_specific=False),
                 "unknown or late",
             )
 
@@ -151,12 +151,12 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
             control_reference._collected_required_fields(
                 [
                     {"required": ["name", "value"]},
-                    {"required": ["path", 7]},
+                    {"required": ["target", 7]},
                     {"required": []},
                     {"required": "invalid"},
                 ]
             ),
-            {"name", "value", "path", "7"},
+            {"name", "value", "target", "7"},
         )
         self.assertEqual(
             control_reference._collected_value_contract_labels(
@@ -172,7 +172,7 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
         self.assertEqual(control_reference._schema_value_property({"properties": {}}), {})
         self.assertEqual(control_reference._schema_value_property({}), {})
 
-    def test_command_contract_summary_handles_single_and_path_specific_shapes(self) -> None:
+    def test_command_contract_summary_handles_single_and_target_specific_shapes(self) -> None:
         with patch(
             "venus_evcharger.control.reference._named_request_schemas_by_command",
             return_value={
@@ -184,11 +184,11 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
                 ],
                 "multi": [
                     {
-                        "required": ["value", "name", "path"],
+                        "required": ["value", "name", "target"],
                         "properties": {"value": {"type": "number", "minimum": 0}},
                     },
                     {
-                        "required": ["value", "name", "path"],
+                        "required": ["value", "name", "target"],
                         "properties": {"value": {"type": "string", "enum": ["auto", "manual"]}},
                     },
                 ],
@@ -200,7 +200,7 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
             )
             self.assertEqual(
                 control_reference._command_contract_summary("multi"),
-                (("name", "path", "value"), "number or string depending on `path`", "path-specific schema"),
+                (("name", "target", "value"), "number or string depending on `target`", "target-specific schema"),
             )
 
         with (
@@ -218,7 +218,7 @@ class TestVenusEvchargerControlReference(unittest.TestCase):
             patch("venus_evcharger.control.reference._joined_labels", return_value="integer") as joined_labels,
         ):
             self.assertEqual(control_reference._command_contract_summary("single"), (("value",), "integer", "implementation-defined"))
-            joined_labels.assert_called_once_with({"integer"}, path_specific=False)
+            joined_labels.assert_called_once_with({"integer"}, target_specific=False)
 
 
 if __name__ == "__main__":

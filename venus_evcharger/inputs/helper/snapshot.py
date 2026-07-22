@@ -7,6 +7,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 from venus_evcharger.core.shared import AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION, compact_json, write_text_atomically
 from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
@@ -36,6 +37,24 @@ class AtomicSnapshotWriter:
         self._last_payload = serialized
 
 
+@dataclass(frozen=True, slots=True)
+class _SourceTarget:
+    """Snapshot destination for one semantic source."""
+
+    name: str
+    value_key: str
+    captured_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class _SourcePollSpec:
+    """One scheduled source read and its snapshot destination."""
+
+    target: _SourceTarget
+    interval: float
+    getter: Callable[[], object]
+
+
 class SnapshotStore:
     """Schedule source reads and own all snapshot freshness metadata."""
 
@@ -56,17 +75,19 @@ class SnapshotStore:
         self._grid_fusion = GridMeasurementFusion(settings.grid_fusion_config)
 
     def collect(self, now: float | None = None) -> Snapshot:
-        current = time.time() if now is None else float(now)
-        timestamp_after_work: Callable[[], float] = time.time if now is None else lambda: current
+        current, timestamp_after_work = _collection_clock(now)
         with self._lock:
             snapshot = dict(self._state)
             due_sources = self._due_sources(current)
-        for source_name, interval, getter, value_key, captured_key in due_sources:
-            value = getter()
+        if due_sources:
+            self.sources.prepare_cycle()
+        for spec in due_sources:
+            value = spec.getter()
             source_current = timestamp_after_work()
+            observed_at = _source_observed_at(self.sources, spec.target.name, source_current)
             with self._lock:
-                self._apply_source(snapshot, source_name, value_key, captured_key, value, source_current)
-                self._next_poll_at[source_name] = source_current + interval
+                self._apply_source(snapshot, spec.target, value, observed_at)
+                self._next_poll_at[spec.target.name] = source_current + spec.interval
         with self._lock:
             final_current = timestamp_after_work()
             self._finalize(snapshot, final_current)
@@ -82,13 +103,18 @@ class SnapshotStore:
 
     def refresh_source(self, source_name: str, now: float | None = None) -> None:
         current = time.time() if now is None else float(now)
+        self.sources.prepare_cycle()
+        self._refresh_prepared_source(source_name, current)
+
+    def _refresh_prepared_source(self, source_name: str, current: float) -> None:
         source = self._source_read(source_name)
         if source is None:
             return
-        value, value_key, captured_key = source
+        value, target = source
+        observed_at = self.sources.observed_at(source_name) or current
         with self._lock:
             snapshot = dict(self._state)
-            self._apply_source(snapshot, source_name, value_key, captured_key, value, current)
+            self._apply_source(snapshot, target, value, observed_at)
             if source_name in {"battery", "grid"}:
                 apply_grid_fusion(self._grid_fusion, snapshot, current)
             self._stamp(snapshot, current)
@@ -97,8 +123,9 @@ class SnapshotStore:
 
     def refresh_all(self, now: float | None = None) -> None:
         current = time.time() if now is None else float(now)
+        self.sources.prepare_cycle()
         for source_name in ("pv", "battery", "grid"):
-            self.refresh_source(source_name, current)
+            self._refresh_prepared_source(source_name, current)
 
     def validation_poll(self) -> bool:
         self.refresh_all()
@@ -135,33 +162,33 @@ class SnapshotStore:
     def _due_sources(
         self,
         current: float,
-    ) -> tuple[tuple[str, float, Callable[[], object], str, str], ...]:
-        specs: tuple[tuple[str, float, Callable[[], object], str, str], ...] = (
-            ("pv", self.settings.auto_pv_poll_interval_seconds, self.sources.pv_power, "pv_power", "pv_captured_at"),
-            (
-                "battery",
+    ) -> tuple[_SourcePollSpec, ...]:
+        specs = (
+            _SourcePollSpec(
+                _SourceTarget("pv", "pv_power", "pv_captured_at"),
+                self.settings.auto_pv_poll_interval_seconds,
+                self.sources.pv_power,
+            ),
+            _SourcePollSpec(
+                _SourceTarget("battery", "battery_soc", "battery_captured_at"),
                 self.settings.auto_battery_poll_interval_seconds,
                 self.sources.battery_snapshot,
-                "battery_soc",
-                "battery_captured_at",
             ),
-            (
-                "grid",
+            _SourcePollSpec(
+                _SourceTarget("grid", "grid_gateway_power", "grid_gateway_captured_at"),
                 self.settings.auto_grid_poll_interval_seconds,
                 self.sources.grid_power,
-                "grid_gateway_power",
-                "grid_gateway_captured_at",
             ),
         )
-        return tuple(spec for spec in specs if current >= self._next_poll_at[spec[0]])
+        return tuple(spec for spec in specs if current >= self._next_poll_at[spec.target.name])
 
-    def _source_read(self, source_name: str) -> tuple[object, str, str] | None:
+    def _source_read(self, source_name: str) -> tuple[object, _SourceTarget] | None:
         if source_name == "pv":
-            return self.sources.pv_power(), "pv_power", "pv_captured_at"
+            return self.sources.pv_power(), _SourceTarget("pv", "pv_power", "pv_captured_at")
         if source_name == "battery":
-            return self.sources.battery_snapshot(), "battery_soc", "battery_captured_at"
+            return self.sources.battery_snapshot(), _SourceTarget("battery", "battery_soc", "battery_captured_at")
         if source_name == "grid":
-            return self.sources.grid_power(), "grid_gateway_power", "grid_gateway_captured_at"
+            return self.sources.grid_power(), _SourceTarget("grid", "grid_gateway_power", "grid_gateway_captured_at")
         return None
 
     def _finalize(self, snapshot: Snapshot, current: float) -> None:
@@ -182,18 +209,16 @@ class SnapshotStore:
     @staticmethod
     def _apply_source(
         snapshot: Snapshot,
-        source_name: str,
-        value_key: str,
-        captured_key: str,
+        target: _SourceTarget,
         value: object,
         current: float,
     ) -> None:
-        if source_name == "battery" and is_object_mapping(value):
-            SnapshotStore._apply_battery(snapshot, value, captured_key, current)
+        if target.name == "battery" and is_object_mapping(value):
+            SnapshotStore._apply_battery(snapshot, value, target.captured_key, current)
             return
-        snapshot[value_key] = value
-        snapshot[captured_key] = None if value is None else current
-        _set_source_status(snapshot, source_name, value is not None)
+        snapshot[target.value_key] = value
+        snapshot[target.captured_key] = None if value is None else current
+        _set_source_status(snapshot, target.name, value is not None)
 
     @staticmethod
     def _apply_battery(
@@ -245,6 +270,17 @@ BATTERY_SNAPSHOT_FIELDS = (
     "battery_sources",
     "battery_learning_profiles",
 )
+
+
+def _collection_clock(now: float | None) -> tuple[float, Callable[[], float]]:
+    if now is None:
+        return time.time(), time.time
+    current = float(now)
+    return current, lambda: current
+
+
+def _source_observed_at(sources: SourceReaderPort, source_name: str, fallback: float) -> float:
+    return sources.observed_at(source_name) or fallback
 
 
 def _set_source_status(snapshot: Snapshot, source_name: str, available: bool) -> None:

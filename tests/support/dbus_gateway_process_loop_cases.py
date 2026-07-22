@@ -129,7 +129,6 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter._next_work_tick_monotonic = 100.0
             install_mock(adapter, "process_socket_once", MagicMock())
-            install_mock(adapter, "process_introspection_requests_once", MagicMock())
             install_mock(adapter, "process_one_dbus_operation_once", MagicMock())
             install_mock(adapter, "publish_cache", MagicMock())
             install_mock(adapter.tick_health, "record", MagicMock())
@@ -156,7 +155,6 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter.update_adaptive_tick.assert_called_once()
             self.assertAlmostEqual(adapter._next_work_tick_monotonic, 100.04 + adapter.tick_seconds)
             adapter.process_socket_once.assert_called_once()
-            adapter.process_introspection_requests_once.assert_called_once()
             adapter.process_one_dbus_operation_once.assert_called_once()
             adapter.publish_cache.assert_called_once()
 
@@ -174,11 +172,9 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
                 stop_adapter._stop = True
 
             install_mock(stop_adapter, "process_socket_once", MagicMock(side_effect=stop_during_work))
-            install_mock(stop_adapter, "process_introspection_requests_once", MagicMock())
             install_mock(stop_adapter, "process_one_dbus_operation_once", MagicMock())
             install_mock(stop_adapter, "publish_cache", MagicMock())
             self.assertFalse(stop_adapter.tick())
-            stop_adapter.process_introspection_requests_once.assert_called_once()
             stop_adapter.process_one_dbus_operation_once.assert_called_once()
             stop_adapter.publish_cache.assert_called_once()
 
@@ -253,7 +249,6 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter._next_work_tick_monotonic = 0.0
             error = RuntimeError("tick boom")
             install_mock(adapter, "process_socket_once", MagicMock(side_effect=error))
-            install_mock(adapter, "process_introspection_requests_once", MagicMock())
             install_mock(adapter, "process_one_dbus_operation_once", MagicMock())
             install_mock(adapter, "publish_cache", MagicMock())
             install_mock(adapter.circuit, "record_error", MagicMock())
@@ -263,7 +258,6 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
 
             adapter.circuit.record_error.assert_called_once_with(error)
             log_exception.assert_called_once_with("DBus adapter tick failed: %s", error)
-            adapter.process_introspection_requests_once.assert_not_called()
             adapter.process_one_dbus_operation_once.assert_not_called()
             adapter.publish_cache.assert_not_called()
 

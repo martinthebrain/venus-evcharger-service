@@ -31,8 +31,8 @@ def payload_error_code(message: str) -> str:
     lowered = message.lower()
     unsupported_tokens = (
         "unsupported control command",
-        "unsupported control path",
-        "does not support path",
+        "unsupported core control route",
+        "does not support target",
         "requires one of:",
     )
     if any(token in lowered for token in unsupported_tokens):
@@ -127,7 +127,7 @@ def error_payload_for_result(result: ControlResult) -> dict[str, Any]:
         retryable=result.reversible_failure,
         details={
             "status": result.status,
-            "path": result.command.path,
+            "target": result.command.target,
             "command_id": result.command.command_id,
             "idempotency_key": result.command.idempotency_key,
         },

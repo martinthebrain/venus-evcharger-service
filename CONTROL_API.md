@@ -152,30 +152,19 @@ Canonical request style for new clients:
 }
 ```
 
-Compatibility request style:
-
-2. Path/value form
-
-```json
-{
-  "path": "/Mode",
-  "value": 1
-}
-```
-
 Normative guidance:
 
 - new clients should prefer the canonical `name` form
-- `path/value` exists for compatibility and bridge-friendly usage
-- both forms map into the same canonical `ControlCommand`
-- clients should not treat `path/value` as a second primary control model
+- commands with one fixed target may omit `target`
+- commands that address one of several domain settings must provide a semantic `target`
+- DBus paths are not part of the Control API contract
 
-For runtime-setting commands, an explicit path is required:
+For runtime-setting commands, an explicit semantic target is required:
 
 ```json
 {
   "name": "set_auto_runtime_setting",
-  "path": "/Auto/StartSurplusWatts",
+  "target": "auto_start_surplus_watts",
   "value": 1700
 }
 ```
@@ -183,7 +172,7 @@ For runtime-setting commands, an explicit path is required:
 ### Request fields
 
 - `name`
-- `path`
+- `target` (required only for command families with more than one target)
 - `value`
 - `detail`
 - `command_id`
@@ -229,7 +218,7 @@ Every command response uses this stable outer shape:
 `command` includes:
 
 - `name`
-- `path`
+- `target`
 - `value`
 - `source`
 - `detail`
@@ -346,22 +335,22 @@ machine-readable validation rules, treat `GET /v1/openapi.json` as normative.
 <!-- BEGIN:CONTROL_API_COMMAND_MATRIX -->
 | Command name | Required fields | Value type | Allowed values / ranges | Idempotent shape | `accepted_in_flight` | Required scope | Typical restrictions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `set_mode` | `name`, `path`, `value` | integer | `0`, `1`, `2` | yes | possible | `control_basic` | mode-specific runtime rules |
-| `set_auto_start` | `name`, `path`, `value` | boolean or `0/1` | binary | yes | uncommon | `control_basic` | none beyond local policy |
-| `set_start_stop` | `name`, `path`, `value` | boolean or `0/1` | binary | yes | possible | `control_basic` | mode/backend policy |
-| `set_enable` | `name`, `path`, `value` | boolean or `0/1` | binary | yes | possible | `control_basic` | backend/health policy |
-| `set_current_setting` | `name`, `path`, `value` | number | `>= 0` | yes | possible | `control_basic` | backend/current limits |
-| `set_phase_selection` | `name`, `path`, `value` | string | `P1`, `P1_P2`, `P1_P2_P3` | yes | possible | `control_basic` | supported topology and phase hardware |
-| `set_auto_runtime_setting` | `name`, `path`, `value` | boolean or `0/1`, integer, number, or string depending on `path` | path-specific schema | yes | uncommon | `control_admin` | only supported runtime-setting paths |
-| `reset_phase_lockout` | `name`, `path`, `value` | boolean or `0/1` | binary | no | uncommon | `control_admin` | only meaningful when lockout exists |
-| `reset_contactor_lockout` | `name`, `path`, `value` | boolean or `0/1` | binary | no | uncommon | `control_admin` | only meaningful when lockout exists |
-| `trigger_software_update` | `name`, `path`, `value` | boolean or `0/1` | binary | no | possible | `update_admin` | update policy, availability, current update state |
+| `set_mode` | `name`, `value` | integer | `0`, `1`, `2` | yes | possible | `control_basic` | mode-specific runtime rules |
+| `set_auto_start` | `name`, `value` | boolean or `0/1` | binary | yes | uncommon | `control_basic` | none beyond local policy |
+| `set_start_stop` | `name`, `value` | boolean or `0/1` | binary | yes | possible | `control_basic` | mode/backend policy |
+| `set_enable` | `name`, `value` | boolean or `0/1` | binary | yes | possible | `control_basic` | backend/health policy |
+| `set_current_setting` | `name`, `target`, `value` | number | `>= 0` | yes | possible | `control_basic` | backend/current limits |
+| `set_phase_selection` | `name`, `value` | string | `P1`, `P1_P2`, `P1_P2_P3` | yes | possible | `control_basic` | supported topology and phase hardware |
+| `set_auto_runtime_setting` | `name`, `target`, `value` | boolean or `0/1`, integer, number, or string depending on `target` | target-specific schema | yes | uncommon | `control_admin` | only supported runtime-setting paths |
+| `reset_phase_lockout` | `name`, `value` | boolean or `0/1` | binary | no | uncommon | `control_admin` | only meaningful when lockout exists |
+| `reset_contactor_lockout` | `name`, `value` | boolean or `0/1` | binary | no | uncommon | `control_admin` | only meaningful when lockout exists |
+| `trigger_software_update` | `name`, `value` | boolean or `0/1` | binary | no | possible | `update_admin` | update policy, availability, current update state |
 <!-- END:CONTROL_API_COMMAND_MATRIX -->
 
 Notes:
 
-- the canonical form is `name`-first; `path` is only required where the command family needs a more specific target
-- path-based compatibility payloads are still accepted, but new clients should model against command names
+- the canonical form is `name`-first; `target` is required where the command family needs a more specific domain target
+- DBus paths remain private to the gateway adapter and are not accepted by this API
 - "Idempotent shape" means a client can safely reason about repeated writes to the same target/value pair; replay protection is additionally available through `Idempotency-Key`
 - `accepted_in_flight` should be treated as a possible outcome for commands that can trigger external actuation or longer-running local side effects
 
@@ -500,7 +489,7 @@ python3 ./venus_evchargerctl.py --token READ-TOKEN capabilities
 python3 ./venus_evchargerctl.py --token READ-TOKEN state automation
 python3 ./venus_evchargerctl.py --token CONTROL-TOKEN command set-mode 1
 python3 ./venus_evchargerctl.py --token CONTROL-TOKEN safe-write set-mode 1
-python3 ./venus_evchargerctl.py --token CONTROL-TOKEN command set-current-setting 12.5 --path /SetCurrent
+python3 ./venus_evchargerctl.py --token CONTROL-TOKEN command set-current-setting 12.5 --target set_current
 python3 ./venus_evchargerctl.py --unix-socket /run/venus-evcharger-control.sock --token READ-TOKEN watch --kind command --once
 ```
 

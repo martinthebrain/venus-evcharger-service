@@ -51,7 +51,10 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
         self.assertIn("rate_limited", CONTROL_API_ERROR_CODES)
         self.assertEqual(CONTROL_API_EVENT_KINDS, frozenset({"snapshot", "command", "state", "heartbeat"}))
         self.assertIn("set_mode", CONTROL_COMMAND_NAMES)
-        self.assertEqual(CONTROL_COMMAND_SOURCES, frozenset({"dbus", "http", "internal", "mqtt"}))
+        self.assertEqual(
+            CONTROL_COMMAND_SOURCES,
+            frozenset({"control-surface", "http", "internal", "mqtt"}),
+        )
         self.assertEqual(CONTROL_COMMAND_STATUSES, frozenset({"accepted_in_flight", "applied", "rejected"}))
         self.assertEqual(normalized_control_api_version(" v1 "), "v1")
         self.assertEqual(normalized_control_api_version("v2"), "v1")
@@ -62,8 +65,8 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
         self.assertEqual(normalized_control_command_name(" set_mode "), "set_mode")
         with self.assertRaisesRegex(ValueError, "Unsupported control command 'unknown'"):
             normalized_control_command_name("unknown")
-        self.assertEqual(normalized_control_command_source(" MQTT ", default="dbus"), "mqtt")
-        self.assertEqual(normalized_control_command_source("unknown", default="dbus"), "dbus")
+        self.assertEqual(normalized_control_command_source(" MQTT ", default="control-surface"), "mqtt")
+        self.assertEqual(normalized_control_command_source("unknown", default="control-surface"), "control-surface")
         self.assertEqual(normalized_control_command_status(" applied "), "applied")
         self.assertEqual(normalized_control_command_status("ignored"), "rejected")
 
@@ -71,7 +74,7 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
         payload = normalized_control_command_fields(
             {
                 "name": " set_mode ",
-                "path": " /Mode ",
+                "target": " mode ",
                 "value": 1,
                 "source": " HTTP ",
                 "detail": " ok ",
@@ -81,7 +84,7 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
         )
 
         self.assertEqual(payload["name"], "set_mode")
-        self.assertEqual(payload["path"], "/Mode")
+        self.assertEqual(payload["target"], "mode")
         self.assertEqual(payload["value"], 1)
         self.assertEqual(payload["source"], "http")
         self.assertEqual(payload["detail"], "ok")
@@ -94,7 +97,7 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
     def test_control_result_fields_enforce_one_consistent_status_shape(self) -> None:
         applied = normalized_control_result_fields(
             {
-                "command": {"name": "set_mode", "path": "/Mode", "value": 1},
+                "command": {"name": "set_mode", "target": "mode", "value": 1},
                 "status": "applied",
                 "accepted": 0,
                 "applied": 0,
@@ -113,7 +116,7 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
 
         in_flight = normalized_control_result_fields(
             {
-                "command": {"name": "set_current_setting", "path": "/SetCurrent", "value": 12.5},
+                "command": {"name": "set_current_setting", "target": "set_current", "value": 12.5},
                 "status": "accepted_in_flight",
             }
         )
@@ -125,7 +128,7 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
 
         rejected = normalized_control_result_fields(
             {
-                "command": {"name": "set_phase_selection", "path": "/PhaseSelection", "value": "P1_P2_P3"},
+                "command": {"name": "set_phase_selection", "target": "phase_selection", "value": "P1_P2_P3"},
                 "status": "rejected",
                 "accepted": 1,
                 "external_side_effect_started": 1,
@@ -181,9 +184,9 @@ class TestVenusEvchargerControlContracts(unittest.TestCase):
                 "ok": 0,
                 "detail": "  no  ",
                 "replayed": 1,
-                "command": {"name": "set_mode", "path": "/Mode", "value": 1},
+                "command": {"name": "set_mode", "target": "mode", "value": 1},
                 "result": {
-                    "command": {"name": "set_mode", "path": "/Mode", "value": 1},
+                    "command": {"name": "set_mode", "target": "mode", "value": 1},
                     "status": "applied",
                 },
                 "error": {"code": "conflict", "message": " no "},

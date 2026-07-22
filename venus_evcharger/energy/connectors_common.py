@@ -36,7 +36,7 @@ def _normalized_connector_type(raw_value: object) -> str:
     normalized = str(raw_value).strip().lower()
     if normalized == "template_http_energy":
         return "template_http"
-    return normalized or "dbus"
+    return normalized
 
 
 def _optional_path(value: object) -> str | None:

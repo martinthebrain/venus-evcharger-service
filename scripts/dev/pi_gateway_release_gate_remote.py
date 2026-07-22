@@ -8,20 +8,24 @@ import subprocess
 
 from pi_gateway_release_gate_common import ROOT, GateFailure, PiSession
 
+DEPLOY_EXCLUDES = (
+    "--exclude=.git",
+    "--exclude=.venv*",
+    "--exclude=.mypy_cache",
+    "--exclude=.pytest_cache",
+    "--exclude=.mutmut-cache",
+    "--exclude=.coverage",
+    "--exclude=coverage.xml",
+    "--exclude=htmlcov",
+    "--exclude=__pycache__",
+    "--exclude=*.pyc",
+)
+
 
 def deploy_repo(pi: PiSession, remote_dir: str) -> None:
-    excludes = (
-        "--exclude=.git",
-        "--exclude=.mypy_cache",
-        "--exclude=.pytest_cache",
-        "--exclude=.coverage",
-        "--exclude=htmlcov",
-        "--exclude=__pycache__",
-        "--exclude=*.pyc",
-    )
     pi.ssh(f"mkdir -p {remote_dir!r}", timeout=10.0)
     tar = subprocess.Popen(
-        ["tar", *excludes, "-C", str(ROOT), "-czf", "-", "."],
+        ["tar", *DEPLOY_EXCLUDES, "-C", str(ROOT), "-czf", "-", "."],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=False,
@@ -69,7 +73,7 @@ def remote_compile(pi: PiSession, remote_dir: str) -> None:
     )
     pi.ssh(
         f"cd {remote_dir!r} && python3 scripts/dev/check_python_syntax_venus.py "
-        f"venus_evcharger/dbus_adapter {modules}",
+        f"venus_evcharger/dbus_adapter venus_evcharger/ipc {modules}",
         timeout=60.0,
     )
 

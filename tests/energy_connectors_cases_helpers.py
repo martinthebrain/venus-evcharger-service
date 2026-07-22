@@ -374,7 +374,7 @@ class _EnergyConnectorsHelperCases:
         )
         self.assertEqual(energy_connectors._modbus_field_value(_BoolClient(), field), 2.0)
         self.assertEqual(energy_connectors._normalized_connector_type("template_http_energy"), "template_http")
-        self.assertEqual(energy_connectors._normalized_connector_type(""), "dbus")
+        self.assertEqual(energy_connectors._normalized_connector_type(""), "")
         self.assertEqual(energy_connectors._command_args({"Args": ""}), ())
         self.assertEqual(energy_connectors._command_args({"Args": "python3 helper.py --once"}), ("python3", "helper.py", "--once"))
         self.assertTrue(energy_connectors._optional_bool_path({"value": "enabled"}, "value"))

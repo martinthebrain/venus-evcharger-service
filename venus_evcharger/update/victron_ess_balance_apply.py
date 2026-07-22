@@ -302,12 +302,7 @@ class VictronEssBalanceExecutor:
         profile_key: str,
         metrics: dict[str, Any],
     ) -> None:
-        if self._writer._victron_ess_balance_write_setpoint(
-            svc,
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_service", ""),
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_path", ""),
-            setpoint_w,
-        ):
+        if self._writer.write_setpoint(svc, setpoint_w, intent="tracking"):
             svc._victron_ess_balance_last_write_at = float(now)
             svc._victron_ess_balance_last_setpoint_w = float(setpoint_w)
             self._telemetry._record_victron_ess_balance_command(
@@ -327,7 +322,7 @@ class VictronEssBalanceExecutor:
         profile_key: str,
         metrics: dict[str, Any],
     ) -> None:
-        if self._writer._victron_ess_balance_should_write(svc, now, setpoint_w):
+        if self._writer.should_write(svc, now, setpoint_w):
             self._victron_ess_balance_apply_write_outcome(
                 svc,
                 now,
@@ -337,7 +332,7 @@ class VictronEssBalanceExecutor:
                 metrics,
             )
             return
-        if self._writer._victron_ess_balance_last_setpoint(svc) is not None:
+        if self._writer.last_setpoint(svc) is not None:
             metrics["battery_discharge_balance_victron_bias_active"] = 1
             metrics["battery_discharge_balance_victron_bias_reason"] = "holding"
 
@@ -387,24 +382,19 @@ class VictronEssBalanceExecutor:
         metrics["battery_discharge_balance_victron_bias_setpoint_w"] = float(base_setpoint_w)
         metrics["battery_discharge_balance_victron_bias_reason"] = reason
         metrics["battery_discharge_balance_victron_bias_activation_gate_active"] = 0
-        if self._writer._victron_ess_balance_last_setpoint(svc) is None:
+        if self._writer.last_setpoint(svc) is None:
             self._recommendation._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
             self._adaptive._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
             self._sources._merge_victron_ess_balance_metrics(svc, metrics)
             return
-        if not self._writer._victron_ess_balance_should_write(svc, now, base_setpoint_w):
+        if not self._writer.should_write(svc, now, base_setpoint_w):
             metrics["battery_discharge_balance_victron_bias_active"] = 1
             metrics["battery_discharge_balance_victron_bias_reason"] = f"{reason}-holding"
             self._recommendation._populate_victron_ess_balance_telemetry_metrics(svc, metrics)
             self._adaptive._maybe_auto_apply_victron_ess_balance_recommendation(svc, metrics, now)
             self._sources._merge_victron_ess_balance_metrics(svc, metrics)
             return
-        if self._writer._victron_ess_balance_write_setpoint(
-            svc,
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_service", ""),
-            getattr(svc, "auto_battery_discharge_balance_victron_bias_path", ""),
-            base_setpoint_w,
-        ):
+        if self._writer.write_setpoint(svc, base_setpoint_w, intent="restore"):
             svc._victron_ess_balance_last_write_at = float(now)
             svc._victron_ess_balance_last_setpoint_w = None
             metrics["battery_discharge_balance_victron_bias_reason"] = f"{reason}-restored"

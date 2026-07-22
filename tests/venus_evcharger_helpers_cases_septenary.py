@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.venus_evcharger_helpers_support import *
-from venus_evcharger.dbus_gateway import DbusCacheStore, gateway_paths
 
 
 class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
@@ -139,9 +138,6 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
             "aenergy": {"total": 1000.0},
         }, pv_power=2200.0, battery_soc=55.0, grid_power=-2000.0, auto_mode_active=True)
         service.fetch_pm_status = MagicMock(side_effect=AssertionError("main loop must not poll Shelly directly"))
-        service.controllers.runtime.dbus_input.get_pv_power = MagicMock(side_effect=AssertionError("main loop must not poll PV directly"))
-        service.controllers.runtime.dbus_input.get_battery_soc = MagicMock(side_effect=AssertionError("main loop must not poll battery directly"))
-        service.controllers.runtime.dbus_input.get_grid_power = MagicMock(side_effect=AssertionError("main loop must not poll grid directly"))
         service.controllers.runtime.auto.auto_decide_relay = MagicMock(return_value=True)
 
         with unittest.mock.patch("venus_evcharger_service.time.time", return_value=100.0):
@@ -168,17 +164,13 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
         service._last_successful_update_at = None
         service.started_at = 0.0
         service.auto_watchdog_stale_seconds = 0.0
-        service.controllers.runtime.runtime.reset_system_bus = MagicMock()
-        service.controllers.runtime.dbus_input.invalidate_auto_pv_services = MagicMock()
-        service.controllers.runtime.dbus_input.invalidate_auto_battery_service = MagicMock()
+        service.controllers.runtime.auto_input.refresh_snapshot = MagicMock()
 
         self.assertFalse(service.runtime.update_is_stale(500.0))
         service.runtime.recover_watchdog(500.0)
 
         self.assertEqual(service._recovery_attempts, 0)
-        service.controllers.runtime.runtime.reset_system_bus.assert_not_called()
-        service.controllers.runtime.dbus_input.invalidate_auto_pv_services.assert_not_called()
-        service.controllers.runtime.dbus_input.invalidate_auto_battery_service.assert_not_called()
+        service.controllers.runtime.auto_input.refresh_snapshot.assert_not_called()
 
     def test_watchdog_age_uses_zero_timestamp_as_valid_success_time(self):
         service = self._make_update_service()
@@ -193,25 +185,19 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
         self.assertEqual(service._dbusservice["/Auto/LastSuccessfulUpdateAge"], 50)
         self.assertEqual(service._dbusservice["/Auto/StaleSeconds"], 50)
 
-    def test_watchdog_recovery_resets_bus_and_invalidates_cached_services(self):
+    def test_watchdog_recovery_reloads_semantic_input_snapshot(self):
         service = self._make_update_service()
         service._last_successful_update_at = 100.0
         service.started_at = 0.0
         service.auto_watchdog_stale_seconds = 30.0
         service.auto_watchdog_recovery_seconds = 60.0
-        service.controllers.runtime.runtime.reset_system_bus = MagicMock()
-        service.controllers.runtime.dbus_input.invalidate_auto_pv_services = MagicMock()
-        service.controllers.runtime.dbus_input.invalidate_auto_battery_service = MagicMock()
-        service._dbus_list_backoff_until = 999.0
+        service.controllers.runtime.auto_input.refresh_snapshot = MagicMock()
 
         service.runtime.recover_watchdog(200.0)
 
         self.assertEqual(service._recovery_attempts, 1)
         self.assertEqual(service._last_recovery_attempt_at, 200.0)
-        self.assertEqual(service._dbus_list_backoff_until, 0.0)
-        service.controllers.runtime.runtime.reset_system_bus.assert_called_once()
-        service.controllers.runtime.dbus_input.invalidate_auto_pv_services.assert_called_once()
-        service.controllers.runtime.dbus_input.invalidate_auto_battery_service.assert_called_once()
+        service.controllers.runtime.auto_input.refresh_snapshot.assert_called_once_with(None)
 
     def test_auto_daytime_window(self):
         service = make_helper_service()
@@ -225,29 +211,6 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
         self.assertTrue(service.controllers.runtime.auto.is_within_auto_daytime_window(datetime(2026, 1, 3, 10, 0)))
         self.assertFalse(service.controllers.runtime.auto.is_within_auto_daytime_window(datetime(2026, 7, 3, 6, 30)))
         self.assertTrue(service.controllers.runtime.auto.is_within_auto_daytime_window(datetime(2026, 7, 3, 20, 30)))
-
-    def test_list_dbus_services(self):
-        service = make_helper_service()
-        temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(temp_dir.cleanup)
-        paths = gateway_paths(f"{temp_dir.name}/run")
-        store = DbusCacheStore(paths)
-        store.update_services([
-            "com.victronenergy.system",
-            "com.victronenergy.pvinverter.http_40",
-        ])
-        store.write_snapshot_files()
-        service.dbus_gateway_run_dir = paths.run_dir
-        service.dbus_gateway_cache_path = paths.cache_path
-        service.controllers.runtime.runtime.mark_recovery = MagicMock()
-        service.controllers.runtime.runtime.mark_failure = MagicMock()
-        service._dbus_input_controller = None
-
-        self.assertEqual(
-            sorted(service.controllers.runtime.dbus_input.list_dbus_services()),
-            ["com.victronenergy.pvinverter.http_40", "com.victronenergy.system"],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

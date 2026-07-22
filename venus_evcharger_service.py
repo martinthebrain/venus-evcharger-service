@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Callable
 
 from gi.repository import GLib as gobject  # pylint: disable=import-error
 
@@ -25,13 +24,8 @@ sys.path.insert(
 
 from venus_evcharger.bootstrap.controller import run_service_main
 from venus_evcharger.core.common import (
-    _a,
     _age_seconds,
     _health_code,
-    _kwh,
-    _status_label,
-    _v,
-    _w,
     mode_uses_auto_logic,
     month_in_ranges,
     month_window,
@@ -64,13 +58,6 @@ __all__ = [
 
 class ShellyWallboxService:
     """Expose a Shelly relay meter as a Venus OS EV charger tile."""
-    _formatter_bundle: dict[str, Callable[[object, object], str] | None] = {
-        "kwh": _kwh,
-        "a": _a,
-        "w": _w,
-        "v": _v,
-        "status": _status_label,
-    }
     controllers: ServiceControllerOwner
     runtime: ServiceRuntimeFacade
     state: ServiceStateFacade
@@ -102,7 +89,6 @@ class ShellyWallboxService:
                 os.path.dirname(os.path.realpath(__file__)),
                 "venus_evcharger_auto_input_helper.py",
             ),
-            formatters=self._formatter_bundle,
         )
         self.controllers = ServiceControllerOwner(self, functions)
         self.runtime = ServiceRuntimeFacade(self.controllers)
@@ -110,9 +96,7 @@ class ShellyWallboxService:
         self.update = ServiceUpdateFacade(self.controllers)
         self.control = ServiceControlFacade(self)
         self.auto = ServiceAutoFacade(
-            lambda: self._control_command_async_enabled,
             self.controllers,
-            self.runtime,
             self.control.publish_command_event,
         )
         self.controllers.bootstrap.initialize_service()

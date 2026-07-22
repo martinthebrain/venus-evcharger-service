@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec, read_spec_from_mapping
 from venus_evcharger.dbus_gateway import write_json_file
-from venus_evcharger.dbus_gateway_command_types import CommandMapping
+from venus_evcharger.ipc.command_types import CommandMapping
 
 
 class DbusReadScheduler:
@@ -89,6 +89,10 @@ class DbusDiscoveryManager:
     def record_error(self, error: BaseException, *, now: float) -> None:
         self.last_error = str(error)
         self.next_scan_at = float(now) + min(60.0, self.interval_seconds)
+
+    def force_due(self) -> None:
+        """Schedule one topology refresh without exposing DBus discovery details."""
+        self.next_scan_at = 0.0
 
 
 class AtomicJsonWriter:

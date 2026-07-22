@@ -3,36 +3,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from tests.support.dbus_inputs import DbusInputControllerFake
 from venus_evcharger.auto.policy import AutoPolicy
-from venus_evcharger.ports import AutoDecisionPort, DbusInputPort
+from venus_evcharger.ports import AutoDecisionPort
 
 
 class TestWallboxPortsAutoUpdate(unittest.TestCase):
-    def test_dbus_input_port_uses_only_the_bound_controller(self) -> None:
-        service = SimpleNamespace(auto_pv_service="", auto_pv_service_prefix="com.victronenergy.pvinverter", _resolved_auto_pv_services=[], _auto_pv_last_scan=0.0, auto_pv_scan_interval_seconds=60.0, auto_pv_max_services=2, auto_pv_path="/Ac/Power", auto_use_dc_pv=False, auto_dc_pv_service="com.victronenergy.system", auto_dc_pv_path="/Dc/Pv/Power", _last_pv_missing_warning=None, auto_battery_service="", auto_battery_service_prefix="com.victronenergy.battery", auto_battery_soc_path="/Soc", _resolved_auto_battery_service=None, _auto_battery_last_scan=0.0, auto_battery_scan_interval_seconds=60.0, auto_grid_l1_path="/Ac/Grid/L1/Power", auto_grid_l2_path="/Ac/Grid/L2/Power", auto_grid_l3_path="/Ac/Grid/L3/Power", auto_grid_require_all_phases=True, auto_grid_service="com.victronenergy.system", _dbus_list_backoff_until=0.0, _dbus_list_failures=0, auto_dbus_backoff_base_seconds=5.0, auto_dbus_backoff_max_seconds=60.0, dbus_method_timeout_seconds=1.0, _last_dbus_ok_at=None, _source_retry_ready=MagicMock(return_value=True), _mark_recovery=MagicMock(), _mark_failure=MagicMock(), _delay_source_retry=MagicMock(), _warning_throttled=MagicMock(), _get_system_bus=MagicMock(), _reset_system_bus=MagicMock(), _get_dbus_value=MagicMock(return_value=42.0))
-        port = DbusInputPort(service)
-        port.bind_controller(DbusInputControllerFake(raw_value=42.0))
-        self.assertEqual(port.get_dbus_value("svc", "/Path"), 42.0)
-        service._get_dbus_value.assert_not_called()
-
-    def test_dbus_input_port_validates_override_return_contracts(self) -> None:
-        controller = SimpleNamespace(
-            get_dbus_value=MagicMock(return_value=["raw", 1]),
-            list_dbus_services=MagicMock(return_value=["svc", 1]),
-            resolve_auto_pv_services=MagicMock(return_value="svc"),
-            resolve_auto_battery_service=MagicMock(return_value=None),
-        )
-        port = DbusInputPort(SimpleNamespace())
-        port.bind_controller(controller)
-
-        self.assertEqual(port.get_dbus_value("svc", "/Path"), ["raw", 1])
-        with self.assertRaisesRegex(TypeError, "list_dbus_services must return list\\[str\\]"):
-            port.list_dbus_services()
-        with self.assertRaisesRegex(TypeError, "resolve_auto_pv_services must return list, got str"):
-            port.resolve_auto_pv_services()
-        self.assertIsNone(port.resolve_auto_battery_service())
-
     def test_auto_decision_port_does_not_bind_or_proxy_controller_behavior(self) -> None:
         port = AutoDecisionPort(SimpleNamespace())
 

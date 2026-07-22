@@ -54,10 +54,11 @@ def _token_configured(value: object) -> bool:
 
 
 _BASE_FIELDS = (
-    _ConfigField("deviceinstance", 0),
+    _ConfigField("instance_id", 0, _as_int, attr="deviceinstance"),
+    _ConfigField("product_name", "", _as_str),
+    _ConfigField("display_name", "", _as_str, attr="custom_name"),
     _ConfigField("host", ""),
     _ConfigField("phase", "L1"),
-    _ConfigField("service_name", ""),
     _ConfigField("connection_name", ""),
     _ConfigField("runtime_state_path", ""),
     _ConfigField("runtime_overrides_path", ""),
@@ -87,7 +88,7 @@ _CONTROL_API_FIELDS = (
 )
 
 _COMPANION_FIELDS = (
-    _ConfigField("companion_dbus_bridge_enabled", False, _as_bool),
+    _ConfigField("companion_publication_enabled", False, _as_bool),
     _ConfigField("companion_battery_service_enabled", False, _as_bool),
     _ConfigField("companion_pvinverter_service_enabled", False, _as_bool),
     _ConfigField("companion_grid_service_enabled", False, _as_bool),
@@ -100,18 +101,6 @@ _COMPANION_FIELDS = (
     _ConfigField("companion_source_grid_hold_seconds", 0.0, _as_float),
     _ConfigField("companion_source_grid_smoothing_alpha", 1.0, _as_float),
     _ConfigField("companion_source_grid_smoothing_max_jump_watts", 0.0, _as_float),
-    _ConfigField("companion_battery_deviceinstance", 0, _as_int),
-    _ConfigField("companion_pvinverter_deviceinstance", 0, _as_int),
-    _ConfigField("companion_grid_deviceinstance", 0, _as_int),
-    _ConfigField("companion_source_battery_deviceinstance_base", 0, _as_int),
-    _ConfigField("companion_source_pvinverter_deviceinstance_base", 0, _as_int),
-    _ConfigField("companion_source_grid_deviceinstance_base", 0, _as_int),
-    _ConfigField("companion_battery_service_name", ""),
-    _ConfigField("companion_pvinverter_service_name", ""),
-    _ConfigField("companion_grid_service_name", ""),
-    _ConfigField("companion_source_battery_service_prefix", ""),
-    _ConfigField("companion_source_pvinverter_service_prefix", ""),
-    _ConfigField("companion_source_grid_service_prefix", ""),
 )
 
 _BALANCE_POLICY_FIELDS = (
@@ -133,8 +122,6 @@ _BALANCE_COORDINATION_FIELDS = (
 _VICTRON_BIAS_FIELDS = (
     _ConfigField("auto_battery_discharge_balance_victron_bias_enabled", False, _as_bool),
     _ConfigField("auto_battery_discharge_balance_victron_bias_source_id", "", _as_str),
-    _ConfigField("auto_battery_discharge_balance_victron_bias_service", "", _as_str),
-    _ConfigField("auto_battery_discharge_balance_victron_bias_path", "", _as_str),
     _ConfigField("auto_battery_discharge_balance_victron_bias_base_setpoint_watts", 0.0, _as_float),
     _ConfigField("auto_battery_discharge_balance_victron_bias_deadband_watts", 0.0, _as_float),
     _ConfigField("auto_battery_discharge_balance_victron_bias_activation_mode", "always", _as_str),

@@ -37,9 +37,8 @@ class BranchCoverageNextClusterSixTests(unittest.TestCase):
         )
         self.assertEqual(connectors_mod._modbus_field_text(_FloatClient(), field), "12.5")
 
-    def test_runtime_facade_rejects_direct_dbus_access(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            ServiceRuntimeFacade.get_system_bus()
+    def test_runtime_facade_has_no_direct_dbus_surface(self) -> None:
+        self.assertFalse(hasattr(ServiceRuntimeFacade, "get_system_bus"))
 
     def test_resolved_energy_capacity_wh_returns_none_when_prompt_declined(self) -> None:
         namespace = _namespace(energy_recommendation_prefix=["/tmp/huawei-rec"])

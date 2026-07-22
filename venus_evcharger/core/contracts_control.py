@@ -49,7 +49,7 @@ CONTROL_API_ENDPOINTS = frozenset(
 )
 CONTROL_API_EXPERIMENTAL_ENDPOINTS = frozenset({"/v1/events"})
 CONTROL_API_STABLE_ENDPOINTS = frozenset(endpoint for endpoint in CONTROL_API_ENDPOINTS if endpoint not in CONTROL_API_EXPERIMENTAL_ENDPOINTS)
-CONTROL_COMMAND_SOURCES = frozenset({"dbus", "http", "internal", "mqtt"})
+CONTROL_COMMAND_SOURCES = frozenset({"control-surface", "http", "internal", "mqtt"})
 CONTROL_COMMAND_STATUSES = frozenset({"accepted_in_flight", "applied", "rejected"})
 CONTROL_API_EVENT_KINDS = frozenset({"snapshot", "command", "state", "heartbeat"})
 
@@ -118,7 +118,7 @@ def normalized_control_command_fields(
     raw = dict(payload or {})
     return {
         "name": normalized_control_command_name(raw.get("name")),
-        "path": _normalized_text(raw.get("path")),
+        "target": _normalized_text(raw.get("target")),
         "value": raw.get("value"),
         "source": normalized_control_command_source(raw.get("source"), default=default_source),
         "detail": _normalized_text(raw.get("detail")),

@@ -7,14 +7,16 @@ import unittest
 from types import SimpleNamespace
 from typing import Protocol, cast
 
+from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
+
+install_venus_adapter_stubs()
+
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.bootstrap.contracts import (
     require_config_state,
     require_controller_owner,
-    require_dbus_service,
     require_gobject_timers,
     require_runtime_state,
-    require_write_handler,
 )
 from venus_evcharger.dbus_adapter.process.protocols.context import DbusAdapterProcessContext
 from venus_evcharger.dbus_adapter.process.protocols.health import DbusAdapterHealthContext
@@ -25,7 +27,7 @@ from venus_evcharger.dbus_adapter.process.protocols.introspection import (
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
 from venus_evcharger.dbus_adapter.process.protocols.loop import DbusAdapterLoopContext
 from venus_evcharger.dbus_adapter.process.protocols.runtime import (
-    DbusAdapterIdentityContext,
+    DbusAdapterPublicationContext,
     DbusAdapterRuntimeContext,
     DbusAdapterSocketContext,
 )
@@ -35,12 +37,10 @@ from venus_evcharger.publish.dbus_diagnostics_sources import DbusDiagnosticsSour
 from venus_evcharger.service.composition_guards import (
     is_auto_input_service,
     is_backend_target,
-    is_dbus_input_service,
     is_publish_service,
     is_update_cycle_service,
     require_auto_input_service,
     require_backend_target,
-    require_dbus_input_service,
     require_publish_service,
     require_update_cycle_service,
 )
@@ -79,8 +79,7 @@ def _composition_host() -> SimpleNamespace:
             decide_relay=_no_operation,
         ),
         state=SimpleNamespace(flush_runtime_overrides=_no_operation),
-        _dbusservice={},
-        _dbus_publish_state={},
+        gateway_publication=object(),
         _dbus_live_publish_interval_seconds=1.0,
         _dbus_slow_publish_interval_seconds=5.0,
         _last_health_code=0,
@@ -94,41 +93,6 @@ def _composition_host() -> SimpleNamespace:
         virtual_mode=1,
         _auto_input_helper_generation=1,
         _auto_input_runtime_instance_id="instance",
-        dbus_gateway_cache_path="/run/cache.json",
-        dbus_gateway_run_dir="/run",
-        dbus_gateway_max_age_seconds=10.0,
-        auto_dbus_backoff_base_seconds=1.0,
-        auto_dbus_backoff_max_seconds=60.0,
-        auto_pv_scan_interval_seconds=30.0,
-        auto_pv_service="",
-        auto_pv_service_prefix="com.victronenergy.pvinverter",
-        auto_pv_max_services=8,
-        auto_battery_scan_interval_seconds=30.0,
-        auto_battery_service="",
-        auto_battery_service_prefix="com.victronenergy.battery",
-        auto_battery_soc_path="/Soc",
-        auto_battery_capacity_wh=None,
-        auto_battery_power_path="/Dc/0/Power",
-        auto_battery_ac_power_path="/Ac/Power",
-        auto_battery_pv_power_path="/Dc/Pv/Power",
-        auto_battery_grid_interaction_path="/Ac/Grid/Power",
-        auto_battery_operating_mode_path="/Settings/CGwacs/BatteryLife/State",
-        auto_grid_service="com.victronenergy.system",
-        auto_energy_sources=(),
-        auto_use_combined_battery_soc=False,
-        _last_dbus_ok_at=0.0,
-        _last_pv_missing_warning=None,
-        _dbus_list_backoff_until=0.0,
-        _dbus_list_failures=0,
-        _resolved_auto_pv_services=[],
-        _auto_pv_last_scan=0.0,
-        _resolved_auto_battery_service=None,
-        _auto_battery_last_scan=0.0,
-        _resolved_auto_energy_services={},
-        _auto_energy_last_scan={},
-        _last_energy_learning_profiles={},
-        _last_energy_cluster={},
-        service_name="com.victronenergy.evcharger.http_60",
         _readback_store=object(),
         time_now=_no_operation,
     )
@@ -149,14 +113,6 @@ class BoundaryRequirementFailureTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "does not expose ControllerOwnerPort"):
             require_controller_owner(SimpleNamespace())
 
-    def test_require_dbus_service_rejects_missing_port(self) -> None:
-        with self.assertRaisesRegex(TypeError, "does not expose DbusServicePort"):
-            require_dbus_service(SimpleNamespace())
-
-    def test_require_write_handler_rejects_missing_port(self) -> None:
-        with self.assertRaisesRegex(TypeError, "does not expose DbusWriteHandlerPort"):
-            require_write_handler(SimpleNamespace())
-
     def test_require_gobject_timers_rejects_missing_port(self) -> None:
         with self.assertRaisesRegex(TypeError, "does not implement GobjectTimersPort"):
             require_gobject_timers(object())
@@ -172,10 +128,10 @@ class StructuralProtocolContractTests(unittest.TestCase):
             (
                 DbusAdapterRuntimeContext,
                 DbusAdapterSocketContext,
-                DbusAdapterIdentityContext,
                 DbusAdapterLoopContext,
                 DbusAdapterIoContext,
                 DbusAdapterHealthContext,
+                DbusAdapterPublicationContext,
                 DbusAdapterIntrospectionContext,
                 DbusAdapterIntrospectionSnapshotContext,
                 Protocol,
@@ -192,7 +148,6 @@ class ServiceCompositionGuardContractTests(unittest.TestCase):
         for guard, requirement in (
             (is_publish_service, require_publish_service),
             (is_auto_input_service, require_auto_input_service),
-            (is_dbus_input_service, require_dbus_input_service),
             (is_update_cycle_service, require_update_cycle_service),
             (is_backend_target, require_backend_target),
         ):
@@ -200,18 +155,18 @@ class ServiceCompositionGuardContractTests(unittest.TestCase):
                 self.assertTrue(guard(host))
                 self.assertIs(requirement(host), host)
 
-    def test_publish_guard_requires_state_and_runtime_method_together(self) -> None:
-        attributes_only = _composition_host()
-        attributes_only.runtime = SimpleNamespace()
-        method_only = SimpleNamespace(runtime=_composition_host().runtime)
+    def test_publish_guard_requires_semantic_gateway_and_runtime_attributes(self) -> None:
+        missing_runtime = _composition_host()
+        del missing_runtime.runtime
+        runtime_only = SimpleNamespace(runtime=_composition_host().runtime)
 
         bootstrap_phase = _composition_host()
-        del bootstrap_phase._dbusservice
+        del bootstrap_phase.gateway_publication
         del bootstrap_phase.last_status
         del bootstrap_phase.virtual_set_current
 
-        self.assertFalse(is_publish_service(attributes_only))
-        self.assertFalse(is_publish_service(method_only))
+        self.assertFalse(is_publish_service(missing_runtime))
+        self.assertFalse(is_publish_service(runtime_only))
         self.assertFalse(is_publish_service(bootstrap_phase))
 
     def test_auto_input_guard_requires_all_three_boundary_parts(self) -> None:
@@ -226,17 +181,9 @@ class ServiceCompositionGuardContractTests(unittest.TestCase):
         self.assertFalse(is_auto_input_service(missing_runtime_method))
         self.assertFalse(is_auto_input_service(missing_auto_method))
 
-    def test_dbus_input_guard_requires_state_and_runtime_method_together(self) -> None:
-        attributes_only = _composition_host()
-        attributes_only.runtime = SimpleNamespace()
-        method_only = SimpleNamespace(runtime=_composition_host().runtime)
-
-        self.assertFalse(is_dbus_input_service(attributes_only))
-        self.assertFalse(is_dbus_input_service(method_only))
-
     def test_update_guard_requires_every_collaborator_method(self) -> None:
         missing_attributes = _composition_host()
-        del missing_attributes.service_name
+        del missing_attributes._readback_store
         missing_runtime_method = _composition_host()
         missing_runtime_method.runtime = SimpleNamespace()
         missing_state_method = _composition_host()
@@ -253,7 +200,6 @@ class ServiceCompositionGuardContractTests(unittest.TestCase):
         expected_errors = (
             (require_publish_service, "wallbox service does not implement PublishServicePort"),
             (require_auto_input_service, "wallbox service does not implement AutoInputSupervisorService"),
-            (require_dbus_input_service, "wallbox service does not implement DbusInputService"),
             (require_update_cycle_service, "wallbox service does not implement UpdateCycleServicePort"),
             (require_backend_target, "wallbox service does not expose mutable backend state"),
         )

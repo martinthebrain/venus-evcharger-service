@@ -3,6 +3,18 @@ from tests.energy_aggregate_cases_common import *
 
 
 class _EnergyAggregateLearningForecastCases:
+    def test_empty_learning_profile_exposes_neutral_derived_values(self) -> None:
+        profile = EnergyLearningProfile(source_id="empty")
+
+        self.assertIsNone(profile.support_bias)
+        self.assertIsNone(profile.import_support_bias)
+        self.assertIsNone(profile.export_bias)
+        self.assertIsNone(profile.battery_first_export_bias)
+        self.assertIsNone(profile.day_support_bias)
+        self.assertIsNone(profile.night_support_bias)
+        self.assertIsNone(profile.reserve_band_width_soc)
+        self.assertEqual(profile.as_dict()["source_id"], "empty")
+
     def test_update_energy_learning_profiles_tracks_observed_maxima(self) -> None:
         with patch("venus_evcharger.energy.learning._sample_period", side_effect=("day", "night")):
             profiles = update_energy_learning_profiles(

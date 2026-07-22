@@ -22,42 +22,11 @@ class ServiceRuntimeFacade:
     def __init__(self, controllers: ControllerOwnerPort) -> None:
         self._controllers = controllers
 
-    def reset_system_bus(self) -> None:
-        self._controllers.runtime.runtime.reset_system_bus()
-
-    @staticmethod
-    def get_system_bus() -> object:
-        raise RuntimeError("Direct DBus access is disabled; use the DBus gateway adapter")
-
     def initialize_worker_state(self) -> None:
         self._controllers.runtime.runtime.init_worker_state()
 
     def ensure_worker_state(self) -> None:
         self._controllers.runtime.runtime.ensure_worker_state()
-
-    def mark_mainloop_thread(self) -> None:
-        self._controllers.runtime.runtime.mark_mainloop_thread()
-
-    def dbus_publish_direct_allowed(self) -> bool:
-        return self._controllers.runtime.runtime.dbus_publish_direct_allowed()
-
-    def assert_dbus_mainloop_thread(self, operation: str = "dbus access") -> None:
-        self._controllers.runtime.runtime.assert_dbus_mainloop_thread(operation)
-
-    def enqueue_dbus_publish_values(self, values: list[tuple[str, object]], current: float) -> bool:
-        return self._controllers.runtime.runtime.enqueue_dbus_publish_values(values, current)
-
-    def enqueue_dbus_publish_fields(self, fields: list[tuple[str, object]], current: float) -> bool:
-        return self._controllers.runtime.runtime.enqueue_dbus_publish_fields(fields, current)
-
-    def enqueue_dbus_update_index_bump(self, current: float) -> None:
-        self._controllers.runtime.runtime.enqueue_dbus_update_index_bump(current)
-
-    def enqueue_companion_dbus_publish(self, now: float | None = None) -> bool:
-        return self._controllers.runtime.runtime.enqueue_companion_dbus_publish(now)
-
-    def flush_dbus_publish_queue(self) -> bool:
-        return self._controllers.runtime.runtime.flush_dbus_publish_queue()
 
     def start_update_worker(self) -> None:
         self._controllers.runtime.runtime.start_update_worker()

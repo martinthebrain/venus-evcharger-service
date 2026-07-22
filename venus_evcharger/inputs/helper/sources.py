@@ -1,61 +1,88 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Canonical semantic source readers for the auto-input helper."""
+"""Semantic energy-source projection for the auto-input helper."""
 
 from __future__ import annotations
 
-from venus_evcharger.dbus_gateway import BATTERY_SOC_READ_KEY
-from venus_evcharger.inputs.helper.contracts import (
-    BatterySnapshotReaderPort,
-    GatewayReaderPort,
-    PvGridReaderPort,
-    Snapshot,
-)
+import time
 
-
-class BatterySourceReader:
-    """Read battery SOC from the gateway's semantic cache contract."""
-
-    def __init__(self, gateway: GatewayReaderPort) -> None:
-        self.gateway = gateway
-
-    def battery_snapshot(self) -> Snapshot:
-        if not self.gateway.source_retry_ready("battery"):
-            return {"battery_soc": None}
-        value = self.gateway.semantic_value(BATTERY_SOC_READ_KEY, reason="helper semantic battery SOC read")
-        if value is None or not 0.0 <= float(value) <= 100.0:
-            self.gateway.delay_source_retry("battery")
-            return empty_battery_snapshot()
-        return gateway_battery_snapshot(float(value))
+from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
+from venus_evcharger.inputs.helper.contracts import EnergySnapshotReaderPort, Snapshot
+from venus_evcharger.ipc.energy import EnergyRefreshScope, MeasuredValue
 
 
 class AutoInputSources:
-    """Small source boundary consumed by snapshot scheduling."""
+    """Project one coherent energy snapshot into the core auto-input payload."""
 
-    def __init__(self, pv_grid: PvGridReaderPort, battery: BatterySnapshotReaderPort) -> None:
-        self.pv_grid = pv_grid
-        self.battery = battery
+    def __init__(self, settings: AutoInputHelperSettings, gateway: EnergySnapshotReaderPort) -> None:
+        self.settings = settings
+        self.gateway = gateway
+        self._measurements: dict[EnergyRefreshScope, MeasuredValue | None] = {}
+
+    def prepare_cycle(self) -> None:
+        self.gateway.refresh_inputs()
+        scopes: tuple[EnergyRefreshScope, ...] = ("pv", "grid", "battery")
+        self._measurements = {
+            scope: self.gateway.measurement(scope)
+            for scope in scopes
+        }
+
+    def observed_at(self, source_name: str) -> float | None:
+        measurement = self._measurements.get(_source_scope(source_name))
+        return measurement.observed_at if measurement is not None and measurement.observed_at > 0.0 else None
 
     def pv_power(self) -> float | None:
-        return self.pv_grid.pv_power()
-
-    def battery_snapshot(self) -> Snapshot:
-        return self.battery.battery_snapshot()
+        return self._numeric_value("pv")
 
     def grid_power(self) -> float | None:
-        return self.pv_grid.grid_power()
+        return self._numeric_value("grid")
+
+    def battery_snapshot(self) -> Snapshot:
+        measurement = self._valid_measurement("battery")
+        if measurement is None or measurement.value is None or not 0.0 <= measurement.value <= 100.0:
+            self._request_missing("battery")
+            return empty_battery_snapshot()
+        source_count = max(1, len(measurement.source_ids))
+        return gateway_battery_snapshot(
+            measurement.value,
+            confidence=measurement.confidence,
+            source_count=source_count,
+        )
+
+    def _numeric_value(self, scope: EnergyRefreshScope) -> float | None:
+        measurement = self._valid_measurement(scope)
+        if measurement is None or measurement.value is None:
+            self._request_missing(scope)
+            return None
+        return measurement.value
+
+    def _valid_measurement(self, scope: EnergyRefreshScope) -> MeasuredValue | None:
+        measurement = self._measurements.get(scope)
+        if measurement is None or measurement.status not in {"fresh", "stale"}:
+            return None
+        age = max(0.0, time.time() - measurement.observed_at)
+        return measurement if measurement.observed_at > 0.0 and age <= self.settings.gateway_max_age_seconds else None
+
+    def _request_missing(self, scope: EnergyRefreshScope) -> None:
+        self.gateway.request_refresh(scope, reason=f"semantic {scope} measurement unavailable", priority=True)
 
 
-def gateway_battery_snapshot(battery_soc: float) -> Snapshot:
+def gateway_battery_snapshot(
+    battery_soc: float,
+    *,
+    confidence: float = 1.0,
+    source_count: int = 1,
+) -> Snapshot:
+    normalized_count = max(1, int(source_count))
     payload = empty_battery_snapshot()
     payload.update(
         {
             "battery_soc": battery_soc,
             "battery_combined_soc": battery_soc,
-            "battery_average_confidence": 1.0,
-            "battery_source_count": 1,
-            "battery_online_source_count": 1,
-            "battery_valid_soc_source_count": 1,
-            "battery_battery_source_count": 1,
+            "battery_average_confidence": confidence,
+            "battery_source_count": normalized_count,
+            "battery_online_source_count": normalized_count,
+            "battery_valid_soc_source_count": normalized_count,
+            "battery_battery_source_count": normalized_count,
         }
     )
     return payload
@@ -97,3 +124,13 @@ def empty_battery_snapshot() -> Snapshot:
         "battery_sources": [],
         "battery_learning_profiles": {},
     }
+
+
+def _source_scope(source_name: str) -> EnergyRefreshScope:
+    if source_name == "pv":
+        return "pv"
+    if source_name == "grid":
+        return "grid"
+    if source_name == "battery":
+        return "battery"
+    return "all"

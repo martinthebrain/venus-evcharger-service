@@ -2,7 +2,7 @@
 from tests.venus_evcharger_write_controller_support import *
 
 
-class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
+class TestControlWriteControllerSecondary(ControlWriteControllerTestBase):
     def test_handle_mode_write_keeps_in_flight_cutover_state_after_relay_side_effects_start(self) -> None:
         service = SimpleNamespace(
             virtual_mode=0,
@@ -59,7 +59,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 1))
+        self.assertTrue(handle_control_target(controller, "mode", 1))
         self.assertEqual(service.virtual_mode, 1)
         self.assertEqual(service.virtual_enable, 1)
         self.assertEqual(service.virtual_startstop, 0)
@@ -94,15 +94,16 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             _ignore_min_offtime_once=False,
             _dbusservice={"/AutoStart": 0},
             time_now=MagicMock(return_value=100.0),
-            _publish_dbus_field=MagicMock(side_effect=RuntimeError("fail")),
+            _publish_dbus_field=MagicMock(),
             _state_summary=self._state_summary,
-            _save_runtime_state=MagicMock(),
+            _save_runtime_state=MagicMock(side_effect=RuntimeError("save failed")),
         )
 
         controller = write_controller(service)
 
-        self.assertFalse(controller.handle_write("/AutoStart", 1))
+        self.assertFalse(handle_control_target(controller, "auto_start", 1))
         self.assertEqual(service.virtual_autostart, 0)
+        service._publish_dbus_field.assert_not_called()
 
     def test_restore_write_state_recovers_values_deques_and_mappings_from_non_container_targets(self) -> None:
         service = SimpleNamespace(
@@ -117,45 +118,12 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
             "mappings": {"mapping_state": {"mode": 1}},
         }
 
-        DbusWriteController._restore_write_state(service, snapshot)
+        ControlWriteController._restore_write_state(service, snapshot)
 
         self.assertEqual(service.scalar_value, 12.5)
         self.assertIsInstance(service.sample_buffer, deque)
         self.assertEqual(list(service.sample_buffer), [(1.0, 2.0, 3.0)])
         self.assertEqual(service.mapping_state, {"mode": 1})
-
-    def test_restore_write_state_ignores_dbus_restore_errors(self) -> None:
-        class FailingDbusService(dict[str, object]):
-            def __setitem__(self, key: str, value: object) -> None:
-                raise RuntimeError("dbus write failed")
-
-        service = SimpleNamespace(_dbusservice=FailingDbusService())
-        snapshot = {
-            "attrs": {},
-            "deques": {},
-            "values": {},
-            "mappings": {},
-            "dbus_paths": {"/Mode": 0},
-        }
-
-        DbusWriteController._restore_write_state(service, snapshot)
-
-    def test_restore_write_state_queues_dbus_restore_when_async_publish_is_available(self) -> None:
-        service = SimpleNamespace(
-            time_now=MagicMock(return_value=123.0),
-            _enqueue_dbus_publish_values=MagicMock(),
-        )
-        snapshot = {
-            "attrs": {},
-            "deques": {},
-            "values": {},
-            "mappings": {},
-            "dbus_paths": {"/Mode": 0},
-        }
-
-        DbusWriteController._restore_write_state(service, snapshot)
-
-        service._enqueue_dbus_publish_values.assert_called_once_with([("/Mode", 0)], 123.0)
 
     def test_handle_mode_write_returns_true_when_save_fails_after_relay_side_effects_started(self) -> None:
         service = SimpleNamespace(
@@ -193,7 +161,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 1))
+        self.assertTrue(handle_control_target(controller, "mode", 1))
         self.assertEqual(service.virtual_mode, 1)
         self.assertTrue(service._auto_mode_cutover_pending)
         service._queue_relay_command.assert_called_once_with(False, 200.0)
@@ -234,7 +202,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 0))
+        self.assertTrue(handle_control_target(controller, "mode", 0))
 
         self.assertEqual(service.virtual_mode, 0)
         self.assertEqual(service.virtual_enable, 1)
@@ -280,7 +248,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 1))
+        self.assertTrue(handle_control_target(controller, "mode", 1))
 
         self.assertEqual(service.virtual_mode, 1)
         self.assertTrue(service._auto_mode_cutover_pending)
@@ -311,7 +279,7 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertFalse(controller.handle_write("/AutoStart", 1))
+        self.assertFalse(handle_control_target(controller, "auto_start", 1))
         self.assertEqual(service.virtual_autostart, 0)
         self.assertEqual(service._dbusservice["/AutoStart"], 0)
         self.assertEqual(service._dbus_publish_state["/AutoStart"]["value"], 0)
@@ -348,25 +316,25 @@ class TestDbusWriteControllerSecondary(DbusWriteControllerTestBase):
         service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Mode", 5))
+        controller._handle_mode_write(5)
         self.assertEqual(service.virtual_mode, 2)
         self.assertEqual(service.manual_override_until, 0.0)
         self.assertTrue(service._auto_mode_cutover_pending)
         service._queue_relay_command.assert_called_once_with(False, 42.0)
 
-        self.assertTrue(controller.handle_write("/AutoStart", 1))
+        self.assertTrue(handle_control_target(controller, "auto_start", 1))
         self.assertEqual(service.virtual_autostart, 1)
         self.assertEqual(service._dbusservice["/AutoStart"], 1)
 
-        self.assertTrue(controller.handle_write("/SetCurrent", 12.5))
-        self.assertTrue(controller.handle_write("/MaxCurrent", 20))
-        self.assertTrue(controller.handle_write("/MinCurrent", 4))
+        self.assertTrue(handle_control_target(controller, "set_current", 12.5))
+        self.assertTrue(handle_control_target(controller, "max_current", 20))
+        self.assertTrue(handle_control_target(controller, "min_current", 4))
         self.assertEqual(service.virtual_set_current, 12.5)
         self.assertEqual(service.max_current, 20.0)
         self.assertEqual(service.min_current, 4.0)
 
         service._save_runtime_state.reset_mock()
         service._publish_dbus_field.side_effect = RuntimeError("fail")
-        self.assertFalse(controller.handle_write("/AutoStart", 1))
+        self.assertTrue(handle_control_target(controller, "auto_start", 1))
         self.assertEqual(service.virtual_autostart, 1)
-        service._save_runtime_state.assert_not_called()
+        service._save_runtime_state.assert_called_once()

@@ -8,7 +8,7 @@ import time
 from collections import deque
 from collections.abc import Iterable, Mapping
 
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.ipc.command_types import CommandPayload
 
 CPU_IDLE_INDEX = 3
 CPU_IOWAIT_INDEX = 4

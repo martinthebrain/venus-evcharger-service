@@ -212,7 +212,6 @@ def initialize_runtime_override_state(svc: Any) -> None:
     svc._runtime_overrides_active = False
     svc._runtime_overrides_values = {}
     svc.runtime_overrides_write_min_interval_seconds = 1.0
-    svc._dbus_publish_state = {}
     svc._dbus_live_publish_interval_seconds = 1.0
     svc._dbus_slow_publish_interval_seconds = 5.0
     svc._last_auto_audit_key = None

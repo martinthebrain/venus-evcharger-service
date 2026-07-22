@@ -51,8 +51,8 @@ class WriteControllerPortContractTests(unittest.TestCase):
         self.assertEqual(port.publish_local_pm_status(False, 13.5), "published")
         self.assertEqual(port.get_worker_snapshot(), {})
         self.assertEqual(port.update_worker_snapshot(pm_status={"output": True}), "updated")
-        self.assertEqual(port.publish_dbus_field("mode", 2, 14.5, force=True), "dbus-published")
-        self.assertEqual(port.publish_dbus_field("status", 1, 15.5), "dbus-published")
+        self.assertEqual(port.publish_field("mode", 2, 14.5, force=True), "dbus-published")
+        self.assertEqual(port.publish_field("status", 1, 15.5), "dbus-published")
         self.assertEqual(port.time_now(), 100.25)
 
         service.auto.clear_samples.assert_called_once_with()
@@ -65,6 +65,52 @@ class WriteControllerPortContractTests(unittest.TestCase):
             [call("mode", 2, 14.5, force=True), call("status", 1, 15.5, force=False)],
         )
         service.time_now.assert_called_once_with()
+
+    def test_publication_transaction_commits_or_discards_semantic_fields_atomically(self) -> None:
+        service = _service_double()
+        port = WriteControllerPort(service)
+
+        port.begin_publication_transaction()
+        self.assertTrue(port.publish_field("mode", 2, 14.5, force=True))
+        self.assertTrue(port.publish_field("status", 1, 15.5))
+        service.state.publish_field.assert_not_called()
+        port.commit_publication_transaction()
+
+        self.assertEqual(
+            service.state.publish_field.call_args_list,
+            [call("mode", 2, 14.5, force=True), call("status", 1, 15.5, force=False)],
+        )
+
+        service.state.publish_field.reset_mock()
+        port.begin_publication_transaction()
+        port.publish_field("mode", 0, 16.5, force=True)
+        port.discard_publication_transaction()
+        service.state.publish_field.assert_not_called()
+
+        self.assertEqual(port.publish_field("status", 0, 17.5), "dbus-published")
+        service.state.publish_field.assert_called_once_with("status", 0, 17.5, force=False)
+        port.begin_publication_transaction()
+        port.discard_publication_transaction()
+
+    def test_publication_transaction_rejects_invalid_lifecycle_and_keeps_failed_flush_pending(self) -> None:
+        service = _service_double()
+        port = WriteControllerPort(service)
+
+        with self.assertRaises(RuntimeError) as inactive:
+            port.commit_publication_transaction()
+        self.assertEqual(str(inactive.exception), "No control publication transaction is active")
+        port.begin_publication_transaction()
+        with self.assertRaises(RuntimeError) as already_active:
+            port.begin_publication_transaction()
+        self.assertEqual(str(already_active.exception), "Control publication transaction is already active")
+        port.publish_field("mode", 2, 14.5, force=True)
+        service.state.publish_field.side_effect = RuntimeError("mailbox unavailable")
+        with self.assertRaisesRegex(RuntimeError, "mailbox unavailable"):
+            port.commit_publication_transaction()
+
+        service.state.publish_field.side_effect = None
+        port.commit_publication_transaction()
+        service.state.publish_field.assert_called_with("mode", 2, 14.5, force=True)
 
     def test_relay_freshness_budget_uses_the_tightest_positive_runtime_limit(self) -> None:
         self.assertEqual(WriteControllerPort(_service_double())._relay_status_freshness_seconds(), 2.0)

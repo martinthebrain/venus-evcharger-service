@@ -37,7 +37,7 @@ def adapter_settings() -> GatewayAdapterSettings:
         timing=GatewayTimingSettings(0.11, 0.91, 31.0, 0.41),
         slo=GatewaySloSettings(2.1, 5.1, 10.1, 501.0),
         files=GatewayFileSettings("/run/lifecycle", 101, "/run/health", 3.1, 202),
-        introspection=GatewayIntrospectionSettings("/run/intro", "/run/request", True),
+        introspection=GatewayIntrospectionSettings("/run/intro", True),
         stale_after_seconds=12.5,
     )
 
@@ -61,9 +61,12 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
             "DbusRateLimiter",
             "DbusCircuitBreaker",
             "DbusCacheStore",
-            "DbusCommandInbox",
+            "DbusGatewayCommandInbox",
+            "CoreCommandMailbox",
+            "GatewayPublicationRegistry",
             "DbusWriteScheduler",
             "DbusReadScheduler",
+            "DbusEnergyDiscoveryManager",
             "DbusReadExecutor",
             "DbusDiscoveryManager",
             "AtomicJsonWriter",
@@ -86,12 +89,20 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
             introspection_interval_seconds=2.1,
         )
         mocks["DbusCacheStore"].assert_called_once_with(settings.paths, stale_after_seconds=12.5)
-        self.assertEqual(
-            [call.args[0] for call in mocks["DbusCommandInbox"].call_args_list],
-            [settings.paths.command_dir, settings.paths.core_command_dir],
-        )
+        mocks["DbusGatewayCommandInbox"].assert_called_once_with(settings.paths.command_dir)
+        mocks["CoreCommandMailbox"].assert_called_once_with(settings.paths.core_command_dir)
+        registry_call = mocks["GatewayPublicationRegistry"].call_args
+        self.assertEqual(registry_call.args, (config,))
+        self.assertEqual(registry_call.kwargs["evcs_service_name"], settings.service_name)
+        self.assertIs(registry_call.kwargs["cache"], mocks["DbusCacheStore"].return_value)
+        self.assertIs(registry_call.kwargs["core_commands"], mocks["CoreCommandMailbox"].return_value)
+        self.assertTrue(callable(registry_call.kwargs["timed_publish"]))
         mocks["DbusWriteScheduler"].assert_called_once_with(adapter)
         mocks["DbusReadScheduler"].assert_called_once_with(settings.read_specs)
+        mocks["DbusEnergyDiscoveryManager"].assert_called_once_with(
+            settings.read_specs,
+            max_prefix_services=10,
+        )
         mocks["DbusReadExecutor"].assert_called_once_with(adapter)
         mocks["DbusDiscoveryManager"].assert_called_once_with(interval_seconds=31.0)
         for attribute, component_name in (
@@ -99,8 +110,12 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
             ("rate_limiter", "DbusRateLimiter"),
             ("circuit", "DbusCircuitBreaker"),
             ("cache", "DbusCacheStore"),
+            ("commands", "DbusGatewayCommandInbox"),
+            ("core_command_mailbox", "CoreCommandMailbox"),
+            ("publication_registry", "GatewayPublicationRegistry"),
             ("write_scheduler", "DbusWriteScheduler"),
             ("read_scheduler", "DbusReadScheduler"),
+            ("energy_discovery", "DbusEnergyDiscoveryManager"),
             ("read_executor", "DbusReadExecutor"),
             ("discovery", "DbusDiscoveryManager"),
             ("json_writer", "AtomicJsonWriter"),
@@ -114,8 +129,8 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertIs(adapter.config, config)
         self.assertIs(adapter.paths, settings.paths)
         self.assertEqual(adapter.service_name, settings.service_name)
-        self.assertIsNone(adapter._dbusservice)
-        self.assertIs(adapter._dbusservice_registered, False)
+        self.assertFalse(hasattr(adapter, "_dbusservice"))
+        self.assertFalse(hasattr(adapter, "_dbusservice_registered"))
         self.assertIs(adapter._stop, False)
         self.assertIsNone(adapter._server)
         self.assertIsNone(adapter._main_loop)
@@ -133,7 +148,6 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertEqual(adapter.health_log_interval_seconds, 3.1)
         self.assertEqual(adapter.health_log_max_bytes, 202)
         self.assertEqual(adapter.dbus_introspection_snapshot_path, "/run/intro")
-        self.assertEqual(adapter.dbus_introspection_request_path, "/run/request")
         self.assertIs(adapter.dbus_introspection_enabled, True)
         self.assertEqual(adapter._next_work_tick_monotonic, 0.0)
         self.assertEqual(adapter._last_resource_snapshot, {})

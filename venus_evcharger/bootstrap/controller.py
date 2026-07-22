@@ -8,7 +8,7 @@ import faulthandler
 import logging
 import os
 import signal
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from venus_evcharger.app.bootstrap_support import (
@@ -24,14 +24,11 @@ from venus_evcharger.bootstrap.config_backend import BackendConfigLoader
 from venus_evcharger.bootstrap.config_identity import IdentityConfigLoader
 from venus_evcharger.bootstrap.contracts import (
     BootstrapDependencies,
-    Formatter,
     MonthWindow,
-    require_dbus_service,
     require_gobject_timers,
 )
-from venus_evcharger.bootstrap.paths import ServicePathRegistrar
+from venus_evcharger.bootstrap.publication import EvcsPublicationRegistrar
 from venus_evcharger.bootstrap.runtime import RuntimeInitializer
-from venus_evcharger.dbus_gateway import GatewayDbusServiceProxy
 
 
 @dataclass(frozen=True)
@@ -43,7 +40,7 @@ class ServiceBootstrapComponents:
     auto: AutoConfigLoader
     config: ServiceConfigLoader
     runtime: RuntimeInitializer
-    paths: ServicePathRegistrar
+    publication: EvcsPublicationRegistrar
 
 
 def _enable_fault_diagnostics() -> None:
@@ -86,7 +83,6 @@ class ServiceBootstrapController:
         read_version_func: Callable[[str], str],
         gobject_module: object,
         script_path: str,
-        formatters: Mapping[str, Formatter],
     ) -> None:
         self.service = service
         self.dependencies = BootstrapDependencies(
@@ -97,7 +93,6 @@ class ServiceBootstrapController:
             read_version=read_version_func,
             gobject=gobject_module,
             script_path=script_path,
-            formatters=formatters,
         )
         identity = IdentityConfigLoader(service, normalize_phase_func)
         backend = BackendConfigLoader(service)
@@ -114,7 +109,7 @@ class ServiceBootstrapController:
                 read_version=read_version_func,
                 gobject=require_gobject_timers(gobject_module),
             ),
-            paths=ServicePathRegistrar(service, script_path=script_path, formatters=formatters),
+            publication=EvcsPublicationRegistrar(service, script_path=script_path),
         )
 
     def initialize_service(self) -> None:
@@ -123,12 +118,10 @@ class ServiceBootstrapController:
             ("load-runtime-configuration", self.load_runtime_configuration),
             ("prepare-runtime-state", self.prepare_runtime_state),
             ("initialize-virtual-state", self.initialize_virtual_state),
-            ("initialize-dbus-service", self.initialize_dbus_service),
             ("initialize-controllers", self.initialize_controllers),
             ("restore-runtime-state", self.restore_runtime_state),
             ("apply-device-metadata", self.apply_device_metadata),
-            ("register-dbus-paths", self.register_paths),
-            ("publish-dbus-service", self.publish_dbus_service),
+            ("register-evcs-publication", self.register_evcs_publication),
             ("start-runtime-loops", self.start_runtime_loops),
         )
         for step_name, step_func in bootstrap_steps:
@@ -160,25 +153,9 @@ class ServiceBootstrapController:
         """Apply device metadata used by the GUI and management paths."""
         self.components.runtime.apply_device_metadata()
 
-    def initialize_dbus_service(self) -> None:
-        """Create the gateway-owned EV charger DBus service proxy."""
-        service_name = getattr(self.service, "service_name", None)
-        deviceinstance = getattr(self.service, "deviceinstance", None)
-        if not isinstance(service_name, str) or not isinstance(deviceinstance, int):
-            raise TypeError("service identity must be loaded before DBus initialization")
-        setattr(
-            self.service,
-            "_dbusservice",
-            GatewayDbusServiceProxy(f"{service_name}.http_{deviceinstance}"),
-        )
-
-    def register_paths(self) -> None:
-        """Register management, control, measurement, and diagnostic paths."""
-        self.components.paths.register()
-
-    def publish_dbus_service(self) -> None:
-        """Tell the gateway to publish the registered DBus service."""
-        require_dbus_service(self.service).register()
+    def register_evcs_publication(self) -> None:
+        """Enqueue the complete semantic EVCS registration."""
+        self.components.publication.register()
 
     def start_runtime_loops(self) -> None:
         """Start workers and register GLib timers."""

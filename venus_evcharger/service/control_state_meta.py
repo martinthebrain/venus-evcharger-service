@@ -126,7 +126,7 @@ class ControlStateMeta:
                 "service_version": current_version or _optional_text_attr(service, "firmware_version"),
                 "api_version": "v1",
                 "product_name": _optional_text_attr(service, "product_name"),
-                "service_name": _optional_text_attr(service, "service_name"),
+                "instance_id": _optional_int_attr(service, "deviceinstance"),
             },
         }
 

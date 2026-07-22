@@ -10,10 +10,12 @@ from typing import Protocol, TypeVar
 
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusConnectionManager
+from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.executor import DbusReadExecutor
-from venus_evcharger.dbus_adapter.scheduling import DbusDiscoveryManager
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox
-from venus_evcharger.dbus_gateway_command_types import CommandMapping, CommandPayload
+from venus_evcharger.dbus_adapter.scheduling import DbusDiscoveryManager, DbusReadScheduler
+from venus_evcharger.dbus_gateway import DbusCacheStore, DbusGatewayCommandInbox
+from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
+from venus_evcharger.ipc.energy import EnergyRefreshRequest
 
 _T = TypeVar("_T")
 
@@ -25,17 +27,15 @@ class DbusAdapterIntrospectionContext(Protocol):  # pragma: no cover
     connection: DbusConnectionManager
     circuit: DbusCircuitBreaker
     cache: DbusCacheStore
-    commands: DbusCommandInbox
+    commands: DbusGatewayCommandInbox
     discovery: DbusDiscoveryManager
+    energy_discovery: DbusEnergyDiscoveryManager
     read_executor: DbusReadExecutor
+    read_scheduler: DbusReadScheduler
     dbus_introspection_enabled: bool
-    dbus_introspection_request_path: str
     _introspection_queue_depth: int
     _last_introspection_full_scan_at: float
 
-    def introspection_request_payload(self) -> CommandPayload: ...
-    def enqueue_introspection_requests(self, payload: CommandMapping) -> int: ...
-    def clear_introspection_request_payload(self) -> None: ...
     def enqueue_introspection_command(
         self,
         service: str,
@@ -46,17 +46,9 @@ class DbusAdapterIntrospectionContext(Protocol):  # pragma: no cover
         reason: str,
     ) -> None: ...
     def background_introspection_due(self, now: float) -> bool: ...
-    def background_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def grid_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def battery_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def pv_introspection_specs(self) -> list[tuple[str, str, int, str, str]]: ...
-    def configured_or_prefixed_services(
-        self,
-        explicit_key: str,
-        prefix_key: str,
-        default_prefix: str,
-    ) -> list[str]: ...
-    def refresh_services_command(self, command: CommandMapping) -> CommandOutcome: ...
+    def refresh_energy_inputs_command(self, command: CommandMapping) -> CommandOutcome: ...
+    def _energy_refresh_keys(self, request: EnergyRefreshRequest) -> tuple[str, ...]: ...
+    def _stale_refresh_keys(self, keys: tuple[str, ...], max_age_seconds: float) -> tuple[str, ...]: ...
     def introspect_command_if_healthy(self, command: CommandMapping) -> CommandOutcome: ...
     def introspect_command(self, command: CommandMapping) -> CommandOutcome: ...
     def timed_introspection_result(self, service: str, path: str, timeout: float) -> tuple[CommandOutcome, object]: ...

@@ -20,12 +20,17 @@ def _controller_service(**values: object) -> SimpleNamespace:
     time_now = values.pop("time_now", MagicMock(return_value=0.0))
     flush = values.pop("flush_runtime_overrides", MagicMock())
     summary = values.pop("state_summary", MagicMock(return_value="state"))
+    last_accepted = values.pop("last_accepted_field", MagicMock(return_value=None))
     return SimpleNamespace(
         _readback_store=InMemoryReadbackStore(),
         _worker_poll_interval_seconds=1.0,
         auto_shelly_soft_fail_seconds=10.0,
         time_now=time_now,
-        state=SimpleNamespace(flush_runtime_overrides=flush, summary=summary),
+        state=SimpleNamespace(
+            flush_runtime_overrides=flush,
+            summary=summary,
+            last_accepted_field=last_accepted,
+        ),
         **values,
     )
 
@@ -50,6 +55,111 @@ class _ObservedAttributes:
 
 
 class UpdateControllerContractTests(unittest.TestCase):
+    def test_constructor_wires_the_exact_component_graph(self) -> None:
+        service = _controller_service()
+        phase_values = MagicMock(name="phase_values")
+        health_code = MagicMock(name="health_code")
+        gateway_operations = object()
+        readbacks = object()
+        targets = object()
+        health = object()
+        telemetry = object()
+        relay_foundation = SimpleNamespace(targets=targets, health=health, telemetry=telemetry)
+        state = object()
+        relay = object()
+        pm_snapshots = object()
+        inputs = object()
+        offline = object()
+        learning = object()
+        balance = object()
+        runtime_cycle = object()
+        software_update = object()
+
+        with (
+            patch.object(controller_module, "ReadbackResolver", return_value=readbacks) as readback_factory,
+            patch.object(controller_module, "build_relay_foundation", return_value=relay_foundation) as foundation_factory,
+            patch.object(controller_module, "UpdateStateController", return_value=state) as state_factory,
+            patch.object(controller_module, "complete_relay_components", return_value=relay) as relay_factory,
+            patch.object(controller_module, "PmSnapshotResolver", return_value=pm_snapshots) as pm_factory,
+            patch.object(controller_module, "InputCacheResolver", return_value=inputs) as input_factory,
+            patch.object(controller_module, "OfflinePublisher", return_value=offline) as offline_factory,
+            patch.object(controller_module, "LearningController", return_value=learning) as learning_factory,
+            patch.object(controller_module, "VictronEssBalanceController", return_value=balance) as balance_factory,
+            patch.object(controller_module, "RuntimeCycleCoordinator", return_value=runtime_cycle) as cycle_factory,
+            patch.object(controller_module, "SoftwareUpdateController", return_value=software_update) as update_factory,
+        ):
+            controller = UpdateCycleController(
+                service,
+                phase_values,
+                health_code,
+                gateway_operations=gateway_operations,
+            )
+
+        self.assertIs(controller.service, service)
+        readback_factory.assert_called_once_with(service._readback_store, service, service.time_now)
+        self.assertIs(service._readback_resolver, readbacks)
+        foundation_factory.assert_called_once_with(phase_values)
+        state_factory.assert_called_once_with(service, targets, health, health_code)
+        relay_factory.assert_called_once_with(relay_foundation, state)
+        pm_factory.assert_called_once_with()
+        input_factory.assert_called_once_with(service)
+        offline_factory.assert_called_once_with(service, telemetry, state)
+        learning_factory.assert_called_once_with(service)
+        balance_factory.assert_called_once_with(gateway_operations)
+        cycle_factory.assert_called_once_with(
+            service,
+            state,
+            pm_snapshots,
+            inputs,
+            offline,
+            relay,
+            learning,
+            balance,
+        )
+        update_factory.assert_called_once_with()
+        components = controller.components
+        self.assertEqual(
+            (
+                components.readbacks,
+                components.state,
+                components.pm_snapshots,
+                components.inputs,
+                components.offline,
+                components.relay,
+                components.learning,
+                components.victron_ess_balance,
+                components.runtime_cycle,
+                components.software_update,
+            ),
+            (
+                readbacks,
+                state,
+                pm_snapshots,
+                inputs,
+                offline,
+                relay,
+                learning,
+                balance,
+                runtime_cycle,
+                software_update,
+            ),
+        )
+
+    def test_constructor_builds_unavailable_gateway_fallback_once(self) -> None:
+        service = _controller_service()
+        unavailable = object()
+        balance = object()
+
+        with (
+            patch.object(controller_module, "UnavailableGatewayOperations", return_value=unavailable) as unavailable_factory,
+            patch.object(controller_module, "VictronEssBalanceController", return_value=balance) as balance_factory,
+        ):
+            controller = UpdateCycleController(service, MagicMock(), MagicMock(return_value=0))
+
+        unavailable_factory.assert_called_once_with()
+        balance_factory.assert_called_once_with(unavailable)
+        self.assertIs(controller.components.victron_ess_balance, balance)
+
     def test_constructor_preserves_dependencies_and_constants(self) -> None:
         service = _controller_service()
         phase_values = MagicMock()
@@ -145,12 +255,14 @@ class UpdateControllerContractTests(unittest.TestCase):
                 SoftwareUpdateController._spawn_software_update_process("update.log", "/repo", "restart.sh")
         close.assert_called_once_with(log_handle)
 
-    def test_sign_of_life_logs_exact_service_and_power(self) -> None:
-        service = _controller_service(service_name="EVCS", _dbusservice={"/Ac/Power": 123.0})
+    def test_sign_of_life_logs_power_without_transport_identity(self) -> None:
+        last_accepted = MagicMock(return_value=123.0)
+        service = _controller_service(last_accepted_field=last_accepted)
         controller = UpdateCycleController(service, MagicMock(), MagicMock(return_value=0))
         with patch.object(controller_module.logging, "info") as info:
             self.assertIs(controller.sign_of_life(), True)
-        info.assert_called_once_with("[%s] Last '/Ac/Power': %s", "EVCS", 123.0)
+        last_accepted.assert_called_once_with("ac_power_w")
+        info.assert_called_once_with("Last accepted AC power publication: %s", 123.0)
 
     def test_update_runs_flush_and_housekeeping_or_reports_failure(self) -> None:
         service = _controller_service(

@@ -8,7 +8,6 @@ from unittest.mock import patch
 from venus_evcharger.controllers.state_restore_victron_ess import VictronEssRuntimeRestorer
 from venus_evcharger.controllers.state_restore_victron_ess import (
     _victron_ess_balance_energy_ids,
-    _victron_ess_balance_runtime_string,
 )
 def _service() -> SimpleNamespace:
     return SimpleNamespace(
@@ -18,8 +17,6 @@ def _service() -> SimpleNamespace:
             SimpleNamespace(source_id=""),
         ),
         auto_battery_discharge_balance_victron_bias_source_id="primary",
-        auto_battery_discharge_balance_victron_bias_service=" com.victronenergy.settings ",
-        auto_battery_discharge_balance_victron_bias_path=" /Settings/Ess/Bias ",
         auto_battery_discharge_balance_victron_bias_activation_mode="export_only",
         _victron_ess_balance_auto_apply_generation=2,
     )
@@ -53,8 +50,8 @@ class VictronEssRuntimeRestoreContractTests(unittest.TestCase):
                 )
 
         expected_key = (
-            "victron-bias-learning/v2/source=primary"
-            "/service=com.victronenergy.settings/path=/Settings/Ess/Bias"
+            "victron-bias-learning/v3/source=primary"
+            "/target=ess-grid-setpoint"
             "/energy=battery-a,battery-b"
         )
         self.assertEqual(self._topology_key(), expected_key)
@@ -64,10 +61,10 @@ class VictronEssRuntimeRestoreContractTests(unittest.TestCase):
                 {"source_id": "primary", "topology_key": expected_key},
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             self.controller._victron_ess_balance_payload_matches_topology(
                 self.service,
-                {"source_id": "primary", "topology_key": expected_key.replace("/v2", "/v1")},
+                {"source_id": "primary", "topology_key": expected_key.replace("/v3", "/v2")},
             )
         )
         self.assertFalse(
@@ -100,7 +97,7 @@ class VictronEssRuntimeRestoreContractTests(unittest.TestCase):
         )
         self.assertEqual(
             empty_topology_key,
-            "victron-bias-learning/v2/source=/service=/path=/energy=",
+            "victron-bias-learning/v3/source=/target=ess-grid-setpoint/energy=",
         )
         self.assertTrue(
             self.controller._victron_ess_balance_payload_matches_topology(
@@ -481,18 +478,11 @@ class VictronEssRuntimeRestoreContractTests(unittest.TestCase):
             original_mode,
         )
 
-    def test_energy_id_and_runtime_string_helpers(self) -> None:
+    def test_energy_id_helper(self) -> None:
         self.assertEqual(
             _victron_ess_balance_energy_ids(self.service),
             ["battery-b", "battery-a"],
         )
-        self.assertEqual(
-            _victron_ess_balance_runtime_string(
-                self.service, "auto_battery_discharge_balance_victron_bias_service"
-            ),
-            "com.victronenergy.settings",
-        )
-        self.assertEqual(_victron_ess_balance_runtime_string(SimpleNamespace(), "missing"), "")
         self.assertEqual(
             _victron_ess_balance_energy_ids(
                 SimpleNamespace(
@@ -502,10 +492,6 @@ class VictronEssRuntimeRestoreContractTests(unittest.TestCase):
             [],
         )
         self.assertEqual(_victron_ess_balance_energy_ids(SimpleNamespace()), [])
-        self.assertEqual(
-            _victron_ess_balance_runtime_string(SimpleNamespace(value=None), "value"),
-            "",
-        )
 
 
 if __name__ == "__main__":  # pragma: no cover

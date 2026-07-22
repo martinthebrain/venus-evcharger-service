@@ -168,7 +168,7 @@ class _ControlApiHttpStateCases:
     def test_execute_payload_preserves_existing_tracking_when_service_returns_it(self) -> None:
         command = ControlCommand(
             name="set_mode",
-            path="/Mode",
+            target="mode",
             value=1,
             source="http",
             command_id="cmd-1",
@@ -191,7 +191,7 @@ class _ControlApiHttpStateCases:
     def test_tracked_command_keeps_matching_tracking_metadata_unchanged(self) -> None:
         command = ControlCommand(
             name="set_mode",
-            path="/Mode",
+            target="mode",
             value=1,
             source="http",
             command_id="cmd-1",
@@ -206,7 +206,7 @@ class _ControlApiHttpStateCases:
         self.assertIs(tracked, command)
 
     def test_execute_payload_injects_tracking_when_service_returns_untracked_command(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         service = control_api_http_service(
             control_command_from_payload=MagicMock(return_value=command),
@@ -222,7 +222,7 @@ class _ControlApiHttpStateCases:
         self.assertEqual(executed_command.idempotency_key, "idem-9")
 
     def test_command_endpoint_rejects_stale_if_match_state_token(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         service = control_api_http_service(
             control_command_from_payload=MagicMock(return_value=command),
@@ -247,7 +247,7 @@ class _ControlApiHttpStateCases:
         service.handle_control_command.assert_not_called()
 
     def test_command_endpoint_accepts_matching_if_match_state_token(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         service = control_api_http_service(
             control_command_from_payload=MagicMock(return_value=command),
@@ -317,7 +317,7 @@ class _ControlApiHttpStateCases:
         self.assertEqual(port, 0)
 
     def test_command_endpoint_executes_payload_through_service_hooks(self) -> None:
-        command = ControlCommand(name="set_mode", path="/Mode", value=1, source="http")
+        command = ControlCommand(name="set_mode", target="mode", value=1, source="http")
         result = ControlResult.applied_result(command)
         record_audit = MagicMock()
         service = control_api_http_service(
@@ -348,7 +348,7 @@ class _ControlApiHttpStateCases:
         self.assertEqual(service.control_command_from_payload.call_args.kwargs, {"source": "http"})
         handled_command = service.handle_control_command.call_args.args[0]
         self.assertEqual(handled_command.name, "set_mode")
-        self.assertEqual(handled_command.path, "/Mode")
+        self.assertEqual(handled_command.target, "mode")
         self.assertEqual(handled_command.value, 1)
         self.assertEqual(handled_command.source, "http")
         self.assertTrue(handled_command.command_id)

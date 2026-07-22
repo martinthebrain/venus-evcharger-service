@@ -11,11 +11,14 @@ from tests.support.dbus_gateway_adapter_harness import (
     gateway_paths,
     health_slo_module,
     install_mock,
+    observe_evcs_fields,
     patch,
     process_health_module,
     tempfile,
     time,
 )
+from venus_evcharger.ipc.core_commands import core_control_command_payload
+from venus_evcharger.ipc.energy import EnergyRefreshRequest
 
 
 class GatewayHealthSloCases(GatewayAdapterContractCase):
@@ -85,17 +88,14 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             now = time.time()
-            adapter.cache.update_value(
-                f"path:{adapter.service_name}/Ac/Power",
-                10.0,
-                source=f"{adapter.service_name}/Ac/Power",
-                now=now - 5.0,
-            )
+            observe_evcs_fields(adapter, {"ac_power_w": (10.0, 5.0)}, now=now)
             adapter.cache.update_value("grid_power_w", 10.0, source="grid", now=now - 5.0)
             monotonic_now = time.monotonic()
             adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=monotonic_now - 3.0)
             adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=monotonic_now)
-            adapter.commands.enqueue({"kind": "refresh_services", "created_at": now - 5.0})
+            refresh = EnergyRefreshRequest("health-stale", "topology", 0.0).to_command(source="health-test")
+            refresh["created_at"] = now - 5.0
+            adapter.commands.enqueue(refresh)
 
             health = adapter.health_snapshot()
 
@@ -116,38 +116,36 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             now = time.time()
-            for path, value, age in (
-                ("/Ac/Power", 1.7, 0.5),
-                ("/Ac/Current", 0.01, 0.5),
-                ("/Session/Energy", 0.0, 600.0),
-                ("/Session/Time", 0, 600.0),
-                ("/Ac/Energy/Forward", 0.0, 600.0),
-            ):
-                adapter.cache.update_value(
-                    f"path:{adapter.service_name}{path}",
-                    value,
-                    source=f"{adapter.service_name}{path}",
-                    now=now - age,
-                )
+            observe_evcs_fields(
+                adapter,
+                {
+                    "ac_power_w": (1.7, 0.5),
+                    "ac_current_a": (0.01, 0.5),
+                    "session_energy_kwh": (0.0, 600.0),
+                    "session_time_s": (0, 600.0),
+                    "energy_forward_kwh": (0.0, 600.0),
+                },
+                now=now,
+            )
 
             self.assertFalse(adapter.charging_session_active_for_gui(now))
-            freshness_paths = adapter.gui_freshness_paths(now)
-            self.assertIn("/Ac/Power", freshness_paths)
-            self.assertIn("/Ac/Current", freshness_paths)
-            self.assertIn("/Connected", freshness_paths)
-            self.assertIn("/Mode", freshness_paths)
-            self.assertNotIn("/Session/Energy", freshness_paths)
+            freshness_fields = adapter.gui_freshness_fields(now)
+            self.assertIn("ac_power_w", freshness_fields)
+            self.assertIn("ac_current_a", freshness_fields)
+            self.assertIn("connected", freshness_fields)
+            self.assertIn("mode", freshness_fields)
+            self.assertNotIn("session_energy_kwh", freshness_fields)
             observed = adapter.slo_observed({}, {}, now, time.monotonic())
             self.assertIn("gui_measurement_max_age_s", observed)
-            self.assertIn("gui_measurement_missing_path_count", observed)
+            self.assertIn("gui_measurement_missing_field_count", observed)
             self.assertEqual(observed["gui_session_max_age_s"], 0.0)
-            self.assertEqual(observed["gui_session_missing_path_count"], 0.0)
-            self.assertGreater(observed["gui_control_missing_path_count"], 0.0)
+            self.assertEqual(observed["gui_session_missing_field_count"], 0.0)
+            self.assertEqual(observed["gui_control_missing_field_count"], 0.0)
             checks = health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())
             self.assertTrue(checks["gui_fresh"])
             self.assertTrue(checks["gui_controls_fresh"])
 
-    def test_gui_freshness_tracks_control_paths_against_effective_target(self) -> None:
+    def test_gui_freshness_tracks_control_fields_against_effective_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text(
@@ -156,17 +154,15 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             now = time.time()
-            for path, value, age in (
-                ("/Ac/Power", 1.0, 0.5),
-                ("/Ac/Current", 0.01, 0.5),
-                ("/Mode", 1, 9.0),
-            ):
-                adapter.cache.update_value(
-                    f"path:{adapter.service_name}{path}",
-                    value,
-                    source=f"{adapter.service_name}{path}",
-                    now=now - age,
-                )
+            observe_evcs_fields(
+                adapter,
+                {
+                    "ac_power_w": (1.0, 0.5),
+                    "ac_current_a": (0.01, 0.5),
+                    "mode": (1, 9.0),
+                },
+                now=now,
+            )
 
             observed = adapter.slo_observed({}, {}, now, time.monotonic())
             checks = health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())
@@ -175,17 +171,12 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             self.assertEqual(targets["configured_gui_max_age_s"], 2.0)
             self.assertEqual(targets["gui_control_max_age_s"], 10.0)
             self.assertEqual(observed["gui_control_max_age_s"], 9.0)
-            self.assertEqual(observed["gui_control_missing_path_count"], 7.0)
-            self.assertGreater(observed["gui_missing_path_count"], observed["gui_control_missing_path_count"])
+            self.assertEqual(observed["gui_control_missing_field_count"], 0.0)
+            self.assertEqual(observed["gui_missing_field_count"], 0.0)
             self.assertTrue(checks["gui_controls_fresh"])
             self.assertTrue(checks["gui_fresh"])
 
-            adapter.cache.update_value(
-                f"path:{adapter.service_name}/Mode",
-                1,
-                source=f"{adapter.service_name}/Mode",
-                now=now - 10.1,
-            )
+            observe_evcs_fields(adapter, {"mode": (1, 10.1)}, now=now)
             stale_observed = adapter.slo_observed({}, {}, now, time.monotonic())
             stale_checks = health_slo_module.slo_checks_from_observed(stale_observed, adapter.slo_thresholds())
 
@@ -208,7 +199,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
 
             adapter.tick_health.snapshot.assert_called_once_with(now=777.0)
             self.assertEqual(observed["gui_measurement_max_age_s"], 0.0)
-            self.assertGreater(observed["gui_measurement_missing_path_count"], 0.0)
+            self.assertGreater(observed["gui_measurement_missing_field_count"], 0.0)
             self.assertEqual(observed["queue_oldest_age_s"], 3.0)
             self.assertEqual(observed["core_read_max_age_s"], 4.0)
             self.assertEqual(observed["mainloop_max_gap_ms_60s"], 42.0)
@@ -222,20 +213,18 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             now = time.time()
-            for path, value, age in (
-                ("/Ac/Power", 900.0, 0.5),
-                ("/Ac/Current", 4.0, 0.5),
-                ("/Session/Energy", 0.1, 600.0),
-            ):
-                adapter.cache.update_value(
-                    f"path:{adapter.service_name}{path}",
-                    value,
-                    source=f"{adapter.service_name}{path}",
-                    now=now - age,
-                )
+            observe_evcs_fields(
+                adapter,
+                {
+                    "ac_power_w": (900.0, 0.5),
+                    "ac_current_a": (4.0, 0.5),
+                    "session_energy_kwh": (0.1, 600.0),
+                },
+                now=now,
+            )
 
             self.assertTrue(adapter.charging_session_active_for_gui(now))
-            self.assertIn("/Session/Energy", adapter.gui_freshness_paths(now))
+            self.assertIn("session_energy_kwh", adapter.gui_freshness_fields(now))
             observed = adapter.slo_observed({}, {}, now, time.monotonic())
             self.assertFalse(
                 health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())["gui_fresh"]
@@ -251,21 +240,18 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             now = time.time()
 
-            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 50.0, source="power", now=now)
-            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Current", 0.0, source="current", now=now)
-            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Power", now), 50.0)
+            observe_evcs_fields(adapter, {"ac_power_w": (50.0, 0.0), "ac_current_a": (0.0, 0.0)}, now=now)
+            self.assertEqual(adapter.fresh_evcs_field_float("ac_power_w", now), 50.0)
             self.assertTrue(adapter.charging_session_active_for_gui(now))
 
-            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 0.0, source="power", now=now)
-            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Current", 0.2, source="current", now=now)
-            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Current", now), 0.2)
+            observe_evcs_fields(adapter, {"ac_power_w": (0.0, 0.0), "ac_current_a": (0.2, 0.0)}, now=now)
+            self.assertEqual(adapter.fresh_evcs_field_float("ac_current_a", now), 0.2)
             self.assertTrue(adapter.charging_session_active_for_gui(now))
 
-            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 900.0, source="power", now=now - 2.0)
-            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Current", 0.0, source="current", now=now)
-            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Power", now), 900.0)
-            adapter.cache.update_value(f"path:{adapter.service_name}/Ac/Power", 900.0, source="power", now=now - 2.1)
-            self.assertEqual(adapter.fresh_cached_path_float("/Ac/Power", now), 0.0)
+            observe_evcs_fields(adapter, {"ac_power_w": (900.0, 2.0), "ac_current_a": (0.0, 0.0)}, now=now)
+            self.assertEqual(adapter.fresh_evcs_field_float("ac_power_w", now), 900.0)
+            observe_evcs_fields(adapter, {"ac_power_w": (900.0, 2.1)}, now=now)
+            self.assertEqual(adapter.fresh_evcs_field_float("ac_power_w", now), 0.0)
             self.assertFalse(adapter.charging_session_active_for_gui(now))
 
     def test_core_read_stale_requires_fresh_status_and_age(self) -> None:
@@ -328,14 +314,20 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             paths = gateway_paths(str(Path(temp_dir) / "run"))
             adapter = DbusAdapter(str(config_path), paths=paths)
 
-            adapter.write_scheduler.registered_paths.update({"/Mode", "/StartStop"})
-            adapter.commands.enqueue({"kind": "refresh_services", "priority": "read"})
-            legacy_refresh = Path(paths.command_dir) / "legacy-refresh.json"
-            legacy_refresh.write_text(
-                '{"kind":"refresh_services","created_at":1.0,"coalesce_key":"refresh-services"}',
-                encoding="utf-8",
+            observe_evcs_fields(adapter, {"mode": (1, 0.0), "start_stop": (1, 0.0)}, now=time.time())
+            refresh = EnergyRefreshRequest("health-topology", "topology", 0.0).to_command(source="health-test")
+            refresh_path = adapter.commands.enqueue(refresh)
+            duplicate_refresh = Path(paths.command_dir) / "duplicate-topology-refresh.json"
+            duplicate_refresh.write_text(Path(refresh_path).read_text(encoding="utf-8"), encoding="utf-8")
+            adapter.core_command_mailbox.enqueue(
+                core_control_command_payload(
+                    "set_mode",
+                    "mode",
+                    1,
+                    source="control-api",
+                    origin="health-test",
+                )
             )
-            adapter.core_commands.enqueue({"kind": "user_command", "path": "/Mode", "value": 1})
             adapter.circuit.record_success(12.5)
             adapter.cache.update_value("grid_power_w", 10.0, source="grid", now=time.time() - 1.0)
             adapter.cache.mark_error("pv_power_w", source="pv", error="offline")
@@ -351,7 +343,8 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             self.assertEqual(health["pending_command_count"], 1)
             self.assertEqual(health["physical_command_count"], 2)
             self.assertEqual(health["core_command_count"], 1)
-            self.assertEqual(health["registered_path_count"], 2)
+            self.assertEqual(health["registered_path_count"], adapter.publication_registry.registered_path_count)
+            self.assertGreater(health["registered_path_count"], 0)
             self.assertEqual(health["last_tick_at"], 123.0)
             self.assertEqual(health["tick_duration_ms"], 7.5)
             self.assertIn("discovery_last_success_at", health)

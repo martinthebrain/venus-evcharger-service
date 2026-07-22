@@ -7,8 +7,6 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -47,14 +45,13 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True) as write_mock:
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
 
         write_mock.assert_called_once_with(
             service,
-            "com.victronenergy.settings",
-            "/Settings/CGwacs/AcPowerSetPoint",
             -50.0,
+            intent="tracking",
         )
         self.assertEqual(service._last_auto_metrics["battery_discharge_balance_victron_bias_active"], 1)
         self.assertEqual(service._last_auto_metrics["battery_discharge_balance_victron_bias_source_id"], "victron")
@@ -67,8 +64,6 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -94,14 +89,13 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True) as write_mock:
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, False)
 
         write_mock.assert_called_once_with(
             service,
-            "com.victronenergy.settings",
-            "/Settings/CGwacs/AcPowerSetPoint",
             50.0,
+            intent="restore",
         )
         self.assertIsNone(service._victron_ess_balance_last_setpoint_w)
         self.assertEqual(service._victron_ess_balance_pid_last_output_w, 0.0)
@@ -114,8 +108,6 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="supported_only",
@@ -150,7 +142,7 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True) as write_mock:
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True) as write_mock:
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             self.assertEqual(
                 service._last_auto_metrics["battery_discharge_balance_victron_bias_reason"],
@@ -162,9 +154,8 @@ class _UpdateCycleQuaternaryVictronCoreCases:
 
         write_mock.assert_called_once_with(
             service,
-            "com.victronenergy.settings",
-            "/Settings/CGwacs/AcPowerSetPoint",
             -30.0,
+            intent="tracking",
         )
         self.assertEqual(service._last_auto_metrics["battery_discharge_balance_victron_bias_reason"], "applied")
 
@@ -172,8 +163,6 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -208,7 +197,7 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True):
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = -200.0
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 104.0, True)
@@ -228,8 +217,6 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -264,7 +251,7 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True):
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = 150.0
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 103.0, True)
@@ -360,8 +347,6 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         service = SimpleNamespace(
             auto_battery_discharge_balance_victron_bias_enabled=True,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="com.victronenergy.settings",
-            auto_battery_discharge_balance_victron_bias_path="/Settings/CGwacs/AcPowerSetPoint",
             auto_battery_discharge_balance_victron_bias_base_setpoint_watts=50.0,
             auto_battery_discharge_balance_victron_bias_deadband_watts=100.0,
             auto_battery_discharge_balance_victron_bias_support_mode="allow_experimental",
@@ -397,7 +382,7 @@ class _UpdateCycleQuaternaryVictronCoreCases:
         )
         controller = UpdateCycleController(service, _phase_values, lambda reason: {"init": 0}.get(reason, 99))
 
-        with patch.object(controller.components.victron_ess_balance.components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(controller.components.victron_ess_balance.components.writer, "write_setpoint", return_value=True):
             controller.components.victron_ess_balance.apply_victron_ess_balance_bias(service, 100.0, True)
             service._auto_cached_inputs_used = True
             service._last_energy_cluster["battery_sources"][0]["discharge_balance_error_w"] = -250.0

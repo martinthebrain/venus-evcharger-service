@@ -11,13 +11,13 @@ from tests.support.dbus_gateway_adapter_harness import (
     Path,
     gateway_paths,
     install_mock,
-    introspection_module,
     introspection_snapshot_module,
     json,
     patch,
+    process_io_module,
     tempfile,
-    time,
 )
+from venus_evcharger.ipc.energy import EnergyRefreshRequest
 
 
 class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
@@ -37,54 +37,63 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
             self.assertEqual(adapter.introspect_command({}), "dropped")
             timed_introspection.assert_not_called()
 
-            install_mock(adapter.read_executor, "refresh_requested_value", MagicMock(return_value="applied"))
-            self.assertEqual(
-                adapter.process_non_write_command({"type": "refresh_value", "key": "grid_power_w"}), "applied"
+            force_reads = install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            force_discovery = install_mock(adapter.discovery, "force_due", MagicMock())
+            refresh = EnergyRefreshRequest(
+                request_id="all-inputs",
+                scope="all",
+                max_age_seconds=0.0,
+                urgency="priority",
+                reason="test-refresh",
             )
-            adapter.read_executor.refresh_requested_value.assert_called_once_with(
-                {"type": "refresh_value", "key": "grid_power_w"}
+            self.assertEqual(
+                adapter.process_non_write_command(refresh.to_command(source="test")),
+                "applied",
+            )
+            force_reads.assert_called_once_with(("grid_power_w", "pv_power_w", "battery_soc"))
+            force_discovery.assert_called_once_with()
+            force_reads.reset_mock()
+            battery_refresh = EnergyRefreshRequest("battery", "battery", 0.0)
+            self.assertEqual(
+                adapter.process_non_write_command(battery_refresh.to_command(source="test")),
+                "applied",
+            )
+            force_reads.assert_called_once_with(("battery_soc",))
+            self.assertEqual(
+                adapter.process_non_write_command(
+                    {"type": "refresh_value", "key": "grid_power_w", "service": "svc", "path": "/P"}
+                ),
+                "dropped",
             )
 
             list_services = install_mock(adapter, "list_services", MagicMock(return_value=["svc1", "svc2"]))
-            remove_coalesced = install_mock(adapter.commands, "remove_coalesced", MagicMock())
+            discovery_due = install_mock(adapter.discovery, "due", MagicMock(return_value=True))
             record_success = install_mock(adapter.discovery, "record_success", MagicMock())
-            with patch.object(introspection_module.time, "time", return_value=100.0):
-                self.assertEqual(adapter.refresh_services_command({"kind": "refresh_services"}), "applied")
+            with patch.object(process_io_module.time, "time", return_value=100.0):
+                self.assertTrue(adapter.refresh_services_if_due_once())
             list_services.assert_called_once_with()
             self.assertEqual(sorted(adapter.cache.services), ["svc1", "svc2"])
+            self.assertEqual(adapter.energy_discovery.topology_snapshot(now=100.0).generation, 1)
             record_success.assert_called_once_with(now=100.0)
-            remove_coalesced.assert_called_once_with("refresh:services")
+            discovery_due.assert_called_once()
 
             list_services.reset_mock()
             record_success.reset_mock()
-            remove_coalesced.reset_mock()
-            self.assertEqual(
-                adapter.refresh_services_command({"kind": "refresh_services", "created_at": 90.0}),
-                "applied",
-            )
+            discovery_due.return_value = False
+            self.assertFalse(adapter.refresh_services_if_due_once())
             list_services.assert_not_called()
             record_success.assert_not_called()
-            remove_coalesced.assert_called_once_with("refresh:services")
 
-            adapter.circuit.degraded_until = time.time() + 5.0
-            remove_coalesced.reset_mock()
-            self.assertEqual(adapter.refresh_services_command({"kind": "refresh_services"}), "deferred")
-            remove_coalesced.assert_not_called()
-            adapter.circuit.degraded_until = 0.0
-
+            discovery_due.return_value = True
             install_mock(adapter, "list_services", MagicMock(side_effect=DbusOperationDeferred("read")))
-            remove_coalesced.reset_mock()
-            self.assertEqual(adapter.refresh_services_command({"kind": "refresh_services"}), "deferred")
-            remove_coalesced.assert_not_called()
+            self.assertFalse(adapter.refresh_services_if_due_once())
 
             services_error = RuntimeError("dbus down")
             install_mock(adapter, "list_services", MagicMock(side_effect=services_error))
             record_error = install_mock(adapter.discovery, "record_error", MagicMock())
-            remove_coalesced.reset_mock()
-            with patch.object(introspection_module.time, "time", return_value=123.0):
-                self.assertEqual(adapter.refresh_services_command({"kind": "refresh_services"}), "dropped")
+            with patch.object(process_io_module.time, "time", return_value=123.0):
+                self.assertTrue(adapter.refresh_services_if_due_once())
             record_error.assert_called_once_with(services_error, now=123.0)
-            remove_coalesced.assert_called_once_with("refresh:services")
 
             adapter._introspection_queue_depth = 2
             adapter.record_introspection_xml("svc", "/Recorded", "<node/>")

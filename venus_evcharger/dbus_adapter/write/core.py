@@ -1,152 +1,97 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Core command processing for scheduled DBus writes."""
+"""Core command processing for scheduled gateway operations."""
 
 from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from abc import ABC, abstractmethod
 
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
-from venus_evcharger.dbus_adapter.write.protocols import (
-    DbusWriteSchedulerAdapter,
-    DropStaleCoalescedCommands,
-    ProcessLocalPublishBurst,
-    PublishCommand,
-)
-from venus_evcharger.dbus_adapter.write.support import (
-    budget_elapsed,
-    command_kind,
-    deadline_pair,
-    has_startup_registration,
-    is_local_publish_command,
-    register_service_command,
-    should_follow_with_local_burst,
-)
-from venus_evcharger.dbus_gateway import DbusCommandInbox
-from venus_evcharger.dbus_gateway_command_types import CommandFile, CommandFileList, CommandMapping
+from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
+from venus_evcharger.dbus_adapter.write.support import command_ready, deadline_pair, is_local_publish_command
+from venus_evcharger.ipc.command_types import CommandFile, CommandFileList, CommandMapping
+from venus_evcharger.ipc.gateway_operations import SEMANTIC_GATEWAY_KINDS
+from venus_evcharger.ipc.gateway_publication import SEMANTIC_PUBLICATION_KINDS
+from venus_evcharger.ipc.generic_shelly_configuration import DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND
 
 GATEWAY_COMMAND_RETRY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class DbusWriteSchedulerCore:
+class DbusWriteSchedulerCore(ABC):
+    """Schedule typed gateway commands without exposing DBus paths."""
+
     adapter: DbusWriteSchedulerAdapter
     local_publish_burst_limit: int
-    startup_registration_batch_limit: int
-    startup_registration_tick_budget_seconds: float
-    drop_stale_coalesced_commands: DropStaleCoalescedCommands
-    process_local_publish_burst: ProcessLocalPublishBurst
-    publish_command: PublishCommand
-    register_path: Callable[[CommandMapping], CommandOutcome]
-    set_remote_value: Callable[[CommandMapping], CommandOutcome]
-    budget_available: Callable[[CommandMapping, float], bool]
-    prioritized_commands: Callable[[CommandFileList], CommandFileList]
-    prune_budget: Callable[[float], None]
-    record_budget: Callable[[CommandMapping], None]
-    record_lifecycle: Callable[[CommandMapping, str], None]
-    record_processed: Callable[[], None]
     last_scheduled_outcome: CommandOutcome | None
+
+    @abstractmethod
+    def drop_stale_coalesced_commands(
+        self,
+        processed_path: str,
+        processed_command: CommandMapping,
+        *,
+        pending_commands: CommandFileList | None = None,
+    ) -> None:
+        """Remove older commands superseded by one completed command."""
+
+    @abstractmethod
+    def process_local_publish_burst(self, limit: int | None = None) -> int:
+        """Process a bounded burst of local semantic publications."""
+
+    @abstractmethod
+    def process_semantic_operation(
+        self,
+        command: CommandMapping,
+        *,
+        command_file: str,
+    ) -> CommandOutcome:
+        """Execute one adapter-owned semantic system operation."""
+
+    @abstractmethod
+    def process_publication(self, command: CommandMapping) -> CommandOutcome:
+        """Apply one semantic EVCS or companion publication command."""
+
+    @abstractmethod
+    def budget_available(self, command: CommandMapping, now: float) -> bool:
+        """Return whether the command's queue class still has budget."""
+
+    @staticmethod
+    @abstractmethod
+    def prioritized_commands(commands: CommandFileList) -> CommandFileList:
+        """Return pending commands in deterministic scheduler order."""
+
+    @abstractmethod
+    def prune_budget(self, now: float) -> None:
+        """Discard queue-budget observations outside the active window."""
+
+    @abstractmethod
+    def prune_processed(self, now: float) -> None:
+        """Discard processed-command observations outside the active window."""
+
+    @abstractmethod
+    def record_budget(self, command: CommandMapping) -> None:
+        """Record one command against its queue-class budget."""
+
+    @abstractmethod
+    def record_lifecycle(self, command: CommandMapping, state: str) -> None:
+        """Record one externally visible command lifecycle transition."""
+
+    @abstractmethod
+    def record_processed(self) -> None:
+        """Record one completed command for health accounting."""
 
     def process_one(self, *, include_local_publish: bool = True) -> bool:
         self.last_scheduled_outcome = None
         pending = self.adapter.commands.load_pending()
-        coalesced = self.prioritized_commands(DbusCommandInbox.coalesce(pending))
-        if not coalesced:
-            return False
-        if self._startup_registration_pending(coalesced):
-            return self.process_startup_registration_batch(coalesced)
-        return self.process_next_scheduled_command(coalesced, include_local_publish=include_local_publish)
-
-    def _startup_registration_pending(self, commands: CommandFileList) -> bool:
-        return not self.adapter.dbus_service_registered and has_startup_registration(commands=commands)
-
-    def process_next_scheduled_command(
-        self,
-        commands: CommandFileList,
-        *,
-        include_local_publish: bool,
-    ) -> bool:
+        commands = self.prioritized_commands(self.adapter.commands.coalesce(pending))
         selected = self.select_next_command(commands, include_local_publish=include_local_publish)
         if selected is None:
             return False
         path, command = selected
-        outcome = self.process_loaded_command(path, command)
-        self.last_scheduled_outcome = outcome
-        if should_follow_with_local_burst(command, outcome):
-            self.process_local_publish_burst(max(0, self.local_publish_burst_limit - 1))
+        self.last_scheduled_outcome = self.process_loaded_command(path, command, pending_commands=pending)
         return True
-
-    def process_startup_registration_batch(self, commands: CommandFileList) -> bool:
-        started = time.monotonic()
-        register_service = register_service_command(commands)
-        did_paths, processed = self.process_startup_register_paths(commands, started)
-        did_service = self._process_startup_register_service(
-            register_service,
-            processed=processed,
-            started=started,
-        )
-        return did_paths or did_service
-
-    def process_startup_register_paths(
-        self,
-        commands: CommandFileList,
-        started: float,
-    ) -> tuple[bool, int]:
-        did_work = False
-        processed = 0
-        for path, command in commands:
-            if self._startup_path_budget_exhausted(started, processed):
-                break
-            if command_kind(command) != "register_path":
-                continue
-            if self.register_path(command) != "applied":
-                continue
-            self.adapter.commands.remove(path)
-            self.record_processed()
-            did_work = True
-            processed += 1
-        return did_work, processed
-
-    def _process_startup_register_service(
-        self,
-        register_service: CommandFile | None,
-        *,
-        processed: int,
-        started: float,
-    ) -> bool:
-        if not self.should_process_startup_service(register_service, processed=processed, started=started):
-            return False
-        assert register_service is not None
-        path, command = register_service
-        if self.process_command(command, command_file=path) != "applied":
-            return False
-        self.adapter.commands.remove(path)
-        self.record_processed()
-        return True
-
-    def should_process_startup_service(
-        self,
-        register_service: CommandFile | None,
-        *,
-        processed: int,
-        started: float,
-    ) -> bool:
-        return (
-            register_service is not None
-            and not self.remaining_register_paths()
-            and processed < self.startup_registration_batch_limit
-            and not budget_elapsed(started, self.startup_registration_tick_budget_seconds)
-        )
-
-    def _startup_path_budget_exhausted(self, started: float, processed: int) -> bool:
-        return (
-            processed >= self.startup_registration_batch_limit
-            or budget_elapsed(started, self.startup_registration_tick_budget_seconds)
-        )
-
-    def remaining_register_paths(self) -> bool:
-        return any(command_kind(command) == "register_path" for _path, command in self.adapter.commands.load_pending())
 
     def select_next_command(
         self,
@@ -157,34 +102,47 @@ class DbusWriteSchedulerCore:
         now = time.time()
         self.prune_budget(now)
         for path, command in commands:
-            if (include_local_publish or not is_local_publish_command(command)) and self.budget_available(command, now):
+            if self._command_selectable(command, include_local_publish=include_local_publish, now=now):
                 return path, command
         return None
 
+    def _command_selectable(
+        self,
+        command: CommandMapping,
+        *,
+        include_local_publish: bool,
+        now: float,
+    ) -> bool:
+        return (
+            command_ready(command, now)
+            and (include_local_publish or not is_local_publish_command(command))
+            and self.budget_available(command, now)
+        )
+
     def process_command(self, command: CommandMapping, *, command_file: str = "") -> CommandOutcome:
-        priority = str(command.get("priority") or "diagnostic")
-        if not self.adapter.circuit.allows_priority(priority):
+        if self._command_blocked(command):
             return "deferred"
-        return self.dispatch_command(command, command_file=command_file)
+        return self._dispatch_command(command, command_file=command_file)
 
-    def dispatch_command(self, command: CommandMapping, *, command_file: str) -> CommandOutcome:
-        kind = command_kind(command)
-        handlers: dict[str, Callable[[CommandMapping], CommandOutcome]] = {
-            "register_service": self._register_service_command,
-            "register_path": self.register_path,
-            "publish_value": lambda item: self.publish_command(item, command_file=command_file),
-            "publish_desired": lambda item: self.publish_command(item, command_file=command_file),
-            "publish_fields": lambda item: self.publish_command(item, command_file=command_file),
-            "set_value": self.set_remote_value,
-        }
-        handler = handlers.get(kind)
-        if handler is None:
-            return self.adapter.process_non_write_command(command)
-        return handler(command)
+    def _command_blocked(self, command: CommandMapping) -> bool:
+        priority = str(command.get("priority") or "diagnostic")
+        return not self.adapter.circuit.allows_priority(priority)
 
-    def _register_service_command(self, _command: CommandMapping) -> CommandOutcome:
-        self.adapter.register_dbus_service_name()
-        return "applied"
+    def _dispatch_command(self, command: CommandMapping, *, command_file: str) -> CommandOutcome:
+        kind = self._command_kind(command)
+        if kind in SEMANTIC_PUBLICATION_KINDS:
+            return self.process_publication(command)
+        if self._is_semantic_operation(kind):
+            return self.process_semantic_operation(command, command_file=command_file)
+        return self.adapter.process_non_write_command(command)
+
+    @staticmethod
+    def _command_kind(command: CommandMapping) -> str:
+        return str(command.get("kind") or command.get("type") or "")
+
+    @staticmethod
+    def _is_semantic_operation(kind: str) -> bool:
+        return kind in SEMANTIC_GATEWAY_KINDS or kind == DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND
 
     def process_loaded_command(
         self,
@@ -241,4 +199,4 @@ class DbusWriteSchedulerCore:
     @staticmethod
     def command_expired(command: CommandMapping) -> bool:
         deadline, created_at = deadline_pair(command)
-        return deadline > 0.0 and created_at > 0.0 and time.time() > created_at + deadline
+        return bool(deadline > 0.0 and created_at > 0.0 and time.time() > created_at + deadline)

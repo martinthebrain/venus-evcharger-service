@@ -34,8 +34,6 @@ class _BranchCoverageVictronApplyCasesPart2:
             auto_battery_discharge_balance_victron_bias_max_abs_watts=100.0,
             auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second=0.0,
             auto_battery_discharge_balance_victron_bias_source_id="victron",
-            auto_battery_discharge_balance_victron_bias_service="svc",
-            auto_battery_discharge_balance_victron_bias_path="/path",
             auto_energy_sources=(SimpleNamespace(source_id="alpha"),),
             _last_auto_metrics={},
             _warning_throttled=MagicMock(),
@@ -137,8 +135,6 @@ class _BranchCoverageVictronApplyCasesPart2:
             auto_battery_discharge_balance_victron_bias_integral_limit_watts=0.0,
             auto_battery_discharge_balance_victron_bias_max_abs_watts=100.0,
             auto_battery_discharge_balance_victron_bias_ramp_rate_watts_per_second=0.0,
-            auto_battery_discharge_balance_victron_bias_service="svc",
-            auto_battery_discharge_balance_victron_bias_path="/path",
             _last_auto_metrics={},
             _warning_throttled=MagicMock(),
             _reset_system_bus=MagicMock(),
@@ -204,7 +200,7 @@ class _BranchCoverageVictronApplyCasesPart2:
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "tracking")
 
         service._victron_ess_balance_last_setpoint_w = 60.0
-        with patch.object(components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+        with patch.object(components.writer, "write_setpoint", return_value=True):
             metrics = {}
             controller._victron_ess_balance_apply_write_outcome(service, 15.0, 70.0, -20.0, "profile", metrics)
             self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "applied")
@@ -220,8 +216,8 @@ class _BranchCoverageVictronApplyCasesPart2:
         with patch.object(components.recommendation, "_populate_victron_ess_balance_telemetry_metrics"), patch.object(
             components.adaptive, "_maybe_auto_apply_victron_ess_balance_recommendation"
         ), patch.object(components.sources, "_merge_victron_ess_balance_metrics"), patch.object(
-            components.writer, "_victron_ess_balance_should_write", return_value=True
-        ), patch.object(components.writer, "_victron_ess_balance_write_setpoint", return_value=True):
+            components.writer, "should_write", return_value=True
+        ), patch.object(components.writer, "write_setpoint", return_value=True):
             metrics = {}
             service._victron_ess_balance_last_setpoint_w = 70.0
             controller._restore_victron_ess_balance_base_setpoint(service, 17.0, metrics, "blocked")

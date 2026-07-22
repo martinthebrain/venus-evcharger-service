@@ -15,15 +15,9 @@ WorkerSnapshot = dict[str, Any]
 
 
 class AsyncRuntimeStatePort(Protocol):  # pragma: no cover - declarative typing contract
-    """Initialize async state and guard DBus-mainloop ownership."""
+    """Initialize RAM-only async runtime state."""
 
     def initialize(self) -> None: ...
-
-    def mark_mainloop_thread(self) -> None: ...
-
-    def direct_publish_allowed(self) -> bool: ...
-
-    def assert_mainloop_thread(self, operation: str = "dbus access") -> None: ...
 
 
 class ControlCommandQueuePort(Protocol):  # pragma: no cover - declarative typing contract
@@ -35,9 +29,7 @@ class ControlCommandQueuePort(Protocol):  # pragma: no cover - declarative typin
 
 
 class MainloopWatchdogPort(Protocol):  # pragma: no cover - declarative typing contract
-    """Maintain the GLib heartbeat and companion publish queue."""
-
-    def flush_companion_publish(self) -> bool: ...
+    """Maintain the GLib heartbeat."""
 
     def heartbeat_tick(self) -> bool: ...
 

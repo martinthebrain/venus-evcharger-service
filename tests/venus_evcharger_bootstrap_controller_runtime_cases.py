@@ -24,7 +24,6 @@ class _RuntimePort:
         self.start_control_command_worker = MagicMock()
         self.start_mainloop_watchdog = MagicMock()
         self.schedule_update_cycle = MagicMock(return_value=True)
-        self.flush_dbus_publish_queue = MagicMock(return_value=True)
         self.mainloop_heartbeat_tick = MagicMock(return_value=True)
 
 
@@ -51,7 +50,6 @@ def _runtime_service(**overrides: object) -> SimpleNamespace:
         "sign_of_life_minutes": 10,
         "runtime_state_path": "/run/state.json",
         "topology_configured": True,
-        "_dbus_publish_flush_interval_ms": 200,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -60,7 +58,7 @@ def _runtime_service(**overrides: object) -> SimpleNamespace:
 def _initializer(service: object, *, mode_uses_auto: bool = False) -> RuntimeInitializer:
     return RuntimeInitializer(
         service,
-        normalize_mode=lambda value: int(value),
+        normalize_mode=lambda value: int(str(value)),
         mode_uses_auto_logic=lambda _mode: mode_uses_auto,
         read_version=lambda _name: "1.0",
         gobject=MagicMock(),

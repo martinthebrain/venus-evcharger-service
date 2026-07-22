@@ -16,9 +16,10 @@ import xml.etree.ElementTree as xml_et
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 from venus_evcharger.dbus_adapter.process.health import DbusAdapterHealth
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionSnapshotContext
-from venus_evcharger.dbus_gateway_command_types import CommandMapping, CommandPayload
 from venus_evcharger.dbus_gateway_core import float_or_default
-from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
+from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
+
+DBUS_INTROSPECTION_SCHEMA_VERSION = 1
 
 
 class DbusAdapterIntrospectionSnapshot(DbusAdapterHealth):

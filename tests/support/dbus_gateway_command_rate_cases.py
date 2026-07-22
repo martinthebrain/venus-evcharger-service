@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from tests.support.dbus_gateway_adapter_harness import (
-    DbusCommandInbox,
+    DbusGatewayCommandInbox,
     DbusOperationDeferred,
     DbusRateLimiter,
     GatewayAdapterContractCase,
@@ -18,7 +18,7 @@ class GatewayCommandRateCases(GatewayAdapterContractCase):
 
     def test_coalesced_commands_use_stable_filename_and_latest_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            inbox = DbusCommandInbox(str(Path(temp_dir) / "commands"))
+            inbox = DbusGatewayCommandInbox(str(Path(temp_dir) / "commands"))
             first = inbox.enqueue({"kind": "set_value", "value": 1, "created_at": 10.0, "coalesce_key": "ev:/Mode"})
             second = inbox.enqueue({"kind": "set_value", "value": 2, "created_at": 20.0, "coalesce_key": "ev:/Mode"})
 
@@ -33,7 +33,7 @@ class GatewayCommandRateCases(GatewayAdapterContractCase):
 
     def test_coalesce_key_overrides_explicit_command_id_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            inbox = DbusCommandInbox(str(Path(temp_dir) / "commands"))
+            inbox = DbusGatewayCommandInbox(str(Path(temp_dir) / "commands"))
             first = inbox.enqueue({"id": "manual-a", "kind": "set_value", "value": 1, "coalesce_key": "ev:/Mode"})
             second = inbox.enqueue({"id": "manual-b", "kind": "set_value", "value": 2, "coalesce_key": "ev:/Mode"})
 
@@ -44,7 +44,7 @@ class GatewayCommandRateCases(GatewayAdapterContractCase):
 
     def test_coalesced_physical_file_keeps_higher_priority_command(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            inbox = DbusCommandInbox(str(Path(temp_dir) / "commands"))
+            inbox = DbusGatewayCommandInbox(str(Path(temp_dir) / "commands"))
             path = inbox.enqueue(
                 {"kind": "set_value", "value": "off", "priority": "safety", "coalesce_key": "relay:/StartStop"}
             )

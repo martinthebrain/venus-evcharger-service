@@ -56,8 +56,8 @@ class ServiceStateFacade:
     def publish_field(self, field: str, value: object, now: float | None, *, force: bool = False) -> bool:
         return self._controllers.runtime.publisher.publish_field(field, value, now, force=force)
 
-    def bump_update_index(self, now: float | None) -> None:
-        self._controllers.runtime.publisher.bump_update_index(now)
+    def last_accepted_field(self, field: str) -> object:
+        return self._controllers.runtime.publisher.last_accepted_field(field)
 
     def publish_live_measurements(
         self,
@@ -104,6 +104,4 @@ class ServiceStateFacade:
         self._controllers.runtime.companion.stop()
 
     def publish_companion_bridge(self, now: float | None = None) -> bool:
-        if not self._runtime.dbus_publish_direct_allowed():
-            return self._runtime.enqueue_companion_dbus_publish(now)
         return self._controllers.runtime.companion.publish(now)

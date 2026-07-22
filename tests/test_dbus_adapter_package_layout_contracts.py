@@ -9,7 +9,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO / "venus_evcharger" / "dbus_adapter"
-EXPECTED_AREAS = {"health", "process", "read", "write"}
+EXPECTED_AREAS = {"health", "process", "publication", "read", "write"}
+ALLOWED_PACKAGE_EXPORTS = {
+    Path("venus_evcharger/dbus_adapter/publication/__init__.py"): {
+        ("registry", "GatewayPublicationRegistry"),
+    },
+}
 DOCUMENTATION_PATHS = (REPO / "DBUS_GATEWAY.md", REPO / "DBUS_INTROSPECTION.md")
 RETIRED_IMPORT_PREFIX = "venus_evcharger.dbus_adapter_"
 RETIRED_PATH_PREFIX = "venus_evcharger/dbus_adapter_"
@@ -25,11 +30,24 @@ class DbusAdapterPackageLayoutContractTests(unittest.TestCase):
         for area in EXPECTED_AREAS:
             self.assertTrue((PACKAGE_ROOT / area / "__init__.py").is_file())
 
-    def test_package_initializers_do_not_hide_compatibility_reexports(self) -> None:
+    def test_package_initializers_expose_only_declared_public_roles(self) -> None:
         for path in sorted(PACKAGE_ROOT.rglob("__init__.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
-            self.assertEqual(imports, [], str(path.relative_to(REPO)))
+            exports = {
+                (node.module or "", alias.name)
+                for node in tree.body
+                if isinstance(node, ast.ImportFrom)
+                for alias in node.names
+            }
+            self.assertEqual(
+                exports,
+                ALLOWED_PACKAGE_EXPORTS.get(path.relative_to(REPO), set()),
+                str(path.relative_to(REPO)),
+            )
+            self.assertFalse(
+                any(isinstance(node, ast.Import) for node in tree.body),
+                str(path.relative_to(REPO)),
+            )
 
     def test_python_imports_do_not_reference_retired_module_names(self) -> None:
         paths = sorted((REPO / "venus_evcharger").rglob("*.py"))

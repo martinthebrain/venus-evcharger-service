@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import configparser
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
 from tests.venus_evcharger_publisher_support import (
-    DbusPublishController,
     DbusPublishControllerTestCase,
     MagicMock,
     SimpleNamespace,
+    build_publish_controller,
 )
 
 

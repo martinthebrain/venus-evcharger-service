@@ -14,46 +14,37 @@ import re
 import subprocess
 import time
 import urllib.request
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from venus_evcharger.dbus_gateway import DbusCacheStore, dbus_path_key, gateway_paths
+from venus_evcharger.ipc.gateway_diagnostics import (
+    DEFAULT_GATEWAY_DIAGNOSTICS_PATH,
+    GatewayDiagnosticsFileReader,
+)
 from venus_evcharger.ops.forensic_observer_schema import (
     AUTO_INPUT_SNAPSHOT_PATH_KEY,
     DEFAULT_DEVICE_INSTANCE,
     DEFAULT_FORENSIC_SUBDIR,
-    DEFAULT_GATEWAY_RUN_DIR,
     DEFAULT_MOUNTS_PATH,
-    DEFAULT_SERVICE_NAME,
     DEVICE_INSTANCE_KEY,
-    GATEWAY_CACHE_PATH_KEY,
-    GATEWAY_RUN_DIR_KEY,
     HOST_KEY,
     INCIDENT_TIME_FORMAT,
-    INTROSPECTION_SNAPSHOT_PATH_KEY,
     REDACTED_CONFIG_FILENAME,
     RUNTIME_LOG_DIR,
-    SERVICE_NAME_KEY,
     SLUG_TRIM_CHARS,
     SNAPSHOT_FILENAME,
     UTF8,
     WRITE_PROBE_FILENAME,
 )
-
-
-EVCHARGER_PATHS = (
-    "/Mode",
-    "/StartStop",
-    "/AutoStart",
-    "/Ac/Power",
-    "/Status",
-    "/Auto/DecisionReason",
-    "/Auto/DecisionState",
-    "/Auto/LastHealthReason",
-    "/Auto/RuntimeOverridesActive",
-    "/Auto/RuntimeOverridesPath",
+from venus_evcharger.ports.gateway_diagnostics import (
+    GatewayDiagnosticsReader,
+    GatewayDiagnosticsSnapshot,
+    GatewayDiagnosticsUnavailable,
 )
+
+
+GATEWAY_DIAGNOSTICS_SNAPSHOT_PATH_KEY = "GatewayDiagnosticsSnapshotPath"
 SECRET_KEYS = ("password", "token", "secret", "auth")
 TRACE_MARKERS = ("Traceback", "malloc()", "NoReply", "dbus down", "Watchdog recovery", "stale")
 MOUNT_PREFIXES = ("/media/", "/run/media/", "/mnt/")
@@ -78,12 +69,7 @@ def device_instance(defaults: configparser.SectionProxy) -> int:
     try:
         return int(str(defaults.get(DEVICE_INSTANCE_KEY)).strip())
     except ValueError:
-        return DEFAULT_DEVICE_INSTANCE
-
-
-def evcharger_service_name(defaults: configparser.SectionProxy) -> str:
-    base = str(defaults.get(SERVICE_NAME_KEY, DEFAULT_SERVICE_NAME)).strip()
-    return f"{base or DEFAULT_SERVICE_NAME}.http_{device_instance(defaults)}"
+        return int(DEFAULT_DEVICE_INSTANCE)
 
 
 def auto_input_snapshot_path(defaults: configparser.SectionProxy) -> str:
@@ -93,19 +79,9 @@ def auto_input_snapshot_path(defaults: configparser.SectionProxy) -> str:
     return f"/run/dbus-venus-evcharger-auto-{device_instance(defaults)}.json"
 
 
-def dbus_introspection_snapshot_path(defaults: configparser.SectionProxy) -> str:
-    configured = str(defaults.get(INTROSPECTION_SNAPSHOT_PATH_KEY, "")).strip()
-    if configured:
-        return configured
-    return f"/run/dbus-venus-evcharger-dbus-map-{device_instance(defaults)}.json"
-
-
-def dbus_gateway_cache_path(defaults: configparser.SectionProxy) -> str:
-    configured = str(defaults.get(GATEWAY_CACHE_PATH_KEY, "")).strip()
-    if configured:
-        return configured
-    run_dir = str(defaults.get(GATEWAY_RUN_DIR_KEY, DEFAULT_GATEWAY_RUN_DIR)).strip()
-    return gateway_paths(run_dir or None).cache_path
+def gateway_diagnostics_snapshot_path(defaults: configparser.SectionProxy) -> str:
+    configured = str(defaults.get(GATEWAY_DIAGNOSTICS_SNAPSHOT_PATH_KEY, "")).strip()
+    return configured or DEFAULT_GATEWAY_DIAGNOSTICS_PATH
 
 
 def runtime_state_path(defaults: configparser.SectionProxy) -> str:
@@ -179,43 +155,13 @@ def command_output(args: list[str], timeout: float = 3.0) -> dict[str, Any]:
         return {"ok": False, "error": str(error)}
 
 
-def json_ready(value: Any) -> Any:
-    """Return one JSON-serializable representation of DBus or Python values."""
-    if _is_json_scalar(value):
-        return value
-    return _json_ready_complex(value)
-
-
-def _json_ready_complex(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): json_ready(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [json_ready(item) for item in value]
-    return str(value)
-
-
-def _is_json_scalar(value: Any) -> bool:
-    return isinstance(value, (str, int, float, bool)) or value is None
-
-
-def read_dbus_paths(
-    service_name: str,
-    paths: Iterable[str] = EVCHARGER_PATHS,
-    *,
-    bus_factory: Callable[[], Any] | None = None,
-    cache_path: str = "",
-) -> dict[str, Any]:
-    del bus_factory
-    snapshot = DbusCacheStore.load_snapshot(cache_path or gateway_paths().cache_path)
-    values: dict[str, Any] = {}
-    errors: dict[str, str] = {}
-    for path in paths:
-        entry = DbusCacheStore.value_entry(snapshot, dbus_path_key(service_name, path))
-        if entry is None:
-            errors[path] = "missing-from-gateway-cache"
-            continue
-        values[path] = json_ready(entry.get("value"))
-    return {"ok": not errors, "values": values, "errors": errors}
+def read_gateway_diagnostics(reader: GatewayDiagnosticsReader) -> dict[str, object]:
+    """Return a stable forensic envelope around one semantic gateway snapshot."""
+    try:
+        snapshot = reader.read_snapshot()
+    except GatewayDiagnosticsUnavailable as error:
+        return {"available": False, "error": str(error)}
+    return {"available": True, "snapshot": snapshot.to_payload()}
 
 
 def fetch_shelly_status(host: str, timeout: float = 2.0) -> dict[str, Any]:
@@ -260,13 +206,15 @@ def read_text_safe(path: str) -> str:
         return f"<unavailable: {error}>\n"
 
 
-def read_json_file(path: str) -> dict[str, Any]:
+def read_json_file(path: str) -> dict[str, object]:
     try:
-        payload = json.loads(Path(path).read_text(encoding=UTF8))
+        decoded: object = json.loads(Path(path).read_text(encoding=UTF8))
     except FORENSIC_JSON_READ_ERRORS as error:
         return {"ok": False, "path": path, "error": str(error)}
-    if not isinstance(payload, dict):
+    if not isinstance(decoded, dict):
         return {"ok": False, "path": path, "error": "not-a-json-object"}
+    untyped = cast(dict[object, object], decoded)
+    payload: dict[str, object] = {str(key): value for key, value in untyped.items()}
     payload["ok"] = True
     payload["path"] = path
     return payload
@@ -291,9 +239,13 @@ def helper_processes(ps_text: str) -> list[dict[str, Any]]:
     return matching_processes(ps_text, "venus_evcharger_auto_input_helper.py")
 
 
-def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None = None) -> dict[str, Any]:
+def collect_snapshot(
+    config_path: str,
+    *,
+    diagnostics_reader: GatewayDiagnosticsReader | None = None,
+) -> dict[str, Any]:
     defaults = load_defaults(config_path)
-    service_name = evcharger_service_name(defaults)
+    reader = diagnostics_reader or GatewayDiagnosticsFileReader(gateway_diagnostics_snapshot_path(defaults))
     log_dir = RUNTIME_LOG_DIR
     runtime_log_tail = tail_log_dir(log_dir)
     runtime_markers = sorted(
@@ -303,11 +255,9 @@ def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None 
     ps_text = str(ps_snapshot.get("stdout") or "")
     return {
         "timestamp": time.time(),
-        "service_name": service_name,
         "config_path": config_path,
-        "dbus": read_dbus_paths(service_name, bus_factory=bus_factory, cache_path=dbus_gateway_cache_path(defaults)),
+        "gateway_diagnostics": read_gateway_diagnostics(reader),
         "auto_input_snapshot": read_json_file(auto_input_snapshot_path(defaults)),
-        "dbus_introspection_snapshot": read_json_file(dbus_introspection_snapshot_path(defaults)),
         "runtime_state": read_json_file(runtime_state_path(defaults)),
         "helper_processes": helper_processes(ps_text),
         "shelly": fetch_shelly_status(configured_host(defaults)),
@@ -319,31 +269,55 @@ def collect_snapshot(config_path: str, *, bus_factory: Callable[[], Any] | None 
     }
 
 
-def incident_reasons(snapshot: dict[str, Any]) -> list[str]:
-    reasons = _dbus_incident_reasons(snapshot)
+def incident_reasons(snapshot: Mapping[str, object]) -> list[str]:
+    reasons = _gateway_incident_reasons(snapshot)
     reasons.extend(_runit_incident_reasons(snapshot))
-    reasons.extend(f"log-marker-{_slug(marker)}" for marker in snapshot.get("trace_markers", []))
+    reasons.extend(_marker_incident_reasons(snapshot.get("trace_markers")))
     return sorted(set(reasons))
 
 
-def _dbus_incident_reasons(snapshot: dict[str, Any]) -> list[str]:
-    dbus_state = snapshot.get("dbus")
-    if not isinstance(dbus_state, dict):
+def _marker_incident_reasons(value: object) -> list[str]:
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
         return []
-    dbus_errors = dbus_state.get("errors")
-    if not isinstance(dbus_errors, dict):
+    markers = cast(Sequence[object], value)
+    return [f"log-marker-{_slug(marker)}" for marker in markers if isinstance(marker, str)]
+
+
+def _gateway_incident_reasons(snapshot: Mapping[str, object]) -> list[str]:
+    try:
+        gateway = _gateway_diagnostics_from_artifact(snapshot)
+    except (TypeError, ValueError):
+        return ["gateway-diagnostics-invalid"]
+    if gateway is None:
         return []
-    reasons: list[str] = []
-    for path in ("/Mode", "/StartStop", "/Ac/Power"):
-        if path in dbus_errors:
-            reasons.append(f"dbus-{path}-failed")
+    reasons = [f"gateway-{name.replace('_', '-')}-unavailable" for name in gateway.critical_unavailable_fields()]
+    health_reason = _gateway_health_incident_reason(gateway)
+    if health_reason:
+        reasons.append(health_reason)
     return reasons
 
 
-def _runit_incident_reasons(snapshot: dict[str, Any]) -> list[str]:
-    svstat = snapshot.get("svstat")
-    if not isinstance(svstat, dict):
+def _gateway_diagnostics_from_artifact(snapshot: Mapping[str, object]) -> GatewayDiagnosticsSnapshot | None:
+    raw_diagnostics = snapshot.get("gateway_diagnostics")
+    if not isinstance(raw_diagnostics, Mapping):
+        return None
+    diagnostics = cast(Mapping[str, object], raw_diagnostics)
+    if not diagnostics.get("available"):
+        return None
+    return GatewayDiagnosticsSnapshot.from_payload(diagnostics.get("snapshot"))
+
+
+def _gateway_health_incident_reason(gateway: GatewayDiagnosticsSnapshot) -> str:
+    if gateway.health.state in {"protective", "unavailable"}:
+        return f"gateway-health-{gateway.health.state}"
+    return ""
+
+
+def _runit_incident_reasons(snapshot: Mapping[str, object]) -> list[str]:
+    raw_svstat = snapshot.get("svstat")
+    if not isinstance(raw_svstat, Mapping):
         return []
+    svstat = cast(Mapping[str, object], raw_svstat)
     if not svstat.get("ok"):
         return ["runit-status-failed"]
     stdout = svstat.get("stdout")
@@ -355,8 +329,13 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip(SLUG_TRIM_CHARS) or "event"
 
 
-def write_incident(log_dir: str, snapshot: dict[str, Any], config_path: str, reasons: list[str]) -> str:
-    stamp = time.strftime(INCIDENT_TIME_FORMAT, time.localtime(float(snapshot["timestamp"])))
+def write_incident(
+    log_dir: str,
+    snapshot: Mapping[str, object],
+    config_path: str,
+    reasons: list[str],
+) -> str:
+    stamp = time.strftime(INCIDENT_TIME_FORMAT, time.localtime(_artifact_timestamp(snapshot)))
     incident_dir = Path(log_dir) / f"incident-{stamp}-{_slug('-'.join(reasons))[:80]}"
     incident_dir.mkdir(parents=True, exist_ok=True)
     payload = dict(snapshot)
@@ -368,19 +347,26 @@ def write_incident(log_dir: str, snapshot: dict[str, Any], config_path: str, rea
     return str(incident_dir)
 
 
+def _artifact_timestamp(snapshot: Mapping[str, object]) -> float:
+    value = snapshot.get("timestamp")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("forensic snapshot timestamp must be numeric")
+    return float(value)
+
+
 def _observer_iteration(
     config_path: str,
     last_incident_at: float,
     *,
     incident_cooldown: float,
     mounts_path: str,
-    bus_factory: Callable[[], Any] | None,
+    diagnostics_reader: GatewayDiagnosticsReader | None,
 ) -> float:
     mounts = read_mounts(mounts_path)
     log_dir = first_writable_log_dir(mounted_storage_candidates(mounts))
     if not log_dir:
         return last_incident_at
-    snapshot = collect_snapshot(config_path, bus_factory=bus_factory)
+    snapshot = collect_snapshot(config_path, diagnostics_reader=diagnostics_reader)
     reasons = incident_reasons(snapshot)
     now = time.time()
     if reasons and (now - last_incident_at) >= incident_cooldown:
@@ -396,7 +382,7 @@ def observer_loop(
     interval: float = 30.0,
     incident_cooldown: float = 900.0,
     mounts_path: str = DEFAULT_MOUNTS_PATH,
-    bus_factory: Callable[[], Any] | None = None,
+    diagnostics_reader: GatewayDiagnosticsReader | None = None,
 ) -> None:
     time.sleep(max(0.0, start_delay))
     last_incident_at = 0.0
@@ -406,7 +392,7 @@ def observer_loop(
             last_incident_at,
             incident_cooldown=incident_cooldown,
             mounts_path=mounts_path,
-            bus_factory=bus_factory,
+            diagnostics_reader=diagnostics_reader,
         )
         time.sleep(max(1.0, interval))
 
@@ -414,8 +400,8 @@ def observer_loop(
 __all__ = [
     "collect_snapshot",
     "device_instance",
-    "evcharger_service_name",
     "first_writable_log_dir",
+    "gateway_diagnostics_snapshot_path",
     "incident_reasons",
     "mounted_storage_candidates",
     "observer_loop",

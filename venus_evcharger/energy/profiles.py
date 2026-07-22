@@ -10,7 +10,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class EnergySourceProfile:
-    """Default connector and path settings for one named energy-source profile."""
+    """Default connector settings for one named external-source profile."""
 
     profile_name: str
     role: str
@@ -20,18 +20,8 @@ class EnergySourceProfile:
     family_name: str = ""
     access_mode: str = ""
     firmware_class: str = ""
-    service_prefix: str = ""
-    soc_path: str = ""
-    battery_power_path: str = ""
-    ac_power_path: str = ""
-    pv_power_path: str = ""
-    grid_interaction_path: str = ""
-    operating_mode_path: str = ""
     battery_chemistry: str = "lfp"
     capacity_auto_estimate: bool = True
-    capacity_wh_path: str = ""
-    capacity_ah_path: str = "/InstalledCapacity"
-    voltage_path: str = "/Dc/0/Voltage"
     capacity_estimate_min_soc: float = 95.0
     capacity_startup_recheck_seconds: float = 300.0
     default_host: str = ""
@@ -76,25 +66,6 @@ def _profile_variant(base: EnergySourceProfile, profile_name: str, *, family_nam
 
 
 _PROFILES = {
-    "dbus-battery": EnergySourceProfile(
-        profile_name="dbus-battery",
-        role="battery",
-        connector_type="dbus",
-        service_prefix="com.victronenergy.battery",
-        soc_path="/Soc",
-        battery_power_path="/Dc/0/Power",
-    ),
-    "dbus-hybrid": EnergySourceProfile(
-        profile_name="dbus-hybrid",
-        role="hybrid-inverter",
-        connector_type="dbus",
-        soc_path="/Soc",
-        battery_power_path="/Dc/0/Power",
-        ac_power_path="/Ac/Power",
-        pv_power_path="/Pv/Power",
-        grid_interaction_path="/Grid/Power",
-        operating_mode_path="/Mode",
-    ),
     "template-http-hybrid": EnergySourceProfile(
         profile_name="template-http-hybrid",
         role="hybrid-inverter",
@@ -284,8 +255,6 @@ for _family in ("MAP0", "MB0"):
     )
 
 _ALIASES = {
-    "battery": "dbus-battery",
-    "hybrid": "dbus-hybrid",
     "template-http": "template-http-hybrid",
     "http-hybrid": "template-http-hybrid",
     "modbus": "modbus-hybrid",
@@ -330,18 +299,8 @@ def energy_source_profile_defaults(profile_name: object) -> Mapping[str, Any]:
         "Profile": profile.profile_name,
         "Role": profile.role,
         "Type": profile.connector_type,
-        "ServicePrefix": profile.service_prefix,
-        "SocPath": profile.soc_path,
-        "BatteryPowerPath": profile.battery_power_path,
-        "AcPowerPath": profile.ac_power_path,
-        "PvPowerPath": profile.pv_power_path,
-        "GridInteractionPath": profile.grid_interaction_path,
-        "OperatingModePath": profile.operating_mode_path,
         "BatteryChemistry": profile.battery_chemistry,
         "CapacityAutoEstimate": profile.capacity_auto_estimate,
-        "CapacityWhPath": profile.capacity_wh_path,
-        "CapacityAhPath": profile.capacity_ah_path,
-        "VoltagePath": profile.voltage_path,
         "CapacityEstimateMinSoc": profile.capacity_estimate_min_soc,
         "CapacityStartupRecheckSeconds": profile.capacity_startup_recheck_seconds,
     }

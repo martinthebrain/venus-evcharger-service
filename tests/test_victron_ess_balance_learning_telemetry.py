@@ -3,7 +3,6 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from venus_evcharger.update.victron_ess_balance_apply_write import VictronEssSetpointWriter
 from venus_evcharger.update.victron_ess_balance_scoring import (
     clamped_stability_score,
     delay_penalty_value,
@@ -208,7 +207,7 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         )
         self.assertGreater(self.scorer.stability_score(svc), 0.0)
 
-    def test_tracking_wrappers_and_gateway_dbus_guard(self) -> None:
+    def test_tracking_wrappers_reset_episode_and_pid_state(self) -> None:
         svc = SimpleNamespace()
         self.harness._record_victron_ess_balance_command(svc, 1.0, 50.0, -20.0, "p")
         self.assertEqual(svc._victron_ess_balance_telemetry_last_command_profile_key, "p")
@@ -216,8 +215,6 @@ class VictronEssBalanceLearningTelemetryTests(unittest.TestCase):
         self.assertIsNone(svc._victron_ess_balance_telemetry_last_command_at)
         self.pid.reset(svc)
         self.pid.reset_integral(svc, aggressive=True)
-        with self.assertRaises(RuntimeError):
-            VictronEssSetpointWriter._victron_ess_balance_dbus_module()
 
 
 if __name__ == "__main__":

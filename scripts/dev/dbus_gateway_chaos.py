@@ -16,19 +16,26 @@ import tempfile
 import time
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from venus_evcharger.dbus_gateway import gateway_paths
+from venus_evcharger.ipc.command_mailbox import normalized_mapping
+from venus_evcharger.ipc.gateway_publication import (
+    publish_companion_fields_command,
+    publish_evcs_fields_command,
+    register_evcs_command,
+)
+from venus_evcharger.ports.gateway_publication import EvcsServiceIdentity
 
 GUI_BURST_COMMAND_COUNT = 200
-GUI_BURST_DRAIN_TICKS = 50
 RESOURCE_PRESSURE_MIN_TICK_SECONDS = 0.3
 
 
 class _FakeDbusService(dict[str, object]):
-    def __init__(self) -> None:
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
         super().__init__()
         self.registered = False
 
@@ -40,7 +47,7 @@ class _FakeDbusService(dict[str, object]):
 
 
 fake_vedbus = ModuleType("vedbus")
-fake_vedbus.VeDbusService = _FakeDbusService
+fake_vedbus.__dict__["VeDbusService"] = _FakeDbusService
 sys.modules.setdefault("vedbus", fake_vedbus)
 
 from venus_evcharger_dbus_adapter import DbusAdapter
@@ -58,9 +65,27 @@ def _adapter(temp_dir: str, extra_config: str = "") -> DbusAdapter:
         f"{extra_config}",
         encoding="utf-8",
     )
-    adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-    adapter.set_dbus_service(_FakeDbusService(), registered=True)
-    return adapter
+    return DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+
+
+def _evcs_identity() -> EvcsServiceIdentity:
+    return EvcsServiceIdentity(
+        product_name="Chaos EVCS",
+        custom_name="Chaos EVCS",
+        firmware_version="test",
+        hardware_version="simulated",
+        serial="chaos-evcs",
+        connection_name="Offline chaos harness",
+        process_name="dbus_gateway_chaos.py",
+        process_version="Python",
+    )
+
+
+def _register_evcs(adapter: DbusAdapter) -> None:
+    outcome = adapter.write_scheduler.process_command(
+        register_evcs_command(_evcs_identity(), {"connected": 1, "mode": 0})
+    )
+    _assert(outcome == "applied", f"semantic EVCS registration failed: {outcome}")
 
 
 def _assert(condition: bool, message: str) -> None:
@@ -70,68 +95,64 @@ def _assert(condition: bool, message: str) -> None:
 
 def scenario_dbus_hang(temp_dir: str) -> None:
     adapter = _adapter(temp_dir)
-    adapter.process_socket_once = lambda: None
-    adapter.process_one_dbus_operation_once = lambda: (_ for _ in ()).throw(TimeoutError("simulated 5s DBus hang"))
-    adapter.publish_cache = lambda: None
-    _assert(adapter.tick(), "tick should survive simulated DBus timeout")
-    _assert(adapter.circuit.last_error, "circuit should record the simulated DBus timeout")
+    with (
+        patch.object(adapter, "process_socket_once", return_value=None),
+        patch.object(
+            adapter,
+            "process_one_dbus_operation_once",
+            side_effect=TimeoutError("simulated 5s DBus hang"),
+        ),
+        patch.object(adapter, "publish_cache", return_value=None),
+    ):
+        _assert(bool(adapter.tick()), "tick should survive simulated DBus timeout")
+    _assert(bool(adapter.circuit.last_error), "circuit should record the simulated DBus timeout")
 
 
 def scenario_gui_burst(temp_dir: str) -> None:
     adapter = _adapter(temp_dir, "DbusGatewayLocalPublishTickBudgetMs=10\n")
+    _register_evcs(adapter)
     for index in range(GUI_BURST_COMMAND_COUNT):
-        path = f"/Chaos/{index}"
-        adapter.write_scheduler.registered_paths.add(path)
-        adapter.commands.enqueue(
-            {
-                "kind": "publish_value",
-                "path": path,
-                "value": index,
-                "priority": "publish",
-                "coalesce_key": f"publish:{path}",
-            }
-        )
-    first_tick = adapter.write_scheduler.process_local_publish_burst(GUI_BURST_COMMAND_COUNT)
+        adapter.commands.enqueue(publish_evcs_fields_command({"ac_power_w": index}, priority="live"))
+    pending = adapter.commands.load_pending()
+    _assert(len(pending) == 1, f"semantic latest-wins burst should coalesce to one command, got {len(pending)}")
+    processed = adapter.write_scheduler.process_local_publish_burst(GUI_BURST_COMMAND_COUNT)
     _assert(
-        0 < first_tick < GUI_BURST_COMMAND_COUNT,
-        f"first GUI burst tick should be bounded, got {first_tick}",
-    )
-    processed = first_tick
-    for _index in range(GUI_BURST_DRAIN_TICKS):
-        if not adapter.commands.load_pending():
-            break
-        processed += adapter.write_scheduler.process_local_publish_burst(GUI_BURST_COMMAND_COUNT)
-    _assert(
-        processed == GUI_BURST_COMMAND_COUNT,
-        f"expected {GUI_BURST_COMMAND_COUNT} GUI publishes across bounded ticks, got {processed}",
+        processed == 1,
+        f"coalesced GUI burst should require one scheduled publication, got {processed}",
     )
     _assert(not adapter.commands.load_pending(), "GUI burst queue should drain")
+    observation = adapter.publication_registry.evcs_field_observation("ac_power_w")
+    _assert(
+        observation is not None and observation.value == GUI_BURST_COMMAND_COUNT - 1,
+        "latest semantic EVCS value should win the coalesced burst",
+    )
 
 
 def scenario_core_overproduction(temp_dir: str) -> None:
     adapter = _adapter(temp_dir, "DbusGatewaySloQueueMaxAgeSeconds=1\n")
     now = time.time()
     for index in range(80):
-        adapter.commands.enqueue(
-            {
-                "kind": "publish_value",
-                "path": f"/Optional/{index}",
-                "value": index,
-                "priority": "diagnostic",
-                "created_at": now - 5.0,
-                "coalesce_key": f"publish:/Optional/{index}",
-            }
+        publication = publish_companion_fields_command(
+            f"chaos-source-{index}",
+            {"ac_power_w": index},
+            priority="diagnostic",
         )
+        publication["created_at"] = now - 5.0
+        adapter.commands.enqueue(publication)
     health = adapter.health_snapshot()
-    _assert(health["backpressure"]["state"] != "ok", "overproduction should trip backpressure")
+    backpressure = normalized_mapping(health.get("backpressure"))
+    _assert(
+        backpressure is not None and backpressure.get("state") != "ok",
+        "overproduction should trip backpressure",
+    )
 
 
 def scenario_reboot_mid_burst(temp_dir: str) -> None:
     paths = gateway_paths(str(Path(temp_dir) / "run"))
     first = _adapter(temp_dir)
-    first.commands.enqueue({"kind": "publish_value", "path": "/Mode", "value": 1, "coalesce_key": "publish:/Mode"})
+    first.commands.enqueue(publish_evcs_fields_command({"mode": 1}, priority="critical"))
     second = DbusAdapter(first.config_path, paths=paths)
-    _assert(second.commands.load_pending(), "command should survive adapter restart")
+    _assert(bool(second.commands.load_pending()), "command should survive adapter restart")
 
 
 def scenario_resource_pressure(temp_dir: str) -> None:

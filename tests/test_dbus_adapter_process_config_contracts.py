@@ -192,7 +192,6 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
             config.introspection_settings(defaults(), 61),
             config.GatewayIntrospectionSettings(
                 "/run/dbus-venus-evcharger-dbus-map-61.json",
-                "/run/dbus-venus-evcharger-dbus-map-requests-61.json",
                 True,
             ),
         )
@@ -204,7 +203,6 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "DbusGatewayHealthLogIntervalSeconds": "-1",
                 "DbusGatewayHealthLogMaxBytes": "-1",
                 "DbusIntrospectionSnapshotPath": " /tmp/snapshot.json ",
-                "DbusIntrospectionRequestPath": " /tmp/request.json ",
                 "DbusIntrospectionEnabled": "false",
             }
         )
@@ -214,7 +212,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
         )
         self.assertEqual(
             config.introspection_settings(custom, 61),
-            config.GatewayIntrospectionSettings("/tmp/snapshot.json", "/tmp/request.json", False),
+            config.GatewayIntrospectionSettings("/tmp/snapshot.json", False),
         )
 
         for key, value in (
@@ -223,10 +221,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
         ):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, key):
                 config.file_settings(defaults({key: value}), paths)
-        for key, value in (
-            ("DbusIntrospectionSnapshotPath", "."),
-            ("DbusIntrospectionRequestPath", "/tmp/request.txt"),
-        ):
+        for key, value in (("DbusIntrospectionSnapshotPath", "."),):
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, key):
                 config.introspection_settings(defaults({key: value}), 61)
 

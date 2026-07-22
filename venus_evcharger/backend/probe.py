@@ -18,11 +18,12 @@ from __future__ import annotations
 import argparse
 import configparser
 import json
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import requests
 
@@ -30,7 +31,12 @@ from .config import backend_selection_view
 from .config_file import load_required_backend_config
 from .factory import build_service_backends
 from .registry import CHARGER_BACKENDS, METER_BACKENDS, SWITCH_BACKENDS
-from venus_evcharger.dbus_introspection import load_introspection_snapshot
+from venus_evcharger.ipc.gateway_diagnostics import GatewayDiagnosticsFileReader
+from venus_evcharger.ports.gateway_diagnostics import (
+    GatewayDiagnosticsReader,
+    GatewayDiagnosticsUnavailable,
+)
+from venus_evcharger.ports.gateway_operations import UnavailableGatewayOperations
 
 _ADAPTER_SECTION = "Adapter"
 _DEFAULT_SECTION = "DEFAULT"
@@ -45,16 +51,19 @@ _SHELLY_COMPONENT_KEY = "shellycomponent"
 _SHELLY_ID_KEY = "shellyid"
 _PHASE_KEY = "phase"
 _MAX_CURRENT_KEY = "maxcurrent"
-_DEVICE_INSTANCE_KEY = "deviceinstance"
-_DBUS_INTROSPECTION_ENABLED_KEY = "dbusintrospectionenabled"
-_DBUS_INTROSPECTION_SNAPSHOT_PATH_KEY = "dbusintrospectionsnapshotpath"
-_DBUS_INTROSPECTION_MAX_AGE_KEY = "dbusintrospectionmaxageseconds"
+_GATEWAY_DIAGNOSTICS_MAX_AGE_SECONDS = 900.0
 _TRUTHY_TEXTS = frozenset(("1", "true", "yes", "on"))
 
 
 def _config(path: str) -> configparser.ConfigParser:
     """Load one backend config file."""
-    return load_required_backend_config(path, "backend probe")
+    return _required_config(load_required_backend_config(path, "backend probe"))
+
+
+def _required_config(value: object) -> configparser.ConfigParser:
+    if not isinstance(value, configparser.ConfigParser):
+        raise TypeError("backend probe config loader must return ConfigParser")
+    return value
 
 
 def _adapter_type(path: str) -> str:
@@ -115,6 +124,7 @@ def _probe_service() -> Any:
         phase="L1",
         max_current=16.0,
         _last_voltage=None,
+        gateway_operations=UnavailableGatewayOperations(),
     )
 
 
@@ -134,6 +144,7 @@ def _probe_service_from_wallbox_config(config: configparser.ConfigParser) -> Any
         phase=_section_option_text(defaults, _PHASE_KEY, "L1"),
         max_current=_section_option_float(defaults, _MAX_CURRENT_KEY, 16.0),
         _last_voltage=None,
+        gateway_operations=UnavailableGatewayOperations(),
     )
 
 
@@ -154,18 +165,18 @@ def _json_ready_container(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, dict):
-        return _json_ready_mapping(value)
+        return _json_ready_mapping(cast(dict[object, object], value))
     if isinstance(value, (list, tuple)):
-        return _json_ready_sequence(value)
+        return _json_ready_sequence(cast(Sequence[object], value))
     return value
 
 
-def _json_ready_mapping(value: dict[Any, Any]) -> dict[str, Any]:
+def _json_ready_mapping(value: Mapping[object, object]) -> dict[str, Any]:
     """Convert JSON object payloads recursively to stable string-keyed dicts."""
     return {str(key): _json_ready(item) for key, item in value.items()}
 
 
-def _json_ready_sequence(value: list[Any] | tuple[Any, ...]) -> list[Any]:
+def _json_ready_sequence(value: Sequence[object]) -> list[Any]:
     """Convert JSON arrays recursively to plain Python lists."""
     return [_json_ready(item) for item in value]
 
@@ -197,7 +208,11 @@ def validate_backend_config(path: str) -> dict[str, object]:
     }
 
 
-def validate_wallbox_config(path: str) -> dict[str, object]:
+def validate_wallbox_config(
+    path: str,
+    *,
+    diagnostics_reader: GatewayDiagnosticsReader | None = None,
+) -> dict[str, object]:
     """Validate one full wallbox config including backend selection compatibility.
 
     This command is especially useful for composed installations because it
@@ -207,7 +222,6 @@ def validate_wallbox_config(path: str) -> dict[str, object]:
     config = _config(path)
     service = _probe_service_from_wallbox_config(config)
     resolved = build_service_backends(service)
-    defaults = config["DEFAULT"]
     return {
         "path": path,
         "runtime": _json_ready(resolved.runtime),
@@ -217,53 +231,36 @@ def validate_wallbox_config(path: str) -> dict[str, object]:
             "switch": resolved.switch is not None,
             "charger": resolved.charger is not None,
         },
-        "dbus_introspection": _dbus_introspection_probe_summary(defaults),
+        "gateway_diagnostics": _gateway_diagnostics_probe_summary(diagnostics_reader),
     }
 
 
-def _dbus_introspection_probe_summary(defaults: configparser.SectionProxy) -> dict[str, object]:
-    deviceinstance = int(_section_option_float(defaults, _DEVICE_INSTANCE_KEY, 60.0))
-    snapshot_path = _dbus_introspection_snapshot_path(defaults, deviceinstance)
-    snapshot = _dbus_introspection_snapshot(defaults, snapshot_path)
-    services = snapshot.get("services") if isinstance(snapshot, dict) else None
+def _gateway_diagnostics_probe_summary(
+    reader: GatewayDiagnosticsReader | None = None,
+    *,
+    now: float | None = None,
+    max_age_seconds: float = _GATEWAY_DIAGNOSTICS_MAX_AGE_SECONDS,
+) -> dict[str, object]:
+    source = reader or GatewayDiagnosticsFileReader()
+    try:
+        snapshot = source.read_snapshot()
+    except GatewayDiagnosticsUnavailable as error:
+        return {
+            "available": False,
+            "fresh": False,
+            "error": str(error),
+        }
+    current_time = time.time() if now is None else now
     return {
-        "enabled": _dbus_introspection_enabled(defaults),
-        "snapshot_path": snapshot_path,
-        "snapshot_fresh": bool(snapshot),
-        "worker_state": _dbus_introspection_gateway_state(snapshot),
-        "queue_depth": _dbus_introspection_queue_depth(snapshot),
-        "service_count": _dbus_introspection_service_count(services),
+        "available": True,
+        "fresh": snapshot.is_fresh(current_time, max_age_seconds),
+        "sequence": snapshot.sequence,
+        "age_seconds": snapshot.age_seconds(current_time),
+        "gateway_state": snapshot.health.state,
+        "gateway_stale": snapshot.health.stale,
+        "discovery": snapshot.discovery.to_payload(),
+        "critical_unavailable_fields": list(snapshot.critical_unavailable_fields()),
     }
-
-
-def _dbus_introspection_snapshot_path(defaults: configparser.SectionProxy, deviceinstance: int) -> str:
-    default_path = f"/run/dbus-venus-evcharger-dbus-map-{deviceinstance}.json"
-    return _section_option_text(defaults, _DBUS_INTROSPECTION_SNAPSHOT_PATH_KEY, default_path)
-
-
-def _dbus_introspection_snapshot(defaults: configparser.SectionProxy, snapshot_path: str) -> dict[str, object]:
-    max_age_seconds = _section_option_float(defaults, _DBUS_INTROSPECTION_MAX_AGE_KEY, 900.0)
-    return load_introspection_snapshot(snapshot_path, max_age_seconds=max_age_seconds)
-
-
-def _dbus_introspection_enabled(defaults: configparser.SectionProxy) -> bool:
-    return _section_option_bool(defaults, _DBUS_INTROSPECTION_ENABLED_KEY, True)
-
-
-def _dbus_introspection_gateway_state(snapshot: object) -> str:
-    state = snapshot.get("worker_state") if isinstance(snapshot, dict) else None
-    return "" if state is None else str(state)
-
-
-def _dbus_introspection_queue_depth(snapshot: object) -> int:
-    if not isinstance(snapshot, dict):
-        return 0
-    depth = snapshot.get("queue_depth")
-    return int(depth) if depth is not None else 0
-
-
-def _dbus_introspection_service_count(services: object) -> int:
-    return len(services) if isinstance(services, dict) else 0
 
 
 def probe_meter_backend(path: str) -> dict[str, object]:
@@ -391,7 +388,8 @@ def _probe_command_payload(command: str, config_path: str) -> dict[str, object]:
     payload = handlers[command](config_path)
     if not isinstance(payload, dict):
         raise TypeError(f"Probe command {command!r} must return dict, got {type(payload).__name__}")
-    return {str(key): value for key, value in payload.items()}
+    untyped = cast(dict[object, object], payload)
+    return {str(key): value for key, value in untyped.items()}
 
 
 if __name__ == "__main__":  # pragma: no cover

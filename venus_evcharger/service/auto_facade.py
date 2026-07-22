@@ -6,12 +6,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from venus_evcharger.control import ControlCommand, ControlResult
-from venus_evcharger.control.models import ControlCommandSource
+from venus_evcharger.control.models import ControlCommandName, ControlCommandSource
 
 from .composition_contracts import ControllerOwnerPort
-from .runtime_facade import ServiceRuntimeFacade
-
-
 CommandEventPublisher = Callable[[ControlCommand, ControlResult], None]
 
 
@@ -20,14 +17,10 @@ class ServiceAutoFacade:
 
     def __init__(
         self,
-        async_commands_enabled: Callable[[], bool],
         controllers: ControllerOwnerPort,
-        runtime: ServiceRuntimeFacade,
         publish_command_event: CommandEventPublisher,
     ) -> None:
-        self._async_commands_enabled = async_commands_enabled
         self._controllers = controllers
-        self._runtime = runtime
         self._publish_command_event = publish_command_event
 
     def mode_uses_auto_logic(self, mode: object) -> bool:
@@ -59,13 +52,14 @@ class ServiceAutoFacade:
             grid_power,
         )
 
-    def command_from_write(
+    def command(
         self,
-        path: str,
+        name: ControlCommandName,
+        target: str,
         value: object,
-        source: ControlCommandSource = "dbus",
+        source: ControlCommandSource = "internal",
     ) -> ControlCommand:
-        return self._controllers.runtime.write.build_control_command(path, value, source=source)
+        return self._controllers.runtime.write.build_control_command(name, target, value, source=source)
 
     def command_from_payload(
         self,
@@ -78,15 +72,3 @@ class ServiceAutoFacade:
         result = self._controllers.runtime.write.handle_control_command(command)
         self._publish_command_event(command, result)
         return result
-
-    def handle_dbus_write(self, path: str, value: object) -> bool:
-        command = self.command_from_write(path, value, source="dbus")
-        if self._async_commands_enabled():
-            return self._runtime.enqueue_control_command(command)
-        return bool(self.handle_command(command).accepted)
-
-    def invalidate_pv_services(self) -> None:
-        self._controllers.runtime.dbus_input.invalidate_auto_pv_services()
-
-    def invalidate_battery_service(self) -> None:
-        self._controllers.runtime.dbus_input.invalidate_auto_battery_service()

@@ -92,38 +92,6 @@ class _EnergyConnectorsHttpOpenDtuCases:
             self.assertTrue(snapshot.online)
             self.assertEqual(snapshot.confidence, 1.0)
 
-    def test_read_energy_source_snapshot_uses_source_capacity_fallback_and_dbus_connector(self) -> None:
-        forwarded: list[tuple[str, float]] = []
-
-        def _dbus_snapshot(source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
-            forwarded.append((source.source_id, now))
-            return EnergySourceSnapshot(
-                source_id=source.source_id,
-                role=source.role,
-                service_name="com.victronenergy.battery.demo",
-                soc=55.0,
-                usable_capacity_wh=source.usable_capacity_wh,
-                online=True,
-                confidence=1.0,
-                captured_at=now,
-            )
-
-        owner = SimpleNamespace(_dbus_energy_source_snapshot=_dbus_snapshot)
-        source = EnergySourceDefinition(
-            source_id="victron",
-            role="battery",
-            connector_type="dbus",
-            usable_capacity_wh=5120.0,
-        )
-
-        snapshot = read_energy_source_snapshot(owner, source, 50.0)
-
-        self.assertEqual(forwarded, [("victron", 50.0)])
-        self.assertEqual(snapshot.usable_capacity_wh, 5120.0)
-        bad_owner = SimpleNamespace(_dbus_energy_source_snapshot=MagicMock(return_value={"source_id": "bad"}))
-        with self.assertRaisesRegex(TypeError, "_dbus_energy_source_snapshot must return EnergySourceSnapshot"):
-            read_energy_source_snapshot(bad_owner, source, 51.0)
-
     def test_template_http_connector_uses_source_capacity_when_response_omits_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = self._write_config(

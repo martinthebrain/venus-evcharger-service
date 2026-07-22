@@ -3,22 +3,24 @@
 
 from __future__ import annotations
 
-from venus_evcharger.dbus_gateway_command_types import CommandMapping
-from venus_evcharger.dbus_gateway_core import (
-    FAST_READ_KEYS,
-    GUI_CRITICAL_PUBLISH_PATHS,
-    is_object_mapping,
-    normalized_object_mapping,
+from venus_evcharger.ipc.command_types import CommandMapping
+from venus_evcharger.ipc.gateway_publication import (
+    PUBLISH_COMPANION_FIELDS_KIND,
+    PUBLISH_EVCS_FIELDS_KIND,
+    REGISTER_COMPANION_KIND,
+    REGISTER_EVCS_KIND,
 )
-from venus_evcharger.dbus_gateway_surface import evcs_fields_to_paths
+from venus_evcharger.ipc.generic_shelly_configuration import DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND
 
 _STATIC_QUEUE_CLASSES = {
-    "register_path": "startup/register",
-    "register_service": "startup/register",
-    "refresh_value": "read-slow",
-    "set_value": "remote-write",
-    "refresh_services": "discovery",
+    REGISTER_EVCS_KIND: "startup/register",
+    REGISTER_COMPANION_KIND: "startup/register",
+    "refresh_energy_inputs": "read-fast",
     "introspect": "introspection",
+    "gx_relay_refresh": "read-fast",
+    "gx_relay_set_enabled": "remote-write",
+    "ess_grid_setpoint": "remote-write",
+    DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND: "remote-write",
 }
 
 
@@ -32,17 +34,18 @@ def command_queue_class(command: CommandMapping) -> str:
     kind = _command_kind(command)
     if _is_publish_command(kind):
         return _publish_queue_class(command)
-    if kind == "refresh_value":
+    if kind == "refresh_energy_inputs":
         return _refresh_queue_class(command)
     return _STATIC_QUEUE_CLASSES.get(kind, "diagnostic")
 
 
 def _publish_queue_class(command: CommandMapping) -> str:
-    return "gui-critical-publish" if _is_gui_critical_publish(command) else "local-publish"
+    priority = _command_text(command, "publication_priority")
+    return "gui-critical-publish" if priority == "critical" else "local-publish"
 
 
 def _refresh_queue_class(command: CommandMapping) -> str:
-    return "read-fast" if _refresh_key(command) in FAST_READ_KEYS else "read-slow"
+    return "discovery" if _command_text(command, "scope") == "topology" else "read-fast"
 
 
 def command_allowed_by_backpressure(command: CommandMapping, state: str) -> bool:
@@ -76,41 +79,12 @@ def _allowed_when_protective(priority: str, queue_class: str) -> bool:
     return priority == "safety" or (priority == "user" and queue_class == "gui-critical-publish")
 
 
-def _is_gui_critical_publish(command: CommandMapping) -> bool:
-    return (
-        _single_publish_path_is_gui_critical(command)
-        or _publish_paths_are_gui_critical(command)
-        or _publish_fields_are_gui_critical(command)
-    )
-
-
-def _single_publish_path_is_gui_critical(command: CommandMapping) -> bool:
-    return _publish_path(command) in GUI_CRITICAL_PUBLISH_PATHS
-
-
-def _publish_paths_are_gui_critical(command: CommandMapping) -> bool:
-    paths = command.get("paths")
-    return is_object_mapping(paths) and any(str(item) in GUI_CRITICAL_PUBLISH_PATHS for item in paths)
-
-
-def _publish_fields_are_gui_critical(command: CommandMapping) -> bool:
-    fields = normalized_object_mapping(command.get("fields"))
-    if fields is None:
-        return False
-    mapped_paths = evcs_fields_to_paths(fields)
-    return any(path in GUI_CRITICAL_PUBLISH_PATHS for path in mapped_paths)
-
-
 def _command_kind(command: CommandMapping) -> str:
     return _command_text(command, "kind") or _command_text(command, "type")
 
 
 def _is_publish_command(kind: str) -> bool:
-    return kind in {"publish_value", "publish_desired", "publish_fields"}
-
-
-def _refresh_key(command: CommandMapping) -> str:
-    return _command_text(command, "key")
+    return kind in {PUBLISH_EVCS_FIELDS_KIND, PUBLISH_COMPANION_FIELDS_KIND}
 
 
 def _normalized_state(state: str) -> str:
@@ -129,7 +103,3 @@ def _effective_queue_class(command: CommandMapping) -> str:
 
 def _is_startup_registration(queue_class: str) -> bool:
     return queue_class == "startup/register"
-
-
-def _publish_path(command: CommandMapping) -> str:
-    return _command_text(command, "path")

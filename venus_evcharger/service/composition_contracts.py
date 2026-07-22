@@ -18,9 +18,6 @@ from .composition_ports import (
     CompanionControllerPort as _CompanionControllerPort,
 )
 from .composition_ports import (
-    DbusInputControllerPort as _DbusInputControllerPort,
-)
-from .composition_ports import (
     PublishControllerPort as _PublishControllerPort,
 )
 from .composition_ports import (
@@ -56,8 +53,6 @@ class RuntimeControllerSetPort(Protocol):
     def write(self) -> _WriteControllerPort: ...
     @property
     def auto_input(self) -> _AutoInputControllerPort: ...
-    @property
-    def dbus_input(self) -> _DbusInputControllerPort: ...
     @property
     def update(self) -> _UpdateControllerPort: ...
     @property

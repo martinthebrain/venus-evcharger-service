@@ -3,38 +3,42 @@ from tests.venus_evcharger_write_controller_support import *
 from venus_evcharger.control import ControlApiV1Service, ControlCommand
 
 
-class TestControlApiV1(DbusWriteControllerTestBase):
-    def test_command_for_dbus_write_maps_canonical_commands(self) -> None:
+class TestControlApiV1(ControlWriteControllerTestBase):
+    def test_command_for_target_maps_canonical_commands(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
-        mode_command = api.command_for_dbus_write("/Mode", 1)
-        current_command = api.command_for_dbus_write("/SetCurrent", 12.5)
-        auto_command = api.command_for_dbus_write("/Auto/StartSurplusWatts", 1800.0)
+        mode_command = api.command_for_target("set_mode", "mode", 1)
+        current_command = api.command_for_target(
+            "set_current_setting", "set_current", 12.5
+        )
+        auto_command = api.command_for_target(
+            "set_auto_runtime_setting", "auto_start_surplus_watts", 1800.0
+        )
 
         self.assertEqual(mode_command.name, "set_mode")
         self.assertEqual(current_command.name, "set_current_setting")
         self.assertEqual(auto_command.name, "set_auto_runtime_setting")
-        with self.assertRaisesRegex(ValueError, "Unsupported control path '/UnknownPath'"):
-            api.command_for_dbus_write("/UnknownPath", 1)
+        with self.assertRaisesRegex(ValueError, "does not support target 'unknown'"):
+            api.command_for_target("set_mode", "unknown", 1)
 
-    def test_command_for_write_preserves_transport_source(self) -> None:
+    def test_command_for_target_preserves_transport_source(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
-        command = api.command_for_write("/Mode", 1, source="mqtt")
+        command = api.command_for_target("set_mode", "mode", 1, source="mqtt")
 
         self.assertEqual(command.name, "set_mode")
         self.assertEqual(command.source, "mqtt")
 
-    def test_command_from_payload_accepts_canonical_name_and_default_path(self) -> None:
+    def test_command_from_payload_accepts_canonical_name_and_default_target(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
         command = api.command_from_payload(
@@ -43,56 +47,58 @@ class TestControlApiV1(DbusWriteControllerTestBase):
         )
 
         self.assertEqual(command.name, "set_mode")
-        self.assertEqual(command.path, "/Mode")
+        self.assertEqual(command.target, "mode")
         self.assertEqual(command.source, "http")
         self.assertEqual(command.command_id, "cmd-1")
         self.assertEqual(command.idempotency_key, "idem-1")
 
-    def test_command_from_payload_requires_explicit_path_for_runtime_setting_commands(self) -> None:
+    def test_command_from_payload_requires_explicit_target_for_runtime_setting_commands(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
-        with self.assertRaisesRegex(ValueError, "requires an explicit 'path'"):
+        with self.assertRaisesRegex(ValueError, "requires an explicit 'target'"):
             api.command_from_payload({"name": "set_current_setting", "value": 12.5}, source="http")
 
     def test_command_from_payload_rejects_unknown_command_names(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
         with self.assertRaisesRegex(ValueError, "Unsupported control command"):
             api.command_from_payload({"name": "set_everything_on", "value": 1}, source="http")
 
-    def test_command_from_payload_accepts_explicit_path_and_rejects_missing_shape(self) -> None:
+    def test_command_from_payload_accepts_explicit_target_and_rejects_missing_shape(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
         command = api.command_from_payload(
-            {"name": "set_current_setting", "path": "/SetCurrent", "value": 10.0},
+            {"name": "set_current_setting", "target": "set_current", "value": 10.0},
             source="http",
         )
 
-        self.assertEqual(command.path, "/SetCurrent")
-        path_command = api.command_from_payload({"path": "/Mode", "value": 1}, source="http")
-        self.assertEqual(path_command.name, "set_mode")
-        with self.assertRaisesRegex(ValueError, "must include either 'name' or 'path'"):
+        self.assertEqual(command.target, "set_current")
+        with self.assertRaisesRegex(ValueError, "must include 'name'"):
+            api.command_from_payload({"target": "mode", "value": 1}, source="http")
+        with self.assertRaisesRegex(ValueError, "must include 'name'"):
             api.command_from_payload({}, source="http")
 
     def test_command_from_payload_rejects_extra_fields_unknown_paths_and_invalid_types(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
         with self.assertRaisesRegex(ValueError, "Unsupported payload field"):
             api.command_from_payload({"name": "set_mode", "value": 1, "unexpected": True}, source="http")
-        with self.assertRaisesRegex(ValueError, "Unsupported control path"):
-            api.command_from_payload({"path": "/UnknownPath", "value": 1}, source="http")
+        with self.assertRaisesRegex(ValueError, "Unsupported payload field"):
+            api.command_from_payload(
+                {"name": "set_mode", "path": "/Mode", "value": 1}, source="http"
+            )
         with self.assertRaisesRegex(ValueError, "requires one of: 0, 1, 2"):
             api.command_from_payload({"name": "set_mode", "value": "1"}, source="http")
         with self.assertRaisesRegex(ValueError, "requires a boolean or binary integer"):
@@ -101,131 +107,132 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             api.command_from_payload({"name": "set_phase_selection", "value": ""}, source="http")
         with self.assertRaisesRegex(ValueError, "requires one of"):
             api.command_from_payload(
-                {"name": "set_auto_runtime_setting", "path": "/Auto/NotARealSetting", "value": 1},
+                {"name": "set_auto_runtime_setting", "target": "auto_unknown", "value": 1},
                 source="http",
             )
 
-    def test_command_from_payload_rejects_blank_path_and_wrong_explicit_default_path(self) -> None:
+    def test_command_from_payload_rejects_blank_or_wrong_explicit_default_target(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
-        with self.assertRaisesRegex(ValueError, "must be a non-empty string"):
-            api.command_from_payload({"path": "   ", "value": 1}, source="http")
-        with self.assertRaisesRegex(ValueError, "does not support path '/Enable'"):
-            api.command_from_payload({"name": "set_mode", "path": "/Enable", "value": 1}, source="http")
+        with self.assertRaisesRegex(ValueError, "does not support target 'enable'"):
+            api.command_from_payload(
+                {"name": "set_mode", "target": "enable", "value": 1}, source="http"
+            )
 
-    def test_command_from_payload_validates_path_specific_runtime_value_types(self) -> None:
+    def test_command_from_payload_validates_target_specific_runtime_value_types(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
         command = api.command_from_payload(
-            {"name": "set_auto_runtime_setting", "path": "/Auto/ScheduledEnabledDays", "value": "1,2,3"},
+            {"name": "set_auto_runtime_setting", "target": "auto_scheduled_enabled_days", "value": "1,2,3"},
             source="http",
         )
-        self.assertEqual(command.path, "/Auto/ScheduledEnabledDays")
+        self.assertEqual(command.target, "auto_scheduled_enabled_days")
         with self.assertRaisesRegex(ValueError, "requires a non-empty string value"):
             api.command_from_payload(
-                {"name": "set_auto_runtime_setting", "path": "/Auto/ScheduledEnabledDays", "value": 3},
+                {"name": "set_auto_runtime_setting", "target": "auto_scheduled_enabled_days", "value": 3},
                 source="http",
             )
         with self.assertRaisesRegex(ValueError, "requires a boolean or binary integer"):
             api.command_from_payload(
-                {"name": "set_auto_runtime_setting", "path": "/Auto/PhaseSwitching", "value": 3},
+                {"name": "set_auto_runtime_setting", "target": "auto_phase_switching", "value": 3},
                 source="http",
             )
         with self.assertRaisesRegex(ValueError, "requires a non-negative integer value"):
             api.command_from_payload(
-                {"name": "set_auto_runtime_setting", "path": "/Auto/PhaseMismatchLockoutCount", "value": 1.5},
+                {"name": "set_auto_runtime_setting", "target": "auto_phase_mismatch_lockout_count", "value": 1.5},
                 source="http",
             )
         with self.assertRaisesRegex(ValueError, "requires a HH:MM time string"):
             api.command_from_payload(
-                {"name": "set_auto_runtime_setting", "path": "/Auto/ScheduledLatestEndTime", "value": "25:99"},
+                {"name": "set_auto_runtime_setting", "target": "auto_scheduled_latest_end_time", "value": "25:99"},
                 source="http",
             )
         with self.assertRaisesRegex(ValueError, "between 0 and 100"):
             api.command_from_payload(
-                {"name": "set_auto_runtime_setting", "path": "/Auto/MinSoc", "value": 101},
+                {"name": "set_auto_runtime_setting", "target": "auto_min_soc", "value": 101},
                 source="http",
             )
         with self.assertRaisesRegex(ValueError, "interval \\(0, 1\\]"):
             api.command_from_payload(
-                {"name": "set_auto_runtime_setting", "path": "/Auto/LearnChargePowerAlpha", "value": 0},
+                {"name": "set_auto_runtime_setting", "target": "auto_learn_charge_power_alpha", "value": 0},
                 source="http",
             )
 
     def test_command_from_payload_accepts_boolean_binary_values_and_reports_numeric_errors(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
         command = api.command_from_payload({"name": "set_auto_start", "value": True}, source="http")
 
         self.assertIs(command.value, True)
-        with self.assertRaisesRegex(ValueError, "requires a non-negative numeric value for path '/SetCurrent'"):
-            api.command_from_payload({"name": "set_current_setting", "path": "/SetCurrent", "value": "bad"}, source="http")
-        with self.assertRaisesRegex(ValueError, "requires a non-negative numeric value for path '/SetCurrent'"):
-            api.command_from_payload({"name": "set_current_setting", "path": "/SetCurrent", "value": -1}, source="http")
+        with self.assertRaisesRegex(ValueError, "requires a non-negative numeric value for target 'set_current'"):
+            api.command_from_payload({"name": "set_current_setting", "target": "set_current", "value": "bad"}, source="http")
+        with self.assertRaisesRegex(ValueError, "requires a non-negative numeric value for target 'set_current'"):
+            api.command_from_payload({"name": "set_current_setting", "target": "set_current", "value": -1}, source="http")
 
     def test_control_api_helper_error_paths_cover_generic_runtime_and_unknown_commands(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
 
-        self.assertEqual(api._auto_runtime_value_kind("/Auto/Unknown"), "any")
+        self.assertEqual(api._auto_runtime_value_kind("auto_unknown"), "any")
         self.assertEqual(
-            ControlApiV1Service._auto_runtime_error_kind("/Auto/StartSurplusWatts"),
+            ControlApiV1Service._auto_runtime_error_kind("auto_start_surplus_watts"),
             "numeric",
         )
         self.assertEqual(
-            ControlApiV1Service._auto_runtime_error_kind("/Auto/PhaseSwitching"),
+            ControlApiV1Service._auto_runtime_error_kind("auto_phase_switching"),
             "binary",
         )
         self.assertEqual(
-            ControlApiV1Service._auto_runtime_error_kind("/Auto/PhaseMismatchLockoutCount"),
+            ControlApiV1Service._auto_runtime_error_kind("auto_phase_mismatch_lockout_count"),
             "integer",
         )
         self.assertEqual(
-            ControlApiV1Service._auto_runtime_error_kind("/Auto/Unknown"),
+            ControlApiV1Service._auto_runtime_error_kind("auto_unknown"),
             "generic",
         )
         self.assertEqual(
-            ControlApiV1Service._auto_runtime_value_error("/Auto/Unknown"),
-            "Control command 'set_auto_runtime_setting' received an invalid value for path '/Auto/Unknown'.",
+            ControlApiV1Service._auto_runtime_value_error("auto_unknown"),
+            "Control command 'set_auto_runtime_setting' received an invalid value for target 'auto_unknown'.",
         )
         self.assertEqual(
-            ControlApiV1Service._auto_runtime_value_error("/Auto/StartSurplusWatts"),
-            "Control command 'set_auto_runtime_setting' requires a non-negative numeric value for path '/Auto/StartSurplusWatts'.",
+            ControlApiV1Service._auto_runtime_value_error("auto_start_surplus_watts"),
+            "Control command 'set_auto_runtime_setting' requires a non-negative numeric value for target 'auto_start_surplus_watts'.",
         )
         self.assertEqual(
-            ControlApiV1Service._auto_runtime_value_error("/Auto/ScheduledLatestEndTime"),
-            "Control command 'set_auto_runtime_setting' requires a HH:MM time string for path '/Auto/ScheduledLatestEndTime'.",
+            ControlApiV1Service._auto_runtime_value_error("auto_scheduled_latest_end_time"),
+            "Control command 'set_auto_runtime_setting' requires a HH:MM time string for target 'auto_scheduled_latest_end_time'.",
         )
 
     def test_control_api_helper_validation_edges_cover_generic_paths_and_time_parsing(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=set(DbusWriteController.AUTO_RUNTIME_SETTING_PATHS) | {"/Auto/Custom"},
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=set(ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS) | {"auto_custom"},
         )
 
         command = api.command_from_payload(
-            {"name": "set_auto_runtime_setting", "path": "/Auto/Custom", "value": {"free": "form"}},
+            {"name": "set_auto_runtime_setting", "target": "auto_custom", "value": {"free": "form"}},
             source="http",
         )
 
-        self.assertEqual(command.path, "/Auto/Custom")
+        self.assertEqual(command.target, "auto_custom")
         self.assertEqual(command.value, {"free": "form"})
         self.assertTrue(ControlApiV1Service._always_valid_value(object()))
-        self.assertTrue(ControlApiV1Service._within_auto_runtime_bounds("/Auto/Custom", 5.0))
-        self.assertFalse(ControlApiV1Service._valid_auto_runtime_text("/Auto/ScheduledLatestEndTime", "1230"))
-        self.assertFalse(ControlApiV1Service._valid_auto_runtime_text("/Auto/ScheduledLatestEndTime", "ab:30"))
-        self.assertFalse(ControlApiV1Service._valid_auto_runtime_text("/Auto/ScheduledLatestEndTime", "12:99"))
+        self.assertTrue(ControlApiV1Service._within_auto_runtime_bounds("auto_custom", 5.0))
+        scheduled_time = "auto_scheduled_latest_end_time"
+        self.assertFalse(ControlApiV1Service._valid_auto_runtime_text(scheduled_time, "1230"))
+        self.assertFalse(ControlApiV1Service._valid_auto_runtime_text(scheduled_time, "ab:30"))
+        self.assertFalse(ControlApiV1Service._valid_auto_runtime_text(scheduled_time, "12:99"))
 
     def test_build_control_command_from_payload_delegates_to_control_api(self) -> None:
         service = SimpleNamespace(
@@ -237,12 +244,12 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             _save_runtime_state=MagicMock(),
             _save_runtime_overrides=MagicMock(),
         )
-        controller = DbusWriteController(WriteControllerPort(service))
+        controller = ControlWriteController(WriteControllerPort(service))
 
         command = controller.build_control_command_from_payload({"name": "set_mode", "value": 1}, source="http")
 
         self.assertEqual(command.name, "set_mode")
-        self.assertEqual(command.path, "/Mode")
+        self.assertEqual(command.target, "mode")
         self.assertEqual(command.source, "http")
 
     def test_handle_control_command_returns_applied_result(self) -> None:
@@ -260,8 +267,8 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             auto=SimpleNamespace(normalize_mode=self._normalize_mode),
         )
         state.publish_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
-        command = ControlCommand(name="set_auto_start", path="/AutoStart", value=1)
+        controller = ControlWriteController(WriteControllerPort(service))
+        command = ControlCommand(name="set_auto_start", target="auto_start", value=1)
 
         result = controller.handle_control_command(command)
 
@@ -290,8 +297,8 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             auto=SimpleNamespace(normalize_mode=self._normalize_mode),
         )
         state.publish_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
-        command = ControlCommand(name="set_auto_start", path="/AutoStart", value=1)
+        controller = ControlWriteController(WriteControllerPort(service))
+        command = ControlCommand(name="set_auto_start", target="auto_start", value=1)
 
         result = controller.handle_control_command(command)
 
@@ -321,8 +328,8 @@ class TestControlApiV1(DbusWriteControllerTestBase):
             auto=SimpleNamespace(normalize_mode=self._normalize_mode),
         )
         state.publish_field.side_effect = self._publish_field_side_effect(service)
-        controller = DbusWriteController(WriteControllerPort(service))
-        command = ControlCommand(name="set_current_setting", path="/SetCurrent", value=12.5)
+        controller = ControlWriteController(WriteControllerPort(service))
+        command = ControlCommand(name="set_current_setting", target="set_current", value=12.5)
 
         result = controller.handle_control_command(command)
 
@@ -336,18 +343,21 @@ class TestControlApiV1(DbusWriteControllerTestBase):
         self.assertEqual(service.virtual_set_current, 12.5)
         self.assertEqual(service._dbusservice["/SetCurrent"], 12.5)
 
-    def test_execute_dispatches_commands_with_and_without_paths(self) -> None:
+    def test_execute_dispatches_commands_with_and_without_explicit_targets(self) -> None:
         api = ControlApiV1Service(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
         controller = SimpleNamespace(
             _handle_mode_value_write=MagicMock(),
             _handle_current_setting_write=MagicMock(),
         )
 
-        api.execute(controller, ControlCommand(name="set_mode", path="/Mode", value=1))
-        api.execute(controller, ControlCommand(name="set_current_setting", path="/SetCurrent", value=12.5))
+        api.execute(controller, ControlCommand(name="set_mode", target="mode", value=1))
+        api.execute(
+            controller,
+            ControlCommand(name="set_current_setting", target="set_current", value=12.5),
+        )
 
         controller._handle_mode_value_write.assert_called_once_with(1)
-        controller._handle_current_setting_write.assert_called_once_with("/SetCurrent", 12.5)
+        controller._handle_current_setting_write.assert_called_once_with("set_current", 12.5)

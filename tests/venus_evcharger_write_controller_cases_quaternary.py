@@ -2,7 +2,7 @@
 from tests.venus_evcharger_write_controller_support import *
 
 
-class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
+class TestControlWriteControllerQuaternary(ControlWriteControllerTestBase):
     def test_handle_phase_selection_write_rejects_locked_out_phase_from_effective_supported_set(self) -> None:
         service = SimpleNamespace(
             virtual_mode=0,
@@ -41,7 +41,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertFalse(controller.handle_write("/PhaseSelection", "P1_P2_P3"))
+        self.assertFalse(handle_control_target(controller, "phase_selection", "P1_P2_P3"))
         service._apply_phase_selection.assert_not_called()
         self.assertEqual(service._dbusservice["/SupportedPhaseSelections"], "P1,P1_P2,P1_P2_P3")
 
@@ -91,7 +91,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/PhaseLockoutReset", 1))
+        self.assertTrue(handle_control_target(controller, "auto_phase_lockout_reset", 1))
         self.assertFalse(service._phase_switch_mismatch_active)
         self.assertEqual(service._phase_switch_mismatch_counts, {})
         self.assertIsNone(service._phase_switch_lockout_selection)
@@ -144,7 +144,7 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/ContactorLockoutReset", 1))
+        self.assertTrue(handle_control_target(controller, "auto_contactor_lockout_reset", 1))
         self.assertEqual(service._contactor_fault_counts, {})
         self.assertIsNone(service._contactor_fault_active_reason)
         self.assertIsNone(service._contactor_fault_active_since)
@@ -177,9 +177,9 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/Auto/PhaseLockoutReset", 0))
-        self.assertTrue(controller.handle_write("/Auto/ContactorLockoutReset", 0))
-        self.assertTrue(controller.handle_write("/Auto/SoftwareUpdateRun", 0))
+        self.assertTrue(handle_control_target(controller, "auto_phase_lockout_reset", 0))
+        self.assertTrue(handle_control_target(controller, "auto_contactor_lockout_reset", 0))
+        self.assertTrue(handle_control_target(controller, "auto_software_update_run", 0))
 
         self.assertEqual(service._dbusservice["/Auto/PhaseLockoutReset"], 0)
         self.assertEqual(service._dbusservice["/Auto/ContactorLockoutReset"], 0)
@@ -204,19 +204,19 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
 
         service = build_service()
         controller = write_controller(service)
-        self.assertTrue(controller.handle_write("/SetCurrent", 12.5))
+        self.assertTrue(handle_control_target(controller, "set_current", 12.5))
         self.assertEqual(service.virtual_set_current, 12.5)
         self.assertEqual(service._dbusservice["/SetCurrent"], 12.5)
 
         service = build_service()
         controller = write_controller(service)
-        self.assertTrue(controller.handle_write("/MinCurrent", 7.0))
+        self.assertTrue(handle_control_target(controller, "min_current", 7.0))
         self.assertEqual(service.min_current, 7.0)
         self.assertEqual(service._dbusservice["/MinCurrent"], 7.0)
 
         service = build_service()
         controller = write_controller(service)
-        self.assertTrue(controller.handle_write("/MaxCurrent", 20.0))
+        self.assertTrue(handle_control_target(controller, "max_current", 20.0))
         self.assertEqual(service.max_current, 20.0)
         self.assertEqual(service._dbusservice["/MaxCurrent"], 20.0)
 
@@ -238,33 +238,34 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
 
         controller = write_controller(service)
 
-        self.assertTrue(controller.handle_write("/SetCurrent", 10.0))
+        self.assertTrue(handle_control_target(controller, "set_current", 10.0))
 
         backend.set_current.assert_called_once_with(10.0)
         self.assertEqual(service.virtual_set_current, 10.0)
         self.assertEqual(service._dbusservice["/SetCurrent"], 10.0)
 
-    def test_auto_runtime_setting_write_covers_phase_tuning_paths(self) -> None:
+    def test_auto_runtime_setting_write_covers_phase_tuning_targets(self) -> None:
         runtime_cases = (
-            ("/Auto/PhaseSwitching", 0, 0),
-            ("/Auto/PhasePreferLowestWhenIdle", 0, 0),
-            ("/Auto/PhaseUpshiftDelaySeconds", 12.0, 12.0),
-            ("/Auto/PhaseDownshiftDelaySeconds", 14.0, 14.0),
-            ("/Auto/PhaseUpshiftHeadroomWatts", 900.0, 900.0),
-            ("/Auto/PhaseDownshiftMarginWatts", 450.0, 450.0),
-            ("/Auto/PhaseMismatchRetrySeconds", 30.0, 30.0),
-            ("/Auto/PhaseMismatchLockoutCount", 4, 4),
-            ("/Auto/PhaseMismatchLockoutSeconds", 600.0, 600.0),
+            ("auto_phase_switching", 0, 0),
+            ("auto_phase_prefer_lowest_when_idle", 0, 0),
+            ("auto_phase_upshift_delay_seconds", 12.0, 12.0),
+            ("auto_phase_downshift_delay_seconds", 14.0, 14.0),
+            ("auto_phase_upshift_headroom_watts", 900.0, 900.0),
+            ("auto_phase_downshift_margin_watts", 450.0, 450.0),
+            ("auto_phase_mismatch_retry_seconds", 30.0, 30.0),
+            ("auto_phase_mismatch_lockout_count", 4, 4),
+            ("auto_phase_mismatch_lockout_seconds", 600.0, 600.0),
         )
 
-        for path, new_value, expected_dbus in runtime_cases:
-            with self.subTest(path=path):
+        for target, new_value, expected_published in runtime_cases:
+            with self.subTest(target=target):
+                dbus_path = EVCS_FIELD_TO_PATH[target]
                 service = SimpleNamespace(
                     virtual_mode=1,
                     virtual_autostart=1,
                     virtual_startstop=0,
                     virtual_enable=1,
-                    _dbusservice={path: 0},
+                    _dbusservice={dbus_path: 0},
                     time_now=MagicMock(return_value=42.0),
                     _publish_dbus_field=MagicMock(),
                     _state_summary=self._state_summary,
@@ -276,44 +277,45 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                 service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
                 controller = write_controller(service)
 
-                self.assertTrue(controller.handle_write(path, new_value))
+                self.assertTrue(handle_control_target(controller, target, new_value))
 
                 self.assertEqual(
-                    AUTO_POLICY_SETTING_BY_PATH[path].read(service.auto_policy),
-                    expected_dbus,
+                    AUTO_POLICY_SETTING_BY_TARGET[target].read(service.auto_policy),
+                    expected_published,
                 )
-                self.assertEqual(service._dbusservice[path], expected_dbus)
+                self.assertEqual(service._dbusservice[dbus_path], expected_published)
                 service._validate_runtime_config.assert_called_once()
 
-    def test_auto_runtime_setting_write_covers_remaining_policy_and_delay_paths(self) -> None:
+    def test_auto_runtime_setting_write_covers_remaining_policy_and_delay_targets(self) -> None:
         runtime_cases = (
-            ("/Auto/StartSurplusWatts", "auto_start_surplus_watts", 2000.0),
-            ("/Auto/StopSurplusWatts", "auto_stop_surplus_watts", 1500.0),
-            ("/Auto/MinSoc", "auto_min_soc", 45.0),
-            ("/Auto/ResumeSoc", "auto_resume_soc", 55.0),
-            ("/Auto/StartDelaySeconds", "auto_start_delay_seconds", 20.0),
-            ("/Auto/StopDelaySeconds", "auto_stop_delay_seconds", 30.0),
-            ("/Auto/DbusBackoffMaxSeconds", "auto_dbus_backoff_max_seconds", 12.0),
-            ("/Auto/GridRecoveryStartSeconds", "auto_grid_recovery_start_seconds", 25.0),
-            ("/Auto/StopSurplusDelaySeconds", "auto_stop_surplus_delay_seconds", 35.0),
-            ("/Auto/StopSurplusVolatilityLowWatts", "auto_stop_surplus_volatility_low_watts", 120.0),
-            ("/Auto/StopSurplusVolatilityHighWatts", "auto_stop_surplus_volatility_high_watts", 240.0),
-            ("/Auto/ReferenceChargePowerWatts", "auto_reference_charge_power_watts", 2100.0),
-            ("/Auto/LearnChargePowerMinWatts", "auto_learn_charge_power_min_watts", 700.0),
-            ("/Auto/LearnChargePowerAlpha", "auto_learn_charge_power_alpha", 0.3),
-            ("/Auto/LearnChargePowerStartDelaySeconds", "auto_learn_charge_power_start_delay_seconds", 40.0),
-            ("/Auto/LearnChargePowerWindowSeconds", "auto_learn_charge_power_window_seconds", 120.0),
-            ("/Auto/LearnChargePowerMaxAgeSeconds", "auto_learn_charge_power_max_age_seconds", 1800.0),
+            ("auto_start_surplus_watts", "auto_start_surplus_watts", 2000.0),
+            ("auto_stop_surplus_watts", "auto_stop_surplus_watts", 1500.0),
+            ("auto_min_soc", "auto_min_soc", 45.0),
+            ("auto_resume_soc", "auto_resume_soc", 55.0),
+            ("auto_start_delay_seconds", "auto_start_delay_seconds", 20.0),
+            ("auto_stop_delay_seconds", "auto_stop_delay_seconds", 30.0),
+            ("auto_dbus_backoff_max_seconds", "auto_dbus_backoff_max_seconds", 12.0),
+            ("auto_grid_recovery_start_seconds", "auto_grid_recovery_start_seconds", 25.0),
+            ("auto_stop_surplus_delay_seconds", "auto_stop_surplus_delay_seconds", 35.0),
+            ("auto_stop_surplus_volatility_low_watts", "auto_stop_surplus_volatility_low_watts", 120.0),
+            ("auto_stop_surplus_volatility_high_watts", "auto_stop_surplus_volatility_high_watts", 240.0),
+            ("auto_reference_charge_power_watts", "auto_reference_charge_power_watts", 2100.0),
+            ("auto_learn_charge_power_min_watts", "auto_learn_charge_power_min_watts", 700.0),
+            ("auto_learn_charge_power_alpha", "auto_learn_charge_power_alpha", 0.3),
+            ("auto_learn_charge_power_start_delay_seconds", "auto_learn_charge_power_start_delay_seconds", 40.0),
+            ("auto_learn_charge_power_window_seconds", "auto_learn_charge_power_window_seconds", 120.0),
+            ("auto_learn_charge_power_max_age_seconds", "auto_learn_charge_power_max_age_seconds", 1800.0),
         )
 
-        for path, attr, new_value in runtime_cases:
-            with self.subTest(path=path):
+        for target, attr, new_value in runtime_cases:
+            with self.subTest(target=target):
+                dbus_path = EVCS_FIELD_TO_PATH[target]
                 service = SimpleNamespace(
                     virtual_mode=1,
                     virtual_autostart=1,
                     virtual_startstop=0,
                     virtual_enable=1,
-                    _dbusservice={path: 0},
+                    _dbusservice={dbus_path: 0},
                     time_now=MagicMock(return_value=42.0),
                     _publish_dbus_field=MagicMock(),
                     _state_summary=self._state_summary,
@@ -328,13 +330,13 @@ class TestDbusWriteControllerQuaternary(DbusWriteControllerTestBase):
                 service._publish_dbus_field.side_effect = self._publish_field_side_effect(service)
                 controller = write_controller(service)
 
-                self.assertTrue(controller.handle_write(path, new_value))
+                self.assertTrue(handle_control_target(controller, target, new_value))
 
-                policy_setting = AUTO_POLICY_SETTING_BY_PATH.get(path)
+                policy_setting = AUTO_POLICY_SETTING_BY_TARGET.get(target)
                 if policy_setting is None:
                     self.assertEqual(getattr(service, attr), new_value)
                 else:
                     self.assertEqual(policy_setting.read(service.auto_policy), new_value)
                     self.assertFalse(hasattr(service, attr))
-                self.assertEqual(service._dbusservice[path], new_value)
+                self.assertEqual(service._dbusservice[dbus_path], new_value)
                 service._validate_runtime_config.assert_called_once()

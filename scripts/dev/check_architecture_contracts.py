@@ -10,6 +10,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from architecture_command_mailbox_contracts import check_command_mailbox_contracts
+from architecture_gateway_operation_contracts import check_gateway_operation_contracts
 from architecture_gateway_read_contracts import check_gateway_read_contracts
 from architecture_suppression_contracts import check_suppression_contracts
 
@@ -30,30 +32,6 @@ FORBIDDEN_SUBSTRINGS = {
     "venus_evcharger/bootstrap/controller.py": (
         "_setup_dbus_mainloop",
         "_dbus_service_owned_by_current_process",
-    ),
-    "venus_evcharger/inputs/helper/sources_pv_grid.py": (
-        "_read_ac_pv_total",
-        "_read_dc_pv_power",
-        "_grid_total_and_missing_paths",
-        "_grid_path_numeric_value",
-    ),
-    "venus_evcharger/inputs/pv.py": (
-        "_resolve_pv_service_names",
-        "_read_pv_service_values",
-        "_read_rescanned_pv_services",
-        "_read_dc_pv_value",
-        "_handle_missing_pv_power",
-        "_ac_pv_total_with_optional_rescan",
-        "_dc_pv_total",
-    ),
-    "venus_evcharger/inputs/storage.py": (
-        "_read_battery_soc_value",
-    ),
-    "venus_evcharger/inputs/storage_support.py": (
-        "_configured_grid_paths",
-        "_read_grid_phase_values",
-        "_read_one_grid_phase",
-        "_finalize_grid_power",
     ),
 }
 
@@ -98,30 +76,6 @@ FORBIDDEN_FILE_PATTERNS = {
             r")\("
         ),
     },
-    "venus_evcharger/inputs/pv.py": {
-        "dbus input private port calls": re.compile(
-            r"\b(?:svc|self\.service)\._(?:"
-            r"get_dbus_value|invalidate_auto_battery_service|resolve_auto_battery_service|"
-            r"list_dbus_services|source_retry_ready|mark_recovery|mark_failure|"
-            r"delay_source_retry|warning_throttled|resolve_auto_pv_services|"
-            r"invalidate_auto_pv_services"
-            r")\("
-        ),
-    },
-    "venus_evcharger/inputs/storage.py": {
-        "dbus input private port calls": re.compile(
-            r"\b(?:svc|self\.service)\._(?:"
-            r"get_dbus_value|invalidate_auto_battery_service|resolve_auto_battery_service"
-            r")\("
-        ),
-    },
-    "venus_evcharger/inputs/storage_support.py": {
-        "dbus input private port calls": re.compile(
-            r"\b(?:svc|self\.service)\._(?:"
-            r"get_dbus_value|resolve_auto_battery_service|list_dbus_services"
-            r")\("
-        ),
-    },
 }
 
 
@@ -137,10 +91,10 @@ ALLOWED_MULTIPLE_INHERITANCE = {
             bases=(
                 "DbusAdapterRuntimeContext",
                 "DbusAdapterSocketContext",
-                "DbusAdapterIdentityContext",
                 "DbusAdapterLoopContext",
                 "DbusAdapterIoContext",
                 "DbusAdapterHealthContext",
+                "DbusAdapterPublicationContext",
                 "DbusAdapterIntrospectionContext",
                 "DbusAdapterIntrospectionSnapshotContext",
                 "Protocol",
@@ -223,7 +177,7 @@ ALLOWED_MULTIPLE_INHERITANCE = {
     },
 }
 
-EXPECTED_CLASS_BASES = {
+EXPECTED_CLASS_BASES: dict[str, dict[str, tuple[str, ...]]] = {
     "venus_evcharger/controllers/state.py": {
         "ServiceStateController": (),
     },
@@ -441,6 +395,8 @@ def main() -> int:
         *check_suppression_contracts(REPO),
         *_check_gateway_surface_boundary(),
         *_check_dbus_adapter_layout(),
+        *check_command_mailbox_contracts(REPO),
+        *check_gateway_operation_contracts(REPO),
         *check_gateway_read_contracts(REPO),
     ]
     if failures:

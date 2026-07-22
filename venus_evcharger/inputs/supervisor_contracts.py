@@ -49,6 +49,7 @@ class AutoInputSupervisorService(Protocol):
     auto_input_helper_restart_seconds: float
     auto_input_helper_stale_seconds: float
     auto_input_snapshot_path: str
+    gateway_health_path: str
     virtual_mode: int
     _auto_input_helper_generation: int
     _auto_input_helper_last_start_at: float

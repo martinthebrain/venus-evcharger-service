@@ -71,10 +71,13 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
                 f"^Unsupported control command '{display}'\\.$",
             ):
                 normalized_control_command_name(value)
-        for source in ("dbus", "http", "internal", "mqtt"):
+        for source in ("control-surface", "http", "internal", "mqtt"):
             self.assertEqual(normalized_control_command_source(source.upper()), source)
         self.assertEqual(normalized_control_command_source("invalid"), "http")
-        self.assertEqual(normalized_control_command_source("invalid", default="dbus"), "dbus")
+        self.assertEqual(
+            normalized_control_command_source("invalid", default="control-surface"),
+            "control-surface",
+        )
         self.assertEqual(normalized_control_command_source("invalid", default="invalid"), "http")
         for status in ("accepted_in_flight", "applied", "rejected"):
             self.assertEqual(normalized_control_command_status(f" {status} "), status)
@@ -88,18 +91,18 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
             normalized_control_command_fields(
                 {
                     "name": " set_mode ",
-                    "path": " /Mode ",
+                    "target": " mode ",
                     "value": {"raw": 2},
                     "source": " MQTT ",
                     "detail": " detail ",
                     "command_id": " command-id ",
                     "idempotency_key": " key ",
                 },
-                default_source="dbus",
+                default_source="control-surface",
             ),
             {
                 "name": "set_mode",
-                "path": "/Mode",
+                "target": "mode",
                 "value": {"raw": 2},
                 "source": "mqtt",
                 "detail": "detail",
@@ -117,7 +120,12 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
     def test_applied_result_shape(self) -> None:
         result = normalized_control_result_fields(
             {
-                "command": {"name": "set_mode", "path": "/Mode", "value": 2, "source": "dbus"},
+                "command": {
+                    "name": "set_mode",
+                    "target": "mode",
+                    "value": 2,
+                    "source": "control-surface",
+                },
                 "status": "applied",
                 "persisted": 0,
                 "reversible_failure": 1,
@@ -130,9 +138,9 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
             {
                 "command": {
                     "name": "set_mode",
-                    "path": "/Mode",
+                    "target": "mode",
                     "value": 2,
-                    "source": "dbus",
+                    "source": "control-surface",
                     "detail": "",
                     "command_id": "",
                     "idempotency_key": "",
@@ -148,7 +156,7 @@ class TestCoreContractsControlCommandContracts(unittest.TestCase):
         )
 
     def test_in_flight_and_rejected_result_shapes(self) -> None:
-        command = {"name": "set_mode", "path": "/Mode", "value": 1}
+        command = {"name": "set_mode", "target": "mode", "value": 1}
         in_flight = normalized_control_result_fields(
             {
                 "command": command,

@@ -227,8 +227,6 @@ def make_runtime_support_service(**overrides: object) -> SimpleNamespace:
         "_contactor_lockout_at": None,
         "auto_energy_sources": (),
         "auto_battery_discharge_balance_victron_bias_source_id": "",
-        "auto_battery_discharge_balance_victron_bias_service": "com.victronenergy.settings",
-        "auto_battery_discharge_balance_victron_bias_path": "/Settings/CGwacs/AcPowerSetPoint",
         "auto_battery_discharge_balance_victron_bias_activation_mode": "always",
         "auto_battery_discharge_balance_victron_bias_kp": 0.0,
         "auto_battery_discharge_balance_victron_bias_ki": 0.0,

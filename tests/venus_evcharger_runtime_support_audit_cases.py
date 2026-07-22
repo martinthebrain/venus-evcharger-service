@@ -82,7 +82,7 @@ class TestRuntimeSupportControllerAudit(RuntimeSupportTestCaseBase):
             service = make_runtime_support_service(
                 time_now=lambda: current_time[0],
                 auto_audit_log_path=path,
-                dbus_gateway_health_path=health_path,
+                gateway_health_path=health_path,
                 _last_auto_metrics=make_auto_metrics(),
             )
             controller = RuntimeSupportController(service, self._age_zero, self._health_zero)

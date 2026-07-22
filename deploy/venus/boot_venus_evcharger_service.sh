@@ -20,7 +20,7 @@ SERVICE_LIFECYCLE="$SCRIPT_DIR/service_lifecycle.sh"
 SERVICE_ROOT="${VENUS_EVCHARGER_SERVICE_ROOT:-/service}"
 PROC_ROOT="${VENUS_EVCHARGER_PROC_ROOT:-/proc}"
 CONFIG_PATH="$SCRIPT_DIR/config.venus_evcharger.ini"
-GENERIC_SHELLY_HELPER="$REPO_DIR/venus_evcharger/ops/disable_generic_shelly_once.py"
+GENERIC_SHELLY_HELPER="$REPO_DIR/venus_evcharger_generic_shelly_configuration.py"
 
 # Ensure the runit service directory structure exists even on fresh copies.
 mkdir -p "$SERVICE_DIR/log" "$DBUS_ADAPTER_SERVICE_DIR/log" "$OBSERVER_SERVICE_DIR/log"

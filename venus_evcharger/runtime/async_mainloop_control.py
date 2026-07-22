@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from venus_evcharger.control import ControlCommand
-from venus_evcharger.runtime.async_mainloop_types import require_control_command_queue
+from venus_evcharger.runtime.async_control_types import require_control_command_queue
 
 ASYNC_CONTROL_COMMAND_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
@@ -20,7 +20,7 @@ class ControlCommandQueue:
         self.service = service
 
     def enqueue(self, command: ControlCommand) -> bool:
-        """Coalesce DBus control commands for a background worker."""
+        """Coalesce semantic control commands for the background worker."""
         svc = self.service
         if not svc._control_command_async_enabled:
             result = svc.auto.handle_command(command)
@@ -29,10 +29,10 @@ class ControlCommandQueue:
         with svc._control_command_lock:
             pending = require_control_command_queue(svc._control_command_pending, "_control_command_pending")
             svc._control_command_sequence += 1
-            if command.path in pending:
-                del pending[command.path]
-            pending[command.path] = (int(svc._control_command_sequence), queued_at, command)
-            svc._desired_control_values[command.path] = command.value
+            if command.target in pending:
+                del pending[command.target]
+            pending[command.target] = (int(svc._control_command_sequence), queued_at, command)
+            svc._desired_control_values[command.target] = command.value
             while len(pending) > int(getattr(svc, "_control_command_max_paths", 32)):
                 dropped_path = next(iter(pending))
                 del pending[dropped_path]
@@ -55,15 +55,15 @@ class ControlCommandQueue:
             try:
                 svc.auto.handle_command(command)
             except ASYNC_CONTROL_COMMAND_ERRORS:
-                logging.exception("Async control command failed path=%s", command.path)
+                logging.exception("Async control command failed target=%s", command.target)
             finally:
                 duration = time.monotonic() - started
                 svc._last_write_command_duration_seconds = duration
                 budget = _float_attr(getattr(svc, "_write_command_budget_seconds", None), 2.0)
                 if duration > budget:
                     logging.warning(
-                        "Control command path=%s exceeded budget: %.3fs",
-                        command.path,
+                        "Control command target=%s exceeded budget: %.3fs",
+                        command.target,
                         duration,
                     )
         return True

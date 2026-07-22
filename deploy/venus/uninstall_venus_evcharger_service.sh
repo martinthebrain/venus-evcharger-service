@@ -30,8 +30,9 @@ LEGACY_STARTUP=$REPO_DIR/install_venus_evcharger_service.sh
 BOOT_HELPER=$SCRIPT_DIR/boot_venus_evcharger_service.sh
 LEGACY_BOOT_HELPER=$REPO_DIR/boot_venus_evcharger_service.sh
 CONFIG_PATH="$SCRIPT_DIR/config.venus_evcharger.ini"
-GENERIC_SHELLY_HELPER_CMD="$REPO_DIR/venus_evcharger/ops/disable_generic_shelly_once.py $CONFIG_PATH >/dev/null 2>&1 &"
-LEGACY_GENERIC_SHELLY_HELPER_CMD="$REPO_DIR/disable_generic_shelly_once.py $REPO_DIR/config.venus_evcharger.ini >/dev/null 2>&1 &"
+GENERIC_SHELLY_HELPER_CMD="$REPO_DIR/venus_evcharger_generic_shelly_configuration.py $CONFIG_PATH >/dev/null 2>&1 &"
+LEGACY_GENERIC_SHELLY_HELPER_CMD="$REPO_DIR/venus_evcharger/ops/disable_generic_shelly_once.py $CONFIG_PATH >/dev/null 2>&1 &"
+OLDER_GENERIC_SHELLY_HELPER_CMD="$REPO_DIR/disable_generic_shelly_once.py $REPO_DIR/config.venus_evcharger.ini >/dev/null 2>&1 &"
 
 remove_rc_local_line() {
 	line="$1"
@@ -53,3 +54,4 @@ remove_rc_local_line "$BOOT_HELPER"
 remove_rc_local_line "$LEGACY_BOOT_HELPER"
 remove_rc_local_line "$GENERIC_SHELLY_HELPER_CMD"
 remove_rc_local_line "$LEGACY_GENERIC_SHELLY_HELPER_CMD"
+remove_rc_local_line "$OLDER_GENERIC_SHELLY_HELPER_CMD"

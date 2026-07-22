@@ -6,10 +6,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Protocol, TypeVar, Unpack
 
+from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
 from venus_evcharger.dbus_gateway_cache import CacheValueMetadata, ExternalReadMetadata
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
 from venus_evcharger.dbus_gateway_core import CacheFreshnessKind
+from venus_evcharger.ipc.command_types import CommandPayload
 
 _T = TypeVar("_T")
 
@@ -96,6 +97,9 @@ class DbusReadAdapter(Protocol):  # pragma: no cover
 
     @property
     def read_scheduler(self) -> ReadSchedulerProtocol: ...
+
+    @property
+    def energy_discovery(self) -> DbusEnergyDiscoveryManager: ...
 
     @property
     def rate_limiter(self) -> ReadRateLimiterProtocol: ...

@@ -38,7 +38,7 @@ def render_control_api_getting_started_markdown() -> str:
             "python3 ./venus_evchargerctl.py --token READ-TOKEN state automation",
             "python3 ./venus_evchargerctl.py --token CONTROL-TOKEN command set-mode 1",
             "python3 ./venus_evchargerctl.py --token CONTROL-TOKEN safe-write set-mode 1",
-            "python3 ./venus_evchargerctl.py --token CONTROL-TOKEN command set-current-setting 12.5 --path /SetCurrent",
+            "python3 ./venus_evchargerctl.py --token CONTROL-TOKEN command set-current-setting 12.5 --target set_current",
             "python3 ./venus_evchargerctl.py --unix-socket /run/venus-evcharger-control.sock --token READ-TOKEN watch --kind command --once",
             "```",
             "",

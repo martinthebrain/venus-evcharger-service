@@ -10,10 +10,17 @@ from unittest.mock import MagicMock, patch
 
 from venus_evcharger.inputs.helper.liveness import HelperLiveness, WarningThrottle
 from venus_evcharger.inputs.helper.snapshot import AtomicSnapshotWriter, SnapshotStore, empty_snapshot
-from venus_evcharger.inputs.helper.sources import AutoInputSources, BatterySourceReader
-from venus_evcharger.inputs.helper.sources_pv_grid import PvGridSourceReader
-from tests.support.auto_input_helper import FakeGateway
-from tests.support.auto_input_helper import FakeLoop, FakeSnapshots, FakeSources, MemoryWriter, helper_settings, run_callback
+from venus_evcharger.inputs.helper.sources import AutoInputSources
+from venus_evcharger.ipc.energy import MeasuredValue
+from tests.support.auto_input_helper import (
+    FakeEnergyGateway,
+    FakeLoop,
+    FakeSnapshots,
+    FakeSources,
+    MemoryWriter,
+    helper_settings,
+    run_callback,
+)
 
 
 class AutoInputHelperSnapshotContracts(unittest.TestCase):
@@ -109,12 +116,19 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         self.assertEqual(snapshot["captured_at"], 5.0)
         self.assertEqual(snapshot["helper_status"], "starting")
 
-    def test_composed_source_boundary_delegates_only_to_named_components(self) -> None:
-        gateway = FakeGateway()
-        sources = AutoInputSources(PvGridSourceReader(helper_settings(), gateway), BatterySourceReader(gateway))
-        self.assertIsNone(sources.pv_power())
-        self.assertIsNone(sources.grid_power())
-        self.assertEqual(sources.battery_snapshot()["battery_soc"], None)
+    def test_composed_source_boundary_uses_only_semantic_measurements(self) -> None:
+        gateway = FakeEnergyGateway()
+        gateway.measurements = {
+            "pv": MeasuredValue(50.0, 99.0, "fresh", 1.0),
+            "grid": MeasuredValue(-10.0, 99.0, "fresh", 1.0),
+            "battery": MeasuredValue(60.0, 99.0, "fresh", 1.0),
+        }
+        sources = AutoInputSources(helper_settings(), gateway)
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0):
+            sources.prepare_cycle()
+            self.assertEqual(sources.pv_power(), 50.0)
+            self.assertEqual(sources.grid_power(), -10.0)
+            self.assertEqual(sources.battery_snapshot()["battery_soc"], 60.0)
 
 
 class AutoInputHelperLivenessContracts(unittest.TestCase):

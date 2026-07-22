@@ -20,6 +20,7 @@ from venus_evcharger.publish.dbus_shared import (
     PublishServicePort,
     PublishValue,
 )
+from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsReader
 
 
 class DbusPublishController:
@@ -29,8 +30,13 @@ class DbusPublishController:
         self,
         service: PublishServicePort,
         age_seconds_func: AgeSeconds,
+        gateway_diagnostics: GatewayDiagnosticsReader,
     ) -> None:
-        context = DbusPublishContext(service=service, age_seconds=age_seconds_func)
+        context = DbusPublishContext(
+            service=service,
+            age_seconds=age_seconds_func,
+            gateway_diagnostics=gateway_diagnostics,
+        )
         self.core = DbusPublishCore(context)
         self.learned = DbusPublishLearned(context)
         self.runtime_view = DbusRuntimeView()
@@ -52,16 +58,6 @@ class DbusPublishController:
     def ensure_state(self) -> None:
         self.core.ensure_state()
 
-    def publish_path(
-        self,
-        path: str,
-        value: PublishValue,
-        now: float | None = None,
-        interval_seconds: float | None = None,
-        force: bool = False,
-    ) -> bool:
-        return self.core.publish_path(path, value, now, interval_seconds, force)
-
     def publish_field(
         self,
         field: str,
@@ -72,8 +68,8 @@ class DbusPublishController:
     ) -> bool:
         return self.core.publish_field(field, value, now, interval_seconds, force)
 
-    def bump_update_index(self, now: float | None = None) -> None:
-        self.core.bump_update_index(now)
+    def last_accepted_field(self, field: str) -> object:
+        return self.core.last_accepted_field(field)
 
     def publish_live_measurements(
         self,

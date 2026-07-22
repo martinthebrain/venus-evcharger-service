@@ -142,15 +142,12 @@ class RuntimeSupportContractTests(unittest.TestCase):
                 "_relay_sync_failure_reported", "_auto_input_snapshot_seen_for_current_helper",
                 "_auto_mode_cutover_pending", "_ignore_min_offtime_once",
             ),
-            true=("dbus_introspection_enabled",),
             integers=("_auto_input_helper_generation",),
             floats=("_auto_input_helper_last_start_at",),
             fives=("auto_input_helper_restart_seconds",),
             text={
                 "_auto_input_runtime_instance_id": "runtime-id",
                 "auto_input_snapshot_path": "/run/dbus-venus-evcharger-auto-61.json",
-                "dbus_introspection_snapshot_path": "/run/dbus-venus-evcharger-dbus-map-61.json",
-                "dbus_introspection_request_path": "/run/dbus-venus-evcharger-dbus-map-requests-61.json",
             },
         )
         expected.update(
@@ -158,7 +155,6 @@ class RuntimeSupportContractTests(unittest.TestCase):
                 "_worker_poll_interval_seconds": 1.0,
                 "relay_sync_timeout_seconds": 3.0,
                 "auto_input_helper_stale_seconds": 15.0,
-                "dbus_introspection_max_age_seconds": 900.0,
             }
         )
         assert_typed_mapping(self, values, expected)
@@ -174,14 +170,6 @@ class RuntimeSupportContractTests(unittest.TestCase):
         partial_defaults = partial.worker_state_defaults()
         self.assertEqual(partial_defaults["_worker_poll_interval_seconds"](), 1.0)
         self.assertEqual(partial_defaults["relay_sync_timeout_seconds"](), 3.0)
-        self.assertEqual(
-            partial_defaults["dbus_introspection_snapshot_path"](),
-            "/run/dbus-venus-evcharger-dbus-map-0.json",
-        )
-        self.assertEqual(
-            partial_defaults["dbus_introspection_request_path"](),
-            "/run/dbus-venus-evcharger-dbus-map-requests-0.json",
-        )
 
     def test_observability_defaults_are_complete_typed_and_delegate_normalizers(self) -> None:
         controller = RuntimeSupportController(SimpleNamespace(), MagicMock(), MagicMock())
@@ -218,6 +206,14 @@ class RuntimeSupportContractTests(unittest.TestCase):
         existing_factory.assert_not_called()
         missing_factory.assert_called_once_with()
         self.assertEqual(service.missing, {"created": True})
+
+    def test_clone_worker_snapshot_returns_an_independent_snapshot(self) -> None:
+        snapshot = {"captured_at": 12.0}
+
+        cloned = RuntimeSupportController.clone_worker_snapshot(snapshot)
+
+        self.assertEqual(cloned, snapshot)
+        self.assertIsNot(cloned, snapshot)
 
 
 if __name__ == "__main__":

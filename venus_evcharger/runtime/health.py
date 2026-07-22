@@ -68,11 +68,8 @@ class RuntimeHealthMonitor:
 
     @staticmethod
     def _perform_watchdog_reset(svc: Any) -> None:
-        """Reset lightweight in-memory discovery state during watchdog recovery."""
-        svc.runtime.reset_system_bus()
-        svc.auto.invalidate_pv_services()
-        svc.auto.invalidate_battery_service()
-        svc._dbus_list_backoff_until = 0.0
+        """Reload the helper-owned semantic input snapshot during recovery."""
+        svc.runtime.refresh_auto_input_snapshot()
 
     @staticmethod
     def _watchdog_restart_attempts(svc: Any) -> int:

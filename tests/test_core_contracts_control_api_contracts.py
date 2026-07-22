@@ -215,7 +215,7 @@ class TestCoreContractsControlApiContracts(unittest.TestCase):
                     "auth_scopes": ["control_admin"],
                     "command_names": ["set_mode"],
                     "command_scope_requirements": {"set_mode": "control_admin"},
-                    "command_sources": ["dbus"],
+                    "command_sources": ["control-surface"],
                     "state_endpoints": ["/v1/state/health"],
                     "endpoints": ["/v1/capabilities"],
                     "available_modes": [7],
@@ -239,7 +239,7 @@ class TestCoreContractsControlApiContracts(unittest.TestCase):
                 "auth_scopes": ["control_admin"],
                 "command_names": ["set_mode"],
                 "command_scope_requirements": {"set_mode": "control_admin"},
-                "command_sources": ["dbus"],
+                "command_sources": ["control-surface"],
                 "state_endpoints": ["/v1/state/health"],
                 "endpoints": ["/v1/capabilities"],
                 "available_modes": [7],
@@ -252,16 +252,16 @@ class TestCoreContractsControlApiContracts(unittest.TestCase):
 
     def test_command_response_normalizes_present_command(self) -> None:
         payload = normalized_control_api_command_response_fields(
-            {"ok": 1, "command": {"name": "set_mode", "source": "dbus"}}
+            {"ok": 1, "command": {"name": "set_mode", "source": "control-surface"}}
         )
         self.assertIs(payload["ok"], True)
         self.assertEqual(
             payload["command"],
             {
                 "name": "set_mode",
-                "path": "",
+                "target": "",
                 "value": None,
-                "source": "dbus",
+                "source": "control-surface",
                 "detail": "",
                 "command_id": "",
                 "idempotency_key": "",

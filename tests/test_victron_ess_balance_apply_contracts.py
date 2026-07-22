@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 from venus_evcharger.runtime.setup_support import default_auto_metrics
 from venus_evcharger.update.victron_ess_balance import VictronEssBalanceController
 from venus_evcharger.update.victron_ess_balance_apply import VictronEssBalanceExecutor
-from tests.support.victron_ess_balance import build_victron_ess_components
+from tests.support.victron_ess_balance import AcceptingGatewayOperations, build_victron_ess_components
 
 
 def _service(**overrides: object) -> SimpleNamespace:
@@ -14,8 +14,6 @@ def _service(**overrides: object) -> SimpleNamespace:
         "auto_battery_discharge_balance_victron_bias_enabled": True,
         "auto_battery_discharge_balance_victron_bias_auto_apply_enabled": True,
         "auto_battery_discharge_balance_victron_bias_base_setpoint_watts": 50.0,
-        "auto_battery_discharge_balance_victron_bias_service": "settings-service",
-        "auto_battery_discharge_balance_victron_bias_path": "/Setpoint",
         "_last_energy_cluster": {"battery_discharge_balance_eligible_source_count": 2},
         "_victron_ess_balance_safe_state_active": True,
         "_victron_ess_balance_safe_state_reason": "old",
@@ -52,7 +50,7 @@ class ApplyContracts(unittest.TestCase):
         self.assertEqual(self.subject._victron_ess_balance_default_metrics()["battery_discharge_balance_victron_bias_reason"], "disabled")
 
     def test_public_controller_delegates_only_its_three_domain_operations(self) -> None:
-        controller = VictronEssBalanceController()
+        controller = VictronEssBalanceController(AcceptingGatewayOperations())
         svc = _service()
         controller.components.executor.apply_victron_ess_balance_bias = MagicMock()
         controller.components.profiles.victron_ess_balance_learning_state_payload = MagicMock(
@@ -214,6 +212,11 @@ class ApplyContracts(unittest.TestCase):
         metrics: dict[str, Any] = {}
         profile = {"key": "profile", "action_direction": "export"}
         events: list[str] = []
+
+        def note_direction(*_args: object) -> int:
+            events.append("direction")
+            return 3
+
         self.profiles._victron_ess_balance_learning_profile = MagicMock(return_value=profile)
         self.profiles._set_victron_ess_balance_active_profile = MagicMock(side_effect=lambda *_: events.append("set"))
         self.profiles._ensure_victron_ess_balance_learning_profile_state = MagicMock(
@@ -226,7 +229,7 @@ class ApplyContracts(unittest.TestCase):
             side_effect=lambda *_: events.append("refresh")
         )
         self.safety._victron_ess_balance_note_action_direction = MagicMock(
-            side_effect=lambda *_: events.append("direction") or 3
+            side_effect=note_direction
         )
         self.safety._populate_victron_ess_balance_runtime_safety_metrics = MagicMock(
             side_effect=lambda *_: events.append("safety")
@@ -314,37 +317,35 @@ class ApplyContracts(unittest.TestCase):
     def test_write_outcome_and_tracking_write_state_cover_all_branches(self) -> None:
         svc = _service()
         metrics: dict[str, Any] = {}
-        self.writer._victron_ess_balance_write_setpoint = MagicMock(return_value=True)
+        self.writer.write_setpoint = MagicMock(return_value=True)
         self.telemetry._record_victron_ess_balance_command = MagicMock()
         self.subject._victron_ess_balance_apply_write_outcome(svc, 9.0, 65.0, -5.0, "p", metrics)
-        self.writer._victron_ess_balance_write_setpoint.assert_called_once_with(
-            svc, "settings-service", "/Setpoint", 65.0
-        )
+        self.writer.write_setpoint.assert_called_once_with(svc, 65.0, intent="tracking")
         self.assertEqual(svc._victron_ess_balance_last_write_at, 9.0)
         self.assertEqual(svc._victron_ess_balance_last_setpoint_w, 65.0)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "applied")
-        self.writer._victron_ess_balance_write_setpoint.return_value = False
+        self.writer.write_setpoint.return_value = False
         self.subject._victron_ess_balance_apply_write_outcome(svc, 10.0, 70.0, -6.0, "p", metrics)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "write-failed")
-        self.writer._victron_ess_balance_write_setpoint.reset_mock()
+        self.writer.write_setpoint.reset_mock()
         sparse = SimpleNamespace()
         self.subject._victron_ess_balance_apply_write_outcome(sparse, 10.0, 70.0, -6.0, "p", {})
-        self.writer._victron_ess_balance_write_setpoint.assert_called_once_with(sparse, "", "", 70.0)
+        self.writer.write_setpoint.assert_called_once_with(sparse, 70.0, intent="tracking")
 
-        self.writer._victron_ess_balance_should_write = MagicMock(return_value=True)
+        self.writer.should_write = MagicMock(return_value=True)
         self.subject._victron_ess_balance_apply_write_outcome = MagicMock()
         self.subject._victron_ess_balance_tracking_write_state(svc, 11.0, 71.0, -7.0, "p", metrics)
         self.subject._victron_ess_balance_apply_write_outcome.assert_called_once_with(
             svc, 11.0, 71.0, -7.0, "p", metrics
         )
-        self.writer._victron_ess_balance_should_write.return_value = False
-        self.writer._victron_ess_balance_last_setpoint = MagicMock(return_value=65.0)
+        self.writer.should_write.return_value = False
+        self.writer.last_setpoint = MagicMock(return_value=65.0)
         metrics.clear()
         self.subject._victron_ess_balance_tracking_write_state(svc, 12.0, 72.0, -8.0, "p", metrics)
-        self.writer._victron_ess_balance_should_write.assert_called_with(svc, 12.0, 72.0)
+        self.writer.should_write.assert_called_with(svc, 12.0, 72.0)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_active"], 1)
         self.assertEqual(metrics["battery_discharge_balance_victron_bias_reason"], "holding")
-        self.writer._victron_ess_balance_last_setpoint.return_value = None
+        self.writer.last_setpoint.return_value = None
         metrics.clear()
         self.subject._victron_ess_balance_tracking_write_state(svc, 13.0, 73.0, -9.0, "p", metrics)
         self.assertEqual(metrics, {})
@@ -353,8 +354,13 @@ class ApplyContracts(unittest.TestCase):
         svc = _service()
         metrics: dict[str, Any] = {}
         events: list[str] = []
+
+        def tracking_setpoint(*_args: object) -> float:
+            events.append("setpoint")
+            return 61.0
+
         self.subject._victron_ess_balance_tracking_setpoint = MagicMock(
-            side_effect=lambda *_: events.append("setpoint") or 61.0
+            side_effect=tracking_setpoint
         )
         self.subject._victron_ess_balance_update_tracking_telemetry = MagicMock(
             side_effect=lambda *_: events.append("telemetry")

@@ -11,7 +11,6 @@ from tests.support import dbus_gateway_health_metrics_cases as health_metrics_ca
 from tests.support import dbus_gateway_health_slo_cases as health_slo_cases
 from tests.support import dbus_gateway_introspection_background_cases as introspection_background_cases
 from tests.support import dbus_gateway_introspection_execution_cases as introspection_execution_cases
-from tests.support import dbus_gateway_introspection_request_cases as introspection_request_cases
 from tests.support import dbus_gateway_process_health_cases as process_health_cases
 from tests.support import dbus_gateway_process_io_cases as process_io_cases
 from tests.support import dbus_gateway_process_loop_cases as process_loop_cases
@@ -58,7 +57,6 @@ class AllGatewayAdapterCases(
     regulation_cases.GatewayRegulationCases,
     health_history_cases.GatewayHealthHistoryCases,
     adaptive_tick_cases.GatewayAdaptiveTickCases,
-    introspection_request_cases.GatewayIntrospectionRequestCases,
     introspection_background_cases.GatewayIntrospectionBackgroundCases,
     introspection_execution_cases.GatewayIntrospectionExecutionCases,
     process_loop_cases.GatewayProcessLoopCases,

@@ -16,7 +16,7 @@ import logging
 import tempfile
 import time
 import unittest
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +50,7 @@ with patch.dict(
     import venus_evcharger.dbus_adapter.process.loop as process_loop_module
     import venus_evcharger.dbus_adapter.process.runtime as runtime_module
     import venus_evcharger.dbus_adapter.process.socket as process_socket_module
+    import venus_evcharger.dbus_adapter.publication.registry as publication_registry_module
     import venus_evcharger.dbus_adapter.read.executor as read_module
     import venus_evcharger.dbus_adapter.read.aggregate as read_aggregate_module
     import venus_evcharger.dbus_adapter.read.pv as read_pv_module
@@ -75,12 +76,23 @@ with patch.dict(
     from venus_evcharger.dbus_adapter.read.spec import read_spec_from_mapping
     from venus_evcharger.dbus_gateway import (
         DbusCacheStore,
-        DbusCommandInbox,
+        DbusGatewayCommandInbox,
         dbus_path_key,
         gateway_paths,
         read_json_file,
     )
-    from venus_evcharger.dbus_gateway_command_types import CommandFileList, CommandMapping
+    from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping
+    from venus_evcharger.ipc.gateway_publication import (
+        publish_companion_fields_command,
+        publish_evcs_fields_command,
+        register_companion_command,
+        register_evcs_command,
+    )
+    from venus_evcharger.ports.gateway_publication import (
+        CompanionServiceIdentity,
+        EvcsServiceIdentity,
+        PublicationPriority,
+    )
     from venus_evcharger_dbus_adapter import DbusAdapter
     from venus_evcharger_dbus_adapter import main as adapter_main
 
@@ -89,6 +101,91 @@ def install_mock(target: object, name: str, mock: MagicMock) -> MagicMock:
     """Install and return a mock when the interaction itself is under test."""
     setattr(target, name, mock)
     return mock
+
+
+def evcs_identity() -> EvcsServiceIdentity:
+    """Return the canonical semantic EVCS identity used by scheduler tests."""
+    return EvcsServiceIdentity(
+        product_name="Test EVCS",
+        custom_name="Garage",
+        firmware_version="1.2.3",
+        hardware_version="relay",
+        serial="evcs-test-60",
+        connection_name="Local controller",
+        process_name="venus_evcharger_service.py",
+        process_version="Python",
+    )
+
+
+def evcs_registration(fields: Mapping[str, object] | None = None) -> CommandMapping:
+    """Build one scheduler-ready semantic EVCS registration command."""
+    return register_evcs_command(evcs_identity(), fields or {"mode": 0, "connected": 1})
+
+
+def evcs_publication(
+    fields: Mapping[str, object] | None = None,
+    *,
+    priority: PublicationPriority = "live",
+) -> CommandMapping:
+    """Build one scheduler-ready semantic EVCS field publication."""
+    return publish_evcs_fields_command(fields or {"ac_power_w": 1200.0}, priority=priority)
+
+
+def observe_evcs_fields(
+    adapter: DbusAdapter,
+    observations: Mapping[str, tuple[object, float]],
+    *,
+    now: float,
+) -> None:
+    """Apply timestamped semantic EVCS observations through the real registry."""
+    if not adapter.publication_registry.evcs_registered:
+        with patch.object(publication_registry_module.time, "time", return_value=now):
+            outcome = adapter.write_scheduler.process_command(evcs_registration({"connected": 1}))
+        if outcome != "applied":
+            raise AssertionError(f"EVCS registration failed: {outcome}")
+    for field, (value, age_seconds) in observations.items():
+        with patch.object(publication_registry_module.time, "time", return_value=now - age_seconds):
+            outcome = adapter.write_scheduler.process_command(evcs_publication({field: value}))
+        if outcome != "applied":
+            raise AssertionError(f"EVCS publication failed for {field}: {outcome}")
+
+
+def companion_identity(service_id: str = "aggregate-grid") -> CompanionServiceIdentity:
+    """Return one opaque semantic companion identity."""
+    return CompanionServiceIdentity(
+        service_id=service_id,
+        kind="grid",
+        product_name="External Grid",
+        custom_name="Grid",
+        firmware_version="1.2.3",
+        hardware_version="virtual",
+        serial=f"grid-{service_id}",
+        connection_name="External energy companion",
+        process_name="venus_evcharger_service.py",
+        process_version="Python",
+    )
+
+
+def companion_registration(
+    service_id: str = "aggregate-grid",
+    fields: Mapping[str, object] | None = None,
+) -> CommandMapping:
+    """Build one scheduler-ready companion registration command."""
+    return register_companion_command(companion_identity(service_id), fields or {"connected": 1})
+
+
+def companion_publication(
+    service_id: str = "aggregate-grid",
+    fields: Mapping[str, object] | None = None,
+    *,
+    priority: PublicationPriority = "live",
+) -> CommandMapping:
+    """Build one scheduler-ready companion field publication."""
+    return publish_companion_fields_command(
+        service_id,
+        fields or {"ac_power_w": 500.0},
+        priority=priority,
+    )
 
 
 class RecordingDbusService(dict[str, object]):
@@ -254,12 +351,13 @@ __all__ = [
     "DbusBusStub",
     "DbusCacheStore",
     "DbusCircuitBreaker",
-    "DbusCommandInbox",
+    "DbusGatewayCommandInbox",
     "DbusConnectionManager",
     "DbusDiscoveryManager",
     "DbusOperationDeferred",
     "DbusRateLimiter",
     "DbusReadScheduler",
+    "EvcsServiceIdentity",
     "FakeVeDbusService",
     "GatewayAdapterContractCase",
     "GatewayAdapterScenario",
@@ -277,7 +375,13 @@ __all__ = [
     "adapter_scenario",
     "builtins",
     "configparser",
+    "companion_identity",
+    "companion_publication",
+    "companion_registration",
     "dbus_path_key",
+    "evcs_identity",
+    "evcs_publication",
+    "evcs_registration",
     "gateway_core_module",
     "gateway_paths",
     "health_backpressure_module",

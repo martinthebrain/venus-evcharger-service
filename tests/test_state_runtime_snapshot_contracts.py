@@ -295,12 +295,10 @@ class TestStateRuntimeSnapshotContracts(unittest.TestCase):
     def test_topology_profile_and_learning_contracts_are_exact(self) -> None:
         svc = SimpleNamespace(
             auto_energy_sources=(SimpleNamespace(source_id=" z "), SimpleNamespace(source_id="a")),
-            auto_battery_discharge_balance_victron_bias_service=" service ",
-            auto_battery_discharge_balance_victron_bias_path=" /path ",
             auto_battery_discharge_balance_victron_bias_source_id=" source ",
             _victron_ess_balance_learning_profiles={"profile-a": {"sample_count": 2}},
         )
-        topology = "victron-bias-learning/v2/source=source/service=service/path=/path/energy=a,z"
+        topology = "victron-bias-learning/v3/source=source/target=ess-grid-setpoint/energy=a,z"
         self.assertEqual(self.controller._victron_ess_balance_runtime_topology_key(svc, " source "), topology)
         profile = {
             "key": "stored-key",

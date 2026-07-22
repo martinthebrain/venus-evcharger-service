@@ -10,32 +10,14 @@ import threading
 import time
 from typing import Any
 
-from venus_evcharger.runtime.contracts import AsyncRuntimeStatePort
-
 MAINLOOP_WATCHDOG_TRACEBACK_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
 
 
 class MainloopWatchdog:
-    """Own companion publishing and GLib-mainloop liveness checks."""
+    """Own GLib-mainloop liveness checks."""
 
-    def __init__(self, service: Any, thread_guard: AsyncRuntimeStatePort) -> None:
+    def __init__(self, service: Any) -> None:
         self.service = service
-        self.thread_guard = thread_guard
-
-    def flush_companion_publish(self) -> bool:
-        """Run any coalesced companion-service publish in the GLib thread."""
-        svc = self.service
-        with svc._companion_publish_lock:
-            if not svc._companion_publish_pending:
-                return False
-            svc._companion_publish_pending = False
-            publish_now = svc._companion_publish_now
-            svc._companion_publish_now = None
-        bridge = getattr(svc, "_companion_dbus_bridge", None)
-        if bridge is None:
-            return False
-        self.thread_guard.assert_mainloop_thread("companion DBus publish flush")
-        return bool(bridge.publish(publish_now))
 
     def heartbeat_tick(self) -> bool:
         """Update an in-RAM heartbeat from the GLib thread."""

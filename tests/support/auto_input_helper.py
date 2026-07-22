@@ -6,10 +6,15 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from venus_evcharger.dbus_gateway import GatewayReadKey
-from venus_evcharger.energy import EnergySourceDefinition
 from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings, load_auto_input_helper_settings
 from venus_evcharger.inputs.helper.contracts import Snapshot
+from venus_evcharger.ipc.energy import (
+    EnergyInputsSnapshot,
+    EnergyRefreshRequest,
+    EnergyRefreshScope,
+    EnergyTopologySnapshot,
+    MeasuredValue,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,73 +33,61 @@ def helper_settings(*, parent_pid: int | None = None) -> AutoInputHelperSettings
     )
 
 
-class FakeGatewayClientPaths:
-    def __init__(self, cache_path: str = "/run/fake-dbus-cache.json") -> None:
-        self.cache_path = cache_path
-
-
 class FakeGatewayClient:
-    def __init__(self, cache_path: str = "/run/fake-dbus-cache.json") -> None:
-        self.paths = FakeGatewayClientPaths(cache_path)
-        self.commands: list[dict[str, object]] = []
-        self.read_requests: list[tuple[object, str, str, str]] = []
-        self.enqueue_error: OSError | None = None
-        self.read_error: OSError | None = None
-
-    def enqueue_command(self, command: Mapping[str, object]) -> str:
-        if self.enqueue_error is not None:
-            raise self.enqueue_error
-        self.commands.append(dict(command))
-        return f"command-{len(self.commands)}"
-
-    def request_read_key(
-        self,
-        key: object,
-        *,
-        priority: str = "read",
-        source: str = "core",
-        reason: str = "",
-    ) -> None:
-        if self.read_error is not None:
-            raise self.read_error
-        self.read_requests.append((key, priority, source, reason))
-
-
-class FakeGateway:
     def __init__(self) -> None:
-        self.values: dict[tuple[str, str], float | int | None] = {}
-        self.semantic: dict[GatewayReadKey, float | int | None] = {}
-        self.services: list[str] = []
-        self.requests: list[tuple[str, str, int, str]] = []
-        self.service_refreshes = 0
-        self.retry_ready: dict[str, bool] = {}
-        self.delayed: list[str] = []
+        self.inputs: EnergyInputsSnapshot | None = None
+        self.topology: EnergyTopologySnapshot | None = None
+        self.refresh_requests: list[tuple[EnergyRefreshRequest, str]] = []
+        self.error: Exception | None = None
 
-    def cached_value(self, service_name: str, path: str) -> float | int | None:
-        return self.values.get((service_name, path))
+    def load_energy_inputs(self, *, max_age_seconds: float) -> EnergyInputsSnapshot | None:
+        del max_age_seconds
+        return self.inputs
 
-    def semantic_value(self, key: GatewayReadKey, *, reason: str) -> float | int | None:
-        del reason
-        return self.semantic.get(key)
+    def load_energy_topology(self, *, max_age_seconds: float) -> EnergyTopologySnapshot | None:
+        del max_age_seconds
+        return self.topology
 
-    def service_names(self) -> list[str]:
-        return list(self.services)
+    def request_energy_refresh(self, request: EnergyRefreshRequest, *, source: str) -> str:
+        if self.error is not None:
+            raise self.error
+        self.refresh_requests.append((request, source))
+        return f"command-{len(self.refresh_requests)}"
 
-    def service_available(self, service_name: str) -> bool:
-        return service_name in self.services
 
-    def request_value(self, service_name: str, path: str, *, priority: int, reason: str) -> None:
-        self.requests.append((service_name, path, priority, reason))
+class FakeEnergyGateway:
+    def __init__(self) -> None:
+        self.inputs: EnergyInputsSnapshot | None = None
+        self.topology: EnergyTopologySnapshot | None = None
+        self.measurements: dict[EnergyRefreshScope, MeasuredValue | None] = {}
+        self.requests: list[tuple[EnergyRefreshScope, str, bool]] = []
+        self.input_refreshes = 0
+        self.topology_refreshes = 0
+        self.reset_calls = 0
 
-    def request_service_refresh(self) -> bool:
-        self.service_refreshes += 1
+    def refresh_inputs(self) -> EnergyInputsSnapshot | None:
+        self.input_refreshes += 1
+        return self.inputs
+
+    def refresh_topology(self) -> EnergyTopologySnapshot | None:
+        self.topology_refreshes += 1
+        return self.topology
+
+    def measurement(self, scope: EnergyRefreshScope) -> MeasuredValue | None:
+        return self.measurements.get(scope)
+
+    def request_refresh(
+        self,
+        scope: EnergyRefreshScope,
+        *,
+        reason: str,
+        priority: bool = False,
+    ) -> bool:
+        self.requests.append((scope, reason, priority))
         return True
 
-    def source_retry_ready(self, key: str) -> bool:
-        return self.retry_ready.get(key, True)
-
-    def delay_source_retry(self, key: str) -> None:
-        self.delayed.append(key)
+    def reset(self) -> None:
+        self.reset_calls += 1
 
 
 class FakeSources:
@@ -102,6 +95,14 @@ class FakeSources:
         self.pv: float | None = 100.0
         self.battery: Snapshot = {"battery_soc": 50.0}
         self.grid: float | None = -20.0
+        self.prepared = 0
+        self.observed: dict[str, float | None] = {}
+
+    def prepare_cycle(self) -> None:
+        self.prepared += 1
+
+    def observed_at(self, source_name: str) -> float | None:
+        return self.observed.get(source_name)
 
     def pv_power(self) -> float | None:
         return self.pv
@@ -130,6 +131,9 @@ class FakeSnapshots:
         self.refresh_error: Exception | None = None
         self.heartbeat_error: Exception | None = None
 
+    def poll(self) -> bool:
+        return True
+
     def refresh_source(self, source_name: str, now: float | None = None) -> None:
         if self.refresh_error is not None:
             raise self.refresh_error
@@ -138,6 +142,9 @@ class FakeSnapshots:
     def refresh_all(self, now: float | None = None) -> None:
         del now
         self.refresh_all_calls += 1
+
+    def validation_poll(self) -> bool:
+        return True
 
     def heartbeat(self) -> bool:
         if self.heartbeat_error is not None:
@@ -150,51 +157,6 @@ class FakeSnapshots:
         self.lifecycle.append(state)
 
 
-class FakeCatalog:
-    def __init__(self, primary: EnergySourceDefinition) -> None:
-        self.primary = primary
-        self.readable: set[tuple[str, str]] = set()
-
-    def primary_source(self) -> EnergySourceDefinition:
-        return self.primary
-
-    def primary_service_prefix(self) -> str:
-        return self.primary.service_prefix
-
-    def source_has_readable_data(self, source: EnergySourceDefinition, service_name: str) -> bool:
-        return (source.source_id, service_name) in self.readable
-
-    def battery_service_has_soc(self, service_name: str) -> bool:
-        return (self.primary.source_id, service_name) in self.readable
-
-
-class FakeResolver:
-    def __init__(self, service_name: str = "com.victronenergy.battery.test") -> None:
-        self.service_name = service_name
-        self.invalidations = 0
-        self.resolve_error: Exception | None = None
-
-    def resolve(self, source: EnergySourceDefinition) -> str:
-        del source
-        if self.resolve_error is not None:
-            raise self.resolve_error
-        return self.service_name
-
-    def invalidate_primary(self) -> None:
-        self.invalidations += 1
-
-
-class FakePvGrid:
-    def __init__(self, services: list[str] | None = None) -> None:
-        self.services = services or []
-        self.resolve_error: Exception | None = None
-
-    def resolve_pv_services(self) -> list[str]:
-        if self.resolve_error is not None:
-            raise self.resolve_error
-        return list(self.services)
-
-
 class FakeLoop:
     def __init__(self) -> None:
         self.run_calls = 0
@@ -205,11 +167,3 @@ class FakeLoop:
 
     def quit(self) -> None:
         self.quit_calls += 1
-
-
-class WarningRecorder:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, float, str, tuple[object, ...]]] = []
-
-    def __call__(self, key: str, interval_seconds: float, message: str, *args: object) -> None:
-        self.calls.append((key, interval_seconds, message, args))

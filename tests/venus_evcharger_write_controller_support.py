@@ -8,26 +8,31 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 from venus_evcharger.auto.policy import AutoPolicy
-from venus_evcharger.auto.policy_settings import AUTO_POLICY_SETTING_BY_PATH
+from venus_evcharger.auto.policy_settings import AUTO_POLICY_SETTING_BY_TARGET
 from venus_evcharger.ports import WriteControllerPort
-from venus_evcharger.controllers.write_snapshot import _snapshot_dbus_paths
-from venus_evcharger.controllers.write import DbusWriteController
+from venus_evcharger.controllers.write import ControlWriteController
+from venus_evcharger.core.contracts_control_surface import (
+    CONTROL_AUTO_RUNTIME_TARGETS,
+    CONTROL_CURRENT_SETTING_TARGETS,
+    CONTROL_DIRECT_TARGET_COMMANDS,
+)
 from venus_evcharger.dbus_gateway import EVCS_FIELD_TO_PATH
 
 __all__ = [
     "Any",
-    "AUTO_POLICY_SETTING_BY_PATH",
+    "AUTO_POLICY_SETTING_BY_TARGET",
     "AutoPolicy",
     "Callable",
-    "DbusWriteController",
-    "DbusWriteControllerTestBase",
+    "ControlWriteController",
+    "ControlWriteControllerTestBase",
+    "EVCS_FIELD_TO_PATH",
     "MagicMock",
     "SimpleNamespace",
     "WriteControllerPort",
-    "_snapshot_dbus_paths",
     "deque",
     "partial",
     "patch",
+    "handle_control_target",
     "write_controller",
     "write_port",
 ]
@@ -160,13 +165,36 @@ def write_port(service: Any) -> WriteControllerPort:
     return WriteControllerPort(service)
 
 
-def write_controller(service: Any) -> DbusWriteController:
+def write_controller(service: Any) -> ControlWriteController:
     """Build the production controller over the canonical test composition."""
-    return DbusWriteController(write_port(service))
+    return ControlWriteController(write_port(service))
+
+
+def handle_control_target(
+    controller: ControlWriteController,
+    target: str,
+    value: object,
+) -> bool:
+    """Exercise the production semantic command boundary in scenario tests."""
+    if target in CONTROL_CURRENT_SETTING_TARGETS:
+        name = "set_current_setting"
+    elif target in CONTROL_AUTO_RUNTIME_TARGETS:
+        name = "set_auto_runtime_setting"
+    else:
+        name = CONTROL_DIRECT_TARGET_COMMANDS.get(target)
+    if name is None:
+        raise ValueError(f"Unsupported control target '{target}'.")
+    command = controller.build_control_command(
+        name,
+        target,
+        value,
+        source="control-surface",
+    )
+    return bool(controller.handle_control_command(command).accepted)
 
 
 
-class DbusWriteControllerTestBase(unittest.TestCase):
+class ControlWriteControllerTestBase(unittest.TestCase):
     @staticmethod
     def _normalize_mode(value: object) -> int:
         if isinstance(value, bool):
@@ -177,12 +205,12 @@ class DbusWriteControllerTestBase(unittest.TestCase):
 
     @staticmethod
     def _normalize_mode_5_to_2(value: object) -> int:
-        mode = DbusWriteControllerTestBase._normalize_mode(value)
+        mode = ControlWriteControllerTestBase._normalize_mode(value)
         return 2 if mode == 5 else mode
 
     @staticmethod
     def _mode_uses_auto_logic(mode: object) -> bool:
-        return DbusWriteControllerTestBase._normalize_mode(mode) in (1, 2)
+        return ControlWriteControllerTestBase._normalize_mode(mode) in (1, 2)
 
     @staticmethod
     def _clear_auto_samples(service: Any) -> None:

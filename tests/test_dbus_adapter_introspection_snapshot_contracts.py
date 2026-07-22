@@ -14,7 +14,7 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 install_venus_adapter_stubs()
 
 import venus_evcharger.dbus_adapter.process.introspection_snapshot as snapshot
-from venus_evcharger.dbus_introspection import DBUS_INTROSPECTION_SCHEMA_VERSION
+from venus_evcharger.dbus_adapter.process.introspection_snapshot import DBUS_INTROSPECTION_SCHEMA_VERSION
 
 
 def adapter(values: dict[str, dict[str, object]] | None = None) -> snapshot.DbusAdapterIntrospectionSnapshot:

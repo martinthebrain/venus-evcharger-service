@@ -15,15 +15,15 @@ from collections.abc import Mapping
 from venus_evcharger.dbus_adapter.health.backpressure import backpressure_snapshot
 from venus_evcharger.dbus_adapter.health.freshness import (
     cache_freshness,
-    cached_entry_age,
-    cached_entry_float,
-    max_cached_path_age,
-    missing_cached_path_count,
+    max_publication_field_age,
+    missing_publication_field_count,
+    publication_field_age,
+    publication_field_float,
 )
 from venus_evcharger.dbus_adapter.health.gui import (
-    ACTIVE_SESSION_GUI_FRESHNESS_PATHS,
-    GUI_CONTROL_FRESHNESS_PATHS,
-    GUI_MEASUREMENT_FRESHNESS_PATHS,
+    ACTIVE_SESSION_GUI_FRESHNESS_FIELDS,
+    GUI_CONTROL_FRESHNESS_FIELDS,
+    GUI_MEASUREMENT_FRESHNESS_FIELDS,
 )
 from venus_evcharger.dbus_adapter.health.history import append_health_log
 from venus_evcharger.dbus_adapter.health.queue import oldest_command_age, queue_class_health, queue_health
@@ -38,16 +38,17 @@ from venus_evcharger.dbus_adapter.health.slo import (
     slo_targets,
     stale_core_read_keys,
 )
+from venus_evcharger.dbus_adapter.process.diagnostics import DbusAdapterDiagnostics
 from venus_evcharger.dbus_adapter.process.protocols.health import DbusAdapterHealthContext
-from venus_evcharger.dbus_gateway import FAST_READ_KEYS, DbusCommandInbox, dbus_path_key
-from venus_evcharger.dbus_gateway_command_types import CommandPayload
+from venus_evcharger.dbus_adapter.read.keys import CORE_ENERGY_READ_KEYS
 from venus_evcharger.dbus_gateway_core import float_or_zero
+from venus_evcharger.ipc.command_types import CommandPayload
 
 SESSION_ACTIVE_POWER_WATTS = 50.0
 SESSION_ACTIVE_CURRENT_AMPS = 0.2
 
 
-class DbusAdapterHealth:
+class DbusAdapterHealth(DbusAdapterDiagnostics):
     def append_health_log(self: DbusAdapterHealthContext, health: Mapping[str, object]) -> None:
         if not self.health_log_due():
             return
@@ -66,8 +67,8 @@ class DbusAdapterHealth:
         current_monotonic = time.monotonic()
         current_time = time.time()
         pending = self.commands.load_pending()
-        effective_pending = DbusCommandInbox.coalesce(pending)
-        core_pending = self.core_commands.load_pending()
+        effective_pending = self.commands.coalesce(pending)
+        core_pending = self.core_command_mailbox.load_pending()
         write_scheduler_health = self.write_scheduler.health(now=current_time)
         queue_metrics = queue_health(
             effective_pending,
@@ -93,7 +94,7 @@ class DbusAdapterHealth:
             "pending_command_count": len(effective_pending),
             "physical_command_count": len(pending),
             "core_command_count": len(core_pending),
-            "registered_path_count": len(self.write_scheduler.registered_paths),
+            "registered_path_count": self.registered_publication_path_count,
             "last_tick_at": self._last_tick_at,
             "tick_duration_ms": self._last_tick_duration_ms,
             "discovery_last_success_at": self.discovery.last_success_at,
@@ -157,47 +158,49 @@ class DbusAdapterHealth:
         current_monotonic: float,
     ) -> dict[str, float]:
         eventloop = self.tick_health.snapshot(now=current_monotonic)
-        measurement_age = self.max_cached_path_age_for_paths(GUI_MEASUREMENT_FRESHNESS_PATHS, now)
-        control_age = self.max_cached_path_age_for_paths(GUI_CONTROL_FRESHNESS_PATHS, now)
-        session_paths = self.gui_session_freshness_paths(now)
-        session_age = self.max_cached_path_age_for_paths(session_paths, now)
+        measurement_age = self.max_publication_field_age(GUI_MEASUREMENT_FRESHNESS_FIELDS, now)
+        control_age = self.max_publication_field_age(GUI_CONTROL_FRESHNESS_FIELDS, now)
+        session_fields = self.gui_session_freshness_fields(now)
+        session_age = self.max_publication_field_age(session_fields, now)
         return {
             "gui_max_age_s": max(measurement_age, control_age, session_age),
             "gui_measurement_max_age_s": measurement_age,
             "gui_control_max_age_s": control_age,
             "gui_session_max_age_s": session_age,
-            "gui_missing_path_count": self.missing_cached_path_count_for_paths(self.gui_freshness_paths(now)),
-            "gui_measurement_missing_path_count": self.missing_cached_path_count_for_paths(GUI_MEASUREMENT_FRESHNESS_PATHS),
-            "gui_control_missing_path_count": self.missing_cached_path_count_for_paths(GUI_CONTROL_FRESHNESS_PATHS),
-            "gui_session_missing_path_count": self.missing_cached_path_count_for_paths(session_paths),
+            "gui_missing_field_count": self.missing_publication_field_count(self.gui_freshness_fields(now)),
+            "gui_measurement_missing_field_count": self.missing_publication_field_count(
+                GUI_MEASUREMENT_FRESHNESS_FIELDS
+            ),
+            "gui_control_missing_field_count": self.missing_publication_field_count(GUI_CONTROL_FRESHNESS_FIELDS),
+            "gui_session_missing_field_count": self.missing_publication_field_count(session_fields),
             "core_read_max_age_s": max_core_read_age(cache_freshness),
             "queue_oldest_age_s": float_or_zero(queue_health.get("oldest_command_age_s")),
             "mainloop_max_gap_ms_60s": float_or_zero(eventloop.get("max_tick_gap_ms_60s")),
         }
 
-    def gui_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
-        paths = set(GUI_MEASUREMENT_FRESHNESS_PATHS | GUI_CONTROL_FRESHNESS_PATHS)
-        paths.update(self.gui_session_freshness_paths(now))
-        return paths
+    def gui_freshness_fields(self: DbusAdapterHealthContext, now: float) -> set[str]:
+        fields = set(GUI_MEASUREMENT_FRESHNESS_FIELDS | GUI_CONTROL_FRESHNESS_FIELDS)
+        fields.update(self.gui_session_freshness_fields(now))
+        return fields
 
-    def gui_session_freshness_paths(self: DbusAdapterHealthContext, now: float) -> set[str]:
-        return set(ACTIVE_SESSION_GUI_FRESHNESS_PATHS) if self.charging_session_active_for_gui(now) else set()
+    def gui_session_freshness_fields(self: DbusAdapterHealthContext, now: float) -> set[str]:
+        return set(ACTIVE_SESSION_GUI_FRESHNESS_FIELDS) if self.charging_session_active_for_gui(now) else set()
 
     def charging_session_active_for_gui(self: DbusAdapterHealthContext, now: float) -> bool:
         return (
-            self.fresh_cached_path_float("/Ac/Power", now) >= SESSION_ACTIVE_POWER_WATTS
-            or self.fresh_cached_path_float("/Ac/Current", now) >= SESSION_ACTIVE_CURRENT_AMPS
+            self.fresh_evcs_field_float("ac_power_w", now) >= SESSION_ACTIVE_POWER_WATTS
+            or self.fresh_evcs_field_float("ac_current_a", now) >= SESSION_ACTIVE_CURRENT_AMPS
         )
 
-    def fresh_cached_path_float(self: DbusAdapterHealthContext, path: str, now: float) -> float:
-        entry = self.cache.values.get(dbus_path_key(self.service_name, path))
-        if cached_entry_age(entry, now) > effective_gui_max_age_seconds(self.slo_thresholds()):
+    def fresh_evcs_field_float(self: DbusAdapterHealthContext, field: str, now: float) -> float:
+        observation = self.publication_registry.evcs_field_observation(field)
+        if publication_field_age(observation, now) > effective_gui_max_age_seconds(self.slo_thresholds()):
             return 0.0
-        return cached_entry_float(entry)
+        return publication_field_float(observation)
 
     def apply_slo_regulation(self: DbusAdapterHealthContext) -> None:
         now = time.time()
-        pending = DbusCommandInbox.coalesce(self.commands.load_pending())
+        pending = self.commands.coalesce(self.commands.load_pending())
         queue_age = oldest_command_age(pending, now)
         cache_freshness = self.cache_freshness_snapshot(now)
         core_read_age = max_core_read_age(cache_freshness)
@@ -234,7 +237,7 @@ class DbusAdapterHealth:
             self.read_scheduler.force_due(
                 stale_core_read_keys(
                     cache_freshness,
-                    FAST_READ_KEYS,
+                    CORE_ENERGY_READ_KEYS,
                     max_age_seconds=self.slo_core_read_max_age_seconds,
                 )
             )
@@ -246,8 +249,15 @@ class DbusAdapterHealth:
         self.discovery.next_scan_at = max(self.discovery.next_scan_at, quiet_until)
         self._last_introspection_full_scan_at = max(self._last_introspection_full_scan_at, now)
 
-    def max_cached_path_age_for_paths(self: DbusAdapterHealthContext, paths: set[str], now: float) -> float:
-        return max_cached_path_age(self.cache.values, self.service_name, paths, now)
+    def max_publication_field_age(
+        self: DbusAdapterHealthContext,
+        fields: set[str] | frozenset[str],
+        now: float,
+    ) -> float:
+        return max_publication_field_age(self.publication_registry, fields, now)
 
-    def missing_cached_path_count_for_paths(self: DbusAdapterHealthContext, paths: set[str]) -> float:
-        return missing_cached_path_count(self.cache.values, self.service_name, paths)
+    def missing_publication_field_count(
+        self: DbusAdapterHealthContext,
+        fields: set[str] | frozenset[str],
+    ) -> float:
+        return missing_publication_field_count(self.publication_registry, fields)

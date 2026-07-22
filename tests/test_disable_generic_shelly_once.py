@@ -1,328 +1,213 @@
-"""Unit tests for the one-shot generic Shelly disable helper."""
+"""Behavior tests for the semantic generic Shelly one-shot helper."""
 
+from __future__ import annotations
+
+import configparser
+import logging
 import os
-from pathlib import Path
-import runpy
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
-sys.modules["dbus"] = MagicMock()
+from venus_evcharger.ops import disable_generic_shelly_once as helper
+from venus_evcharger.ports.generic_shelly_configuration import (
+    DisableMatchingGenericShellyOnceRequest,
+    GenericShellyConfigurationReceipt,
+)
 
-from venus_evcharger.ops import disable_generic_shelly_once  # noqa: E402
-from venus_evcharger.ops.disable_generic_shelly_once import disable_matching_device, load_settings, matches_device  # noqa: E402
-from venus_evcharger.dbus_gateway import DbusCacheStore, DbusCommandInbox, dbus_path_key, gateway_paths  # noqa: E402
+
+class _StringValue:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __str__(self) -> str:
+        return self.value
 
 
-class TestDisableGenericShellyOnce(unittest.TestCase):
-    def test_matches_device_prefers_ip(self):
-        self.assertTrue(matches_device("98A316712F3C", "192.168.178.76", "98A316712F3C", "192.168.178.76", ""))
-        self.assertFalse(matches_device("98A316712F3C", "192.168.178.77", "98A316712F3C", "192.168.178.76", ""))
+class _RecordingConfigurationPort:
+    def __init__(self, receipt: GenericShellyConfigurationReceipt) -> None:
+        self.receipt = receipt
+        self.requests: list[DisableMatchingGenericShellyOnceRequest] = []
 
-    def test_matches_device_uses_mac_without_ip(self):
-        self.assertTrue(matches_device("98A316712F3C", "192.168.178.77", "98A316712F3C", "", "98A316712F3C"))
-        self.assertTrue(matches_device("98A316712F3C", "192.168.178.77", "98:A3:16:71:2F:3C", "", "98-A3-16-71-2F-3C"))
-        self.assertFalse(matches_device("OTHER", "192.168.178.76", "OTHER", "", "98A316712F3C"))
-        self.assertFalse(matches_device("OTHER", "192.168.178.76", "OTHER", "", ""))
+    def disable_matching_device_channel_once(
+        self,
+        request: DisableMatchingGenericShellyOnceRequest,
+    ) -> GenericShellyConfigurationReceipt:
+        self.requests.append(request)
+        return self.receipt
 
-    def test_as_bool_defaults_none_values(self):
-        self.assertTrue(disable_generic_shelly_once._as_bool(None, True))
-        self.assertFalse(disable_generic_shelly_once._as_bool(None, False))
 
-    def test_load_settings_uses_host_as_default_ip(self):
-        with tempfile.NamedTemporaryFile("w+", suffix=".ini") as handle:
-            handle.write("[DEFAULT]\nHost=192.168.178.76\n")
-            handle.flush()
-            settings = load_settings(handle.name)
+def _settings(
+    *,
+    enabled: bool = True,
+    allow_persistent_disable: bool = True,
+    target_ip: str = "192.0.2.7",
+    target_mac: str = "",
+    channel: int = 1,
+    delay_seconds: float = 0.0,
+) -> helper.DisableShellySettings:
+    return {
+        "enabled": enabled,
+        "allow_persistent_disable": allow_persistent_disable,
+        "target_ip": target_ip,
+        "target_mac": target_mac,
+        "channel": channel,
+        "delay_seconds": delay_seconds,
+    }
 
-        self.assertEqual(settings["target_ip"], "192.168.178.76")
-        self.assertEqual(settings["channel"], 1)
-        self.assertEqual(settings["delay_seconds"], 180.0)
 
-    def test_load_settings_rejects_missing_or_incomplete_config(self):
-        with self.assertRaisesRegex(ValueError, "Unable to read config file"):
-            load_settings("/tmp/does-not-exist.ini")
+class DisableGenericShellyOnceTests(unittest.TestCase):
+    def test_scalar_normalization_is_fail_safe_and_bounded(self) -> None:
+        self.assertTrue(helper._as_bool(None, True))
+        self.assertFalse(helper._as_bool(None, False))
+        self.assertTrue(helper._as_bool(" YES "))
+        self.assertFalse(helper._as_bool("invalid"))
+        self.assertEqual(helper._as_int("2", 7), 2)
+        self.assertEqual(helper._as_int(_StringValue("3"), 7), 3)
+        self.assertEqual(helper._as_int("bad", 7), 7)
+        self.assertEqual(helper._as_float("2.5", 7.5), 2.5)
+        self.assertEqual(helper._as_float(_StringValue("3.5"), 7.5), 3.5)
+        self.assertEqual(helper._as_float("bad", 7.5), 7.5)
+        self.assertEqual(helper._normalize_mac(" aa:bb-cc dd:ee:ff "), "AABBCCDDEEFF")
+        self.assertEqual(helper._normalize_mac(None), "")
+        self.assertEqual(helper._normalized_channel(0), 1)
+        self.assertEqual(helper._normalized_channel(2), 2)
+        self.assertEqual(helper._normalized_channel("bad"), 1)
+        self.assertEqual(helper._normalized_delay_seconds(-1), 0.0)
+        self.assertEqual(helper._normalized_delay_seconds(0.5), 0.5)
+        self.assertEqual(helper._normalized_delay_seconds("bad"), 180.0)
 
-        with tempfile.NamedTemporaryFile("w+", suffix=".ini") as handle:
-            handle.write("[DEFAULT]\n")
-            handle.flush()
-            with self.assertRaisesRegex(ValueError, "DEFAULT Host is required"):
-                load_settings(handle.name)
-
-    def test_load_settings_clamps_and_normalizes_optional_values(self):
+    def test_load_settings_returns_only_semantic_admin_settings(self) -> None:
         with tempfile.NamedTemporaryFile("w+", suffix=".ini") as handle:
             handle.write(
                 "[DEFAULT]\n"
-                "Host=192.168.178.76\n"
-                "DisableGenericShellyDevice=0\n"
+                "Host=192.0.2.1\n"
+                "DisableGenericShellyDevice=no\n"
                 "GenericShellyAllowPersistentDisable=yes\n"
-                "GenericShellyService= com.example.shelly \n"
-                "GenericShellyDisableIp=\n"
-                "GenericShellyDisableMac=aa-bb cc:dd:ee:ff\n"
-                "GenericShellyDisableChannel=0\n"
-                "GenericShellyDisableDelaySeconds=-5\n"
+                "GenericShellyService=com.example.ignored\n"
+                "GenericShellyDisableIp=192.0.2.2\n"
+                "GenericShellyDisableMac=aa:bb:cc:dd:ee:ff\n"
+                "GenericShellyDisableChannel=2\n"
+                "GenericShellyDisableDelaySeconds=3.5\n"
+                "DbusGatewayCachePath=/tmp/ignored.json\n"
             )
             handle.flush()
-            settings = load_settings(handle.name)
-
-        self.assertFalse(settings["enabled"])
-        self.assertTrue(settings["allow_persistent_disable"])
-        self.assertEqual(settings["service"], "com.example.shelly")
-        self.assertEqual(settings["target_ip"], "")
-        self.assertEqual(settings["target_mac"], "AABBCCDDEEFF")
-        self.assertEqual(settings["channel"], 1)
-        self.assertEqual(settings["delay_seconds"], 0.0)
-
-    def test_load_settings_uses_default_service_when_override_is_blank(self):
-        with tempfile.NamedTemporaryFile("w+", suffix=".ini") as handle:
-            handle.write(
-                "[DEFAULT]\n"
-                "Host=192.168.178.76\n"
-                "GenericShellyService=   \n"
-            )
-            handle.flush()
-            settings = load_settings(handle.name)
-
-        self.assertEqual(settings["service"], "com.victronenergy.shelly")
-
-    def test_load_settings_falls_back_for_invalid_numeric_values(self):
-        with tempfile.NamedTemporaryFile("w+", suffix=".ini") as handle:
-            handle.write(
-                "[DEFAULT]\n"
-                "Host=192.168.178.76\n"
-                "GenericShellyDisableChannel=abc\n"
-                "GenericShellyDisableDelaySeconds=never\n"
-            )
-            handle.flush()
-            settings = load_settings(handle.name)
-
-        self.assertEqual(settings["channel"], 1)
-        self.assertEqual(settings["delay_seconds"], 180.0)
-
-    def test_get_system_bus_rejects_direct_dbus_access(self):
-        with self.assertRaisesRegex(RuntimeError, "Direct DBus access is disabled"):
-            disable_generic_shelly_once.get_system_bus()
-
-    def test_dbus_helper_functions_use_gateway_cache_and_commands(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            paths = gateway_paths(str(Path(temp_dir) / "run"))
-            store = DbusCacheStore(paths)
-            store.update_value(dbus_path_key("svc", "/Value"), 17, source="test")
-            store.update_value(
-                "introspection:svc:/Devices",
-                "<node><node name='a'/><node/><node name='b'/></node>",
-                source="test",
-            )
-            store.write_snapshot_files()
-
-            self.assertEqual(disable_generic_shelly_once.get_dbus_value(paths.cache_path, "svc", "/Value", timeout=2.5), 17)
-            self.assertTrue(disable_generic_shelly_once.set_dbus_value(paths.run_dir, "svc", "/Value", 7, timeout=1.5))
-            self.assertTrue(disable_generic_shelly_once.set_dbus_value(paths.run_dir, "svc", "/Other", "raw", timeout=1.0))
-            self.assertEqual(disable_generic_shelly_once.get_dbus_child_nodes(paths.run_dir, "svc", "/Devices", timeout=0.5), ["a", "b"])
-
-            commands = [payload for _path, payload in DbusCommandInbox(paths.command_dir).load_pending()]
-            self.assertTrue(any(command.get("kind") == "set_value" and command.get("path") == "/Value" and command.get("value") == 7 for command in commands))
-            self.assertTrue(any(command.get("kind") == "set_value" and command.get("path") == "/Other" and command.get("value") == "raw" for command in commands))
-            self.assertEqual(disable_generic_shelly_once.get_dbus_child_nodes(paths.run_dir, "svc", "/Missing", timeout=0.5), [])
-            commands = [payload for _path, payload in DbusCommandInbox(paths.command_dir).load_pending()]
-            self.assertTrue(any(command.get("kind") == "introspect" and command.get("path") == "/Missing" for command in commands))
-
-    def test_disable_matching_device_writes_only_when_enabled(self):
-        settings = {
-            "enabled": True,
-            "allow_persistent_disable": True,
-            "service": "com.victronenergy.shelly",
-            "target_ip": "192.168.178.76",
-            "target_mac": "98A316712F3C",
-            "channel": 1,
-        }
-
-        def fake_get_value(service_name, path):
-            values = {
-                "/Devices/98A316712F3C/Ip": "192.168.178.76",
-                "/Devices/98A316712F3C/Mac": "98A316712F3C",
-                "/Devices/98A316712F3C/1/Enabled": 1,
-            }
-            return values[path]
-
-        set_value = MagicMock()
-        result = disable_matching_device(
+            settings = helper.load_settings(handle.name)
+        self.assertEqual(
             settings,
-            lambda service_name, path: ["98A316712F3C"],
-            fake_get_value,
-            set_value,
-        )
-
-        self.assertEqual(result, "disabled")
-        set_value.assert_called_once_with(
-            "com.victronenergy.shelly",
-            "/Devices/98A316712F3C/1/Enabled",
-            0,
-        )
-
-    def test_disable_matching_device_skips_when_already_disabled(self):
-        settings = {
-            "enabled": True,
-            "allow_persistent_disable": True,
-            "service": "com.victronenergy.shelly",
-            "target_ip": "192.168.178.76",
-            "target_mac": "98A316712F3C",
-            "channel": 1,
-        }
-
-        def fake_get_value(service_name, path):
-            values = {
-                "/Devices/98A316712F3C/Ip": "192.168.178.76",
-                "/Devices/98A316712F3C/Mac": "98A316712F3C",
-                "/Devices/98A316712F3C/1/Enabled": 0,
-            }
-            return values[path]
-
-        set_value = MagicMock()
-        result = disable_matching_device(
-            settings,
-            lambda service_name, path: ["98A316712F3C"],
-            fake_get_value,
-            set_value,
-        )
-
-        self.assertEqual(result, "already-disabled")
-        set_value.assert_not_called()
-
-    def test_disable_matching_device_respects_config_flags(self):
-        settings = {
-            "enabled": True,
-            "allow_persistent_disable": False,
-            "service": "com.victronenergy.shelly",
-            "target_ip": "192.168.178.76",
-            "target_mac": "98A316712F3C",
-            "channel": 1,
-        }
-
-        set_value = MagicMock()
-        result = disable_matching_device(
-            settings,
-            lambda service_name, path: ["98A316712F3C"],
-            lambda service_name, path: None,
-            set_value,
-        )
-
-        self.assertEqual(result, "persistent-disable-blocked")
-        set_value.assert_not_called()
-
-    def test_disable_matching_device_handles_disabled_config_missing_target_and_not_found(self):
-        logger = MagicMock()
-        disabled_result = disable_matching_device(
-            {"enabled": False, "allow_persistent_disable": True, "service": "svc"},
-            lambda *_args: [],
-            lambda *_args: None,
-            MagicMock(),
-            logger,
-        )
-        self.assertEqual(disabled_result, "disabled-by-config")
-
-        no_target_result = disable_matching_device(
             {
-                "enabled": True,
+                "enabled": False,
                 "allow_persistent_disable": True,
-                "service": "svc",
-                "target_ip": "",
-                "target_mac": "",
-                "channel": 1,
+                "target_ip": "192.0.2.2",
+                "target_mac": "AABBCCDDEEFF",
+                "channel": 2,
+                "delay_seconds": 3.5,
             },
-            lambda *_args: [],
-            lambda *_args: None,
-            MagicMock(),
-            logger,
         )
-        self.assertEqual(no_target_result, "no-target")
+        self.assertNotIn("service", settings)
+        self.assertNotIn("gateway_cache_path", settings)
 
-        not_found_result = disable_matching_device(
-            {
-                "enabled": True,
-                "allow_persistent_disable": True,
-                "service": "svc",
-                "target_ip": "192.168.178.76",
-                "target_mac": "",
-                "channel": 1,
-            },
-            lambda *_args: ["SERIAL"],
-            lambda _service, path: {"Ip": "192.168.178.99", "Mac": "AABB"}.get(path.rsplit("/", 1)[-1]),
-            MagicMock(),
-            logger,
+    def test_load_settings_defaults_and_errors_are_explicit(self) -> None:
+        with tempfile.NamedTemporaryFile("w+", suffix=".ini") as handle:
+            handle.write("[DEFAULT]\nHost=192.0.2.1\n")
+            handle.flush()
+            self.assertEqual(helper.load_settings(handle.name), _settings(target_ip="192.0.2.1", delay_seconds=180.0))
+
+        missing = "/tmp/definitely-missing-generic-shelly.ini"
+        with self.assertRaisesRegex(ValueError, f"^Unable to read config file: {missing}$"):
+            helper.load_settings(missing)
+
+        parser = configparser.ConfigParser()
+        parser.read_dict({"DEFAULT": {"Host": "  "}})
+        with self.assertRaisesRegex(ValueError, "^DEFAULT Host is required in the config$"):
+            helper._required_host(parser["DEFAULT"])
+
+    def test_reference_matcher_preserves_ip_precedence_and_mac_fallback(self) -> None:
+        self.assertTrue(helper.matches_device("AABBCCDDEEFF", " 192.0.2.1 ", "other", "192.0.2.1", "AABBCCDDEEFF"))
+        self.assertFalse(helper.matches_device("AABBCCDDEEFF", "192.0.2.2", "AABBCCDDEEFF", "192.0.2.1", "AABBCCDDEEFF"))
+        self.assertTrue(helper.matches_device("aa-bb-cc-dd-ee-ff", None, None, "", "AABBCCDDEEFF"))
+        self.assertTrue(helper.matches_device("serial", None, "aa:bb:cc:dd:ee:ff", "", "AABBCCDDEEFF"))
+        self.assertFalse(helper.matches_device("not-a-mac", None, None, "", "AABBCCDDEEFF"))
+        self.assertFalse(helper.matches_device("serial", None, None, "", ""))
+
+    def test_preconditions_are_terminal_before_delay_or_port_access(self) -> None:
+        cases = (
+            (_settings(enabled=False), "disabled-by-config"),
+            (_settings(allow_persistent_disable=False), "persistent-disable-blocked"),
+            (_settings(target_ip="", target_mac=""), "no-target"),
         )
-        self.assertEqual(not_found_result, "not-found")
+        for settings, expected in cases:
+            port = _RecordingConfigurationPort(GenericShellyConfigurationReceipt(True, "unused"))
+            with (
+                patch.object(helper, "load_settings", return_value=settings),
+                patch("venus_evcharger.ops.disable_generic_shelly_once.time.sleep") as sleep,
+            ):
+                self.assertEqual(helper.run_once("config", configuration_port=port), expected)
+            sleep.assert_not_called()
+            self.assertEqual(port.requests, [])
 
-    def test_run_once_waits_then_wires_bus_helpers_into_disable_matching_device(self):
-        settings = {
-            "enabled": True,
-            "allow_persistent_disable": True,
-            "service": "svc",
-            "target_ip": "192.168.178.76",
-            "target_mac": "",
-            "channel": 1,
-            "delay_seconds": 2.0,
-            "gateway_run_dir": "/tmp/gateway-run",
-            "gateway_cache_path": "/tmp/gateway-cache.json",
-        }
-        set_value = MagicMock()
-
-        def fake_get_value(_bus, _service, path, timeout=1.0):
-            values = {
-                "/Devices/SERIAL/Ip": "192.168.178.76",
-                "/Devices/SERIAL/Mac": "AABBCCDDEEFF",
-                "/Devices/SERIAL/1/Enabled": 1,
-            }
-            return values[path]
-
-        with patch.object(disable_generic_shelly_once, "load_settings", return_value=settings):
-            with patch.object(disable_generic_shelly_once.time, "sleep") as sleep_mock:
-                with patch.object(disable_generic_shelly_once, "get_dbus_child_nodes", return_value=["SERIAL"]) as list_nodes:
-                    with patch.object(disable_generic_shelly_once, "get_dbus_value", side_effect=fake_get_value) as get_value:
-                        with patch.object(disable_generic_shelly_once, "set_dbus_value", side_effect=set_value) as set_value_func:
-                            result = disable_generic_shelly_once.run_once("/tmp/config.ini")
-
-        self.assertEqual(result, "disabled")
-        sleep_mock.assert_called_once_with(2.0)
-        list_nodes.assert_called_once_with("/tmp/gateway-run", "svc", "/Devices", timeout=1.0)
-        self.assertEqual(get_value.call_count, 3)
-        get_value.assert_any_call("/tmp/gateway-cache.json", "svc", "/Devices/SERIAL/Ip", timeout=1.0)
-        set_value_func.assert_called_once_with("/tmp/gateway-run", "svc", "/Devices/SERIAL/1/Enabled", 0, timeout=1.0)
-
-    def test_main_returns_status_for_success_and_failure(self):
-        with patch.object(disable_generic_shelly_once, "run_once", return_value="disabled") as run_once:
-            with patch.object(disable_generic_shelly_once.logging, "basicConfig") as basic_config:
-                with patch.object(disable_generic_shelly_once.logging, "info") as info_log:
-                    self.assertEqual(disable_generic_shelly_once.main(["/tmp/example.ini"]), 0)
-        basic_config.assert_called_once()
-        run_once.assert_called_once_with("/tmp/example.ini")
-        info_log.assert_called_with("Generic Shelly one-shot helper finished: %s", "disabled")
-
-        with patch.object(disable_generic_shelly_once, "run_once", side_effect=RuntimeError("boom")):
-            with patch.object(disable_generic_shelly_once.logging, "exception") as exception_log:
-                self.assertEqual(disable_generic_shelly_once.main(["/tmp/example.ini"]), 1)
-        exception_log.assert_called_once()
-
-    def test_main_guard_raises_system_exit(self):
-        module_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "venus_evcharger",
-            "ops",
-            "disable_generic_shelly_once.py",
+    def test_run_once_submits_ip_request_after_delay_and_reports_acceptance(self) -> None:
+        port = _RecordingConfigurationPort(GenericShellyConfigurationReceipt(True, "command-17"))
+        with (
+            patch.object(helper, "load_settings", return_value=_settings(delay_seconds=2.0, channel=3)),
+            patch("venus_evcharger.ops.disable_generic_shelly_once.time.sleep") as sleep,
+            patch("venus_evcharger.ops.disable_generic_shelly_once.logging.info") as info,
+        ):
+            self.assertEqual(helper.run_once("config", configuration_port=port), "accepted")
+        sleep.assert_called_once_with(2.0)
+        self.assertEqual(
+            info.call_args_list,
+            [
+                call("Waiting %.0f seconds before generic Shelly one-shot request", 2.0),
+                call("Gateway accepted generic Shelly disable request %s", "command-17"),
+            ],
         )
-        with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False) as handle:
-            handle.write(
-                "[DEFAULT]\n"
-                "Host=192.168.178.76\n"
-                "DisableGenericShellyDevice=0\n"
-                "GenericShellyDisableDelaySeconds=0\n"
-            )
-            config_path = handle.name
-        self.addCleanup(lambda: os.path.exists(config_path) and os.unlink(config_path))
+        self.assertEqual(len(port.requests), 1)
+        request = port.requests[0]
+        self.assertEqual((request.selector.kind, request.selector.value, request.channel), ("ip", "192.0.2.7", 3))
 
-        with patch.object(sys, "argv", [module_path, config_path]):
-            with self.assertRaises(SystemExit) as raised:
-                runpy.run_path(module_path, run_name="__main__")
+    def test_run_once_submits_mac_request_without_delay_and_reports_rejection(self) -> None:
+        port = _RecordingConfigurationPort(GenericShellyConfigurationReceipt(False, reason="backpressure"))
+        settings = _settings(target_ip="", target_mac="AABBCCDDEEFF")
+        with (
+            patch.object(helper, "load_settings", return_value=settings),
+            patch("venus_evcharger.ops.disable_generic_shelly_once.time.sleep") as sleep,
+            patch("venus_evcharger.ops.disable_generic_shelly_once.logging.warning") as warning,
+        ):
+            self.assertEqual(helper.run_once(configuration_port=port), "rejected")
+        sleep.assert_not_called()
+        warning.assert_called_once_with("Gateway rejected generic Shelly disable request: %s", "backpressure")
+        self.assertEqual(port.requests[0].selector.kind, "mac")
 
-        self.assertEqual(raised.exception.code, 0)
+    def test_main_reports_acceptance_rejection_missing_composition_and_failure(self) -> None:
+        accepted_port = _RecordingConfigurationPort(GenericShellyConfigurationReceipt(True, "accepted-id"))
+        with (
+            patch.object(helper, "run_once", return_value="accepted") as run,
+            patch("venus_evcharger.ops.disable_generic_shelly_once.logging.basicConfig") as basic,
+            patch("venus_evcharger.ops.disable_generic_shelly_once.logging.info") as info,
+        ):
+            self.assertEqual(helper.main(["config"], configuration_port=accepted_port), 0)
+        run.assert_called_once_with("config", configuration_port=accepted_port)
+        basic.assert_called_once_with(level=logging.INFO, format="%(levelname)s %(message)s")
+        info.assert_called_once_with("Generic Shelly one-shot helper finished: %s", "accepted")
+
+        with patch.object(helper, "run_once", return_value="rejected"):
+            self.assertEqual(helper.main(["config"], configuration_port=accepted_port), 1)
+
+        with patch("venus_evcharger.ops.disable_generic_shelly_once.logging.error") as error:
+            self.assertEqual(helper.main(["config"]), 1)
+        error.assert_called_once_with("Generic Shelly configuration port is not configured")
+
+        failure = RuntimeError("failed")
+        with (
+            patch.object(sys, "argv", ["helper", "from-sys-argv"]),
+            patch.object(helper, "run_once", side_effect=failure) as failed_run,
+            patch("venus_evcharger.ops.disable_generic_shelly_once.logging.exception") as exception,
+        ):
+            self.assertEqual(helper.main(configuration_port=accepted_port), 1)
+        failed_run.assert_called_once_with("from-sys-argv", configuration_port=accepted_port)
+        exception.assert_called_once_with("Generic Shelly one-shot helper failed: %s", failure)
+
+if __name__ == "__main__":
+    unittest.main()

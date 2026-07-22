@@ -639,7 +639,8 @@ Typical fields include:
 
 - `service_version`
 - `api_version`
-- `current_version`
+- `product_name`
+- `instance_id`
 
 ### `GET /v1/state/build`
 
@@ -648,10 +649,10 @@ Returns build and product identity metadata for the running service.
 Typical fields include:
 
 - `product_name`
-- `service_name`
 - `connection_name`
 - `hardware_version`
 - `firmware_version`
+- `runtime_state_path`
 
 ### `GET /v1/state/contracts`
 

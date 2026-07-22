@@ -13,7 +13,6 @@ from venus_evcharger.core.contracts import (
     normalized_status_source,
 )
 from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticSnapshot, DiagnosticValue
-from venus_evcharger.publish.dbus_diagnostics_introspection import DbusDiagnosticsIntrospection
 from venus_evcharger.publish.dbus_diagnostics_phase import DbusDiagnosticsPhase
 from venus_evcharger.publish.dbus_diagnostics_runtime import DbusDiagnosticsRuntime
 from venus_evcharger.publish.dbus_diagnostics_schedule import DbusDiagnosticsSchedule
@@ -24,6 +23,20 @@ from venus_evcharger.publish.dbus_ports import (
     FieldPublisherPort,
 )
 from venus_evcharger.publish.dbus_shared import DbusPublishContext, PublishServicePort, is_object_mapping
+from venus_evcharger.publish.gateway_diagnostics import (
+    GatewayDiscoveryDiagnosticValues,
+    GatewayDiscoveryDiagnostics,
+)
+
+
+def _gateway_values(
+    source: GatewayDiscoveryDiagnostics,
+    supplied: GatewayDiscoveryDiagnosticValues | None,
+    now: float,
+) -> GatewayDiscoveryDiagnosticValues:
+    if supplied is not None:
+        return supplied
+    return source.values(now)
 
 
 class DbusPublishDiagnostics:
@@ -45,7 +58,7 @@ class DbusPublishDiagnostics:
         self.schedule = DbusDiagnosticsSchedule(context)
         self.runtime = DbusDiagnosticsRuntime(context, runtime_views.decisions)
         self.phase = DbusDiagnosticsPhase(context, runtime_views.phases)
-        self.introspection = DbusDiagnosticsIntrospection(context)
+        self.gateway = GatewayDiscoveryDiagnostics(context.gateway_diagnostics)
 
     @staticmethod
     def _runtime_error_state(service: object) -> Mapping[str, object]:
@@ -54,8 +67,13 @@ class DbusPublishDiagnostics:
             return {}
         return {str(key): value for key, value in error_state.items()}
 
-    def counter_values(self, now: float) -> dict[str, DiagnosticValue]:
+    def counter_values(
+        self,
+        now: float,
+        gateway: GatewayDiscoveryDiagnosticValues | None = None,
+    ) -> dict[str, DiagnosticValue]:
         """Return change-driven diagnostic counters keyed by semantic EVCS field."""
+        gateway_values = _gateway_values(self.gateway, gateway, now)
         error_state = self._runtime_error_state(self.service)
         scheduled_snapshot = self.runtime_views.summary.scheduled_snapshot(self.service, now)
         auto_state, auto_state_code = normalized_auto_state_pair(
@@ -85,11 +103,16 @@ class DbusPublishDiagnostics:
             **self.phase.phase_values(now),
             **self.phase.contactor_values(),
             **self.runtime.runtime_timing_values(now),
-            **self.introspection.counter_values(now),
+            **gateway_values.counter_values(),
         }
 
-    def age_values(self, now: float) -> dict[str, float]:
+    def age_values(
+        self,
+        now: float,
+        gateway: GatewayDiscoveryDiagnosticValues | None = None,
+    ) -> dict[str, float]:
         """Return slower-changing age-like diagnostic values keyed by semantic EVCS field."""
+        gateway_values = _gateway_values(self.gateway, gateway, now)
         svc = self.service
         stale_base = (
             svc._last_successful_update_at
@@ -145,12 +168,16 @@ class DbusPublishDiagnostics:
                 getattr(svc, "_software_update_last_run_at", None), now
             ),
             "auto_stale_seconds": self.context.age(stale_base, now),
-            "auto_dbus_introspection_snapshot_age": self.introspection.snapshot_age(now),
+            "auto_gateway_diagnostics_age": gateway_values.age_seconds,
         }
 
     def snapshot(self, now: float) -> DiagnosticSnapshot:
         """Return one immutable-cycle view of all diagnostic values."""
-        return DiagnosticSnapshot(counters=self.counter_values(now), ages=self.age_values(now))
+        gateway = self.gateway.values(now)
+        return DiagnosticSnapshot(
+            counters=self.counter_values(now, gateway),
+            ages=self.age_values(now, gateway),
+        )
 
     def publish_diagnostic_paths(self, now: float) -> bool:
         """Publish diagnostics on change, except age-like values every five seconds."""

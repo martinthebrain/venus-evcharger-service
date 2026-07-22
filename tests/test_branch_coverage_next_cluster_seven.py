@@ -3,11 +3,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.companion_dbus_bridge_cases_common import _FakeVeDbusService
 from tests.venus_evcharger_test_fixtures import make_runtime_state_service
 from tests.wizard_branch_runtime_cases_common import _imported_defaults, _namespace
 from venus_evcharger.bootstrap import wizard_cli_imports, wizard_cli_non_interactive
-from venus_evcharger.companion import EnergyCompanionDbusBridge
 from venus_evcharger.controllers.state_restore import RuntimeStateRestorer
 from venus_evcharger.controllers.state_restore_victron_ess import (
     VictronEssRuntimeRestorer,
@@ -17,14 +15,6 @@ from venus_evcharger.controllers.state_runtime_normalize import RuntimeStateNorm
 
 
 class BranchCoverageNextClusterSevenTests(unittest.TestCase):
-    def test_companion_bridge_grid_helpers_cover_disabled_and_existing_service_paths(self) -> None:
-        bridge = EnergyCompanionDbusBridge(SimpleNamespace(companion_source_grid_services_enabled=False), "/tmp/service.py")
-        self.assertFalse(bridge._publish_grid_source_service({"source_id": "hybrid"}, 0, 100.0))
-
-        existing_service = _FakeVeDbusService("com.victronenergy.grid.external_400")
-        bridge._source_grid_services["hybrid"] = existing_service
-        self.assertIs(bridge._ensure_source_grid_service({"source_id": "hybrid"}, 0), existing_service)
-
     def test_wizard_cli_wrappers_cover_direct_non_interactive_paths(self) -> None:
         imported = _imported_defaults(
             imported_from="/tmp/import.json",

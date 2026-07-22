@@ -18,8 +18,16 @@ ControlCommandName = Literal[
     "set_start_stop",
     "trigger_software_update",
 ]
-ControlCommandSource = Literal["dbus", "http", "internal", "mqtt"]
+ControlCommandSource = Literal["control-surface", "http", "internal", "mqtt"]
 ControlCommandStatus = Literal["accepted_in_flight", "applied", "rejected"]
+
+
+@dataclass(frozen=True, slots=True)
+class ControlRoute:
+    """One adapter-resolved route into the canonical control model."""
+
+    name: ControlCommandName
+    target: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,9 +35,9 @@ class ControlCommand:
     """One canonical control request independent of transport details."""
 
     name: ControlCommandName
-    path: str
+    target: str
     value: Any
-    source: ControlCommandSource = "dbus"
+    source: ControlCommandSource = "internal"
     detail: str = ""
     command_id: str = ""
     idempotency_key: str = ""

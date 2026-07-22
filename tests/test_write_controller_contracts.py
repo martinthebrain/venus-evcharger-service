@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Exact command-boundary contracts for the DBus write controller."""
+"""Exact command-boundary contracts for the semantic control writer."""
 
 from __future__ import annotations
 
@@ -10,49 +10,51 @@ from unittest.mock import MagicMock, patch
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.control import ControlCommand, ControlResult
 from venus_evcharger.controllers import write as write_module
-from venus_evcharger.controllers.write import DbusWriteController
+from venus_evcharger.controllers.write import ControlWriteController
 
 
 class TestWriteControllerConstructionContracts(unittest.TestCase):
-    def test_constructor_builds_control_service_from_declared_path_sets(self) -> None:
+    def test_constructor_builds_control_service_from_declared_target_sets(self) -> None:
         port = SimpleNamespace()
         control_api = MagicMock()
         with patch.object(write_module, "ControlApiV1Service", return_value=control_api) as api_type:
-            controller = DbusWriteController(port)
+            controller = ControlWriteController(port)
         api_type.assert_called_once_with(
-            current_setting_paths=DbusWriteController.CURRENT_SETTING_PATHS,
-            auto_runtime_setting_paths=DbusWriteController.AUTO_RUNTIME_SETTING_PATHS,
+            current_setting_targets=ControlWriteController.CURRENT_SETTING_TARGETS,
+            auto_runtime_setting_targets=ControlWriteController.AUTO_RUNTIME_SETTING_TARGETS,
         )
         self.assertIs(controller.port, port)
         self.assertIs(controller._control_api, control_api)
         self.assertIs(controller._external_side_effect_started, False)
 
     def test_failure_detail_uses_message_or_exception_type(self) -> None:
-        self.assertEqual(DbusWriteController._write_failure_detail(ValueError("bad")), "bad")
-        self.assertEqual(DbusWriteController._write_failure_detail(ValueError()), "ValueError")
+        self.assertEqual(ControlWriteController._write_failure_detail(ValueError("bad")), "bad")
+        self.assertEqual(ControlWriteController._write_failure_detail(ValueError()), "ValueError")
 
 
 class TestWriteControllerCommandBoundaryContracts(unittest.TestCase):
     def setUp(self) -> None:
         self.port = SimpleNamespace()
-        self.controller = DbusWriteController(self.port)
+        self.controller = ControlWriteController(self.port)
         self.controller._control_api = MagicMock()
 
-    def test_transport_writes_build_exact_canonical_commands(self) -> None:
+    def test_semantic_targets_build_exact_canonical_commands(self) -> None:
         command = MagicMock(spec=ControlCommand)
-        self.controller._control_api.command_for_write.return_value = command
+        self.controller._control_api.command_for_target.return_value = command
         self.assertIs(
-            self.controller.build_control_command("/Mode", 2, source="dbus"),
+            self.controller.build_control_command(
+                "set_mode", "mode", 2, source="control-surface"
+            ),
             command,
         )
-        self.controller._control_api.command_for_write.assert_called_once_with(
-            "/Mode", 2, source="dbus"
+        self.controller._control_api.command_for_target.assert_called_once_with(
+            "set_mode", "mode", 2, source="control-surface"
         )
 
-        self.controller._control_api.command_for_write.reset_mock()
-        self.controller.build_control_command("/Enable", 1)
-        self.controller._control_api.command_for_write.assert_called_once_with(
-            "/Enable", 1, source="dbus"
+        self.controller._control_api.command_for_target.reset_mock()
+        self.controller.build_control_command("set_enable", "enable", 1)
+        self.controller._control_api.command_for_target.assert_called_once_with(
+            "set_enable", "enable", 1, source="internal"
         )
 
     def test_structured_payload_builds_exact_canonical_command(self) -> None:
@@ -78,8 +80,11 @@ class TestWriteControllerCommandBoundaryContracts(unittest.TestCase):
             _service=service,
             save_runtime_state=MagicMock(),
             save_runtime_overrides=MagicMock(),
+            begin_publication_transaction=MagicMock(),
+            commit_publication_transaction=MagicMock(),
+            discard_publication_transaction=MagicMock(),
         )
-        controller = DbusWriteController(port)
+        controller = ControlWriteController(port)
         command = MagicMock(spec=ControlCommand)
         applied = MagicMock(spec=ControlResult)
         controller._control_api = MagicMock()
@@ -92,28 +97,35 @@ class TestWriteControllerCommandBoundaryContracts(unittest.TestCase):
         controller._control_api.execute.assert_called_once_with(controller, command)
         port.save_runtime_state.assert_called_once_with()
         port.save_runtime_overrides.assert_called_once_with()
+        port.begin_publication_transaction.assert_called_once_with()
+        port.commit_publication_transaction.assert_called_once_with()
         result.assert_called_once_with(command, external_side_effect_started=False)
         self.assertIs(controller._external_side_effect_started, False)
 
-    def test_handle_write_returns_the_canonical_result_acceptance(self) -> None:
+    def test_built_command_is_forwarded_to_the_canonical_handler(self) -> None:
         command = MagicMock(spec=ControlCommand)
         result = SimpleNamespace(accepted=True)
         with (
             patch.object(self.controller, "build_control_command", return_value=command) as build,
             patch.object(self.controller, "handle_control_command", return_value=result) as handle,
         ):
-            self.assertTrue(self.controller.handle_write("/Mode", 2))
-        build.assert_called_once_with("/Mode", 2, source="dbus")
+            built = self.controller.build_control_command(
+                "set_mode", "mode", 2, source="control-surface"
+            )
+            self.assertTrue(self.controller.handle_control_command(built).accepted)
+        build.assert_called_once_with(
+            "set_mode", "mode", 2, source="control-surface"
+        )
         handle.assert_called_once_with(command)
 
-    def test_unsupported_path_is_rejected_before_state_or_persistence_work(self) -> None:
-        controller = DbusWriteController(SimpleNamespace())
+    def test_unsupported_target_is_rejected_before_state_or_persistence_work(self) -> None:
+        controller = ControlWriteController(SimpleNamespace())
 
         with self.assertRaisesRegex(
             ValueError,
-            "^Unsupported control path '/Unknown'\\.$",
+            "^Control command 'set_mode' does not support target 'unknown'\\.$",
         ):
-            controller.handle_write("/Unknown", object())
+            controller.build_control_command("set_mode", "unknown", 1)
 
 
 class TestWriteControllerRuntimeSettingContracts(unittest.TestCase):
@@ -122,9 +134,9 @@ class TestWriteControllerRuntimeSettingContracts(unittest.TestCase):
         port = SimpleNamespace(auto_policy=policy, validate_runtime_config=MagicMock())
 
         self.assertEqual(
-            DbusWriteController._apply_auto_runtime_setting(
+            ControlWriteController._apply_auto_runtime_setting(
                 port,
-                "/Auto/StartSurplusWatts",
+                "auto_start_surplus_watts",
                 "123.5",
             ),
             123.5,
@@ -138,11 +150,11 @@ class TestWriteControllerRuntimeSettingContracts(unittest.TestCase):
         port = SimpleNamespace(validate_runtime_config=MagicMock())
         runtime_normalizer = MagicMock(return_value="normalized")
         specs = {
-            "/Runtime": ("runtime_value", runtime_normalizer),
+            "runtime": ("runtime_value", runtime_normalizer),
         }
-        with patch.object(DbusWriteController, "AUTO_RUNTIME_SETTING_SPECS", specs):
+        with patch.object(ControlWriteController, "AUTO_RUNTIME_SETTING_SPECS", specs):
             self.assertEqual(
-                DbusWriteController._apply_auto_runtime_setting(port, "/Runtime", " value "),
+                ControlWriteController._apply_auto_runtime_setting(port, "runtime", " value "),
                 "normalized",
             )
         runtime_normalizer.assert_called_once_with(" value ")
@@ -150,18 +162,18 @@ class TestWriteControllerRuntimeSettingContracts(unittest.TestCase):
         self.assertEqual(port.runtime_value, "normalized")
 
     def test_runtime_setting_handler_publishes_normalized_value_once(self) -> None:
-        port = SimpleNamespace(time_now=MagicMock(return_value=50.0), publish_dbus_field=MagicMock())
-        controller = DbusWriteController(port)
+        port = SimpleNamespace(time_now=MagicMock(return_value=50.0), publish_field=MagicMock())
+        controller = ControlWriteController(port)
         with (
             patch.object(controller, "_apply_auto_runtime_setting", return_value=7.5) as apply,
-            patch.object(DbusWriteController, "AUTO_RUNTIME_SETTING_FIELDS", {"/Setting": "field"}),
+            patch.object(ControlWriteController, "AUTO_RUNTIME_SETTING_FIELDS", {"setting": "field"}),
         ):
-            controller._handle_auto_runtime_setting_write("/Setting", "7.5")
-        apply.assert_called_once_with(port, "/Setting", "7.5")
-        port.publish_dbus_field.assert_called_once_with("field", 7.5, 50.0, force=True)
+            controller._handle_auto_runtime_setting_write("setting", "7.5")
+        apply.assert_called_once_with(port, "setting", "7.5")
+        port.publish_field.assert_called_once_with("field", 7.5, 50.0, force=True)
 
     def test_value_adapters_have_exact_normalization(self) -> None:
-        controller = DbusWriteController(SimpleNamespace())
+        controller = ControlWriteController(SimpleNamespace())
         with (
             patch.object(controller, "_handle_mode_write") as mode,
             patch.object(controller, "_handle_startstop_write") as startstop,

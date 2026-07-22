@@ -8,13 +8,11 @@ from venus_evcharger.bootstrap.runtime_loops import register_runtime_timers, sta
 
 def _service(*, configured: bool) -> SimpleNamespace:
     runtime = SimpleNamespace(
-        mark_mainloop_thread=MagicMock(),
         start_io_worker=MagicMock(),
         start_update_worker=MagicMock(),
         start_control_command_worker=MagicMock(),
         start_mainloop_watchdog=MagicMock(),
         schedule_update_cycle=MagicMock(return_value=True),
-        flush_dbus_publish_queue=MagicMock(return_value=True),
         mainloop_heartbeat_tick=MagicMock(return_value=True),
     )
     state = SimpleNamespace(start_companion_bridge=MagicMock(), summary=MagicMock(return_value="mode=1"))
@@ -30,7 +28,6 @@ def _service(*, configured: bool) -> SimpleNamespace:
         runtime_state_path="/run/state.json",
         topology_configured=configured,
         host_configured=configured,
-        _dbus_publish_flush_interval_ms=200,
     )
 
 
@@ -45,7 +42,6 @@ class BootstrapRuntimeLoopContracts(unittest.TestCase):
             gobject.timeout_add.call_args_list,
             [
                 call(1000, service.runtime.schedule_update_cycle),
-                call(200, service.runtime.flush_dbus_publish_queue),
                 call(1000, service.runtime.mainloop_heartbeat_tick),
             ],
         )
@@ -58,7 +54,6 @@ class BootstrapRuntimeLoopContracts(unittest.TestCase):
         ) as info:
             start_runtime_loops(service, gobject)
 
-        service.runtime.mark_mainloop_thread.assert_called_once_with()
         service.runtime.start_io_worker.assert_called_once_with()
         service.control.start_server.assert_called_once_with()
         service.runtime.start_update_worker.assert_called_once_with()
