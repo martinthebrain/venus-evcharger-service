@@ -116,59 +116,104 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
     def test_auto_input_source_max_age_clamps_poll_budget_and_validation_budget(self):
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_pv_poll_interval_seconds=0.0, auto_input_validation_poll_seconds=12.0),
+                SimpleNamespace(
+                    auto_pv_poll_interval_seconds=0.0,
+                    auto_input_validation_poll_seconds=12.0,
+                    dbus_gateway_max_age_seconds=10.0,
+                ),
                 "auto_pv_poll_interval_seconds",
             ),
-            12.0,
+            10.0,
         )
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_pv_poll_interval_seconds=-3.0, auto_input_validation_poll_seconds=12.0),
+                SimpleNamespace(
+                    auto_pv_poll_interval_seconds=-3.0,
+                    auto_input_validation_poll_seconds=12.0,
+                    dbus_gateway_max_age_seconds=10.0,
+                ),
                 "auto_pv_poll_interval_seconds",
             ),
-            12.0,
+            10.0,
         )
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_pv_poll_interval_seconds=0.1, auto_input_validation_poll_seconds=0.5),
+                SimpleNamespace(
+                    auto_pv_poll_interval_seconds=0.1,
+                    auto_input_validation_poll_seconds=0.5,
+                    dbus_gateway_max_age_seconds=10.0,
+                ),
                 "auto_pv_poll_interval_seconds",
             ),
             1.0,
         )
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_input_validation_poll_seconds=0.5),
+                SimpleNamespace(auto_input_validation_poll_seconds=0.5, dbus_gateway_max_age_seconds=10.0),
                 "missing_poll_interval_seconds",
             ),
             1.0,
         )
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_input_validation_poll_seconds=12.0),
+                SimpleNamespace(auto_input_validation_poll_seconds=12.0, dbus_gateway_max_age_seconds=10.0),
                 "missing_poll_interval_seconds",
             ),
-            12.0,
+            10.0,
         )
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_pv_poll_interval_seconds=1.0, auto_input_validation_poll_seconds=0.0),
+                SimpleNamespace(
+                    auto_pv_poll_interval_seconds=1.0,
+                    auto_input_validation_poll_seconds=0.0,
+                    dbus_gateway_max_age_seconds=10.0,
+                ),
                 "auto_pv_poll_interval_seconds",
             ),
-            2.0,
+            10.0,
         )
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_pv_poll_interval_seconds=0.0),
+                SimpleNamespace(auto_pv_poll_interval_seconds=0.0, dbus_gateway_max_age_seconds=0.0),
+                "auto_pv_poll_interval_seconds",
+            ),
+            30.0,
+        )
+        self.assertEqual(
+            InputCacheResolver._auto_input_source_max_age_seconds(
+                SimpleNamespace(
+                    auto_pv_poll_interval_seconds=0.0,
+                    auto_input_validation_poll_seconds=0.0,
+                    dbus_gateway_max_age_seconds=0.0,
+                ),
                 "auto_pv_poll_interval_seconds",
             ),
             30.0,
         )
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(
-                SimpleNamespace(auto_pv_poll_interval_seconds=0.0, auto_input_validation_poll_seconds=0.0),
+                SimpleNamespace(auto_input_validation_poll_seconds=30.0, dbus_gateway_max_age_seconds=0.0),
+                "missing_poll_interval_seconds",
+            ),
+            30.0,
+        )
+        self.assertEqual(
+            InputCacheResolver._auto_input_source_max_age_seconds(
+                SimpleNamespace(auto_pv_poll_interval_seconds=0.0, auto_input_validation_poll_seconds=30.0),
                 "auto_pv_poll_interval_seconds",
             ),
             30.0,
+        )
+        self.assertEqual(
+            InputCacheResolver._auto_input_source_max_age_seconds(
+                SimpleNamespace(
+                    auto_pv_poll_interval_seconds=0.25,
+                    auto_input_validation_poll_seconds=30.0,
+                    dbus_gateway_max_age_seconds=0.0,
+                ),
+                "auto_pv_poll_interval_seconds",
+            ),
+            1.0,
         )
 
     def test_resolve_auto_inputs_records_complete_energy_cluster_snapshot(self):
@@ -180,6 +225,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_grid_poll_interval_seconds=3.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=None,
@@ -285,13 +331,14 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         self.assertEqual(service._last_energy_cluster["battery_sources"], [{"source_id": "battery"}, {"source_id": "hybrid"}])
         self.assertEqual(service._last_energy_learning_profiles, {"battery": {"power_w": 1400.0}})
 
-    def test_resolve_auto_inputs_rejects_all_over_age_sources_by_their_own_poll_budget(self):
+    def test_resolve_auto_inputs_rejects_sources_older_than_the_combined_freshness_budget(self):
         service = SimpleNamespace(
             auto_input_cache_seconds=120.0,
             auto_pv_poll_interval_seconds=2.0,
             auto_grid_poll_interval_seconds=3.0,
             auto_battery_poll_interval_seconds=4.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=None,
@@ -315,11 +362,11 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             {
                 "captured_at": 100.0,
                 "pv_power": 2500.0,
-                "pv_captured_at": 95.0,
+                "pv_captured_at": 89.0,
                 "grid_power": -1500.0,
-                "grid_captured_at": 93.0,
+                "grid_captured_at": 89.0,
                 "battery_soc": 63.5,
-                "battery_captured_at": 91.0,
+                "battery_captured_at": 89.0,
             },
             100.0,
             True,
@@ -336,6 +383,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_grid_poll_interval_seconds=3.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=None,
@@ -379,6 +427,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_grid_poll_interval_seconds=3.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 5},
             _last_pv_value=None,
@@ -409,6 +458,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_grid_poll_interval_seconds=3.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=None,
@@ -437,13 +487,14 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         self.assertEqual(service._last_energy_cluster["battery_combined_ac_power_w"], 444.0)
         self.assertEqual(service._last_energy_learning_profiles, {})
 
-    def test_resolve_auto_inputs_rejects_over_age_combined_battery_snapshot_metrics_by_battery_poll_budget(self):
+    def test_resolve_auto_inputs_rejects_over_age_combined_battery_snapshot_metrics(self):
         service = SimpleNamespace(
             auto_input_cache_seconds=120.0,
             auto_pv_poll_interval_seconds=2.0,
             auto_grid_poll_interval_seconds=3.0,
             auto_battery_poll_interval_seconds=4.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=None,
@@ -466,7 +517,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
         controller.components.inputs.resolve_auto_inputs(
             {
                 "captured_at": 100.0,
-                "battery_captured_at": 91.0,
+                "battery_captured_at": 89.0,
                 "battery_combined_charge_power_w": 111.0,
                 "battery_combined_discharge_power_w": 222.0,
                 "battery_combined_net_power_w": -333.0,
@@ -488,6 +539,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_grid_poll_interval_seconds=3.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=None,
@@ -598,10 +650,11 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_grid_poll_interval_seconds=2.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=2100.0,
-            _last_pv_at=90.0,
+            _last_pv_at=89.9,
             _last_grid_value=None,
             _last_grid_at=None,
             _last_battery_soc_value=None,
@@ -634,6 +687,7 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_grid_poll_interval_seconds=2.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
             _auto_cached_inputs_used=False,
             _error_state={"cache_hits": 0},
             _last_pv_value=2100.0,
@@ -670,9 +724,10 @@ class TestUpdateCycleControllerNonary(UpdateCycleControllerTestBase):
             auto_pv_poll_interval_seconds=2.0,
             auto_battery_poll_interval_seconds=10.0,
             auto_input_validation_poll_seconds=30.0,
+            dbus_gateway_max_age_seconds=10.0,
         )
 
-        self.assertEqual(InputCacheResolver._auto_input_source_max_age_seconds(service, "auto_pv_poll_interval_seconds"), 4.0)
+        self.assertEqual(InputCacheResolver._auto_input_source_max_age_seconds(service, "auto_pv_poll_interval_seconds"), 10.0)
         self.assertEqual(
             InputCacheResolver._auto_input_source_max_age_seconds(service, "auto_battery_poll_interval_seconds"),
             20.0,
