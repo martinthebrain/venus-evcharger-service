@@ -79,9 +79,21 @@ read_mem_available_kb() {
 	fi
 }
 
+resource_min_mem_available_kb() {
+	case "$WORK_STORAGE" in
+	sd | data)
+		printf '%s\n' "$RESOURCE_MIN_MEM_AVAILABLE_PERSISTENT_KB"
+		;;
+	*)
+		printf '%s\n' "$RESOURCE_MIN_MEM_AVAILABLE_KB"
+		;;
+	esac
+}
+
 resource_pressure_reason() {
 	[ "$RESOURCE_GUARD_ENABLED" = "1" ] || return 1
 	resource_snapshot
+	resource_min_mem=$(resource_min_mem_available_kb)
 	if [ -n "$RESOURCE_LOAD1" ] && numeric_greater_than "$RESOURCE_LOAD1" "$RESOURCE_MAX_LOAD1"; then
 		printf 'load1=%s>%s' "$RESOURCE_LOAD1" "$RESOURCE_MAX_LOAD1"
 		return 0
@@ -94,8 +106,8 @@ resource_pressure_reason() {
 		printf 'load15=%s>%s' "$RESOURCE_LOAD15" "$RESOURCE_MAX_LOAD15"
 		return 0
 	fi
-	if [ -n "$RESOURCE_MEM_AVAILABLE_KB" ] && [ "$RESOURCE_MEM_AVAILABLE_KB" -lt "$RESOURCE_MIN_MEM_AVAILABLE_KB" ]; then
-		printf 'mem_available_kb=%s<%s' "$RESOURCE_MEM_AVAILABLE_KB" "$RESOURCE_MIN_MEM_AVAILABLE_KB"
+	if [ -n "$RESOURCE_MEM_AVAILABLE_KB" ] && [ "$RESOURCE_MEM_AVAILABLE_KB" -lt "$resource_min_mem" ]; then
+		printf 'mem_available_kb=%s<%s' "$RESOURCE_MEM_AVAILABLE_KB" "$resource_min_mem"
 		return 0
 	fi
 	if [ -n "$RESOURCE_DISK_AVAILABLE_KB" ] && [ "$RESOURCE_DISK_AVAILABLE_KB" -lt "$RESOURCE_MIN_DISK_AVAILABLE_KB" ]; then

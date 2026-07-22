@@ -142,6 +142,88 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             self.assertFalse((target_dir / ".bootstrap-state/update.lock").exists())
             self.assertEqual(list(work_root.iterdir()), [])
 
+    def test_bootstrap_updater_uses_lower_memory_floor_for_persistent_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            ram_base = root / "ram"
+            sd_mount = root / "sd"
+            ram_base.mkdir()
+            sd_mount.mkdir()
+            ram_mountpoint = subprocess.run(
+                ["df", "-Pk", str(ram_base)],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()[1].split()[-1]
+            mounts_path = root / "mounts"
+            mounts_path.write_text(
+                f"tmpfs {ram_mountpoint} tmpfs rw 0 0\n/dev/mmcblk0p1 {sd_mount} ext4 rw 0 0\n",
+                encoding="utf-8",
+            )
+            meminfo_path = root / "meminfo"
+            meminfo_path.write_text("MemAvailable:       39012 kB\n", encoding="utf-8")
+            target_dir = root / "target"
+
+            completed = subprocess.run(
+                ["bash", str(UPDATER_SCRIPT), str(target_dir)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_SOURCE_DIR": str(root / "missing-source"),
+                    "VENUS_EVCHARGER_UPDATER_RAM_WORK_BASE": str(ram_base),
+                    "VENUS_EVCHARGER_UPDATER_RAM_MIN_MEM_AVAILABLE_KB": "393216",
+                    "VENUS_EVCHARGER_UPDATER_RAM_MIN_FILESYSTEM_AVAILABLE_KB": "1",
+                    "VENUS_EVCHARGER_UPDATER_MEMINFO_PATH": str(meminfo_path),
+                    "VENUS_EVCHARGER_UPDATER_MOUNTS_PATH": str(mounts_path),
+                    "VENUS_EVCHARGER_UPDATER_SD_WORK_ROOT": str(sd_mount / ".venus-evcharger-updater-work"),
+                    "VENUS_EVCHARGER_UPDATER_MIN_MEM_AVAILABLE_KB": "65536",
+                    "VENUS_EVCHARGER_UPDATER_PERSISTENT_MIN_MEM_AVAILABLE_KB": "32768",
+                    "VENUS_EVCHARGER_UPDATER_RESOURCE_WAIT_SECONDS": "0",
+                },
+            )
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("Using sd updater workspace", completed.stderr)
+            self.assertNotIn("Resource pressure", completed.stderr)
+            status = self._read_normalized_status(target_dir)
+            self.assertEqual(status["failure_reason"], "incomplete-local-source")
+            self.assertEqual(status["work_storage"], "sd")
+
+    def test_bootstrap_updater_keeps_memory_guard_for_persistent_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            work_root = root / "sd-work"
+            work_root.mkdir()
+            meminfo_path = root / "meminfo"
+            meminfo_path.write_text("MemAvailable:       30000 kB\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                ["bash", str(UPDATER_SCRIPT), str(root / "target")],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "VENUS_EVCHARGER_SOURCE_DIR": str(root / "missing-source"),
+                    "VENUS_EVCHARGER_UPDATER_SD_WORK_ROOT": str(work_root),
+                    "VENUS_EVCHARGER_UPDATER_RAM_WORK_BASE": str(root / "missing-ram"),
+                    "VENUS_EVCHARGER_UPDATER_MEMINFO_PATH": str(meminfo_path),
+                    "VENUS_EVCHARGER_UPDATER_PERSISTENT_MIN_MEM_AVAILABLE_KB": "32768",
+                    "VENUS_EVCHARGER_UPDATER_RESOURCE_WAIT_SECONDS": "0",
+                },
+            )
+
+            self.assertEqual(completed.returncode, 75)
+            self.assertIn("mem_available_kb=30000<32768", completed.stderr)
+            status = self._read_normalized_status(root / "target")
+            self.assertEqual(
+                status["failure_reason"],
+                "resource-pressure:update-start:mem_available_kb=30000<32768",
+            )
+            self.assertEqual(status["work_storage"], "sd")
+
     def test_bootstrap_updater_syncs_local_source_and_preserves_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
