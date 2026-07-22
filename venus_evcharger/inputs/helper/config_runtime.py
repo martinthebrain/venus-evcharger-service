@@ -51,7 +51,8 @@ def load_auto_input_helper_settings(
     pv_poll = _poll_interval_seconds(config, "AutoPvPollIntervalMs", auto_poll_ms)
     grid_poll = _poll_interval_seconds(config, "AutoGridPollIntervalMs", auto_poll_ms)
     battery_poll = _poll_interval_seconds(config, "AutoBatteryPollIntervalMs", auto_poll_ms)
-    fusion = _grid_fusion_config(config)
+    gateway_max_age = max(0.0, config_get_float(config, "DbusGatewayMaxAgeSeconds", 10.0))
+    fusion = _grid_fusion_config(config, gateway_max_age)
     _validate_grid_fusion_poll_interval(fusion, battery_poll)
     return AutoInputHelperSettings(
         config_path=config_path,
@@ -61,7 +62,7 @@ def load_auto_input_helper_settings(
         runtime_instance_id=_parsed_runtime_instance_id(runtime_instance_id),
         gateway_run_dir=config.get("DbusGatewayRunDir", "/run/venus-evcharger").strip(),
         gateway_cache_path=_gateway_cache_path(config),
-        gateway_max_age_seconds=max(0.0, config_get_float(config, "DbusGatewayMaxAgeSeconds", 10.0)),
+        gateway_max_age_seconds=gateway_max_age,
         gateway_error_retry_seconds=max(
             1.0, min(300.0, config_get_float(config, "DbusGatewayErrorRetrySeconds", 30.0))
         ),
@@ -94,13 +95,17 @@ def _poll_interval_seconds(config: configparser.SectionProxy, key: str, fallback
     return max(0.2, config_get_float(config, key, fallback_ms) / 1000.0)
 
 
-def _grid_fusion_config(config: configparser.SectionProxy) -> GridFusionConfig:
+def _grid_fusion_config(config: configparser.SectionProxy, gateway_max_age_seconds: float) -> GridFusionConfig:
+    enabled = parse_config_bool(config["AutoGridFusionEnabled"]) if "AutoGridFusionEnabled" in config else False
+    backup_max_age_seconds = gateway_max_age_seconds
+    if enabled:
+        backup_max_age_seconds = config_get_float(config, "AutoGridFusionBackupMaxAgeSeconds", 6.0)
     return GridFusionConfig(
-        enabled=parse_config_bool(config["AutoGridFusionEnabled"]) if "AutoGridFusionEnabled" in config else False,
+        enabled=enabled,
         primary_source_id=config.get("AutoGridFusionPrimarySource", "").strip(),
         backup_source_id=config.get("AutoGridFusionBackupSource", "victron").strip(),
         primary_max_age_seconds=config_get_float(config, "AutoGridFusionPrimaryMaxAgeSeconds", 15.0),
-        backup_max_age_seconds=config_get_float(config, "AutoGridFusionBackupMaxAgeSeconds", 6.0),
+        backup_max_age_seconds=backup_max_age_seconds,
         minimum_confidence=config_get_float(config, "AutoGridFusionMinimumConfidence", 0.5),
         failover_samples=int(config_get_float(config, "AutoGridFusionFailoverSamples", 3.0)),
         recovery_samples=int(config_get_float(config, "AutoGridFusionRecoverySamples", 15.0)),
