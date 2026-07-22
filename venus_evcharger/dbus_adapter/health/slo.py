@@ -204,4 +204,6 @@ def _with_publish_caps(
     budgets["gui-critical-publish"] = min(int(budgets.get("gui-critical-publish", gui_cap)), gui_cap)
     budgets["local-publish"] = min(int(budgets.get("local-publish", local_cap)), local_cap)
     budgets["diagnostic"] = 0
+    budgets["discovery"] = 0
+    budgets["introspection"] = 0
     return budgets

@@ -91,7 +91,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             slow = health_backpressure_module.backpressure_snapshot(
                 circuit_state=adapter.circuit.state(),
                 slo={"violated": []},
-                queue_health={"oldest_command_age_s": adapter.slo_queue_max_age_seconds * 3.0},
+                queue_health={"oldest_slo_command_age_s": adapter.slo_queue_max_age_seconds * 3.0},
                 queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
             )
             self.assertEqual(slow["state"], "slow")
@@ -99,7 +99,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             protective = health_backpressure_module.backpressure_snapshot(
                 circuit_state=adapter.circuit.state(),
                 slo={"violated": []},
-                queue_health={"oldest_command_age_s": 0.0},
+                queue_health={"oldest_slo_command_age_s": 0.0},
                 queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
             )
             self.assertEqual(protective["state"], "protective")
@@ -107,14 +107,14 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             congested = health_backpressure_module.backpressure_snapshot(
                 circuit_state=adapter.circuit.state(),
                 slo={"violated": ["gui_fresh"]},
-                queue_health={"oldest_command_age_s": 0.0},
+                queue_health={"oldest_slo_command_age_s": 0.0},
                 queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
             )
             self.assertEqual(congested["state"], "ok")
             congested = health_backpressure_module.backpressure_snapshot(
                 circuit_state=adapter.circuit.state(),
                 slo={"violated": ["core_reads_fresh"]},
-                queue_health={"oldest_command_age_s": 0.0},
+                queue_health={"oldest_slo_command_age_s": 0.0},
                 queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
             )
             self.assertEqual(congested["state"], "congested")
@@ -122,7 +122,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 health_backpressure_module.backpressure_snapshot(
                     circuit_state="ok",
                     slo={"violated": ["core_reads_fresh", "queue_age_ok", "gui_fresh", "core_reads_fresh"]},
-                    queue_health={"oldest_command_age_s": adapter.slo_queue_max_age_seconds + 0.1},
+                    queue_health={"oldest_slo_command_age_s": adapter.slo_queue_max_age_seconds + 0.1},
                     queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
                 ),
                 {
@@ -137,7 +137,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 health_backpressure_module.backpressure_snapshot(
                     circuit_state="degraded",
                     slo={"violated": ("queue_age_ok",)},
-                    queue_health={"oldest_command_age_s": 0.0},
+                    queue_health={"oldest_slo_command_age_s": 0.0},
                     queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
                 ),
                 {
@@ -152,7 +152,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 health_backpressure_module.backpressure_snapshot(
                     circuit_state="protective",
                     slo={"violated": set()},
-                    queue_health={"oldest_command_age_s": 0.0},
+                    queue_health={"oldest_slo_command_age_s": 0.0},
                     queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
                 ),
                 {
@@ -167,7 +167,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 health_backpressure_module.backpressure_snapshot(
                     circuit_state="ok",
                     slo={"violated": "core_reads_fresh"},
-                    queue_health={"oldest_command_age_s": adapter.slo_queue_max_age_seconds},
+                    queue_health={"oldest_slo_command_age_s": adapter.slo_queue_max_age_seconds},
                     queue_max_age_seconds=adapter.slo_queue_max_age_seconds,
                 ),
                 {

@@ -101,7 +101,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 3000.0}))
             install_mock(adapter.read_scheduler, "force_due", MagicMock())
             install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
-            install_mock(adapter, "quiet_discovery_and_introspection", MagicMock())
+            install_mock(adapter, "suspend_advisory_work", MagicMock())
             install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
             adapter._last_resource_snapshot = {"state": "constrained"}
 
@@ -127,11 +127,11 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
 
             adapter.write_scheduler.set_dynamic_local_publish_burst.assert_called_once_with(5, pressure_state="slow")
             adapter.read_scheduler.force_due.assert_called_once_with({"pv_power_w", "battery_soc"})
-            adapter.quiet_discovery_and_introspection.assert_called_once_with(1000.0)
+            adapter.suspend_advisory_work.assert_called_once_with(1000.0)
             adapter.cache_freshness_snapshot.assert_called_once_with(1000.0)
             backpressure_snapshot.assert_called_once_with(
                 circuit_state="ok",
-                queue_health={"oldest_command_age_s": 20.0},
+                queue_health={"oldest_command_age_s": 20.0, "oldest_slo_command_age_s": 20.0},
                 slo=unittest.mock.ANY,
                 queue_max_age_seconds=10.0,
             )
@@ -158,7 +158,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
             install_mock(adapter.read_scheduler, "force_due", MagicMock())
             install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
-            install_mock(adapter, "quiet_discovery_and_introspection", MagicMock())
+            install_mock(adapter, "suspend_advisory_work", MagicMock())
             install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
             adapter._last_resource_snapshot = {}
 
@@ -184,7 +184,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
 
             runtime_pressure_state.assert_called_once_with("ok", "ok")
             adapter.write_scheduler.set_dynamic_local_publish_burst.assert_called_once_with(20, pressure_state="ok")
-            adapter.quiet_discovery_and_introspection.assert_not_called()
+            adapter.suspend_advisory_work.assert_not_called()
 
     def test_slo_regulation_quiets_discovery_under_protective_pressure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -203,7 +203,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
             install_mock(adapter.read_scheduler, "force_due", MagicMock())
             install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
-            install_mock(adapter, "quiet_discovery_and_introspection", MagicMock())
+            install_mock(adapter, "suspend_advisory_work", MagicMock())
             install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
             adapter._last_resource_snapshot = {"state": "ok"}
 
@@ -231,7 +231,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                 1,
                 pressure_state="protective",
             )
-            adapter.quiet_discovery_and_introspection.assert_called_once_with(1000.0)
+            adapter.suspend_advisory_work.assert_called_once_with(1000.0)
 
     def test_slo_snapshot_and_regulation_boundaries_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -282,9 +282,9 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
             adapter.apply_slo_regulation()
             adapter.read_scheduler.force_due.assert_not_called()
-            install_mock(adapter, "quiet_discovery_and_introspection", MagicMock())
+            install_mock(adapter, "suspend_advisory_work", MagicMock())
             adapter.apply_slo_regulation()
-            adapter.quiet_discovery_and_introspection.assert_not_called()
+            adapter.suspend_advisory_work.assert_not_called()
 
             adapter.write_scheduler.local_publish_burst_limit = 20
             install_mock(adapter, "cache_freshness_snapshot", MagicMock(return_value={}))
@@ -304,6 +304,27 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             quiet_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-quiet")))
             quiet_adapter.discovery.next_scan_at = 0.0
             quiet_adapter._last_introspection_full_scan_at = 50.0
-            quiet_adapter.quiet_discovery_and_introspection(100.0)
+            advisory = [
+                ("introspection.json", {"queue_class": "introspection"}),
+                ("discovery.json", {"queue_class": "discovery"}),
+                ("diagnostic.json", {"queue_class": "diagnostic"}),
+                ("remote.json", {"queue_class": "remote-write"}),
+            ]
+            install_mock(quiet_adapter.commands, "load_pending", MagicMock(return_value=advisory))
+            install_mock(quiet_adapter.commands, "remove", MagicMock())
+            install_mock(quiet_adapter.write_scheduler, "record_lifecycle", MagicMock())
+            quiet_adapter.suspend_advisory_work(100.0)
             self.assertEqual(quiet_adapter.discovery.next_scan_at, 160.0)
             self.assertEqual(quiet_adapter._last_introspection_full_scan_at, 100.0)
+            self.assertEqual(
+                quiet_adapter.commands.remove.call_args_list,
+                [unittest.mock.call("introspection.json"), unittest.mock.call("discovery.json"), unittest.mock.call("diagnostic.json")],
+            )
+            self.assertEqual(
+                quiet_adapter.write_scheduler.record_lifecycle.call_args_list,
+                [
+                    unittest.mock.call({"queue_class": "introspection"}, "dropped"),
+                    unittest.mock.call({"queue_class": "discovery"}, "dropped"),
+                    unittest.mock.call({"queue_class": "diagnostic"}, "dropped"),
+                ],
+            )

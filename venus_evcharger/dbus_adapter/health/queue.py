@@ -10,6 +10,8 @@ from venus_evcharger.dbus_gateway import command_queue_class
 from venus_evcharger.dbus_gateway_core import float_or_zero
 from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping, CommandPayload
 
+ADVISORY_QUEUE_CLASSES = frozenset({"diagnostic", "discovery", "introspection"})
+
 
 def queue_class_health(pending: CommandFileList, now: float) -> CommandPayload:
     classes: dict[str, dict[str, object]] = {}
@@ -35,6 +37,7 @@ def queue_health(
         "pending_command_count": len(pending),
         "physical_command_count": physical_command_count_from_pending(pending, physical_count),
         "oldest_command_age_s": oldest_command_age(pending, now),
+        "oldest_slo_command_age_s": oldest_slo_command_age(pending, now),
         "core_command_count": len(core_pending),
         "oldest_core_command_age_s": oldest_command_age(core_pending, now),
         "processed_commands_60s": processed_commands_60s,
@@ -46,6 +49,17 @@ def queue_health(
 def oldest_command_age(commands: CommandFileList, now: float) -> float:
     ages = [max(0.0, now - command_activity_at(command, now)) for _path, command in commands]
     return max(ages) if ages else 0.0
+
+
+def oldest_slo_command_age(commands: CommandFileList, now: float) -> float:
+    return oldest_command_age(
+        [(path, command) for path, command in commands if command_queue_class_name(command) not in ADVISORY_QUEUE_CLASSES],
+        now,
+    )
+
+
+def command_queue_class_name(command: CommandMapping) -> str:
+    return str(command.get("queue_class") or command_queue_class(command))
 
 
 def command_activity_at(command: CommandMapping, now: float) -> float:

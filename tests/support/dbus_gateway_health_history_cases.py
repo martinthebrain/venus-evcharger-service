@@ -30,6 +30,7 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
             "timeouts_60s": 3,
             "queues": {
                 "oldest_command_age_s": 4.5,
+                "oldest_slo_command_age_s": 3.5,
                 "oldest_core_command_age_s": 5.5,
                 "ignored": 99.0,
             },
@@ -55,6 +56,7 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
                     "state": "degraded",
                     "backpressure": "slow",
                     "queue_oldest_age_s": 4.5,
+                    "queue_oldest_slo_age_s": 3.5,
                     "core_queue_oldest_age_s": 5.5,
                     "max_tick_gap_ms_60s": 123.0,
                     "timeouts_60s": 3,
@@ -86,6 +88,7 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
                     "state": "unknown",
                     "backpressure": "unknown",
                     "queue_oldest_age_s": 0.0,
+                    "queue_oldest_slo_age_s": 0.0,
                     "core_queue_oldest_age_s": 0.0,
                     "max_tick_gap_ms_60s": 0.0,
                     "timeouts_60s": 0,

@@ -63,7 +63,7 @@ class DbusAdapterBackpressureContractTests(unittest.TestCase):
         cases = (
             (
                 "ok",
-                {"oldest_command_age_s": 0.0},
+                {"oldest_command_age_s": 0.0, "oldest_slo_command_age_s": 0.0},
                 {},
                 {
                     "state": "ok",
@@ -75,7 +75,7 @@ class DbusAdapterBackpressureContractTests(unittest.TestCase):
             ),
             (
                 "ok",
-                {"oldest_command_age_s": 11.0},
+                {"oldest_command_age_s": 99.0, "oldest_slo_command_age_s": 11.0},
                 {"violated": ["queue_age_ok", "queue_age_ok"]},
                 {
                     "state": "congested",
@@ -87,7 +87,7 @@ class DbusAdapterBackpressureContractTests(unittest.TestCase):
             ),
             (
                 "degraded",
-                {"oldest_command_age_s": "invalid"},
+                {"oldest_command_age_s": 99.0, "oldest_slo_command_age_s": "invalid"},
                 {},
                 {
                     "state": "slow",
@@ -122,6 +122,16 @@ class DbusAdapterBackpressureContractTests(unittest.TestCase):
                     expected,
                 )
 
+    def test_snapshot_ignores_advisory_age_when_slo_age_is_fresh(self) -> None:
+        self.assertEqual(
+            backpressure_snapshot(
+                circuit_state="ok",
+                queue_health={"oldest_command_age_s": 120.0, "oldest_slo_command_age_s": 0.0},
+                slo={"violated": []},
+                queue_max_age_seconds=10.0,
+            )["state"],
+            "ok",
+        )
 
 if __name__ == "__main__":
     unittest.main()
