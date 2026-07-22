@@ -7,9 +7,27 @@ from collections.abc import Mapping
 from typing import ClassVar, Protocol
 
 from venus_evcharger.core.contracts import finite_float_or_none, timestamp_not_future
+
+
+def _non_negative_seconds_attr(owner: object, attribute_name: str) -> float:
+    raw_value = getattr(owner, attribute_name, None)
+    if raw_value is None:
+        return 0.0
+    return max(0.0, float(raw_value))
+
+
+def _validation_seconds(owner: object) -> float:
+    raw_value = getattr(owner, "auto_input_validation_poll_seconds", None)
+    if raw_value is None:
+        return 30.0
+    normalized = float(raw_value)
+    return 30.0 if normalized == 0.0 else normalized
+
+
 class InputCacheService(Protocol):
     auto_input_cache_seconds: float
     auto_input_validation_poll_seconds: float
+    dbus_gateway_max_age_seconds: float
     auto_pv_poll_interval_seconds: float
     auto_grid_poll_interval_seconds: float
     auto_battery_poll_interval_seconds: float
@@ -148,14 +166,14 @@ class InputCacheResolver:
     @staticmethod
     def _auto_input_source_max_age_seconds(svc: InputCacheService, poll_interval_attr: str) -> float:
         """Return the maximum tolerated age for one helper-fed source value."""
-        raw_poll_interval = getattr(svc, poll_interval_attr, None)
-        poll_interval_seconds = 0.0 if raw_poll_interval is None else max(0.0, float(raw_poll_interval))
-        raw_validation = getattr(svc, "auto_input_validation_poll_seconds", None)
-        validation_seconds = 30.0 if raw_validation is None or float(raw_validation) == 0.0 else float(raw_validation)
-        freshness_limit = validation_seconds if poll_interval_seconds <= 0.0 else min(
-            validation_seconds,
-            poll_interval_seconds * 2.0,
-        )
+        poll_interval_seconds = _non_negative_seconds_attr(svc, poll_interval_attr)
+        gateway_max_age_seconds = _non_negative_seconds_attr(svc, "dbus_gateway_max_age_seconds")
+        validation_seconds = _validation_seconds(svc)
+        poll_budget_seconds = poll_interval_seconds * 2.0
+        source_budget_seconds = max(gateway_max_age_seconds, poll_budget_seconds)
+        if source_budget_seconds <= 0.0:
+            return max(1.0, validation_seconds)
+        freshness_limit = min(validation_seconds, source_budget_seconds)
         return max(1.0, freshness_limit)
 
     def resolve_auto_inputs(
