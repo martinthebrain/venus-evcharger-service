@@ -34,7 +34,7 @@ from venus_evcharger.ipc.energy import EnergyRefreshRequest
 class GatewayProcessIoCases(GatewayAdapterContractCase):
     """Exercise cache publication, signals, and timed I/O scenarios."""
 
-    def test_cache_publish_interval_throttles_unchanged_snapshots(self) -> None:
+    def test_cache_publish_interval_is_a_hard_serialization_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\nDbusGatewayCachePublishIntervalSeconds=60\n", encoding="utf-8")
@@ -46,7 +46,7 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             adapter.cache.update_value("path:svc/P", 1, source="svc/P")
             adapter.publish_cache()
 
-            self.assertEqual(adapter.cache.write_snapshot_files.call_count, 2)
+            self.assertEqual(adapter.cache.write_snapshot_files.call_count, 1)
 
     def test_cache_publish_interval_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -70,7 +70,6 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             adapter.append_health_log.assert_called_with({"state": "ok"})
             self.assertEqual(adapter.write_introspection_snapshot.call_count, 2)
             self.assertEqual(adapter._last_cache_publish_monotonic, 11.0)
-            self.assertEqual(adapter._last_cache_publish_sequence, adapter.cache.sequence)
 
             no_throttle = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-no-throttle")))
             no_throttle.cache_publish_interval_seconds = 0.0
@@ -78,7 +77,7 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             install_mock(no_throttle.cache, "write_snapshot_files", MagicMock())
             install_mock(no_throttle, "append_health_log", MagicMock())
             install_mock(no_throttle, "write_introspection_snapshot", MagicMock())
-            with patch.object(process_io_module.time, "monotonic", MagicMock(side_effect=AssertionError("not called"))):
+            with patch.object(process_io_module.time, "monotonic", side_effect=[20.0, 20.0]):
                 no_throttle.publish_cache()
                 no_throttle.publish_cache()
             self.assertEqual(no_throttle.cache.write_snapshot_files.call_count, 2)

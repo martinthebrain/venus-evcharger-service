@@ -9,7 +9,7 @@ import unittest
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 
@@ -200,22 +200,48 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
 
     def test_gateway_client_receipts_reflect_transport_acceptance(self) -> None:
         client = MagicMock(spec=GatewayClient)
-        client.enqueue_command.side_effect = ["/tmp/command-id.json", ""]
+        client.enqueue_command.side_effect = [
+            "/tmp/relay-command.json",
+            "/tmp/ess-command.json",
+            "",
+        ]
         operations = GatewayOperationsClient(client)
+        request = GxRelaySetRequest(
+            relay_index=0,
+            contact_mode="NO",
+            enabled=True,
+            ensure_manual=True,
+            verify_settle_seconds=0.1,
+            verify_retry_seconds=0.2,
+        )
         relay = operations.set_gx_relay_enabled(
-            GxRelaySetRequest(
-                relay_index=0,
-                contact_mode="NO",
-                enabled=True,
-                ensure_manual=True,
-                verify_settle_seconds=0.1,
-                verify_retry_seconds=0.2,
-            )
+            request
         )
         ess = operations.set_ess_grid_setpoint(10.0, intent="tracking")
+        rejected = operations.set_ess_grid_setpoint(20.0, intent="restore")
+
         self.assertTrue(relay.accepted)
-        self.assertEqual(relay.command_id, "command-id")
-        self.assertFalse(ess.accepted)
+        self.assertEqual(relay.command_id, "relay-command")
+        self.assertTrue(ess.accepted)
+        self.assertEqual(ess.command_id, "ess-command")
+        self.assertFalse(rejected.accepted)
+        self.assertEqual(rejected.command_id, "")
+        client.enqueue_command.assert_has_calls(
+            [
+                call(
+                    gx_relay_set_command(
+                        request.relay_index,
+                        request.contact_mode,
+                        request.enabled,
+                        ensure_manual=request.ensure_manual,
+                        verify_settle_seconds=request.verify_settle_seconds,
+                        verify_retry_seconds=request.verify_retry_seconds,
+                    )
+                ),
+                call(ess_grid_setpoint_command(10.0, intent="tracking")),
+                call(ess_grid_setpoint_command(20.0, intent="restore")),
+            ]
+        )
 
 
 class GatewaySemanticAdapterTests(unittest.TestCase):

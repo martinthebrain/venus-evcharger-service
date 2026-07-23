@@ -137,7 +137,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
 
     def test_rate_timing_and_slo_defaults_and_clamps(self) -> None:
         self.assertEqual(config.rate_settings(defaults()), config.GatewayRateSettings(0.25, 0.35, 2.0))
-        self.assertEqual(config.timing_settings(defaults()), config.GatewayTimingSettings(0.2, 1.0, 900.0, 0.0))
+        self.assertEqual(config.timing_settings(defaults()), config.GatewayTimingSettings(0.2, 1.0, 900.0, 1.0))
         self.assertEqual(config.slo_settings(defaults()), config.GatewaySloSettings(2.0, 5.0, 10.0, 500.0))
         custom = defaults(
             {
@@ -156,11 +156,11 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
             }
         )
         self.assertEqual(config.rate_settings(custom), config.GatewayRateSettings(0.11, 0.22, 0.33))
-        self.assertEqual(config.timing_settings(custom), config.GatewayTimingSettings(0.05, 0.05, 42.0, 0.0))
+        self.assertEqual(config.timing_settings(custom), config.GatewayTimingSettings(0.05, 0.05, 42.0, 1.0))
         self.assertEqual(config.slo_settings(custom), config.GatewaySloSettings(0.1, 0.2, 0.1, 10.0))
         self.assertEqual(
             config.timing_settings(defaults({"DbusGatewayTickSeconds": "0.7"})),
-            config.GatewayTimingSettings(0.7, 1.0, 900.0, 0.0),
+            config.GatewayTimingSettings(0.7, 1.0, 900.0, 1.0),
         )
         self.assertEqual(
             config.timing_settings(
@@ -175,6 +175,12 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
             ),
             config.GatewayTimingSettings(0.3, 0.8, 900.0, 0.4),
         )
+        for configured, expected in (("0", 1.0), ("0.1", 0.2), ("0.2", 0.2)):
+            with self.subTest(configured=configured):
+                timing = config.timing_settings(
+                    defaults({"DbusGatewayCachePublishIntervalSeconds": configured})
+                )
+                self.assertEqual(timing.cache_publish_interval_seconds, expected)
 
     def test_file_and_introspection_settings_cover_defaults_custom_and_clamps(self) -> None:
         paths = gateway_paths("/run/test")

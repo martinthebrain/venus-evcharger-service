@@ -18,6 +18,8 @@ DEFAULT_GATEWAY_SOCKET_NAME = "gateway.sock"
 DEFAULT_DBUS_CACHE_NAME = "dbus-cache.json"
 DEFAULT_DBUS_CACHE_SEQUENCE_NAME = "dbus-cache.seq"
 DEFAULT_DBUS_HEALTH_NAME = "dbus-health.json"
+DEFAULT_ENERGY_INPUTS_NAME = "energy-inputs.v1.bin"
+DEFAULT_ENERGY_TOPOLOGY_NAME = "energy-topology.json"
 DEFAULT_DBUS_COMMAND_DIR_NAME = "dbus-commands"
 DEFAULT_CORE_COMMAND_DIR_NAME = "core-commands"
 
@@ -76,6 +78,8 @@ class GatewayPaths:
     cache_path: str
     cache_sequence_path: str
     health_path: str
+    energy_inputs_path: str
+    energy_topology_path: str
     command_dir: str
     core_command_dir: str
 
@@ -88,6 +92,8 @@ def gateway_paths(run_dir: str | None = None) -> GatewayPaths:
         cache_path=os.path.join(base, DEFAULT_DBUS_CACHE_NAME),
         cache_sequence_path=os.path.join(base, DEFAULT_DBUS_CACHE_SEQUENCE_NAME),
         health_path=os.path.join(base, DEFAULT_DBUS_HEALTH_NAME),
+        energy_inputs_path=os.path.join(base, DEFAULT_ENERGY_INPUTS_NAME),
+        energy_topology_path=os.path.join(base, DEFAULT_ENERGY_TOPOLOGY_NAME),
         command_dir=os.path.join(base, DEFAULT_DBUS_COMMAND_DIR_NAME),
         core_command_dir=os.path.join(base, DEFAULT_CORE_COMMAND_DIR_NAME),
     )

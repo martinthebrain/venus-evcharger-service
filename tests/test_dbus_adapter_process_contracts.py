@@ -154,7 +154,6 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertEqual(adapter._last_introspection_full_scan_at, 0.0)
         self.assertEqual(adapter._introspection_queue_depth, 0)
         self.assertEqual(adapter._last_cache_publish_monotonic, 0.0)
-        self.assertEqual(adapter._last_cache_publish_sequence, -1)
         self.assertEqual(adapter._last_health_log_monotonic, 0.0)
         self.assertEqual(adapter._last_tick_at, 0.0)
         self.assertEqual(adapter._last_tick_monotonic, 0.0)

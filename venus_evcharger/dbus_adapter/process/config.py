@@ -14,6 +14,12 @@ from venus_evcharger.dbus_adapter.read.spec import ReadSpec, ReadSpecs
 from venus_evcharger.dbus_gateway import GatewayPaths, gateway_paths
 from venus_evcharger.runtime.output_path import validated_output_file_path
 
+_COMMAND_LIFECYCLE_PATH_LABEL = "DbusGatewayCommandLifecyclePath"
+_HEALTH_LOG_PATH_LABEL = "DbusGatewayHealthLogPath"
+_INTROSPECTION_PATH_LABEL = "DbusIntrospectionSnapshotPath"
+_JSONL_SUFFIX = ".jsonl"
+_JSON_SUFFIX = ".json"
+
 
 class CasePreservingConfigParser(configparser.ConfigParser):
     """Config parser that keeps DBus path and option casing intact."""
@@ -141,13 +147,13 @@ def rate_settings(defaults: configparser.SectionProxy) -> GatewayRateSettings:
 def timing_settings(defaults: configparser.SectionProxy) -> GatewayTimingSettings:
     configured_tick = config_get_float(defaults, "DbusGatewayTickSeconds", 0.2)
     min_tick = max(0.05, config_get_float(defaults, "DbusGatewayMinTickSeconds", configured_tick))
+    configured_cache_publish = config_get_float(defaults, "DbusGatewayCachePublishIntervalSeconds", 1.0)
     return GatewayTimingSettings(
         min_tick_seconds=min_tick,
         max_tick_seconds=max(min_tick, config_get_float(defaults, "DbusGatewayMaxTickSeconds", 1.0)),
         service_list_interval_seconds=config_get_float(defaults, "DbusGatewayServiceListIntervalSeconds", 900.0),
-        cache_publish_interval_seconds=max(
-            0.0,
-            config_get_float(defaults, "DbusGatewayCachePublishIntervalSeconds", 0.0),
+        cache_publish_interval_seconds=(
+            1.0 if configured_cache_publish <= 0.0 else max(0.2, configured_cache_publish)
         ),
     )
 
@@ -165,20 +171,20 @@ def file_settings(defaults: configparser.SectionProxy, paths: GatewayPaths) -> G
     return GatewayFileSettings(
         command_lifecycle_path=validated_output_file_path(
             defaults.get(
-                "DbusGatewayCommandLifecyclePath",
+                _COMMAND_LIFECYCLE_PATH_LABEL,
                 os.path.join(paths.run_dir, "dbus-command-lifecycle.jsonl"),
             ),
-            label="DbusGatewayCommandLifecyclePath",
-            suffix=".jsonl",
+            label=_COMMAND_LIFECYCLE_PATH_LABEL,
+            suffix=_JSONL_SUFFIX,
         ),
         command_lifecycle_max_bytes=max(
             0,
             int(config_get_float(defaults, "DbusGatewayCommandLifecycleMaxBytes", DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES)),
         ),
         health_log_path=validated_output_file_path(
-            defaults.get("DbusGatewayHealthLogPath", os.path.join(paths.run_dir, "dbus-health-history.jsonl")),
-            label="DbusGatewayHealthLogPath",
-            suffix=".jsonl",
+            defaults.get(_HEALTH_LOG_PATH_LABEL, os.path.join(paths.run_dir, "dbus-health-history.jsonl")),
+            label=_HEALTH_LOG_PATH_LABEL,
+            suffix=_JSONL_SUFFIX,
         ),
         health_log_interval_seconds=max(
             0.0,
@@ -198,11 +204,11 @@ def introspection_settings(
     return GatewayIntrospectionSettings(
         snapshot_path=validated_output_file_path(
             defaults.get(
-                "DbusIntrospectionSnapshotPath",
+                _INTROSPECTION_PATH_LABEL,
                 f"/run/dbus-venus-evcharger-dbus-map-{device_instance}.json",
             ),
-            label="DbusIntrospectionSnapshotPath",
-            suffix=".json",
+            label=_INTROSPECTION_PATH_LABEL,
+            suffix=_JSON_SUFFIX,
         ),
         enabled=_truthy(defaults.get("DbusIntrospectionEnabled", "1")),
     )

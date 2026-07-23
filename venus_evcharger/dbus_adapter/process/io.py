@@ -100,15 +100,10 @@ class DbusAdapterIo(DbusAdapterIntrospectionSnapshot):
         self.cache.set_semantic_energy_snapshots(inputs, topology)
         health = self.health_snapshot()
         self.cache.health.update(health)
-        if self.cache_publish_interval_seconds > 0.0:
-            now = time.monotonic()
-            if (
-                self.cache.sequence == self._last_cache_publish_sequence
-                and now - self._last_cache_publish_monotonic < self.cache_publish_interval_seconds
-            ):
-                return
-            self._last_cache_publish_monotonic = now
-            self._last_cache_publish_sequence = self.cache.sequence
+        now = time.monotonic()
+        if now - self._last_cache_publish_monotonic < self.cache_publish_interval_seconds:
+            return
+        self._last_cache_publish_monotonic = now
         self.cache.write_snapshot_files()
         self.write_gateway_diagnostics(
             health=health,

@@ -21,6 +21,7 @@ ALLOWED_NOQA_CODES = {
 NO_MUTATE_FILE_PREFIXES = (
     "venus_evcharger/dbus_adapter",
     "venus_evcharger/dbus_gateway",
+    "venus_evcharger/ipc/energy_binary.py",
 )
 
 SuppressionChecker = Callable[[str, int, str, str], str | None]
@@ -94,7 +95,7 @@ def _no_cover_failure(relative_path: str, line_number: int, comment: str, line: 
 
 def _no_mutate_failure(relative_path: str, line_number: int, comment: str, _line: str) -> str | None:
     if "pragma: no mutate" in comment and not _line_allowed_no_mutate(relative_path):
-        return f"{relative_path}:{line_number}: mutation suppression outside gateway/adapter boundary"
+        return f"{relative_path}:{line_number}: mutation suppression outside gateway/adapter/IPC boundary"
     return None
 
 

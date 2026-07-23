@@ -158,6 +158,8 @@ class GatewayBoundaryEdgeContractTests(unittest.TestCase):
         operations = GatewayOperationsClient(client)
         with patch.object(gateway_client_module, "gateway_value", return_value=True):
             self.assertEqual(operations.read_gx_relay_state(0, max_age_seconds=2.0), 1)
+        with patch.object(gateway_client_module, "gateway_value", return_value=0):
+            self.assertEqual(operations.read_gx_relay_state(0, max_age_seconds=2.0), 0)
         client.enqueue_command.assert_not_called()
 
     def test_unavailable_operations_are_explicit_and_boundary_checked(self) -> None:

@@ -172,6 +172,22 @@ def write_text_atomically(path: str | PathLike[str], payload: str, encoding: str
         raise
 
 
+def write_bytes_atomically(path: str | PathLike[str], payload: bytes) -> None:
+    """Atomically replace a binary file, cleaning up the temp file on failure."""
+    path_str = os.fspath(path)
+    target_dir = os.path.dirname(path_str)
+    if target_dir:
+        os.makedirs(target_dir, exist_ok=True)
+    tmp_path = f"{path_str}.tmp.{os.getpid()}.{threading.get_ident()}"
+    try:
+        with open(tmp_path, "wb") as handle:
+            handle.write(payload)
+        os.replace(tmp_path, path_str)
+    except (OSError, RuntimeError, TypeError):
+        _remove_temporary_file(tmp_path)
+        raise
+
+
 def _remove_temporary_file(path: str) -> None:
     try:
         if os.path.exists(path):

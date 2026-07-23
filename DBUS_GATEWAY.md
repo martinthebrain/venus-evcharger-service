@@ -90,10 +90,11 @@ names, paths, inspection XML, service counts, or path counts.
 `DbusGatewaySocketPath`, `DbusGatewayCommandDir`, and
 `DbusGatewayCoreCommandDir` can override these paths.
 
-`DbusGatewayCachePublishIntervalSeconds=0` preserves the default behavior:
-the adapter writes the RAM-backed cache and health files every tick. A positive
-value throttles unchanged snapshot writes, while cache sequence changes still
-flush immediately.
+`DbusGatewayCachePublishIntervalSeconds=1` limits RAM-backed IPC publication to
+once per second. The adapter enforces a 0.2 second minimum even when an older
+configuration requests a smaller positive interval. An older `0` is migrated
+in memory to the one-second default; cache sequence changes do not bypass this
+resource guard.
 
 `DbusGatewayHealthLogPath`, `DbusGatewayHealthLogIntervalSeconds`, and
 `DbusGatewayCommandLifecyclePath` control the JSONL diagnostics. These files are
@@ -102,7 +103,14 @@ but must not derive runtime decisions from them.
 
 ## Read Model
 
-Consumers read `dbus-cache.json`. Every value is more than a scalar:
+The frequent semantic energy consumer reads `energy-inputs.v1.bin` through the
+typed `EnergyInputsSnapshot` contract. The small dependency-free binary format
+avoids parsing the complete raw cache. `energy-topology.json` carries the much
+less frequently consumed topology. Both readers fall back to `dbus-cache.json`
+during an atomic rolling update.
+
+Generic and diagnostic consumers read `dbus-cache.json`. Every value is more
+than a scalar:
 
 - `value`: last value seen by the adapter
 - `source`: DBus service/path source

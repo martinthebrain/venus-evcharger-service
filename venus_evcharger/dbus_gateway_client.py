@@ -26,6 +26,7 @@ from venus_evcharger.ipc.energy import (
     EnergyRefreshRequest,
     EnergyTopologySnapshot,
 )
+from venus_evcharger.ipc.energy_binary import load_energy_inputs_file
 from venus_evcharger.ipc.gateway_operations import (
     ess_grid_setpoint_command,
     gx_relay_refresh_command,
@@ -56,6 +57,14 @@ from venus_evcharger.ports.generic_shelly_configuration import (
     DisableMatchingGenericShellyOnceRequest,
     GenericShellyConfigurationReceipt,
 )
+
+
+def _energy_topology_or_none(payload: object) -> EnergyTopologySnapshot | None:
+    """Validate one topology payload without leaking transport errors."""
+    try:
+        return EnergyTopologySnapshot.from_payload(payload)
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 class GatewayClient:
@@ -95,6 +104,12 @@ class GatewayClient:
         return DbusCacheStore.load_snapshot(self.paths.cache_path, max_age_seconds=max_age_seconds)
 
     def load_energy_inputs(self, *, max_age_seconds: float = 10.0) -> EnergyInputsSnapshot | None:
+        compact_snapshot = load_energy_inputs_file(
+            self.paths.energy_inputs_path,
+            max_age_seconds=max_age_seconds,
+        )
+        if compact_snapshot is not None:
+            return compact_snapshot
         payload = self.load_cache(max_age_seconds=max_age_seconds).get("energy_inputs")
         try:
             return EnergyInputsSnapshot.from_payload(payload)
@@ -102,11 +117,15 @@ class GatewayClient:
             return None
 
     def load_energy_topology(self, *, max_age_seconds: float = 30.0) -> EnergyTopologySnapshot | None:
-        payload = self.load_cache(max_age_seconds=max_age_seconds).get("energy_topology")
-        try:
-            return EnergyTopologySnapshot.from_payload(payload)
-        except (KeyError, TypeError, ValueError):
-            return None
+        payload: object = DbusCacheStore.load_snapshot(
+            self.paths.energy_topology_path,
+            max_age_seconds=max_age_seconds,
+        )
+        snapshot = _energy_topology_or_none(payload)
+        if snapshot is not None:
+            return snapshot
+        fallback = self.load_cache(max_age_seconds=max_age_seconds).get("energy_topology")
+        return _energy_topology_or_none(fallback)
 
     def load_health(self, *, max_age_seconds: float = 10.0) -> CommandPayload:
         payload = DbusCacheStore.load_snapshot(self.paths.health_path, max_age_seconds=max_age_seconds)
