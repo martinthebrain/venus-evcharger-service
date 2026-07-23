@@ -155,6 +155,26 @@ class TestWriteControllerModeAndRelayContracts(unittest.TestCase):
             "state",
         )
 
+    def test_mode_write_to_manual_transfers_the_existing_auto_permission(self) -> None:
+        port = _port(
+            virtual_mode=2,
+            normalize_mode=MagicMock(return_value=0),
+            mode_uses_auto_logic=MagicMock(return_value=False),
+        )
+        controller = ControlWriteController(port)
+        with (
+            patch.object(controller, "_handle_mode_transition_to_auto") as to_auto,
+            patch.object(controller, "_handle_mode_transition_to_manual") as to_manual,
+            patch.object(controller, "_reset_auto_decision_state"),
+            patch.object(controller, "_snapshot_for_mode"),
+            patch.object(controller, "_publish_mode_paths"),
+            patch.object(write_module.logging, "info"),
+        ):
+            controller._handle_mode_write(0)
+        to_auto.assert_not_called()
+        to_manual.assert_called_once_with(2, 50.0)
+        self.assertEqual(port.virtual_mode, 0)
+
     def test_startstop_auto_disable_and_manual_request_use_distinct_pipelines(self) -> None:
         auto_port = _port(virtual_mode=1, mode_uses_auto_logic=MagicMock(return_value=True))
         auto = ControlWriteController(auto_port)

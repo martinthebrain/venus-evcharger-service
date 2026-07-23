@@ -91,6 +91,16 @@ class _ControlWriteSupport:
         self._activate_auto_without_cutover(port)
         port.manual_override_until = 0.0
 
+    def _handle_mode_transition_to_manual(self, previous_mode: int, current_time: float) -> None:
+        """Transfer the visible Auto permission into the manual relay target."""
+        port = self.port
+        if not port.mode_uses_auto_logic(previous_mode):
+            return
+        wanted_on = bool(port.virtual_enable)
+        if bool(port.virtual_startstop) == wanted_on:
+            return
+        self._apply_manual_enable_like_request(port, wanted_on, current_time)
+
     @staticmethod
     def _snapshot_for_mode(svc: Any, current_time: float, auto_mode_active: bool) -> None:
         snapshot = svc.get_worker_snapshot()
