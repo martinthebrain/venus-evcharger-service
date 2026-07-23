@@ -54,8 +54,6 @@ class TestShellyWallboxHelpersPrimary(ShellyWallboxHelpersTestBase):
         service.auto_startup_warmup_seconds = -1
         service.auto_scheduled_night_start_delay_seconds = -1
         service.auto_manual_override_seconds = -1
-        service.startup_device_info_retry_seconds = -1
-        service.startup_device_info_retries = -1
         service.shelly_request_timeout_seconds = -1
         service.dbus_method_timeout_seconds = -1
         configure_auto_policy(
@@ -81,8 +79,6 @@ class TestShellyWallboxHelpersPrimary(ShellyWallboxHelpersTestBase):
         self.assertEqual(service.auto_startup_warmup_seconds, 0.0)
         self.assertEqual(service.auto_scheduled_night_start_delay_seconds, 0.0)
         self.assertEqual(service.auto_manual_override_seconds, 0.0)
-        self.assertEqual(service.startup_device_info_retry_seconds, 0.0)
-        self.assertEqual(service.startup_device_info_retries, 0)
         self.assertEqual(service.shelly_request_timeout_seconds, 2.0)
         self.assertEqual(service.dbus_method_timeout_seconds, 1.0)
         self.assertEqual(service.auto_policy.min_soc, 100.0)

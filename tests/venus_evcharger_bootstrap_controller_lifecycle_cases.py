@@ -41,8 +41,8 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
             side_effect=lambda: calls.append("restore"),
         ), patch.object(
             controller,
-            "apply_device_metadata",
-            side_effect=lambda: calls.append("metadata"),
+            "apply_service_identity",
+            side_effect=lambda: calls.append("identity"),
         ), patch.object(
             controller,
             "register_evcs_publication",
@@ -56,7 +56,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
 
         self.assertEqual(
             calls,
-            ["config", "prepare", "virtual", "controllers", "restore", "metadata", "publication", "loops"],
+            ["config", "prepare", "virtual", "controllers", "restore", "identity", "publication", "loops"],
         )
         self.assertEqual(
             [call.args for call in info_mock.call_args_list],
@@ -71,8 +71,8 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
                 ("Bootstrap step complete: %s", "initialize-controllers"),
                 ("Bootstrap step start: %s", "restore-runtime-state"),
                 ("Bootstrap step complete: %s", "restore-runtime-state"),
-                ("Bootstrap step start: %s", "apply-device-metadata"),
-                ("Bootstrap step complete: %s", "apply-device-metadata"),
+                ("Bootstrap step start: %s", "apply-service-identity"),
+                ("Bootstrap step complete: %s", "apply-service-identity"),
                 ("Bootstrap step start: %s", "register-evcs-publication"),
                 ("Bootstrap step complete: %s", "register-evcs-publication"),
                 ("Bootstrap step start: %s", "start-runtime-loops"),
@@ -91,7 +91,7 @@ class TestServiceBootstrapControllerLifecycle(ServiceBootstrapControllerTestCase
             "initialize_virtual_state",
         ), patch.object(controller, "restore_runtime_state"), patch.object(
             controller,
-            "apply_device_metadata",
+            "apply_service_identity",
         ), patch.object(
             controller,
             "register_evcs_publication",

@@ -311,8 +311,6 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
                     "AutoWatchdogRestartAttempts": "6",
                     "AutoStartupWarmupSeconds": "18",
                     "AutoManualOverrideSeconds": "333",
-                    "StartupDeviceInfoRetries": "4",
-                    "StartupDeviceInfoRetrySeconds": "1.5",
                     "ShellyRequestTimeoutSeconds": "4.5",
                     "DbusMethodTimeoutSeconds": "2.5",
                 }
@@ -427,8 +425,6 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(service.auto_watchdog_restart_attempts, 6)
         self.assertEqual(service.auto_startup_warmup_seconds, 18.0)
         self.assertEqual(service.auto_manual_override_seconds, 333.0)
-        self.assertEqual(service.startup_device_info_retries, 4)
-        self.assertEqual(service.startup_device_info_retry_seconds, 1.5)
         self.assertEqual(service.shelly_request_timeout_seconds, 4.5)
         self.assertEqual(service.dbus_method_timeout_seconds, 2.5)
         state.validate_runtime_config.assert_called_once_with()

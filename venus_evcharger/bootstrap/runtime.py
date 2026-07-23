@@ -11,10 +11,7 @@ from venus_evcharger.bootstrap.contracts import (
     require_runtime_state,
 )
 from venus_evcharger.bootstrap.runtime_loops import RuntimeLoopService, start_runtime_loops
-from venus_evcharger.bootstrap.runtime_metadata import (
-    apply_device_metadata,
-    fetch_device_info_with_fallback,
-)
+from venus_evcharger.bootstrap.runtime_metadata import apply_service_identity
 from venus_evcharger.bootstrap.runtime_virtual_state import initialize_virtual_state
 
 
@@ -58,20 +55,12 @@ class RuntimeInitializer:
             manual_target = bool(getattr(svc, "virtual_enable", 0) or getattr(svc, "virtual_startstop", 0))
         setattr(svc, "_startup_manual_target", manual_target)
 
-    def apply_device_metadata(self) -> None:
-        """Fetch device metadata and apply UI-facing identity fields."""
-        apply_device_metadata(
-            self._service,
-            read_version=self._read_version,
-            fetch_device_info=self.fetch_device_info_with_fallback,
-        )
+    def apply_service_identity(self) -> None:
+        """Apply the local identity used by GUI and management paths."""
+        apply_service_identity(self._service, read_version=self._read_version)
 
     def start_runtime_loops(self) -> None:
         """Start background workers and arm GLib timers."""
         if not isinstance(self._service, RuntimeLoopService):
             raise TypeError("bootstrap service does not implement RuntimeLoopService")
         start_runtime_loops(self._service, self._gobject)
-
-    def fetch_device_info_with_fallback(self) -> dict[str, object]:
-        """Fetch device info or return generic metadata after bounded retries."""
-        return dict(fetch_device_info_with_fallback(self._service))

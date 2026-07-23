@@ -67,7 +67,7 @@ class AutoBackendBootstrapEdgeContractTests(unittest.TestCase):
             (controller.initialize_controllers, "initialize_controllers"),
             (controller.initialize_virtual_state, "initialize_virtual_state"),
             (controller.restore_runtime_state, "restore_runtime_state"),
-            (controller.apply_device_metadata, "apply_device_metadata"),
+            (controller.apply_service_identity, "apply_service_identity"),
             (controller.start_runtime_loops, "start_runtime_loops"),
         )
 

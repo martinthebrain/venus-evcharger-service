@@ -56,17 +56,6 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
             controller.prepare_runtime_state()
         prepare_runtime_state.assert_called_once_with()
 
-    def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self) -> None:
-        service = SimpleNamespace(
-            startup_device_info_retries=2,
-            startup_device_info_retry_seconds=0,
-            runtime=SimpleNamespace(rpc_call=MagicMock(side_effect=RuntimeError("offline"))),
-        )
-
-        controller = self._controller(service)
-        self.assertEqual(controller.fetch_device_info_with_fallback(), {})
-        self.assertEqual(service.runtime.rpc_call.call_count, 3)
-
     def test_logging_level_and_signal_install_cover_default_and_error_paths(self) -> None:
         empty_config = configparser.ConfigParser(default_section="NOT_DEFAULT")
         self.assertEqual(_logging_level_from_config(empty_config, "WARNING"), "WARNING")
@@ -88,31 +77,3 @@ class TestServiceBootstrapControllerBasics(ServiceBootstrapControllerTestCase):
         with patch("venus_evcharger.bootstrap.controller.logging.debug") as debug_mock:
             handlers[15](15, None)
         debug_mock.assert_called_once()
-
-    def test_fetch_device_info_with_fallback_logs_retry_and_sleeps(self) -> None:
-        service = SimpleNamespace(
-            startup_device_info_retries=1,
-            startup_device_info_retry_seconds=2.5,
-            runtime=SimpleNamespace(
-                rpc_call=MagicMock(side_effect=[RuntimeError("offline"), {"mac": "ABC"}])
-            ),
-        )
-        controller = self._controller(service)
-
-        with patch("venus_evcharger.bootstrap.runtime_metadata.time.sleep") as sleep_mock:
-            with patch("venus_evcharger.bootstrap.runtime_metadata.logging.warning") as warning_mock:
-                result = controller.fetch_device_info_with_fallback()
-
-        self.assertEqual(result, {"mac": "ABC"})
-        sleep_mock.assert_called_once_with(2.5)
-        self.assertGreaterEqual(warning_mock.call_count, 1)
-
-    def test_fetch_device_info_with_fallback_ignores_non_mapping_payload(self) -> None:
-        service = SimpleNamespace(
-            startup_device_info_retries=0,
-            startup_device_info_retry_seconds=0,
-            runtime=SimpleNamespace(rpc_call=MagicMock(return_value=["not", "a", "mapping"])),
-        )
-        controller = self._controller(service)
-
-        self.assertEqual(controller.fetch_device_info_with_fallback(), {})

@@ -7,8 +7,6 @@ import logging
 import os
 from typing import Protocol, runtime_checkable
 
-from venus_evcharger.bootstrap.runtime_metadata import topology_configured
-
 class _RuntimeFacade(Protocol):
     def start_io_worker(self) -> None: ...
     def start_update_worker(self) -> None: ...
@@ -59,7 +57,7 @@ def register_runtime_timers(svc: RuntimeLoopService, gobject_module: _GobjectTim
 
 def start_runtime_loops(svc: RuntimeLoopService, gobject_module: _GobjectTimers) -> None:
     """Register DBus paths, start background workers, and arm timers."""
-    if topology_configured(svc):
+    if svc.topology_configured:
         svc.runtime.start_io_worker()
     else:
         logging.info("No load topology is configured yet; skipping runtime I/O worker startup")

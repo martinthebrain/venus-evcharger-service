@@ -60,7 +60,6 @@ class RuntimeConfigValidator:
         "auto_watchdog_restart_attempts",
         "auto_startup_warmup_seconds",
         "auto_manual_override_seconds",
-        "startup_device_info_retry_seconds",
         "auto_audit_log_max_age_hours",
         "auto_audit_log_repeat_seconds",
     )
@@ -134,7 +133,6 @@ class RuntimeConfigValidator:
         self._clamp_min_int(svc, "auto_pv_max_services", 1, "AutoPvMaxServices", "")
         self._clamp_interval_settings()
         self._validate_scheduled_runtime_config(svc)
-        self._validate_startup_retry_config(svc)
         self._validate_timeout_settings(svc)
         self._validate_balance_runtime_config(svc)
         policy = getattr(svc, "auto_policy")
@@ -158,16 +156,6 @@ class RuntimeConfigValidator:
             setattr(svc, "auto_scheduled_latest_end_time", latest_end)
         if hasattr(svc, "auto_scheduled_night_current_amps"):
             RuntimeConfigValidator._clamp_non_negative_float(svc, "auto_scheduled_night_current_amps")
-
-    @staticmethod
-    def _validate_startup_retry_config(svc: object) -> None:
-        retries = getattr(svc, "startup_device_info_retries")
-        if not isinstance(retries, int):
-            raise TypeError("startup_device_info_retries must be an integer")
-        if retries >= 0:
-            return
-        logging.warning("StartupDeviceInfoRetries %s invalid, clamping to 0", retries)
-        setattr(svc, "startup_device_info_retries", 0)
 
     @staticmethod
     def _validate_optional_non_negative_int(svc: object, attr_name: str, label: str) -> None:

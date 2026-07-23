@@ -54,7 +54,10 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
     def test_run_initializes_gateway_loop_and_closes_transport(self) -> None:
         """The loop starts IPC; publication registration is command-driven."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            scenario_context = self.adapter_scenario(run_directory=str(Path(temp_dir) / "run"))
+            scenario_context = self.adapter_scenario(
+                "[DEFAULT]\nDbusGatewayMinTickSeconds=0.9995\n",
+                run_directory=str(Path(temp_dir) / "run"),
+            )
             with scenario_context as scenario:
                 adapter = scenario.adapter
                 fake_loop = MagicMock()
@@ -66,14 +69,24 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                     patch.object(process_loop_module, "DBusGMainLoop") as dbus_mainloop,
                     patch.object(process_loop_module.GLib, "MainLoop", return_value=fake_loop),
                     patch.object(process_loop_module.GLib, "timeout_add", return_value=123) as timeout_add,
+                    patch.object(process_loop_module.os, "makedirs") as makedirs,
                 ):
                     adapter.run()
 
                 dbus_mainloop.assert_called_once_with(set_as_default=True)
                 adapter.install_signal_handlers.assert_called_once()
+                self.assertEqual(
+                    makedirs.call_args_list,
+                    [
+                        ((adapter.paths.run_dir,), {"exist_ok": True}),
+                        ((adapter.paths.command_dir,), {"exist_ok": True}),
+                        ((adapter.paths.core_command_dir,), {"exist_ok": True}),
+                    ],
+                )
                 adapter.start_socket.assert_called_once()
                 timeout_add.assert_called_once_with(max(50, int(adapter.min_tick_seconds * 1000)), adapter.tick)
                 fake_loop.run.assert_called_once_with()
+                self.assertIs(adapter._main_loop, fake_loop)
                 self.assertTrue(adapter._stop)
                 adapter.close_socket.assert_called_once()
 

@@ -19,8 +19,6 @@ AUTO_WATCHDOG_RECOVERY_KEY = "AutoWatchdogRecoverySeconds"
 AUTO_WATCHDOG_RESTART_ATTEMPTS_KEY = "AutoWatchdogRestartAttempts"
 AUTO_STARTUP_WARMUP_KEY = "AutoStartupWarmupSeconds"
 AUTO_MANUAL_OVERRIDE_KEY = "AutoManualOverrideSeconds"
-STARTUP_DEVICE_INFO_RETRIES_KEY = "StartupDeviceInfoRetries"
-STARTUP_DEVICE_INFO_RETRY_SECONDS_KEY = "StartupDeviceInfoRetrySeconds"
 SHELLY_REQUEST_TIMEOUT_KEY = "ShellyRequestTimeoutSeconds"
 DBUS_METHOD_TIMEOUT_KEY = "DbusMethodTimeoutSeconds"
 
@@ -36,7 +34,5 @@ def load_helper_resilience_config(svc: Any, defaults: configparser.SectionProxy)
     svc.auto_watchdog_restart_attempts = int(_config_value(defaults, AUTO_WATCHDOG_RESTART_ATTEMPTS_KEY, 5))
     svc.auto_startup_warmup_seconds = float(_config_value(defaults, AUTO_STARTUP_WARMUP_KEY, 15))
     svc.auto_manual_override_seconds = float(_config_value(defaults, AUTO_MANUAL_OVERRIDE_KEY, 300))
-    svc.startup_device_info_retries = int(_config_value(defaults, STARTUP_DEVICE_INFO_RETRIES_KEY, 3))
-    svc.startup_device_info_retry_seconds = float(_config_value(defaults, STARTUP_DEVICE_INFO_RETRY_SECONDS_KEY, 2))
     svc.shelly_request_timeout_seconds = float(_config_value(defaults, SHELLY_REQUEST_TIMEOUT_KEY, 2.0))
     svc.dbus_method_timeout_seconds = float(_config_value(defaults, DBUS_METHOD_TIMEOUT_KEY, 1.0))

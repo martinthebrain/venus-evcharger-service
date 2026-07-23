@@ -59,21 +59,6 @@ class TestStateValidationLoggingContracts(unittest.TestCase):
                 with self.assertNoLogs(level="WARNING"):
                     invoke(SimpleNamespace(value=valid_boundary))
 
-    def test_startup_retry_logs_invalid_value_and_accepts_zero(self) -> None:
-        invalid = SimpleNamespace(startup_device_info_retries=-1)
-        with self.assertLogs(level="WARNING") as logs:
-            RuntimeConfigValidator._validate_startup_retry_config(invalid)
-        self.assertEqual(invalid.startup_device_info_retries, 0)
-        self.assertEqual(
-            logs.output,
-            ["WARNING:root:StartupDeviceInfoRetries -1 invalid, clamping to 0"],
-        )
-        with self.assertNoLogs(level="WARNING"):
-            RuntimeConfigValidator._validate_startup_retry_config(
-                SimpleNamespace(startup_device_info_retries=0)
-            )
-
-
     def test_each_mode_normalizer_accepts_all_values_and_logs_its_fallback(self) -> None:
         cases = (
             (

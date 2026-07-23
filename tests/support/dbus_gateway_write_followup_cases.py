@@ -9,6 +9,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     MagicMock,
     Path,
     evcs_publication,
+    evcs_registration,
     install_mock,
     patch,
     read_json_file,
@@ -144,12 +145,16 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
             select = install_mock(scheduler, "select_next_command", MagicMock(return_value=pending[0]))
             process_loaded = install_mock(scheduler, "process_loaded_command", MagicMock(return_value="applied"))
 
-            self.assertTrue(scheduler.process_one())
+            self.assertTrue(scheduler.process_one(required_kind="register_evcs"))
 
             load_pending.assert_called_once_with()
             coalesce.assert_called_once_with(pending)
             prioritize.assert_called_once_with(pending)
-            select.assert_called_once_with(pending, include_local_publish=True)
+            select.assert_called_once_with(
+                pending,
+                include_local_publish=True,
+                required_kind="register_evcs",
+            )
             process_loaded.assert_called_once_with("relay.json", command, pending_commands=pending)
 
     def test_process_loaded_command_preserves_orchestration_arguments(self) -> None:
@@ -263,6 +268,25 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
             )
 
             self.assertEqual(selected, ("operation", operation))
+
+    def test_required_kind_selects_only_the_requested_command_type(self) -> None:
+        with self.adapter_scenario() as scenario:
+            scheduler = scenario.adapter.write_scheduler
+            publication = evcs_publication({"mode": 2})
+            registration = evcs_registration({"mode": 0})
+
+            selected = scheduler.select_next_command(
+                [("publication", publication), ("registration", registration)],
+                required_kind="register_evcs",
+            )
+
+            self.assertEqual(selected, ("registration", registration))
+            self.assertIsNone(
+                scheduler.select_next_command(
+                    [("publication", publication)],
+                    required_kind="register_evcs",
+                )
+            )
 
     def test_select_next_command_includes_local_publication_by_default(self) -> None:
         with self.adapter_scenario() as scenario:

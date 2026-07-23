@@ -82,11 +82,20 @@ class DbusWriteSchedulerCore(ABC):
     def record_processed(self) -> None:
         """Record one completed command for health accounting."""
 
-    def process_one(self, *, include_local_publish: bool = True) -> bool:
+    def process_one(
+        self,
+        *,
+        include_local_publish: bool = True,
+        required_kind: str | None = None,
+    ) -> bool:
         self.last_scheduled_outcome = None
         pending = self.adapter.commands.load_pending()
         commands = self.prioritized_commands(self.adapter.commands.coalesce(pending))
-        selected = self.select_next_command(commands, include_local_publish=include_local_publish)
+        selected = self.select_next_command(
+            commands,
+            include_local_publish=include_local_publish,
+            required_kind=required_kind,
+        )
         if selected is None:
             return False
         path, command = selected
@@ -98,11 +107,17 @@ class DbusWriteSchedulerCore(ABC):
         commands: CommandFileList,
         *,
         include_local_publish: bool = True,
+        required_kind: str | None = None,
     ) -> CommandFile | None:
         now = time.time()
         self.prune_budget(now)
         for path, command in commands:
-            if self._command_selectable(command, include_local_publish=include_local_publish, now=now):
+            if self._command_selectable(
+                command,
+                include_local_publish=include_local_publish,
+                required_kind=required_kind,
+                now=now,
+            ):
                 return path, command
         return None
 
@@ -111,13 +126,30 @@ class DbusWriteSchedulerCore(ABC):
         command: CommandMapping,
         *,
         include_local_publish: bool,
+        required_kind: str | None,
         now: float,
     ) -> bool:
         return (
             command_ready(command, now)
-            and (include_local_publish or not is_local_publish_command(command))
+            and self._command_matches_filters(
+                command,
+                include_local_publish=include_local_publish,
+                required_kind=required_kind,
+            )
             and self.budget_available(command, now)
         )
+
+    @classmethod
+    def _command_matches_filters(
+        cls,
+        command: CommandMapping,
+        *,
+        include_local_publish: bool,
+        required_kind: str | None,
+    ) -> bool:
+        publish_allowed = include_local_publish or not is_local_publish_command(command)
+        kind_allowed = required_kind is None or cls._command_kind(command) == required_kind
+        return publish_allowed and kind_allowed
 
     def process_command(self, command: CommandMapping, *, command_file: str = "") -> CommandOutcome:
         if self._command_blocked(command):

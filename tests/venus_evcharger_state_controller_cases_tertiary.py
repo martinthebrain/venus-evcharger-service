@@ -88,8 +88,6 @@ class TestServiceStateControllerTertiary(ServiceStateControllerTestBase):
             auto_watchdog_recovery_seconds=-1,
             auto_startup_warmup_seconds=-1,
             auto_manual_override_seconds=-1,
-            startup_device_info_retry_seconds=-1,
-            startup_device_info_retries=-1,
             shelly_request_timeout_seconds=-1,
             dbus_method_timeout_seconds=-1,
         )

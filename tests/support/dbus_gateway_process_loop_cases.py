@@ -8,6 +8,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     GatewayAdapterContractCase,
     MagicMock,
     Path,
+    evcs_registration,
     gateway_paths,
     install_mock,
     patch,
@@ -40,8 +41,22 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=True))
             install_mock(adapter, "refresh_services_if_due_once", MagicMock(return_value=True))
             self.assertTrue(adapter.process_one_dbus_operation_once())
-            adapter.refresh_services_if_due_once.assert_called_once()
+            adapter.write_scheduler.process_one.assert_called_once_with(
+                include_local_publish=False,
+                required_kind="register_evcs",
+            )
+            adapter.refresh_services_if_due_once.assert_not_called()
             adapter.poll_one_due_read_once.assert_not_called()
+
+            install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=False))
+            self.assertFalse(adapter.process_one_dbus_operation_once())
+            adapter.refresh_services_if_due_once.assert_not_called()
+            adapter.poll_one_due_read_once.assert_not_called()
+
+            self.assertEqual(adapter.write_scheduler.process_publication(evcs_registration()), "applied")
+            install_mock(adapter, "refresh_services_if_due_once", MagicMock(return_value=True))
+            self.assertTrue(adapter.process_one_dbus_operation_once())
+            adapter.refresh_services_if_due_once.assert_called_once()
 
             adapter.cache.update_services(["svc"])
             install_mock(adapter, "refresh_services_if_due_once", MagicMock(return_value=True))
@@ -84,6 +99,10 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             self.assertTrue(adapter.process_one_dbus_operation_once())
 
             priority_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-priority")))
+            self.assertEqual(
+                priority_adapter.write_scheduler.process_publication(evcs_registration()),
+                "applied",
+            )
             priority_adapter.cache.update_services(["svc"])
             install_mock(priority_adapter, "enqueue_background_introspection_if_due", MagicMock())
             install_mock(priority_adapter, "poll_one_due_read_once", MagicMock(return_value=True))
@@ -98,6 +117,10 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
 
             aggregate_adapter = DbusAdapter(
                 str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-aggregate"))
+            )
+            self.assertEqual(
+                aggregate_adapter.write_scheduler.process_publication(evcs_registration()),
+                "applied",
             )
             aggregate_adapter.cache.update_services(["svc"])
             now = time.time()

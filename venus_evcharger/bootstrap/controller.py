@@ -120,7 +120,7 @@ class ServiceBootstrapController:
             ("initialize-virtual-state", self.initialize_virtual_state),
             ("initialize-controllers", self.initialize_controllers),
             ("restore-runtime-state", self.restore_runtime_state),
-            ("apply-device-metadata", self.apply_device_metadata),
+            ("apply-service-identity", self.apply_service_identity),
             ("register-evcs-publication", self.register_evcs_publication),
             ("start-runtime-loops", self.start_runtime_loops),
         )
@@ -149,9 +149,9 @@ class ServiceBootstrapController:
         """Restore RAM-backed runtime state and worker bookkeeping."""
         self.components.runtime.restore_runtime_state()
 
-    def apply_device_metadata(self) -> None:
-        """Apply device metadata used by the GUI and management paths."""
-        self.components.runtime.apply_device_metadata()
+    def apply_service_identity(self) -> None:
+        """Apply the stable local identity published through the gateway."""
+        self.components.runtime.apply_service_identity()
 
     def register_evcs_publication(self) -> None:
         """Enqueue the complete semantic EVCS registration."""
@@ -160,11 +160,6 @@ class ServiceBootstrapController:
     def start_runtime_loops(self) -> None:
         """Start workers and register GLib timers."""
         self.components.runtime.start_runtime_loops()
-
-    def fetch_device_info_with_fallback(self) -> dict[str, object]:
-        """Return startup device metadata with bounded network fallback."""
-        return self.components.runtime.fetch_device_info_with_fallback()
-
 
 def run_service_main(service_class: Callable[[], object], config_path: str, gobject_module: object) -> None:
     """Run the configured wallbox service process."""

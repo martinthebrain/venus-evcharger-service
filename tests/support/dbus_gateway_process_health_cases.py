@@ -49,6 +49,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             self.assertEqual(adapter.fresh_evcs_field_float("ac_power_w", now), 0.0)
 
             fresh_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-fresh")))
+            observe_evcs_fields(fresh_adapter, {"connected": (1, 0.0)}, now=now)
             fresh_adapter.cache.update_services(["svc"])
             for key in ("grid_power_w", "pv_power_w", "battery_soc"):
                 fresh_adapter.cache.update_value(key, 1.0, source="test", now=now)
