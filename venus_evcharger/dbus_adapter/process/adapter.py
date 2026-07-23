@@ -105,7 +105,6 @@ class DbusAdapter(DbusAdapterLoop):
         self._last_introspection_full_scan_at = 0.0
         self._introspection_queue_depth = 0
         self._last_cache_publish_monotonic = 0.0
-        self._last_cache_publish_sequence = -1
         self._last_health_log_monotonic = 0.0
         self._last_tick_at = 0.0
         self._last_tick_monotonic = 0.0

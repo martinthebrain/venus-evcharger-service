@@ -130,6 +130,7 @@ DEFAULT_TARGETS = (
     "venus_evcharger/inputs/helper/energy_gateway.py",
     "venus_evcharger/inputs/helper/snapshot.py",
     "venus_evcharger/inputs/helper/sources.py",
+    "venus_evcharger/ipc/energy_binary.py",
     "venus_evcharger/ipc/energy_refresh.py",
     "venus_evcharger/ipc/energy_snapshots.py",
     "venus_evcharger/ipc/energy_types.py",

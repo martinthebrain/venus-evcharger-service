@@ -40,7 +40,6 @@ class DbusAdapterIoContext(Protocol):  # pragma: no cover
     slo_gui_max_age_seconds: float
     _introspection_queue_depth: int
     _last_cache_publish_monotonic: float
-    _last_cache_publish_sequence: int
 
     def poll_one_due_read_once(self) -> bool: ...
     def refresh_services_if_due_once(self) -> bool: ...

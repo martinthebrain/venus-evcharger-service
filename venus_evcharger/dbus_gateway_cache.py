@@ -24,6 +24,7 @@ from venus_evcharger.dbus_gateway_core import (
 )
 from venus_evcharger.ipc.command_types import CommandPayload
 from venus_evcharger.ipc.energy import EnergyInputsSnapshot, EnergyTopologySnapshot
+from venus_evcharger.ipc.energy_binary import write_energy_inputs_file
 
 NumericMetadataValue = str | bytes | bytearray | int | float
 NUMERIC_METADATA_TYPES = (str, bytes, bytearray, int, float)
@@ -199,6 +200,8 @@ class DbusCacheStore:
         self.services: dict[str, CommandPayload] = {}
         self.energy_inputs: CommandPayload = {}
         self.energy_topology: CommandPayload = {}
+        self._energy_inputs_snapshot: EnergyInputsSnapshot | None = None
+        self._energy_topology_snapshot: EnergyTopologySnapshot | None = None
         self.health: CommandPayload = {
             "state": "init",
             "degraded_until": 0.0,
@@ -343,6 +346,8 @@ class DbusCacheStore:
         topology: EnergyTopologySnapshot,
     ) -> None:
         """Attach adapter-derived public snapshots without changing raw cache state."""
+        self._energy_inputs_snapshot = inputs
+        self._energy_topology_snapshot = topology
         self.energy_inputs = inputs.to_payload()
         self.energy_topology = topology.to_payload()
 
@@ -385,6 +390,7 @@ class DbusCacheStore:
     def write_snapshot_files(self) -> None:
         os.makedirs(self.paths.run_dir, exist_ok=True)
         snapshot = self.snapshot()
+        self._write_semantic_snapshot_files()
         write_json_file(self.paths.cache_path, snapshot)
         write_text_atomically(self.paths.cache_sequence_path, f"{self.sequence}\n")
         write_json_file(
@@ -396,6 +402,14 @@ class DbusCacheStore:
                 "dbus_health": snapshot["dbus_health"],
             },
         )
+
+    def _write_semantic_snapshot_files(self) -> None:
+        energy_inputs = self._energy_inputs_snapshot
+        energy_topology = self._energy_topology_snapshot
+        if energy_inputs is not None:
+            write_energy_inputs_file(self.paths.energy_inputs_path, energy_inputs)
+        if energy_topology is not None:
+            write_json_file(self.paths.energy_topology_path, energy_topology.to_payload())
 
     @staticmethod
     def load_snapshot(path: str, *, max_age_seconds: float = 30.0, now: float | None = None) -> CommandPayload:

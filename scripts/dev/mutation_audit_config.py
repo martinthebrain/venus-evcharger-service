@@ -70,6 +70,7 @@ def mutmut_config_toml(target_path: str) -> str:
     also_copy = [
         "venus_evcharger_auto_input_helper.py",
         "venus_evcharger_dbus_adapter.py",
+        "venus_evcharger_generic_shelly_configuration.py",
         "venus_evcharger_service.py",
         "CONTROL_API.md",
         "deploy/venus",
