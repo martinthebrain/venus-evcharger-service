@@ -77,12 +77,6 @@ class TestStateValidationPrimitiveContracts(unittest.TestCase):
             RuntimeConfigValidator._clamp_fraction(
                 SimpleNamespace(value=None), "value", "Value", 0.5
             )
-        with self.assertRaisesRegex(
-            TypeError, "^startup_device_info_retries must be an integer$"
-        ):
-            RuntimeConfigValidator._validate_startup_retry_config(
-                SimpleNamespace(startup_device_info_retries=1.0)
-            )
         with self.assertRaisesRegex(TypeError, "^value must be an integer$"):
             RuntimeConfigValidator._validate_optional_non_negative_int(
                 SimpleNamespace(value=1.0), "value", "Value"
@@ -98,7 +92,6 @@ class TestStateValidationOrchestrationContracts(unittest.TestCase):
             poll_interval_ms=100,
             sign_of_life_minutes=1,
             auto_pv_max_services=1,
-            startup_device_info_retries=0,
             auto_policy=AutoPolicy(),
         )
         controller = RuntimeConfigValidator(svc)
@@ -106,7 +99,6 @@ class TestStateValidationOrchestrationContracts(unittest.TestCase):
             patch.object(RuntimeConfigValidator, "_clamp_min_int") as clamp_min,
             patch.object(RuntimeConfigValidator, "_clamp_interval_settings") as intervals,
             patch.object(RuntimeConfigValidator, "_validate_scheduled_runtime_config") as scheduled,
-            patch.object(RuntimeConfigValidator, "_validate_startup_retry_config") as startup,
             patch.object(RuntimeConfigValidator, "_validate_timeout_settings") as timeouts,
             patch.object(RuntimeConfigValidator, "_validate_balance_runtime_config") as balance,
             patch.object(validation_module, "validate_auto_policy") as policy,
@@ -122,7 +114,6 @@ class TestStateValidationOrchestrationContracts(unittest.TestCase):
         )
         intervals.assert_called_once_with()
         scheduled.assert_called_once_with(svc)
-        startup.assert_called_once_with(svc)
         timeouts.assert_called_once_with(svc)
         balance.assert_called_once_with(svc)
         policy.assert_called_once_with(svc.auto_policy)
@@ -132,14 +123,12 @@ class TestStateValidationOrchestrationContracts(unittest.TestCase):
             poll_interval_ms=100,
             sign_of_life_minutes=1,
             auto_pv_max_services=1,
-            startup_device_info_retries=0,
         )
         controller = RuntimeConfigValidator(svc)
         with (
             patch.object(RuntimeConfigValidator, "_clamp_min_int"),
             patch.object(RuntimeConfigValidator, "_clamp_interval_settings"),
             patch.object(RuntimeConfigValidator, "_validate_scheduled_runtime_config"),
-            patch.object(RuntimeConfigValidator, "_validate_startup_retry_config"),
             patch.object(RuntimeConfigValidator, "_validate_timeout_settings"),
             patch.object(RuntimeConfigValidator, "_validate_balance_runtime_config"),
         ):
@@ -151,7 +140,6 @@ class TestStateValidationOrchestrationContracts(unittest.TestCase):
             poll_interval_ms=100,
             sign_of_life_minutes=1,
             auto_pv_max_services=1,
-            startup_device_info_retries=0,
             auto_policy=object(),
         )
         controller = RuntimeConfigValidator(svc)
@@ -159,7 +147,6 @@ class TestStateValidationOrchestrationContracts(unittest.TestCase):
             patch.object(RuntimeConfigValidator, "_clamp_min_int"),
             patch.object(RuntimeConfigValidator, "_clamp_interval_settings"),
             patch.object(RuntimeConfigValidator, "_validate_scheduled_runtime_config"),
-            patch.object(RuntimeConfigValidator, "_validate_startup_retry_config"),
             patch.object(RuntimeConfigValidator, "_validate_timeout_settings"),
             patch.object(RuntimeConfigValidator, "_validate_balance_runtime_config"),
         ):

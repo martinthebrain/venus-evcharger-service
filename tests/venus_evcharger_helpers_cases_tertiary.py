@@ -77,15 +77,6 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
             "http://192.168.178.76/rpc/Switch.Set?id=0&on=false"
         )
 
-    def test_fetch_device_info_with_fallback_returns_empty_dict_after_retries(self):
-        service = make_helper_service()
-        service.startup_device_info_retries = 2
-        service.startup_device_info_retry_seconds = 0
-        service.controllers.runtime.shelly.rpc_call = MagicMock(side_effect=RuntimeError("offline"))
-
-        self.assertEqual(service.controllers.bootstrap.fetch_device_info_with_fallback(), {})
-        self.assertEqual(service.controllers.runtime.shelly.rpc_call.call_count, 3)
-
     def test_handle_write_startstop_switches_relay_and_updates_dbus(self):
         service = make_helper_service()
         service.virtual_mode = 0
@@ -206,7 +197,8 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
         self.assertTrue(result)
         self.assertEqual(service.virtual_mode, 0)
         self.assertEqual(service._dbusservice["/Mode"], 0)
-        self.assertEqual(service._dbusservice["/StartStop"], 0)
+        self.assertEqual(service.virtual_startstop, 1)
+        self.assertEqual(service._dbusservice["/StartStop"], 1)
         self.assertIsNone(service.auto_start_condition_since)
         self.assertIsNone(service.auto_stop_condition_since)
         self.assertEqual(len(service.auto_samples), 0)

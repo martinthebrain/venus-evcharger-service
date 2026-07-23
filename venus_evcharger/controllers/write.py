@@ -118,6 +118,8 @@ class ControlWriteController(_ControlWriteSupport):
         self._log_normalized_mode(requested_mode, normalized_mode)
         if auto_mode_active:
             self._handle_mode_transition_to_auto(previous_mode, current_time)
+        else:
+            self._handle_mode_transition_to_manual(previous_mode, current_time)
         port.virtual_mode = normalized_mode
         self._reset_auto_decision_state(port)
         self._snapshot_for_mode(port, current_time, auto_mode_active)

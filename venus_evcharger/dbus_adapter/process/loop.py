@@ -20,6 +20,7 @@ from venus_evcharger.dbus_adapter.process.protocols.loop import DbusAdapterLoopC
 from venus_evcharger.dbus_gateway_core import float_or_zero
 
 GATEWAY_TICK_RECOVERY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+EVCS_REGISTRATION_COMMAND_KIND = "register_evcs"
 
 
 class DbusAdapterLoop(DbusAdapterIntrospection):
@@ -96,12 +97,21 @@ class DbusAdapterLoop(DbusAdapterIntrospection):
         return self.min_tick_seconds
 
     def process_one_dbus_operation_once(self: DbusAdapterLoopContext) -> bool:
+        if not self.evcs_service_registered:
+            return self.process_evcs_registration_once()
         if self.refresh_initial_services_once():
             return True
         self.enqueue_background_introspection_if_due()
         if self.priority_read_performed():
             return True
         return self.process_standard_operation_once()
+
+    def process_evcs_registration_once(self: DbusAdapterLoopContext) -> bool:
+        """Register our own service before touching any external DBus service."""
+        return self.write_scheduler.process_one(
+            include_local_publish=False,
+            required_kind=EVCS_REGISTRATION_COMMAND_KIND,
+        )
 
     def refresh_initial_services_once(self: DbusAdapterLoopContext) -> bool:
         return not self.cache.services and self.refresh_services_if_due_once()

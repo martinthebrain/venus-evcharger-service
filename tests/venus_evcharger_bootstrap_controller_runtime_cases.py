@@ -50,6 +50,14 @@ def _runtime_service(**overrides: object) -> SimpleNamespace:
         "sign_of_life_minutes": 10,
         "runtime_state_path": "/run/state.json",
         "topology_configured": True,
+        "config": {"DEFAULT": {}},
+        "custom_name_override": "",
+        "deviceinstance": 60,
+        "product_name": "",
+        "custom_name": "",
+        "serial": "",
+        "firmware_version": "",
+        "hardware_version": "",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -121,26 +129,18 @@ class TestServiceBootstrapRuntimeComponent(unittest.TestCase):
 
         self.assertIsNone(service._startup_manual_target)
 
-    def test_apply_device_metadata_delegates_with_owned_dependencies(self) -> None:
+    def test_apply_service_identity_delegates_with_owned_dependencies(self) -> None:
         service = _runtime_service()
         initializer = _initializer(service)
-        with patch("venus_evcharger.bootstrap.runtime.apply_device_metadata") as apply:
-            initializer.apply_device_metadata()
+        with patch("venus_evcharger.bootstrap.runtime.apply_service_identity") as apply:
+            initializer.apply_service_identity()
 
         self.assertIs(apply.call_args.args[0], service)
         self.assertEqual(apply.call_args.kwargs["read_version"]("version.txt"), "1.0")
-        self.assertIs(apply.call_args.kwargs["fetch_device_info"].__self__, initializer)
 
-    def test_fetch_device_info_normalizes_mapping_to_plain_dict(self) -> None:
-        service = _runtime_service()
-        with patch(
-            "venus_evcharger.bootstrap.runtime.fetch_device_info_with_fallback",
-            return_value={"mac": "ABC"},
-        ) as fetch:
-            result = _initializer(service).fetch_device_info_with_fallback()
-
-        self.assertEqual(result, {"mac": "ABC"})
-        fetch.assert_called_once_with(service)
+    def test_apply_service_identity_rejects_an_incomplete_runtime_boundary(self) -> None:
+        with self.assertRaisesRegex(TypeError, "^bootstrap service does not implement ServiceIdentitySource$"):
+            _initializer(SimpleNamespace()).apply_service_identity()
 
     def test_start_runtime_loops_delegates_only_after_runtime_contract_is_complete(self) -> None:
         service = _runtime_service()

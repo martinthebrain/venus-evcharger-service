@@ -279,8 +279,6 @@ def make_state_validation_service(**overrides: object) -> SimpleNamespace:
         "auto_scheduled_latest_end_time": "06:30",
         "auto_contactor_fault_latch_count": 1,
         "auto_contactor_fault_latch_seconds": 1.0,
-        "startup_device_info_retry_seconds": 1.0,
-        "startup_device_info_retries": 1,
         "shelly_request_timeout_seconds": 1.0,
         "dbus_method_timeout_seconds": 1.0,
     }

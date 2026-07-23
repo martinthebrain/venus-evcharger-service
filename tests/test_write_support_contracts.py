@@ -138,6 +138,43 @@ class TestWriteSupportModeContracts(unittest.TestCase):
         activate.assert_called_once_with(port)
         self.assertEqual(port.manual_override_until, 0.0)
 
+    def test_transition_to_manual_transfers_auto_permission_to_relay_target(self) -> None:
+        port = SimpleNamespace(
+            mode_uses_auto_logic=MagicMock(return_value=True),
+            virtual_enable=1,
+            virtual_startstop=0,
+        )
+        controller = ControlWriteController(port)
+        with patch.object(controller, "_apply_manual_enable_like_request") as apply:
+            controller._handle_mode_transition_to_manual(2, 10.0)
+        apply.assert_called_once_with(port, True, 10.0)
+        port.mode_uses_auto_logic.assert_called_once_with(2)
+
+        port.virtual_enable = 0
+        port.virtual_startstop = 1
+        port.mode_uses_auto_logic.reset_mock()
+        with patch.object(controller, "_apply_manual_enable_like_request") as apply:
+            controller._handle_mode_transition_to_manual(1, 11.0)
+        apply.assert_called_once_with(port, False, 11.0)
+        port.mode_uses_auto_logic.assert_called_once_with(1)
+
+    def test_transition_to_manual_avoids_redundant_or_non_transition_writes(self) -> None:
+        port = SimpleNamespace(
+            mode_uses_auto_logic=MagicMock(return_value=True),
+            virtual_enable=1,
+            virtual_startstop=1,
+        )
+        controller = ControlWriteController(port)
+        with patch.object(controller, "_apply_manual_enable_like_request") as apply:
+            controller._handle_mode_transition_to_manual(2, 10.0)
+        apply.assert_not_called()
+
+        port.mode_uses_auto_logic.return_value = False
+        port.virtual_startstop = 0
+        with patch.object(controller, "_apply_manual_enable_like_request") as apply:
+            controller._handle_mode_transition_to_manual(0, 11.0)
+        apply.assert_not_called()
+
     def test_worker_snapshot_clears_inputs_outside_auto_and_preserves_them_in_auto(self) -> None:
         snapshot = {"pv_power": 1, "battery_soc": 2, "grid_power": 3}
         svc = SimpleNamespace(
@@ -181,6 +218,16 @@ class TestWriteSupportModeContracts(unittest.TestCase):
                 call("mode", 2, 11.0, force=True),
                 call("start_stop", 1, 11.0, force=True),
                 call("enable", 1, 11.0, force=True),
+            ],
+        )
+        svc.publish_field.reset_mock()
+        ControlWriteController._publish_mode_paths(svc, 12.0, False)
+        self.assertEqual(
+            svc.publish_field.call_args_list,
+            [
+                call("mode", 2, 12.0, force=True),
+                call("start_stop", 0, 12.0, force=True),
+                call("enable", 1, 12.0, force=True),
             ],
         )
 
