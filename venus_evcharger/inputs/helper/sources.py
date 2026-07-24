@@ -3,44 +3,109 @@
 
 from __future__ import annotations
 
+import math
 import time
 
+from venus_evcharger.energy import read_energy_source_step
+from venus_evcharger.energy.read_steps import EnergySourceStepReader
 from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
 from venus_evcharger.inputs.helper.contracts import EnergySnapshotReaderPort, Snapshot
+from venus_evcharger.inputs.helper.external_contracts import (
+    ExternalEnergyCycle,
+    ProjectedEnergyValue,
+    PvProjectionPolicy,
+    projection_measurement_status,
+)
+from venus_evcharger.inputs.helper.external_sources import ConfiguredEnergySources
 from venus_evcharger.ipc.energy import EnergyRefreshScope, MeasuredValue
 
 
 class AutoInputSources:
     """Project one coherent energy snapshot into the core auto-input payload."""
 
-    def __init__(self, settings: AutoInputHelperSettings, gateway: EnergySnapshotReaderPort) -> None:
+    def __init__(
+        self,
+        settings: AutoInputHelperSettings,
+        gateway: EnergySnapshotReaderPort,
+        *,
+        connector_session: object | None = None,
+        energy_source_reader: EnergySourceStepReader = read_energy_source_step,
+    ) -> None:
         self.settings = settings
         self.gateway = gateway
         self._measurements: dict[EnergyRefreshScope, MeasuredValue | None] = {}
+        self._gateway_battery: MeasuredValue | None = None
+        self._battery_observed_at: float | None = None
+        self._external_cycle: ExternalEnergyCycle | None = None
+        self._pv_projection: ProjectedEnergyValue | None = None
+        self.external = ConfiguredEnergySources(
+            settings.energy_sources,
+            use_combined_soc=settings.use_combined_battery_soc,
+            request_timeout_seconds=settings.energy_source_request_timeout_seconds,
+            polling_policy=settings.external_polling_policy,
+            pv_policy=settings.pv_projection_policy,
+            gateway_source_id=settings.grid_fusion_config.backup_source_id,
+            gateway_definition=settings.gateway_energy_source,
+            session=connector_session,
+            reader=energy_source_reader,
+        )
 
     def prepare_cycle(self) -> None:
+        current = time.time()
         self.gateway.refresh_inputs()
         scopes: tuple[EnergyRefreshScope, ...] = ("pv", "grid", "battery")
         self._measurements = {
             scope: self.gateway.measurement(scope)
             for scope in scopes
         }
+        self._prepare_external_cycle(current)
+
+    def close(self) -> None:
+        """Release connector resources owned by this helper."""
+        self.external.close()
+
+    def _prepare_external_cycle(self, current: float) -> None:
+        self._external_cycle = None
+        self._gateway_battery = self._valid_battery_measurement(current)
+        self._battery_observed_at = _measurement_observed_at(self._gateway_battery)
+        gateway_pv = self._projected_gateway_value("pv", current)
+        if not self.external.enabled:
+            self._pv_projection = gateway_pv
+            return
+        self._external_cycle = self.external.collect_cycle(self._gateway_battery, current)
+        self._battery_observed_at = self._external_cycle.battery_observed_at
+        self._pv_projection = _select_pv_projection(
+            gateway_pv,
+            self._external_cycle.pv,
+            self.settings.pv_projection_policy,
+        )
 
     def observed_at(self, source_name: str) -> float | None:
+        if source_name == "pv":
+            return _projected_observed_at(self._pv_projection)
+        if source_name == "battery":
+            return self._battery_observed_at
         measurement = self._measurements.get(_source_scope(source_name))
-        return measurement.observed_at if measurement is not None and measurement.observed_at > 0.0 else None
+        return _measurement_observed_at(measurement)
 
     def pv_power(self) -> float | None:
-        return self._numeric_value("pv")
+        if self._pv_projection is None:
+            if self.settings.pv_projection_policy.name != "external_only":
+                self._request_missing("pv")
+            return None
+        return self._pv_projection.value
 
     def grid_power(self) -> float | None:
         return self._numeric_value("grid")
 
     def battery_snapshot(self) -> Snapshot:
-        measurement = self._valid_measurement("battery")
-        if measurement is None or measurement.value is None or not 0.0 <= measurement.value <= 100.0:
+        measurement = self._gateway_battery
+        if self.external.enabled:
+            return self._external_battery_snapshot(measurement)
+        if measurement is None:
             self._request_missing("battery")
             return empty_battery_snapshot()
+        assert measurement.value is not None
         source_count = max(1, len(measurement.source_ids))
         return gateway_battery_snapshot(
             measurement.value,
@@ -48,19 +113,64 @@ class AutoInputSources:
             source_count=source_count,
         )
 
+    def _valid_battery_measurement(self, current: float) -> MeasuredValue | None:
+        measurement = self._valid_measurement("battery", current)
+        if measurement is None:
+            return None
+        assert measurement.value is not None
+        return measurement if 0.0 <= float(measurement.value) <= 100.0 else None
+
+    def _external_battery_snapshot(self, measurement: MeasuredValue | None) -> Snapshot:
+        if measurement is None:
+            self._request_missing("battery")
+        if self._external_cycle is None:
+            return empty_battery_snapshot()
+        return dict(self._external_cycle.battery)
+
     def _numeric_value(self, scope: EnergyRefreshScope) -> float | None:
-        measurement = self._valid_measurement(scope)
-        if measurement is None or measurement.value is None:
+        measurement = self._valid_measurement(scope, time.time())
+        if measurement is None:
             self._request_missing(scope)
             return None
-        return measurement.value
+        assert measurement.value is not None
+        return float(measurement.value)
 
-    def _valid_measurement(self, scope: EnergyRefreshScope) -> MeasuredValue | None:
+    def _valid_measurement(
+        self,
+        scope: EnergyRefreshScope,
+        current: float,
+    ) -> MeasuredValue | None:
         measurement = self._measurements.get(scope)
-        if measurement is None or measurement.status not in {"fresh", "stale"}:
+        if measurement is None:
             return None
-        age = max(0.0, time.time() - measurement.observed_at)
-        return measurement if measurement.observed_at > 0.0 and age <= self.settings.gateway_max_age_seconds else None
+        if not _contributing_measurement_status(measurement.status):
+            return None
+        observed_at = float(measurement.observed_at)
+        if not _valid_gateway_observation_time(observed_at, current):
+            return None
+        age = current - observed_at
+        if age > self.settings.gateway_max_age_seconds:
+            return None
+        return measurement
+
+    def _projected_gateway_value(
+        self,
+        scope: EnergyRefreshScope,
+        current: float,
+    ) -> ProjectedEnergyValue | None:
+        measurement = self._valid_measurement(scope, current)
+        if measurement is None:
+            return None
+        assert measurement.value is not None
+        return ProjectedEnergyValue(
+            value=float(measurement.value),
+            observed_at=float(measurement.observed_at),
+            source_id=self.settings.grid_fusion_config.backup_source_id,
+            confidence=float(measurement.confidence),
+            measurement_status=projection_measurement_status(
+                measurement.status
+            ),
+        )
 
     def _request_missing(self, scope: EnergyRefreshScope) -> None:
         self.gateway.request_refresh(scope, reason=f"semantic {scope} measurement unavailable", priority=True)
@@ -126,11 +236,61 @@ def empty_battery_snapshot() -> Snapshot:
     }
 
 
+def _select_pv_projection(
+    gateway: ProjectedEnergyValue | None,
+    external: ProjectedEnergyValue | None,
+    policy: PvProjectionPolicy,
+) -> ProjectedEnergyValue | None:
+    candidates = {
+        "gateway_only": (gateway,),
+        "gateway_preferred": (gateway, external),
+        "external_preferred": (external, gateway),
+        "external_only": (external,),
+    }[policy.name]
+    available = tuple(candidate for candidate in candidates if candidate is not None)
+    if not available:
+        return None
+    return max(available, key=_projection_quality)
+
+
+def _projection_quality(projection: ProjectedEnergyValue) -> tuple[int, int]:
+    return (
+        _projection_status_rank(projection),
+        _projection_confidence_rank(projection),
+    )
+
+
+def _projection_status_rank(projection: ProjectedEnergyValue) -> int:
+    return 1 if projection.measurement_status == "fresh" else 0
+
+
+def _projection_confidence_rank(projection: ProjectedEnergyValue) -> int:
+    return 1 if projection.confidence >= 0.5 else 0
+
+
+def _contributing_measurement_status(status: str) -> bool:
+    return status in {"fresh", "stale"}
+
+
+def _valid_gateway_observation_time(observed_at: float, current: float) -> bool:
+    return math.isfinite(observed_at) and 0.0 < observed_at <= current
+
+
+def _projected_observed_at(
+    projection: ProjectedEnergyValue | None,
+) -> float | None:
+    return None if projection is None else projection.observed_at
+
+
+def _measurement_observed_at(
+    measurement: MeasuredValue | None,
+) -> float | None:
+    if measurement is None or measurement.observed_at <= 0.0:
+        return None
+    return measurement.observed_at
+
+
 def _source_scope(source_name: str) -> EnergyRefreshScope:
-    if source_name == "pv":
-        return "pv"
     if source_name == "grid":
         return "grid"
-    if source_name == "battery":
-        return "battery"
     return "all"

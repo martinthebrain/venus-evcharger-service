@@ -18,7 +18,7 @@ class AggregatePayload(TypedDict):
     last_error: str
 
 
-def aggregate_signature_members(signature: object, aggregate: str) -> list[tuple[str, str]] | None:  # pragma: no mutate block
+def aggregate_signature_members(signature: object, aggregate: str) -> list[tuple[str, str]] | None:
     if not isinstance(signature, tuple):
         return None
     if len(signature) != _PAIR_LENGTH:
@@ -31,7 +31,7 @@ def aggregate_signature_members(signature: object, aggregate: str) -> list[tuple
     return _member_pairs(members)
 
 
-def _member_pairs(raw_members: tuple[object, ...]) -> list[tuple[str, str]] | None:  # pragma: no mutate block
+def _member_pairs(raw_members: tuple[object, ...]) -> list[tuple[str, str]] | None:
     pairs: list[tuple[str, str]] = []
     for item in raw_members:
         if not isinstance(item, tuple) or len(item) != _PAIR_LENGTH:
@@ -41,7 +41,7 @@ def _member_pairs(raw_members: tuple[object, ...]) -> list[tuple[str, str]] | No
     return pairs
 
 
-def aggregate_member_float(value: object) -> float:  # pragma: no mutate block
+def aggregate_member_float(value: object) -> float:
     if isinstance(value, bool):
         return float(value)
     if isinstance(value, (str, bytes, SupportsFloat, SupportsIndex)):
@@ -58,19 +58,19 @@ class AggregateState:
     sources: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
-    def record_member(self, service: str, path: str, value: object) -> None:  # pragma: no mutate block
+    def record_member(self, service: str, path: str, value: object) -> None:
         if value is None:
             return
         self.total += aggregate_member_float(value)
         self.sources.append(f"{service}{path}")
 
-    def record_error(self, service: str, path: str, error: BaseException) -> None:  # pragma: no mutate block
+    def record_error(self, service: str, path: str, error: BaseException) -> None:
         self.errors.append(f"{service}{path}: {error}")
 
     def complete(self, member_count: int) -> bool:
         return self.index >= member_count
 
-    def payload(self, key: str) -> AggregatePayload:  # pragma: no mutate block
+    def payload(self, key: str) -> AggregatePayload:
         return {
             "value": self.total,
             "source": ",".join(self.sources) if self.sources else key,

@@ -145,7 +145,7 @@ class DbusReadExecutor:
 
     def _poll_pv_total_step(self, key: str, spec: ReadSpec) -> CommandOutcome:
         members = self._in_progress_pv_total_members(key) or self.adapter.energy_discovery.pv_members(
-            spec, self.adapter.cache.values
+            spec
         )
         if not members:
             raise RuntimeError("No available AC or DC PV source candidates")
@@ -216,6 +216,11 @@ class DbusReadExecutor:
         value = self._read_aggregate_member_value(service, path, state, ignore_member_errors=ignore_member_errors)
         if value is OPTIONAL_MEMBER_FAILED:
             return None
+        self.adapter.energy_discovery.record_pv_value(
+            service,
+            path,
+            value,
+        )
         target = read_target(service, path)
         if target is not None:
             self.adapter.cache.update_external_read(
@@ -252,6 +257,11 @@ class DbusReadExecutor:
         state: AggregateState,
         error: BaseException,
     ) -> None:
+        self.adapter.energy_discovery.record_pv_error(
+            service,
+            path,
+            error,
+        )
         target = read_target(service, path)
         if target is not None:
             self.adapter.cache.mark_unavailable(

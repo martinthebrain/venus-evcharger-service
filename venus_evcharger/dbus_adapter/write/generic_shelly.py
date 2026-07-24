@@ -13,7 +13,7 @@ import dbus
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
-from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
+from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
 from venus_evcharger.ipc.command_types import CommandMapping
 from venus_evcharger.ipc.generic_shelly_configuration import (
     DisableMatchingGenericShellyOnceOperation,
@@ -42,7 +42,7 @@ class _Progress:
 class GenericShellyConfigurationExecutor:
     """Advance one persistent configuration request by one DBus operation."""
 
-    def __init__(self, adapter: DbusWriteSchedulerAdapter) -> None:
+    def __init__(self, adapter: SemanticWriteAdapter) -> None:
         self._adapter = adapter
 
     def process(self, command: CommandMapping, command_file: str) -> CommandOutcome:
@@ -237,4 +237,6 @@ def _is_phase(value: object) -> TypeGuard[GenericShellyPhase]:
 
 
 def _is_device_sequence(value: object) -> TypeGuard[list[str] | tuple[str, ...]]:
-    return isinstance(value, (list, tuple)) and all(isinstance(item, str) and bool(item.strip()) for item in value)
+    if not isinstance(value, (list, tuple)):
+        return False
+    return all(isinstance(item, str) and bool(item.strip()) for item in value)

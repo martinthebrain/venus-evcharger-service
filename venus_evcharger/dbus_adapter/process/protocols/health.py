@@ -4,18 +4,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from venus_evcharger.dbus_adapter.health.freshness import EvcsPublicationObservations
-from venus_evcharger.dbus_adapter.health.slo import SloThresholds
+from venus_evcharger.dbus_adapter.process.protocols.roles import PublicationRole
 from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker
-from venus_evcharger.dbus_adapter.resources import ResourceMonitor, TickHealth
+from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
+from venus_evcharger.dbus_adapter.resources import ResourceMonitor
 from venus_evcharger.dbus_adapter.scheduling import DbusDiscoveryManager, DbusReadScheduler
+from venus_evcharger.dbus_adapter.tick_health import TickHealth
 from venus_evcharger.dbus_adapter.write.scheduler import DbusWriteScheduler
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusGatewayCommandInbox
 from venus_evcharger.ipc.command_mailbox import CommandMailbox
 from venus_evcharger.ipc.command_types import CommandPayload
+
+if TYPE_CHECKING:
+    from venus_evcharger.dbus_adapter.publication import GatewayPublicationRegistry
 
 
 class DbusAdapterHealthContext(Protocol):  # pragma: no cover
@@ -26,6 +29,7 @@ class DbusAdapterHealthContext(Protocol):  # pragma: no cover
     core_command_mailbox: CommandMailbox
     circuit: DbusCircuitBreaker
     discovery: DbusDiscoveryManager
+    energy_discovery: DbusEnergyDiscoveryManager
     read_scheduler: DbusReadScheduler
     write_scheduler: DbusWriteScheduler
     resource_monitor: ResourceMonitor
@@ -47,37 +51,7 @@ class DbusAdapterHealthContext(Protocol):  # pragma: no cover
     _last_tick_monotonic: float
     _last_tick_duration_ms: float
     _last_introspection_full_scan_at: float
-
     @property
-    def publication_registry(self) -> EvcsPublicationObservations: ...
-
+    def publication_role(self) -> PublicationRole: ...
     @property
-    def registered_publication_path_count(self) -> int: ...
-
-    def health_log_due(self) -> bool: ...
-    def health_snapshot(self) -> CommandPayload: ...
-    def cache_freshness_snapshot(self, now: float) -> CommandPayload: ...
-    def slo_snapshot(
-        self,
-        *,
-        queue_health: Mapping[str, object],
-        cache_freshness: Mapping[str, object],
-        now: float,
-        current_monotonic: float,
-    ) -> CommandPayload: ...
-    def slo_observed(
-        self,
-        queue_health: Mapping[str, object],
-        cache_freshness: Mapping[str, object],
-        now: float,
-        current_monotonic: float,
-    ) -> dict[str, float]: ...
-    def slo_thresholds(self) -> SloThresholds: ...
-    def gui_freshness_fields(self, now: float) -> set[str]: ...
-    def gui_session_freshness_fields(self, now: float) -> set[str]: ...
-    def charging_session_active_for_gui(self, now: float) -> bool: ...
-    def fresh_evcs_field_float(self, field: str, now: float) -> float: ...
-    def apply_slo_regulation(self) -> None: ...
-    def suspend_advisory_work(self, now: float) -> None: ...
-    def max_publication_field_age(self, fields: set[str] | frozenset[str], now: float) -> float: ...
-    def missing_publication_field_count(self, fields: set[str] | frozenset[str]) -> float: ...
+    def publication_registry(self) -> GatewayPublicationRegistry: ...

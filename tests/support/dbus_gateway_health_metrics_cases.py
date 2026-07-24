@@ -64,6 +64,8 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(snapshot["grid_power_w_age_s"], 1.0)
         self.assertEqual(snapshot["pv_power_w_status"], "error")
         self.assertEqual(snapshot["battery_soc_status"], "missing")
+        self.assertEqual(snapshot["critical_missing_count"], 1)
+        self.assertEqual(snapshot["critical_nonfresh_count"], 1)
 
     def test_queue_health_helpers_report_classes_ages_and_drain_contracts(self) -> None:
         pending = [
@@ -156,21 +158,24 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
             core_read_max_age_seconds=5.0,
             queue_max_age_seconds=7.0,
             mainloop_gap_max_ms=100.0,
-            tick_seconds=0.2,
-            max_tick_seconds=0.6,
         )
         observed_at_limit = {
             "gui_max_age_s": 10.0,
             "gui_measurement_max_age_s": 10.0,
             "gui_control_max_age_s": 10.0,
             "gui_session_max_age_s": 10.0,
+            "gui_missing_field_count": 0.0,
+            "gui_measurement_missing_field_count": 0.0,
+            "gui_control_missing_field_count": 0.0,
+            "gui_session_missing_field_count": 0.0,
             "core_read_max_age_s": 5.0,
+            "core_read_missing_count": 0.0,
+            "core_read_nonfresh_count": 0.0,
             "queue_oldest_age_s": 7.0,
-            "mainloop_max_gap_ms_60s": 1500.0,
+            "mainloop_max_gap_ms_60s": 100.0,
         }
 
         self.assertEqual(health_slo_module.effective_gui_max_age_seconds(thresholds), 10.0)
-        self.assertEqual(health_slo_module.effective_mainloop_gap_max_ms(thresholds), 1500.0)
         self.assertEqual(
             health_slo_module.slo_targets(thresholds),
             {
@@ -178,10 +183,16 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
                 "gui_measurement_max_age_s": 10.0,
                 "gui_control_max_age_s": 10.0,
                 "gui_session_max_age_s": 10.0,
+                "gui_missing_field_count": 0.0,
+                "gui_measurement_missing_field_count": 0.0,
+                "gui_control_missing_field_count": 0.0,
+                "gui_session_missing_field_count": 0.0,
                 "configured_gui_max_age_s": 2.0,
                 "core_read_max_age_s": 5.0,
+                "core_read_missing_count": 0.0,
+                "core_read_nonfresh_count": 0.0,
                 "queue_max_age_s": 7.0,
-                "mainloop_gap_max_ms": 1500.0,
+                "mainloop_gap_max_ms": 100.0,
             },
         )
         self.assertEqual(
@@ -201,9 +212,15 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
             "gui_measurement_max_age_s": 10.2,
             "gui_control_max_age_s": 10.3,
             "gui_session_max_age_s": 10.4,
+            "gui_missing_field_count": 0.1,
+            "gui_measurement_missing_field_count": 0.1,
+            "gui_control_missing_field_count": 0.1,
+            "gui_session_missing_field_count": 0.1,
             "core_read_max_age_s": 5.1,
+            "core_read_missing_count": 0.1,
+            "core_read_nonfresh_count": 0.1,
             "queue_oldest_age_s": 7.1,
-            "mainloop_max_gap_ms_60s": 1500.1,
+            "mainloop_max_gap_ms_60s": 100.1,
         }
         violated_checks = health_slo_module.slo_checks_from_observed(violated_observed, thresholds)
         self.assertEqual(
@@ -250,25 +267,23 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
                 "observed": {},
             },
         )
-        self.assertEqual(health_slo_module.slo_checks_from_observed({}, thresholds)["gui_fresh"], True)
+        self.assertEqual(health_slo_module.slo_checks_from_observed({}, thresholds)["gui_fresh"], False)
         tiny_thresholds = health_slo_module.SloThresholds(
             gui_max_age_seconds=0.1,
             core_read_max_age_seconds=0.1,
             queue_max_age_seconds=0.1,
             mainloop_gap_max_ms=0.1,
-            tick_seconds=0.0001,
-            max_tick_seconds=0.0001,
         )
         self.assertEqual(
             health_slo_module.slo_checks_from_observed({}, tiny_thresholds),
             {
-                "gui_fresh": True,
-                "gui_measurements_fresh": True,
-                "gui_controls_fresh": True,
-                "gui_session_fresh": True,
-                "core_reads_fresh": True,
-                "queue_age_ok": True,
-                "mainloop_gap_ok": True,
+                "gui_fresh": False,
+                "gui_measurements_fresh": False,
+                "gui_controls_fresh": False,
+                "gui_session_fresh": False,
+                "core_reads_fresh": False,
+                "queue_age_ok": False,
+                "mainloop_gap_ok": False,
             },
         )
 
@@ -277,11 +292,8 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
             core_read_max_age_seconds=1.0,
             queue_max_age_seconds=7.0,
             mainloop_gap_max_ms=3000.0,
-            tick_seconds=0.2,
-            max_tick_seconds=0.6,
         )
         self.assertEqual(health_slo_module.effective_gui_max_age_seconds(mainloop_configured), 12.0)
-        self.assertEqual(health_slo_module.effective_mainloop_gap_max_ms(mainloop_configured), 3000.0)
         self.assertEqual(
             health_slo_module.max_core_read_age(
                 {
@@ -314,7 +326,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=7.0,
-                eventloop_gap_ms=1500.0,
+                eventloop_gap_ms=100.0,
                 base_burst=4,
                 thresholds=thresholds,
             ),
@@ -323,7 +335,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=7.1,
-                eventloop_gap_ms=1500.0,
+                eventloop_gap_ms=100.0,
                 base_burst=4,
                 thresholds=thresholds,
             ),
@@ -332,7 +344,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=7.1,
-                eventloop_gap_ms=1500.0,
+                eventloop_gap_ms=100.0,
                 base_burst=1,
                 thresholds=thresholds,
             ),
@@ -341,7 +353,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=70.0,
-                eventloop_gap_ms=1500.0,
+                eventloop_gap_ms=100.0,
                 base_burst=20,
                 thresholds=thresholds,
             ),
@@ -350,7 +362,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=7.1,
-                eventloop_gap_ms=1500.1,
+                eventloop_gap_ms=100.1,
                 base_burst=4,
                 thresholds=thresholds,
             ),
@@ -359,7 +371,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=7.0,
-                eventloop_gap_ms=1500.1,
+                eventloop_gap_ms=100.1,
                 base_burst=5,
                 thresholds=thresholds,
             ),
@@ -368,7 +380,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=7.1,
-                eventloop_gap_ms=1500.1,
+                eventloop_gap_ms=100.1,
                 base_burst=1,
                 thresholds=thresholds,
             ),
@@ -383,7 +395,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
         self.assertEqual(
             health_slo_module.regulated_publish_burst(
                 queue_age=70.0,
-                eventloop_gap_ms=1500.0,
+                eventloop_gap_ms=100.0,
                 base_burst=20,
                 thresholds=thresholds,
                 pressure_state="congested",

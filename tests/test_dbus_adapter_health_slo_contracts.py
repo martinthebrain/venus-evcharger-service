@@ -8,11 +8,15 @@ import unittest
 
 from venus_evcharger.dbus_adapter.health.slo import (
     SloThresholds,
+    core_read_missing_count,
+    core_read_nonfresh_count,
     core_read_stale,
     effective_gui_max_age_seconds,
-    effective_mainloop_gap_max_ms,
+    freshness_check,
     higher_pressure_state,
     max_core_read_age,
+    observed_at_most,
+    observed_zero,
     pressure_limited_publish_burst,
     pressure_limited_queue_budgets,
     regulated_publish_burst,
@@ -30,8 +34,6 @@ def thresholds() -> SloThresholds:
         core_read_max_age_seconds=5.0,
         queue_max_age_seconds=7.0,
         mainloop_gap_max_ms=100.0,
-        tick_seconds=0.2,
-        max_tick_seconds=0.6,
     )
 
 
@@ -59,10 +61,9 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
             {"state": "ok", "violated": [], "checks": {"fresh": True}, "targets": {}, "observed": {}},
         )
 
-    def test_effective_targets_include_adaptive_tick_and_core_read_floors(self) -> None:
+    def test_targets_keep_configured_mainloop_limit_and_core_read_floor(self) -> None:
         current = thresholds()
         self.assertEqual(effective_gui_max_age_seconds(current), 10.0)
-        self.assertEqual(effective_mainloop_gap_max_ms(current), 1500.0)
         self.assertEqual(
             slo_targets(current),
             {
@@ -70,15 +71,20 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
                 "gui_measurement_max_age_s": 10.0,
                 "gui_control_max_age_s": 10.0,
                 "gui_session_max_age_s": 10.0,
+                "gui_missing_field_count": 0.0,
+                "gui_measurement_missing_field_count": 0.0,
+                "gui_control_missing_field_count": 0.0,
+                "gui_session_missing_field_count": 0.0,
                 "configured_gui_max_age_s": 2.0,
                 "core_read_max_age_s": 5.0,
+                "core_read_missing_count": 0.0,
+                "core_read_nonfresh_count": 0.0,
                 "queue_max_age_s": 7.0,
-                "mainloop_gap_max_ms": 1500.0,
+                "mainloop_gap_max_ms": 100.0,
             },
         )
-        configured = SloThresholds(12.0, 1.0, 7.0, 3000.0, 0.2, 0.6)
+        configured = SloThresholds(12.0, 1.0, 7.0, 3000.0)
         self.assertEqual(effective_gui_max_age_seconds(configured), 12.0)
-        self.assertEqual(effective_mainloop_gap_max_ms(configured), 3000.0)
 
     def test_checks_accept_exact_limits_and_reject_values_just_above(self) -> None:
         at_limit = {
@@ -86,9 +92,15 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
             "gui_measurement_max_age_s": 10.0,
             "gui_control_max_age_s": 10.0,
             "gui_session_max_age_s": 10.0,
+            "gui_missing_field_count": 0.0,
+            "gui_measurement_missing_field_count": 0.0,
+            "gui_control_missing_field_count": 0.0,
+            "gui_session_missing_field_count": 0.0,
             "core_read_max_age_s": 5.0,
+            "core_read_missing_count": 0.0,
+            "core_read_nonfresh_count": 0.0,
             "queue_oldest_age_s": 7.0,
-            "mainloop_max_gap_ms_60s": 1500.0,
+            "mainloop_max_gap_ms_60s": 100.0,
         }
         self.assertEqual(slo_checks_from_observed(at_limit, thresholds()), {key: True for key in (
             "gui_fresh",
@@ -109,9 +121,67 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
             "queue_age_ok",
             "mainloop_gap_ok",
         )})
-        self.assertTrue(all(slo_checks_from_observed({}, thresholds()).values()))
-        tiny = SloThresholds(0.1, 0.1, 0.1, 0.1, 0.0001, 0.0001)
-        self.assertTrue(all(slo_checks_from_observed({}, tiny).values()))
+        self.assertFalse(any(slo_checks_from_observed({}, thresholds()).values()))
+        tiny = SloThresholds(0.1, 0.1, 0.1, 0.1)
+        self.assertFalse(any(slo_checks_from_observed({}, tiny).values()))
+
+    def test_missing_and_nonfresh_counts_override_zero_ages(self) -> None:
+        observed = {
+            "gui_max_age_s": 0.0,
+            "gui_measurement_max_age_s": 0.0,
+            "gui_control_max_age_s": 0.0,
+            "gui_session_max_age_s": 0.0,
+            "gui_missing_field_count": 1.0,
+            "gui_measurement_missing_field_count": 1.0,
+            "gui_control_missing_field_count": 0.0,
+            "gui_session_missing_field_count": 0.0,
+            "core_read_max_age_s": 0.0,
+            "core_read_missing_count": 1.0,
+            "core_read_nonfresh_count": 0.0,
+            "queue_oldest_age_s": 0.0,
+            "mainloop_max_gap_ms_60s": 0.0,
+        }
+        checks = slo_checks_from_observed(observed, thresholds())
+        self.assertFalse(checks["gui_fresh"])
+        self.assertFalse(checks["gui_measurements_fresh"])
+        self.assertTrue(checks["gui_controls_fresh"])
+        self.assertTrue(checks["gui_session_fresh"])
+        self.assertFalse(checks["core_reads_fresh"])
+
+        nonfresh = observed | {
+            "gui_missing_field_count": 0.0,
+            "gui_measurement_missing_field_count": 0.0,
+            "core_read_missing_count": 0.0,
+            "core_read_nonfresh_count": 1.0,
+        }
+        nonfresh_checks = slo_checks_from_observed(nonfresh, thresholds())
+        self.assertTrue(nonfresh_checks["gui_fresh"])
+        self.assertFalse(nonfresh_checks["core_reads_fresh"])
+
+    def test_observed_metric_contracts_require_presence_and_exact_zero_counts(self) -> None:
+        self.assertTrue(observed_at_most({"age": 5.0}, "age", 5.0))
+        self.assertFalse(observed_at_most({"age": 5.01}, "age", 5.0))
+        self.assertFalse(observed_at_most({"age": -0.01}, "age", 5.0))
+        self.assertFalse(observed_at_most({}, "age", 5.0))
+        self.assertTrue(observed_zero({"missing": 0.0}, "missing"))
+        self.assertFalse(observed_zero({"missing": -1.0}, "missing"))
+        self.assertFalse(observed_zero({}, "missing"))
+        self.assertTrue(
+            freshness_check(
+                {"age": 5.0, "missing": 0.0},
+                age_field="age",
+                missing_field="missing",
+                max_age=5.0,
+            )
+        )
+        self.assertFalse(
+            freshness_check(
+                {"age": 5.0},
+                age_field="age",
+                missing_field="missing",
+                max_age=5.0,
+            )
+        )
 
     def test_core_read_age_and_staleness_require_fresh_complete_entries(self) -> None:
         freshness = {
@@ -124,6 +194,23 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
         self.assertEqual(max_core_read_age({}), 0.0)
         for key, age in (("grid_power_w", 1.5), ("pv_power_w", 2.5), ("battery_soc", 3.5)):
             self.assertEqual(max_core_read_age({f"{key}_age_s": age}), age)
+        statuses = {
+            "grid_power_w_status": "fresh",
+            "pv_power_w_status": "error",
+            "battery_soc_status": "missing",
+        }
+        self.assertEqual(core_read_missing_count(statuses), 1.0)
+        self.assertEqual(core_read_nonfresh_count(statuses), 1.0)
+        self.assertEqual(core_read_missing_count({}), 3.0)
+        self.assertEqual(core_read_nonfresh_count({}), 0.0)
+        self.assertEqual(core_read_nonfresh_count({"grid_power_w_status": None}), 1.0)
+        all_fresh = {
+            "grid_power_w_status": "fresh",
+            "pv_power_w_status": "fresh",
+            "battery_soc_status": "fresh",
+        }
+        self.assertEqual(core_read_missing_count(all_fresh), 0.0)
+        self.assertEqual(core_read_nonfresh_count(all_fresh | {"battery_soc_status": "error"}), 1.0)
 
         complete = {"grid_power_w_status": "fresh", "grid_power_w_age_s": 5.0}
         self.assertFalse(core_read_stale("grid_power_w", complete, max_age_seconds=5.0))
@@ -142,13 +229,13 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
 
     def test_regulated_burst_uses_strict_thresholds_caps_and_gap_reduction(self) -> None:
         current = thresholds()
-        self.assertEqual(regulated_publish_burst(queue_age=7.0, eventloop_gap_ms=1500.0, base_burst=4, thresholds=current), 4)
-        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=1500.0, base_burst=4, thresholds=current), 12)
-        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=1500.0, base_burst=1, thresholds=current), 5)
-        self.assertEqual(regulated_publish_burst(queue_age=70.0, eventloop_gap_ms=1500.0, base_burst=20, thresholds=current), 50)
-        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=1500.1, base_burst=4, thresholds=current), 2)
-        self.assertEqual(regulated_publish_burst(queue_age=7.0, eventloop_gap_ms=1500.1, base_burst=5, thresholds=current), 2)
-        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=1500.1, base_burst=1, thresholds=current), 1)
+        self.assertEqual(regulated_publish_burst(queue_age=7.0, eventloop_gap_ms=100.0, base_burst=4, thresholds=current), 4)
+        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=100.0, base_burst=4, thresholds=current), 12)
+        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=100.0, base_burst=1, thresholds=current), 5)
+        self.assertEqual(regulated_publish_burst(queue_age=70.0, eventloop_gap_ms=100.0, base_burst=20, thresholds=current), 50)
+        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=100.1, base_burst=4, thresholds=current), 2)
+        self.assertEqual(regulated_publish_burst(queue_age=7.0, eventloop_gap_ms=100.1, base_burst=5, thresholds=current), 2)
+        self.assertEqual(regulated_publish_burst(queue_age=7.1, eventloop_gap_ms=100.1, base_burst=1, thresholds=current), 1)
 
     def test_pressure_state_uses_highest_severity_and_unknown_is_ok(self) -> None:
         self.assertEqual(runtime_pressure_state("ok", "ok"), "ok")

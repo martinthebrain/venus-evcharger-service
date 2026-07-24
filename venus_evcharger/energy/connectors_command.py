@@ -3,23 +3,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import shlex
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from venus_evcharger.backend.template_support import config_section, load_template_config
 from venus_evcharger.core.contracts import finite_float_or_none
 
 from .connectors_common import (
+    _bounded_request_timeout_seconds,
     _optional_bool_path,
     _optional_confidence_path,
     _optional_float_path,
     _optional_path,
     _optional_text_path,
-    _typed_cache_map,
+    _runtime_cache_get,
+    _runtime_cache_put,
+    _runtime_default_timeout_seconds,
 )
 from .models import EnergySourceDefinition, EnergySourceSnapshot
-
 
 _DEFAULT_TIMEOUT_SECONDS = 2.0
 _ADAPTER_SECTION = "Adapter"
@@ -28,6 +30,7 @@ _RESPONSE_SECTION = "Response"
 _COMMAND_ARGS_KEY = "Args"
 _COMMAND_TIMEOUT_KEY = "TimeoutSeconds"
 _REQUEST_TIMEOUT_KEY = "RequestTimeoutSeconds"
+_SETTINGS_CACHE = "command_json.settings"
 _RESPONSE_PATH_KEYS = (
     "SocPath",
     "UsableCapacityWhPath",
@@ -72,6 +75,7 @@ def _build_command_json_energy_source_snapshot(
         source_id=source.source_id,
         role=source.role,
         service_name=_command_source_name(source, settings),
+        physical_id=source.physical_id,
         soc=soc_value,
         usable_capacity_wh=usable_capacity_wh,
         net_battery_power_w=_optional_float_path(payload, settings.battery_power_path),
@@ -130,21 +134,31 @@ def _command_confidence(
     return 1.0 if confidence is None else confidence
 
 
-def _command_timeout_seconds(runtime: Any, adapter: Any, command: Any) -> float:
-    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", None) or _DEFAULT_TIMEOUT_SECONDS)
+def _command_timeout_seconds(
+    runtime: object,
+    adapter: Mapping[str, object],
+    command: Mapping[str, object],
+) -> float:
+    default_timeout = _runtime_default_timeout_seconds(runtime, _DEFAULT_TIMEOUT_SECONDS)
     timeout_seconds = finite_float_or_none(command.get(_COMMAND_TIMEOUT_KEY))
     if timeout_seconds is None:
         timeout_seconds = finite_float_or_none(adapter.get(_REQUEST_TIMEOUT_KEY))
-    if timeout_seconds is None or timeout_seconds <= 0.0:
-        return default_timeout
-    return float(timeout_seconds)
+    configured = default_timeout if timeout_seconds is None or timeout_seconds <= 0.0 else float(timeout_seconds)
+    return _bounded_request_timeout_seconds(runtime, configured)
 
 
-def _command_json_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> CommandJsonEnergySourceSettings:
-    cache = _typed_cache_map(runtime, "_energy_command_settings_cache", CommandJsonEnergySourceSettings)
+def _command_json_energy_source_settings(
+    runtime: object,
+    source: EnergySourceDefinition,
+) -> CommandJsonEnergySourceSettings:
     cache_key = str(source.config_path).strip()
-    cached = cache.get(cache_key)
-    if isinstance(cached, CommandJsonEnergySourceSettings):
+    cached = _runtime_cache_get(
+        runtime,
+        _SETTINGS_CACHE,
+        cache_key,
+        CommandJsonEnergySourceSettings,
+    )
+    if cached is not None:
         return cached
     if not cache_key:
         raise ValueError(f"Energy source '{source.source_id}' requires ConfigPath for command_json connector")
@@ -167,11 +181,11 @@ def _command_json_energy_source_settings(runtime: Any, source: EnergySourceDefin
         confidence_path=response_paths[8],
     )
     _validate_command_json_energy_source_settings(source, settings)
-    cache[cache_key] = settings
+    _runtime_cache_put(runtime, _SETTINGS_CACHE, cache_key, settings)
     return settings
 
 
-def _command_args(command: Any) -> tuple[str, ...]:
+def _command_args(command: Mapping[str, object]) -> tuple[str, ...]:
     args_text = str(command.get(_COMMAND_ARGS_KEY, "")).strip()
     if not args_text:
         return ()
@@ -186,9 +200,7 @@ def _validate_command_json_energy_source_settings(
         raise ValueError(f"Energy source '{source.source_id}' requires [Command] Args")
     if _command_has_readable_response(settings, source):
         return
-    raise ValueError(
-        f"Energy source '{source.source_id}' requires at least one Response path or UsableCapacityWh"
-    )
+    raise ValueError(f"Energy source '{source.source_id}' requires at least one Response path or UsableCapacityWh")
 
 
 def _command_has_readable_response(

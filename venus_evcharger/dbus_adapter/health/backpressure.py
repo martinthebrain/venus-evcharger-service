@@ -5,14 +5,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TypeGuard
 
 from venus_evcharger.dbus_gateway_core import float_or_zero
 from venus_evcharger.ipc.command_types import CommandPayload
 
-BACKPRESSURE_SLO_REASONS = {"core_reads_fresh", "queue_age_ok"}
-SLO_VIOLATION_SEQUENCE_TYPES = (list, tuple, set)
-
-
+BACKPRESSURE_SLO_REASONS = {"gui_fresh", "core_reads_fresh", "queue_age_ok"}
 def backpressure_snapshot(
     *,
     circuit_state: str,
@@ -54,7 +52,13 @@ def slo_violations(slo: Mapping[str, object]) -> list[object]:
     if "violated" not in slo:
         return []
     raw_violations = slo["violated"]
-    return list(raw_violations) if isinstance(raw_violations, SLO_VIOLATION_SEQUENCE_TYPES) else []
+    return list(raw_violations) if _is_violation_sequence(raw_violations) else []
+
+
+def _is_violation_sequence(
+    value: object,
+) -> TypeGuard[list[object] | tuple[object, ...] | set[object]]:
+    return isinstance(value, (list, tuple, set))
 
 
 def backpressure_state(

@@ -28,10 +28,12 @@ from venus_evcharger.runtime import RuntimeSupportController
 from venus_evcharger.update.controller import UpdateCycleController
 
 from .composition_guards import (
+    require_auto_decision_service,
     require_auto_input_service,
     require_backend_target,
     require_publish_service,
     require_update_cycle_service,
+    require_write_runtime_service,
 )
 from .composition_ports import (
     AutoControllerPort,
@@ -142,7 +144,7 @@ class ServiceControllerOwner:
         if runtime is None:
             runtime = self.prepare_runtime_state()
         auto = AutoDecisionController(
-            AutoDecisionPort(service),
+            AutoDecisionPort(require_auto_decision_service(service)),
             self.functions.health_code,
             self.functions.mode_uses_auto_logic,
         )
@@ -152,7 +154,9 @@ class ServiceControllerOwner:
             GatewayDiagnosticsFileReader(gateway_diagnostics_path(self._gateway_run_dir())),
         )
         shelly = ShellyIoController(service)
-        write = ControlWriteController(WriteControllerPort(service))
+        write = ControlWriteController(
+            WriteControllerPort(require_write_runtime_service(service))
+        )
         auto_input = AutoInputSupervisor(
             require_auto_input_service(service),
             config_path=self.functions.config_path,

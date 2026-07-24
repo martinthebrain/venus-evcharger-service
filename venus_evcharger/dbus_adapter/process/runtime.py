@@ -9,15 +9,17 @@ import signal
 from gi.repository import GLib
 
 from venus_evcharger.dbus_adapter.process.protocols.runtime import DbusAdapterRuntimeContext
-from venus_evcharger.dbus_adapter.process.socket import DbusAdapterSocket
 
 
-class DbusAdapterRuntime(DbusAdapterSocket):
-    def install_signal_handlers(self: DbusAdapterRuntimeContext) -> None:
+class DbusAdapterRuntime:
+    def __init__(self, context: DbusAdapterRuntimeContext) -> None:
+        self._context = context
+
+    def install_signal_handlers(self) -> None:
         def _stop(_signum: int, _frame: object) -> None:
-            self._stop = True
-            if self._main_loop is not None:
-                GLib.idle_add(self._main_loop.quit)
+            self._context._stop = True
+            if self._context._main_loop is not None:
+                GLib.idle_add(self._context._main_loop.quit)
 
         signal.signal(signal.SIGTERM, _stop)
         signal.signal(signal.SIGINT, _stop)

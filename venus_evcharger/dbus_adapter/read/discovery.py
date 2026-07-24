@@ -3,11 +3,19 @@
 
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from venus_evcharger.dbus_adapter.read.pv import pv_total_members
+from venus_evcharger.dbus_adapter.read.pv import dc_pv_target, use_dc_pv
+from venus_evcharger.dbus_adapter.read.pv_discovery import (
+    PvSourceRegistry,
+    PvSourceUnavailabilityReason,
+    opaque_energy_source_id,
+)
+from venus_evcharger.dbus_adapter.read.pv_dormancy import (
+    DEFAULT_MAX_OBSERVATIONS,
+    PvDormancyEvidence,
+)
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec, ReadSpecs
 from venus_evcharger.ipc.energy import (
     EnergySourceDescriptor,
@@ -29,25 +37,53 @@ class IntrospectionTarget:
 
 
 class DbusEnergyDiscoveryManager:
-    """Own service selection while publishing only semantic source identities."""
+    """Own service selection while publishing only validated source identities."""
 
-    def __init__(self, specs: ReadSpecs, *, max_prefix_services: int = 10) -> None:
+    def __init__(
+        self,
+        specs: ReadSpecs,
+        *,
+        max_prefix_services: int = 10,
+        max_pv_observations: int = DEFAULT_MAX_OBSERVATIONS,
+        monotonic: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
+    ) -> None:
         self._specs = specs
         self._max_prefix_services = max(1, int(max_prefix_services))
         self._service_names: tuple[str, ...] = ()
         self._generation = 0
         self._captured_at = 0.0
+        self._pv_sources = PvSourceRegistry(
+            specs.get("pv_power_w", {}),
+            max_observations=max_pv_observations,
+            monotonic=monotonic,
+            wall_clock=wall_clock,
+        )
+        self._pv_revision = self._pv_sources.revision
 
     @property
     def generation(self) -> int:
         return self._generation
 
-    def update_services(self, names: Sequence[str], *, now: float) -> None:
-        normalized = tuple(sorted({str(name).strip() for name in names if str(name).strip()}))
+    @property
+    def pv_observation_count(self) -> int:
+        return self._pv_sources.observation_count
+
+    def update_services(
+        self,
+        names: Sequence[str],
+        *,
+        captured_at: float,
+    ) -> None:
+        normalized = tuple(
+            sorted({str(name).strip() for name in names if str(name).strip()})
+        )
         if normalized != self._service_names:
             self._service_names = normalized
             self._generation += 1
-        self._captured_at = max(0.0, float(now))
+        self._captured_at = max(0.0, float(captured_at))
+        self._pv_sources.maintain(self._advertising_services())
+        self._sync_pv_revision()
 
     def services_for(self, spec: ReadSpec) -> list[str]:
         explicit = _spec_text(spec, "service")
@@ -56,29 +92,105 @@ class DbusEnergyDiscoveryManager:
         prefix = _spec_text(spec, "prefix")
         if not prefix:
             return []
-        return [name for name in self._service_names if name.startswith(prefix)][: self._max_prefix_services]
+        return [
+            name
+            for name in self._service_names
+            if name.startswith(prefix)
+        ][: self._max_prefix_services]
 
     def first_service(self, spec: ReadSpec) -> str | None:
         services = self.services_for(spec)
         return services[0] if services else None
 
-    def pv_members(
-        self,
-        spec: ReadSpec,
-        cached_values: Mapping[str, Mapping[str, object]],
-    ) -> list[tuple[str, str]]:
-        return pv_total_members(spec, self.services_for(spec), cached_values)
+    def pv_members(self, spec: ReadSpec) -> list[tuple[str, str]]:
+        result = self._pv_sources.members(
+            self.services_for(spec),
+            self._advertising_services(),
+        )
+        self._sync_pv_revision()
+        return result
 
-    def topology_snapshot(self, *, now: float) -> EnergyTopologySnapshot:
-        captured_at = max(float(now), self._captured_at)
+    def record_pv_value(
+        self,
+        service: str,
+        path: str,
+        value: object,
+    ) -> None:
+        self._pv_sources.record_value(
+            service,
+            path,
+            value,
+            advertising_services=self._advertising_services(),
+        )
+        self._sync_pv_revision()
+
+    def record_pv_error(
+        self,
+        service: str,
+        path: str,
+        error: BaseException | str,
+    ) -> None:
+        self._pv_sources.record_error(
+            service,
+            path,
+            error,
+            advertising_services=self._advertising_services(),
+        )
+        self._sync_pv_revision()
+
+    def dormant_evidence(self) -> tuple[PvDormancyEvidence, ...]:
+        evidence = self._pv_sources.dormant_evidence(
+            self._advertising_services()
+        )
+        self._sync_pv_revision()
+        return evidence
+
+    def dormant_source_ids(self) -> tuple[str, ...]:
+        return tuple(item.source_id for item in self.dormant_evidence())
+
+    def source_unavailability_reasons(
+        self,
+        *,
+        dormant_source_ids: frozenset[str] | None = None,
+    ) -> dict[str, PvSourceUnavailabilityReason]:
+        dormant = (
+            frozenset(self.dormant_source_ids())
+            if dormant_source_ids is None
+            else dormant_source_ids
+        )
+        result = self._pv_sources.unavailability_reasons(
+            self._advertising_services(),
+            dormant_source_ids=dormant,
+        )
+        self._sync_pv_revision()
+        return result
+
+    def needs_early_pv_rescan(self) -> bool:
+        result = self._pv_sources.needs_early_rescan(
+            self._advertising_services()
+        )
+        self._sync_pv_revision()
+        return result
+
+    def topology_snapshot(
+        self,
+        *,
+        captured_at: float,
+    ) -> EnergyTopologySnapshot:
+        dormant_source_ids = frozenset(self.dormant_source_ids())
+        sources = self._source_descriptors(dormant_source_ids)
         return EnergyTopologySnapshot(
             generation=self._generation,
-            captured_at=captured_at,
-            sources=tuple(self._source_descriptors()),
+            captured_at=max(float(captured_at), self._captured_at),
+            sources=tuple(sources),
         )
 
     def source_ids(self, kind: str) -> tuple[str, ...]:
-        return tuple(source.source_id for source in self._source_descriptors() if source.kind == kind)
+        return tuple(
+            source.source_id
+            for source in self._source_descriptors()
+            if source.kind == kind
+        )
 
     def read_keys_for_source(self, source_id: str) -> tuple[str, ...]:
         for source in self._source_descriptors():
@@ -93,10 +205,18 @@ class DbusEnergyDiscoveryManager:
             *self._pv_introspection_targets(),
         ]
 
-    def _source_descriptors(self) -> list[EnergySourceDescriptor]:
+    def _source_descriptors(
+        self,
+        dormant_source_ids: frozenset[str] = frozenset(),
+    ) -> list[EnergySourceDescriptor]:
+        pv_descriptors = self._pv_sources.descriptors(
+            self._advertising_services(),
+            dormant_source_ids=dormant_source_ids,
+        )
+        self._sync_pv_revision()
         return [
             *self._grid_descriptors(),
-            *self._pv_descriptors(),
+            *pv_descriptors,
             *self._battery_descriptors(),
         ]
 
@@ -114,35 +234,11 @@ class DbusEnergyDiscoveryManager:
             )
         ]
 
-    def _pv_descriptors(self) -> list[EnergySourceDescriptor]:
-        spec = self._specs.get("pv_power_w", {})
-        descriptors = [
-            EnergySourceDescriptor(
-                source_id=_opaque_source_id("pv-ac", service),
-                kind="pv_ac",
-                state=self._service_state(service),
-                capabilities=("power",),
-            )
-            for service in self.services_for(spec)
-        ]
-        dc_service = _spec_text(spec, "dc_service")
-        dc_path = _spec_text(spec, "dc_path")
-        if _spec_bool(spec, "use_dc_pv") and dc_service and dc_path:
-            descriptors.append(
-                EnergySourceDescriptor(
-                    source_id=_opaque_source_id("pv-dc", dc_service),
-                    kind="pv_dc",
-                    state=self._service_state(dc_service),
-                    capabilities=("power",),
-                )
-            )
-        return descriptors
-
     def _battery_descriptors(self) -> list[EnergySourceDescriptor]:
         spec = self._specs.get("battery_soc", {})
         return [
             EnergySourceDescriptor(
-                source_id=_opaque_source_id("battery", service),
+                source_id=opaque_energy_source_id("battery", service),
                 kind="battery",
                 state=self._service_state(service),
                 capabilities=("soc",),
@@ -160,7 +256,13 @@ class DbusEnergyDiscoveryManager:
         service = _spec_text(spec, "service")
         paths = spec.get("paths", [])
         return [
-            IntrospectionTarget(service, str(path), 80, "grid", "configured-grid-field")
+            IntrospectionTarget(
+                service,
+                str(path),
+                80,
+                "grid",
+                "configured-grid-field",
+            )
             for path in paths
             if service and str(path)
         ]
@@ -169,48 +271,91 @@ class DbusEnergyDiscoveryManager:
         spec = self._specs.get("battery_soc", {})
         path = _spec_text(spec, "path")
         return [
-            IntrospectionTarget(service, path, 70, "battery", "discovered-battery-field")
+            IntrospectionTarget(
+                service,
+                path,
+                70,
+                "battery",
+                "discovered-battery-field",
+            )
             for service in self.services_for(spec)
             if path
         ]
 
     def _pv_introspection_targets(self) -> list[IntrospectionTarget]:
         spec = self._specs.get("pv_power_w", {})
-        path = _spec_text(spec, "path")
-        targets = [
-            IntrospectionTarget(service, path, 30, "pv", "discovered-ac-pv-field")
-            for service in self.services_for(spec)
-            if path
+        return [
+            *_ac_pv_introspection_targets(
+                spec,
+                self.services_for(spec),
+                frozenset(self._service_names),
+            ),
+            *_advertised_dc_pv_introspection_targets(
+                spec,
+                frozenset(self._service_names),
+            ),
         ]
-        dc_service = _spec_text(spec, "dc_service")
-        dc_path = _spec_text(spec, "dc_path")
-        dc_target = _dc_pv_introspection_target(_spec_bool(spec, "use_dc_pv"), dc_service, dc_path)
-        if dc_target is not None:
-            targets.append(dc_target)
-        return targets
+
+    def _advertising_services(self) -> frozenset[str]:
+        return frozenset(self._service_names)
+
+    def _sync_pv_revision(self) -> None:
+        revision = self._pv_sources.revision
+        if revision != self._pv_revision:
+            self._pv_revision = revision
+            self._generation += 1
 
 
-def _dc_pv_introspection_target(enabled: bool, service: str, path: str) -> IntrospectionTarget | None:
-    if not enabled:
+def _dc_pv_introspection_target(
+    spec: ReadSpec,
+) -> IntrospectionTarget | None:
+    target = dc_pv_target(spec) if use_dc_pv(spec) else None
+    if target is None:
         return None
-    if not service or not path:
-        return None
-    return IntrospectionTarget(service, path, 30, "pv", "configured-dc-pv-field")
+    service, path = target
+    return IntrospectionTarget(
+        service,
+        path,
+        30,
+        "pv",
+        "configured-dc-pv-field",
+    )
 
 
-def _opaque_source_id(kind: str, service: str) -> str:
-    digest = hashlib.sha256(service.encode()).hexdigest()[:10]
-    return f"{kind}-{digest}"
+def _ac_pv_introspection_targets(
+    spec: ReadSpec,
+    services: Sequence[str],
+    advertising_services: frozenset[str],
+) -> list[IntrospectionTarget]:
+    path = _spec_text(spec, "path")
+    if not path:
+        return []
+    return [
+        IntrospectionTarget(
+            service,
+            path,
+            30,
+            "pv",
+            "discovered-ac-pv-field",
+        )
+        for service in services
+        if service in advertising_services
+    ]
+
+
+def _advertised_dc_pv_introspection_targets(
+    spec: ReadSpec,
+    advertising_services: frozenset[str],
+) -> list[IntrospectionTarget]:
+    target = _dc_pv_introspection_target(spec)
+    if target is None or target.service not in advertising_services:
+        return []
+    return [target]
 
 
 def _spec_text(spec: ReadSpec, key: str) -> str:
     value = spec.get(key)
     return value.strip() if isinstance(value, str) else ""
-
-
-def _spec_bool(spec: ReadSpec, key: str) -> bool:
-    value = spec.get(key)
-    return value if isinstance(value, bool) else False
 
 
 def _read_keys_for_kind(kind: EnergySourceKind) -> tuple[str, ...]:

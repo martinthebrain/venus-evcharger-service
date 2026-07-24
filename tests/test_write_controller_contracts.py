@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -101,6 +102,51 @@ class TestWriteControllerCommandBoundaryContracts(unittest.TestCase):
         port.commit_publication_transaction.assert_called_once_with()
         result.assert_called_once_with(command, external_side_effect_started=False)
         self.assertIs(controller._external_side_effect_started, False)
+
+    def test_concurrent_commands_are_serialized_across_the_whole_transaction(self) -> None:
+        service = SimpleNamespace()
+        port = SimpleNamespace(
+            _service=service,
+            save_runtime_state=MagicMock(),
+            save_runtime_overrides=MagicMock(),
+            begin_publication_transaction=MagicMock(),
+            commit_publication_transaction=MagicMock(),
+            discard_publication_transaction=MagicMock(),
+        )
+        controller = ControlWriteController(port)
+        first_entered = Event()
+        release_first = Event()
+        second_entered = Event()
+        calls = 0
+
+        def execute(_controller: object, _command: object) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                first_entered.set()
+                self.assertTrue(release_first.wait(2.0))
+            else:
+                second_entered.set()
+
+        controller._control_api = MagicMock()
+        controller._control_api.execute.side_effect = execute
+        commands = (MagicMock(spec=ControlCommand), MagicMock(spec=ControlCommand))
+        with patch.object(controller, "_snapshot_write_state", return_value="snapshot"):
+            first = Thread(target=controller.handle_control_command, args=(commands[0],))
+            second = Thread(target=controller.handle_control_command, args=(commands[1],))
+            first.start()
+            self.assertTrue(first_entered.wait(2.0))
+            second.start()
+            self.assertFalse(second_entered.wait(0.05))
+            release_first.set()
+            first.join(2.0)
+            second.join(2.0)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertTrue(second_entered.is_set())
+        self.assertEqual(port.begin_publication_transaction.call_count, 2)
+        self.assertEqual(port.commit_publication_transaction.call_count, 2)
 
     def test_built_command_is_forwarded_to_the_canonical_handler(self) -> None:
         command = MagicMock(spec=ControlCommand)

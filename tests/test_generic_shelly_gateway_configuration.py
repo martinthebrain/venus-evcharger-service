@@ -15,9 +15,8 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 install_venus_adapter_stubs()
 
 from venus_evcharger.dbus_adapter.scheduling import AtomicJsonWriter
-from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
-from venus_evcharger.dbus_adapter.write.scheduler import DbusWriteScheduler
-from venus_evcharger.dbus_adapter.write.semantic import DbusWriteSchedulerSemantic
+from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
+from venus_evcharger.dbus_adapter.write.semantic import SemanticWriteExecutor
 from venus_evcharger.dbus_gateway import DbusCacheStore, gateway_paths, read_json_file
 from venus_evcharger.dbus_gateway_policy import command_queue_class
 from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
@@ -74,8 +73,8 @@ class _Adapter:
         return operation()
 
 
-def _scheduler(adapter: _Adapter) -> DbusWriteSchedulerSemantic:
-    return DbusWriteScheduler(cast(DbusWriteSchedulerAdapter, adapter))
+def _scheduler(adapter: _Adapter) -> SemanticWriteExecutor:
+    return SemanticWriteExecutor(cast(SemanticWriteAdapter, adapter))
 
 
 def _request(*, kind: str = "ip", value: str = "192.0.2.7") -> CommandPayload:

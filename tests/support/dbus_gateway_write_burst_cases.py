@@ -11,7 +11,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     install_mock,
     patch,
     time,
-    write_publish_module,
+    write_core_module,
 )
 from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command, gx_relay_set_command
 
@@ -23,7 +23,7 @@ class GatewayWriteBurstCases(GatewayAdapterContractCase):
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter
             lifecycle_path = scenario.root / "run" / "lifecycle.jsonl"
-            adapter.command_lifecycle_path = str(lifecycle_path)
+            adapter.write_scheduler.health_tracker.command_lifecycle_path = str(lifecycle_path)
             command_path = adapter.commands.enqueue(
                 {
                     **gx_relay_refresh_command(0),
@@ -54,7 +54,7 @@ class GatewayWriteBurstCases(GatewayAdapterContractCase):
                 }
                 adapter.commands.enqueue(command)
             process_loaded = install_mock(
-                adapter.write_scheduler,
+                adapter.write_scheduler.command_queue,
                 "process_loaded_command",
                 MagicMock(return_value="applied"),
             )
@@ -77,15 +77,15 @@ class GatewayWriteBurstCases(GatewayAdapterContractCase):
                     }
                 )
             process_loaded = install_mock(
-                adapter.write_scheduler,
+                adapter.write_scheduler.command_queue,
                 "process_loaded_command",
                 MagicMock(return_value="applied"),
             )
 
             with patch.object(
-                vars(write_publish_module)["time"],
-                "monotonic",
-                side_effect=[0.0, 0.0, 0.002],
+                write_core_module,
+                "budget_elapsed",
+                side_effect=[False, True],
             ):
                 processed = adapter.write_scheduler.process_local_publish_burst()
 
@@ -98,7 +98,7 @@ class GatewayWriteBurstCases(GatewayAdapterContractCase):
             adapter.commands.enqueue(gx_relay_refresh_command(0))
             adapter.commands.enqueue(evcs_publication({"connected": 1}))
             process_loaded = install_mock(
-                adapter.write_scheduler,
+                adapter.write_scheduler.command_queue,
                 "process_loaded_command",
                 MagicMock(return_value="deferred"),
             )
@@ -148,12 +148,16 @@ class GatewayWriteBurstCases(GatewayAdapterContractCase):
                 "created_at": 2.0,
             }
 
-            selected = scheduler.select_next_command([("first", first), ("second", second)])
+            selected = scheduler.command_queue.select_next_command([("first", first), ("second", second)])
             self.assertIsNotNone(selected)
             assert selected is not None
             self.assertIs(selected[1], first)
-            scheduler.record_budget(first)
-            self.assertIsNone(scheduler.select_next_command([("first", first), ("second", second)]))
+            scheduler.health_tracker.record_budget(first)
+            self.assertIsNone(
+                scheduler.command_queue.select_next_command([("first", first), ("second", second)])
+            )
 
-            scheduler.prune_budget(time.time() + 2.0)
-            self.assertIsNotNone(scheduler.select_next_command([("first", first), ("second", second)]))
+            scheduler.health_tracker.prune_budget(time.time() + 2.0)
+            self.assertIsNotNone(
+                scheduler.command_queue.select_next_command([("first", first), ("second", second)])
+            )

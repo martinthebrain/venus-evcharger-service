@@ -65,10 +65,9 @@ def _configured_source(defaults: Mapping[str, Any], source_id: str) -> EnergySou
     connector_type = _text(defaults.get(f"{prefix}Type"), _profile_text(profile_defaults, "Type")).lower()
     if connector_type not in ENERGY_SOURCE_CONNECTOR_TYPES:
         connector_type = EnergySourceDefinition.connector_type
-    if connector_type == "template_http_energy":
-        connector_type = "template_http"
     return EnergySourceDefinition(
         source_id=source_id,
+        physical_id=_text(defaults.get(f"{prefix}PhysicalId")),
         profile_name=_profile_text(profile_defaults, "Profile", profile_name),
         role=role,
         connector_type=connector_type,

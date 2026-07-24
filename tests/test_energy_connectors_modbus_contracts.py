@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 from configparser import ConfigParser
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
@@ -98,6 +98,26 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
         self.assertEqual(modbus._modbus_aggregation_setting(parser, "Missing"), "")
         self.assertEqual(modbus._modbus_aggregation_setting(ConfigParser(), "Missing"), "")
 
+    def test_non_finite_scale_and_values_fail_closed(self) -> None:
+        for scale in ("nan", "inf", "-inf"):
+            parser = ConfigParser()
+            parser.read_dict({"Read": {"Address": "1", "Scale": scale}})
+            with self.subTest(scale=scale), self.assertRaisesRegex(
+                ValueError,
+                "scale must be finite",
+            ):
+                modbus._modbus_field_settings(parser, "Read")
+
+        field = _field(1)
+        for raw_value in (float("nan"), float("inf"), float("-inf")):
+            client = MagicMock()
+            client.read_scalar.return_value = raw_value
+            with self.subTest(raw_value=raw_value), self.assertRaisesRegex(
+                ValueError,
+                "non-finite value",
+            ):
+                modbus._modbus_field_value(client, field)
+
     def test_settings_loader_assembles_every_role_and_caches(self) -> None:
         parser = ConfigParser()
         fields = tuple(_field(index) for index in range(1, 10))
@@ -135,7 +155,11 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
         load_map.assert_called_once_with(parser, "OperatingModeMap")
         self.assertEqual(
             load_scope.call_args_list,
-            [call(parser, "AcPowerScopeKey"), call(parser, "PvInputPowerScopeKey"), call(parser, "GridInteractionScopeKey")],
+            [
+                call(parser, "AcPowerScopeKey"),
+                call(parser, "PvInputPowerScopeKey"),
+                call(parser, "GridInteractionScopeKey"),
+            ],
         )
         self.assertEqual(
             loaded,
@@ -149,7 +173,10 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
             ),
         )
         validate.assert_called_once_with(source, loaded)
-        self.assertEqual(runtime._energy_modbus_settings_cache, {"config.ini": loaded})
+        self.assertEqual(
+            runtime._energy_connector_runtime_state.caches,
+            {"modbus.settings": {"config.ini": loaded}},
+        )
 
         missing = EnergySourceDefinition(source_id="missing", config_path=" ")
         with self.assertRaises(ValueError) as raised:
@@ -157,17 +184,29 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), "Energy source 'missing' requires ConfigPath for modbus connector")
 
     def test_client_cache_source_name_and_field_values_are_exact(self) -> None:
-        runtime = SimpleNamespace(_energy_modbus_client_cache={"valid": object(), "invalid": "value"})
-        self.assertEqual(modbus._modbus_client_cache(runtime), {})
-        self.assertEqual(runtime._energy_modbus_client_cache, {})
+        runtime = SimpleNamespace()
+        cached_client = MagicMock(spec=ModbusClient)
+        modbus._store_modbus_client(runtime, "valid", cached_client)
+        self.assertIs(modbus._cached_modbus_client(runtime, "valid"), cached_client)
+        runtime._energy_connector_runtime_state.caches["modbus.clients"]["invalid"] = "value"
+        self.assertIsNone(modbus._cached_modbus_client(runtime, "invalid"))
+        self.assertEqual(
+            runtime._energy_connector_runtime_state.caches,
+            {"modbus.clients": {"valid": cached_client}},
+        )
 
         transport = _transport()
-        self.assertEqual(modbus._modbus_source_name(EnergySourceDefinition(source_id="id", service_name="service"), transport), "service")
+        self.assertEqual(
+            modbus._modbus_source_name(EnergySourceDefinition(source_id="id", service_name="service"), transport),
+            "service",
+        )
         self.assertEqual(modbus._modbus_source_name(EnergySourceDefinition(source_id="id"), transport), "192.0.2.10")
         serial = _transport(host=None, device="/dev/ttyUSB0")
         self.assertEqual(modbus._modbus_source_name(EnergySourceDefinition(source_id="id"), serial), "/dev/ttyUSB0")
         empty = _transport(host=None, device=None)
-        self.assertEqual(modbus._modbus_source_name(EnergySourceDefinition(source_id="id", config_path="cfg"), empty), "cfg")
+        self.assertEqual(
+            modbus._modbus_source_name(EnergySourceDefinition(source_id="id", config_path="cfg"), empty), "cfg"
+        )
         self.assertEqual(modbus._modbus_source_name(EnergySourceDefinition(source_id="id"), empty), "id")
 
         client = MagicMock(spec=ModbusClient)
@@ -189,11 +228,24 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
     def test_snapshot_builder_maps_every_field_and_boundary(self) -> None:
         source = EnergySourceDefinition(source_id="source", role="hybrid-inverter", usable_capacity_wh=5000.0)
         settings = _settings()
-        client = MagicMock(spec=ModbusClient)
-        field_value = MagicMock(side_effect=(61.0, 8400.0, -1200.0, 3000.0, 2500.0, 2300.0, 1700.0, -300.0))
-        field_text = MagicMock(return_value="support")
+        values: dict[str, float | str | None] = {
+            "soc": 61.0,
+            "usable_capacity": 8400.0,
+            "battery_power": -1200.0,
+            "charge_limit_power": 3000.0,
+            "discharge_limit_power": 2500.0,
+            "ac_power": 2300.0,
+            "pv_input_power": 1700.0,
+            "grid_interaction": -300.0,
+            "operating_mode": "support",
+        }
         self.assertEqual(
-            modbus._build_modbus_energy_source_snapshot(source, 123.5, settings, client, field_value, field_text),
+            modbus._build_modbus_energy_source_snapshot(
+                source,
+                123.5,
+                settings,
+                values,
+            ),
             EnergySourceSnapshot(
                 source_id="source",
                 role="hybrid-inverter",
@@ -215,14 +267,6 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
                 captured_at=123.5,
             ),
         )
-        self.assertEqual(
-            field_value.call_args_list,
-            [call(client, getattr(settings, name)) for name in (
-                "soc_field", "usable_capacity_field", "battery_power_field", "charge_limit_power_field",
-                "discharge_limit_power_field", "ac_power_field", "pv_input_power_field", "grid_interaction_field",
-            )],
-        )
-        field_text.assert_called_once_with(client, settings.operating_mode_field, settings.operating_mode_map)
 
         for soc, capacity, expected_soc, expected_capacity in (
             (-0.1, None, None, 5000.0),
@@ -231,8 +275,12 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
             (100.1, 0.5, None, 0.5),
         ):
             with self.subTest(soc=soc, capacity=capacity):
-                values = MagicMock(side_effect=(soc, capacity, None, None, None, None, None, None))
-                snapshot = modbus._build_modbus_energy_source_snapshot(source, 1.0, settings, client, values, field_text)
+                snapshot = modbus._build_modbus_energy_source_snapshot(
+                    source,
+                    1.0,
+                    settings,
+                    {"soc": soc, "usable_capacity": capacity},
+                )
                 self.assertEqual(snapshot.soc, expected_soc)
                 self.assertEqual(snapshot.usable_capacity_wh, expected_capacity)
 

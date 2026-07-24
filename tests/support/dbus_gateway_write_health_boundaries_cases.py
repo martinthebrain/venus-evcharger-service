@@ -24,7 +24,7 @@ class GatewayWriteHealthBoundaryCases(GatewayAdapterContractCase):
             max(write_health_module._QUEUE_CLASS_RANKS.values()) + 1,
         )
         self.assertEqual(
-            write_health_module.DbusWriteSchedulerHealth._queue_class_budgets(
+            write_health_module.WriteSchedulerHealthTracker._queue_class_budgets(
                 {
                     "DbusGatewayQueueBudgetGuiCriticalPublish": "1",
                     "DbusGatewayQueueBudgetLocalPublish": "1",
@@ -49,7 +49,7 @@ class GatewayWriteHealthBoundaryCases(GatewayAdapterContractCase):
             "[DEFAULT]\nDbusGatewayQueueBudgetGuiCriticalPublish=7\nDbusGatewayQueueBudgetLocalPublish=6\n"
         ) as scenario:
             scheduler = scenario.adapter.write_scheduler
-            scheduler.local_publish_burst_limit = 20
+            scheduler.health_tracker.local_publish_burst_limit = 20
 
             expected: dict[GatewayPressureState, tuple[int, int, int, int]] = {
                 "congested": (10, 10, 5, 0),
@@ -60,34 +60,39 @@ class GatewayWriteHealthBoundaryCases(GatewayAdapterContractCase):
                 scheduler.set_dynamic_local_publish_burst(50, pressure_state=state)
                 self.assertEqual(
                     (
-                        scheduler.dynamic_local_publish_burst_limit,
-                        scheduler.queue_class_budgets["gui-critical-publish"],
-                        scheduler.queue_class_budgets["local-publish"],
-                        scheduler.queue_class_budgets["diagnostic"],
+                        scheduler.health_tracker.dynamic_local_publish_burst_limit,
+                        scheduler.health_tracker.queue_class_budgets["gui-critical-publish"],
+                        scheduler.health_tracker.queue_class_budgets["local-publish"],
+                        scheduler.health_tracker.queue_class_budgets["diagnostic"],
                     ),
                     values,
                 )
 
     def test_budget_and_event_pruning_keep_boundary_entries(self) -> None:
         with self.adapter_scenario() as scenario:
-            scheduler = scenario.adapter.write_scheduler
-            scheduler._budget_events.extend(((98.5, "remote-write"), (99.0, "remote-write")))
-            scheduler._processed_events.extend((39.0, 40.0))
-            scheduler._lifecycle_events.extend(
-                ((39.0, "applied", "remote-write"), (40.0, "deferred", "remote-write"))
-            )
+            tracker = scenario.adapter.write_scheduler.health_tracker
+            command = gx_relay_refresh_command(0)
+            with patch.object(vars(write_health_module)["time"], "time", return_value=98.5):
+                tracker.record_budget(command)
+            with patch.object(vars(write_health_module)["time"], "time", return_value=99.0):
+                tracker.record_budget(command)
+            with patch.object(vars(write_health_module)["time"], "time", return_value=39.0):
+                tracker.record_processed()
+                tracker.record_lifecycle(command, "applied")
+            with patch.object(vars(write_health_module)["time"], "time", return_value=40.0):
+                tracker.record_processed()
+                tracker.record_lifecycle(command, "deferred")
 
-            scheduler.prune_budget(100.0)
-            scheduler.prune_processed(100.0)
-            scheduler.prune_lifecycle(100.0)
+            tracker.prune_budget(100.0)
+            health = tracker.health(now=100.0)
 
-            self.assertEqual(list(scheduler._budget_events), [(99.0, "remote-write")])
-            self.assertEqual(list(scheduler._processed_events), [40.0])
-            self.assertEqual(list(scheduler._lifecycle_events), [(40.0, "deferred", "remote-write")])
+            self.assertEqual(health["queue_class_usage_1s"], {"read-fast": 1})
+            self.assertEqual(health["processed_commands_60s"], 1)
+            self.assertEqual(health["lifecycle_counts_60s"], {"deferred": 1})
 
     def test_budget_uses_semantic_queue_class(self) -> None:
         with self.adapter_scenario("[DEFAULT]\nDbusGatewayQueueBudgetRemoteWrite=1\n") as scenario:
-            scheduler = scenario.adapter.write_scheduler
+            tracker = scenario.adapter.write_scheduler.health_tracker
             operation = gx_relay_set_command(
                 0,
                 "NO",
@@ -97,18 +102,18 @@ class GatewayWriteHealthBoundaryCases(GatewayAdapterContractCase):
                 verify_retry_seconds=1.0,
             )
             with patch.object(vars(write_health_module)["time"], "time", return_value=200.0):
-                scheduler.record_budget(operation)
+                tracker.record_budget(operation)
 
-            self.assertEqual(list(scheduler._budget_events), [(200.0, "remote-write")])
-            self.assertFalse(scheduler.budget_available(operation, 200.0))
+            self.assertEqual(tracker.queue_class_usage_1s(), {"remote-write": 1})
+            self.assertFalse(tracker.budget_available(operation, 200.0))
 
     def test_lifecycle_journal_contains_only_semantic_command_metadata(self) -> None:
         with self.adapter_scenario() as scenario:
-            scheduler = scenario.adapter.write_scheduler
+            tracker = scenario.adapter.write_scheduler.health_tracker
             lifecycle_path = scenario.root / "logs" / "write-health.jsonl"
-            scenario.adapter.command_lifecycle_path = str(lifecycle_path)
+            tracker.command_lifecycle_path = str(lifecycle_path)
             with patch.object(vars(write_health_module)["time"], "time", return_value=220.0):
-                scheduler.record_lifecycle(
+                tracker.record_lifecycle(
                     gx_relay_set_command(
                         0,
                         "NO",
@@ -119,7 +124,7 @@ class GatewayWriteHealthBoundaryCases(GatewayAdapterContractCase):
                     ),
                     "applied",
                 )
-                scheduler.record_lifecycle(evcs_publication({"mode": 1}), "queued")
+                tracker.record_lifecycle(evcs_publication({"mode": 1}), "queued")
 
             rows = [json.loads(line) for line in lifecycle_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(rows[0]["kind"], "gx_relay_set_enabled")
@@ -130,13 +135,13 @@ class GatewayWriteHealthBoundaryCases(GatewayAdapterContractCase):
 
     def test_lifecycle_journal_io_failure_is_advisory(self) -> None:
         with self.adapter_scenario() as scenario:
-            scheduler = scenario.adapter.write_scheduler
-            scenario.adapter.command_lifecycle_path = str(scenario.root / "commands.jsonl")
+            tracker = scenario.adapter.write_scheduler.health_tracker
+            tracker.command_lifecycle_path = str(scenario.root / "commands.jsonl")
             with (
                 patch.object(builtins, "open", side_effect=OSError("full")),
                 patch.object(vars(write_health_module)["logging"], "debug") as log_debug,
             ):
-                scheduler.record_lifecycle(evcs_publication(), "dropped")
+                tracker.record_lifecycle(evcs_publication(), "dropped")
             log_debug.assert_called_once_with(
                 "Unable to append DBus gateway command lifecycle event",
                 exc_info=True,

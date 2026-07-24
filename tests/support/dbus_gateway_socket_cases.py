@@ -34,9 +34,11 @@ class GatewaySocketCases(GatewayAdapterContractCase):
             adapter._server = server
 
             with patch.object(process_socket_module.select, "select", return_value=([server], [], [])):
-                adapter.process_socket_once()
+                adapter.socket_role.process_socket_once()
 
-            self.assertEqual(conn.timeouts, [0.1])
+            self.assertEqual(len(conn.timeouts), 1)
+            self.assertGreater(conn.timeouts[0], 0.0)
+            self.assertLessEqual(conn.timeouts[0], 0.1)
             self.assertEqual(conn.sent, [])
 
     def test_socket_payload_and_socket_poll_edges(self) -> None:
@@ -45,10 +47,10 @@ class GatewaySocketCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
 
-            self.assertFalse(adapter.handle_socket_payload("{")["ok"])
-            self.assertFalse(adapter.handle_socket_payload("[]")["ok"])
-            self.assertTrue(adapter.handle_socket_payload('{"type":"snapshot"}')["ok"])
-            self.assertTrue(adapter.handle_socket_payload('{"type":"health"}')["ok"])
+            self.assertFalse(adapter.socket_role.handle_socket_payload("{")["ok"])
+            self.assertFalse(adapter.socket_role.handle_socket_payload("[]")["ok"])
+            self.assertTrue(adapter.socket_role.handle_socket_payload('{"type":"snapshot"}')["ok"])
+            self.assertTrue(adapter.socket_role.handle_socket_payload('{"type":"health"}')["ok"])
             enqueue = install_mock(adapter.commands, "enqueue", MagicMock(return_value="queued.json"))
             refresh = EnergyRefreshRequest(
                 request_id="socket-grid",
@@ -57,7 +59,7 @@ class GatewaySocketCases(GatewayAdapterContractCase):
                 urgency="priority",
                 reason="socket-test",
             ).to_command(source="socket-test")
-            self.assertTrue(adapter.handle_socket_payload(json.dumps(refresh))["ok"])
+            self.assertTrue(adapter.socket_role.handle_socket_payload(json.dumps(refresh))["ok"])
             enqueue.assert_called_once_with(refresh)
             for request_type in (
                 "refresh_value",
@@ -66,17 +68,17 @@ class GatewaySocketCases(GatewayAdapterContractCase):
                 "publish_value",
                 "set_value",
             ):
-                self.assertFalse(adapter.handle_socket_payload(json.dumps({"type": request_type}))["ok"])
-            self.assertFalse(adapter.handle_socket_payload('{"type":"wat"}')["ok"])
+                self.assertFalse(adapter.socket_role.handle_socket_payload(json.dumps({"type": request_type}))["ok"])
+            self.assertFalse(adapter.socket_role.handle_socket_payload('{"type":"wat"}')["ok"])
 
             adapter._server = None
-            adapter.process_socket_once()
+            adapter.socket_role.process_socket_once()
             server = SocketServerStub(SocketClientStub(), error=BlockingIOError())
             adapter._server = server
             with patch.object(process_socket_module.select, "select", return_value=([], [], [])):
-                adapter.process_socket_once()
+                adapter.socket_role.process_socket_once()
             with patch.object(process_socket_module.select, "select", return_value=([server], [], [])):
-                adapter.process_socket_once()
+                adapter.socket_role.process_socket_once()
             self.assertEqual(server.accept_calls, 1)
 
     def test_socket_process_sends_json_response(self) -> None:
@@ -84,11 +86,11 @@ class GatewaySocketCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            conn = SocketClientStub(b'{"type":"snapshot"}')
+            conn = SocketClientStub(b'{"type":"snapshot"}\n')
             server = SocketServerStub(conn)
             adapter._server = server
             with patch.object(process_socket_module.select, "select", return_value=([server], [], [])):
-                adapter.process_socket_once()
+                adapter.socket_role.process_socket_once()
             self.assertEqual(len(conn.sent), 1)
             self.assertTrue(json.loads(conn.sent[0].decode("utf-8"))["ok"])
 
@@ -102,7 +104,7 @@ class GatewaySocketCases(GatewayAdapterContractCase):
 
             server = MagicMock()
             with patch.object(process_socket_module.socket, "socket", return_value=server) as socket_factory:
-                adapter.start_socket()
+                adapter.socket_role.start_socket()
             socket_factory.assert_called_once_with(
                 process_socket_module.socket.AF_UNIX,
                 process_socket_module.socket.SOCK_STREAM,
@@ -113,7 +115,7 @@ class GatewaySocketCases(GatewayAdapterContractCase):
             self.assertIs(adapter._server, server)
             self.assertFalse(Path(adapter.paths.socket_path).exists())
 
-            adapter.close_socket()
+            adapter.socket_role.close_socket()
             server.close.assert_called_once_with()
             self.assertIsNone(adapter._server)
-            adapter.close_socket()
+            adapter.socket_role.close_socket()

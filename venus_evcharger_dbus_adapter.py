@@ -8,7 +8,8 @@ import argparse
 import configparser
 import logging
 
-from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter, _logging_level_from_config
+from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter
+from venus_evcharger.dbus_adapter.process.config import logging_level_from_config
 from venus_evcharger.dbus_gateway import gateway_paths
 
 __all__ = ["DbusAdapter", "main"]
@@ -23,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     config.read(args.config_path)
     logging.basicConfig(
         format="%(levelname)s [pid=%(process)d dbus-adapter] %(message)s",
-        level=_logging_level_from_config(config),
+        level=logging_level_from_config(config),
     )
     adapter = DbusAdapter(args.config_path, paths=gateway_paths(args.run_dir or None))
     adapter.run()

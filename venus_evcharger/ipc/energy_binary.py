@@ -6,8 +6,9 @@ from __future__ import annotations
 import struct
 import time
 from pathlib import Path
-from typing import cast
+from typing import TypeVar
 
+from venus_evcharger.core.contracts import timestamp_age_within
 from venus_evcharger.core.shared import write_bytes_atomically
 from venus_evcharger.ipc.energy import (
     ENERGY_IPC_SCHEMA_VERSION,
@@ -22,7 +23,6 @@ _MAX_SOURCE_IDS = 64
 _HEADER = struct.Struct(">4sBQQd")
 _MEASUREMENT = struct.Struct(">BBdddH")
 _TEXT_LENGTH = struct.Struct(">H")
-_MeasurementFields = tuple[int, int, float, float, float, int]
 _PAYLOAD_SIZE_ERROR = "energy inputs binary payload exceeds the size limit"
 _INVALID_MAGIC_ERROR = "energy inputs binary payload has invalid magic"
 _UNSUPPORTED_SCHEMA_ERROR = "energy inputs binary payload has unsupported schema_version"
@@ -35,6 +35,7 @@ _TRUNCATED_PAYLOAD_ERROR = "energy inputs binary payload is truncated"
 _TRUNCATED_TEXT_ERROR = "energy inputs binary text field is truncated"
 _INVALID_UTF8_ERROR = "energy inputs binary text field is not UTF-8"
 _TRAILING_DATA_ERROR = "energy inputs binary payload has trailing data"
+_INVALID_WIRE_TYPE_ERROR = "energy inputs binary payload has invalid wire value type"
 _STATUS_TO_CODE: dict[EnergyValueStatus, int] = {
     "fresh": 0,
     "stale": 1,
@@ -72,9 +73,7 @@ def decode_energy_inputs(payload: bytes) -> EnergyInputsSnapshot:
     if len(payload) > _MAX_PAYLOAD_BYTES:
         raise ValueError(_PAYLOAD_SIZE_ERROR)
     reader = _BinaryReader(payload)
-    unpacked_header = reader.unpack(_HEADER)
-    header = cast(tuple[bytes, int, int, int, float], unpacked_header)  # pragma: no mutate
-    magic, schema_version, sequence, topology_generation, captured_at = header
+    magic, schema_version, sequence, topology_generation, captured_at = reader.header()
     if magic != _MAGIC:
         raise ValueError(_INVALID_MAGIC_ERROR)
     if schema_version != ENERGY_IPC_SCHEMA_VERSION:
@@ -104,13 +103,26 @@ def load_energy_inputs_file(
 ) -> EnergyInputsSnapshot | None:
     """Load a fresh binary snapshot, returning ``None`` for absent or invalid data."""
     try:
-        snapshot = decode_energy_inputs(Path(path).read_bytes())
+        snapshot = decode_energy_inputs(_read_bounded_payload(Path(path)))
     except (OSError, TypeError, ValueError):
         return None
     current = time.time() if now is None else float(now)
-    if max_age_seconds >= 0.0 and current - snapshot.captured_at > float(max_age_seconds):
+    if max_age_seconds >= 0.0 and not timestamp_age_within(
+        snapshot.captured_at,
+        current,
+        max_age_seconds,
+    ):
         return None
     return snapshot
+
+
+def _read_bounded_payload(path: Path) -> bytes:
+    """Read at most one byte beyond the wire limit before rejecting a file."""
+    with path.open("rb") as handle:
+        payload = handle.read(_MAX_PAYLOAD_BYTES + 1)
+    if len(payload) > _MAX_PAYLOAD_BYTES:
+        raise ValueError(_PAYLOAD_SIZE_ERROR)
+    return payload
 
 
 def _encode_measurement(measurement: MeasuredValue) -> list[bytes]:
@@ -135,9 +147,9 @@ def _encode_measurement(measurement: MeasuredValue) -> list[bytes]:
 
 
 def _decode_measurement(reader: _BinaryReader) -> MeasuredValue:
-    unpacked_fields = reader.unpack(_MEASUREMENT)
-    fields = cast(_MeasurementFields, unpacked_fields)  # pragma: no mutate
-    status_code, has_value, value, observed_at, confidence, source_count = fields
+    status_code, has_value, value, observed_at, confidence, source_count = (
+        reader.measurement_fields()
+    )
     status = _decoded_status(status_code)
     decoded_value = _decoded_value(has_value, value)
     source_ids = tuple(reader.text() for _unused in range(_validated_source_count(source_count)))
@@ -196,10 +208,34 @@ class _BinaryReader:
         self._offset = end
         return values
 
+    def header(self) -> tuple[bytes, int, int, int, float]:
+        magic, schema_version, sequence, topology_generation, captured_at = self.unpack(
+            _HEADER
+        )
+        return (
+            _wire_value(magic, bytes),
+            _wire_value(schema_version, int),
+            _wire_value(sequence, int),
+            _wire_value(topology_generation, int),
+            _wire_value(captured_at, float),
+        )
+
+    def measurement_fields(self) -> tuple[int, int, float, float, float, int]:
+        status_code, has_value, value, observed_at, confidence, source_count = self.unpack(
+            _MEASUREMENT
+        )
+        return (
+            _wire_value(status_code, int),
+            _wire_value(has_value, int),
+            _wire_value(value, float),
+            _wire_value(observed_at, float),
+            _wire_value(confidence, float),
+            _wire_value(source_count, int),
+        )
+
     def text(self) -> str:
-        unpacked_size = self.unpack(_TEXT_LENGTH)
-        (size,) = cast(tuple[int], unpacked_size)  # pragma: no mutate
-        end = self._offset + int(size)
+        (raw_size,) = self.unpack(_TEXT_LENGTH)
+        end = self._offset + _wire_value(raw_size, int)
         if end > len(self._payload):
             raise ValueError(_TRUNCATED_TEXT_ERROR)
         try:
@@ -212,6 +248,15 @@ class _BinaryReader:
     def require_complete(self) -> None:
         if self._offset != len(self._payload):
             raise ValueError(_TRAILING_DATA_ERROR)
+
+
+_WireValue = TypeVar("_WireValue")
+
+
+def _wire_value(value: object, expected: type[_WireValue]) -> _WireValue:
+    if not isinstance(value, expected):
+        raise ValueError(_INVALID_WIRE_TYPE_ERROR)
+    return value
 
 
 __all__ = [

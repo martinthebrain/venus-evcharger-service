@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 
 from .models import EnergyClusterSnapshot, EnergySourceDefinition, EnergySourceSnapshot
 from .numeric import non_negative_optional_float, sum_optional
+from .physical_sources import unique_weighted_soc_sources
 from .profiles import energy_source_profile_details
 
 
@@ -65,7 +66,7 @@ def _weighted_soc(sources: tuple[EnergySourceSnapshot, ...]) -> tuple[float | No
     total_capacity = 0.0
     total_soc_energy = 0.0
     count = 0
-    for source in sources:
+    for source in unique_weighted_soc_sources(sources):
         weighted_values = _weighted_soc_source_values(source)
         if weighted_values is None:
             continue

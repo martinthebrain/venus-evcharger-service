@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import configparser
+import importlib
 import logging
+import sys
 import unittest
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
@@ -20,8 +22,10 @@ from venus_evcharger.dbus_adapter.process.config import (
     GatewayFileSettings,
     GatewayIntrospectionSettings,
     GatewayRateSettings,
+    GatewayResourceSettings,
     GatewaySloSettings,
     GatewayTimingSettings,
+    logging_level_from_config,
 )
 from venus_evcharger.dbus_gateway import gateway_paths
 
@@ -34,24 +38,43 @@ def adapter_settings() -> GatewayAdapterSettings:
         device_instance=61,
         read_specs={"grid_power_w": {"service": "system", "path": "/Grid"}},
         rates=GatewayRateSettings(0.21, 0.31, 2.1),
-        timing=GatewayTimingSettings(0.11, 0.91, 31.0, 0.41),
+        timing=GatewayTimingSettings(
+            0.11,
+            0.91,
+            31.0,
+            17.0,
+            0.21,
+            0.31,
+            4.1,
+            0.41,
+        ),
         slo=GatewaySloSettings(2.1, 5.1, 10.1, 501.0),
         files=GatewayFileSettings("/run/lifecycle", 101, "/run/health", 3.1, 202),
         introspection=GatewayIntrospectionSettings("/run/intro", True),
+        resources=GatewayResourceSettings(2.1, 9.1),
         stale_after_seconds=12.5,
     )
 
 
 class DbusAdapterProcessContractTests(unittest.TestCase):
+    def test_adapter_module_import_does_not_duplicate_existing_velib_path(self) -> None:
+        velib_path = process._VELIB_PYTHON_PATH
+        self.assertIn(velib_path, sys.path)
+        occurrences = sys.path.count(velib_path)
+
+        self.assertIs(importlib.reload(process), process)
+
+        self.assertEqual(sys.path.count(velib_path), occurrences)
+
     def test_logging_level_is_normalized_and_invalid_values_fall_back(self) -> None:
         config = CasePreservingConfigParser()
-        self.assertEqual(process._logging_level_from_config(config), logging.INFO)
+        self.assertEqual(logging_level_from_config(config), logging.INFO)
         config["DEFAULT"]["Logging"] = " debug "
-        self.assertEqual(process._logging_level_from_config(config), logging.DEBUG)
+        self.assertEqual(logging_level_from_config(config), logging.DEBUG)
         config["DEFAULT"]["Logging"] = "warning"
-        self.assertEqual(process._logging_level_from_config(config), logging.WARNING)
+        self.assertEqual(logging_level_from_config(config), logging.WARNING)
         config["DEFAULT"]["Logging"] = "not-a-level"
-        self.assertEqual(process._logging_level_from_config(config), logging.INFO)
+        self.assertEqual(logging_level_from_config(config), logging.INFO)
 
     def test_adapter_initializes_every_component_and_runtime_field_from_settings(self) -> None:
         config = configparser.ConfigParser()
@@ -72,6 +95,15 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
             "AtomicJsonWriter",
             "ResourceMonitor",
             "TickHealth",
+            "DbusAdapterRuntime",
+            "DbusAdapterIo",
+            "DbusAdapterIntrospection",
+            "DbusAdapterIntrospectionSnapshot",
+            "DbusAdapterDiagnostics",
+            "DbusAdapterPublication",
+            "DbusAdapterHealth",
+            "DbusAdapterSocket",
+            "DbusAdapterLoop",
         )
         mocks = {name: MagicMock(name=name) for name in component_names}
         with ExitStack() as stack:
@@ -97,14 +129,61 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertIs(registry_call.kwargs["cache"], mocks["DbusCacheStore"].return_value)
         self.assertIs(registry_call.kwargs["core_commands"], mocks["CoreCommandMailbox"].return_value)
         self.assertTrue(callable(registry_call.kwargs["timed_publish"]))
-        mocks["DbusWriteScheduler"].assert_called_once_with(adapter)
+        mocks["DbusWriteScheduler"].assert_called_once()
+        write_context = mocks["DbusWriteScheduler"].call_args.args[0]
+        self.assertIsInstance(write_context, process.DbusAdapterWriteContext)
+        self.assertIsNot(write_context, adapter)
+        self.assertIs(write_context.cache, adapter.cache)
+        self.assertIs(write_context.connection, adapter.connection)
+        self.assertIs(write_context.publication_registry, adapter.publication_registry)
+        self.assertIs(write_context.publication_role, adapter.publication_role)
+        self.assertIs(write_context.introspection_role, adapter.introspection_role)
+        self.assertIs(write_context.io_role, adapter.io_role)
+        self.assertFalse(hasattr(write_context, "loop_role"))
+        self.assertFalse(hasattr(write_context, "health_role"))
+        write_context.publication_role.evcs_service_registered = True
+        self.assertTrue(write_context.evcs_service_registered)
+        write_context.introspection_role.process_non_write_command.return_value = "dropped"
+        command = {"kind": "unknown"}
+        self.assertEqual(write_context.process_non_write_command(command), "dropped")
+        write_context.introspection_role.process_non_write_command.assert_called_once_with(command)
+        dbus_result = object()
+        local_result = object()
+        write_context.io_role.timed_dbus_operation.return_value = dbus_result
+        write_context.io_role.timed_local_publish.return_value = local_result
+        operation = MagicMock()
+        self.assertIs(write_context.timed_dbus_operation("write", operation), dbus_result)
+        self.assertIs(write_context.timed_local_publish(operation), local_result)
+        write_context.io_role.timed_dbus_operation.assert_called_once_with("write", operation)
+        write_context.io_role.timed_local_publish.assert_called_once_with(operation)
         mocks["DbusReadScheduler"].assert_called_once_with(settings.read_specs)
         mocks["DbusEnergyDiscoveryManager"].assert_called_once_with(
             settings.read_specs,
             max_prefix_services=10,
         )
         mocks["DbusReadExecutor"].assert_called_once_with(adapter)
-        mocks["DbusDiscoveryManager"].assert_called_once_with(interval_seconds=31.0)
+        mocks["DbusDiscoveryManager"].assert_called_once_with(
+            interval_seconds=31.0,
+            missing_pv_interval_seconds=17.0,
+        )
+        mocks["ResourceMonitor"].assert_called_once_with(
+            settings=process.ResourceMonitorSettings(
+                sample_interval_seconds=2.1,
+                recovery_hold_seconds=9.1,
+            ),
+        )
+        for role_name in (
+            "DbusAdapterRuntime",
+            "DbusAdapterIo",
+            "DbusAdapterIntrospection",
+            "DbusAdapterIntrospectionSnapshot",
+            "DbusAdapterDiagnostics",
+            "DbusAdapterPublication",
+            "DbusAdapterHealth",
+            "DbusAdapterSocket",
+            "DbusAdapterLoop",
+        ):
+            mocks[role_name].assert_called_once_with(adapter)
         for attribute, component_name in (
             ("connection", "DbusConnectionManager"),
             ("rate_limiter", "DbusRateLimiter"),
@@ -121,6 +200,15 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
             ("json_writer", "AtomicJsonWriter"),
             ("resource_monitor", "ResourceMonitor"),
             ("tick_health", "TickHealth"),
+            ("runtime_role", "DbusAdapterRuntime"),
+            ("io_role", "DbusAdapterIo"),
+            ("introspection_role", "DbusAdapterIntrospection"),
+            ("introspection_snapshot_role", "DbusAdapterIntrospectionSnapshot"),
+            ("diagnostics_role", "DbusAdapterDiagnostics"),
+            ("publication_role", "DbusAdapterPublication"),
+            ("health_role", "DbusAdapterHealth"),
+            ("socket_role", "DbusAdapterSocket"),
+            ("loop_role", "DbusAdapterLoop"),
         ):
             with self.subTest(attribute=attribute):
                 self.assertIs(getattr(adapter, attribute), mocks[component_name].return_value)
@@ -137,7 +225,10 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertEqual(adapter.min_tick_seconds, 0.11)
         self.assertEqual(adapter.max_tick_seconds, 0.91)
         self.assertEqual(adapter.tick_seconds, 0.11)
-        self.assertEqual(adapter.cache_publish_interval_seconds, 0.41)
+        self.assertEqual(adapter.energy_publish_interval_seconds, 0.21)
+        self.assertEqual(adapter.health_publish_interval_seconds, 0.31)
+        self.assertEqual(adapter.cache_publish_interval_seconds, 4.1)
+        self.assertEqual(adapter.cache_dirty_publish_interval_seconds, 0.41)
         self.assertEqual(adapter.command_lifecycle_path, "/run/lifecycle")
         self.assertEqual(adapter.command_lifecycle_max_bytes, 101)
         self.assertEqual(adapter.slo_gui_max_age_seconds, 2.1)
@@ -153,12 +244,33 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertEqual(adapter._last_resource_snapshot, {})
         self.assertEqual(adapter._last_introspection_full_scan_at, 0.0)
         self.assertEqual(adapter._introspection_queue_depth, 0)
+        self.assertEqual(adapter._last_energy_publish_monotonic, 0.0)
+        self.assertEqual(adapter._last_health_publish_monotonic, 0.0)
         self.assertEqual(adapter._last_cache_publish_monotonic, 0.0)
+        self.assertEqual(adapter._last_cache_publish_sequence, -1)
+        self.assertEqual(adapter._last_topology_generation, -1)
         self.assertEqual(adapter._last_health_log_monotonic, 0.0)
         self.assertEqual(adapter._last_tick_at, 0.0)
         self.assertEqual(adapter._last_tick_monotonic, 0.0)
         self.assertEqual(adapter._last_tick_duration_ms, 0.0)
         self.assertIs(adapter._prefer_read_next, True)
+
+    def test_composition_root_facade_starts_and_ticks_through_loop_role(self) -> None:
+        config = configparser.ConfigParser()
+        settings = adapter_settings()
+        with (
+            patch.object(process, "load_adapter_config", return_value=config),
+            patch.object(process, "adapter_settings", return_value=settings),
+        ):
+            adapter = process.DbusAdapter("/etc/evcharger.ini", paths=settings.paths)
+        with (
+            patch.object(adapter.loop_role, "run") as run,
+            patch.object(adapter.loop_role, "tick", return_value=True) as tick,
+        ):
+            adapter.run()
+            self.assertTrue(adapter.tick())
+        run.assert_called_once_with()
+        tick.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -160,6 +160,10 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
             with patch.object(mailbox_module.Path, "glob", side_effect=OSError("unavailable")):
                 self.assertEqual(mailbox.load_pending(), [])
 
+            with patch.object(mailbox, "_locked", side_effect=PermissionError("read-only")):
+                pending = mailbox.load_pending()
+            self.assertEqual([path for path, _payload in pending], [second])
+
     def test_transport_helpers_define_priority_and_latest_wins_semantics(self) -> None:
         self.assertEqual(command_priority_rank(" SAFETY "), 0)
         self.assertEqual(command_priority_rank("unknown"), 6)

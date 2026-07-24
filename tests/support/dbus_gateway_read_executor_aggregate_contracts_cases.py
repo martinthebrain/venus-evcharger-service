@@ -154,7 +154,7 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             self.assertEqual(adapter.cache.values["empty_optional"]["source"], "empty_optional")
 
             adapter.cache.update_services(["svc.z", "svc.a"])
-            adapter.energy_discovery.update_services(["svc.z", "svc.a"], now=1.0)
+            adapter.energy_discovery.update_services(["svc.z", "svc.a"], captured_at=1.0)
             install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=77.0))
             self.assertEqual(
                 adapter.read_executor._poll_first_service(

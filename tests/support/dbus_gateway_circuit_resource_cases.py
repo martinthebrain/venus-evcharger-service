@@ -10,13 +10,12 @@ from tests.support.dbus_gateway_adapter_harness import (
     MagicMock,
     ResourceMonitor,
     TickHealth,
-    builtins,
     install_mock,
     patch,
     rate_module,
-    resource_module,
-    unittest,
 )
+from venus_evcharger.dbus_adapter.resource_pressure import resource_state
+from venus_evcharger.dbus_adapter.resources import ResourceMonitorSettings
 
 
 class GatewayCircuitResourceCases(GatewayAdapterContractCase):
@@ -254,48 +253,39 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
             manager.get_object("svc", "/Path")
 
     def test_resource_monitor_reports_procfs_style_resource_health(self) -> None:
-        monitor = ResourceMonitor(pid=123)
-        install_mock(monitor, "_read_system_cpu", MagicMock(side_effect=[(1000, 500), (1100, 540)]))
-        install_mock(monitor, "_read_process_cpu_seconds", MagicMock(side_effect=[1.0, 1.2]))
-        install_mock(
-            monitor,
-            "_read_meminfo",
-            MagicMock(return_value={"MemTotal": 1024.0 * 1024.0, "MemAvailable": 512.0 * 1024.0}),
+        reader = MagicMock()
+        reader.system_cpu.side_effect = [(1000, 500), (1100, 540)]
+        reader.process_cpu_seconds.side_effect = [1.0, 1.2]
+        reader.meminfo.return_value = {
+            "MemTotal": 1024.0 * 1024.0,
+            "MemAvailable": 512.0 * 1024.0,
+        }
+        reader.process_status.return_value = {
+            "VmRSS": 1234.0,
+            "VmHWM": 2345.0,
+            "Threads": 3.0,
+            "FDSize": 64.0,
+        }
+        reader.open_fd_count.return_value = 7
+        reader.load_average.return_value = (0.2, 0.3, 0.4)
+        reader.cpu_count.return_value = 1
+        monitor = ResourceMonitor(
+            pid=123,
+            settings=ResourceMonitorSettings(sample_interval_seconds=0.0),
+            reader=reader,
+            monotonic=MagicMock(side_effect=[10.0, 11.0]),
         )
-        install_mock(
-            monitor,
-            "_read_process_status",
-            MagicMock(return_value={"VmRSS": 1234.0, "VmHWM": 2345.0, "Threads": 3.0, "FDSize": 64.0}),
-        )
-        install_mock(monitor, "_open_fd_count", MagicMock(return_value=7))
-        install_mock(monitor, "_loadavg", MagicMock(return_value=(0.2, 0.3, 0.4)))
 
-        with patch.object(resource_module.time, "monotonic", side_effect=[10.0, 11.0]):
-            first = monitor.snapshot()
-            second = monitor.snapshot()
+        first = monitor.snapshot()
+        second = monitor.snapshot()
 
         self.assertEqual(first["state"], "ok")
         self.assertEqual(first["process"]["open_fds"], 7)
         self.assertAlmostEqual(second["system_cpu_pct"], 60.0)
         self.assertAlmostEqual(second["process"]["cpu_pct_one_core"], 20.0)
-        self.assertEqual(resource_module.resource_state(1.1, 10.0, 100000.0), "busy")
-        self.assertEqual(resource_module.resource_state(0.1, 95.0, 100000.0), "constrained")
-        self.assertEqual(resource_module.resource_state(0.1, 10.0, 1000.0), "constrained")
-
-    def test_resource_monitor_procfs_failure_edges(self) -> None:
-        monitor = ResourceMonitor(pid=123)
-        with patch.object(resource_module.os, "getloadavg", side_effect=OSError("missing")):
-            self.assertEqual(monitor._loadavg(), (0.0, 0.0, 0.0))
-        with patch.object(builtins, "open", side_effect=OSError("missing")):
-            self.assertEqual(monitor._read_system_cpu(), (0, 0))
-            self.assertEqual(monitor._read_process_cpu_seconds(), 0.0)
-            self.assertEqual(monitor._read_meminfo(), {})
-            self.assertEqual(monitor._read_process_status(), {})
-        read_data = "Name:\tpython\nThreads:\t3\nVmRSS:\tbad kB\n"
-        with patch.object(builtins, "open", unittest.mock.mock_open(read_data=read_data)):
-            self.assertEqual(monitor._read_process_status(), {"Threads": 3.0})
-        with patch.object(resource_module.os, "listdir", side_effect=OSError("missing")):
-            self.assertEqual(monitor._open_fd_count(), 0)
+        self.assertEqual(resource_state(1.1, 10.0, 100000.0), "busy")
+        self.assertEqual(resource_state(0.1, 95.0, 100000.0), "constrained")
+        self.assertEqual(resource_state(0.1, 10.0, 1000.0), "constrained")
 
     def test_tick_health_rolls_recent_tick_durations(self) -> None:
         health = TickHealth(window_seconds=10.0)

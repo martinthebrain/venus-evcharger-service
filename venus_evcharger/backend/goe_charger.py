@@ -21,12 +21,11 @@ from .template_support import (
     load_template_config,
     _request_auth,
     _request_headers,
-    _request_method_callable,
-    http_session,
     normalized_object_mapping,
     object_list,
     resolved_url,
 )
+from .template_http_transport import http_session, request_method_callable
 
 
 _GOE_STATUS_FILTER = "alw,amp,acu,car,err,eto,nrg,pnp"
@@ -266,7 +265,7 @@ class GoEChargerBackend:
 
     def _status_payload(self) -> dict[str, object]:
         """Return one normalized go-e status payload."""
-        response = _request_method_callable(self._session, "GET")(
+        response = request_method_callable(self._session, "GET")(
             **self._request_kwargs(
                 self.settings.state_url,
                 params={"filter": self.settings.status_filter},
@@ -277,7 +276,7 @@ class GoEChargerBackend:
 
     def _set_value(self, key: str, value: object) -> None:
         """Write one documented go-e API key through `/api/set`."""
-        response = _request_method_callable(self._session, "GET")(
+        response = request_method_callable(self._session, "GET")(
             **self._request_kwargs(
                 self.settings.enable_url,
                 params={str(key): _goe_query_value(value)},

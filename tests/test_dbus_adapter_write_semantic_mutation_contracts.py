@@ -15,9 +15,8 @@ install_venus_adapter_stubs()
 
 from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
 from venus_evcharger.dbus_adapter.write import semantic as semantic_module
-from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
-from venus_evcharger.dbus_adapter.write.scheduler import DbusWriteScheduler
-from venus_evcharger.dbus_adapter.write.semantic import DbusWriteSchedulerSemantic
+from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
+from venus_evcharger.dbus_adapter.write.semantic import SemanticWriteExecutor
 from venus_evcharger.ipc.command_types import CommandMapping
 from venus_evcharger.ipc.gateway_operations import (
     ESS_GRID_SETPOINT_KIND,
@@ -61,10 +60,9 @@ class _Adapter:
         return operation()
 
 
-def _scheduler(adapter: _Adapter | None = None) -> tuple[DbusWriteSchedulerSemantic, _Adapter]:
+def _scheduler(adapter: _Adapter | None = None) -> tuple[SemanticWriteExecutor, _Adapter]:
     selected = adapter or _Adapter()
-    scheduler = DbusWriteScheduler(cast(DbusWriteSchedulerAdapter, selected))
-    return cast(DbusWriteSchedulerSemantic, scheduler), selected
+    return SemanticWriteExecutor(cast(SemanticWriteAdapter, selected)), selected
 
 
 def _relay_command(
@@ -242,7 +240,10 @@ class ManualFunctionMutationContracts(unittest.TestCase):
         ):
             self.assertEqual(scheduler._manual_fallback(command, "relay.json", _operation(command)), "deferred")
         rewrite.assert_called_once_with("relay.json", command, phase="manual_read", manual_target=1)
-        self.assertEqual(logs.output, ["DEBUG:root:Trying legacy manual-function target for GX relay 0"])
+        self.assertEqual(
+            logs.output,
+            ["DEBUG:root:Trying alternate Venus relay-function target for GX relay 0"],
+        )
 
     def test_manual_fallback_defers_after_last_target_with_minimum_backoff(self) -> None:
         scheduler, _adapter = _scheduler()
@@ -347,10 +348,10 @@ class RelayOutputMutationContracts(unittest.TestCase):
         mark_error.assert_called_once_with(1, "/Relay/1/State", "relay stayed at 1, expected 0")
 
     def test_state_match_contract_distinguishes_none_mismatch_and_match(self) -> None:
-        self.assertFalse(DbusWriteSchedulerSemantic._relay_state_matches(None, 0))
-        self.assertFalse(DbusWriteSchedulerSemantic._relay_state_matches(0, 1))
-        self.assertTrue(DbusWriteSchedulerSemantic._relay_state_matches(0, 0))
-        self.assertTrue(DbusWriteSchedulerSemantic._relay_state_matches(1, 1))
+        self.assertFalse(SemanticWriteExecutor._relay_state_matches(None, 0))
+        self.assertFalse(SemanticWriteExecutor._relay_state_matches(0, 1))
+        self.assertTrue(SemanticWriteExecutor._relay_state_matches(0, 0))
+        self.assertTrue(SemanticWriteExecutor._relay_state_matches(1, 1))
 
 
 class EssAndDbusBoundaryMutationContracts(unittest.TestCase):
@@ -486,13 +487,13 @@ class CacheAndPureHelperMutationContracts(unittest.TestCase):
         )
 
     def test_relay_and_manual_paths_are_exact_for_both_supported_indices(self) -> None:
-        self.assertEqual(DbusWriteSchedulerSemantic._relay_state_path(0), "/Relay/0/State")
-        self.assertEqual(DbusWriteSchedulerSemantic._relay_state_path(1), "/Relay/1/State")
+        self.assertEqual(SemanticWriteExecutor._relay_state_path(0), "/Relay/0/State")
+        self.assertEqual(SemanticWriteExecutor._relay_state_path(1), "/Relay/1/State")
         self.assertEqual(
-            DbusWriteSchedulerSemantic._manual_function_paths(0),
+            SemanticWriteExecutor._manual_function_paths(0),
             ("/Settings/Relay/0/Function", "/Settings/Relay/Function"),
         )
-        self.assertEqual(DbusWriteSchedulerSemantic._manual_function_paths(1), ("/Settings/Relay/1/Function",))
+        self.assertEqual(SemanticWriteExecutor._manual_function_paths(1), ("/Settings/Relay/1/Function",))
 
 
 if __name__ == "__main__":

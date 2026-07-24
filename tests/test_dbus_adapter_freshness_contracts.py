@@ -7,12 +7,15 @@ import unittest
 from dataclasses import dataclass
 from unittest.mock import patch
 
-from venus_evcharger import dbus_gateway_cache
+import venus_evcharger.dbus_gateway_cache_metadata as cache_metadata
+from venus_evcharger.dbus_gateway_cache_metadata import CacheValueMetadata
+from venus_evcharger.dbus_gateway_cache_snapshot import CacheLivenessPolicy, project_cache_value
 from venus_evcharger.dbus_adapter.health.freshness import (
     cache_freshness,
     cached_entry_age,
     cached_entry_float,
     count_status,
+    critical_value_health,
     important_freshness,
     max_cached_path_age,
     max_publication_field_age,
@@ -40,7 +43,6 @@ class _Observations:
     def evcs_field_observation(self, field: str) -> _Observation | None:
         return self.values.get(field)
 from venus_evcharger.dbus_gateway import (
-    CacheValueMetadata,
     CacheFreshnessKind,
     DbusCacheStore,
     dbus_path_key,
@@ -50,7 +52,7 @@ from venus_evcharger.dbus_gateway import (
 
 class DbusAdapterFreshnessContractTests(unittest.TestCase):
     def test_status_counts_include_unknown_and_accumulate(self) -> None:
-        values = {
+        values: dict[str, dict[str, object]] = {
             "a": {"status": "fresh"},
             "b": {"status": "fresh"},
             "c": {"status": "error"},
@@ -61,7 +63,7 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         self.assertEqual(status_counts({}), {})
 
     def test_important_freshness_has_all_and_only_fast_read_fields(self) -> None:
-        values = {
+        values: dict[str, dict[str, object]] = {
             "grid_power_w": {"age_s": "1.25", "status": "fresh"},
             "pv_power_w": {"age_s": 2.5, "status": "error"},
             "battery_soc": {"age_s": object(), "status": None},
@@ -87,6 +89,42 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                 "grid_power_w_status": "missing",
                 "pv_power_w_status": "missing",
                 "battery_soc_status": "missing",
+            },
+        )
+
+    def test_critical_health_distinguishes_missing_from_nonfresh_values(self) -> None:
+        self.assertEqual(
+            critical_value_health(
+                {
+                    "grid_power_w": {"status": "fresh"},
+                    "pv_power_w": {"status": "error"},
+                    "battery_soc": {},
+                    "unrelated": {"status": "stale"},
+                }
+            ),
+            {
+                "critical_missing_count": 1,
+                "critical_nonfresh_count": 1,
+            },
+        )
+        self.assertEqual(
+            critical_value_health({}),
+            {
+                "critical_missing_count": 3,
+                "critical_nonfresh_count": 0,
+            },
+        )
+        self.assertEqual(
+            critical_value_health(
+                {
+                    "grid_power_w": {"status": "fresh"},
+                    "pv_power_w": {"status": "fresh"},
+                    "battery_soc": {"status": "fresh"},
+                }
+            ),
+            {
+                "critical_missing_count": 0,
+                "critical_nonfresh_count": 0,
             },
         )
 
@@ -133,9 +171,11 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         self.assertEqual(max_publication_field_age(observations, {"old", "recent", "missing"}, 100.0), 10.0)
         self.assertEqual(max_publication_field_age(observations, set(), 100.0), 0.0)
         self.assertEqual(missing_publication_field_count(observations, {"old", "missing"}), 1.0)
+        self.assertEqual(missing_publication_field_count(observations, {"old", "recent"}), 0.0)
         self.assertEqual(missing_publication_field_count(observations, frozenset()), 0.0)
         self.assertEqual(publication_field_age(observations.evcs_field_observation("future"), 100.0), 0.0)
         self.assertEqual(publication_field_age(observations.evcs_field_observation("zero"), 100.0), 0.0)
+        self.assertEqual(publication_field_age(_Observation(5, 0.5), 1.0), 0.5)
         self.assertEqual(publication_field_age(None, 100.0), 0.0)
         self.assertEqual(publication_field_float(observations.evcs_field_observation("old")), 12.5)
         self.assertEqual(publication_field_float(observations.evcs_field_observation("recent")), -3.0)
@@ -159,6 +199,8 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
                 "static_status_counts": {},
                 "diagnostic_status_counts": {},
                 "critical_stale_count": 0,
+                "critical_missing_count": 1,
+                "critical_nonfresh_count": 1,
                 "optional_source_error_count": 0,
                 "optional_source_unavailable_count": 0,
                 "grid_power_w_age_s": 1.0,
@@ -278,9 +320,9 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
             freshness_kind="static",
             stale_after_seconds=9.0,
         )
-        self.assertIs(dbus_gateway_cache._cache_value_metadata(base, {}), base)
+        self.assertIs(cache_metadata.merge_cache_value_metadata(base, {}), base)
         self.assertEqual(
-            dbus_gateway_cache._cache_value_metadata(
+            cache_metadata.merge_cache_value_metadata(
                 base,
                 {
                     "source": "new",
@@ -305,14 +347,14 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            dbus_gateway_cache._cache_value_metadata(
+            cache_metadata.merge_cache_value_metadata(
                 base,
                 {"freshness_kind": "invalid", "stale_after_seconds": object()},
             ),
             base,
         )
         self.assertEqual(
-            dbus_gateway_cache._cache_value_metadata(
+            cache_metadata.merge_cache_value_metadata(
                 None,
                 {
                     "source": "field",
@@ -337,27 +379,81 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         for kind in kinds:
             with self.subTest(kind=kind):
                 self.assertEqual(
-                    dbus_gateway_cache._metadata_freshness_kind(kind, "external_read"),
+                    cache_metadata.normalize_freshness_kind(kind, "external_read"),
                     kind,
                 )
         self.assertEqual(
-            dbus_gateway_cache._metadata_freshness_kind(None, "static"),
+            cache_metadata.normalize_freshness_kind(None, "static"),
             "static",
         )
         self.assertEqual(
-            dbus_gateway_cache._metadata_freshness_kind("invalid", "diagnostic"),
+            cache_metadata.normalize_freshness_kind("invalid", "diagnostic"),
             "diagnostic",
         )
-        self.assertEqual(dbus_gateway_cache._metadata_source_state("active", "error"), "active")
-        self.assertEqual(dbus_gateway_cache._metadata_source_state("unavailable", "active"), "unavailable")
-        self.assertEqual(dbus_gateway_cache._metadata_source_state("error", "active"), "error")
-        self.assertEqual(dbus_gateway_cache._metadata_source_state("invalid", "active"), "active")
-        self.assertIsNone(dbus_gateway_cache._metadata_optional_float(None))
-        self.assertEqual(dbus_gateway_cache._metadata_optional_float(None, 3.0), 3.0)
-        self.assertEqual(dbus_gateway_cache._metadata_optional_float(-2), 0.0)
-        self.assertEqual(dbus_gateway_cache._metadata_optional_float("2.5"), 2.5)
-        self.assertEqual(dbus_gateway_cache._metadata_optional_float(object()), 0.0)
-        self.assertEqual(dbus_gateway_cache._metadata_optional_float(object(), 3.0), 3.0)
+        for source_state, expected in (
+            ("active", "active"),
+            ("unavailable", "unavailable"),
+            ("error", "error"),
+            ("invalid", "active"),
+        ):
+            with self.subTest(source_state=source_state):
+                self.assertEqual(
+                    cache_metadata.merge_cache_value_metadata(
+                        None,
+                        {"source_state": source_state},
+                    ).source_state,
+                    expected,
+                )
+        self.assertEqual(
+            cache_metadata.merge_cache_value_metadata(None, {}),
+            CacheValueMetadata(source=""),
+        )
+        self.assertEqual(
+            cache_metadata.merge_cache_value_metadata(None, {"stale_after_seconds": "2.5"}).stale_after_seconds,
+            2.5,
+        )
+        self.assertEqual(
+            cache_metadata.merge_cache_value_metadata(None, {"stale_after_seconds": object()}).stale_after_seconds,
+            0.0,
+        )
+
+    def test_cache_metadata_and_liveness_contracts_use_slots(self) -> None:
+        metadata = CacheValueMetadata(source="system/grid")
+        policy = CacheLivenessPolicy(5.0, True, "com.victronenergy.evcharger.test")
+
+        self.assertFalse(hasattr(metadata, "__dict__"))
+        self.assertFalse(hasattr(policy, "__dict__"))
+
+    def test_source_state_normalization_preserves_each_supported_state_and_fallback(self) -> None:
+        for value, fallback, expected in (
+            ("active", "error", "active"),
+            ("unavailable", "error", "unavailable"),
+            ("error", "active", "error"),
+            ("invalid", "unavailable", "unavailable"),
+            (None, "error", "error"),
+        ):
+            with self.subTest(value=value, fallback=fallback):
+                metadata = cache_metadata.merge_cache_value_metadata(
+                    CacheValueMetadata(source="system/grid", source_state=fallback),
+                    {"source_state": value},
+                )
+                self.assertEqual(metadata.source_state, expected)
+
+    def test_external_staleness_uses_a_strict_age_boundary(self) -> None:
+        policy = CacheLivenessPolicy(
+            stale_after_seconds=5.0,
+            local_service_registered=False,
+            local_service_name="",
+        )
+        item = {
+            "status": "fresh",
+            "freshness_kind": "external_read",
+            "confirmed_at": 10.0,
+            "stale_after_s": 5.0,
+        }
+
+        self.assertEqual(project_cache_value(item, 15.0, policy)["status"], "fresh")
+        self.assertEqual(project_cache_value(item, 15.000001, policy)["status"], "stale")
 
     def test_cache_value_lifecycle_metadata_is_exact(self) -> None:
         cache = DbusCacheStore(stale_after_seconds=-1.0)
@@ -549,44 +645,36 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
 
     def test_local_cache_value_classifier_is_bound_to_the_owned_service(self) -> None:
         service = "com.victronenergy.evcharger.test"
-        self.assertFalse(dbus_gateway_cache._is_local_cache_value({}, "local_owned", ""))
-        self.assertTrue(dbus_gateway_cache._is_local_cache_value({}, "local_owned", service))
-        self.assertTrue(dbus_gateway_cache._is_local_cache_value({}, "static", service))
-        self.assertTrue(
-            dbus_gateway_cache._is_local_cache_value(
-                {"source": f"{service}/Auto/State"},
-                "diagnostic",
-                service,
-            )
+        inactive = CacheLivenessPolicy(1.0, False, service)
+
+        def projected_status(source: object, freshness_kind: CacheFreshnessKind) -> object:
+            return project_cache_value(
+                {
+                    "source": source,
+                    "status": "fresh",
+                    "confirmed_at": 1.0,
+                    "freshness_kind": freshness_kind,
+                },
+                100.0,
+                inactive,
+            )["status"]
+
+        no_service = CacheLivenessPolicy(1.0, False, "")
+        self.assertEqual(
+            project_cache_value(
+                {"status": "fresh", "confirmed_at": 1.0, "freshness_kind": "local_owned"},
+                100.0,
+                no_service,
+            )["status"],
+            "fresh",
         )
-        self.assertFalse(
-            dbus_gateway_cache._is_local_cache_value(
-                {"source": "com.victronenergy.system/State"},
-                "diagnostic",
-                service,
-            )
-        )
-        self.assertFalse(
-            dbus_gateway_cache._is_local_cache_value(
-                {"source": 42},
-                "diagnostic",
-                service,
-            )
-        )
-        self.assertFalse(
-            dbus_gateway_cache._is_local_cache_value(
-                {},
-                "diagnostic",
-                service,
-            )
-        )
-        self.assertFalse(
-            dbus_gateway_cache._is_local_cache_value(
-                {"source": f"{service}/Mode"},
-                "external_read",
-                service,
-            )
-        )
+        self.assertEqual(projected_status("", "local_owned"), "unavailable")
+        self.assertEqual(projected_status("", "static"), "unavailable")
+        self.assertEqual(projected_status(f"{service}/Auto/State", "diagnostic"), "unavailable")
+        self.assertEqual(projected_status("com.victronenergy.system/State", "diagnostic"), "fresh")
+        self.assertEqual(projected_status(42, "diagnostic"), "fresh")
+        self.assertEqual(projected_status("", "diagnostic"), "fresh")
+        self.assertEqual(projected_status(f"{service}/Mode", "external_read"), "stale")
 
     def test_owned_static_and_diagnostic_values_follow_their_own_liveness_policies(self) -> None:
         cache = DbusCacheStore(stale_after_seconds=1.0)

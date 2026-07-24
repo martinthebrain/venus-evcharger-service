@@ -16,7 +16,6 @@ import dbus
 from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionContext
-from venus_evcharger.dbus_adapter.process.runtime import DbusAdapterRuntime
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
 from venus_evcharger.dbus_gateway_core import float_or_default, float_or_zero
 from venus_evcharger.ipc.command_types import CommandMapping
@@ -31,9 +30,12 @@ ENERGY_REFRESH_KEYS_BY_SCOPE: dict[str, tuple[str, ...]] = {
 }
 
 
-class DbusAdapterIntrospection(DbusAdapterRuntime):
+class DbusAdapterIntrospection:
+    def __init__(self, context: DbusAdapterIntrospectionContext) -> None:
+        self._context = context
+
     def enqueue_introspection_command(
-        self: DbusAdapterIntrospectionContext,
+        self,
         service: str,
         path: str,
         *,
@@ -41,7 +43,8 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         source: str,
         reason: str,
     ) -> None:
-        self.commands.enqueue(
+        context = self._context
+        context.commands.enqueue(
             {
                 "kind": "introspect",
                 "service": service,
@@ -49,17 +52,22 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
                 "priority": "discovery" if priority < OPTIONAL_INTROSPECTION_PRIORITY_MIN else "optional",
                 "source": source,
                 "reason": reason,
-                "timeout": config_get_float(self.config["DEFAULT"], "DbusIntrospectionTimeoutSeconds", 1.0),
+                "timeout": config_get_float(
+                    context.config["DEFAULT"],
+                    "DbusIntrospectionTimeoutSeconds",
+                    1.0,
+                ),
                 "coalesce_key": f"introspect:{service}:{path}",
             }
         )
 
-    def enqueue_background_introspection_if_due(self: DbusAdapterIntrospectionContext) -> None:
+    def enqueue_background_introspection_if_due(self) -> None:
+        context = self._context
         now = time.time()
         if not self.background_introspection_due(now):
             return
-        self._last_introspection_full_scan_at = now
-        for target in self.energy_discovery.introspection_targets():
+        context._last_introspection_full_scan_at = now
+        for target in context.energy_discovery.introspection_targets():
             self.enqueue_introspection_command(
                 target.service,
                 target.path,
@@ -68,19 +76,24 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
                 reason=target.reason,
             )
 
-    def background_introspection_due(self: DbusAdapterIntrospectionContext, now: float) -> bool:
+    def background_introspection_due(self, now: float) -> bool:
+        context = self._context
         interval = max(
             60.0,
-            config_get_float(self.config["DEFAULT"], "DbusIntrospectionFullScanIntervalSeconds", 21600.0),
+            config_get_float(
+                context.config["DEFAULT"],
+                "DbusIntrospectionFullScanIntervalSeconds",
+                21600.0,
+            ),
         )
         return (
-            self.dbus_introspection_enabled
-            and now - self._last_introspection_full_scan_at >= interval
-            and bool(self.cache.services)
-            and self.circuit.allows_priority("discovery")
+            context.dbus_introspection_enabled
+            and now - context._last_introspection_full_scan_at >= interval
+            and bool(context.cache.services)
+            and context.circuit.allows_priority("discovery")
         )
 
-    def process_non_write_command(self: DbusAdapterIntrospectionContext, command: CommandMapping) -> CommandOutcome:
+    def process_non_write_command(self, command: CommandMapping) -> CommandOutcome:
         raw_kind = command.get("kind") or command.get("type")
         if not raw_kind:
             return "dropped"
@@ -92,7 +105,7 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         return handlers.get(kind, _drop_command)(command)
 
     def refresh_energy_inputs_command(
-        self: DbusAdapterIntrospectionContext,
+        self,
         command: CommandMapping,
     ) -> CommandOutcome:
         try:
@@ -103,13 +116,15 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         if request.scope == "energy_source" and not keys:
             return "dropped"
         if request.scope in {"all", "topology"}:
-            self.discovery.force_due()
-            self._last_introspection_full_scan_at = 0.0
-        self.read_scheduler.force_due(self._stale_refresh_keys(keys, request.max_age_seconds))
+            self._context.discovery.force_due()
+            self._context._last_introspection_full_scan_at = 0.0
+        self._context.read_scheduler.force_due(
+            self._stale_refresh_keys(keys, request.max_age_seconds)
+        )
         return "applied"
 
     def _energy_refresh_keys(
-        self: DbusAdapterIntrospectionContext,
+        self,
         request: EnergyRefreshRequest,
     ) -> tuple[str, ...]:
         fixed_keys = ENERGY_REFRESH_KEYS_BY_SCOPE.get(request.scope)
@@ -117,10 +132,10 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
             return fixed_keys
         if request.scope != "energy_source" or request.source_id is None:
             return ()
-        return self.energy_discovery.read_keys_for_source(request.source_id)
+        return self._context.energy_discovery.read_keys_for_source(request.source_id)
 
     def _stale_refresh_keys(
-        self: DbusAdapterIntrospectionContext,
+        self,
         keys: tuple[str, ...],
         max_age_seconds: float,
     ) -> tuple[str, ...]:
@@ -128,18 +143,20 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         return tuple(
             key
             for key in keys
-            if now - float_or_zero(self.cache.values.get(key, {}).get("confirmed_at")) > max_age_seconds
+            if now
+            - float_or_zero(self._context.cache.values.get(key, {}).get("confirmed_at"))
+            > max_age_seconds
         )
 
     def introspect_command_if_healthy(
-        self: DbusAdapterIntrospectionContext,
+        self,
         command: CommandMapping,
     ) -> CommandOutcome:
-        if self.circuit.state() != "ok":
+        if self._context.circuit.state() != "ok":
             return "deferred"
         return self.introspect_command(command)
 
-    def introspect_command(self: DbusAdapterIntrospectionContext, command: CommandMapping) -> CommandOutcome:
+    def introspect_command(self, command: CommandMapping) -> CommandOutcome:
         service = str(command.get("service") or "")
         path = str(command.get("path") or "/")
         if not service:
@@ -152,13 +169,13 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
         return "applied"
 
     def timed_introspection_result(
-        self: DbusAdapterIntrospectionContext,
+        self,
         service: str,
         path: str,
         timeout: float,
     ) -> tuple[CommandOutcome, object]:
         try:
-            return "applied", self.timed_dbus_operation(
+            return "applied", self._context.io_role.timed_dbus_operation(
                 "introspection", lambda: self.read_introspection_xml(service, path, timeout)
         )
         except DbusOperationDeferred:
@@ -167,45 +184,47 @@ class DbusAdapterIntrospection(DbusAdapterRuntime):
             return self.drop_failed_introspection(service, path, error), None
 
     def read_introspection_xml(
-        self: DbusAdapterIntrospectionContext,
+        self,
         service: str,
         path: str,
         timeout: float,
     ) -> object:
-        obj = self.connection.get_object(service, path, introspect=False)
+        obj = self._context.connection.get_object(service, path, introspect=False)
         iface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
         return iface.Introspect(timeout=timeout)
 
     def drop_failed_introspection(
-        self: DbusAdapterIntrospectionContext,
+        self,
         service: str,
         path: str,
         error: BaseException,
     ) -> CommandOutcome:
-        self.cache.mark_error(
+        context = self._context
+        context.cache.mark_error(
             f"introspection:{service}:{path}",
             source=f"{service}{path}",
             error=error,
             freshness_kind="diagnostic",
         )
-        self._introspection_queue_depth = max(0, self._introspection_queue_depth - 1)
+        context._introspection_queue_depth = max(0, context._introspection_queue_depth - 1)
         logging.debug("Dropping failed DBus introspection command service=%s path=%s: %s", service, path, error)
         return "dropped"
 
     def record_introspection_xml(
-        self: DbusAdapterIntrospectionContext,
+        self,
         service: str,
         path: str,
         xml_data: object,
     ) -> None:
-        self.cache.update_value(
+        context = self._context
+        context.cache.update_value(
             f"introspection:{service}:{path}",
             xml_data,
             source=f"{service}{path}",
             confidence=0.5,
             freshness_kind="diagnostic",
         )
-        self._introspection_queue_depth = max(0, self._introspection_queue_depth - 1)
+        context._introspection_queue_depth = max(0, context._introspection_queue_depth - 1)
 
 
 def _drop_command(_command: CommandMapping) -> CommandOutcome:

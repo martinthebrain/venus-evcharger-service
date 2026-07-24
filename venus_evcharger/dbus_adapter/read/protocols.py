@@ -8,7 +8,7 @@ from typing import Protocol, TypeVar, Unpack
 
 from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
-from venus_evcharger.dbus_gateway_cache import CacheValueMetadata, ExternalReadMetadata
+from venus_evcharger.dbus_gateway_cache_metadata import CacheValueMetadata, ExternalReadMetadata
 from venus_evcharger.dbus_gateway_core import CacheFreshnessKind
 from venus_evcharger.ipc.command_types import CommandPayload
 

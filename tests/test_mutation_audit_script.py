@@ -173,6 +173,7 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "venus_evcharger_dbus_adapter.py",
                 "venus_evcharger_generic_shelly_configuration.py",
                 "venus_evcharger_service.py",
+                "scripts/ops",
                 "CONTROL_API.md",
                 "deploy/venus",
             ],
@@ -254,6 +255,219 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertEqual(
             mutation_audit_config.test_selection_for_target("scripts/dev/run_mutation_audit.py"),
             ("tests/test_mutation_audit_script.py",),
+        )
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target(
+                "scripts/dev/check_architecture_contracts.py"
+            ),
+            ("tests/test_architecture_contracts_script.py",),
+        )
+        self.assertEqual(
+            mutation_audit_config.test_selection_for_target("scripts/ops/gateway_cache_read.py"),
+            ("tests/test_gateway_cache_read_script.py",),
+        )
+
+    def test_gateway_refactor_targets_have_explicit_focused_test_selections(self) -> None:
+        target_groups = {
+            "process": (
+                "adapter.py",
+                "config.py",
+                "diagnostics.py",
+                "diagnostics_summary.py",
+                "diagnostics_values.py",
+                "health.py",
+                "introspection.py",
+                "introspection_snapshot.py",
+                "io.py",
+                "loop.py",
+                "publication.py",
+                "runtime.py",
+                "socket.py",
+                "write_context.py",
+            ),
+            "write": (
+                "core.py",
+                "generic_shelly.py",
+                "health.py",
+                "publish.py",
+                "scheduler.py",
+                "semantic.py",
+                "support.py",
+            ),
+        }
+        targets = [
+            *(f"venus_evcharger/dbus_adapter/process/{name}" for name in target_groups["process"]),
+            *(f"venus_evcharger/dbus_adapter/write/{name}" for name in target_groups["write"]),
+            "venus_evcharger/dbus_adapter/publication/registry.py",
+            "venus_evcharger/dbus_adapter/read/pv_discovery.py",
+            "venus_evcharger/dbus_adapter/read/pv_dormancy.py",
+            "venus_evcharger/dbus_adapter/resource_metrics.py",
+            "venus_evcharger/dbus_adapter/resource_pressure.py",
+            "venus_evcharger/dbus_adapter/resource_procfs.py",
+            "venus_evcharger/dbus_adapter/resources.py",
+            "venus_evcharger/dbus_adapter/tick_health.py",
+            "venus_evcharger/dbus_gateway_cache.py",
+            "venus_evcharger/dbus_gateway_cache_io.py",
+            "venus_evcharger/dbus_gateway_cache_metadata.py",
+            "venus_evcharger/dbus_gateway_cache_snapshot.py",
+            "venus_evcharger/dbus_gateway_client.py",
+            "venus_evcharger/inputs/helper/config_runtime.py",
+            "venus_evcharger/inputs/helper/external_contracts.py",
+            "venus_evcharger/inputs/helper/external_scheduler.py",
+            "venus_evcharger/inputs/helper/external_sources.py",
+            "venus_evcharger/inputs/helper/sources.py",
+            "venus_evcharger/ipc/command_mailbox.py",
+            "venus_evcharger/ipc/deadline.py",
+            "venus_evcharger/ipc/fast_publication.py",
+            "venus_evcharger/ipc/fast_publication_metrics.py",
+            "venus_evcharger/ipc/fast_publication_policy.py",
+            "venus_evcharger/ipc/fast_publication_work.py",
+            "venus_evcharger/ipc/pending_snapshot.py",
+            "venus_evcharger/ipc/publication_order.py",
+            "venus_evcharger/ipc/publication_order_state.py",
+            "venus_evcharger/ipc/publication_payload.py",
+            "venus_evcharger/ops/forensic_observer.py",
+            "venus_evcharger/ops/forensic_observer_probe.py",
+            "venus_evcharger/ops/forensic_observer_schema.py",
+            "venus_evcharger/ports/gateway_diagnostic_discovery.py",
+            "venus_evcharger/ports/gateway_diagnostic_health.py",
+            "venus_evcharger/ports/gateway_diagnostic_values.py",
+            "venus_evcharger/ports/gateway_diagnostics.py",
+            "venus_evcharger/ports/gateway_diagnostics_validation.py",
+        ]
+        for target in targets:
+            with self.subTest(target=target):
+                selection = mutation_audit_config.test_selection_for_target(target)
+                self.assertNotEqual(selection, mutation_audit_config.DEFAULT_TEST_SELECTION)
+                self.assertTrue(selection)
+                self.assertIn(target, mutation_audit_targets.DEFAULT_TARGETS)
+
+    def test_gateway_refactor_manifest_contains_only_unique_existing_targets(self) -> None:
+        repository = _source_repository_root()
+        targets = mutation_audit_targets.GATEWAY_REFACTOR_TARGETS
+        self.assertEqual(len(targets), len(set(targets)))
+        self.assertTrue(all((repository / target).is_file() for target in targets))
+        self.assertTrue(all(target in mutation_audit_targets.DEFAULT_TARGETS for target in targets))
+
+    def test_new_gateway_boundaries_are_bound_to_their_direct_contract_tests(self) -> None:
+        expected_tests = {
+            "scripts/dev/architecture_suppression_contracts.py": (
+                "tests/test_architecture_contracts_script.py",
+            ),
+            "venus_evcharger/inputs/helper/external_contracts.py": (
+                "tests/test_auto_input_external_sources_contracts.py",
+                "tests/test_auto_input_external_energy_scenario.py",
+            ),
+            "venus_evcharger/inputs/helper/external_scheduler.py": (
+                "tests/test_auto_input_external_sources_contracts.py",
+                "tests/test_auto_input_external_energy_scenario.py",
+            ),
+            "venus_evcharger/inputs/helper/external_sources.py": (
+                "tests/test_auto_input_external_sources_contracts.py",
+                "tests/test_auto_input_external_energy_scenario.py",
+            ),
+            "venus_evcharger/ipc/deadline.py": (
+                "tests/test_ipc_deadline_contracts.py",
+                "tests/test_fast_publication_ipc.py",
+                "tests/test_fast_publication_scheduler_contracts.py",
+            ),
+            "venus_evcharger/ipc/fast_publication.py": (
+                "tests/test_dbus_adapter_process_ipc_contracts.py",
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
+            "venus_evcharger/ipc/fast_publication_metrics.py": (
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
+            "venus_evcharger/ipc/fast_publication_policy.py": (
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
+            "venus_evcharger/ipc/fast_publication_work.py": (
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
+            "venus_evcharger/ipc/pending_snapshot.py": (
+                "tests/test_publication_mailbox_contracts.py",
+                "tests/test_fast_publication_scheduler_contracts.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
+            "venus_evcharger/ipc/publication_order.py": (
+                "tests/test_publication_order_contracts.py",
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
+            "venus_evcharger/ipc/publication_order_state.py": (
+                "tests/test_publication_order_contracts.py",
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
+            "venus_evcharger/ipc/publication_payload.py": (
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_publication_mailbox_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+            ),
+            "venus_evcharger/ops/forensic_observer_probe.py": (
+                "tests/test_forensic_observer_probe_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_diagnostic_discovery.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_diagnostic_health.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_diagnostic_values.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_diagnostics.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
+            ),
+            "venus_evcharger/ports/gateway_diagnostics_validation.py": (
+                "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
+            ),
+        }
+        for target, expected in expected_tests.items():
+            with self.subTest(target=target):
+                self.assertEqual(mutation_audit_config.test_selection_for_target(target), expected)
+
+    def test_socket_mutation_targets_keep_socket_scenarios_enabled(self) -> None:
+        socket_targets = (
+            "venus_evcharger/dbus_adapter/process/socket.py",
+            "venus_evcharger/dbus_gateway_client.py",
+            "venus_evcharger/ipc/fast_publication.py",
+        )
+        for target in socket_targets:
+            with self.subTest(target=target):
+                self.assertEqual(mutation_audit_config.pytest_add_cli_args_for_target(target), ())
+                parsed = tomllib.loads(mutation_audit_config.mutmut_config_toml(target))
+                self.assertEqual(parsed["tool"]["mutmut"]["pytest_add_cli_args"], [])
+        self.assertEqual(
+            mutation_audit_config.pytest_add_cli_args_for_target(
+                "venus_evcharger/dbus_gateway_cache.py"
+            ),
+            ("-k", "not socket"),
         )
 
     def test_auto_input_helper_entrypoint_uses_its_runtime_contract_tests(self) -> None:
@@ -434,6 +648,8 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/ipc/command_mailbox.py": (
                 "tests/test_ipc_command_mailbox_contracts.py",
+                "tests/test_publication_mailbox_contracts.py",
+                "tests/test_fast_publication_ipc.py",
             ),
             "venus_evcharger/ipc/core_commands.py": (
                 "tests/test_ipc_command_mailbox_contracts.py",
@@ -470,6 +686,10 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/dbus_adapter/resources.py": (
                 "tests/test_dbus_adapter_resource_contracts.py",
+                "tests/test_dbus_adapter_resource_metrics_contracts.py",
+                "tests/test_dbus_adapter_resource_pressure_contracts.py",
+                "tests/test_dbus_adapter_resource_procfs_contracts.py",
+                "tests/test_dbus_adapter_tick_health_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/scheduling.py": (
                 "tests/test_dbus_adapter_scheduler_contracts.py",
@@ -492,32 +712,34 @@ class MutationAuditScriptTests(unittest.TestCase):
             "venus_evcharger/dbus_adapter/jsonl.py": (
                 "tests/test_dbus_adapter_jsonl_contracts.py",
             ),
-            "venus_evcharger/dbus_adapter/process/adapter.py": ("tests/test_dbus_adapter_process_contracts.py",),
+            "venus_evcharger/dbus_adapter/process/adapter.py": (
+                "tests/test_dbus_adapter_process_contracts.py",
+                "tests/test_dbus_adapter_process_ipc_contracts.py",
+                "tests/test_fast_publication_ipc.py",
+            ),
             "venus_evcharger/dbus_adapter/process/config.py": (
                 "tests/test_dbus_adapter_process_config_contracts.py",
+                "tests/test_dbus_adapter_process_contracts.py",
+                "tests/test_energy_binary_ipc_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/process/introspection.py": (
-                "tests/test_energy_ipc_contracts.py",
-                "tests/test_gateway_energy_snapshot_contracts.py",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_background_introspection_uses_discovery_targets_and_opaque_topology",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_non_write_introspection_command_contracts",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_non_write_introspection_timed_logging_main_and_json_ready",
+                "tests/test_dbus_gateway_adapter_scheduler.py",
+                "tests/test_dbus_adapter_introspection_snapshot_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/process/introspection_snapshot.py": (
                 "tests/test_dbus_adapter_introspection_snapshot_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/process/io.py": (
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_poll_and_discovery_contracts",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_poll_and_discovery_edges",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_cache_publish_interval_contracts",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_signal_handlers_andlist_services_edges",
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_timed_operation_contracts_record_latency_and_errors",
+                "tests/test_dbus_gateway_adapter_scheduler.py",
+                "tests/test_energy_binary_ipc_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/process/runtime.py": (
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_signal_handlers_andlist_services_edges",
+                "tests/test_dbus_adapter_process_contracts.py",
+                "tests/test_dbus_adapter_process_ipc_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/process/socket.py": (
                 "tests/test_dbus_adapter_process_ipc_contracts.py",
+                "tests/test_fast_publication_ipc.py",
             ),
             "venus_evcharger/dbus_adapter/read/aggregate.py": ("tests/test_dbus_adapter_read_aggregate_contracts.py",),
             "venus_evcharger/dbus_adapter/read/discovery.py": (
@@ -531,23 +753,31 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_gateway_energy_snapshot_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/read/targets.py": (
-                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_read_target_contract_requires_service_and_absolute_path",
+                "tests/test_dbus_adapter_read_targets_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/read/spec.py": (
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_read_spec_from_mapping_validates_known_fields",
             ),
             "venus_evcharger/dbus_adapter/write/scheduler.py": (
                 "tests/test_dbus_gateway_adapter_scheduler.py",
+                "tests/test_fast_publication_ipc.py",
+                "tests/test_fast_publication_scheduler_contracts.py",
+                "tests/test_publication_mailbox_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/write/support.py": (
                 "tests/test_dbus_gateway_adapter_scheduler.py",
+                "tests/test_fast_publication_ipc.py",
+                "tests/test_fast_publication_scheduler_contracts.py",
+                "tests/test_ipc_deadline_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/write/publish.py": (
-                "tests/test_dbus_gateway_adapter_scheduler.py",
                 "tests/test_dbus_adapter_write_publish_mutation_contracts.py",
+                "tests/test_dbus_gateway_adapter_scheduler.py",
+                "tests/test_fast_publication_ipc.py",
             ),
             "venus_evcharger/dbus_adapter/write/semantic.py": (
                 "tests/test_dbus_adapter_write_semantic_mutation_contracts.py",
+                "tests/test_gateway_semantic_operations.py",
             ),
             "venus_evcharger/dbus_gateway_surface.py": ("tests/test_dbus_gateway_primitives.py",),
             "venus_evcharger/publish/gateway_diagnostics.py": (
@@ -604,14 +834,15 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/inputs/helper/config_runtime.py": (
                 "tests/test_auto_input_helper_config_contracts.py",
-                "tests/test_venus_evcharger_auto_input_helper.py",
+                "tests/test_auto_input_external_energy_scenario.py",
             ),
             "venus_evcharger/inputs/helper/snapshot.py": (
                 "tests/test_auto_input_helper_snapshot_liveness_contracts.py",
             ),
             "venus_evcharger/inputs/helper/sources.py": (
                 "tests/test_auto_input_helper_sources_contracts.py",
-                "tests/test_auto_input_helper_snapshot_liveness_contracts.py",
+                "tests/test_auto_input_external_sources_contracts.py",
+                "tests/test_auto_input_external_energy_scenario.py",
             ),
             "venus_evcharger/inputs/helper/energy_gateway.py": (
                 "tests/test_auto_input_helper_gateway_contracts.py",
@@ -619,12 +850,21 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/ports/gateway_diagnostic_values.py": (
                 "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
             ),
             "venus_evcharger/ports/gateway_diagnostics.py": (
                 "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
             ),
             "venus_evcharger/ports/gateway_diagnostics_validation.py": (
                 "tests/test_gateway_diagnostics_contracts.py",
+                "tests/test_gateway_diagnostics_boundary_contracts.py",
+                "tests/test_gateway_diagnostic_value_contracts.py",
+                "tests/test_gateway_diagnostics_snapshot_contracts.py",
             ),
             "venus_evcharger/ports/gateway_operations.py": (
                 "tests/test_gateway_semantic_operations.py",
@@ -962,7 +1202,12 @@ class MutationAuditScriptTests(unittest.TestCase):
 
         self.assertEqual([target.path for target in explicit], ["one.py", "two.py"])
         self.assertGreater(len(defaults), 10)
-        self.assertEqual(defaults[0].path, "venus_evcharger/dbus_gateway_policy.py")
+        gateway_target_count = len(mutation_audit_targets.GATEWAY_REFACTOR_TARGETS)
+        self.assertEqual(
+            tuple(target.path for target in defaults[:gateway_target_count]),
+            mutation_audit_targets.GATEWAY_REFACTOR_TARGETS,
+        )
+        self.assertIn("venus_evcharger/dbus_gateway_policy.py", (target.path for target in defaults))
 
         repo = Path("/tmp/repo")
         with patch.object(mutation_audit_cli.time, "strftime", return_value="20260704-081500") as strftime:

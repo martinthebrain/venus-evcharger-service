@@ -3,17 +3,18 @@
 
 from __future__ import annotations
 
+import configparser
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable
 
 from venus_evcharger.backend.modbus_client import ModbusClient
 from venus_evcharger.backend.modbus_transport_config import load_modbus_transport_settings
 from venus_evcharger.backend.modbus_transport_types import ModbusTransportSettings
 from venus_evcharger.backend.template_support import load_template_config
 
-from .connectors_common import _typed_cache_map
+from .connectors_common import _runtime_cache_get, _runtime_cache_put
 from .models import EnergySourceDefinition, EnergySourceSnapshot
-
 
 _REGISTER_TYPE_OPTION = "RegisterType"
 _ADDRESS_OPTION = "Address"
@@ -24,6 +25,8 @@ _DEFAULT_REGISTER_TYPE = "holding"
 _DEFAULT_DATA_TYPE = "uint16"
 _DEFAULT_SCALE = "1"
 _DEFAULT_WORD_ORDER = "big"
+_CLIENT_CACHE = "modbus.clients"
+_SETTINGS_CACHE = "modbus.settings"
 
 
 @dataclass(frozen=True)
@@ -57,8 +60,24 @@ class ModbusEnergySourceSettings:
     grid_interaction_scope_key: str
 
 
-def _modbus_client_cache(runtime: Any) -> dict[str, ModbusClient]:
-    return _typed_cache_map(runtime, "_energy_modbus_client_cache", ModbusClient)
+@dataclass(slots=True)
+class ModbusReadProgress:
+    """Values accumulated across single-register connector steps."""
+
+    next_field_index: int
+    values: dict[str, float | str | None]
+
+
+def _cached_modbus_client(runtime: object, config_path: str) -> ModbusClient | None:
+    return _runtime_cache_get(runtime, _CLIENT_CACHE, config_path, ModbusClient)
+
+
+def _store_modbus_client(
+    runtime: object,
+    config_path: str,
+    client: ModbusClient,
+) -> None:
+    _runtime_cache_put(runtime, _CLIENT_CACHE, config_path, client)
 
 
 def _modbus_source_name(source: EnergySourceDefinition, transport_settings: ModbusTransportSettings) -> str:
@@ -71,11 +90,18 @@ def _modbus_source_name(source: EnergySourceDefinition, transport_settings: Modb
     return source.config_path or source.source_id
 
 
-def _modbus_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> ModbusEnergySourceSettings:
-    cache = _typed_cache_map(runtime, "_energy_modbus_settings_cache", ModbusEnergySourceSettings)
+def _modbus_energy_source_settings(
+    runtime: object,
+    source: EnergySourceDefinition,
+) -> ModbusEnergySourceSettings:
     cache_key = str(source.config_path).strip()
-    cached = cache.get(cache_key)
-    if isinstance(cached, ModbusEnergySourceSettings):
+    cached = _runtime_cache_get(
+        runtime,
+        _SETTINGS_CACHE,
+        cache_key,
+        ModbusEnergySourceSettings,
+    )
+    if cached is not None:
         return cached
     if not cache_key:
         raise ValueError(f"Energy source '{source.source_id}' requires ConfigPath for modbus connector")
@@ -97,11 +123,14 @@ def _modbus_energy_source_settings(runtime: Any, source: EnergySourceDefinition)
         grid_interaction_scope_key=_modbus_aggregation_setting(parser, "GridInteractionScopeKey"),
     )
     _validate_modbus_energy_source_settings(source, settings)
-    cache[cache_key] = settings
+    _runtime_cache_put(runtime, _SETTINGS_CACHE, cache_key, settings)
     return settings
 
 
-def _modbus_field_settings(parser: Any, section_name: str) -> ModbusEnergyFieldSettings | None:
+def _modbus_field_settings(
+    parser: configparser.ConfigParser,
+    section_name: str,
+) -> ModbusEnergyFieldSettings | None:
     if not parser.has_section(section_name):
         return None
     section = parser[section_name]
@@ -117,26 +146,40 @@ def _modbus_field_settings(parser: Any, section_name: str) -> ModbusEnergyFieldS
     )
 
 
-def _modbus_field_option(section: Any, option_name: str, fallback: str) -> str:
+def _modbus_field_option(
+    section: configparser.SectionProxy,
+    option_name: str,
+    fallback: str,
+) -> str:
     return _section_text(section, option_name, fallback).lower()
 
 
-def _section_text(section: Any, option_name: str, fallback: str = "") -> str:
+def _section_text(
+    section: configparser.SectionProxy,
+    option_name: str,
+    fallback: str = "",
+) -> str:
     value = section.get(option_name)
     if value is None:
         return fallback
     return str(value).strip() or fallback
 
 
-def _modbus_field_address_text(section: Any) -> str:
+def _modbus_field_address_text(section: configparser.SectionProxy) -> str:
     return _section_text(section, _ADDRESS_OPTION)
 
 
-def _modbus_field_scale(section: Any) -> float:
-    return float(_section_text(section, _SCALE_OPTION, _DEFAULT_SCALE))
+def _modbus_field_scale(section: configparser.SectionProxy) -> float:
+    scale = float(_section_text(section, _SCALE_OPTION, _DEFAULT_SCALE))
+    if not math.isfinite(scale):
+        raise ValueError("Modbus field scale must be finite")
+    return scale
 
 
-def _modbus_text_map(parser: Any, section_name: str) -> dict[str, str]:
+def _modbus_text_map(
+    parser: configparser.ConfigParser,
+    section_name: str,
+) -> dict[str, str]:
     if not parser.has_section(section_name):
         return {}
     section = parser[section_name]
@@ -149,7 +192,10 @@ def _modbus_text_map(parser: Any, section_name: str) -> dict[str, str]:
     return normalized
 
 
-def _modbus_aggregation_setting(parser: Any, option_name: str) -> str:
+def _modbus_aggregation_setting(
+    parser: configparser.ConfigParser,
+    option_name: str,
+) -> str:
     if not parser.has_section("Aggregation"):
         return ""
     return str(parser["Aggregation"].get(option_name, "")).strip()
@@ -185,22 +231,29 @@ def _modbus_field_value(client: ModbusClient, field: ModbusEnergyFieldSettings |
     if field is None:
         return None
     raw_value = client.read_scalar(field.register_type, field.address, field.data_type, field.word_order)
-    numeric_value = 1.0 if isinstance(raw_value, bool) and raw_value else 0.0 if isinstance(raw_value, bool) else float(raw_value)
-    return numeric_value * float(field.scale)
+    numeric_value = _modbus_numeric_value(raw_value)
+    scaled_value = numeric_value * float(field.scale)
+    if not math.isfinite(scaled_value):
+        raise ValueError("Modbus energy-source field returned a non-finite value")
+    return scaled_value
+
+
+def _modbus_numeric_value(raw_value: float | int | bool) -> float:
+    if isinstance(raw_value, bool):
+        return float(raw_value)
+    return float(raw_value)
 
 
 def _build_modbus_energy_source_snapshot(
     source: EnergySourceDefinition,
     now: float,
     settings: ModbusEnergySourceSettings,
-    client: ModbusClient,
-    field_value: Callable[[ModbusClient, ModbusEnergyFieldSettings | None], float | None],
-    field_text: Callable[[ModbusClient, ModbusEnergyFieldSettings | None, dict[str, str] | None], str],
+    values: Mapping[str, float | str | None],
 ) -> EnergySourceSnapshot:
-    soc_value = field_value(client, settings.soc_field)
+    soc_value = _numeric_progress_value(values, "soc")
     if soc_value is not None and not 0.0 <= soc_value <= 100.0:
         soc_value = None
-    usable_capacity_wh = field_value(client, settings.usable_capacity_field)
+    usable_capacity_wh = _numeric_progress_value(values, "usable_capacity")
     if usable_capacity_wh is None:
         usable_capacity_wh = source.usable_capacity_wh
     elif usable_capacity_wh <= 0.0:
@@ -209,26 +262,77 @@ def _build_modbus_energy_source_snapshot(
         source_id=source.source_id,
         role=source.role,
         service_name=_modbus_source_name(source, settings.transport_settings),
+        physical_id=source.physical_id,
         soc=soc_value,
         usable_capacity_wh=usable_capacity_wh,
-        net_battery_power_w=field_value(client, settings.battery_power_field),
-        charge_limit_power_w=field_value(client, settings.charge_limit_power_field),
-        discharge_limit_power_w=field_value(client, settings.discharge_limit_power_field),
-        ac_power_w=field_value(client, settings.ac_power_field),
-        pv_input_power_w=field_value(client, settings.pv_input_power_field),
-        grid_interaction_w=field_value(client, settings.grid_interaction_field),
+        net_battery_power_w=_numeric_progress_value(values, "battery_power"),
+        charge_limit_power_w=_numeric_progress_value(values, "charge_limit_power"),
+        discharge_limit_power_w=_numeric_progress_value(values, "discharge_limit_power"),
+        ac_power_w=_numeric_progress_value(values, "ac_power"),
+        pv_input_power_w=_numeric_progress_value(values, "pv_input_power"),
+        grid_interaction_w=_numeric_progress_value(values, "grid_interaction"),
         ac_power_scope_key=_render_scope_key(source, settings.transport_settings, settings.ac_power_scope_key),
-        pv_input_power_scope_key=_render_scope_key(source, settings.transport_settings, settings.pv_input_power_scope_key),
+        pv_input_power_scope_key=_render_scope_key(
+            source, settings.transport_settings, settings.pv_input_power_scope_key
+        ),
         grid_interaction_scope_key=_render_scope_key(
             source,
             settings.transport_settings,
             settings.grid_interaction_scope_key,
         ),
-        operating_mode=field_text(client, settings.operating_mode_field, settings.operating_mode_map),
+        operating_mode=_text_progress_value(values, "operating_mode"),
         online=True,
         confidence=1.0,
         captured_at=now,
     )
+
+
+def _modbus_read_fields(
+    settings: ModbusEnergySourceSettings,
+) -> tuple[tuple[str, ModbusEnergyFieldSettings], ...]:
+    configured = (
+        ("soc", settings.soc_field),
+        ("usable_capacity", settings.usable_capacity_field),
+        ("battery_power", settings.battery_power_field),
+        ("charge_limit_power", settings.charge_limit_power_field),
+        ("discharge_limit_power", settings.discharge_limit_power_field),
+        ("ac_power", settings.ac_power_field),
+        ("pv_input_power", settings.pv_input_power_field),
+        ("grid_interaction", settings.grid_interaction_field),
+        ("operating_mode", settings.operating_mode_field),
+    )
+    return tuple(
+        (field_name, field)
+        for field_name, field in configured
+        if field is not None
+    )
+
+
+def _modbus_progress_value(
+    field_name: str,
+    value: float,
+    settings: ModbusEnergySourceSettings,
+) -> float | str:
+    if field_name != "operating_mode":
+        return value
+    normalized = str(int(value)) if value.is_integer() else str(value)
+    return settings.operating_mode_map.get(normalized, normalized)
+
+
+def _numeric_progress_value(
+    values: Mapping[str, float | str | None],
+    field_name: str,
+) -> float | None:
+    value = values.get(field_name)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _text_progress_value(
+    values: Mapping[str, float | str | None],
+    field_name: str,
+) -> str:
+    value = values.get(field_name)
+    return value if isinstance(value, str) else ""
 
 
 def _render_scope_key(

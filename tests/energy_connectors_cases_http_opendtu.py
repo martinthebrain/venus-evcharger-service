@@ -41,7 +41,7 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 service_name="external-hybrid",
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 100.0)
+            snapshot = self._read_complete(owner, source, 100.0)
 
             self.assertEqual(snapshot.source_id, "hybrid")
             self.assertEqual(snapshot.role, "hybrid-inverter")
@@ -58,7 +58,11 @@ class _EnergyConnectorsHttpOpenDtuCases:
             self.assertTrue(snapshot.online)
             self.assertEqual(snapshot.confidence, 0.8)
             self.assertEqual(snapshot.captured_at, 100.0)
-            session.get.assert_called_once_with(url="http://hybrid.local/state", timeout=2.0)
+            session.get.assert_called_once_with(
+                url="http://hybrid.local/state",
+                timeout=2.0,
+                stream=True,
+            )
 
     def test_template_http_connector_normalizes_out_of_range_values_and_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -85,7 +89,7 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 config_path=config_path,
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 123.0)
+            snapshot = self._read_complete(owner, source, 123.0)
 
             self.assertIsNone(snapshot.soc)
             self.assertIsNone(snapshot.usable_capacity_wh)
@@ -112,7 +116,7 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 usable_capacity_wh=7000.0,
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 200.0)
+            snapshot = self._read_complete(owner, source, 200.0)
 
             self.assertEqual(snapshot.usable_capacity_wh, 7000.0)
             self.assertEqual(snapshot.discharge_power_w, 900.0)
@@ -161,7 +165,7 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 service_name="opendtu",
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 150.0)
+            snapshot = self._read_complete(owner, source, 150.0)
 
             self.assertEqual(snapshot.service_name, "opendtu")
             self.assertEqual(snapshot.ac_power_w, 120.5)
@@ -170,7 +174,11 @@ class _EnergyConnectorsHttpOpenDtuCases:
             self.assertTrue(snapshot.online)
             self.assertEqual(snapshot.confidence, 0.5)
             self.assertEqual(snapshot.captured_at, 150.0)
-            session.get.assert_called_once_with(url="http://opendtu.local/api/livedata/status", timeout=2.0)
+            session.get.assert_called_once_with(
+                url="http://opendtu.local/api/livedata/status",
+                timeout=2.0,
+                stream=True,
+            )
 
     def test_opendtu_connector_fetches_detail_payloads_for_older_api_shape(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -225,14 +233,18 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 config_path=config_path,
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 151.0)
+            snapshot = self._read_complete(owner, source, 151.0)
 
             self.assertEqual(snapshot.ac_power_w, 111.0)
             self.assertEqual(snapshot.pv_input_power_w, 118.0)
             self.assertTrue(snapshot.online)
             self.assertEqual(snapshot.confidence, 1.0)
             self.assertEqual(session.get.call_count, 2)
-            session.get.assert_any_call(url="http://opendtu.local/api/livedata/status?inv=114182000000", timeout=2.0)
+            session.get.assert_any_call(
+                url="http://opendtu.local/api/livedata/status?inv=114182000000",
+                timeout=2.0,
+                stream=True,
+            )
 
     def test_opendtu_connector_treats_night_idle_payload_as_online_without_detail_requests(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -271,7 +283,7 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 config_path=config_path,
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 152.0)
+            snapshot = self._read_complete(owner, source, 152.0)
 
             self.assertEqual(snapshot.ac_power_w, 0.0)
             self.assertIsNone(snapshot.pv_input_power_w)
@@ -279,7 +291,11 @@ class _EnergyConnectorsHttpOpenDtuCases:
             self.assertTrue(snapshot.online)
             self.assertEqual(snapshot.confidence, 1.0)
             self.assertEqual(session.get.call_count, 1)
-            session.get.assert_called_once_with(url="http://opendtu.local/api/livedata/status", timeout=2.0)
+            session.get.assert_called_once_with(
+                url="http://opendtu.local/api/livedata/status",
+                timeout=2.0,
+                stream=True,
+            )
 
     def test_opendtu_connector_keeps_radio_problem_payload_offline(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -312,11 +328,15 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 config_path=config_path,
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 153.0)
+            snapshot = self._read_complete(owner, source, 153.0)
 
             self.assertFalse(snapshot.online)
             self.assertEqual(snapshot.confidence, 0.0)
-            session.get.assert_called_once_with(url="http://opendtu.local/api/livedata/status", timeout=2.0)
+            session.get.assert_called_once_with(
+                url="http://opendtu.local/api/livedata/status",
+                timeout=2.0,
+                stream=True,
+            )
 
     def test_opendtu_connector_keeps_hybrid_source_strict_for_unreachable_idle_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -349,7 +369,7 @@ class _EnergyConnectorsHttpOpenDtuCases:
                 config_path=config_path,
             )
 
-            snapshot = read_energy_source_snapshot(owner, source, 154.0)
+            snapshot = self._read_complete(owner, source, 154.0)
 
             self.assertFalse(snapshot.online)
             self.assertEqual(snapshot.confidence, 0.0)

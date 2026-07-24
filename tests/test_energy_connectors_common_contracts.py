@@ -7,7 +7,9 @@ import unittest
 from types import SimpleNamespace
 
 from venus_evcharger.energy.connectors_common import (
-    _cache_map,
+    EnergyConnectorRuntimeState,
+    EnergySourceHttpClient,
+    _bounded_request_timeout_seconds,
     _csv_filter,
     _normalized_connector_type,
     _normalized_optional_bool_value,
@@ -16,40 +18,144 @@ from venus_evcharger.energy.connectors_common import (
     _optional_float_path,
     _optional_path,
     _optional_text_path,
+    _runtime_cache_get,
+    _runtime_cache_pop,
+    _runtime_cache_put,
+    _runtime_default_timeout_seconds,
     _runtime_owner,
+    _runtime_state,
     _sum_optional,
-    _typed_cache_map,
 )
 
 
+class _Response:
+    def __init__(self) -> None:
+        self.headers = {"Content-Length": "12"}
+        self.closed = False
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        return {"value": 1}
+
+    def iter_content(self, chunk_size: int) -> tuple[bytes, ...]:
+        del chunk_size
+        return (b'{"value": 1}',)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Session:
+    def __init__(self) -> None:
+        self.url = ""
+        self.timeout = 0.0
+        self.kwargs: dict[str, object] = {}
+
+    def get(self, *, url: str, timeout: float, **_kwargs: object) -> _Response:
+        self.url = url
+        self.timeout = timeout
+        self.kwargs = dict(_kwargs)
+        return _Response()
+
+
+class _TimeoutRuntime:
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        self.requests: list[float] = []
+        self.session = _Session()
+
+    def bounded_request_timeout_seconds(self, configured_seconds: float) -> float:
+        self.requests.append(configured_seconds)
+        return self.timeout_seconds
+
+
 class EnergyConnectorsCommonContractTests(unittest.TestCase):
-    def test_runtime_owner_and_cache_normalization_are_exact(self) -> None:
+    def test_runtime_owner_and_typed_cache_state_are_exact(self) -> None:
         runtime = SimpleNamespace()
         owner = SimpleNamespace(service=runtime)
         self.assertIs(_runtime_owner(owner), runtime)
         self.assertIs(_runtime_owner(runtime), runtime)
 
-        runtime.cache = {1: "one", "two": 2}
-        normalized = _cache_map(runtime, "cache")
-        self.assertEqual(normalized, {"1": "one", "two": 2})
-        self.assertIs(runtime.cache, normalized)
+        state = _runtime_state(runtime)
+        self.assertIsInstance(state, EnergyConnectorRuntimeState)
+        self.assertIs(_runtime_state(runtime), state)
+        self.assertIs(runtime._energy_connector_runtime_state, state)
 
-        runtime.missing = "not-a-map"
-        missing = _cache_map(runtime, "missing")
-        self.assertEqual(missing, {})
-        self.assertIs(runtime.missing, missing)
+        _runtime_cache_put(runtime, "numbers", "valid", 3)
+        _runtime_cache_put(runtime, "numbers", "invalid", "3")
+        self.assertEqual(_runtime_cache_get(runtime, "numbers", "valid", int), 3)
+        self.assertEqual(_runtime_cache_pop(runtime, "numbers", "valid"), 3)
+        self.assertIsNone(_runtime_cache_pop(runtime, "absent", "key"))
+        _runtime_cache_put(runtime, "numbers", "valid", 3)
+        self.assertIsNone(_runtime_cache_get(runtime, "numbers", "invalid", int))
+        self.assertIsNone(_runtime_cache_get(runtime, "numbers", "missing", int))
+        self.assertEqual(state.caches, {"numbers": {"valid": 3}})
 
-        absent = _cache_map(runtime, "absent")
-        self.assertEqual(absent, {})
-        self.assertIs(runtime.absent, absent)
+        second_runtime = SimpleNamespace()
+        self.assertIsNone(_runtime_cache_get(second_runtime, "missing", "key", int))
+        self.assertEqual(
+            second_runtime._energy_connector_runtime_state.caches,
+            {"missing": {}},
+        )
+        _runtime_cache_put(second_runtime, "numbers", "valid", 4)
+        self.assertEqual(_runtime_cache_get(second_runtime, "numbers", "valid", int), 4)
+        self.assertEqual(_runtime_cache_get(runtime, "numbers", "valid", int), 3)
 
-        runtime.typed = {"valid": 3, "invalid": "3"}
-        typed = _typed_cache_map(runtime, "typed", int)
-        self.assertEqual(typed, {"valid": 3})
-        self.assertIs(runtime.typed, typed)
+    def test_deadline_limiter_and_http_client_restore_configured_timeout(self) -> None:
+        self.assertEqual(_bounded_request_timeout_seconds(object(), 2.0), 2.0)
+        self.assertEqual(_bounded_request_timeout_seconds(object(), 0.0), 0.001)
+        self.assertEqual(_bounded_request_timeout_seconds(object(), -2.0), 0.001)
+
+        runtime = _TimeoutRuntime(0.3)
+        self.assertEqual(_bounded_request_timeout_seconds(runtime, 2.0), 0.3)
+        runtime.timeout_seconds = 4.0
+        self.assertEqual(_bounded_request_timeout_seconds(runtime, 2.0), 2.0)
+        runtime.timeout_seconds = -1.0
+        self.assertEqual(_bounded_request_timeout_seconds(runtime, 2.0), 0.001)
+        self.assertEqual(runtime.requests, [2.0, 2.0, 2.0])
+
+        runtime.timeout_seconds = 0.25
+        runtime.requests.clear()
+        client = EnergySourceHttpClient(runtime, 5.0)
+        self.assertEqual(
+            client._perform_request(
+                "GET",
+                "http://energy.local/${device}",
+                context={"device": "meter"},
+                json_template='{"source": "${device}"}',
+            ),
+            {"value": 1},
+        )
+        self.assertEqual(runtime.requests, [5.0])
+        self.assertEqual(runtime.session.url, "http://energy.local/meter")
+        self.assertEqual(runtime.session.timeout, 0.25)
+        self.assertEqual(
+            runtime.session.kwargs,
+            {"json": {"source": "meter"}, "stream": True},
+        )
+        self.assertEqual(client.timeout_seconds, 5.0)
+
+    def test_timeout_default_contract_is_structural_and_exact(self) -> None:
+        self.assertEqual(_runtime_default_timeout_seconds(object(), 2.0), 2.0)
+        self.assertEqual(
+            _runtime_default_timeout_seconds(
+                SimpleNamespace(shelly_request_timeout_seconds=3.5),
+                2.0,
+            ),
+            3.5,
+        )
+        self.assertEqual(
+            _runtime_default_timeout_seconds(
+                SimpleNamespace(shelly_request_timeout_seconds=0.0),
+                2.0,
+            ),
+            2.0,
+        )
 
     def test_connector_and_optional_path_normalization_is_exact(self) -> None:
-        self.assertEqual(_normalized_connector_type(" TEMPLATE_HTTP_ENERGY "), "template_http")
+        self.assertEqual(_normalized_connector_type(" TEMPLATE_HTTP "), "template_http")
         self.assertEqual(_normalized_connector_type(" MODBUS "), "modbus")
         self.assertEqual(_normalized_connector_type("  "), "")
 

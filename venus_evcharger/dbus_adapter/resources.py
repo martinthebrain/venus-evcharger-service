@@ -1,249 +1,180 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Host resource monitoring and event-loop timing for the DBus adapter."""
+"""Resource monitor orchestration for the DBus adapter."""
 
 from __future__ import annotations
 
 import os
 import time
-from collections import deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from math import isfinite
+from typing import TypeGuard
 
+from venus_evcharger.dbus_adapter import resource_metrics, resource_pressure, resource_procfs
 from venus_evcharger.ipc.command_types import CommandPayload
 
-CPU_IDLE_INDEX = 3
-CPU_IOWAIT_INDEX = 4
-CONSTRAINED_LOAD_PER_CPU = 1.5
-CONSTRAINED_CPU_PERCENT = 90.0
-CONSTRAINED_MEM_AVAILABLE_KB = 32768.0
-BUSY_LOAD_PER_CPU = 1.0
-BUSY_CPU_PERCENT = 80.0
-BUSY_MEM_AVAILABLE_KB = 65536.0
+DEFAULT_MEMORY_STALE_SECONDS = 10.0
 
 
-class TickHealth:
-    """Rolling event-loop tick diagnostics without touching DBus."""
+@dataclass(frozen=True, slots=True)
+class ResourceMonitorSettings:
+    """Sampling and recovery policy for host-resource observations."""
 
-    def __init__(self, *, window_seconds: float = 60.0) -> None:
-        self.window_seconds = max(1.0, float(window_seconds))
-        self._ticks: deque[tuple[float, float, bool, float, bool]] = deque()
-        self._last_tick_start = 0.0
+    sample_interval_seconds: float = 2.0
+    recovery_hold_seconds: float = 10.0
+    memory_stale_seconds: float = DEFAULT_MEMORY_STALE_SECONDS
 
-    def record(self, *, duration_ms: float, expected_interval_s: float, now: float | None = None) -> None:
-        current = time.monotonic() if now is None else float(now)
-        late = float(duration_ms) > max(0.0, float(expected_interval_s)) * 1000.0 * 2.0
-        gap_ms = max(0.0, (current - self._last_tick_start) * 1000.0) if self._last_tick_start > 0.0 else 0.0
-        late_gap = gap_ms > max(0.0, float(expected_interval_s)) * 1000.0 * 2.0
-        self._last_tick_start = current
-        self._ticks.append((current, max(0.0, float(duration_ms)), late, gap_ms, late_gap))
-        self._prune(current)
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "sample_interval_seconds",
+            max(0.0, float(self.sample_interval_seconds)),
+        )
+        object.__setattr__(
+            self,
+            "recovery_hold_seconds",
+            max(0.0, float(self.recovery_hold_seconds)),
+        )
+        object.__setattr__(
+            self,
+            "memory_stale_seconds",
+            max(0.0, float(self.memory_stale_seconds)),
+        )
 
-    def snapshot(self, *, now: float | None = None) -> CommandPayload:
-        current = time.monotonic() if now is None else float(now)
-        self._prune(current)
-        durations = self._durations()
-        gaps = self._gaps()
-        return {
-            "tick_count_60s": len(self._ticks),
-            "avg_tick_duration_ms_60s": _average(durations),
-            "max_tick_duration_ms_60s": max(durations) if durations else 0.0,
-            "late_ticks_60s": self._late_tick_count(),
-            "avg_tick_gap_ms_60s": _average(gaps),
-            "max_tick_gap_ms_60s": max(gaps) if gaps else 0.0,
-            "late_tick_gap_count_60s": self._late_gap_count(),
-        }
 
-    def _durations(self) -> list[float]:
-        return [duration for _timestamp, duration, _late, _gap, _late_gap in self._ticks]
+@dataclass(frozen=True, slots=True)
+class _MemoryObservation:
+    captured_at: float
+    values: Mapping[str, float]
 
-    def _gaps(self) -> list[float]:
-        return [gap for _timestamp, _duration, _late, gap, _late_gap in self._ticks if gap > 0.0]
 
-    def _late_tick_count(self) -> int:
-        return sum(1 for _timestamp, _duration, late, _gap, _late_gap in self._ticks if late)
-
-    def _late_gap_count(self) -> int:
-        return sum(1 for _timestamp, _duration, _late, _gap, late_gap in self._ticks if late_gap)
-
-    def _prune(self, now: float) -> None:
-        cutoff = now - self.window_seconds
-        while self._ticks and self._ticks[0][0] < cutoff:
-            self._ticks.popleft()
+@dataclass(frozen=True, slots=True)
+class _SnapshotCache:
+    payload: CommandPayload
+    valid_until: float
 
 
 class ResourceMonitor:
-    """Read lightweight CPU/RAM/process diagnostics from procfs only."""
+    """Sample host resources at a bounded cadence and classify pressure."""
 
-    def __init__(self, *, pid: int | None = None) -> None:
-        self.pid = os.getpid() if pid is None else int(pid)
-        self._last_sample: tuple[float, int, int, float] | None = None
-
-    def snapshot(self) -> CommandPayload:
-        now = time.monotonic()
-        total, idle = self._read_system_cpu()
-        proc_cpu = self._read_process_cpu_seconds()
-        system_cpu_pct, process_cpu_pct = self._cpu_percentages(now, total, idle, proc_cpu)
-        meminfo = self._read_meminfo()
-        status = self._read_process_status()
-        load1, load5, load15 = self._loadavg()
-        return self._snapshot_payload(
-            load=(load1, load5, load15),
-            meminfo=meminfo,
-            process_cpu_pct=process_cpu_pct,
-            status=status,
-            system_cpu_pct=system_cpu_pct,
-        )
-
-    def _snapshot_payload(
+    def __init__(
         self,
         *,
-        load: tuple[float, float, float],
-        meminfo: Mapping[str, float],
-        process_cpu_pct: float,
-        status: Mapping[str, float],
-        system_cpu_pct: float,
-    ) -> CommandPayload:
-        load1, load5, load15 = load
-        cpu_count = max(1, os.cpu_count() or 1)
-        mem_total = float(meminfo.get("MemTotal") or 0.0)
-        mem_available = float(meminfo.get("MemAvailable") or 0.0)
-        return {
-            "state": resource_state(load1 / cpu_count, system_cpu_pct, mem_available),
-            "loadavg_1m": load1,
-            "loadavg_5m": load5,
-            "loadavg_15m": load15,
-            "load_per_cpu_1m": load1 / cpu_count,
-            "system_cpu_pct": system_cpu_pct,
-            "mem_total_kb": mem_total,
-            "mem_available_kb": mem_available,
-            "mem_available_pct": _percentage(mem_available, mem_total),
-            "process": self._process_snapshot(status, process_cpu_pct),
-        }
-
-    def _process_snapshot(self, status: Mapping[str, float], process_cpu_pct: float) -> CommandPayload:
-        return {
-            "pid": self.pid,
-            "rss_kb": float(status.get("VmRSS") or 0.0),
-            "rss_hwm_kb": float(status.get("VmHWM") or 0.0),
-            "threads": int(status.get("Threads") or 0),
-            "fd_size": int(status.get("FDSize") or 0),
-            "open_fds": self._open_fd_count(),
-            "cpu_pct_one_core": process_cpu_pct,
-        }
-
-    def _cpu_percentages(self, now: float, total: int, idle: int, proc_cpu: float) -> tuple[float, float]:
-        if self._last_sample is None:
-            self._last_sample = (now, total, idle, proc_cpu)
-            return 0.0, 0.0
-        last_now, last_total, last_idle, last_proc_cpu = self._last_sample
-        self._last_sample = (now, total, idle, proc_cpu)
-        total_delta = max(0, total - last_total)
-        idle_delta = max(0, idle - last_idle)
-        elapsed = max(0.001, now - last_now)
-        system_pct = ((total_delta - idle_delta) / total_delta * 100.0) if total_delta > 0 else 0.0
-        process_pct = max(0.0, (proc_cpu - last_proc_cpu) / elapsed * 100.0)
-        return system_pct, process_pct
-
-    @staticmethod
-    def _loadavg() -> tuple[float, float, float]:
-        try:
-            load1, load5, load15 = os.getloadavg()
-            return float(load1), float(load5), float(load15)
-        except OSError:
-            return 0.0, 0.0, 0.0
-
-    @staticmethod
-    def _read_system_cpu() -> tuple[int, int]:
-        try:
-            with open("/proc/stat", encoding="utf-8") as handle:
-                parts = handle.readline().split()[1:]
-        except OSError:
-            return 0, 0
-        values = [int(float(part)) for part in parts]
-        idle = (values[CPU_IDLE_INDEX] if len(values) > CPU_IDLE_INDEX else 0) + (
-            values[CPU_IOWAIT_INDEX] if len(values) > CPU_IOWAIT_INDEX else 0
+        pid: int | None = None,
+        settings: ResourceMonitorSettings | None = None,
+        reader: resource_procfs.ResourceReader | None = None,
+        monotonic: Callable[[], float] | None = None,
+    ) -> None:
+        policy = settings if settings is not None else ResourceMonitorSettings()
+        self.pid = os.getpid() if pid is None else int(pid)
+        self.sample_interval_seconds = policy.sample_interval_seconds
+        self.memory_stale_seconds = policy.memory_stale_seconds
+        self._reader = reader if reader is not None else resource_procfs.ProcfsResourceReader(self.pid)
+        self._monotonic = monotonic if monotonic is not None else time.monotonic
+        self._cpu_usage = resource_metrics.CpuUsageTracker()
+        self._state = resource_pressure.ResourceStateLatch(
+            recovery_hold_seconds=policy.recovery_hold_seconds,
         )
-        return sum(values), idle
+        self._last_memory: _MemoryObservation | None = None
+        self._snapshot_cache: _SnapshotCache | None = None
 
-    def _read_process_cpu_seconds(self) -> float:
-        try:
-            with open(f"/proc/{self.pid}/stat", encoding="utf-8") as handle:
-                parts = handle.read().split()
-            ticks = float(parts[13]) + float(parts[14])
-            return ticks / float(os.sysconf(os.sysconf_names["SC_CLK_TCK"]))
-        except (OSError, IndexError, KeyError, ValueError):
-            return 0.0
+    def snapshot(self) -> CommandPayload:
+        now = self._monotonic()
+        cache = self._snapshot_cache
+        if cache is not None and now < cache.valid_until:
+            return _snapshot_copy(cache.payload)
+        metrics = self._measure(now)
+        state = self._state.observe(
+            load_per_cpu=metrics.load_per_cpu,
+            cpu_pct=metrics.system_cpu_pct,
+            mem_available_kb=metrics.mem_available_kb,
+            now=now,
+        )
+        payload = metrics.payload(pid=self.pid, state=state)
+        self._snapshot_cache = _SnapshotCache(payload, now + self.sample_interval_seconds)
+        return _snapshot_copy(payload)
 
-    @staticmethod
-    def _read_meminfo() -> dict[str, float]:
-        return _read_proc_numeric_mapping("/proc/meminfo")
+    def _measure(self, now: float) -> resource_metrics.ResourceMetrics:
+        cpu_count = self._reader.cpu_count()
+        system_cpu_pct, process_cpu_pct = self._cpu_usage.percentages(
+            now=now,
+            system_cpu=self._reader.system_cpu(),
+            process_cpu=self._reader.process_cpu_seconds(),
+            cpu_count=cpu_count,
+        )
+        meminfo, memory_status, memory_age = self._memory_sample(now)
+        process_status = self._reader.process_status()
+        load = self._reader.load_average()
+        open_fds = self._reader.open_fd_count()
+        return resource_metrics.ResourceMetrics(
+            load=load,
+            cpu_count=cpu_count,
+            system_cpu_pct=system_cpu_pct,
+            process_cpu_pct=process_cpu_pct,
+            meminfo=meminfo,
+            memory_sample_status=memory_status,
+            memory_sample_age_s=memory_age,
+            process_status=process_status,
+            open_fds=open_fds,
+        )
 
-    def _read_process_status(self) -> dict[str, float]:
-        return _read_proc_numeric_mapping(f"/proc/{self.pid}/status", digits_only=True)
-
-    def _open_fd_count(self) -> int:
-        try:
-            return len(os.listdir(f"/proc/{self.pid}/fd"))
-        except OSError:
-            return 0
-
-
-def _average(values: list[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
-
-
-def _read_proc_numeric_mapping(path: str, *, digits_only: bool = False) -> dict[str, float]:
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return _proc_numeric_lines(handle, digits_only=digits_only)
-    except (OSError, ValueError, IndexError):
-        return {}
-
-
-def _proc_numeric_lines(lines: Iterable[str], *, digits_only: bool) -> dict[str, float]:
-    values: dict[str, float] = {}
-    for line in lines:
-        key, separator, raw_value = line.partition(":")
-        if not separator:
-            return {}
-        token = _proc_numeric_token(raw_value, digits_only=digits_only)
-        if token is None:
-            continue
-        values[key] = float(token)
-    return values
+    def _memory_sample(
+        self,
+        now: float,
+    ) -> tuple[
+        Mapping[str, float] | None,
+        resource_metrics.MemorySampleStatus,
+        float | None,
+    ]:
+        current = self._reader.meminfo()
+        if _valid_memory_sample(current):
+            self._last_memory = _MemoryObservation(now, current)
+            return current, "fresh", 0.0
+        previous = self._last_memory
+        if previous is None:
+            return None, "unavailable", None
+        age = max(0.0, now - previous.captured_at)
+        if age <= self.memory_stale_seconds:
+            return previous.values, "cached", age
+        self._last_memory = None
+        return None, "unavailable", None
 
 
-def _proc_numeric_token(raw_value: str, *, digits_only: bool) -> str | None:
-    token = next(iter(raw_value.strip().split()), None)
-    if token is None:
+def _valid_memory_sample(
+    values: Mapping[str, float] | None,
+) -> TypeGuard[Mapping[str, float]]:
+    sample = _memory_values(values)
+    return sample is not None and _physical_memory_values(*sample)
+
+
+def _memory_values(
+    values: Mapping[str, float] | None,
+) -> tuple[float, float] | None:
+    if values is None:
         return None
-    if digits_only and not token.isdigit():
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable")
+    if total is None or available is None:
         return None
-    return token
+    return total, available
 
 
-def _percentage(value: float, total: float) -> float:
-    return (value / total * 100.0) if total > 0.0 else 0.0
-
-
-def resource_state(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> str:
-    if _resource_constrained(load_per_cpu, cpu_pct, mem_available_kb):
-        return "constrained"
-    if _resource_busy(load_per_cpu, cpu_pct, mem_available_kb):
-        return "busy"
-    return "ok"
-
-
-def _resource_constrained(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> bool:
+def _physical_memory_values(total: float, available: float) -> bool:
     return (
-        load_per_cpu >= CONSTRAINED_LOAD_PER_CPU
-        or cpu_pct >= CONSTRAINED_CPU_PERCENT
-        or mem_available_kb < CONSTRAINED_MEM_AVAILABLE_KB
+        isfinite(total)
+        and isfinite(available)
+        and total > 0.0
+        and 0.0 <= available <= total
     )
 
 
-def _resource_busy(load_per_cpu: float, cpu_pct: float, mem_available_kb: float) -> bool:
-    return (
-        load_per_cpu >= BUSY_LOAD_PER_CPU
-        or cpu_pct >= BUSY_CPU_PERCENT
-        or mem_available_kb < BUSY_MEM_AVAILABLE_KB
-    )
+def _snapshot_copy(payload: CommandPayload) -> CommandPayload:
+    copied = dict(payload)
+    process = payload.get("process")
+    if _is_object_mapping(process):
+        copied["process"] = dict(process)
+    return copied
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)

@@ -35,14 +35,18 @@ from venus_evcharger.ports.write import WriteControllerPort
 from venus_evcharger.ports.write_runtime import WriteControllerRuntimePort, WriteRuntimeServicePort
 from venus_evcharger.publish.dbus_diagnostics_sources import DbusDiagnosticsSources
 from venus_evcharger.service.composition_guards import (
+    is_auto_decision_service,
     is_auto_input_service,
     is_backend_target,
     is_publish_service,
     is_update_cycle_service,
+    is_write_runtime_service,
+    require_auto_decision_service,
     require_auto_input_service,
     require_backend_target,
     require_publish_service,
     require_update_cycle_service,
+    require_write_runtime_service,
 )
 
 
@@ -73,13 +77,29 @@ def _composition_host() -> SimpleNamespace:
             delay_source_retry=_no_operation,
             warning_throttled=_no_operation,
             worker_snapshot=_no_operation,
+            pending_relay_command=_no_operation,
+            write_auto_audit_event=_no_operation,
+            queue_relay_command=_no_operation,
+            publish_local_pm_status=_no_operation,
+            phase_selection_requires_pause=_no_operation,
+            apply_phase_selection=_no_operation,
         ),
         auto=SimpleNamespace(
+            clear_samples=_no_operation,
             mode_uses_auto_logic=_no_operation,
             decide_relay=_no_operation,
+            normalize_mode=_integer_mode,
         ),
-        state=SimpleNamespace(flush_runtime_overrides=_no_operation),
+        state=SimpleNamespace(
+            flush_runtime_overrides=_no_operation,
+            publish_field=_no_operation,
+            save_runtime_state=_no_operation,
+            summary=_no_operation,
+            save_runtime_overrides=_no_operation,
+            validate_runtime_config=_no_operation,
+        ),
         gateway_publication=object(),
+        auto_policy=AutoPolicy(),
         _dbus_live_publish_interval_seconds=1.0,
         _dbus_slow_publish_interval_seconds=5.0,
         _last_health_code=0,
@@ -87,6 +107,31 @@ def _composition_host() -> SimpleNamespace:
         last_status=0,
         started_at=0.0,
         virtual_set_current=6.0,
+        virtual_enable=1,
+        virtual_autostart=1,
+        virtual_startstop=1,
+        supported_phase_selections=("P1",),
+        requested_phase_selection="P1",
+        active_phase_selection="P1",
+        _phase_switch_lockout_selection=None,
+        _phase_switch_lockout_until=None,
+        _auto_mode_cutover_pending=False,
+        _ignore_min_offtime_once=False,
+        auto_manual_override_seconds=0.0,
+        auto_start_condition_since=None,
+        auto_stop_condition_since=None,
+        min_current=6.0,
+        max_current=16.0,
+        auto_start_delay_seconds=0.0,
+        auto_stop_delay_seconds=0.0,
+        auto_scheduled_enabled_days="mon,tue,wed,thu,fri,sat,sun",
+        auto_scheduled_night_start_delay_seconds=0.0,
+        auto_scheduled_latest_end_time="06:30",
+        auto_scheduled_night_current_amps=6.0,
+        _software_update_run_requested_at=None,
+        auto_dbus_backoff_base_seconds=1.0,
+        auto_dbus_backoff_max_seconds=60.0,
+        manual_override_until=None,
         auto_input_helper_restart_seconds=5.0,
         auto_input_helper_stale_seconds=10.0,
         auto_input_snapshot_path="/run/input.json",
@@ -148,6 +193,8 @@ class ServiceCompositionGuardContractTests(unittest.TestCase):
         for guard, requirement in (
             (is_publish_service, require_publish_service),
             (is_auto_input_service, require_auto_input_service),
+            (is_auto_decision_service, require_auto_decision_service),
+            (is_write_runtime_service, require_write_runtime_service),
             (is_update_cycle_service, require_update_cycle_service),
             (is_backend_target, require_backend_target),
         ):
@@ -196,10 +243,118 @@ class ServiceCompositionGuardContractTests(unittest.TestCase):
         self.assertFalse(is_update_cycle_service(missing_state_method))
         self.assertFalse(is_update_cycle_service(missing_auto_method))
 
+    def test_decision_and_write_guards_require_their_exact_collaborators(self) -> None:
+        decision_attributes = (
+            "virtual_mode",
+            "virtual_enable",
+            "virtual_autostart",
+            "auto_policy",
+            "_auto_mode_cutover_pending",
+            "_ignore_min_offtime_once",
+        )
+        for attribute in decision_attributes:
+            host = _composition_host()
+            delattr(host, attribute)
+            with self.subTest(decision_attribute=attribute):
+                self.assertFalse(is_auto_decision_service(host))
+
+        decision_collaborator_methods = {
+            "runtime": ("write_auto_audit_event", "pending_relay_command"),
+            "state": ("save_runtime_state",),
+        }
+        for collaborator_name, methods in decision_collaborator_methods.items():
+            for method in methods:
+                host = _composition_host()
+                delattr(getattr(host, collaborator_name), method)
+                with self.subTest(
+                    decision_collaborator=collaborator_name,
+                    missing_method=method,
+                ):
+                    self.assertFalse(is_auto_decision_service(host))
+
+        write_attributes = (
+            "auto_policy",
+            "virtual_mode",
+            "virtual_autostart",
+            "virtual_startstop",
+            "virtual_enable",
+            "auto_manual_override_seconds",
+            "auto_start_condition_since",
+            "auto_stop_condition_since",
+            "virtual_set_current",
+            "min_current",
+            "max_current",
+            "auto_start_delay_seconds",
+            "auto_stop_delay_seconds",
+            "auto_scheduled_enabled_days",
+            "auto_scheduled_night_start_delay_seconds",
+            "auto_scheduled_latest_end_time",
+            "auto_scheduled_night_current_amps",
+            "_software_update_run_requested_at",
+            "auto_dbus_backoff_base_seconds",
+            "auto_dbus_backoff_max_seconds",
+            "supported_phase_selections",
+            "requested_phase_selection",
+            "active_phase_selection",
+            "_phase_switch_lockout_selection",
+            "_phase_switch_lockout_until",
+            "_auto_mode_cutover_pending",
+            "_ignore_min_offtime_once",
+            "manual_override_until",
+            "time_now",
+        )
+        for attribute in write_attributes:
+            host = _composition_host()
+            delattr(host, attribute)
+            with self.subTest(write_attribute=attribute):
+                self.assertFalse(is_write_runtime_service(host))
+
+        collaborator_methods = {
+            "auto": ("clear_samples", "normalize_mode", "mode_uses_auto_logic"),
+            "runtime": (
+                "queue_relay_command",
+                "publish_local_pm_status",
+                "worker_snapshot",
+                "pending_relay_command",
+                "update_worker_snapshot",
+                "phase_selection_requires_pause",
+                "apply_phase_selection",
+            ),
+            "state": (
+                "publish_field",
+                "save_runtime_state",
+                "summary",
+                "save_runtime_overrides",
+                "validate_runtime_config",
+            ),
+        }
+        for collaborator_name, methods in collaborator_methods.items():
+            for method in methods:
+                host = _composition_host()
+                delattr(getattr(host, collaborator_name), method)
+                with self.subTest(
+                    collaborator=collaborator_name,
+                    missing_method=method,
+                ):
+                    self.assertFalse(is_write_runtime_service(host))
+
+        for invalid_policy in (None, object()):
+            host = _composition_host()
+            host.auto_policy = invalid_policy
+            with self.subTest(invalid_policy=invalid_policy):
+                self.assertFalse(is_auto_decision_service(host))
+                self.assertFalse(is_write_runtime_service(host))
+
+        host = _composition_host()
+        host.time_now = 1.0
+        self.assertFalse(is_write_runtime_service(host))
+
     def test_requirements_report_the_exact_failed_boundary(self) -> None:
         expected_errors = (
             (require_publish_service, "wallbox service does not implement PublishServicePort"),
             (require_auto_input_service, "wallbox service does not implement AutoInputSupervisorService"),
+            (require_auto_decision_service, "wallbox service does not implement AutoDecisionServicePort"),
+            (require_write_runtime_service, "wallbox service does not implement WriteRuntimeServicePort"),
             (require_update_cycle_service, "wallbox service does not implement UpdateCycleServicePort"),
             (require_backend_target, "wallbox service does not expose mutable backend state"),
         )

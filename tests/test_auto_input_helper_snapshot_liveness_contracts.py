@@ -84,8 +84,12 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         store = SnapshotStore(helper_settings(), FakeSources(), writer, lambda: stopped)
         with patch("venus_evcharger.inputs.helper.snapshot.time.time", return_value=12.0):
             self.assertFalse(store.validation_poll())
-        self.assertEqual(len(writer.payloads), 3)
+        self.assertEqual(len(writer.payloads), 1)
+        self.assertEqual(writer.payloads[0]["pv_power"], 100.0)
+        self.assertEqual(writer.payloads[0]["battery_soc"], 50.0)
+        self.assertEqual(writer.payloads[0]["grid_gateway_power"], -20.0)
         self.assertEqual(store.current()["captured_at"], 12.0)
+        self.assertIsNone(store._prepared_source_sample("unknown", 12.0))
 
     def test_heartbeat_and_lifecycle_preserve_values(self) -> None:
         writer = MemoryWriter()
@@ -129,6 +133,7 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
             self.assertEqual(sources.pv_power(), 50.0)
             self.assertEqual(sources.grid_power(), -10.0)
             self.assertEqual(sources.battery_snapshot()["battery_soc"], 60.0)
+        sources.close()
 
 
 class AutoInputHelperLivenessContracts(unittest.TestCase):

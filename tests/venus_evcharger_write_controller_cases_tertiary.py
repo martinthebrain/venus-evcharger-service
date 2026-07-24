@@ -8,10 +8,13 @@ class TestControlWriteControllerTertiary(ControlWriteControllerTestBase):
         self.assertIsNone(WriteControllerPort._relay_output_value({}))
         self.assertFalse(WriteControllerPort._relay_output_value({"output": 0}))
         self.assertTrue(WriteControllerPort._relay_output_value({"output": 1}))
+        self.assertIsNone(WriteControllerPort._relay_output_value({"output": "off"}))
+        self.assertIsNone(WriteControllerPort._relay_output_value({"output": 2}))
         self.assertFalse(WriteControllerPort._pending_relay_state_on([True, 100.0]))
         self.assertFalse(WriteControllerPort._pending_relay_state_on(()))
         self.assertFalse(WriteControllerPort._pending_relay_state_on((None, 100.0)))
         self.assertTrue(WriteControllerPort._pending_relay_state_on((True, 100.0)))
+        self.assertTrue(WriteControllerPort._pending_relay_state_on(("off", 100.0)))
 
     def test_write_port_rejects_non_string_contract_results(self) -> None:
         service = SimpleNamespace(

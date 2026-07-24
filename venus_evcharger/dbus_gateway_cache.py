@@ -3,12 +3,13 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypedDict, Unpack
+from typing import Unpack
 
-from venus_evcharger.core.shared import write_text_atomically
+from venus_evcharger import dbus_gateway_cache_io as cache_io
+from venus_evcharger import dbus_gateway_cache_metadata as cache_metadata
+from venus_evcharger import dbus_gateway_cache_snapshot as cache_snapshot
 from venus_evcharger.dbus_gateway_core import (
     DBUS_GATEWAY_SCHEMA_VERSION,
     CacheFreshnessKind,
@@ -18,60 +19,11 @@ from venus_evcharger.dbus_gateway_core import (
     _now,
     float_or_zero,
     gateway_paths,
-    is_object_mapping,
-    read_json_file,
-    write_json_file,
 )
 from venus_evcharger.ipc.command_types import CommandPayload
 from venus_evcharger.ipc.energy import EnergyInputsSnapshot, EnergyTopologySnapshot
-from venus_evcharger.ipc.energy_binary import write_energy_inputs_file
 
-NumericMetadataValue = str | bytes | bytearray | int | float
-NUMERIC_METADATA_TYPES = (str, bytes, bytearray, int, float)
-CACHE_FRESHNESS_KINDS: dict[str, CacheFreshnessKind] = {
-    "external_read": "external_read",
-    "local_owned": "local_owned",
-    "static": "static",
-    "diagnostic": "diagnostic",
-}
-
-
-def _value_age(updated_at: float, now: float) -> float:
-    return max(0.0, now - updated_at) if updated_at else 0.0
-
-
-def _value_is_stale(status: str, age: float, stale_after_seconds: float) -> bool:
-    return status == "fresh" and stale_after_seconds > 0.0 and age > stale_after_seconds
-
-
-def _valid_snapshot_payload(payload: object) -> bool:
-    return _snapshot_payload(payload) is not None
-
-
-def _snapshot_payload(payload: object) -> Mapping[object, object] | None:
-    if not is_object_mapping(payload):
-        return None
-    return payload if _snapshot_captured_at(payload) > 0.0 else None
-
-
-def _snapshot_captured_at(payload: Mapping[object, object]) -> float:
-    return float_or_zero(payload.get("captured_at"))
-
-
-def _snapshot_too_old(captured_at: float, current: float, max_age_seconds: float) -> bool:
-    return max_age_seconds >= 0.0 and current - captured_at > float(max_age_seconds)
-
-
-@dataclass(frozen=True)
-class CacheValueMetadata:
-    source: str
-    status: str = "fresh"
-    confidence: float = 1.0
-    last_error: str = ""
-    now: float | None = None
-    freshness_kind: CacheFreshnessKind = "external_read"
-    source_state: CacheSourceState = "active"
-    stale_after_seconds: float | None = None
+__all__ = ["DbusCacheStore"]
 
 
 @dataclass(frozen=True)
@@ -83,108 +35,6 @@ class _CacheReadFailure:
     now: float | None = None
     freshness_kind: CacheFreshnessKind | None = None
     retry_after_seconds: float | None = None
-
-
-class ExternalReadMetadata(TypedDict, total=False):
-    """Optional metadata accepted by the external-read cache boundary."""
-
-    source: str
-    status: str
-    confidence: float
-    last_error: str
-    now: float | None
-    stale_after_seconds: float | None
-    source_state: CacheSourceState
-
-
-def _cache_value_metadata(metadata: CacheValueMetadata | None, fields: Mapping[str, object]) -> CacheValueMetadata:
-    if metadata is not None:
-        if fields:
-            return CacheValueMetadata(
-                source=str(fields.get("source", metadata.source)),
-                status=str(fields.get("status", metadata.status)),
-                confidence=_metadata_float(fields.get("confidence"), metadata.confidence),
-                last_error=str(fields.get("last_error", metadata.last_error)),
-                now=_metadata_now(fields.get("now"), metadata.now),
-                freshness_kind=_metadata_freshness_kind(fields.get("freshness_kind"), metadata.freshness_kind),
-                source_state=_metadata_source_state(fields.get("source_state"), metadata.source_state),
-                stale_after_seconds=_metadata_optional_float(
-                    fields.get("stale_after_seconds"), metadata.stale_after_seconds
-                ),
-            )
-        return metadata
-    return CacheValueMetadata(
-        source=str(fields.get("source", "")),
-        status=str(fields.get("status", "fresh")),
-        confidence=_metadata_float(fields.get("confidence"), 1.0),
-        last_error=str(fields.get("last_error", "")),
-        now=_metadata_now(fields.get("now")),
-        freshness_kind=_metadata_freshness_kind(fields.get("freshness_kind"), "external_read"),
-        source_state=_metadata_source_state(fields.get("source_state"), "active"),
-        stale_after_seconds=_metadata_optional_float(fields.get("stale_after_seconds")),
-    )
-
-
-def _metadata_freshness_kind(value: object, fallback: CacheFreshnessKind) -> CacheFreshnessKind:
-    normalized = str(value) if value is not None else fallback
-    return CACHE_FRESHNESS_KINDS.get(normalized, fallback)
-
-
-def _metadata_source_state(value: object, fallback: CacheSourceState) -> CacheSourceState:
-    normalized = str(value) if value is not None else fallback
-    if normalized == "active":
-        return "active"
-    if normalized == "unavailable":
-        return "unavailable"
-    if normalized == "error":
-        return "error"
-    return fallback
-
-
-def _is_local_cache_value(
-    item: Mapping[str, object],
-    freshness_kind: CacheFreshnessKind,
-    service_name: str,
-) -> bool:
-    if not service_name:
-        return False
-    if freshness_kind in {"local_owned", "static"}:
-        return True
-    source = item.get("source")
-    return (
-        freshness_kind == "diagnostic"
-        and isinstance(source, str)
-        and source.startswith(f"{service_name}/")
-    )
-
-
-def _local_value_status(status: str, service_registered: bool) -> str:
-    if status != "fresh":
-        return status
-    return "fresh" if service_registered else "unavailable"
-
-
-def _metadata_optional_float(value: object, fallback: float | None = None) -> float | None:
-    if value is None:
-        return fallback
-    numeric_fallback = 0.0 if fallback is None else fallback
-    return max(0.0, _metadata_float(value, numeric_fallback))
-
-
-def _metadata_now(value: object, fallback: float | None = None) -> float | None:
-    if value is None:
-        return fallback
-    if isinstance(value, NUMERIC_METADATA_TYPES):
-        return float(value)
-    return fallback
-
-
-def _metadata_float(value: object, fallback: float) -> float:
-    if value is None:
-        return fallback
-    if isinstance(value, NUMERIC_METADATA_TYPES):
-        return float(value)
-    return fallback
 
 
 class DbusCacheStore:
@@ -215,10 +65,10 @@ class DbusCacheStore:
         key: str,
         value: object,
         *,
-        metadata: CacheValueMetadata | None = None,
+        metadata: cache_metadata.CacheValueMetadata | None = None,
         **metadata_fields: object,
     ) -> None:
-        details = _cache_value_metadata(metadata, metadata_fields)
+        details = cache_metadata.merge_cache_value_metadata(metadata, metadata_fields)
         current = _now() if details.now is None else float(details.now)
         previous = self.values.get(str(key), {})
         normalized_value = _json_ready(value)
@@ -245,7 +95,7 @@ class DbusCacheStore:
         self,
         key: str,
         value: object,
-        **metadata_fields: Unpack[ExternalReadMetadata],
+        **metadata_fields: Unpack[cache_metadata.ExternalReadMetadata],
     ) -> None:
         """Record a value obtained from the external DBus boundary."""
         self.update_value(
@@ -302,7 +152,7 @@ class DbusCacheStore:
         current = _now() if failure.now is None else float(failure.now)
         current_value = self.values.get(str(key), {})
         resolved_kind = (
-            _metadata_freshness_kind(current_value.get("freshness_kind"), "external_read")
+            cache_metadata.normalize_freshness_kind(current_value.get("freshness_kind"), "external_read")
             if failure.freshness_kind is None
             else failure.freshness_kind
         )
@@ -347,8 +197,11 @@ class DbusCacheStore:
     ) -> None:
         """Attach adapter-derived public snapshots without changing raw cache state."""
         self._energy_inputs_snapshot = inputs
-        self._energy_topology_snapshot = topology
         self.energy_inputs = inputs.to_payload()
+        self.set_energy_topology_snapshot(topology)
+
+    def set_energy_topology_snapshot(self, topology: EnergyTopologySnapshot) -> None:
+        self._energy_topology_snapshot = topology
         self.energy_topology = topology.to_payload()
 
     def snapshot(self, *, now: float | None = None) -> CommandPayload:
@@ -366,66 +219,39 @@ class DbusCacheStore:
         }
 
     def value_snapshot(self, item: Mapping[str, object], now: float) -> CommandPayload:
-        confirmed_at = float_or_zero(item.get("confirmed_at"))
-        changed_at = float_or_zero(item.get("changed_at"))
-        age = _value_age(confirmed_at, now)
-        status = self._value_status(item, age)
-        return {
-            **dict(item),
-            "age_s": age,
-            "change_age_s": _value_age(changed_at, now),
-            "status": status,
-        }
-
-    def _value_status(self, item: Mapping[str, object], age: float) -> str:
-        status = str(item.get("status", "unknown"))
-        freshness_kind = _metadata_freshness_kind(item.get("freshness_kind"), "external_read")
-        if _is_local_cache_value(item, freshness_kind, self.local_service_name):
-            return _local_value_status(status, self.local_service_registered)
-        stale_after = _metadata_float(item.get("stale_after_s"), self.stale_after_seconds)
-        if freshness_kind == "external_read" and _value_is_stale(status, age, stale_after):
-            return "stale"
-        return status
-
-    def write_snapshot_files(self) -> None:
-        os.makedirs(self.paths.run_dir, exist_ok=True)
-        snapshot = self.snapshot()
-        self._write_semantic_snapshot_files()
-        write_json_file(self.paths.cache_path, snapshot)
-        write_text_atomically(self.paths.cache_sequence_path, f"{self.sequence}\n")
-        write_json_file(
-            self.paths.health_path,
-            {
-                "schema_version": DBUS_GATEWAY_SCHEMA_VERSION,
-                "sequence": self.sequence,
-                "captured_at": snapshot["captured_at"],
-                "dbus_health": snapshot["dbus_health"],
-            },
+        return cache_snapshot.project_cache_value(
+            item,
+            now,
+            cache_snapshot.CacheLivenessPolicy(
+                stale_after_seconds=self.stale_after_seconds,
+                local_service_registered=self.local_service_registered,
+                local_service_name=self.local_service_name,
+            ),
         )
 
-    def _write_semantic_snapshot_files(self) -> None:
-        energy_inputs = self._energy_inputs_snapshot
-        energy_topology = self._energy_topology_snapshot
-        if energy_inputs is not None:
-            write_energy_inputs_file(self.paths.energy_inputs_path, energy_inputs)
-        if energy_topology is not None:
-            write_json_file(self.paths.energy_topology_path, energy_topology.to_payload())
+    def write_cache_snapshot(self, *, now: float | None = None) -> None:
+        snapshot = self.snapshot(now=now)
+        cache_io.write_cache_snapshot(self.paths, snapshot, self.sequence)
+
+    def write_health_snapshot(self, *, now: float | None = None) -> None:
+        captured_at = _now() if now is None else float(now)
+        cache_io.write_health_snapshot(
+            self.paths,
+            sequence=self.sequence,
+            captured_at=captured_at,
+            health=self.health,
+        )
+
+    def write_energy_inputs_snapshot(self) -> None:
+        cache_io.write_energy_inputs_snapshot(self.paths, self._energy_inputs_snapshot)
+
+    def write_energy_topology_snapshot(self) -> None:
+        cache_io.write_energy_topology_snapshot(self.paths, self._energy_topology_snapshot)
 
     @staticmethod
     def load_snapshot(path: str, *, max_age_seconds: float = 30.0, now: float | None = None) -> CommandPayload:
-        payload = _snapshot_payload(read_json_file(path))
-        if payload is None:
-            return {}
-        captured_at = _snapshot_captured_at(payload)
-        current = _now() if now is None else float(now)
-        if _snapshot_too_old(captured_at, current, max_age_seconds):
-            return {}
-        return {str(key): value for key, value in payload.items()}
+        return cache_snapshot.load_cache_snapshot(path, max_age_seconds=max_age_seconds, now=now)
 
     @staticmethod
     def value_entry(snapshot: Mapping[str, object], key: str) -> CommandPayload | None:
-        values = snapshot.get("values")
-        if not is_object_mapping(values):
-            return None
-        item = values.get(key)
-        return {str(item_key): item_value for item_key, item_value in item.items()} if is_object_mapping(item) else None
+        return cache_snapshot.cache_value_entry(snapshot, key)

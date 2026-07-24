@@ -32,7 +32,7 @@ class _EnergyConnectorsModbusCommandCases:
             )
 
             with patch("venus_evcharger.energy.connectors.create_modbus_transport", return_value=_FakeModbusTransport()):
-                snapshot = read_energy_source_snapshot(owner, source, 300.0)
+                snapshot = self._read_complete(owner, source, 300.0)
 
             self.assertEqual(snapshot.service_name, "192.0.2.10")
             self.assertEqual(snapshot.soc, 64.5)
@@ -68,7 +68,7 @@ class _EnergyConnectorsModbusCommandCases:
             )
 
             with patch("venus_evcharger.energy.connectors.create_modbus_transport", return_value=_FakeModbusTransport()):
-                snapshot = read_energy_source_snapshot(owner, source, 301.0)
+                snapshot = self._read_complete(owner, source, 301.0)
 
             self.assertEqual(snapshot.net_battery_power_w, 2000.0)
             self.assertEqual(snapshot.charge_power_w, 0.0)
@@ -97,8 +97,11 @@ class _EnergyConnectorsModbusCommandCases:
                 stdout='{"data":{"soc":57.0,"battery_power_w":1100.0,"ac_power_w":2500.0,"pv_input_power_w":1800.0,"grid_power_w":200.0,"mode":"support","online":true,"confidence":0.6}}'
             )
 
-            with patch("venus_evcharger.energy.connectors.subprocess.run", return_value=completed) as run_mock:
-                snapshot = read_energy_source_snapshot(owner, source, 400.0)
+            with patch(
+                "venus_evcharger.energy.connectors.run_bounded_command",
+                return_value=completed,
+            ) as run_mock:
+                snapshot = self._read_complete(owner, source, 400.0)
 
             self.assertEqual(snapshot.service_name, "python3")
             self.assertEqual(snapshot.soc, 57.0)
@@ -130,6 +133,9 @@ class _EnergyConnectorsModbusCommandCases:
             )
             completed = SimpleNamespace(stdout='["not-an-object"]')
 
-            with patch("venus_evcharger.energy.connectors.subprocess.run", return_value=completed):
+            with patch(
+                "venus_evcharger.energy.connectors.run_bounded_command",
+                return_value=completed,
+            ):
                 with self.assertRaisesRegex(ValueError, "did not return a JSON object"):
-                    read_energy_source_snapshot(owner, source, 1.0)
+                    self._read_complete(owner, source, 1.0)

@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from venus_evcharger.ports.gateway_diagnostic_discovery import GatewayDiscoveryState
 from venus_evcharger.ports.gateway_diagnostics import (
     GatewayDiagnosticsReader,
     GatewayDiagnosticsUnavailable,
-    GatewayDiscoveryState,
 )
 from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticValue
 

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.ipc.gateway_diagnostics import encode_gateway_diagnostics
@@ -28,13 +28,12 @@ class ForensicObserverTests(unittest.TestCase):
                 "[DEFAULT]\nDeviceInstance=70\nServiceName=com.example.ev\nPassword=secret\nControlApiToken=abc\nHost=192.0.2.1\n",
                 encoding="utf-8",
             )
-            defaults = observer.load_defaults(str(config_path))
+            defaults = observer.load_config(str(config_path))["DEFAULT"]
 
             self.assertEqual(observer.device_instance(defaults), 70)
-            self.assertEqual(observer.configured_host(defaults), "192.0.2.1")
             self.assertIn("Password=<redacted>", observer.redact_config_text(config_path.read_text(encoding="utf-8")))
             config_path.write_text("[DEFAULT]\nDeviceInstance=bad\nServiceName=\n", encoding="utf-8")
-            invalid_defaults = observer.load_defaults(str(config_path))
+            invalid_defaults = observer.load_config(str(config_path))["DEFAULT"]
             self.assertEqual(observer.device_instance(invalid_defaults), 60)
             self.assertEqual(observer.auto_input_snapshot_path(invalid_defaults), "/run/dbus-venus-evcharger-auto-60.json")
             self.assertEqual(observer.runtime_state_path(invalid_defaults), "/run/dbus-venus-evcharger-60.json")
@@ -52,10 +51,17 @@ class ForensicObserverTests(unittest.TestCase):
             self.assertEqual(observer.first_writable_log_dir([str(config_path)]), "")
             self.assertEqual(observer.read_mounts(str(Path(temp_dir) / "missing-mounts")), "")
             config_path.write_text("[DEFAULT]\nAutoInputSnapshotPath=/tmp/custom-auto.json\n", encoding="utf-8")
-            self.assertEqual(observer.auto_input_snapshot_path(observer.load_defaults(str(config_path))), "/tmp/custom-auto.json")
+            self.assertEqual(
+                observer.auto_input_snapshot_path(
+                    observer.load_config(str(config_path))["DEFAULT"]
+                ),
+                "/tmp/custom-auto.json",
+            )
             config_path.write_text("[DEFAULT]\nGatewayDiagnosticsSnapshotPath=/tmp/diagnostics.json\n", encoding="utf-8")
             self.assertEqual(
-                observer.gateway_diagnostics_snapshot_path(observer.load_defaults(str(config_path))),
+                observer.gateway_diagnostics_snapshot_path(
+                    observer.load_config(str(config_path))["DEFAULT"]
+                ),
                 "/tmp/diagnostics.json",
             )
 
@@ -82,18 +88,10 @@ class ForensicObserverTests(unittest.TestCase):
             [],
         )
 
-    def test_successful_commands_and_fetches(self):
+    def test_successful_command(self):
         completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
         with patch.object(observer.subprocess, "run", return_value=completed):
             self.assertTrue(observer.command_output(["true"])["ok"])
-
-        response = MagicMock()
-        response.__enter__.return_value.read.return_value = b'{"ok":true}'
-        with patch.object(observer.urllib.request, "urlopen", return_value=response):
-            shelly = observer.fetch_shelly_status("192.0.2.1")
-
-        self.assertTrue(shelly["ok"])
-        self.assertIn('"ok":true', shelly["payload"])
 
     def test_readers_commands_fetch_and_incident_bundle(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -114,9 +112,6 @@ class ForensicObserverTests(unittest.TestCase):
 
             with patch.object(observer.subprocess, "run", side_effect=RuntimeError("boom")):
                 self.assertFalse(observer.command_output(["false"])["ok"])
-            with patch.object(observer.urllib.request, "urlopen", side_effect=OSError("offline")):
-                self.assertFalse(observer.fetch_shelly_status("192.0.2.1")["ok"])
-            self.assertEqual(observer.fetch_shelly_status("")["skipped"], "no-host")
 
             incident_dir = observer.write_incident(
                 str(target),
@@ -154,6 +149,8 @@ class ForensicObserverTests(unittest.TestCase):
         self.assertIn("auto_input_snapshot", snapshot)
         self.assertIn("runtime_state", snapshot)
         self.assertIn("helper_processes", snapshot)
+        self.assertTrue(snapshot["backend_diagnostics"]["available"])
+        self.assertEqual(snapshot["backend_probe"]["status"], "disabled")
         self.assertEqual(
             observer.incident_reasons(
                 {"gateway_diagnostics": {"available": False}, "svstat": {"ok": False}, "trace_markers": []}
@@ -193,9 +190,9 @@ class ForensicObserverTests(unittest.TestCase):
             card = Path(temp_dir) / "card"
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\nPassword=secret\n", encoding="utf-8")
-            sleep_calls = []
+            sleep_calls: list[float] = []
 
-            def fake_sleep(_seconds):
+            def fake_sleep(_seconds: float) -> None:
                 sleep_calls.append(_seconds)
                 if len(sleep_calls) >= 2:
                     raise KeyboardInterrupt
@@ -220,9 +217,9 @@ class ForensicObserverTests(unittest.TestCase):
     def test_observer_loop_does_not_write_without_incident_reason(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             card = Path(temp_dir) / "card"
-            sleep_calls = []
+            sleep_calls: list[float] = []
 
-            def fake_sleep(_seconds):
+            def fake_sleep(_seconds: float) -> None:
                 sleep_calls.append(_seconds)
                 if len(sleep_calls) >= 2:
                     raise KeyboardInterrupt

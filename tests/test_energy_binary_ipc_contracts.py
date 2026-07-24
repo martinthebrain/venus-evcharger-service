@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import venus_evcharger.ipc.energy_binary as binary
 import venus_evcharger.dbus_gateway_cache as gateway_cache
+import venus_evcharger.dbus_gateway_cache_io as gateway_cache_io
 from venus_evcharger.dbus_gateway_cache import DbusCacheStore
 from venus_evcharger.dbus_gateway_client import GatewayClient
 from venus_evcharger.dbus_gateway_core import gateway_paths, write_json_file
@@ -66,7 +67,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
     def test_wire_format_and_exact_payload_limit_are_canonical(self) -> None:
         snapshot = EnergyInputsSnapshot(
             sequence=1,
-            captured_at=2.0,
+            captured_at=7.0,
             topology_generation=3,
             grid_power_w=MeasuredValue(4.0, 5.0, "fresh", 0.5, (), ""),
             pv_power_w=MeasuredValue(None, 0.0, "unavailable", 0.0, (), ""),
@@ -74,7 +75,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         )
         expected = b"".join(
             (
-                struct.pack(">4sBQQd", b"VEI1", 1, 1, 3, 2.0),
+                struct.pack(">4sBQQd", b"VEI1", 1, 1, 3, 7.0),
                 struct.pack(">BBdddH", 0, 1, 4.0, 5.0, 0.5, 0),
                 b"\x00\x00",
                 struct.pack(">BBdddH", 2, 0, 0.0, 0.0, 0.0, 0),
@@ -98,8 +99,47 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
             self.assertIsNone(binary.load_energy_inputs_file(path, max_age_seconds=2.0, now=103.001))
             self.assertEqual(binary.load_energy_inputs_file(path, max_age_seconds=0.0, now=101.0), _snapshot())
             self.assertIsNone(binary.load_energy_inputs_file(path, max_age_seconds=0.0, now=101.001))
+            self.assertEqual(binary.load_energy_inputs_file(path, max_age_seconds=2.0, now=100.0), _snapshot())
+            self.assertIsNone(binary.load_energy_inputs_file(path, max_age_seconds=2.0, now=99.999))
             self.assertEqual(binary.load_energy_inputs_file(path, max_age_seconds=-1.0, now=999.0), _snapshot())
             self.assertIsNone(binary.load_energy_inputs_file(path + ".missing", max_age_seconds=2.0))
+
+    def test_file_loader_bounds_input_before_decoding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "oversized.bin"
+            path.write_bytes(b"x" * (binary._MAX_PAYLOAD_BYTES + 2))
+            with patch.object(
+                binary,
+                "decode_energy_inputs",
+                side_effect=AssertionError("oversized payload must not be decoded"),
+            ):
+                self.assertIsNone(
+                    binary.load_energy_inputs_file(
+                        str(path),
+                        max_age_seconds=1.0,
+                        now=1.0,
+                    )
+                )
+
+    def test_bounded_reader_requests_one_guard_byte_and_reports_exact_limit(self) -> None:
+        path = Path("/run/test-energy-inputs.bin")
+        with patch.object(Path, "open") as open_file:
+            handle = open_file.return_value.__enter__.return_value
+            handle.read.return_value = b"abc"
+            with patch.object(binary, "_MAX_PAYLOAD_BYTES", 3):
+                self.assertEqual(binary._read_bounded_payload(path), b"abc")
+            open_file.assert_called_once_with("rb")
+            handle.read.assert_called_once_with(4)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            oversized = Path(temp_dir) / "oversized.bin"
+            oversized.write_bytes(b"abcd")
+            with (
+                patch.object(binary, "_MAX_PAYLOAD_BYTES", 3),
+                self.assertRaises(ValueError) as raised,
+            ):
+                binary._read_bounded_payload(oversized)
+            self.assertEqual(str(raised.exception), binary._PAYLOAD_SIZE_ERROR)
 
     def test_decoder_rejects_corrupt_envelopes(self) -> None:
         encoded = binary.encode_energy_inputs(_snapshot())
@@ -135,6 +175,26 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as raised:
                     binary.decode_energy_inputs(payload)
                 self.assertEqual(str(raised.exception), reason)
+
+    def test_reader_validates_struct_wire_types_without_static_casts(self) -> None:
+        reader = binary._BinaryReader(b"")
+        with patch.object(
+            reader,
+            "unpack",
+            return_value=("VEI1", 1, 1, 1, 1.0),
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid wire value type"):
+                reader.header()
+        with patch.object(
+            reader,
+            "unpack",
+            return_value=(0, 1, 2, 3.0, 4.0, 0),
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid wire value type"):
+                reader.measurement_fields()
+        with patch.object(reader, "unpack", return_value=(1.0,)):
+            with self.assertRaisesRegex(ValueError, "invalid wire value type"):
+                reader.text()
 
     def test_decoder_rejects_invalid_utf8_and_source_count(self) -> None:
         encoded = bytearray(binary.encode_energy_inputs(_snapshot()))
@@ -179,6 +239,24 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
                 replace(_snapshot(), grid_power_w=_measurement(1.0, source_ids=large_sources))
             )
 
+    def test_snapshot_rejects_measurements_beyond_future_tolerance(self) -> None:
+        boundary = replace(
+            _snapshot(),
+            grid_power_w=MeasuredValue(1.0, 102.0, "fresh", 1.0),
+        )
+        self.assertEqual(
+            binary.decode_energy_inputs(binary.encode_energy_inputs(boundary)),
+            boundary,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "grid_power_w observed_at exceeds captured_at tolerance",
+        ):
+            replace(
+                _snapshot(),
+                grid_power_w=MeasuredValue(1.0, 102.001, "fresh", 1.0),
+            )
+
     def test_loader_treats_invalid_files_and_clock_conversion_errors_as_absent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "energy.bin"
@@ -213,7 +291,10 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
             )
             store = DbusCacheStore(paths)
             store.set_semantic_energy_snapshots(inputs, topology)
-            store.write_snapshot_files()
+            store.write_energy_inputs_snapshot()
+            store.write_energy_topology_snapshot()
+            store.write_cache_snapshot()
+            store.write_health_snapshot()
             client = GatewayClient(paths)
 
             with patch.object(client, "load_cache", side_effect=AssertionError("full cache must not be parsed")):
@@ -223,23 +304,28 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
             Path(paths.energy_inputs_path).unlink()
             Path(paths.energy_topology_path).unlink()
             self.assertEqual(client.load_energy_inputs(), inputs)
-            self.assertEqual(client.load_energy_topology(), topology)
+            self.assertIsNone(client.load_energy_topology())
 
             write_json_file(
                 paths.energy_topology_path,
                 {"captured_at": captured_at, "invalid": True},
             )
-            self.assertEqual(client.load_energy_topology(), topology)
+            self.assertIsNone(client.load_energy_topology())
 
             with (
-                patch.object(gateway_cache.DbusCacheStore, "load_snapshot", return_value={}) as load_split,
-                patch.object(client, "load_cache", return_value={"energy_topology": topology.to_payload()}),
+                patch.object(
+                    gateway_cache.DbusCacheStore,
+                    "load_snapshot",
+                    return_value=topology.to_payload(),
+                ) as load_split,
+                patch.object(client, "load_health", return_value={"state": "ok"}) as load_health,
             ):
                 self.assertEqual(client.load_energy_topology(max_age_seconds=12.5), topology)
             load_split.assert_called_once_with(
                 paths.energy_topology_path,
-                max_age_seconds=12.5,
+                max_age_seconds=-1.0,
             )
+            load_health.assert_called_once_with(max_age_seconds=12.5)
 
     def test_cache_store_publishes_partial_semantic_snapshots_independently(self) -> None:
         inputs = _snapshot()
@@ -253,18 +339,20 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         self.assertIsNone(store._energy_topology_snapshot)
 
         with (
-            patch.object(gateway_cache, "write_energy_inputs_file") as write_inputs,
-            patch.object(gateway_cache, "write_json_file") as write_json,
+            patch.object(gateway_cache_io, "write_energy_inputs_file") as write_inputs,
+            patch.object(gateway_cache_io, "write_json_file") as write_json,
         ):
             store._energy_inputs_snapshot = inputs
-            store._write_semantic_snapshot_files()
+            store.write_energy_inputs_snapshot()
+            store.write_energy_topology_snapshot()
             write_inputs.assert_called_once_with(store.paths.energy_inputs_path, inputs)
             write_json.assert_not_called()
 
             write_inputs.reset_mock()
             store._energy_inputs_snapshot = None
             store._energy_topology_snapshot = topology
-            store._write_semantic_snapshot_files()
+            store.write_energy_inputs_snapshot()
+            store.write_energy_topology_snapshot()
             write_inputs.assert_not_called()
             write_json.assert_called_once_with(store.paths.energy_topology_path, topology.to_payload())
 

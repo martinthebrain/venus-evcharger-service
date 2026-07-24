@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Protocol, TypeGuard
 
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.core.contracts_basic import non_negative_int, normalize_binary_flag
@@ -12,8 +12,39 @@ from venus_evcharger.core.contracts_basic import non_negative_int, normalize_bin
 PendingRelayCommand = tuple[bool | None, float | None]
 
 
+class AutoDecisionStatePort(Protocol):
+    """State operation required by Auto decisions."""
+
+    def save_runtime_state(self) -> object: ...
+
+
+class AutoDecisionRuntimePort(Protocol):
+    """Runtime operations required by Auto decisions."""
+
+    def write_auto_audit_event(self, reason: str, cached: bool = False) -> object: ...
+
+    def pending_relay_command(self) -> object: ...
+
+
+class AutoDecisionServicePort(Protocol):
+    """Exact mutable service surface consumed by :class:`AutoDecisionPort`."""
+
+    virtual_mode: object
+    virtual_enable: object
+    virtual_autostart: object
+    auto_policy: AutoPolicy
+    _auto_mode_cutover_pending: object
+    _ignore_min_offtime_once: object
+    state: AutoDecisionStatePort
+    runtime: AutoDecisionRuntimePort
+
+
+def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
 def _require_pending_relay_command(value: object) -> PendingRelayCommand:
-    if not isinstance(value, tuple):
+    if not _is_object_tuple(value):
         raise TypeError(f"peek_pending_relay_command must return tuple, got {type(value).__name__}")
     if len(value) != 2:
         raise TypeError(f"peek_pending_relay_command must return tuple length 2, got {len(value)}")
@@ -38,7 +69,7 @@ def _pending_relay_requested_at(value: object) -> float | None:
 class AutoDecisionPort:
     """Expose Auto side effects without controller callbacks or dynamic forwarding."""
 
-    def __init__(self, service: Any) -> None:
+    def __init__(self, service: AutoDecisionServicePort) -> None:
         self.service = service
 
     def mode(self) -> int:

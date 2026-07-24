@@ -29,14 +29,12 @@ _BACKPRESSURE_STATES: dict[str, GatewayPressureState] = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SloThresholds:
     gui_max_age_seconds: float
     core_read_max_age_seconds: float
     queue_max_age_seconds: float
     mainloop_gap_max_ms: float
-    tick_seconds: float
-    max_tick_seconds: float
 
 
 def slo_payload(
@@ -57,15 +55,72 @@ def slo_payload(
 def slo_checks_from_observed(observed: Mapping[str, float], thresholds: SloThresholds) -> dict[str, bool]:
     gui_target = effective_gui_max_age_seconds(thresholds)
     return {
-        "gui_fresh": float(observed.get("gui_max_age_s", 0.0)) <= gui_target,
-        "gui_measurements_fresh": float(observed.get("gui_measurement_max_age_s", 0.0)) <= gui_target,
-        "gui_controls_fresh": float(observed.get("gui_control_max_age_s", 0.0)) <= gui_target,
-        "gui_session_fresh": float(observed.get("gui_session_max_age_s", 0.0)) <= gui_target,
-        "core_reads_fresh": float(observed.get("core_read_max_age_s", 0.0)) <= thresholds.core_read_max_age_seconds,
-        "queue_age_ok": float(observed.get("queue_oldest_age_s", 0.0)) <= thresholds.queue_max_age_seconds,
-        "mainloop_gap_ok": float(observed.get("mainloop_max_gap_ms_60s", 0.0))
-        <= effective_mainloop_gap_max_ms(thresholds),
+        "gui_fresh": freshness_check(
+            observed,
+            age_field="gui_max_age_s",
+            missing_field="gui_missing_field_count",
+            max_age=gui_target,
+        ),
+        "gui_measurements_fresh": freshness_check(
+            observed,
+            age_field="gui_measurement_max_age_s",
+            missing_field="gui_measurement_missing_field_count",
+            max_age=gui_target,
+        ),
+        "gui_controls_fresh": freshness_check(
+            observed,
+            age_field="gui_control_max_age_s",
+            missing_field="gui_control_missing_field_count",
+            max_age=gui_target,
+        ),
+        "gui_session_fresh": freshness_check(
+            observed,
+            age_field="gui_session_max_age_s",
+            missing_field="gui_session_missing_field_count",
+            max_age=gui_target,
+        ),
+        "core_reads_fresh": freshness_check(
+            observed,
+            age_field="core_read_max_age_s",
+            missing_field="core_read_missing_count",
+            max_age=thresholds.core_read_max_age_seconds,
+        )
+        and observed_zero(observed, "core_read_nonfresh_count"),
+        "queue_age_ok": observed_at_most(
+            observed,
+            "queue_oldest_age_s",
+            thresholds.queue_max_age_seconds,
+        ),
+        "mainloop_gap_ok": observed_at_most(
+            observed,
+            "mainloop_max_gap_ms_60s",
+            thresholds.mainloop_gap_max_ms,
+        ),
     }
+
+
+def freshness_check(
+    observed: Mapping[str, float],
+    *,
+    age_field: str,
+    missing_field: str,
+    max_age: float,
+) -> bool:
+    return observed_at_most(observed, age_field, max_age) and observed_zero(
+        observed,
+        missing_field,
+    )
+
+
+def observed_at_most(observed: Mapping[str, float], field: str, maximum: float) -> bool:
+    if field not in observed:
+        return False
+    value = float(observed[field])
+    return 0.0 <= value <= maximum
+
+
+def observed_zero(observed: Mapping[str, float], field: str) -> bool:
+    return field in observed and float(observed[field]) == 0.0
 
 
 def slo_targets(thresholds: SloThresholds) -> dict[str, float]:
@@ -75,20 +130,21 @@ def slo_targets(thresholds: SloThresholds) -> dict[str, float]:
         "gui_measurement_max_age_s": effective_gui_age,
         "gui_control_max_age_s": effective_gui_age,
         "gui_session_max_age_s": effective_gui_age,
+        "gui_missing_field_count": 0.0,
+        "gui_measurement_missing_field_count": 0.0,
+        "gui_control_missing_field_count": 0.0,
+        "gui_session_missing_field_count": 0.0,
         "configured_gui_max_age_s": thresholds.gui_max_age_seconds,
         "core_read_max_age_s": thresholds.core_read_max_age_seconds,
+        "core_read_missing_count": 0.0,
+        "core_read_nonfresh_count": 0.0,
         "queue_max_age_s": thresholds.queue_max_age_seconds,
-        "mainloop_gap_max_ms": effective_mainloop_gap_max_ms(thresholds),
+        "mainloop_gap_max_ms": thresholds.mainloop_gap_max_ms,
     }
 
 
 def effective_gui_max_age_seconds(thresholds: SloThresholds) -> float:
     return max(thresholds.gui_max_age_seconds, thresholds.core_read_max_age_seconds * 2.0)
-
-
-def effective_mainloop_gap_max_ms(thresholds: SloThresholds) -> float:
-    adaptive_tick_ms = max(thresholds.tick_seconds, thresholds.max_tick_seconds) * 1000.0
-    return max(thresholds.mainloop_gap_max_ms, adaptive_tick_ms * 2.5)
 
 
 def max_core_read_age(cache_freshness: Mapping[str, object]) -> float:
@@ -98,6 +154,29 @@ def max_core_read_age(cache_freshness: Mapping[str, object]) -> float:
         if f"{key}_age_s" in cache_freshness
     ]
     return max(ages) if ages else 0.0
+
+
+def core_read_missing_count(cache_freshness: Mapping[str, object]) -> float:
+    return float(
+        sum(
+            1
+            for key in ("grid_power_w", "pv_power_w", "battery_soc")
+            if str(cache_freshness.get(f"{key}_status", "missing")) == "missing"
+        )
+    )
+
+
+def core_read_nonfresh_count(cache_freshness: Mapping[str, object]) -> float:
+    return float(
+        sum(
+            1
+            for key in ("grid_power_w", "pv_power_w", "battery_soc")
+            if (
+                f"{key}_status" in cache_freshness
+                and str(cache_freshness[f"{key}_status"]) not in {"fresh", "missing"}
+            )
+        )
+    )
 
 
 def stale_core_read_keys(
@@ -116,7 +195,7 @@ def core_read_stale(key: str, cache_freshness: Mapping[str, object], *, max_age_
         return True
     if str(cache_freshness[status_key]) != "fresh":
         return True
-    return float_or_zero(cache_freshness[age_key]) > max_age_seconds
+    return float(float_or_zero(cache_freshness[age_key])) > max_age_seconds
 
 
 def regulated_publish_burst(
@@ -130,7 +209,7 @@ def regulated_publish_burst(
     burst = base_burst
     if queue_age > thresholds.queue_max_age_seconds:
         burst = min(max(burst * 3, burst + 4), 50)
-    if eventloop_gap_ms > effective_mainloop_gap_max_ms(thresholds):
+    if eventloop_gap_ms > thresholds.mainloop_gap_max_ms:
         burst = max(1, min(burst, max(1, base_burst // 2)))
     return pressure_limited_publish_burst(burst, base_burst=base_burst, pressure_state=pressure_state)
 
@@ -143,8 +222,7 @@ def runtime_pressure_state(resource_state: str, backpressure_state: str) -> Gate
 
 
 def higher_pressure_state(left: GatewayPressureState, right: GatewayPressureState) -> GatewayPressureState:
-    # Equal ranks necessarily represent the same Literal value, so either side is equivalent.
-    return left if _PRESSURE_RANK[left] >= _PRESSURE_RANK[right] else right  # pragma: no mutate
+    return max((left, right), key=_PRESSURE_RANK.__getitem__)
 
 
 def pressure_limited_publish_burst(

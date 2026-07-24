@@ -2,10 +2,24 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
+from typing import cast
 from unittest.mock import patch
 
 from tests.support.auto_input_helper import FakeEnergyGateway, helper_settings
-from venus_evcharger.inputs.helper.sources import AutoInputSources, empty_battery_snapshot
+from venus_evcharger.energy.models import EnergySourceDefinition, EnergySourceSnapshot
+from venus_evcharger.energy.read_steps import EnergySourceReadStep, completed_read
+from venus_evcharger.inputs.helper.external_contracts import (
+    ExternalPollingPolicy,
+    ProjectedEnergyValue,
+    PvProjectionPolicy,
+    PvSourcePolicyName,
+)
+from venus_evcharger.inputs.helper.sources import (
+    AutoInputSources,
+    _select_pv_projection,
+    empty_battery_snapshot,
+)
 from venus_evcharger.ipc.energy import MeasuredValue
 
 
@@ -53,6 +67,149 @@ class AutoInputHelperSourceContracts(unittest.TestCase):
         self.assertIsNone(self.sources.observed_at("unknown"))
         self.assertEqual(self.gateway.requests[0][0], "pv")
 
+    def test_pv_selection_policy_has_explicit_primary_and_fallback_order(self) -> None:
+        gateway = ProjectedEnergyValue(100.0, 10.0, "victron", 1.0)
+        external = ProjectedEnergyValue(200.0, 9.0, "huawei", 0.8)
+        cases = {
+            "gateway_only": gateway,
+            "gateway_preferred": gateway,
+            "external_preferred": external,
+            "external_only": external,
+        }
+        for policy_name, expected in cases.items():
+            with self.subTest(policy=policy_name):
+                policy = PvProjectionPolicy(name=cast(PvSourcePolicyName, policy_name))
+                self.assertEqual(_select_pv_projection(gateway, external, policy), expected)
+        self.assertIsNone(
+            _select_pv_projection(None, None, PvProjectionPolicy(name="external_only"))
+        )
+
+    def test_pv_selection_prefers_freshness_then_confidence_before_policy_order(self) -> None:
+        fresh_gateway = ProjectedEnergyValue(
+            100.0,
+            10.0,
+            "victron",
+            0.2,
+            "fresh",
+        )
+        stale_external = ProjectedEnergyValue(
+            200.0,
+            9.0,
+            "huawei",
+            1.0,
+            "stale",
+        )
+        self.assertIs(
+            _select_pv_projection(
+                fresh_gateway,
+                stale_external,
+                PvProjectionPolicy(name="external_preferred"),
+            ),
+            fresh_gateway,
+        )
+
+        high_confidence_external = replace(
+            fresh_gateway,
+            value=300.0,
+            source_id="huawei",
+            confidence=0.8,
+        )
+        self.assertIs(
+            _select_pv_projection(
+                fresh_gateway,
+                high_confidence_external,
+                PvProjectionPolicy(name="gateway_preferred"),
+            ),
+            high_confidence_external,
+        )
+        equal_quality_external = replace(
+            fresh_gateway,
+            value=400.0,
+            source_id="huawei",
+        )
+        self.assertIs(
+            _select_pv_projection(
+                fresh_gateway,
+                equal_quality_external,
+                PvProjectionPolicy(name="gateway_preferred"),
+            ),
+            fresh_gateway,
+        )
+
+    def test_future_gateway_observation_requests_refresh(self) -> None:
+        gateway = FakeEnergyGateway()
+        gateway.measurements["pv"] = MeasuredValue(
+            500.0,
+            101.0,
+            "fresh",
+            1.0,
+        )
+        sources = AutoInputSources(helper_settings(), gateway)
+        with patch(
+            "venus_evcharger.inputs.helper.sources.time.time",
+            return_value=100.0,
+        ):
+            sources.prepare_cycle()
+            self.assertIsNone(sources.pv_power())
+        self.assertEqual(gateway.requests[-1][0], "pv")
+
+    def test_external_battery_read_before_prepare_is_empty_and_requests_gateway(self) -> None:
+        definition = EnergySourceDefinition(
+            source_id="external",
+            role="battery",
+            connector_type="command_json",
+            config_path="/external.ini",
+        )
+        settings = replace(
+            helper_settings(),
+            energy_sources=(definition,),
+            external_polling_policy=ExternalPollingPolicy(),
+        )
+
+        def reader(
+            _runtime: object,
+            _source: EnergySourceDefinition,
+            _now: float,
+        ) -> EnergySourceReadStep:
+            raise AssertionError("unprepared source must not poll")
+
+        sources = AutoInputSources(settings, self.gateway, energy_source_reader=reader)
+        self.assertEqual(sources.battery_snapshot(), empty_battery_snapshot())
+        self.assertEqual(self.gateway.requests[0][0], "battery")
+
+    def test_external_only_missing_pv_uses_scheduler_retry_without_gateway_refresh(self) -> None:
+        definition = EnergySourceDefinition(
+            source_id="external",
+            role="battery",
+            connector_type="command_json",
+            config_path="/external.ini",
+        )
+        settings = replace(
+            helper_settings(),
+            energy_sources=(definition,),
+            external_polling_policy=ExternalPollingPolicy(),
+            pv_projection_policy=PvProjectionPolicy(name="external_only"),
+        )
+
+        def reader(
+            _runtime: object,
+            _source: EnergySourceDefinition,
+            now: float,
+        ) -> EnergySourceReadStep:
+            return completed_read(EnergySourceSnapshot(
+                source_id="external",
+                role="battery",
+                service_name="external",
+                soc=50.0,
+                online=True,
+                captured_at=now,
+            ))
+
+        sources = AutoInputSources(settings, self.gateway, energy_source_reader=reader)
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0):
+            sources.prepare_cycle()
+            self.assertIsNone(sources.pv_power())
+        self.assertEqual(self.gateway.requests, [])
 
 if __name__ == "__main__":
     unittest.main()

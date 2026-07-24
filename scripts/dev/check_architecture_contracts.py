@@ -18,6 +18,12 @@ from architecture_suppression_contracts import check_suppression_contracts
 REPO = Path(__file__).resolve().parents[2]
 
 FORBIDDEN_SUBSTRINGS = {
+    "DBUS_GATEWAY.md": (
+        "GatewayClient.request_read_key",
+        "GatewayClient.request_raw_value",
+        "gateway_read_value",
+        "kind=set_value",
+    ),
     "scripts/dev/pi_gateway_release_gate_remote.py": (
         "-m py_compile",
         "-m compileall",
@@ -26,9 +32,7 @@ FORBIDDEN_SUBSTRINGS = {
         "-m py_compile",
         "-m compileall",
     ),
-    "venus_evcharger/app/bootstrap_support.py": (
-        "setup_dbus_mainloop",
-    ),
+    "venus_evcharger/app/bootstrap_support.py": ("setup_dbus_mainloop",),
     "venus_evcharger/bootstrap/controller.py": (
         "_setup_dbus_mainloop",
         "_dbus_service_owned_by_current_process",
@@ -46,6 +50,11 @@ FORBIDDEN_FILE_PATTERNS = {
         "retired backend compatibility APIs": re.compile(
             r"\b(?:compat_legacy_backend_view|config_service_compat|"
             r"runtime_summary_from_legacy_service_attrs|service_has_legacy_backend_attrs)\b"
+        ),
+    },
+    "venus_evcharger/dbus_adapter/write": {
+        "retired write-scheduler inheritance roles": re.compile(
+            r"\bDbusWriteScheduler(?:Core|Publish|Semantic|Health)\b"
         ),
     },
     "tests": {
@@ -78,6 +87,65 @@ FORBIDDEN_FILE_PATTERNS = {
     },
 }
 
+REQUIRED_GATEWAY_CONTRACT_SYMBOLS = {
+    "venus_evcharger/ipc/energy_binary.py": frozenset(
+        {
+            "_MAX_PAYLOAD_BYTES",
+            "_read_bounded_payload",
+            "decode_energy_inputs",
+            "read",
+        }
+    ),
+    "venus_evcharger/ipc/energy_snapshots.py": frozenset(
+        {"EnergyInputsSnapshot", "__post_init__", "timestamp_not_future"}
+    ),
+    "venus_evcharger/ipc/deadline.py": frozenset(
+        {
+            "TRANSIENT_PUBLICATION_DEADLINE_SECONDS",
+            "command_deadline_expired",
+            "normalized_transient_deadline",
+            "remaining_transient_ttl",
+            "valid_deadline_anchor",
+        }
+    ),
+    "venus_evcharger/ipc/publication_order.py": frozenset(
+        {
+            "PUBLICATION_FIELD_ORDERS_FIELD",
+            "PublicationOrderHistory",
+            "PublicationOrderSequence",
+            "claim_durable",
+            "claim_fast",
+            "publication_field_orders",
+        }
+    ),
+    "venus_evcharger/ipc/fast_publication.py": frozenset(
+        {
+            "FastPublicationQueue",
+            "pop_next",
+            "prepare_durable",
+            "publication_field_orders",
+            "remaining_transient_ttl",
+            "requeue",
+        }
+    ),
+    "venus_evcharger/dbus_adapter/write/core.py": frozenset(
+        {
+            "_process_fast_publish_burst",
+            "_urgent_durable_ready",
+            "command_deadline_expired",
+            "process_local_publish_burst",
+        }
+    ),
+    "venus_evcharger/ipc/command_mailbox.py": frozenset(
+        {
+            "MAILBOX_REVISION_FIELD",
+            "MailboxLockTimeout",
+            "_locked",
+            "remove_if_current",
+        }
+    ),
+}
+
 
 @dataclass(frozen=True)
 class _AllowedMultipleInheritance:
@@ -85,132 +153,93 @@ class _AllowedMultipleInheritance:
     reason: str
 
 
+_PROTOCOL_COMPOSITION = "Protocol-only composition of explicit capabilities."
+
+
+def _allowed(*bases: str, reason: str = _PROTOCOL_COMPOSITION) -> _AllowedMultipleInheritance:
+    return _AllowedMultipleInheritance(bases=bases, reason=reason)
+
+
 ALLOWED_MULTIPLE_INHERITANCE = {
     "venus_evcharger/dbus_adapter/process/protocols/context.py": {
-        "DbusAdapterProcessContext": _AllowedMultipleInheritance(
-            bases=(
-                "DbusAdapterRuntimeContext",
-                "DbusAdapterSocketContext",
-                "DbusAdapterLoopContext",
-                "DbusAdapterIoContext",
-                "DbusAdapterHealthContext",
-                "DbusAdapterPublicationContext",
-                "DbusAdapterIntrospectionContext",
-                "DbusAdapterIntrospectionSnapshotContext",
-                "Protocol",
-            ),
-            reason="Protocol-only composition of adapter process contracts.",
-        ),
+        "DbusAdapterProcessContext": _allowed(
+            "DbusAdapterRuntimeContext", "DbusAdapterSocketContext", "DbusAdapterLoopContext",
+            "DbusAdapterIoContext", "DbusAdapterHealthContext", "DbusAdapterPublicationContext",
+            "DbusAdapterIntrospectionContext", "DbusAdapterIntrospectionSnapshotContext", "Protocol"
+        )
     },
     "venus_evcharger/control/http_api.py": {
-        "_ThreadingLocalControlUnixHttpServer": _AllowedMultipleInheritance(
-            bases=("socketserver.ThreadingMixIn", "socketserver.UnixStreamServer"),
-            reason="stdlib server composition for threaded Unix-domain HTTP.",
-        ),
+        "_ThreadingLocalControlUnixHttpServer": _allowed(
+            "socketserver.ThreadingMixIn", "socketserver.UnixStreamServer",
+            reason="stdlib server composition for threaded Unix-domain HTTP."
+        )
     },
     "venus_evcharger/update/offline_publish.py": {
-        "OfflineService": _AllowedMultipleInheritance(
-            bases=("RelayTelemetryService", "Protocol"),
-            reason="Protocol-only composition of offline publication capabilities.",
-        ),
+        "OfflineService": _allowed("RelayTelemetryService", "Protocol"),
     },
     "venus_evcharger/update/relay_ports.py": {
-        "PhaseSwitchCombinedRuntimePort": _AllowedMultipleInheritance(
-            bases=("PhaseSwitchRuntimePort", "RelayTelemetryRuntimePort", "Protocol"),
-            reason="Protocol-only composition of phase-switch runtime capabilities.",
+        "PhaseSwitchCombinedRuntimePort": _allowed(
+            "PhaseSwitchRuntimePort", "RelayTelemetryRuntimePort", "Protocol"
         ),
-        "PhaseSwitchServicePort": _AllowedMultipleInheritance(
-            bases=("RelayTelemetryService", "Protocol"),
-            reason="Protocol-only composition of phase-switch service capabilities.",
-        ),
+        "PhaseSwitchServicePort": _allowed("RelayTelemetryService", "Protocol"),
     },
     "venus_evcharger/update/relay_status_publish.py": {
-        "RelayStatusRuntimePort": _AllowedMultipleInheritance(
-            bases=("StatusRuntimePort", "ChargerRuntimePort", "RelayTelemetryRuntimePort", "Protocol"),
-            reason="Protocol-only composition of relay-status runtime capabilities.",
+        "RelayStatusRuntimePort": _allowed(
+            "StatusRuntimePort", "ChargerRuntimePort", "RelayTelemetryRuntimePort", "Protocol"
         ),
-        "RelayStatusService": _AllowedMultipleInheritance(
-            bases=("ChargerControlService", "RelayTelemetryService", "Protocol"),
-            reason="Protocol-only composition of relay-status service capabilities.",
-        ),
+        "RelayStatusService": _allowed("ChargerControlService", "RelayTelemetryService", "Protocol"),
     },
     "venus_evcharger/update/runtime_cycle_contracts.py": {
-        "UpdateCycleAutoPort": _AllowedMultipleInheritance(
-            bases=("StateAutoPort", "PhaseSwitchAutoPort", "OfflineAutoPort", "Protocol"),
-            reason="Protocol-only composition of update-cycle Auto capabilities.",
+        "UpdateCycleAutoPort": _allowed(
+            "StateAutoPort", "PhaseSwitchAutoPort", "OfflineAutoPort", "Protocol"
         ),
-        "UpdateCycleRuntimePort": _AllowedMultipleInheritance(
-            bases=(
-                "StateRuntimePort",
-                "PhaseSwitchRuntimePort",
-                "ChargerRuntimePort",
-                "RelayTelemetryRuntimePort",
-                "StatusRuntimePort",
-                "Protocol",
-            ),
-            reason="Protocol-only composition of update-cycle runtime capabilities.",
+        "UpdateCycleRuntimePort": _allowed(
+            "StateRuntimePort", "PhaseSwitchRuntimePort", "ChargerRuntimePort",
+            "RelayTelemetryRuntimePort", "StatusRuntimePort", "Protocol"
         ),
-        "UpdateCycleStatePort": _AllowedMultipleInheritance(
-            bases=("StatePublishPort", "PhaseSwitchStatePort", "OfflineStatePort", "Protocol"),
-            reason="Protocol-only composition of update-cycle state capabilities.",
+        "UpdateCycleStatePort": _allowed(
+            "StatePublishPort", "PhaseSwitchStatePort", "OfflineStatePort", "Protocol"
         ),
-        "UpdateCycleReadbackPort": _AllowedMultipleInheritance(
-            bases=("StateReadbackPort", "PhaseSwitchReadbackPort", "StatusReadbackPort", "Protocol"),
-            reason="Protocol-only composition of update-cycle readback capabilities.",
+        "UpdateCycleReadbackPort": _allowed(
+            "StateReadbackPort", "PhaseSwitchReadbackPort", "StatusReadbackPort", "Protocol"
         ),
-        "UpdateCycleServicePort": _AllowedMultipleInheritance(
-            bases=(
-                "UpdateStateService",
-                "InputCacheService",
-                "PmSnapshotService",
-                "OfflineService",
-                "PhaseSwitchServicePort",
-                "RelayStatusService",
-                "ChargerControlService",
-                "ChargerHealthService",
-                "_LearningRuntimeService",
-                "RuntimeWarningServicePort",
-                "Protocol",
-            ),
-            reason="Protocol-only composition of the complete update-cycle boundary.",
+        "UpdateCycleServicePort": _allowed(
+            "UpdateStateService", "InputCacheService", "PmSnapshotService", "OfflineService",
+            "PhaseSwitchServicePort", "RelayStatusService", "ChargerControlService",
+            "ChargerHealthService", "_LearningRuntimeService", "RuntimeWarningServicePort", "Protocol"
         ),
     },
 }
 
+_EXPECTED_LINEAR_CLASSES = (
+    ("venus_evcharger/controllers/state.py", "ServiceStateController"),
+    ("venus_evcharger/dbus_adapter/process/adapter.py", "DbusAdapter"),
+    ("venus_evcharger/dbus_adapter/process/diagnostics.py", "DbusAdapterDiagnostics"),
+    ("venus_evcharger/dbus_adapter/process/health.py", "DbusAdapterHealth"),
+    ("venus_evcharger/dbus_adapter/process/introspection.py", "DbusAdapterIntrospection"),
+    ("venus_evcharger/dbus_adapter/process/introspection_snapshot.py", "DbusAdapterIntrospectionSnapshot"),
+    ("venus_evcharger/dbus_adapter/process/io.py", "DbusAdapterIo"),
+    ("venus_evcharger/dbus_adapter/process/loop.py", "DbusAdapterLoop"),
+    ("venus_evcharger/dbus_adapter/process/publication.py", "DbusAdapterPublication"),
+    ("venus_evcharger/dbus_adapter/process/runtime.py", "DbusAdapterRuntime"),
+    ("venus_evcharger/dbus_adapter/process/socket.py", "DbusAdapterSocket"),
+    ("venus_evcharger/dbus_adapter/write/core.py", "WriteCommandQueue"),
+    ("venus_evcharger/dbus_adapter/write/health.py", "WriteSchedulerHealthTracker"),
+    ("venus_evcharger/dbus_adapter/write/publish.py", "GatewayPublicationExecutor"),
+    ("venus_evcharger/dbus_adapter/write/scheduler.py", "DbusWriteScheduler"),
+    ("venus_evcharger/dbus_adapter/write/semantic.py", "SemanticWriteExecutor"),
+    ("venus_evcharger/update/controller.py", "UpdateCycleController"),
+    ("venus_evcharger/service/controller_owner.py", "ServiceControllerOwner"),
+    ("venus_evcharger/service/auto_facade.py", "ServiceAutoFacade"),
+    ("venus_evcharger/service/runtime_facade.py", "ServiceRuntimeFacade"),
+    ("venus_evcharger/service/state_facade.py", "ServiceStateFacade"),
+    ("venus_evcharger/service/update_facade.py", "ServiceUpdateFacade"),
+    ("venus_evcharger/service/control.py", "ServiceControlFacade"),
+    ("venus_evcharger_service.py", "ShellyWallboxService"),
+    ("venus_evcharger_auto_input_helper.py", "AutoInputHelper"),
+)
 EXPECTED_CLASS_BASES: dict[str, dict[str, tuple[str, ...]]] = {
-    "venus_evcharger/controllers/state.py": {
-        "ServiceStateController": (),
-    },
-    "venus_evcharger/dbus_adapter/process/adapter.py": {
-        "DbusAdapter": ("DbusAdapterLoop",),
-    },
-    "venus_evcharger/update/controller.py": {
-        "UpdateCycleController": (),
-    },
-    "venus_evcharger/service/controller_owner.py": {
-        "ServiceControllerOwner": (),
-    },
-    "venus_evcharger/service/auto_facade.py": {
-        "ServiceAutoFacade": (),
-    },
-    "venus_evcharger/service/runtime_facade.py": {
-        "ServiceRuntimeFacade": (),
-    },
-    "venus_evcharger/service/state_facade.py": {
-        "ServiceStateFacade": (),
-    },
-    "venus_evcharger/service/update_facade.py": {
-        "ServiceUpdateFacade": (),
-    },
-    "venus_evcharger/service/control.py": {
-        "ServiceControlFacade": (),
-    },
-    "venus_evcharger_service.py": {
-        "ShellyWallboxService": (),
-    },
-    "venus_evcharger_auto_input_helper.py": {
-        "AutoInputHelper": (),
-    },
+    path: {class_name: ()} for path, class_name in _EXPECTED_LINEAR_CLASSES
 }
 
 RETIRED_STATE_MODULES = (
@@ -227,6 +256,23 @@ def _repo_text(path: Path) -> str:
 
 def _line_number(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
+
+
+def _module_symbols(path: Path) -> set[str]:
+    tree = ast.parse(_repo_text(path), filename=str(path))
+    return {
+        node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Name, ast.Attribute, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+
+def _check_required_gateway_contracts() -> list[str]:
+    return [
+        f"{relative}: required gateway contract symbol {symbol!r} is missing"
+        for relative, required in REQUIRED_GATEWAY_CONTRACT_SYMBOLS.items()
+        for symbol in sorted(required - _module_symbols(REPO / relative))
+    ]
 
 
 def _check_forbidden_substrings() -> list[str]:
@@ -395,6 +441,7 @@ def main() -> int:
         *check_suppression_contracts(REPO),
         *_check_gateway_surface_boundary(),
         *_check_dbus_adapter_layout(),
+        *_check_required_gateway_contracts(),
         *check_command_mailbox_contracts(REPO),
         *check_gateway_operation_contracts(REPO),
         *check_gateway_read_contracts(REPO),

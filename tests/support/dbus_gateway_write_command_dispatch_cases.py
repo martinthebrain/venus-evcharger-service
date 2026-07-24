@@ -14,6 +14,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     patch,
     time,
     unittest,
+    write_support_module,
 )
 from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command
 
@@ -29,11 +30,11 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
 
             self.assertTrue(adapter.write_scheduler.process_one())
             self.assertTrue(Path(command_path).exists())
-            adapter.write_scheduler.prune_budget(time.time() + 2.0)
+            adapter.write_scheduler.health_tracker.prune_budget(time.time() + 2.0)
 
             adapter.circuit.protective_until = 0.0
             process_command = install_mock(
-                adapter.write_scheduler,
+                adapter.write_scheduler.command_queue,
                 "process_command",
                 MagicMock(side_effect=DbusOperationDeferred("write")),
             )
@@ -41,7 +42,7 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
             self.assertTrue(Path(command_path).exists())
 
             process_command.side_effect = RuntimeError("boom")
-            adapter.write_scheduler.prune_budget(time.time() + 2.0)
+            adapter.write_scheduler.health_tracker.prune_budget(time.time() + 2.0)
             self.assertTrue(adapter.write_scheduler.process_one())
             self.assertTrue(Path(command_path).exists())
 
@@ -51,7 +52,7 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
             local_path = adapter.commands.enqueue(evcs_publication({"mode": 1}))
             operation_path = adapter.commands.enqueue(gx_relay_refresh_command(0))
             process_command = install_mock(
-                adapter.write_scheduler,
+                adapter.write_scheduler.command_queue,
                 "process_command",
                 MagicMock(return_value="applied"),
             )
@@ -68,14 +69,18 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
             adapter = scenario.adapter
             scheduler = adapter.write_scheduler
             install_mock(adapter.circuit, "allows_priority", MagicMock(return_value=True))
-            process_publication = install_mock(scheduler, "process_publication", MagicMock(return_value="applied"))
+            process_publication = install_mock(
+                scheduler.publication_executor,
+                "process",
+                MagicMock(return_value="applied"),
+            )
             process_operation = install_mock(
-                scheduler,
+                scheduler.semantic_executor,
                 "process_semantic_operation",
                 MagicMock(return_value="deferred"),
             )
             process_non_write = install_mock(
-                adapter,
+                scheduler.command_queue.adapter.introspection_role,
                 "process_non_write_command",
                 MagicMock(return_value="dropped"),
             )
@@ -99,7 +104,7 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
                 MagicMock(return_value=True),
             )
             dispatch = install_mock(
-                scheduler,
+                scheduler.command_queue,
                 "_dispatch_command",
                 MagicMock(return_value="applied"),
             )
@@ -111,11 +116,8 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
             dispatch.assert_called_once_with(command, command_file="")
 
     def test_command_kind_accepts_type_fallback_and_rejects_missing_identity(self) -> None:
-        with self.adapter_scenario() as scenario:
-            command_kind = scenario.adapter.write_scheduler._command_kind
-
-            self.assertEqual(command_kind({"type": "fallback"}), "fallback")
-            self.assertEqual(command_kind({}), "")
+        self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "fallback")
+        self.assertEqual(write_support_module.command_kind({}), "")
 
     def test_circuit_breaker_blocks_before_semantic_dispatch(self) -> None:
         with self.adapter_scenario() as scenario:
@@ -126,8 +128,8 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
                 MagicMock(return_value=False),
             )
             process_publication = install_mock(
-                scheduler,
-                "process_publication",
+                scheduler.publication_executor,
+                "process",
                 MagicMock(return_value="applied"),
             )
             command = evcs_publication({"mode": 2}, priority="critical")
@@ -140,20 +142,21 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
     def test_lifecycle_log_failures_do_not_break_scheduling(self) -> None:
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter
-            adapter.command_lifecycle_path = ""
-            adapter.write_scheduler.record_lifecycle(evcs_publication(), "queued")
+            tracker = adapter.write_scheduler.health_tracker
+            tracker.command_lifecycle_path = ""
+            adapter.write_scheduler.health_tracker.record_lifecycle(evcs_publication(), "queued")
             health = adapter.write_scheduler.health(now=time.time())
             lifecycle_counts = health["lifecycle_counts"]
             self.assertIsInstance(lifecycle_counts, dict)
             assert isinstance(lifecycle_counts, dict)
             self.assertEqual(lifecycle_counts["queued"], 1)
 
-            adapter.command_lifecycle_path = str(scenario.root / "lifecycle.jsonl")
+            tracker.command_lifecycle_path = str(scenario.root / "lifecycle.jsonl")
             with patch.object(builtins, "open", side_effect=OSError("full")):
-                adapter.write_scheduler.record_lifecycle(evcs_publication(), "dropped")
+                adapter.write_scheduler.health_tracker.record_lifecycle(evcs_publication(), "dropped")
 
-            adapter.command_lifecycle_path = "lifecycle-without-dir.jsonl"
+            tracker.command_lifecycle_path = "lifecycle-without-dir.jsonl"
             lifecycle_handle = unittest.mock.mock_open()
             with patch.object(builtins, "open", lifecycle_handle):
-                adapter.write_scheduler.record_lifecycle(evcs_publication(), "queued")
+                adapter.write_scheduler.health_tracker.record_lifecycle(evcs_publication(), "queued")
             lifecycle_handle.assert_not_called()

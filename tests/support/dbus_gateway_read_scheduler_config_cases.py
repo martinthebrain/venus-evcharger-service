@@ -8,9 +8,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     DbusReadScheduler,
     GatewayAdapterContractCase,
     configparser,
-    dbus_path_key,
     process_config_module,
-    read_pv_module,
     read_spec_from_mapping,
 )
 
@@ -21,24 +19,52 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
     def test_read_scheduler_tracks_due_reads_and_degraded_intervals(self) -> None:
         scheduler = DbusReadScheduler({"grid": {"interval": 2.0, "priority": "read"}})
 
-        due = scheduler.next_due(now=10.0, circuit_state="degraded", priority_allowed=lambda _priority: True)
+        due = scheduler.next_due(
+            monotonic_at=10.0,
+            circuit_state="degraded",
+            priority_allowed=lambda _priority: True,
+        )
         self.assertIsNotNone(due)
         assert due is not None
         key, _spec, interval = due
         self.assertEqual(key, "grid")
         self.assertEqual(interval, 6.0)
 
-        scheduler.record_success(key, now=10.0, interval=interval)
-        self.assertIsNone(scheduler.next_due(now=15.0, circuit_state="ok", priority_allowed=lambda _priority: True))
-        self.assertIsNotNone(scheduler.next_due(now=16.0, circuit_state="ok", priority_allowed=lambda _priority: True))
-        scheduler.record_error("grid", now=20.0, interval=2.0)
-        self.assertIsNone(scheduler.next_due(now=21.0, circuit_state="ok", priority_allowed=lambda _priority: True))
+        scheduler.record_success(key, monotonic_at=10.0, interval=interval)
+        self.assertIsNone(
+            scheduler.next_due(
+                monotonic_at=15.0,
+                circuit_state="ok",
+                priority_allowed=lambda _priority: True,
+            )
+        )
+        self.assertIsNotNone(
+            scheduler.next_due(
+                monotonic_at=16.0,
+                circuit_state="ok",
+                priority_allowed=lambda _priority: True,
+            )
+        )
+        scheduler.record_error("grid", monotonic_at=20.0, interval=2.0)
+        self.assertIsNone(
+            scheduler.next_due(
+                monotonic_at=21.0,
+                circuit_state="ok",
+                priority_allowed=lambda _priority: True,
+            )
+        )
         self.assertEqual(DbusReadScheduler.effective_interval({"interval": 2.0}, "protective"), 10.0)
         self.assertEqual(DbusReadScheduler.effective_interval({"interval": True}, "ok"), 2.0)
         self.assertEqual(DbusReadScheduler.effective_interval({"interval": "bad"}, "ok"), 2.0)
         self.assertEqual(DbusReadScheduler.effective_interval({"interval": object()}, "ok"), 2.0)
         blocked = DbusReadScheduler({"grid": {"interval": 1.0, "priority": "discovery"}})
-        self.assertIsNone(blocked.next_due(now=1.0, circuit_state="ok", priority_allowed=lambda _priority: False))
+        self.assertIsNone(
+            blocked.next_due(
+                monotonic_at=1.0,
+                circuit_state="ok",
+                priority_allowed=lambda _priority: False,
+            )
+        )
 
         fair = DbusReadScheduler(
             {
@@ -48,7 +74,11 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
             }
         )
         fair.next_read_at = {"grid": 100.0, "pv": 90.0, "battery": 0.0}
-        due = fair.next_due(now=100.0, circuit_state="ok", priority_allowed=lambda _priority: True)
+        due = fair.next_due(
+            monotonic_at=100.0,
+            circuit_state="ok",
+            priority_allowed=lambda _priority: True,
+        )
         self.assertIsNotNone(due)
         assert due is not None
         self.assertEqual(due[0], "battery")
@@ -112,45 +142,60 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
         self.assertTrue(true_spec["optional_zero_on_error"])
 
     def test_discovery_manager_tracks_success_and_error_backoff(self) -> None:
-        discovery = DbusDiscoveryManager(interval_seconds=900.0)
+        discovery = DbusDiscoveryManager(
+            interval_seconds=900.0,
+            missing_pv_interval_seconds=60.0,
+        )
 
-        self.assertTrue(discovery.due(now=100.0, priority_allowed=lambda _priority: True))
-        discovery.record_success(now=100.0)
-        self.assertEqual(discovery.last_success_at, 100.0)
-        self.assertEqual(discovery.next_scan_at, 1000.0)
-        self.assertFalse(discovery.due(now=999.0, priority_allowed=lambda _priority: True))
+        self.assertTrue(
+            discovery.due(
+                monotonic_at=100.0,
+                priority_allowed=lambda _priority: True,
+            )
+        )
+        discovery.record_success(
+            monotonic_at=100.0,
+            captured_at=1000.0,
+            needs_early_rescan=False,
+        )
+        self.assertEqual(discovery.last_success_at, 1000.0)
+        self.assertEqual(discovery.next_scan_monotonic, 1000.0)
+        self.assertEqual(discovery.next_scan_at, 1900.0)
+        self.assertFalse(
+            discovery.due(
+                monotonic_at=999.0,
+                priority_allowed=lambda _priority: True,
+            )
+        )
 
-        discovery.record_error(RuntimeError("dbus down"), now=200.0)
+        discovery.record_error(
+            RuntimeError("dbus down"),
+            monotonic_at=200.0,
+            captured_at=3000.0,
+        )
         self.assertEqual(discovery.last_error, "dbus down")
-        self.assertEqual(discovery.next_scan_at, 260.0)
-        self.assertFalse(discovery.due(now=260.0, priority_allowed=lambda _priority: False))
+        self.assertEqual(discovery.next_scan_monotonic, 260.0)
+        self.assertEqual(discovery.next_scan_at, 3060.0)
+        self.assertFalse(
+            discovery.due(
+                monotonic_at=260.0,
+                priority_allowed=lambda _priority: False,
+            )
+        )
 
     def test_read_scheduler_errors_back_off_and_success_resets_failure_count(self) -> None:
         scheduler = DbusReadScheduler({"pv": {"interval": 2.0, "priority": "read"}})
-        scheduler.record_error("pv", now=100.0, interval=2.0)
+        scheduler.record_error("pv", monotonic_at=100.0, interval=2.0)
         self.assertEqual(scheduler.failure_counts["pv"], 1)
         self.assertEqual(scheduler.next_read_at["pv"], 130.0)
-        scheduler.record_error("pv", now=130.0, interval=2.0)
+        scheduler.record_error("pv", monotonic_at=130.0, interval=2.0)
         self.assertEqual(scheduler.failure_counts["pv"], 2)
         self.assertEqual(scheduler.next_read_at["pv"], 190.0)
-        scheduler.record_success("pv", now=200.0, interval=2.0)
+        scheduler.record_success("pv", monotonic_at=200.0, interval=2.0)
         self.assertEqual(scheduler.failure_counts["pv"], 0)
         self.assertEqual(scheduler.next_read_at["pv"], 202.0)
         scheduler.force_due(["missing"])
         self.assertNotIn("missing", scheduler.next_read_at)
-
-    def test_pv_member_backoff_ignores_non_numeric_probe_timestamps(self) -> None:
-        key = dbus_path_key("com.victronenergy.system", "/Dc/Pv/Power")
-        for next_probe_at in (True, "bad", object()):
-            cached = {key: {"source_state": "unavailable", "next_probe_at": next_probe_at}}
-            self.assertFalse(
-                read_pv_module.pv_member_in_backoff(
-                    cached,
-                    "com.victronenergy.system",
-                    "/Dc/Pv/Power",
-                    now=100.0,
-                )
-            )
 
     def test_adapter_static_config_helpers_cover_defaults_and_invalid_instance(self) -> None:
         parser = configparser.ConfigParser()

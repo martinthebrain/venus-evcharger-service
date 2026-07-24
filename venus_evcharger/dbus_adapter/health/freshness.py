@@ -52,6 +52,7 @@ def cache_freshness(cache: DbusCacheStore, now: float) -> CommandPayload:
         "static_status_counts": status_counts(values_for_kinds(values, {"static"})),
         "diagnostic_status_counts": status_counts(diagnostic_values),
         "critical_stale_count": count_status(critical_values, "stale"),
+        **critical_value_health(values),
         "optional_source_error_count": optional_source_error_count(external_values),
         "optional_source_unavailable_count": optional_source_unavailable_count(external_values),
         **important_freshness(values),
@@ -86,6 +87,27 @@ def status_counts(values: CacheValues) -> dict[str, int]:
         status = str(value.get("status", "unknown"))
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def critical_value_health(values: CacheValues) -> CommandPayload:
+    statuses = critical_value_statuses(values)
+    return {
+        "critical_missing_count": statuses.count("missing"),
+        "critical_nonfresh_count": sum(
+            status not in {"fresh", "missing"} for status in statuses
+        ),
+    }
+
+
+def critical_value_statuses(values: CacheValues) -> tuple[str, ...]:
+    return tuple(
+        (
+            str(values[key].get("status", "missing"))
+            if key in values
+            else "missing"
+        )
+        for key in CORE_ENERGY_READ_KEYS
+    )
 
 
 def important_freshness(values: CacheValues) -> CommandPayload:

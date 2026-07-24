@@ -9,6 +9,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     patch,
     write_support_module,
 )
+from venus_evcharger.ipc.deadline import deadline_pair
 from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command
 
 
@@ -30,7 +31,7 @@ class GatewayWriteSupportCases(GatewayAdapterContractCase):
         }
         for priority, rank in expected.items():
             self.assertEqual(write_support_module.priority_rank(priority), rank)
-        self.assertEqual(write_support_module.deadline_pair({"deadline_s": "2.5", "created_at": "4"}), (2.5, 4.0))
+        self.assertEqual(deadline_pair({"deadline_s": "2.5", "created_at": "4"}), (2.5, 4.0))
         self.assertEqual(write_support_module.command_kind({"kind": "semantic", "type": "fallback"}), "semantic")
         self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "fallback")
         self.assertEqual(write_support_module.command_kind({}), "")
@@ -43,6 +44,28 @@ class GatewayWriteSupportCases(GatewayAdapterContractCase):
             )
         )
         self.assertFalse(write_support_module.is_local_publish_command({"kind": "register_evcs"}))
+
+    def test_all_safety_and_user_work_reserves_durable_capacity(self) -> None:
+        self.assertTrue(
+            write_support_module.is_urgent_durable_command(
+                {"kind": "gx_relay_set_enabled", "priority": "safety"}
+            )
+        )
+        self.assertTrue(
+            write_support_module.is_urgent_durable_command(
+                {"kind": "ess_grid_setpoint", "priority": "user"}
+            )
+        )
+        self.assertTrue(
+            write_support_module.is_urgent_durable_command(
+                {"kind": "publish_evcs_fields", "priority": "safety"}
+            )
+        )
+        self.assertFalse(
+            write_support_module.is_urgent_durable_command(
+                {"kind": "gx_relay_refresh", "priority": "read"}
+            )
+        )
         self.assertFalse(write_support_module.is_local_publish_command(gx_relay_refresh_command(0)))
 
     def test_local_burst_action_and_time_budget_helpers(self) -> None:

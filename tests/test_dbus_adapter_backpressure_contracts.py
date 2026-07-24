@@ -27,13 +27,16 @@ class DbusAdapterBackpressureContractTests(unittest.TestCase):
     def test_slo_reasons_filter_to_backpressure_relevant_violations(self) -> None:
         slo = {
             "violated": [
-                "gui_publish_fresh",
+                "gui_fresh",
                 "queue_age_ok",
                 "core_reads_fresh",
                 "eventloop_gap_ok",
             ]
         }
-        self.assertEqual(backpressure_slo_reasons(slo), ["queue_age_ok", "core_reads_fresh"])
+        self.assertEqual(
+            backpressure_slo_reasons(slo),
+            ["gui_fresh", "queue_age_ok", "core_reads_fresh"],
+        )
 
     def test_reasons_preserve_policy_order_and_strict_queue_boundary(self) -> None:
         self.assertEqual(
@@ -60,7 +63,10 @@ class DbusAdapterBackpressureContractTests(unittest.TestCase):
         self.assertEqual(backpressure_state("ok", 0.0, [], queue_max_age_seconds=limit), "ok")
 
     def test_snapshot_exposes_exact_core_policy_for_each_state(self) -> None:
-        cases = (
+        cases: tuple[
+            tuple[str, dict[str, object], dict[str, object], dict[str, object]],
+            ...,
+        ] = (
             (
                 "ok",
                 {"oldest_command_age_s": 0.0, "oldest_slo_command_age_s": 0.0},

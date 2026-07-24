@@ -28,7 +28,7 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
         """Replace the removed registered-path fixture with semantic registration."""
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter
-            self.assertEqual(adapter.write_scheduler.process_publication(evcs_registration()), "applied")
+            self.assertEqual(adapter.write_scheduler.publication_executor.process(evcs_registration()), "applied")
             adapter.commands.enqueue(
                 EnergyRefreshRequest("scheduler-topology", "topology", 0.0).to_command(source="scheduler-test")
             )
@@ -61,9 +61,9 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
             with scenario_context as scenario:
                 adapter = scenario.adapter
                 fake_loop = MagicMock()
-                install_mock(adapter, "install_signal_handlers", MagicMock())
-                install_mock(adapter, "start_socket", MagicMock())
-                install_mock(adapter, "close_socket", MagicMock())
+                install_mock(adapter.runtime_role, "install_signal_handlers", MagicMock())
+                install_mock(adapter.socket_role, "start_socket", MagicMock())
+                install_mock(adapter.socket_role, "close_socket", MagicMock())
 
                 with (
                     patch.object(process_loop_module, "DBusGMainLoop") as dbus_mainloop,
@@ -74,7 +74,7 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                     adapter.run()
 
                 dbus_mainloop.assert_called_once_with(set_as_default=True)
-                adapter.install_signal_handlers.assert_called_once()
+                adapter.runtime_role.install_signal_handlers.assert_called_once()
                 self.assertEqual(
                     makedirs.call_args_list,
                     [
@@ -83,12 +83,15 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                         ((adapter.paths.core_command_dir,), {"exist_ok": True}),
                     ],
                 )
-                adapter.start_socket.assert_called_once()
-                timeout_add.assert_called_once_with(max(50, int(adapter.min_tick_seconds * 1000)), adapter.tick)
+                adapter.socket_role.start_socket.assert_called_once()
+                timeout_add.assert_called_once_with(
+                    max(50, int(adapter.min_tick_seconds * 1000)),
+                    adapter.loop_role.tick,
+                )
                 fake_loop.run.assert_called_once_with()
                 self.assertIs(adapter._main_loop, fake_loop)
                 self.assertTrue(adapter._stop)
-                adapter.close_socket.assert_called_once()
+                adapter.socket_role.close_socket.assert_called_once()
 
 
 if __name__ == "__main__":
