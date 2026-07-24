@@ -124,8 +124,19 @@ class SnapshotStore:
     def refresh_all(self, now: float | None = None) -> None:
         current = time.time() if now is None else float(now)
         self.sources.prepare_cycle()
-        for source_name in ("pv", "battery", "grid"):
-            self._refresh_prepared_source(source_name, current)
+        samples = tuple(
+            sample
+            for source_name in ("pv", "battery", "grid")
+            if (sample := self._prepared_source_sample(source_name, current))
+            is not None
+        )
+        with self._lock:
+            snapshot = dict(self._state)
+            for value, target, observed_at in samples:
+                self._apply_source(snapshot, target, value, observed_at)
+            self._finalize(snapshot, current)
+            self._state = snapshot
+            self.writer.write(snapshot)
 
     def validation_poll(self) -> bool:
         self.refresh_all()
@@ -190,6 +201,18 @@ class SnapshotStore:
         if source_name == "grid":
             return self.sources.grid_power(), _SourceTarget("grid", "grid_gateway_power", "grid_gateway_captured_at")
         return None
+
+    def _prepared_source_sample(
+        self,
+        source_name: str,
+        current: float,
+    ) -> tuple[object, _SourceTarget, float] | None:
+        source = self._source_read(source_name)
+        if source is None:
+            return None
+        value, target = source
+        observed_at = self.sources.observed_at(source_name) or current
+        return value, target, observed_at
 
     def _finalize(self, snapshot: Snapshot, current: float) -> None:
         apply_grid_fusion(self._grid_fusion, snapshot, current)

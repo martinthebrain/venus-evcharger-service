@@ -146,15 +146,27 @@ class EnergyIpcContracts(unittest.TestCase):
         inputs = EnergyInputsSnapshot(7, 101.0, 3, value, value, value)
         self.assertEqual(EnergyInputsSnapshot.from_payload(inputs.to_payload()), inputs)
         with self.assertRaises(TypeError):
-            EnergyInputsSnapshot(1, 1.0, 1, cast(MeasuredValue, object()), value, value)
+            EnergyInputsSnapshot(1, 101.0, 1, cast(MeasuredValue, object()), value, value)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(-1, 1.0, 1, value, value, value)
+            EnergyInputsSnapshot(-1, 101.0, 1, value, value, value)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(1, 1.0, -1, value, value, value)
+            EnergyInputsSnapshot(1, 101.0, -1, value, value, value)
         with self.assertRaises(ValueError):
             EnergyInputsSnapshot(1, 0.0, 1, value, value, value)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(1, 1.0, 1, value, value, value, schema_version=2)
+            EnergyInputsSnapshot(1, 101.0, 1, value, value, value, schema_version=2)
+        with self.assertRaisesRegex(
+            ValueError,
+            "grid_power_w observed_at exceeds captured_at tolerance",
+        ):
+            EnergyInputsSnapshot(
+                1,
+                98.999,
+                1,
+                value,
+                MeasuredValue(None, 0.0, "unknown", 0.0),
+                MeasuredValue(None, 0.0, "unknown", 0.0),
+            )
 
     def test_refresh_request_round_trip_and_transport_envelope(self) -> None:
         request = EnergyRefreshRequest("request-1", "pv", 5.0, "priority", reason="stale input")
@@ -210,7 +222,7 @@ class EnergyIpcContracts(unittest.TestCase):
 
     def test_snapshot_parsers_reject_untrusted_payload_shapes(self) -> None:
         measurement = _measurement().to_payload()
-        inputs = EnergyInputsSnapshot(1, 1.0, 1, _measurement(), _measurement(), _measurement()).to_payload()
+        inputs = EnergyInputsSnapshot(1, 101.0, 1, _measurement(), _measurement(), _measurement()).to_payload()
         topology = EnergyTopologySnapshot(1, 1.0, ()).to_payload()
         invalid_calls: tuple[tuple[Callable[[object], object], object], ...] = (
             (MeasuredValue.from_payload, []),
@@ -226,6 +238,56 @@ class EnergyIpcContracts(unittest.TestCase):
         for parser, payload in invalid_calls:
             with self.subTest(parser=parser.__qualname__, payload=payload), self.assertRaises((TypeError, ValueError)):
                 parser(payload)
+
+    def test_snapshot_parsers_report_exact_boundary_failures(self) -> None:
+        descriptor = EnergySourceDescriptor(
+            "source-a",
+            "grid",
+            "online",
+            ("power",),
+        )
+        topology = EnergyTopologySnapshot(1, 1.0, (descriptor,)).to_payload()
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "^energy topology must be an object with string keys$",
+        ):
+            EnergyTopologySnapshot.from_payload([])
+        with self.assertRaisesRegex(
+            ValueError,
+            "^energy topology has an unsupported schema_version$",
+        ):
+            EnergyTopologySnapshot.from_payload(
+                {**topology, "schema_version": ENERGY_IPC_SCHEMA_VERSION + 1}
+            )
+        with self.assertRaisesRegex(
+            ValueError,
+            r"^energy topology fields mismatch missing=\['sources'\] extra=\[\]$",
+        ):
+            EnergyTopologySnapshot.from_payload(
+                {key: value for key, value in topology.items() if key != "sources"}
+            )
+        with self.assertRaisesRegex(
+            TypeError,
+            "^energy topology sources must be a sequence$",
+        ):
+            EnergyTopologySnapshot.from_payload({**topology, "sources": "source-a"})
+
+        duplicate = (descriptor, descriptor)
+        with self.assertRaisesRegex(
+            ValueError,
+            "^energy topology source_ids must be unique$",
+        ):
+            EnergyTopologySnapshot(1, 1.0, duplicate)
+        with self.assertRaisesRegex(
+            TypeError,
+            "^energy topology sources must be EnergySourceDescriptor values$",
+        ):
+            EnergyTopologySnapshot(
+                1,
+                1.0,
+                cast(tuple[EnergySourceDescriptor, ...], (object(),)),
+            )
 
 
 if __name__ == "__main__":

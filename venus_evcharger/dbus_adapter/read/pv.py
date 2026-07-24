@@ -4,11 +4,9 @@
 
 from __future__ import annotations
 
-import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
-from venus_evcharger.dbus_gateway import dbus_path_key
 
 PV_MEMBER_ERROR_BACKOFF_SECONDS = 300.0
 
@@ -16,42 +14,30 @@ PV_MEMBER_ERROR_BACKOFF_SECONDS = 300.0
 def pv_total_members(
     spec: ReadSpec,
     ac_services: Sequence[str],
-    cached_values: Mapping[str, Mapping[str, object]],
-    *,
-    now: float | None = None,
 ) -> list[tuple[str, str]]:
-    current_time = time.time() if now is None else now
     return [
-        *ac_pv_members(spec, ac_services, cached_values, now=current_time),
-        *dc_pv_members(spec, cached_values, now=current_time),
+        *ac_pv_members(spec, ac_services),
+        *dc_pv_members(spec),
     ]
 
 
 def ac_pv_members(
     spec: ReadSpec,
     services: Sequence[str],
-    cached_values: Mapping[str, Mapping[str, object]],
-    *,
-    now: float,
 ) -> list[tuple[str, str]]:
     path = str(spec.get("path") or "")
     return [
         (service, path)
         for service in services
-        if path and not pv_member_in_backoff(cached_values, service, path, now=now)
+        if path
     ]
 
 
 def dc_pv_members(
     spec: ReadSpec,
-    cached_values: Mapping[str, Mapping[str, object]],
-    *,
-    now: float,
 ) -> list[tuple[str, str]]:
     target = dc_pv_target(spec) if use_dc_pv(spec) else None
-    if target is None or pv_member_in_backoff(cached_values, *target, now=now):
-        return []
-    return [target]
+    return [] if target is None else [target]
 
 
 def dc_pv_target(spec: ReadSpec) -> tuple[str, str] | None:
@@ -65,37 +51,7 @@ def dc_pv_target(spec: ReadSpec) -> tuple[str, str] | None:
 
 
 def use_dc_pv(spec: ReadSpec) -> bool:
-    if "use_dc_pv" not in spec:
-        return False
-    return str(spec["use_dc_pv"]).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def pv_member_in_backoff(
-    cached_values: Mapping[str, Mapping[str, object]],
-    service: str,
-    path: str,
-    *,
-    now: float | None = None,
-) -> bool:
-    entry = cached_values.get(dbus_path_key(service, path), {})
-    if entry.get("source_state") != "unavailable":
-        return False
-    if "next_probe_at" not in entry:
-        return False
-    next_probe_at = _float_or_zero(entry["next_probe_at"])
-    current_time = time.time() if now is None else now
-    return next_probe_at > current_time
-
-
-def _float_or_zero(raw_value: object) -> float:
-    if isinstance(raw_value, bool):
-        return 0.0
-    if isinstance(raw_value, (float, int, str)):
-        try:
-            return float(raw_value)
-        except ValueError:
-            return 0.0
-    return 0.0
+    return spec.get("use_dc_pv") is True
 
 
 def _stripped_text(raw_value: object) -> str:

@@ -30,7 +30,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.cache.update_services(["svc.first"])
-            adapter.energy_discovery.update_services(["svc.first"], now=1.0)
+            adapter.energy_discovery.update_services(["svc.first"], captured_at=1.0)
             read_busitem = install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=12.0))
 
             outcome = adapter.read_executor.poll_read_spec(
@@ -229,7 +229,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            adapter.energy_discovery.update_services(["com.victronenergy.battery.test"], now=10.0)
+            adapter.energy_discovery.update_services(["com.victronenergy.battery.test"], captured_at=10.0)
             source_id = adapter.energy_discovery.source_ids("battery")[0]
             force_due = install_mock(adapter.read_scheduler, "force_due", MagicMock())
             request = EnergyRefreshRequest("battery-source", "energy_source", 0.0, source_id=source_id)
@@ -286,7 +286,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 ["svc.explicit"],
             )
             adapter.cache.update_services(["svc.2", "other.1", "svc.1"])
-            adapter.energy_discovery.update_services(["svc.2", "other.1", "svc.1"], now=1.0)
+            adapter.energy_discovery.update_services(["svc.2", "other.1", "svc.1"], captured_at=1.0)
             self.assertEqual(adapter.read_executor._services_for_sum({"prefix": "svc."}), ["svc.1", "svc.2"])
 
             install_mock(adapter.read_executor, "read_busitem", MagicMock(side_effect=[2.0, 3.5]))
@@ -500,7 +500,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 )
 
             adapter.cache.update_services(["pv.2", "other.1", "pv.1"])
-            adapter.energy_discovery.update_services(["pv.2", "other.1", "pv.1"], now=1.0)
+            adapter.energy_discovery.update_services(["pv.2", "other.1", "pv.1"], captured_at=1.0)
             aggregate.reset_mock()
             self.assertEqual(
                 adapter.read_executor._poll_services_sum_step(

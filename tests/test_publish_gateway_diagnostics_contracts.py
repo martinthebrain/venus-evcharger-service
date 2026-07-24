@@ -52,12 +52,12 @@ class GatewayDiscoveryDiagnosticsContractTests(unittest.TestCase):
         self.assertEqual(values.unusable_source_count, 0)
         self.assertEqual(values.age_seconds, -1.0)
 
-    def test_future_capture_time_clamps_age_to_zero(self) -> None:
-        values = GatewayDiscoveryDiagnostics(
+    def test_future_capture_time_is_rejected(self) -> None:
+        projection = GatewayDiscoveryDiagnostics(
             gateway_diagnostics_reader(captured_at=110.0)
-        ).values(100.0)
-
-        self.assertEqual(values.age_seconds, 0.0)
+        )
+        with self.assertRaisesRegex(ValueError, "captured_at"):
+            projection.values(100.0)
 
 
 if __name__ == "__main__":

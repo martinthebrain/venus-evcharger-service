@@ -22,14 +22,14 @@ class DbusReadScheduler:
     def next_due(
         self,
         *,
-        now: float,
+        monotonic_at: float,
         circuit_state: str,
         priority_allowed: Callable[[str], bool],
     ) -> tuple[str, ReadSpec, float] | None:
         due_keys = [
             key
             for key in self.specs
-            if now >= self.next_read_at[key]
+            if monotonic_at >= self.next_read_at[key]
         ]
         due_keys.sort(key=lambda key: (self.next_read_at[key], self._order[key]))
         for key in due_keys:
@@ -40,17 +40,35 @@ class DbusReadScheduler:
             return None
         return None
 
-    def record_success(self, key: str, *, now: float, interval: float) -> None:
+    def record_success(
+        self,
+        key: str,
+        *,
+        monotonic_at: float,
+        interval: float,
+    ) -> None:
         normalized = str(key)
         self.failure_counts[normalized] = 0
-        self.next_read_at[normalized] = float(now) + max(0.0, float(interval))
+        self.next_read_at[normalized] = float(monotonic_at) + max(
+            0.0,
+            float(interval),
+        )
 
-    def record_error(self, key: str, *, now: float, interval: float) -> None:
+    def record_error(
+        self,
+        key: str,
+        *,
+        monotonic_at: float,
+        interval: float,
+    ) -> None:
         normalized = str(key)
         failures = min(6, self.failure_counts.get(normalized, 0) + 1)
         self.failure_counts[normalized] = failures
         base = max(float(interval) * 10.0, 30.0)
-        self.next_read_at[normalized] = float(now) + min(300.0, base * (2 ** (failures - 1)))
+        self.next_read_at[normalized] = float(monotonic_at) + min(
+            300.0,
+            base * (2 ** (failures - 1)),
+        )
 
     def force_due(self, keys: set[str] | tuple[str, ...] | list[str]) -> None:
         """Make selected read specs due as soon as the DBus rate limiter allows."""
@@ -70,28 +88,91 @@ class DbusReadScheduler:
 
 
 class DbusDiscoveryManager:
-    """Track service discovery cadence and diagnostic state."""
+    """Track monotonic discovery cadence plus wallclock diagnostics."""
 
-    def __init__(self, *, interval_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        interval_seconds: float,
+        missing_pv_interval_seconds: float = 60.0,
+    ) -> None:
         self.interval_seconds = max(5.0, float(interval_seconds))
-        self.next_scan_at = 0.0
+        self.missing_pv_interval_seconds = min(
+            self.interval_seconds,
+            max(15.0, float(missing_pv_interval_seconds)),
+        )
+        self.next_scan_monotonic = 0.0
         self.last_success_at = 0.0
+        self.next_scan_at = 0.0
         self.last_error = ""
+        self.active_interval_seconds = self.interval_seconds
 
-    def due(self, *, now: float, priority_allowed: Callable[[str], bool]) -> bool:
-        return now >= self.next_scan_at and priority_allowed("discovery")
+    def due(
+        self,
+        *,
+        monotonic_at: float,
+        priority_allowed: Callable[[str], bool],
+    ) -> bool:
+        return (
+            monotonic_at >= self.next_scan_monotonic
+            and priority_allowed("discovery")
+        )
 
-    def record_success(self, *, now: float) -> None:
-        self.last_success_at = float(now)
+    def record_success(
+        self,
+        *,
+        monotonic_at: float,
+        captured_at: float,
+        needs_early_rescan: bool,
+    ) -> None:
+        interval = (
+            self.missing_pv_interval_seconds
+            if needs_early_rescan
+            else self.interval_seconds
+        )
+        self.last_success_at = float(captured_at)
         self.last_error = ""
-        self.next_scan_at = float(now) + self.interval_seconds
+        self.active_interval_seconds = interval
+        self.next_scan_monotonic = float(monotonic_at) + interval
+        self.next_scan_at = float(captured_at) + interval
 
-    def record_error(self, error: BaseException, *, now: float) -> None:
+    def record_error(
+        self,
+        error: BaseException,
+        *,
+        monotonic_at: float,
+        captured_at: float,
+    ) -> None:
+        retry_seconds = min(
+            60.0,
+            self.interval_seconds,
+            self.missing_pv_interval_seconds,
+        )
         self.last_error = str(error)
-        self.next_scan_at = float(now) + min(60.0, self.interval_seconds)
+        self.active_interval_seconds = retry_seconds
+        self.next_scan_monotonic = float(monotonic_at) + retry_seconds
+        self.next_scan_at = float(captured_at) + retry_seconds
+
+    def defer_for(
+        self,
+        *,
+        monotonic_at: float,
+        captured_at: float,
+        seconds: float,
+    ) -> None:
+        delay = max(0.0, float(seconds))
+        self.next_scan_monotonic = max(
+            self.next_scan_monotonic,
+            float(monotonic_at) + delay,
+        )
+        self.next_scan_at = max(
+            self.next_scan_at,
+            float(captured_at) + delay,
+        )
 
     def force_due(self) -> None:
         """Schedule one topology refresh without exposing DBus discovery details."""
+        self.next_scan_monotonic = 0.0
         self.next_scan_at = 0.0
 
 

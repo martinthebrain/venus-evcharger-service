@@ -176,7 +176,7 @@ class ModbusSerialRtuTransport:
         """Send one Modbus RTU request and return the response PDU."""
         attempts = self._serial_attempt_count()
         last_error: BaseException | None
-        for attempt_index in range(attempts):  # pragma: no branch
+        for attempt_index in range(attempts):
             exchange_result, last_error = self._serial_attempt_with_recovery(
                 request,
                 timeout_seconds,

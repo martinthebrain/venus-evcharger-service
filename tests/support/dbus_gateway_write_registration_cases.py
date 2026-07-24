@@ -45,10 +45,10 @@ class GatewayWriteRegistrationCases(GatewayAdapterContractCase):
     def test_repeated_evcs_registration_updates_existing_semantic_fields(self) -> None:
         with self.adapter_scenario() as scenario:
             scheduler = scenario.adapter.write_scheduler
-            self.assertEqual(scheduler.process_publication(evcs_registration({"mode": 0})), "applied")
+            self.assertEqual(scheduler.publication_executor.process(evcs_registration({"mode": 0})), "applied")
             registered_paths = scenario.adapter.publication_registry.registered_path_count
 
-            self.assertEqual(scheduler.process_publication(evcs_registration({"mode": 2})), "applied")
+            self.assertEqual(scheduler.publication_executor.process(evcs_registration({"mode": 2})), "applied")
 
             self.assertEqual(scenario.adapter.publication_registry.service_count, 1)
             self.assertEqual(scenario.adapter.publication_registry.registered_path_count, registered_paths)
@@ -57,7 +57,7 @@ class GatewayWriteRegistrationCases(GatewayAdapterContractCase):
         with self.adapter_scenario() as scenario:
             command = companion_registration("grid-primary", {"connected": 1, "ac_power_w": 125.0})
 
-            self.assertEqual(scenario.adapter.write_scheduler.process_publication(command), "applied")
+            self.assertEqual(scenario.adapter.write_scheduler.publication_executor.process(command), "applied")
 
             self.assertEqual(scenario.adapter.publication_registry.service_count, 1)
             self.assertFalse(scenario.adapter.publication_registry.evcs_registered)
@@ -65,6 +65,6 @@ class GatewayWriteRegistrationCases(GatewayAdapterContractCase):
     def test_publication_waits_for_its_semantic_registration(self) -> None:
         with self.adapter_scenario() as scenario:
             self.assertEqual(
-                scenario.adapter.write_scheduler.process_publication(evcs_publication({"connected": 1})),
+                scenario.adapter.write_scheduler.publication_executor.process(evcs_publication({"connected": 1})),
                 "deferred",
             )

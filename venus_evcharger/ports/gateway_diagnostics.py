@@ -1,195 +1,34 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Transport-neutral gateway diagnostics exposed to operational consumers."""
+"""Aggregate and wire contract for transport-neutral gateway diagnostics."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, Protocol, cast, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
-from venus_evcharger.ports.gateway_diagnostic_values import (
-    CRITICAL_GATEWAY_DIAGNOSTIC_FIELDS,
-    GATEWAY_DIAGNOSTIC_FIELD_NAMES,
-    GatewayDiagnosticFieldName,
-    GatewayDiagnosticSample,
-    GatewayDiagnosticStatus,
-    gateway_diagnostic_field_name,
-)
+from venus_evcharger.core.contracts import timestamp_age_within
+from venus_evcharger.ports import gateway_diagnostic_discovery as diagnostic_discovery
+from venus_evcharger.ports import gateway_diagnostic_health as diagnostic_health
+from venus_evcharger.ports import gateway_diagnostic_values as diagnostic_values
 from venus_evcharger.ports.gateway_diagnostics_validation import (
-    boolean,
     exact_mapping,
-    member_text,
+    is_object_tuple,
+    is_string_object_mapping,
     non_negative_float,
     non_negative_int,
+    object_sequence,
     positive_float,
-    text,
+    timestamp_not_after,
 )
 
-GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 1
-
-GatewayHealthState = Literal["unknown", "ok", "degraded", "protective", "unavailable"]
-GatewayDiscoveryState = Literal[
-    "unknown",
-    "disabled",
-    "idle",
-    "running",
-    "degraded",
-    "protective",
-    "error",
-    "unavailable",
-]
-
-_HEALTH_STATES = frozenset({"unknown", "ok", "degraded", "protective", "unavailable"})
-_DISCOVERY_STATES = frozenset(
-    {"unknown", "disabled", "idle", "running", "degraded", "protective", "error", "unavailable"}
-)
+GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 2
+LEGACY_GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 1
+_LEGACY_PUBLICATION_MAX_AGE_SECONDS = 1.0
 
 
 class GatewayDiagnosticsUnavailable(RuntimeError):
     """Raised when a diagnostics transport cannot provide a valid snapshot."""
-
-
-@dataclass(frozen=True, slots=True)
-class GatewayHealthSummary:
-    """Operational gateway health without transport- or DBus-specific details."""
-
-    state: GatewayHealthState
-    stale: bool
-    timeouts_60s: int
-    average_latency_ms: float
-    maximum_latency_ms: float
-    pending_gateway_commands: int
-    pending_core_commands: int
-    maximum_event_loop_gap_ms_60s: float
-    last_success_at: float
-    last_error_code: str = ""
-
-    def __post_init__(self) -> None:
-        _health_state(self.state)
-        boolean(self.stale, "gateway health stale")
-        non_negative_int(self.timeouts_60s, "gateway health timeouts_60s")
-        average = non_negative_float(self.average_latency_ms, "gateway health average_latency_ms")
-        maximum = non_negative_float(self.maximum_latency_ms, "gateway health maximum_latency_ms")
-        _validate_latency_bounds(average, maximum)
-        non_negative_int(self.pending_gateway_commands, "gateway health pending_gateway_commands")
-        non_negative_int(self.pending_core_commands, "gateway health pending_core_commands")
-        non_negative_float(
-            self.maximum_event_loop_gap_ms_60s,
-            "gateway health maximum_event_loop_gap_ms_60s",
-        )
-        non_negative_float(self.last_success_at, "gateway health last_success_at")
-        text(self.last_error_code, "gateway health last_error_code", allow_empty=True)
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "state": self.state,
-            "stale": self.stale,
-            "timeouts_60s": self.timeouts_60s,
-            "average_latency_ms": self.average_latency_ms,
-            "maximum_latency_ms": self.maximum_latency_ms,
-            "pending_gateway_commands": self.pending_gateway_commands,
-            "pending_core_commands": self.pending_core_commands,
-            "maximum_event_loop_gap_ms_60s": self.maximum_event_loop_gap_ms_60s,
-            "last_success_at": self.last_success_at,
-            "last_error_code": self.last_error_code,
-        }
-
-    @classmethod
-    def from_payload(cls, payload: object) -> GatewayHealthSummary:
-        names = {
-            "state",
-            "stale",
-            "timeouts_60s",
-            "average_latency_ms",
-            "maximum_latency_ms",
-            "pending_gateway_commands",
-            "pending_core_commands",
-            "maximum_event_loop_gap_ms_60s",
-            "last_success_at",
-            "last_error_code",
-        }
-        item = exact_mapping(payload, "gateway health summary", names)
-        return cls(
-            state=_health_state(item["state"]),
-            stale=boolean(item["stale"], "gateway health stale"),
-            timeouts_60s=non_negative_int(item["timeouts_60s"], "gateway health timeouts_60s"),
-            average_latency_ms=non_negative_float(
-                item["average_latency_ms"], "gateway health average_latency_ms"
-            ),
-            maximum_latency_ms=non_negative_float(
-                item["maximum_latency_ms"], "gateway health maximum_latency_ms"
-            ),
-            pending_gateway_commands=non_negative_int(
-                item["pending_gateway_commands"], "gateway health pending_gateway_commands"
-            ),
-            pending_core_commands=non_negative_int(
-                item["pending_core_commands"], "gateway health pending_core_commands"
-            ),
-            maximum_event_loop_gap_ms_60s=non_negative_float(
-                item["maximum_event_loop_gap_ms_60s"],
-                "gateway health maximum_event_loop_gap_ms_60s",
-            ),
-            last_success_at=non_negative_float(
-                item["last_success_at"], "gateway health last_success_at"
-            ),
-            last_error_code=text(
-                item["last_error_code"], "gateway health last_error_code", allow_empty=True
-            ),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class GatewayDiscoverySummary:
-    """Bounded summary of gateway-owned discovery and inspection work."""
-
-    enabled: bool
-    state: GatewayDiscoveryState
-    pending_work: int
-    discovered_source_count: int
-    unusable_source_count: int
-
-    def __post_init__(self) -> None:
-        enabled = boolean(self.enabled, "gateway discovery enabled")
-        state = _discovery_state(self.state)
-        non_negative_int(self.pending_work, "gateway discovery pending_work")
-        discovered = non_negative_int(
-            self.discovered_source_count, "gateway discovery discovered_source_count"
-        )
-        unusable = non_negative_int(
-            self.unusable_source_count, "gateway discovery unusable_source_count"
-        )
-        _validate_discovery_configuration(enabled, state, discovered, unusable)
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "enabled": self.enabled,
-            "state": self.state,
-            "pending_work": self.pending_work,
-            "discovered_source_count": self.discovered_source_count,
-            "unusable_source_count": self.unusable_source_count,
-        }
-
-    @classmethod
-    def from_payload(cls, payload: object) -> GatewayDiscoverySummary:
-        names = {
-            "enabled",
-            "state",
-            "pending_work",
-            "discovered_source_count",
-            "unusable_source_count",
-        }
-        item = exact_mapping(payload, "gateway discovery summary", names)
-        return cls(
-            enabled=boolean(item["enabled"], "gateway discovery enabled"),
-            state=_discovery_state(item["state"]),
-            pending_work=non_negative_int(item["pending_work"], "gateway discovery pending_work"),
-            discovered_source_count=non_negative_int(
-                item["discovered_source_count"], "gateway discovery discovered_source_count"
-            ),
-            unusable_source_count=non_negative_int(
-                item["unusable_source_count"], "gateway discovery unusable_source_count"
-            ),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,38 +37,57 @@ class GatewayDiagnosticsSnapshot:
 
     sequence: int
     captured_at: float
-    health: GatewayHealthSummary
-    discovery: GatewayDiscoverySummary
-    ev_charger: tuple[GatewayDiagnosticSample, ...]
+    health: diagnostic_health.GatewayHealthSummary
+    discovery: diagnostic_discovery.GatewayDiscoverySummary
+    publication: diagnostic_health.GatewayPublicationSummary
+    ev_charger: tuple[diagnostic_values.GatewayDiagnosticSample, ...]
     schema_version: int = GATEWAY_DIAGNOSTICS_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         _schema_version(self.schema_version)
         non_negative_int(self.sequence, "gateway diagnostics sequence")
-        positive_float(self.captured_at, "gateway diagnostics captured_at")
+        captured_at = positive_float(self.captured_at, "gateway diagnostics captured_at")
         _health_summary(self.health)
         _discovery_summary(self.discovery)
-        _validate_samples(_sample_tuple(self.ev_charger))
+        _publication_summary(self.publication)
+        samples = _sample_tuple(self.ev_charger)
+        _validate_samples(samples)
+        _validate_snapshot_timestamps(
+            captured_at,
+            self.health,
+            self.publication,
+            samples,
+        )
 
-    def sample(self, name: GatewayDiagnosticFieldName) -> GatewayDiagnosticSample:
-        normalized = gateway_diagnostic_field_name(name)
+    def sample(
+        self, name: diagnostic_values.GatewayDiagnosticFieldName
+    ) -> diagnostic_values.GatewayDiagnosticSample:
+        normalized = diagnostic_values.gateway_diagnostic_field_name(name)
         return next(sample for sample in self.ev_charger if sample.name == normalized)
 
-    def critical_unavailable_fields(self) -> tuple[GatewayDiagnosticFieldName, ...]:
+    def critical_unavailable_fields(
+        self,
+    ) -> tuple[diagnostic_values.GatewayDiagnosticFieldName, ...]:
         unavailable = {"unavailable", "error", "unknown"}
         return tuple(
             name
-            for name in CRITICAL_GATEWAY_DIAGNOSTIC_FIELDS
+            for name in diagnostic_values.CRITICAL_GATEWAY_DIAGNOSTIC_FIELDS
             if self.sample(name).status in unavailable
         )
 
     def age_seconds(self, now: float) -> float:
         timestamp = non_negative_float(now, "gateway diagnostics current time")
-        return max(0.0, timestamp - self.captured_at)
+        timestamp_not_after(
+            self.captured_at,
+            timestamp,
+            "gateway diagnostics captured_at",
+        )
+        return timestamp - self.captured_at
 
     def is_fresh(self, now: float, max_age_seconds: float) -> bool:
+        timestamp = non_negative_float(now, "gateway diagnostics current time")
         maximum = non_negative_float(max_age_seconds, "gateway diagnostics max_age_seconds")
-        return self.age_seconds(now) <= maximum
+        return timestamp_age_within(self.captured_at, timestamp, maximum)
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -238,81 +96,160 @@ class GatewayDiagnosticsSnapshot:
             "captured_at": self.captured_at,
             "health": self.health.to_payload(),
             "discovery": self.discovery.to_payload(),
+            "publication": self.publication.to_payload(),
             "ev_charger": [sample.to_payload() for sample in self.ev_charger],
         }
 
     @classmethod
     def from_payload(cls, payload: object) -> GatewayDiagnosticsSnapshot:
-        names = {"schema_version", "sequence", "captured_at", "health", "discovery", "ev_charger"}
-        item = exact_mapping(payload, "gateway diagnostics snapshot", names)
+        item = _snapshot_mapping(payload)
         return cls(
             sequence=non_negative_int(item["sequence"], "gateway diagnostics sequence"),
             captured_at=positive_float(item["captured_at"], "gateway diagnostics captured_at"),
-            health=GatewayHealthSummary.from_payload(item["health"]),
-            discovery=GatewayDiscoverySummary.from_payload(item["discovery"]),
+            health=diagnostic_health.GatewayHealthSummary.from_payload(item["health"]),
+            discovery=diagnostic_discovery.GatewayDiscoverySummary.from_payload(item["discovery"]),
+            publication=diagnostic_health.GatewayPublicationSummary.from_payload(
+                item["publication"]
+            ),
             ev_charger=_samples(item["ev_charger"]),
-            schema_version=_schema_version(item["schema_version"]),
+            schema_version=GATEWAY_DIAGNOSTICS_SCHEMA_VERSION,
         )
 
 
 @runtime_checkable
-class GatewayDiagnosticsReader(Protocol):  # pragma: no cover - declarative port
+class GatewayDiagnosticsReader(Protocol):
     """Read the latest semantic diagnostics regardless of its transport."""
 
     def read_snapshot(self) -> GatewayDiagnosticsSnapshot: ...
 
 
-def _validate_latency_bounds(average: float, maximum: float) -> None:
-    if maximum < average:
-        raise ValueError("gateway health maximum_latency_ms must be at least average_latency_ms")
-
-
-def _validate_discovery_configuration(
-    enabled: bool,
-    state: GatewayDiscoveryState,
-    discovered: int,
-    unusable: int,
-) -> None:
-    _validate_discovery_counts(discovered, unusable)
-    _validate_discovery_state(enabled, state)
-
-
-def _validate_discovery_counts(discovered: int, unusable: int) -> None:
-    if unusable > discovered:
-        raise ValueError("gateway discovery unusable_source_count exceeds discovered_source_count")
-
-
-def _validate_discovery_state(enabled: bool, state: GatewayDiscoveryState) -> None:
-    if not enabled and state != "disabled":
-        raise ValueError("disabled gateway discovery requires state='disabled'")
-    if enabled and state == "disabled":
-        raise ValueError("enabled gateway discovery must not report state='disabled'")
-
-
-def _validate_samples(samples: tuple[GatewayDiagnosticSample, ...]) -> None:
+def _validate_samples(samples: tuple[diagnostic_values.GatewayDiagnosticSample, ...]) -> None:
     names = [sample.name for sample in samples]
     if len(names) != len(set(names)):
         raise ValueError("gateway diagnostics ev_charger contains duplicate fields")
-    if frozenset(names) != GATEWAY_DIAGNOSTIC_FIELD_NAMES:
+    if frozenset(names) != diagnostic_values.GATEWAY_DIAGNOSTIC_FIELD_NAMES:
         raise ValueError("gateway diagnostics ev_charger must contain every semantic field exactly once")
 
 
-def _sample_tuple(value: object) -> tuple[GatewayDiagnosticSample, ...]:
-    if not isinstance(value, tuple):
-        raise TypeError("gateway diagnostics ev_charger must be a tuple")
-    untyped = cast(tuple[object, ...], value)
-    if any(not isinstance(sample, GatewayDiagnosticSample) for sample in untyped):
+def _validate_snapshot_timestamps(
+    captured_at: float,
+    health: diagnostic_health.GatewayHealthSummary,
+    publication: diagnostic_health.GatewayPublicationSummary,
+    samples: tuple[diagnostic_values.GatewayDiagnosticSample, ...],
+) -> None:
+    timestamp_not_after(
+        health.last_success_at,
+        captured_at,
+        "gateway health last_success_at",
+    )
+    timestamp_not_after(
+        publication.heartbeat_at,
+        captured_at,
+        "gateway publication heartbeat_at",
+    )
+    for sample in samples:
+        timestamp_not_after(
+            sample.changed_at,
+            captured_at,
+            f"{sample.name} diagnostic changed_at",
+        )
+        timestamp_not_after(
+            sample.confirmed_at,
+            captured_at,
+            f"{sample.name} diagnostic confirmed_at",
+        )
+
+
+def _sample_tuple(value: object) -> tuple[diagnostic_values.GatewayDiagnosticSample, ...]:
+    if not _is_sample_tuple(value):
         raise TypeError("gateway diagnostics ev_charger contains an invalid sample")
-    return cast(tuple[GatewayDiagnosticSample, ...], untyped)
+    return value
 
 
-def _samples(value: object) -> tuple[GatewayDiagnosticSample, ...]:
-    if isinstance(value, (str, bytes, bytearray)):
-        raise TypeError("gateway diagnostics ev_charger must be an array")
-    if not isinstance(value, Sequence):
-        raise TypeError("gateway diagnostics ev_charger must be an array")
-    untyped = cast(Sequence[object], value)
-    return tuple(GatewayDiagnosticSample.from_payload(item) for item in untyped)
+def _is_sample_tuple(
+    value: object,
+) -> TypeGuard[tuple[diagnostic_values.GatewayDiagnosticSample, ...]]:
+    return (
+        is_object_tuple(value)
+        and all(isinstance(sample, diagnostic_values.GatewayDiagnosticSample) for sample in value)
+    )
+
+
+def _samples(value: object) -> tuple[diagnostic_values.GatewayDiagnosticSample, ...]:
+    items = object_sequence(value, "gateway diagnostics ev_charger")
+    return tuple(diagnostic_values.GatewayDiagnosticSample.from_payload(item) for item in items)
+
+
+def _snapshot_mapping(payload: object) -> Mapping[str, object]:
+    base_names = {"schema_version", "sequence", "captured_at", "health", "discovery", "ev_charger"}
+    if not is_string_object_mapping(payload):
+        raise TypeError("gateway diagnostics snapshot must be an object with string keys")
+    if payload.get("schema_version") == GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
+        return exact_mapping(
+            payload,
+            "gateway diagnostics snapshot",
+            base_names | {"publication"},
+        )
+    return _migrate_legacy_snapshot(payload, base_names)
+
+
+def _migrate_legacy_snapshot(
+    payload: object,
+    base_names: set[str],
+) -> Mapping[str, object]:
+    legacy = exact_mapping(payload, "gateway diagnostics snapshot", base_names)
+    if _legacy_schema_version(legacy["schema_version"]) != LEGACY_GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
+        raise ValueError("gateway diagnostics has an unsupported schema_version")
+    samples = _samples(legacy["ev_charger"])
+    captured_at = positive_float(legacy["captured_at"], "gateway diagnostics captured_at")
+    health = diagnostic_health.GatewayHealthSummary.from_payload(legacy["health"])
+    migrated_discovery = diagnostic_discovery.GatewayDiscoverySummary.from_payload(
+        legacy["discovery"]
+    ).to_payload()
+    return {
+        **legacy,
+        "schema_version": GATEWAY_DIAGNOSTICS_SCHEMA_VERSION,
+        "discovery": migrated_discovery,
+        "publication": _legacy_publication_payload(samples, captured_at, health),
+    }
+
+
+def _legacy_publication_payload(
+    samples: tuple[diagnostic_values.GatewayDiagnosticSample, ...],
+    captured_at: float,
+    health: diagnostic_health.GatewayHealthSummary,
+) -> dict[str, object]:
+    heartbeat_at = max((sample.confirmed_at for sample in samples), default=0.0)
+    registered = heartbeat_at > 0.0
+    return {
+        "registered": registered,
+        "heartbeat_at": heartbeat_at if registered else 0.0,
+        "stale": _legacy_publication_stale(
+            registered,
+            heartbeat_at,
+            captured_at,
+            health,
+            samples,
+        ),
+    }
+
+
+def _legacy_publication_stale(
+    registered: bool,
+    heartbeat_at: float,
+    captured_at: float,
+    health: diagnostic_health.GatewayHealthSummary,
+    samples: tuple[diagnostic_values.GatewayDiagnosticSample, ...],
+) -> bool:
+    if not registered or health.stale:
+        return True
+    if any(sample.status == "stale" for sample in samples):
+        return True
+    return not timestamp_age_within(
+        heartbeat_at,
+        captured_at,
+        _LEGACY_PUBLICATION_MAX_AGE_SECONDS,
+    )
 
 
 def _schema_version(value: object) -> int:
@@ -322,38 +259,32 @@ def _schema_version(value: object) -> int:
     return version
 
 
-def _health_summary(value: object) -> GatewayHealthSummary:
-    if not isinstance(value, GatewayHealthSummary):
+def _legacy_schema_version(value: object) -> int:
+    return non_negative_int(value, "gateway diagnostics schema_version")
+
+
+def _health_summary(value: object) -> diagnostic_health.GatewayHealthSummary:
+    if not isinstance(value, diagnostic_health.GatewayHealthSummary):
         raise TypeError("gateway diagnostics health must be GatewayHealthSummary")
     return value
 
 
-def _discovery_summary(value: object) -> GatewayDiscoverySummary:
-    if not isinstance(value, GatewayDiscoverySummary):
+def _discovery_summary(value: object) -> diagnostic_discovery.GatewayDiscoverySummary:
+    if not isinstance(value, diagnostic_discovery.GatewayDiscoverySummary):
         raise TypeError("gateway diagnostics discovery must be GatewayDiscoverySummary")
     return value
 
 
-def _health_state(value: object) -> GatewayHealthState:
-    normalized = member_text(value, _HEALTH_STATES, "gateway health state")
-    return cast(GatewayHealthState, normalized)
-
-
-def _discovery_state(value: object) -> GatewayDiscoveryState:
-    normalized = member_text(value, _DISCOVERY_STATES, "gateway discovery state")
-    return cast(GatewayDiscoveryState, normalized)
+def _publication_summary(value: object) -> diagnostic_health.GatewayPublicationSummary:
+    if not isinstance(value, diagnostic_health.GatewayPublicationSummary):
+        raise TypeError("gateway diagnostics publication must be GatewayPublicationSummary")
+    return value
 
 
 __all__ = [
     "GATEWAY_DIAGNOSTICS_SCHEMA_VERSION",
-    "GatewayDiagnosticFieldName",
-    "GatewayDiagnosticSample",
-    "GatewayDiagnosticStatus",
+    "LEGACY_GATEWAY_DIAGNOSTICS_SCHEMA_VERSION",
     "GatewayDiagnosticsReader",
     "GatewayDiagnosticsSnapshot",
     "GatewayDiagnosticsUnavailable",
-    "GatewayDiscoveryState",
-    "GatewayDiscoverySummary",
-    "GatewayHealthState",
-    "GatewayHealthSummary",
 ]

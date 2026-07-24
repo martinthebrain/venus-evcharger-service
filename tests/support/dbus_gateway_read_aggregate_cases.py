@@ -25,20 +25,33 @@ from venus_evcharger.ipc.energy import EnergyRefreshRequest
 class GatewayAggregateReadCases(GatewayAdapterContractCase):
     """Exercise aggregate member and low-level read scenarios."""
 
-    def test_pv_member_contracts_cover_dc_tokens_targets_and_backoff_edges(self) -> None:
+    def test_pv_member_contracts_cover_ac_dc_tokens_and_targets(self) -> None:
         valid_dc_spec = {
             "dc_service": " com.victronenergy.system ",
             "dc_path": " /Dc/Pv/Power ",
-            "use_dc_pv": " yes ",
+            "use_dc_pv": True,
         }
         self.assertEqual(read_pv_module.dc_pv_target(valid_dc_spec), ("com.victronenergy.system", "/Dc/Pv/Power"))
         self.assertEqual(
-            read_pv_module.dc_pv_members(valid_dc_spec, {}, now=100.0), [("com.victronenergy.system", "/Dc/Pv/Power")]
+            read_pv_module.dc_pv_members(valid_dc_spec),
+            [("com.victronenergy.system", "/Dc/Pv/Power")],
         )
-        for raw in ("1", "true", "yes", "on", " ON "):
-            with self.subTest(raw=raw):
-                self.assertTrue(read_pv_module.use_dc_pv({"use_dc_pv": raw}))
-        for raw in ("", "0", "false", "no", "off", object()):
+        self.assertEqual(
+            read_pv_module.pv_total_members(
+                {
+                    **valid_dc_spec,
+                    "path": "/Ac/Power",
+                },
+                ["pv.b", "pv.a"],
+            ),
+            [
+                ("pv.b", "/Ac/Power"),
+                ("pv.a", "/Ac/Power"),
+                ("com.victronenergy.system", "/Dc/Pv/Power"),
+            ],
+        )
+        self.assertTrue(read_pv_module.use_dc_pv({"use_dc_pv": True}))
+        for raw in ("", "1", "true", "yes", "on", 1, False, object()):
             with self.subTest(raw=raw):
                 self.assertFalse(read_pv_module.use_dc_pv({"use_dc_pv": raw}))
         self.assertFalse(read_pv_module.use_dc_pv({}))
@@ -48,56 +61,18 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
         self.assertIsNone(read_pv_module.dc_pv_target({"dc_service": "svc", "dc_path": object()}))
         self.assertIsNone(read_pv_module.dc_pv_target({"dc_service": "svc"}))
 
-        failed_values = {
-            "path:svc/Path": {"source_state": "unavailable", "next_probe_at": "400.0"},
-            "path:svc/Other": {"source_state": "active", "next_probe_at": "400.0"},
-            "path:svc/MissingErrorAt": {"source_state": "unavailable"},
-            "path:svc/OneSecond": {"source_state": "unavailable", "next_probe_at": 301.0},
-        }
-        self.assertTrue(
-            read_pv_module.pv_member_in_backoff(
-                failed_values,
-                "svc",
-                "/Path",
-                now=399.9,
-            )
-        )
-        self.assertFalse(
-            read_pv_module.pv_member_in_backoff(
-                failed_values,
-                "svc",
-                "/Path",
-                now=400.0,
-            )
-        )
-        self.assertFalse(read_pv_module.pv_member_in_backoff(failed_values, "svc", "/Other", now=101.0))
-        self.assertFalse(read_pv_module.pv_member_in_backoff(failed_values, "svc", "/MissingErrorAt", now=1.0))
-        self.assertTrue(read_pv_module.pv_member_in_backoff(failed_values, "svc", "/OneSecond", now=2.0))
-        self.assertFalse(
-            read_pv_module.pv_member_in_backoff(
-                {"path:svc/Path": {"source_state": "unavailable", "next_probe_at": True}},
-                "svc",
-                "/Path",
-                now=101.0,
-            )
-        )
-        self.assertFalse(
-            read_pv_module.pv_member_in_backoff(
-                {"path:svc/Path": {"source_state": "unavailable", "next_probe_at": "bad"}},
-                "svc",
-                "/Path",
-                now=101.0,
-            )
-        )
-
     def test_pv_total_optional_member_errors_are_preserved_and_nonfatal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
-            adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
-            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
+            services = [
+                "com.victronenergy.pvinverter.http_1",
+                "com.victronenergy.system",
+            ]
+            adapter.cache.update_services(services)
+            adapter.energy_discovery.update_services(services, captured_at=1.0)
 
             def fake_read(service: str, path: str) -> float:
                 if service == "com.victronenergy.pvinverter.http_1":
@@ -124,7 +99,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_1"])
-            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], now=1.0)
+            adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_1"], captured_at=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
@@ -170,8 +145,9 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
-            adapter.cache.update_services(["svc.optional"])
-            adapter.energy_discovery.update_services(["svc.optional"], now=1.0)
+            service = "com.victronenergy.pvinverter.optional"
+            adapter.cache.update_services([service])
+            adapter.energy_discovery.update_services([service], captured_at=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
@@ -181,8 +157,8 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 "optional_sum",
                 {
                     "aggregate": "pv-total",
-                    "prefix": "svc.",
-                    "path": "/Power",
+                    "prefix": "com.victronenergy.pvinverter.",
+                    "path": "/Ac/Power",
                     "dc_service": "",
                     "dc_path": "",
                     "use_dc_pv": False,
@@ -190,7 +166,10 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             )
 
             self.assertEqual(outcome, "applied")
-            self.assertEqual(adapter.cache.values["optional_sum"]["last_error"], "svc.optional/Power: sleeping")
+            self.assertEqual(
+                adapter.cache.values["optional_sum"]["last_error"],
+                f"{service}/Ac/Power: sleeping",
+            )
 
     def test_optional_aggregate_member_skips_cache_for_invalid_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -198,23 +177,16 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.rate_limiter.intervals["read"] = 0.0
-            adapter.cache.update_services(["svc.optional"])
-            adapter.energy_discovery.update_services(["svc.optional"], now=1.0)
             install_mock(
                 adapter.read_executor,
                 "read_optional_busitem",
                 MagicMock(side_effect=RuntimeError("bad path")),
             )
-            outcome = adapter.read_executor.poll_read_spec(
+            outcome = adapter.read_executor._poll_aggregate_step(
                 "optional_sum",
-                {
-                    "aggregate": "pv-total",
-                    "prefix": "svc.",
-                    "path": "NotAbsolute",
-                    "dc_service": "",
-                    "dc_path": "",
-                    "use_dc_pv": False,
-                },
+                ("pv-total", (("svc.optional", "NotAbsolute"),)),
+                [("svc.optional", "NotAbsolute")],
+                ignore_member_errors=True,
             )
 
             self.assertEqual(outcome, "applied")
@@ -274,7 +246,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.cache.update_services(["com.victronenergy.battery.socketcan_can1"])
-            adapter.energy_discovery.update_services(["com.victronenergy.battery.socketcan_can1"], now=1.0)
+            adapter.energy_discovery.update_services(["com.victronenergy.battery.socketcan_can1"], captured_at=1.0)
             install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=74.0))
 
             self.assertEqual(
@@ -330,7 +302,7 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             self.assertEqual(adapter.cache.values["path:svc/L1"]["value"], 1.5)
             self.assertEqual(adapter.cache.values["path:svc/L2"]["value"], None)
             adapter.cache.update_services(["pv.1"])
-            adapter.energy_discovery.update_services(["pv.1"], now=1.0)
+            adapter.energy_discovery.update_services(["pv.1"], captured_at=1.0)
             self.assertEqual(
                 adapter.read_executor.poll_read_spec(
                     "pv", {"aggregate": "services-sum", "prefix": "pv.", "path": "/P"}

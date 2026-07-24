@@ -3,7 +3,7 @@
 
 from .aggregate import aggregate_energy_sources, derive_discharge_balance_metrics, derive_discharge_control_metrics
 from .config import load_energy_source_definitions, load_energy_source_settings
-from .connectors import read_energy_source_snapshot
+from .connectors import read_energy_source_step
 from .forecast import derive_energy_forecast
 from .grid_fusion import GridMeasurementFusion
 from .grid_fusion_contracts import GridFusionConfig, GridFusionResult, GridMeasurement
@@ -45,7 +45,7 @@ __all__ = [
     "energy_source_profile_probe_plan",
     "load_energy_source_definitions",
     "load_energy_source_settings",
-    "read_energy_source_snapshot",
+    "read_energy_source_step",
     "resolve_energy_source_profile",
     "summarize_energy_learning_profiles",
     "update_energy_learning_profiles",

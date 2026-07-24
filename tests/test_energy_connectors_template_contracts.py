@@ -4,15 +4,14 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 from configparser import ConfigParser
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from venus_evcharger.backend.template_support import TemplateAuthSettings
 from venus_evcharger.energy import connectors_template as template
 from venus_evcharger.energy.models import EnergySourceDefinition, EnergySourceSnapshot
-
 
 _AUTH = TemplateAuthSettings("user", "password", False, None, None)
 
@@ -35,6 +34,16 @@ def _settings(**overrides: object) -> template.TemplateHttpEnergySourceSettings:
         confidence_path="data.confidence",
     )
     return replace(baseline, **overrides)
+
+
+class _TimeoutRuntime:
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        self.requests: list[float] = []
+
+    def bounded_request_timeout_seconds(self, configured_seconds: float) -> float:
+        self.requests.append(configured_seconds)
+        return self.timeout_seconds
 
 
 class EnergyConnectorsTemplateContractTests(unittest.TestCase):
@@ -130,10 +139,17 @@ class EnergyConnectorsTemplateContractTests(unittest.TestCase):
 
     def test_source_name_timeout_and_section_text_fallbacks_are_exact(self) -> None:
         settings = _settings()
-        self.assertEqual(template._template_source_name(EnergySourceDefinition(source_id="id", service_name="service"), settings), "service")
-        self.assertEqual(template._template_source_name(EnergySourceDefinition(source_id="id"), settings), "http://energy.local")
+        self.assertEqual(
+            template._template_source_name(EnergySourceDefinition(source_id="id", service_name="service"), settings),
+            "service",
+        )
+        self.assertEqual(
+            template._template_source_name(EnergySourceDefinition(source_id="id"), settings), "http://energy.local"
+        )
         blank = _settings(base_url="")
-        self.assertEqual(template._template_source_name(EnergySourceDefinition(source_id="id", config_path="cfg"), blank), "cfg")
+        self.assertEqual(
+            template._template_source_name(EnergySourceDefinition(source_id="id", config_path="cfg"), blank), "cfg"
+        )
         self.assertEqual(template._template_source_name(EnergySourceDefinition(source_id="id"), blank), "id")
 
         runtime = SimpleNamespace(shelly_request_timeout_seconds=2.5)
@@ -143,6 +159,15 @@ class EnergyConnectorsTemplateContractTests(unittest.TestCase):
             with self.subTest(timeout=value):
                 self.assertEqual(template._template_timeout_seconds(runtime, {"RequestTimeoutSeconds": value}), 2.5)
         self.assertEqual(template._template_timeout_seconds(SimpleNamespace(), {}), 2.0)
+        limited_runtime = _TimeoutRuntime(0.4)
+        self.assertEqual(
+            template._template_timeout_seconds(
+                limited_runtime,
+                {"RequestTimeoutSeconds": "3.5"},
+            ),
+            0.4,
+        )
+        self.assertEqual(limited_runtime.requests, [3.5])
 
         self.assertEqual(template._section_text({}, "missing"), "")
         self.assertEqual(template._section_text({}, "missing", "fallback"), "fallback")
@@ -202,7 +227,10 @@ class EnergyConnectorsTemplateContractTests(unittest.TestCase):
             ),
         )
         validate.assert_called_once_with(source, loaded)
-        self.assertEqual(runtime._energy_template_settings_cache, {"config.ini": loaded})
+        self.assertEqual(
+            runtime._energy_connector_runtime_state.caches,
+            {"template_http.settings": {"config.ini": loaded}},
+        )
 
         invalid_method_parser = ConfigParser()
         invalid_method_parser.read_dict(
@@ -218,8 +246,12 @@ class EnergyConnectorsTemplateContractTests(unittest.TestCase):
         self.assertEqual(invalid_method.request_method, "GET")
 
         with self.assertRaises(ValueError) as raised:
-            template._template_http_energy_source_settings(SimpleNamespace(), EnergySourceDefinition(source_id="missing"))
-        self.assertEqual(str(raised.exception), "Energy source 'missing' requires ConfigPath for template_http connector")
+            template._template_http_energy_source_settings(
+                SimpleNamespace(), EnergySourceDefinition(source_id="missing")
+            )
+        self.assertEqual(
+            str(raised.exception), "Energy source 'missing' requires ConfigPath for template_http connector"
+        )
 
     def test_validation_requires_url_and_one_readable_value(self) -> None:
         source = EnergySourceDefinition(source_id="source")

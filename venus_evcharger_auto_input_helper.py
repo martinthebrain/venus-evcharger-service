@@ -74,6 +74,7 @@ class AutoInputHelper:
         finally:
             self.liveness.stop()
             self.refresh_coordinator.reset()
+            self.sources.close()
             logging.info("Auto input helper stopping pid=%s", os.getpid())
 
     def _handle_signal(self, signum: int, _frame: object) -> None:

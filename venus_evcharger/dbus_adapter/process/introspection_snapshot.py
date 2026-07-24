@@ -12,9 +12,9 @@ import logging
 import os
 import time
 import xml.etree.ElementTree as xml_et
+from typing import TypeGuard
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
-from venus_evcharger.dbus_adapter.process.health import DbusAdapterHealth
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionSnapshotContext
 from venus_evcharger.dbus_gateway_core import float_or_default
 from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
@@ -22,9 +22,13 @@ from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
 DBUS_INTROSPECTION_SCHEMA_VERSION = 1
 
 
-class DbusAdapterIntrospectionSnapshot(DbusAdapterHealth):
-    def write_introspection_snapshot(self: DbusAdapterIntrospectionSnapshotContext) -> None:
-        if not self.dbus_introspection_enabled or not self.dbus_introspection_snapshot_path:
+class DbusAdapterIntrospectionSnapshot:
+    def __init__(self, context: DbusAdapterIntrospectionSnapshotContext) -> None:
+        self._context = context
+
+    def write_introspection_snapshot(self) -> None:
+        context = self._context
+        if not context.dbus_introspection_enabled or not context.dbus_introspection_snapshot_path:
             return
         now = time.time()
         payload = {
@@ -33,31 +37,35 @@ class DbusAdapterIntrospectionSnapshot(DbusAdapterHealth):
             "heartbeat_at": now,
             "worker_state": "gateway",
             "writer_pid": os.getpid(),
-            "queue_depth": self._introspection_queue_depth,
-            "last_full_scan_at": self._last_introspection_full_scan_at,
+            "queue_depth": context._introspection_queue_depth,
+            "last_full_scan_at": context._last_introspection_full_scan_at,
             "services": self.introspection_services_snapshot(now),
         }
         try:
-            write_text_atomically(self.dbus_introspection_snapshot_path, compact_json(payload))
+            write_text_atomically(context.dbus_introspection_snapshot_path, compact_json(payload))
         except (OSError, RuntimeError, TypeError, ValueError) as error:
-            logging.debug("Unable to write DBus introspection snapshot %s: %s", self.dbus_introspection_snapshot_path, error)
+            logging.debug(
+                "Unable to write DBus introspection snapshot %s: %s",
+                context.dbus_introspection_snapshot_path,
+                error,
+            )
 
-    def introspection_services_snapshot(self: DbusAdapterIntrospectionSnapshotContext, now: float) -> dict[str, CommandPayload]:
+    def introspection_services_snapshot(self, now: float) -> dict[str, CommandPayload]:
         services: dict[str, CommandPayload] = {}
         for key, entry in self.introspection_cache_entries():
             service, path = self.split_introspection_cache_key(key)
             self.add_introspection_service_entry(services, service, path, entry, now)
         return services
 
-    def introspection_cache_entries(self: DbusAdapterIntrospectionSnapshotContext) -> list[tuple[str, CommandPayload]]:
+    def introspection_cache_entries(self) -> list[tuple[str, CommandPayload]]:
         return [
             (key, entry)
-            for key, entry in self.cache.values.items()
-            if key.startswith("introspection:") and isinstance(entry, dict)
+            for key, entry in self._context.cache.values.items()
+            if key.startswith("introspection:")
         ]
 
     def add_introspection_service_entry(
-        self: DbusAdapterIntrospectionSnapshotContext,
+        self,
         services: dict[str, CommandPayload],
         service: str,
         path: str,
@@ -98,11 +106,21 @@ class DbusAdapterIntrospectionSnapshot(DbusAdapterHealth):
 
 def _paths_payload(service_payload: CommandPayload) -> dict[str, object]:
     paths = service_payload.get("paths")
-    if isinstance(paths, dict):
+    if _is_string_object_dict(paths):
         return paths
     normalized: dict[str, object] = {}
     service_payload["paths"] = normalized
     return normalized
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    if not _is_object_dict(value):
+        return False
+    return all(isinstance(key, str) for key in value)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
 
 
 def _fresh_introspection_finding(entry: CommandMapping, now: float) -> CommandPayload:

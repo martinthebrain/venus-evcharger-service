@@ -42,10 +42,17 @@ MAX_UPDATE_INDEX = 255
 
 @dataclass(frozen=True, slots=True)
 class PublicationFieldObservation:
-    """One applied semantic publication value and its observation time."""
+    """One semantic value with separate change, confirmation, and service heartbeat times."""
 
     value: object
-    observed_at: float
+    changed_at: float
+    confirmed_at: float
+    service_heartbeat_at: float
+
+    @property
+    def observed_at(self) -> float:
+        """Health freshness is based on field confirmation, not value changes."""
+        return self.confirmed_at
 
 
 @dataclass(slots=True)
@@ -59,7 +66,9 @@ class RegisteredPublicationService:
     service: DbusServiceLike
     values: dict[str, object]
     semantic_values: dict[str, object]
-    field_observed_at: dict[str, float]
+    field_changed_at: dict[str, float]
+    field_confirmed_at: dict[str, float]
+    publication_heartbeat_at: float
     update_index: int = 0
 
 
@@ -118,8 +127,16 @@ class GatewayPublicationRegistry:
             return None
         return PublicationFieldObservation(
             value=record.semantic_values[normalized],
-            observed_at=record.field_observed_at[normalized],
+            changed_at=record.field_changed_at[normalized],
+            confirmed_at=record.field_confirmed_at[normalized],
+            service_heartbeat_at=record.publication_heartbeat_at,
         )
+
+    @property
+    def evcs_publication_heartbeat_at(self) -> float:
+        """Return the last EVCS publication receipt, including value-identical updates."""
+        record = self._services.get(EVCS_SERVICE_ID)
+        return 0.0 if record is None else record.publication_heartbeat_at
 
     def register_evcs(self, publication: RegisterEvcsPublication) -> CommandOutcome:
         existing = self._services.get(EVCS_SERVICE_ID)
@@ -211,7 +228,9 @@ class GatewayPublicationRegistry:
             service=service,
             values=values,
             semantic_values=semantic_values,
-            field_observed_at=dict.fromkeys(semantic_values, observed_at),
+            field_changed_at=dict.fromkeys(semantic_values, observed_at),
+            field_confirmed_at=dict.fromkeys(semantic_values, observed_at),
+            publication_heartbeat_at=observed_at,
         )
         self._services[plan.service_id] = record
         self._cache_record(record)
@@ -264,15 +283,17 @@ class GatewayPublicationRegistry:
         normalized = validate_fields(fields, specs, surface=record.kind)
         changed = False
         observed_at = time.time()
+        record.publication_heartbeat_at = observed_at
         for field, value in normalized.items():
             path = specs[field].path
             if record.values.get(path) == value:
-                record.field_observed_at[field] = observed_at
+                record.field_confirmed_at[field] = observed_at
                 continue
             self._publish_service_value(record, path, value)
             record.values[path] = value
             record.semantic_values[field] = value
-            record.field_observed_at[field] = observed_at
+            record.field_changed_at[field] = observed_at
+            record.field_confirmed_at[field] = observed_at
             self._cache_path(record, path, value)
             changed = True
         if changed:

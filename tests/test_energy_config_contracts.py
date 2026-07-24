@@ -24,7 +24,7 @@ class EnergyConfigContractTests(unittest.TestCase):
     def test_definition_contract_contains_no_raw_dbus_transport_knowledge(self) -> None:
         self.assertEqual(
             ENERGY_SOURCE_CONNECTOR_TYPES,
-            frozenset({"template_http", "template_http_energy", "modbus", "command_json", "opendtu_http"}),
+            frozenset({"template_http", "modbus", "command_json", "opendtu_http"}),
         )
         field_names = {field.name for field in fields(EnergySourceDefinition)}
         self.assertTrue(
@@ -90,9 +90,10 @@ class EnergyConfigContractTests(unittest.TestCase):
                 "AutoBatteryCapacityAutoEstimate": "0",
                 "AutoEnergySource.one.Profile": "custom-profile",
                 "AutoEnergySource.one.Role": "inverter",
-                "AutoEnergySource.one.Type": "template_http_energy",
+                "AutoEnergySource.one.Type": "template_http",
                 "AutoEnergySource.one.ConfigPath": "/one.ini",
                 "AutoEnergySource.one.Service": "one-source",
+                "AutoEnergySource.one.PhysicalId": " house-battery ",
                 "AutoEnergySource.one.UsableCapacityWh": "1234",
                 "AutoEnergySource.one.Chemistry": "LTO",
                 "AutoEnergySource.one.CapacityAutoEstimate": "1",
@@ -116,6 +117,7 @@ class EnergyConfigContractTests(unittest.TestCase):
                 connector_type="template_http",
                 config_path="/one.ini",
                 service_name="one-source",
+                physical_id="house-battery",
                 usable_capacity_wh=1234.0,
                 battery_chemistry="lto",
                 capacity_auto_estimate=True,

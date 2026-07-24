@@ -14,10 +14,22 @@ from unittest.mock import patch
 
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.backend import factory, probe, registry
+from venus_evcharger.backend.factory_contracts import (
+    config_from_backend_service,
+    is_backend_config_source,
+    is_backend_topology_source,
+    topology_from_backend_service,
+)
 from venus_evcharger.backend.models import BackendRuntimeSummary
 from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsUnavailable
 from venus_evcharger.topology.config import parse_topology_config
-from venus_evcharger.topology.schema import ActuatorConfig, ChargerConfig, EvChargerTopologyConfig, MeasurementConfig, TopologyConfig
+from venus_evcharger.topology.schema import (
+    ActuatorConfig,
+    ChargerConfig,
+    EvChargerTopologyConfig,
+    MeasurementConfig,
+    TopologyConfig,
+)
 
 
 class _FakeBackend:
@@ -224,6 +236,27 @@ class TestBackendRegistryContracts(unittest.TestCase):
 
 
 class TestBackendFactoryContracts(unittest.TestCase):
+    def test_factory_boundary_guards_accept_only_valid_config_and_topology_sources(self) -> None:
+        parser = _parser_from_text("[Topology]\nType=native_device\n[Charger]\nType=goe_charger\n")
+        topology = parse_topology_config(parser)
+        config_source = SimpleNamespace(config=parser)
+        topology_source = SimpleNamespace(_topology_config=topology)
+
+        self.assertIs(is_backend_config_source(config_source), True)
+        self.assertIs(config_from_backend_service(config_source), parser)
+        self.assertIs(is_backend_topology_source(topology_source), True)
+        self.assertIs(topology_from_backend_service(topology_source), topology)
+
+        for invalid in (object(), SimpleNamespace(config=object())):
+            with self.subTest(config_source=invalid):
+                self.assertIs(is_backend_config_source(invalid), False)
+                self.assertIsNone(config_from_backend_service(invalid))
+
+        for invalid in (object(), SimpleNamespace(_topology_config=object())):
+            with self.subTest(topology_source=invalid):
+                self.assertIs(is_backend_topology_source(invalid), False)
+                self.assertIsNone(topology_from_backend_service(invalid))
+
     def test_adapter_type_from_config_path_prefers_adapter_section_over_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = _write_config(
@@ -275,7 +308,10 @@ class TestBackendFactoryContracts(unittest.TestCase):
             runtime_topology,
         )
         self.assertIsNone(factory._topology_from_service(SimpleNamespace()))
-        self.assertIsNone(factory._topology_from_service(SimpleNamespace(config=_parser_from_text("[DEFAULT]\nHost=x\n"))))
+        self.assertIsNone(factory._topology_from_service(SimpleNamespace(config=object())))
+        self.assertIsNone(
+            factory._topology_from_service(SimpleNamespace(config=_parser_from_text("[DEFAULT]\nHost=x\n")))
+        )
 
     def test_topology_from_service_parses_config_topology_when_runtime_topology_is_absent(self) -> None:
         parser = _parser_from_text("[Topology]\nType=native_device\n[Charger]\nType=goe_charger\n")
@@ -467,9 +503,15 @@ class TestBackendFactoryContracts(unittest.TestCase):
             patch("venus_evcharger.backend.factory.create_switch_backend", side_effect=fake_backend),
             patch("venus_evcharger.backend.factory.create_charger_backend", side_effect=fake_backend),
         ):
-            self.assertEqual(factory._resolved_meter_backend(runtime, service), ("template_meter", service, "/etc/meter.ini"))
-            self.assertEqual(factory._resolved_switch_backend(runtime, service), ("template_switch", service, "/etc/switch.ini"))
-            self.assertEqual(factory._resolved_charger_backend(runtime, service), ("goe_charger", service, "/etc/charger.ini"))
+            self.assertEqual(
+                factory._resolved_meter_backend(runtime, service), ("template_meter", service, "/etc/meter.ini")
+            )
+            self.assertEqual(
+                factory._resolved_switch_backend(runtime, service), ("template_switch", service, "/etc/switch.ini")
+            )
+            self.assertEqual(
+                factory._resolved_charger_backend(runtime, service), ("goe_charger", service, "/etc/charger.ini")
+            )
 
     def test_resolved_from_topology_builds_one_consistent_backend_bundle(self) -> None:
         service = object()
@@ -494,16 +536,22 @@ class TestBackendFactoryContracts(unittest.TestCase):
         )
 
         with (
-            patch("venus_evcharger.backend.factory._topology_from_service", return_value="topology") as topology_from_service,
+            patch(
+                "venus_evcharger.backend.factory._topology_from_service", return_value="topology"
+            ) as topology_from_service,
             patch("venus_evcharger.backend.factory._topology_backend_roles", return_value=roles) as topology_roles,
-            patch("venus_evcharger.backend.factory._runtime_from_topology_roles", return_value=runtime) as runtime_from_roles,
+            patch(
+                "venus_evcharger.backend.factory._runtime_from_topology_roles", return_value=runtime
+            ) as runtime_from_roles,
             patch("venus_evcharger.backend.factory._direct_meter_backend", return_value="meter") as meter,
             patch("venus_evcharger.backend.factory._direct_switch_backend", return_value="switch") as switch,
             patch("venus_evcharger.backend.factory._direct_charger_backend", return_value="charger") as charger,
         ):
             resolved = factory._resolved_from_topology(service)
 
-        self.assertEqual(resolved, factory.ResolvedBackends(runtime=runtime, meter="meter", switch="switch", charger="charger"))
+        self.assertEqual(
+            resolved, factory.ResolvedBackends(runtime=runtime, meter="meter", switch="switch", charger="charger")
+        )
         topology_from_service.assert_called_once_with(service)
         topology_roles.assert_called_once_with("topology")
         runtime_from_roles.assert_called_once_with(roles)
@@ -521,7 +569,9 @@ class TestBackendFactoryContracts(unittest.TestCase):
         )
 
         with (
-            patch("venus_evcharger.backend.factory._resolved_from_topology", return_value=resolved) as topology_resolver,
+            patch(
+                "venus_evcharger.backend.factory._resolved_from_topology", return_value=resolved
+            ) as topology_resolver,
             patch("venus_evcharger.backend.factory.runtime_summary_from_service") as legacy_runtime,
         ):
             self.assertIs(factory.build_service_backends(service), resolved)
@@ -535,14 +585,18 @@ class TestBackendFactoryContracts(unittest.TestCase):
 
         with (
             patch("venus_evcharger.backend.factory._resolved_from_topology", return_value=None) as topology_resolver,
-            patch("venus_evcharger.backend.factory.runtime_summary_from_service", return_value=runtime) as runtime_from_service,
+            patch(
+                "venus_evcharger.backend.factory.runtime_summary_from_service", return_value=runtime
+            ) as runtime_from_service,
             patch("venus_evcharger.backend.factory._resolved_meter_backend", return_value="meter") as meter,
             patch("venus_evcharger.backend.factory._resolved_switch_backend", return_value="switch") as switch,
             patch("venus_evcharger.backend.factory._resolved_charger_backend", return_value="charger") as charger,
         ):
             resolved = factory.build_service_backends(service)
 
-        self.assertEqual(resolved, factory.ResolvedBackends(runtime=runtime, meter="meter", switch="switch", charger="charger"))
+        self.assertEqual(
+            resolved, factory.ResolvedBackends(runtime=runtime, meter="meter", switch="switch", charger="charger")
+        )
         topology_resolver.assert_called_once_with(service)
         runtime_from_service.assert_called_once_with(service)
         meter.assert_called_once_with(runtime, service)
@@ -629,9 +683,7 @@ class TestBackendProbeContracts(unittest.TestCase):
                 "critical_unavailable_fields": [],
             },
         )
-        self.assertFalse(
-            probe._gateway_diagnostics_probe_summary(reader, now=120.1, max_age_seconds=20.0)["fresh"]
-        )
+        self.assertFalse(probe._gateway_diagnostics_probe_summary(reader, now=120.1, max_age_seconds=20.0)["fresh"])
 
     def test_gateway_diagnostics_summary_reports_transport_unavailability(self) -> None:
         self.assertEqual(
@@ -658,13 +710,9 @@ class TestBackendProbeContracts(unittest.TestCase):
         load_config.assert_called_once_with("/tmp/backend.ini", "backend probe")
 
     def test_section_option_helpers_normalize_text_number_and_boolean_values(self) -> None:
-        defaults = _parser_from_text(
-            "[DEFAULT]\n"
-            "MixedCaseText= value \n"
-            "FloatValue=0\n"
-            "IntValue=0\n"
-            "BoolValue=off\n"
-        )["DEFAULT"]
+        defaults = _parser_from_text("[DEFAULT]\nMixedCaseText= value \nFloatValue=0\nIntValue=0\nBoolValue=off\n")[
+            "DEFAULT"
+        ]
 
         self.assertEqual(probe._section_option_text(defaults, "mixedcasetext", "fallback"), "value")
         self.assertEqual(probe._section_option_text(defaults, "missing", "fallback"), "fallback")
@@ -737,7 +785,9 @@ class TestBackendProbeContracts(unittest.TestCase):
         self.assertEqual(payload["path"], path)
         self.assertEqual(payload["type"], "fake_switch")
         self.assertEqual(payload["shelly_profile"], "fake-switch-profile")
-        self.assertEqual(payload["capabilities"], {"switching_mode": "contactor", "supported_phase_selections": ["P1", "P1_P2_P3"]})
+        self.assertEqual(
+            payload["capabilities"], {"switching_mode": "contactor", "supported_phase_selections": ["P1", "P1_P2_P3"]}
+        )
         self.assertEqual(payload["phase_switch_targets"], {"P1": ["relay-1"]})
         self.assertEqual(payload["switch_state"], {"enabled": True, "phase_selection": "P1"})
 

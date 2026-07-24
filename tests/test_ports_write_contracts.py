@@ -112,6 +112,17 @@ class WriteControllerPortContractTests(unittest.TestCase):
         port.commit_publication_transaction()
         service.state.publish_field.assert_called_with("mode", 2, 14.5, force=True)
 
+        port.begin_publication_transaction()
+        port.publish_field("enable", 1, 15.5, force=True)
+        service.state.publish_field.return_value = False
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Gateway publication rejected field 'enable'",
+        ):
+            port.commit_publication_transaction()
+        service.state.publish_field.return_value = True
+        port.commit_publication_transaction()
+
     def test_relay_freshness_budget_uses_the_tightest_positive_runtime_limit(self) -> None:
         self.assertEqual(WriteControllerPort(_service_double())._relay_status_freshness_seconds(), 2.0)
         self.assertEqual(
@@ -168,6 +179,14 @@ class WriteControllerPortContractTests(unittest.TestCase):
         ):
             self.assertIsNone(WriteControllerPort._fresh_snapshot_output(raw_snapshot, 100.0, 2.0))
 
+        normalized_with_invalid_timestamp = dict(normalized)
+        normalized_with_invalid_timestamp["pm_captured_at"] = "invalid"
+        with patch(
+            "venus_evcharger.ports.write.normalized_worker_snapshot",
+            return_value=normalized_with_invalid_timestamp,
+        ):
+            self.assertIsNone(WriteControllerPort._fresh_snapshot_output(raw_snapshot, 100.0, 2.0))
+
     def test_relay_payload_helpers_define_exact_boundary_semantics(self) -> None:
         present = WriteControllerPort._relay_output_payload_present
         self.assertTrue(present(True, {"output": False}, 0.0))
@@ -191,7 +210,8 @@ class WriteControllerPortContractTests(unittest.TestCase):
 
         value = WriteControllerPort._relay_output_value
         self.assertIs(value({"output": 0}), False)
-        self.assertIs(value({"output": "off"}), True)
+        self.assertIsNone(value({"output": "off"}))
+        self.assertIsNone(value({"output": 2}))
         self.assertIsNone(value({}))
         self.assertIsNone(value("on"))
 
@@ -200,6 +220,7 @@ class WriteControllerPortContractTests(unittest.TestCase):
         self.assertFalse(pending(()))
         self.assertFalse(pending((0, 1.0)))
         self.assertTrue(pending((1,)))
+        self.assertTrue(pending(("off", 1.0)))
 
     def test_last_relay_sample_uses_only_canonical_confirmed_snapshot(self) -> None:
         primary = _service_double(
@@ -227,6 +248,33 @@ class WriteControllerPortContractTests(unittest.TestCase):
         self.assertEqual(WriteControllerPort(missing_flag)._last_relay_output_sample(), (None, None))
         missing_fallback = _service_double(_last_pm_status_confirmed=True)
         self.assertEqual(WriteControllerPort(missing_fallback)._last_relay_output_sample(), (None, None))
+
+    def test_confirmed_relay_output_falls_back_only_to_fresh_canonical_sample(self) -> None:
+        missing = _service_double(
+            _last_confirmed_pm_status=None,
+            _last_confirmed_pm_status_at=99.0,
+        )
+        self.assertIsNone(WriteControllerPort(missing)._fresh_last_output(100.0, 2.0))
+
+        fresh = _service_double(
+            _last_confirmed_pm_status={"output": True},
+            _last_confirmed_pm_status_at=99.0,
+        )
+        port = WriteControllerPort(fresh)
+        self.assertIs(port._fresh_last_output(100.0, 2.0), True)
+        self.assertIs(
+            port._fresh_confirmed_relay_output(
+                {
+                    "pm_status": {"output": False},
+                    "pm_confirmed": True,
+                    "pm_captured_at": 99.0,
+                }
+            ),
+            False,
+        )
+
+        fresh.runtime.worker_snapshot.return_value = {}
+        self.assertIs(port._fresh_confirmed_relay_output({}), True)
 
     def test_cutover_is_conservative_without_fresh_confirmation(self) -> None:
         service = _service_double()

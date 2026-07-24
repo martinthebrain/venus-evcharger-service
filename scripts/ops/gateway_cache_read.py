@@ -11,10 +11,8 @@ from venus_evcharger.ipc.gateway_diagnostics import (
     DEFAULT_GATEWAY_DIAGNOSTICS_PATH,
     GatewayDiagnosticsFileReader,
 )
-from venus_evcharger.ports.gateway_diagnostics import (
-    GatewayDiagnosticSample,
-    GatewayDiagnosticsUnavailable,
-)
+from venus_evcharger.ports.gateway_diagnostic_values import GatewayDiagnosticSample
+from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsUnavailable
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,7 +48,8 @@ def _selected_fields(
 def _sample_line(name: str, sample: GatewayDiagnosticSample) -> str:
     return (
         f"{name}={sample.value!r} status={sample.status} "
-        f"observed_at={sample.observed_at} confidence={sample.confidence} "
+        f"applicability={sample.applicability} changed_at={sample.changed_at} "
+        f"confirmed_at={sample.confirmed_at} confidence={sample.confidence} "
         f"reason_code={sample.reason_code!r}"
     )
 

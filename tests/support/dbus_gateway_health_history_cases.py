@@ -154,9 +154,10 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
                 encoding="utf-8",
             )
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            install_mock(adapter.cache, "write_snapshot_files", MagicMock())
+            install_mock(adapter.cache, "write_cache_snapshot", MagicMock())
+            install_mock(adapter.diagnostics_role, "write_gateway_diagnostics", MagicMock())
 
-            adapter.publish_cache()
+            adapter.io_role.publish_cache()
 
             payload = json.loads(health_log.read_text(encoding="utf-8").strip())
             self.assertIn("backpressure", payload)
@@ -167,12 +168,12 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
             adapter._last_health_log_monotonic = 0.0
             log_handle = unittest.mock.mock_open()
             with patch.object(builtins, "open", log_handle):
-                adapter.append_health_log({"state": "ok"})
+                adapter.health_role.append_health_log({"state": "ok"})
             log_handle.assert_not_called()
 
             adapter._last_health_log_monotonic = 0.0
             with patch.object(builtins, "open", side_effect=OSError("full")):
-                adapter.append_health_log({"state": "ok"})
+                adapter.health_role.append_health_log({"state": "ok"})
 
     def test_health_log_due_and_error_logging_contracts_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -182,19 +183,19 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
 
             adapter.health_log_path = ""
             adapter.health_log_interval_seconds = 10.0
-            self.assertFalse(adapter.health_log_due())
+            self.assertFalse(adapter.health_role.health_log_due())
             adapter.health_log_path = str(Path(temp_dir) / "health.jsonl")
             adapter.health_log_interval_seconds = 0.0
-            self.assertFalse(adapter.health_log_due())
+            self.assertFalse(adapter.health_role.health_log_due())
             adapter.health_log_interval_seconds = -1.0
-            self.assertFalse(adapter.health_log_due())
+            self.assertFalse(adapter.health_role.health_log_due())
 
             adapter.health_log_interval_seconds = 10.0
             adapter._last_health_log_monotonic = 100.0
             with patch.object(process_health_module.time, "monotonic", return_value=109.999):
-                self.assertFalse(adapter.health_log_due())
+                self.assertFalse(adapter.health_role.health_log_due())
             with patch.object(process_health_module.time, "monotonic", return_value=110.0):
-                self.assertTrue(adapter.health_log_due())
+                self.assertTrue(adapter.health_role.health_log_due())
 
             adapter.health_log_path = str(Path(temp_dir) / "health-history.jsonl")
             adapter.health_log_max_bytes = 321
@@ -206,7 +207,7 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
                     "append_health_log",
                 ) as append_health_log,
             ):
-                adapter.append_health_log({"state": "ok"})
+                adapter.health_role.append_health_log({"state": "ok"})
             append_health_log.assert_called_once_with(
                 adapter.health_log_path,
                 {"state": "ok"},
@@ -223,7 +224,7 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
                 ) as log_debug,
                 patch.object(process_health_module.time, "monotonic", return_value=120.0),
             ):
-                adapter.append_health_log({"state": "ok"})
+                adapter.health_role.append_health_log({"state": "ok"})
             log_debug.assert_called_once_with(
                 "Unable to append DBus gateway health history",
                 exc_info=True,

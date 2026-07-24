@@ -678,8 +678,10 @@ class ServiceCompositionContractTests(unittest.TestCase):
         patches.extend(
             [
                 patch.object(owner_module, "require_publish_service", identity),
+                patch.object(owner_module, "require_auto_decision_service", identity),
                 patch.object(owner_module, "require_auto_input_service", identity),
                 patch.object(owner_module, "require_update_cycle_service", identity),
+                patch.object(owner_module, "require_write_runtime_service", identity),
                 patch.object(owner_module, "build_service_backends", resolved_backends),
             ]
         )

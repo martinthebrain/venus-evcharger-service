@@ -6,16 +6,22 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from venus_evcharger.ports.gateway_diagnostics import (
+from venus_evcharger.ports.gateway_diagnostic_discovery import (
+    GatewayDiscoveryState,
+    GatewayDiscoverySummary,
+)
+from venus_evcharger.ports.gateway_diagnostic_health import (
+    GatewayHealthState,
+    GatewayHealthSummary,
+    GatewayPublicationSummary,
+)
+from venus_evcharger.ports.gateway_diagnostic_values import (
+    GatewayDiagnosticApplicability,
     GatewayDiagnosticFieldName,
     GatewayDiagnosticSample,
     GatewayDiagnosticStatus,
-    GatewayDiagnosticsSnapshot,
-    GatewayDiscoveryState,
-    GatewayDiscoverySummary,
-    GatewayHealthState,
-    GatewayHealthSummary,
 )
+from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsSnapshot
 
 _VALUES: Mapping[GatewayDiagnosticFieldName, str | int | float | bool] = {
     "operating_mode": 2,
@@ -31,23 +37,53 @@ _VALUES: Mapping[GatewayDiagnosticFieldName, str | int | float | bool] = {
 }
 
 
+def _sample_value(
+    value: str | int | float | bool,
+    status: GatewayDiagnosticStatus,
+) -> str | int | float | bool | None:
+    return None if status in {"unavailable", "error", "unknown"} else value
+
+
+def _sample_timestamp(status: GatewayDiagnosticStatus, timestamp: float) -> float:
+    return 0.0 if status in {"unavailable", "error", "unknown"} else timestamp
+
+
+def _sample_applicability(
+    status: GatewayDiagnosticStatus,
+) -> GatewayDiagnosticApplicability:
+    if status == "unknown":
+        return "unknown"
+    if status == "inactive":
+        return "not-applicable"
+    return "applicable"
+
+
+def _sample_reason(
+    name: GatewayDiagnosticFieldName,
+    status: GatewayDiagnosticStatus,
+) -> str:
+    return f"{name}-{status}" if status in {"inactive", "unavailable", "error"} else ""
+
+
 def diagnostic_samples(
     *,
     status_overrides: Mapping[GatewayDiagnosticFieldName, GatewayDiagnosticStatus] | None = None,
+    captured_at: float = 100.0,
 ) -> tuple[GatewayDiagnosticSample, ...]:
     overrides = status_overrides or {}
     samples: list[GatewayDiagnosticSample] = []
     for name, value in _VALUES.items():
         status = overrides.get(name, "fresh")
-        unavailable = status in {"unavailable", "error", "unknown"}
         samples.append(
             GatewayDiagnosticSample(
                 name=name,
-                value=None if unavailable else value,
+                value=_sample_value(value, status),
                 status=status,
-                observed_at=0.0 if unavailable else 99.0,
-                confidence=0.0 if unavailable else 1.0,
-                reason_code=f"{name}-{status}" if status in {"unavailable", "error"} else "",
+                changed_at=_sample_timestamp(status, max(0.0, captured_at - 2.0)),
+                confirmed_at=_sample_timestamp(status, max(0.0, captured_at - 1.0)),
+                confidence=_sample_timestamp(status, 1.0),
+                applicability=_sample_applicability(status),
+                reason_code=_sample_reason(name, status),
             )
         )
     return tuple(samples)
@@ -77,7 +113,7 @@ def gateway_diagnostics_snapshot(
             pending_gateway_commands=1,
             pending_core_commands=2,
             maximum_event_loop_gap_ms_60s=20.0,
-            last_success_at=99.5,
+            last_success_at=max(0.0, captured_at - 0.5),
             last_error_code="",
         ),
         discovery=GatewayDiscoverySummary(
@@ -87,8 +123,54 @@ def gateway_diagnostics_snapshot(
             discovered_source_count=discovered_source_count,
             unusable_source_count=unusable_source_count,
         ),
-        ev_charger=diagnostic_samples(status_overrides=status_overrides),
+        publication=GatewayPublicationSummary(
+            registered=True,
+            heartbeat_at=max(0.0, captured_at - 0.5),
+            stale=False,
+        ),
+        ev_charger=diagnostic_samples(
+            status_overrides=status_overrides,
+            captured_at=captured_at,
+        ),
     )
+
+
+def gateway_diagnostics_legacy_payload(
+    *,
+    observed_at: float | None = None,
+) -> dict[str, object]:
+    """Return the canonical schema-v1 representation used by migration tests."""
+    snapshot = gateway_diagnostics_snapshot()
+    legacy_samples = [
+        {
+            "name": sample.name,
+            "value": sample.value,
+            "status": sample.status,
+            "observed_at": sample.confirmed_at if observed_at is None else observed_at,
+            "confidence": sample.confidence,
+            "reason_code": sample.reason_code,
+        }
+        for sample in snapshot.ev_charger
+    ]
+    discovery = snapshot.discovery.to_payload()
+    legacy_discovery = {
+        key: discovery[key]
+        for key in (
+            "enabled",
+            "state",
+            "pending_work",
+            "discovered_source_count",
+            "unusable_source_count",
+        )
+    }
+    return {
+        "schema_version": 1,
+        "sequence": snapshot.sequence,
+        "captured_at": snapshot.captured_at,
+        "health": snapshot.health.to_payload(),
+        "discovery": legacy_discovery,
+        "ev_charger": legacy_samples,
+    }
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,17 +4,19 @@
 
 from __future__ import annotations
 
-from venus_evcharger.dbus_adapter.process.io import DbusAdapterIo
 from venus_evcharger.dbus_adapter.process.protocols.runtime import DbusAdapterPublicationContext
 
 
-class DbusAdapterPublication(DbusAdapterIo):
+class DbusAdapterPublication:
     """Expose publication health without leaking concrete DBus services."""
 
-    @property
-    def evcs_service_registered(self: DbusAdapterPublicationContext) -> bool:
-        return self.publication_registry.evcs_registered
+    def __init__(self, context: DbusAdapterPublicationContext) -> None:
+        self._context = context
 
     @property
-    def registered_publication_path_count(self: DbusAdapterPublicationContext) -> int:
-        return self.publication_registry.registered_path_count
+    def evcs_service_registered(self) -> bool:
+        return self._context.publication_registry.evcs_registered
+
+    @property
+    def registered_publication_path_count(self) -> int:
+        return self._context.publication_registry.registered_path_count

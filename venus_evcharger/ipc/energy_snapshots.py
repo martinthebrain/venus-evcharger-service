@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from venus_evcharger.core.contracts import timestamp_not_future
 from venus_evcharger.ipc.energy_types import (
     ENERGY_IPC_SCHEMA_VERSION,
     EnergySourceKind,
@@ -118,6 +119,10 @@ class EnergyInputsSnapshot:
         ):
             if not isinstance(measurement, MeasuredValue):
                 raise TypeError(f"energy inputs {name} must be a MeasuredValue")
+            if not timestamp_not_future(measurement.observed_at, self.captured_at):
+                raise ValueError(
+                    f"energy inputs {name} observed_at exceeds captured_at tolerance"
+                )
 
     def to_payload(self) -> dict[str, object]:
         return {

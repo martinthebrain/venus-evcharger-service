@@ -46,11 +46,14 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
                 " ",
                 "com.victronenergy.system",
             ],
-            now=10.0,
+            captured_at=10.0,
         )
         self.assertEqual(self.discovery.generation, 1)
-        topology = self.discovery.topology_snapshot(now=11.0)
-        self.assertEqual(topology.generation, 1)
+        self.discovery.record_pv_value("com.victronenergy.pvinverter.a", "/Ac/Power", 100.0)
+        self.discovery.record_pv_value("com.victronenergy.pvinverter.b", "/Ac/Power", 200.0)
+        self.discovery.record_pv_value("com.victronenergy.system", "/Dc/Pv/Power", 300.0)
+        topology = self.discovery.topology_snapshot(captured_at=11.0)
+        self.assertEqual(topology.generation, 4)
         self.assertEqual(topology.captured_at, 11.0)
         self.assertEqual([source.kind for source in topology.sources], ["grid", "pv_ac", "pv_ac", "pv_dc", "battery", "battery"])
         self.assertTrue(all("com.victronenergy" not in source.source_id for source in topology.sources))
@@ -64,9 +67,9 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
             "com.victronenergy.battery.a",
             "com.victronenergy.pvinverter.b",
             "com.victronenergy.system",
-        ])), now=12.0)
-        self.assertEqual(self.discovery.generation, 1)
-        self.assertEqual(self.discovery.topology_snapshot(now=11.0).captured_at, 12.0)
+        ])), captured_at=12.0)
+        self.assertEqual(self.discovery.generation, 4)
+        self.assertEqual(self.discovery.topology_snapshot(captured_at=11.0).captured_at, 12.0)
 
     def test_explicit_service_and_missing_prefix_selection(self) -> None:
         explicit = {"service": " explicit.service ", "prefix": "ignored"}
@@ -78,16 +81,16 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
         bounded = DbusEnergyDiscoveryManager(_specs(), max_prefix_services=0)
         bounded.update_services(
             ["com.victronenergy.pvinverter.a", "com.victronenergy.pvinverter.b"],
-            now=1.0,
+            captured_at=1.0,
         )
         self.assertEqual(bounded.services_for(_specs()["pv_power_w"]), ["com.victronenergy.pvinverter.a"])
 
     def test_unknown_offline_and_online_source_states(self) -> None:
-        unknown = self.discovery.topology_snapshot(now=1.0)
-        self.assertEqual([item.state for item in unknown.sources], ["unknown", "unknown"])
-        self.discovery.update_services(["other.service"], now=2.0)
-        offline = self.discovery.topology_snapshot(now=2.0)
-        self.assertEqual([item.state for item in offline.sources], ["offline", "offline"])
+        unknown = self.discovery.topology_snapshot(captured_at=1.0)
+        self.assertEqual([item.state for item in unknown.sources], ["unknown"])
+        self.discovery.update_services(["other.service"], captured_at=2.0)
+        offline = self.discovery.topology_snapshot(captured_at=2.0)
+        self.assertEqual([item.state for item in offline.sources], ["offline"])
 
     def test_refresh_keys_are_resolved_from_opaque_source_identity(self) -> None:
         self.discovery.update_services(
@@ -96,9 +99,11 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
                 "com.victronenergy.pvinverter.a",
                 "com.victronenergy.battery.a",
             ],
-            now=1.0,
+            captured_at=1.0,
         )
-        sources = self.discovery.topology_snapshot(now=1.0).sources
+        self.discovery.record_pv_value("com.victronenergy.pvinverter.a", "/Ac/Power", 100.0)
+        self.discovery.record_pv_value("com.victronenergy.system", "/Dc/Pv/Power", 200.0)
+        sources = self.discovery.topology_snapshot(captured_at=1.0).sources
         by_kind = {source.kind: source.source_id for source in sources}
         self.assertEqual(self.discovery.read_keys_for_source(by_kind["grid"]), ("grid_power_w",))
         self.assertEqual(self.discovery.read_keys_for_source(by_kind["pv_ac"]), ("pv_power_w",))
@@ -108,8 +113,12 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
 
     def test_introspection_targets_remain_adapter_private(self) -> None:
         self.discovery.update_services(
-            ["com.victronenergy.pvinverter.a", "com.victronenergy.battery.a"],
-            now=1.0,
+            [
+                "com.victronenergy.system",
+                "com.victronenergy.pvinverter.a",
+                "com.victronenergy.battery.a",
+            ],
+            captured_at=1.0,
         )
         targets = self.discovery.introspection_targets()
         self.assertEqual(
@@ -122,7 +131,7 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
                 ("pv", 30, "configured-dc-pv-field"),
             ],
         )
-        members = self.discovery.pv_members(_specs()["pv_power_w"], {})
+        members = self.discovery.pv_members(_specs()["pv_power_w"])
         self.assertEqual(
             members,
             [
@@ -135,7 +144,7 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
         specs = _specs()
         specs["pv_power_w"]["use_dc_pv"] = False
         disabled = DbusEnergyDiscoveryManager(specs)
-        self.assertEqual([item.kind for item in disabled.topology_snapshot(now=1.0).sources], ["grid"])
+        self.assertEqual([item.kind for item in disabled.topology_snapshot(captured_at=1.0).sources], ["grid"])
         self.assertEqual(
             [target.reason for target in disabled.introspection_targets()],
             ["configured-grid-field", "configured-grid-field"],
@@ -143,7 +152,7 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
         specs["pv_power_w"]["use_dc_pv"] = True
         specs["pv_power_w"]["dc_path"] = ""
         invalid = DbusEnergyDiscoveryManager(specs)
-        self.assertEqual([item.kind for item in invalid.topology_snapshot(now=1.0).sources], ["grid"])
+        self.assertEqual([item.kind for item in invalid.topology_snapshot(captured_at=1.0).sources], ["grid"])
         self.assertNotIn(
             "configured-dc-pv-field",
             [target.reason for target in invalid.introspection_targets()],
@@ -151,7 +160,14 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
 
         without_grid = _specs()
         without_grid["grid_power_w"] = {}
-        self.assertEqual(DbusEnergyDiscoveryManager(without_grid).topology_snapshot(now=1.0).sources[0].kind, "pv_dc")
+        dc_only = DbusEnergyDiscoveryManager(without_grid)
+        self.assertEqual(dc_only.topology_snapshot(captured_at=1.0).sources, ())
+        dc_only.update_services(["com.victronenergy.system"], captured_at=1.0)
+        dc_only.record_pv_value("com.victronenergy.system", "/Dc/Pv/Power", 0.0)
+        self.assertEqual(
+            dc_only.topology_snapshot(captured_at=1.0).sources[0].kind,
+            "pv_dc",
+        )
 
 
 class GatewayEnergySnapshotContracts(unittest.TestCase):
@@ -163,8 +179,10 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
                 "com.victronenergy.pvinverter.a",
                 "com.victronenergy.battery.a",
             ],
-            now=90.0,
+            captured_at=90.0,
         )
+        self.discovery.record_pv_value("com.victronenergy.pvinverter.a", "/Ac/Power", 100.0)
+        self.discovery.record_pv_value("com.victronenergy.system", "/Dc/Pv/Power", 200.0)
 
     def test_snapshot_projects_values_quality_and_opaque_sources(self) -> None:
         snapshot = energy_inputs_snapshot(
@@ -178,7 +196,7 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
             captured_at=100.0,
         )
         self.assertEqual(snapshot.sequence, 4)
-        self.assertEqual(snapshot.topology_generation, 1)
+        self.assertEqual(snapshot.topology_generation, 3)
         self.assertEqual(snapshot.grid_power_w.value, -20.0)
         self.assertEqual(snapshot.grid_power_w.reason_code, "")
         self.assertEqual(snapshot.pv_power_w.status, "stale")

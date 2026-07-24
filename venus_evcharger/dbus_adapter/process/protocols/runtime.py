@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import socket
-from collections.abc import Callable
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from venus_evcharger.dbus_adapter.publication import GatewayPublicationRegistry
+from venus_evcharger.dbus_adapter.process.protocols.roles import HealthRole
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusGatewayCommandInbox, GatewayPaths
-from venus_evcharger.ipc.command_types import CommandPayload
+from venus_evcharger.ipc.fast_publication import FastPublicationQueue
+
+if TYPE_CHECKING:
+    from venus_evcharger.dbus_adapter.publication import GatewayPublicationRegistry
 
 
 class MainLoopLike(Protocol):  # pragma: no cover
@@ -24,8 +26,6 @@ class DbusAdapterRuntimeContext(Protocol):  # pragma: no cover
     _main_loop: MainLoopLike | None
     _stop: bool
 
-    def install_signal_handlers(self) -> None: ...
-
 
 class DbusAdapterSocketContext(Protocol):  # pragma: no cover
     """Unix-socket IPC surface required by ``DbusAdapterSocket``."""
@@ -33,25 +33,15 @@ class DbusAdapterSocketContext(Protocol):  # pragma: no cover
     paths: GatewayPaths
     cache: DbusCacheStore
     commands: DbusGatewayCommandInbox
+    fast_publications: FastPublicationQueue
     _server: socket.socket | None
 
-    def handle_socket_payload(self, data: str) -> CommandPayload: ...
-    def dispatch_socket_payload(self, payload: CommandPayload) -> CommandPayload: ...
-    def socket_handlers(self) -> dict[str, Callable[[CommandPayload, str], CommandPayload]]: ...
-    def socket_snapshot(self, payload: CommandPayload, request_type: str) -> CommandPayload: ...
-    def socket_health(self, payload: CommandPayload, request_type: str) -> CommandPayload: ...
-    def socket_enqueue(self, payload: CommandPayload, request_type: str) -> CommandPayload: ...
-    def unsupported_socket_request(self, payload: CommandPayload, request_type: str) -> CommandPayload: ...
-    def health_snapshot(self) -> CommandPayload: ...
+    @property
+    def health_role(self) -> HealthRole: ...
 
 
 class DbusAdapterPublicationContext(Protocol):  # pragma: no cover
     """Publication registry surface required by ``DbusAdapterPublication``."""
 
-    publication_registry: GatewayPublicationRegistry
-
     @property
-    def evcs_service_registered(self) -> bool: ...
-
-    @property
-    def registered_publication_path_count(self) -> int: ...
+    def publication_registry(self) -> GatewayPublicationRegistry: ...

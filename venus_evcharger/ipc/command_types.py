@@ -8,6 +8,6 @@ from typing import TypeAlias
 
 CommandMapping: TypeAlias = Mapping[str, object]
 CommandPayload: TypeAlias = dict[str, object]
-CommandFile: TypeAlias = tuple[str, CommandPayload]
+CommandFile: TypeAlias = tuple[str, CommandMapping]
 CommandFileList: TypeAlias = list[CommandFile]
 CommandOrderKey: TypeAlias = tuple[int, int, float, int, str]

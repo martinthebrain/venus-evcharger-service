@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
 from configparser import ConfigParser
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -40,6 +40,16 @@ def _settings(**overrides: object) -> CommandJsonEnergySourceSettings:
         confidence_path="data.confidence",
     )
     return replace(baseline, **overrides)
+
+
+class _TimeoutRuntime:
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        self.requests: list[float] = []
+
+    def bounded_request_timeout_seconds(self, configured_seconds: float) -> float:
+        self.requests.append(configured_seconds)
+        return self.timeout_seconds
 
 
 class EnergyConnectorsCommandContractTests(unittest.TestCase):
@@ -117,10 +127,14 @@ class EnergyConnectorsCommandContractTests(unittest.TestCase):
         self.assertEqual(_command_confidence({"data": {"confidence": 0.25}}, settings), 0.25)
         self.assertEqual(_command_confidence({}, _settings(confidence_path=None)), 1.0)
 
-        self.assertEqual(_command_source_name(EnergySourceDefinition(source_id="id", service_name="service"), settings), "service")
+        self.assertEqual(
+            _command_source_name(EnergySourceDefinition(source_id="id", service_name="service"), settings), "service"
+        )
         self.assertEqual(_command_source_name(EnergySourceDefinition(source_id="id"), settings), "helper")
         self.assertEqual(
-            _command_source_name(EnergySourceDefinition(source_id="id", config_path="config.ini"), _settings(command=())),
+            _command_source_name(
+                EnergySourceDefinition(source_id="id", config_path="config.ini"), _settings(command=())
+            ),
             "config.ini",
         )
         self.assertEqual(_command_source_name(EnergySourceDefinition(source_id="id"), _settings(command=())), "id")
@@ -143,6 +157,16 @@ class EnergyConnectorsCommandContractTests(unittest.TestCase):
         self.assertEqual(_command_timeout_seconds(runtime, {}, {"TimeoutSeconds": "0.5"}), 0.5)
         self.assertEqual(_command_timeout_seconds(SimpleNamespace(), {}, {}), 2.0)
         self.assertEqual(_command_timeout_seconds(SimpleNamespace(shelly_request_timeout_seconds=0), {}, {}), 2.0)
+        limited_runtime = _TimeoutRuntime(0.4)
+        self.assertEqual(
+            _command_timeout_seconds(
+                limited_runtime,
+                {"RequestTimeoutSeconds": "3.5"},
+                {"TimeoutSeconds": "4.5"},
+            ),
+            0.4,
+        )
+        self.assertEqual(limited_runtime.requests, [4.5])
 
         self.assertEqual(_command_args({}), ())
         self.assertEqual(_command_args({"Args": "  "}), ())
@@ -172,15 +196,19 @@ class EnergyConnectorsCommandContractTests(unittest.TestCase):
         )
         runtime = SimpleNamespace(shelly_request_timeout_seconds=2.0)
         source = EnergySourceDefinition(source_id="source", config_path=" config.ini ")
-        with patch(
-            "venus_evcharger.energy.connectors_command.load_template_config",
-            return_value=parser,
-        ) as load_config, patch(
-            "venus_evcharger.energy.connectors_command._command_timeout_seconds",
-            return_value=4.5,
-        ) as timeout, patch(
-            "venus_evcharger.energy.connectors_command._validate_command_json_energy_source_settings",
-        ) as validate:
+        with (
+            patch(
+                "venus_evcharger.energy.connectors_command.load_template_config",
+                return_value=parser,
+            ) as load_config,
+            patch(
+                "venus_evcharger.energy.connectors_command._command_timeout_seconds",
+                return_value=4.5,
+            ) as timeout,
+            patch(
+                "venus_evcharger.energy.connectors_command._validate_command_json_energy_source_settings",
+            ) as validate,
+        ):
             loaded = _command_json_energy_source_settings(runtime, source)
             cached = _command_json_energy_source_settings(runtime, source)
 
@@ -204,7 +232,10 @@ class EnergyConnectorsCommandContractTests(unittest.TestCase):
                 confidence_path="result.confidence",
             ),
         )
-        self.assertEqual(runtime._energy_command_settings_cache, {"config.ini": loaded})
+        self.assertEqual(
+            runtime._energy_connector_runtime_state.caches,
+            {"command_json.settings": {"config.ini": loaded}},
+        )
 
         missing_path = EnergySourceDefinition(source_id="missing", config_path="  ")
         with self.assertRaises(ValueError) as raised:

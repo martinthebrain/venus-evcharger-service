@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import configparser
+import logging
 import os
 from dataclasses import dataclass
 
@@ -28,22 +29,32 @@ class CasePreservingConfigParser(configparser.ConfigParser):
         return optionstr
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GatewayRateSettings:
     read_interval_seconds: float
     write_interval_seconds: float
     introspection_interval_seconds: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GatewayTimingSettings:
     min_tick_seconds: float
     max_tick_seconds: float
     service_list_interval_seconds: float
+    missing_pv_discovery_interval_seconds: float
+    energy_publish_interval_seconds: float
+    health_publish_interval_seconds: float
     cache_publish_interval_seconds: float
+    cache_dirty_publish_interval_seconds: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
+class GatewayResourceSettings:
+    sample_interval_seconds: float
+    recovery_hold_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
 class GatewaySloSettings:
     gui_max_age_seconds: float
     core_read_max_age_seconds: float
@@ -51,7 +62,7 @@ class GatewaySloSettings:
     mainloop_gap_max_ms: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GatewayFileSettings:
     command_lifecycle_path: str
     command_lifecycle_max_bytes: int
@@ -60,13 +71,13 @@ class GatewayFileSettings:
     health_log_max_bytes: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GatewayIntrospectionSettings:
     snapshot_path: str
     enabled: bool
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GatewayAdapterSettings:
     paths: GatewayPaths
     service_name: str
@@ -77,6 +88,7 @@ class GatewayAdapterSettings:
     slo: GatewaySloSettings
     files: GatewayFileSettings
     introspection: GatewayIntrospectionSettings
+    resources: GatewayResourceSettings
     stale_after_seconds: float
 
 
@@ -86,6 +98,14 @@ def load_adapter_config(path: str) -> configparser.ConfigParser:
     if not loaded:
         raise ValueError(f"Unable to read config file: {path}")
     return parser
+
+
+def logging_level_from_config(config: configparser.ConfigParser) -> int:
+    configured = config["DEFAULT"].get("Logging")
+    if configured is None:
+        return logging.INFO
+    value = str(configured).strip().upper()
+    return logging.getLevelNamesMapping().get(value, logging.INFO)
 
 
 def adapter_settings(
@@ -105,6 +125,7 @@ def adapter_settings(
         slo=slo_settings(defaults),
         files=file_settings(defaults, paths),
         introspection=introspection_settings(defaults, device_instance),
+        resources=resource_settings(defaults),
         stale_after_seconds=config_get_float(defaults, "DbusGatewayStaleAfterSeconds", 10.0),
     )
 
@@ -147,15 +168,61 @@ def rate_settings(defaults: configparser.SectionProxy) -> GatewayRateSettings:
 def timing_settings(defaults: configparser.SectionProxy) -> GatewayTimingSettings:
     configured_tick = config_get_float(defaults, "DbusGatewayTickSeconds", 0.2)
     min_tick = max(0.05, config_get_float(defaults, "DbusGatewayMinTickSeconds", configured_tick))
-    configured_cache_publish = config_get_float(defaults, "DbusGatewayCachePublishIntervalSeconds", 1.0)
     return GatewayTimingSettings(
         min_tick_seconds=min_tick,
         max_tick_seconds=max(min_tick, config_get_float(defaults, "DbusGatewayMaxTickSeconds", 1.0)),
         service_list_interval_seconds=config_get_float(defaults, "DbusGatewayServiceListIntervalSeconds", 900.0),
-        cache_publish_interval_seconds=(
-            1.0 if configured_cache_publish <= 0.0 else max(0.2, configured_cache_publish)
+        missing_pv_discovery_interval_seconds=max(
+            15.0,
+            config_get_float(
+                defaults,
+                "DbusGatewayMissingPvDiscoveryIntervalSeconds",
+                60.0,
+            ),
+        ),
+        energy_publish_interval_seconds=_publish_interval(
+            defaults,
+            "DbusGatewayEnergyPublishIntervalSeconds",
+            1.0,
+        ),
+        health_publish_interval_seconds=_publish_interval(
+            defaults,
+            "DbusGatewayHealthPublishIntervalSeconds",
+            1.0,
+        ),
+        cache_publish_interval_seconds=_publish_interval(
+            defaults,
+            "DbusGatewayFullCachePublishIntervalSeconds",
+            10.0,
+        ),
+        cache_dirty_publish_interval_seconds=_publish_interval(
+            defaults,
+            "DbusGatewayFullCacheDirtyIntervalSeconds",
+            2.0,
         ),
     )
+
+
+def resource_settings(defaults: configparser.SectionProxy) -> GatewayResourceSettings:
+    return GatewayResourceSettings(
+        sample_interval_seconds=max(
+            0.2,
+            config_get_float(defaults, "DbusGatewayResourceSampleIntervalSeconds", 2.0),
+        ),
+        recovery_hold_seconds=max(
+            0.0,
+            config_get_float(defaults, "DbusGatewayResourceRecoveryHoldSeconds", 10.0),
+        ),
+    )
+
+
+def _publish_interval(
+    defaults: configparser.SectionProxy,
+    name: str,
+    fallback: float,
+) -> float:
+    configured = config_get_float(defaults, name, fallback)
+    return fallback if configured <= 0.0 else max(0.2, configured)
 
 
 def slo_settings(defaults: configparser.SectionProxy) -> GatewaySloSettings:

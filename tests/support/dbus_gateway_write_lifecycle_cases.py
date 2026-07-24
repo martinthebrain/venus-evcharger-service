@@ -26,9 +26,9 @@ class GatewayWriteLifecycleCases(GatewayAdapterContractCase):
         ) as scenario:
             scheduler = scenario.adapter.write_scheduler
             self.assertEqual(scheduler.local_publish_burst_limit, 1)
-            self.assertEqual(scheduler.local_publish_tick_budget_seconds, 0.001)
-            self.assertEqual(scheduler.queue_class_budgets["remote-write"], 1)
-            self.assertEqual(scheduler.queue_class_budgets["diagnostic"], 0)
+            self.assertEqual(scheduler.health_tracker.local_publish_tick_budget_seconds, 0.001)
+            self.assertEqual(scheduler.health_tracker.queue_class_budgets["remote-write"], 1)
+            self.assertEqual(scheduler.health_tracker.queue_class_budgets["diagnostic"], 0)
 
     def test_semantic_priority_order_is_stable_by_age(self) -> None:
         safety = {**evcs_publication({"mode": 0}, priority="critical"), "created_at": 3.0}
@@ -36,7 +36,7 @@ class GatewayWriteLifecycleCases(GatewayAdapterContractCase):
         newer_operation = {**gx_relay_refresh_command(1), "created_at": 2.0}
 
         with patch.object(vars(write_health_module)["time"], "time", return_value=4.0):
-            ordered = write_health_module.DbusWriteSchedulerHealth.prioritized_commands(
+            ordered = write_health_module.WriteSchedulerHealthTracker.prioritized_commands(
                 [("newer", newer_operation), ("safety", safety), ("older", older_operation)]
             )
 
@@ -54,31 +54,39 @@ class GatewayWriteLifecycleCases(GatewayAdapterContractCase):
 
     def test_lifecycle_counts_keep_total_and_rolling_windows_separate(self) -> None:
         with self.adapter_scenario() as scenario:
-            scheduler = scenario.adapter.write_scheduler
+            tracker = scenario.adapter.write_scheduler.health_tracker
             with patch.object(
                 vars(write_health_module)["time"],
                 "time",
                 side_effect=[100.0, 170.0],
             ):
-                scheduler.record_lifecycle(evcs_publication(), "applied")
-                scheduler.record_lifecycle(gx_relay_refresh_command(0), "deferred")
+                tracker.record_lifecycle(evcs_publication(), "applied")
+                tracker.record_lifecycle(gx_relay_refresh_command(0), "deferred")
 
-            scheduler.prune_lifecycle(165.0)
+            health = tracker.health(now=165.0)
 
-            self.assertEqual(scheduler._lifecycle_counts, {"applied": 1, "deferred": 1})
-            self.assertEqual(scheduler.lifecycle_counts_60s(), {"deferred": 1})
+            self.assertEqual(health["lifecycle_counts"], {"applied": 1, "deferred": 1})
+            self.assertEqual(health["lifecycle_counts_60s"], {"deferred": 1})
 
     def test_empty_lifecycle_state_is_normalized_to_unknown(self) -> None:
         with self.adapter_scenario() as scenario:
+            tracker = scenario.adapter.write_scheduler.health_tracker
+            tracker.record_lifecycle(evcs_publication(), "")
+            self.assertEqual(tracker.health()["lifecycle_counts"], {"unknown": 1})
+
+    def test_scheduler_facade_records_process_level_lifecycle_events(self) -> None:
+        with self.adapter_scenario() as scenario:
             scheduler = scenario.adapter.write_scheduler
-            scheduler.record_lifecycle(evcs_publication(), "")
-            self.assertEqual(scheduler.health()["lifecycle_counts"], {"unknown": 1})
+
+            scheduler.record_lifecycle(gx_relay_refresh_command(0), "dropped")
+
+            self.assertEqual(scheduler.health()["lifecycle_counts"], {"dropped": 1})
 
     def test_health_exposes_semantic_scheduler_capacity(self) -> None:
         with self.adapter_scenario() as scenario:
             scheduler = scenario.adapter.write_scheduler
-            scheduler.record_budget(evcs_publication({"mode": 1}, priority="critical"))
-            scheduler.record_processed()
+            scheduler.health_tracker.record_budget(evcs_publication({"mode": 1}, priority="critical"))
+            scheduler.health_tracker.record_processed()
 
             health = scheduler.health(now=time.time())
 

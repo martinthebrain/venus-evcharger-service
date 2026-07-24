@@ -19,6 +19,15 @@ from venus_evcharger.ipc.gateway_diagnostics import (
     decode_gateway_diagnostics,
     encode_gateway_diagnostics,
 )
+from venus_evcharger.ipc.fast_publication import (
+    FastPublicationEnqueueResult,
+    FastPublicationQueue,
+    is_transient_publication,
+)
+from venus_evcharger.ipc.publication_order import (
+    PUBLICATION_ORDER_FIELD,
+    PublicationOrderIssuer,
+)
 
 __all__ = (
     "CommandFile",
@@ -31,9 +40,14 @@ __all__ = (
     "CoreCommandMailbox",
     "CoreControlCommand",
     "FileCommandMailbox",
+    "FastPublicationEnqueueResult",
+    "FastPublicationQueue",
+    "PUBLICATION_ORDER_FIELD",
+    "PublicationOrderIssuer",
     "GatewayDiagnosticsFileReader",
     "core_control_command_payload",
     "decode_gateway_diagnostics",
     "encode_gateway_diagnostics",
+    "is_transient_publication",
     "parse_core_control_command",
 )

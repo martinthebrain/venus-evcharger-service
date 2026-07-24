@@ -90,7 +90,7 @@ class PublicationRegistryScenarioTests(GatewayAdapterContractCase):
             adapter = scenario.adapter
             self.assertFalse(adapter.evcs_service_registered)
 
-            self.assertEqual(adapter.write_scheduler.process_publication(evcs_registration()), "applied")
+            self.assertEqual(adapter.write_scheduler.publication_executor.process(evcs_registration()), "applied")
 
             self.assertTrue(adapter.evcs_service_registered)
             self.assertEqual(
@@ -101,9 +101,12 @@ class PublicationRegistryScenarioTests(GatewayAdapterContractCase):
     def test_repeated_companion_registration_updates_same_kind_and_rejects_kind_change(self) -> None:
         with self.adapter_scenario() as scenario:
             registry = scenario.adapter.publication_registry
-            self.assertEqual(scenario.adapter.write_scheduler.process_publication(companion_registration()), "applied")
             self.assertEqual(
-                scenario.adapter.write_scheduler.process_publication(
+                scenario.adapter.write_scheduler.publication_executor.process(companion_registration()),
+                "applied",
+            )
+            self.assertEqual(
+                scenario.adapter.write_scheduler.publication_executor.process(
                     companion_registration(fields={"connected": 0, "ac_power_w": 42.0})
                 ),
                 "applied",
@@ -124,7 +127,10 @@ class PublicationRegistryScenarioTests(GatewayAdapterContractCase):
             assert missing is not None
             self.assertEqual(registry.publish_companion(missing), "deferred")
 
-            self.assertEqual(scenario.adapter.write_scheduler.process_publication(companion_registration()), "applied")
+            self.assertEqual(
+                scenario.adapter.write_scheduler.publication_executor.process(companion_registration()),
+                "applied",
+            )
             record = registry._services["aggregate-grid"]
             record.kind = "corrupt"
             publication = parse_publish_companion_fields(companion_publication())
@@ -146,7 +152,10 @@ class PublicationRegistryScenarioTests(GatewayAdapterContractCase):
     def test_gui_write_is_translated_to_core_command_and_unknown_path_is_rejected(self) -> None:
         with self.adapter_scenario() as scenario:
             registry = scenario.adapter.publication_registry
-            self.assertEqual(scenario.adapter.write_scheduler.process_publication(evcs_registration()), "applied")
+            self.assertEqual(
+                scenario.adapter.write_scheduler.publication_executor.process(evcs_registration()),
+                "applied",
+            )
             record = registry._services[EVCS_SERVICE_ID]
             service = cast(FakeVeDbusService, record.service)
             callback = service.added_paths["/Mode"]["onchangecallback"]
@@ -167,7 +176,10 @@ class PublicationRegistryScenarioTests(GatewayAdapterContractCase):
     def test_invalid_position_uses_identity_fallback(self) -> None:
         with self.adapter_scenario("[DEFAULT]\nPosition = invalid\n") as scenario:
             with patch.object(publication_registry_module.time, "time", return_value=10.0):
-                self.assertEqual(scenario.adapter.write_scheduler.process_publication(evcs_registration()), "applied")
+                self.assertEqual(
+                    scenario.adapter.write_scheduler.publication_executor.process(evcs_registration()),
+                    "applied",
+                )
             record: RegisteredPublicationService = scenario.adapter.publication_registry._services[EVCS_SERVICE_ID]
             self.assertEqual(record.values["/Position"], 1)
 

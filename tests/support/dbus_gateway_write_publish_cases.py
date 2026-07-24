@@ -14,7 +14,9 @@ from tests.support.dbus_gateway_adapter_harness import (
     evcs_publication,
     evcs_registration,
     install_mock,
+    patch,
     time,
+    write_health_module,
 )
 
 
@@ -24,7 +26,7 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
     def test_publication_dispatches_all_semantic_envelopes(self) -> None:
         with self.adapter_scenario() as scenario:
             registry = scenario.adapter.publication_registry
-            scheduler = scenario.adapter.write_scheduler
+            executor = scenario.adapter.write_scheduler.publication_executor
             register_evcs = install_mock(registry, "register_evcs", MagicMock(return_value="applied"))
             publish_evcs = install_mock(registry, "publish_evcs", MagicMock(return_value="applied"))
             register_companion = install_mock(
@@ -45,7 +47,7 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
                 companion_publication(),
             )
             for command in commands:
-                self.assertEqual(scheduler.process_publication(command), "applied")
+                self.assertEqual(executor.process(command), "applied")
 
             register_evcs.assert_called_once()
             publish_evcs.assert_called_once()
@@ -54,7 +56,7 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
 
     def test_invalid_or_incomplete_publication_is_dropped(self) -> None:
         with self.adapter_scenario() as scenario:
-            scheduler = scenario.adapter.write_scheduler
+            executor = scenario.adapter.write_scheduler.publication_executor
             invalid_commands: tuple[CommandMapping, ...] = (
                 {},
                 {"kind": "publish_evcs_fields"},
@@ -62,20 +64,22 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
                 {"kind": "register_evcs", "identity": {}, "fields": {"mode": 0}},
             )
             for command in invalid_commands:
-                self.assertEqual(scheduler.process_publication(command), "dropped")
+                self.assertEqual(executor.process(command), "dropped")
 
-    def test_local_publication_burst_processes_multiple_semantic_services(self) -> None:
+    def test_critical_publication_overtakes_normal_local_publication_burst(self) -> None:
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter
-            self.assertEqual(adapter.write_scheduler.process_publication(evcs_registration()), "applied")
-            self.assertEqual(adapter.write_scheduler.process_publication(companion_registration()), "applied")
+            self.assertEqual(adapter.write_scheduler.publication_executor.process(evcs_registration()), "applied")
+            self.assertEqual(adapter.write_scheduler.publication_executor.process(companion_registration()), "applied")
             paths = [
                 adapter.commands.enqueue(evcs_publication({"mode": 1}, priority="critical")),
                 adapter.commands.enqueue(evcs_publication({"ac_power_w": 800.0}, priority="live")),
                 adapter.commands.enqueue(companion_publication(fields={"ac_power_w": 350.0})),
             ]
 
-            self.assertEqual(adapter.write_scheduler.process_local_publish_burst(limit=3), 3)
+            self.assertEqual(adapter.write_scheduler.process_local_publish_burst(limit=3), 0)
+            self.assertTrue(adapter.write_scheduler.process_one())
+            self.assertEqual(adapter.write_scheduler.process_local_publish_burst(limit=3), 2)
 
             self.assertTrue(all(not Path(path).exists() for path in paths))
             self.assertEqual(adapter.write_scheduler.health()["processed_commands_60s"], 3)
@@ -90,7 +94,7 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
 
             self.assertTrue(Path(deferred_path).exists())
             self.assertTrue(Path(later_path).exists())
-            self.assertEqual(adapter.write_scheduler.last_processed_at, 0.0)
+            self.assertEqual(adapter.write_scheduler.health_tracker.last_processed_at, 0.0)
 
     def test_next_local_publication_ignores_semantic_remote_operations(self) -> None:
         from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command
@@ -100,7 +104,7 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
             adapter.commands.enqueue(gx_relay_refresh_command(0))
             publication_path = adapter.commands.enqueue(evcs_publication({"connected": 1}))
 
-            selected = adapter.write_scheduler.next_local_publish_command()
+            selected = adapter.write_scheduler.command_queue.next_local_publish_command()
 
             self.assertIsNotNone(selected)
             assert selected is not None
@@ -117,13 +121,17 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
             pending: CommandFileList = [("remote.json", remote), ("local.json", local)]
             load_pending = install_mock(scenario.adapter.commands, "load_pending", MagicMock(return_value=pending))
             install_mock(scenario.adapter.commands, "coalesce", MagicMock(side_effect=lambda commands: commands))
-            install_mock(scheduler, "prioritized_commands", MagicMock(side_effect=lambda commands: commands))
-            install_mock(scheduler, "budget_available", MagicMock(return_value=True))
+            install_mock(
+                scheduler.health_tracker,
+                "prioritized_commands",
+                MagicMock(side_effect=lambda commands: commands),
+            )
+            install_mock(scheduler.health_tracker, "budget_available", MagicMock(return_value=True))
 
-            self.assertEqual(scheduler.next_local_publish_command(), ("local.json", local))
+            self.assertEqual(scheduler.command_queue.next_local_publish_command(), ("local.json", local))
 
             load_pending.return_value = []
-            self.assertIsNone(scheduler.next_local_publish_command())
+            self.assertIsNone(scheduler.command_queue.next_local_publish_command())
 
     def test_stale_semantic_publications_are_removed_by_coalesce_key(self) -> None:
         with self.adapter_scenario() as scenario:
@@ -136,21 +144,29 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
                 ("stale.json", stale),
                 ("unrelated.json", dict(unrelated)),
             ]
-            remove = install_mock(adapter.commands, "remove", MagicMock())
+            remove = install_mock(
+                adapter.write_scheduler.command_queue,
+                "remove_pending",
+                MagicMock(return_value=True),
+            )
 
-            adapter.write_scheduler.drop_stale_coalesced_commands(
+            adapter.write_scheduler.command_queue.drop_stale_coalesced_commands(
                 "processed.json",
                 processed,
                 pending_commands=pending,
             )
 
-            remove.assert_called_once_with("stale.json")
+            remove.assert_called_once_with("stale.json", stale)
 
     def test_command_without_coalesce_key_never_removes_other_work(self) -> None:
         with self.adapter_scenario() as scenario:
-            remove = install_mock(scenario.adapter.commands, "remove", MagicMock())
+            remove = install_mock(
+                scenario.adapter.write_scheduler.command_queue,
+                "remove_pending",
+                MagicMock(return_value=True),
+            )
 
-            scenario.adapter.write_scheduler.drop_stale_coalesced_commands(
+            scenario.adapter.write_scheduler.command_queue.drop_stale_coalesced_commands(
                 "processed.json",
                 {"kind": "publish_evcs_fields", "fields": {"mode": 1}},
                 pending_commands=[("other.json", evcs_publication({"mode": 0}))],
@@ -162,7 +178,11 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter
             path = adapter.commands.enqueue(evcs_publication({"mode": 1}))
-            install_mock(adapter.write_scheduler, "budget_available", MagicMock(return_value=False))
+            install_mock(
+                adapter.write_scheduler.health_tracker,
+                "budget_available",
+                MagicMock(return_value=False),
+            )
 
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(limit=2), 0)
             self.assertTrue(Path(path).exists())
@@ -170,10 +190,13 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
     def test_processed_publication_timestamp_is_pruned_after_sixty_seconds(self) -> None:
         with self.adapter_scenario() as scenario:
             scheduler = scenario.adapter.write_scheduler
-            scheduler._processed_events.extend((10.0, 70.0))
+            tracker = scheduler.health_tracker
+            with patch.object(write_health_module.time, "time", side_effect=(10.0, 70.0)):
+                tracker.record_processed()
+                tracker.record_processed()
 
-            scheduler.prune_processed(71.0)
+            tracker.prune_processed(71.0)
 
-            self.assertEqual(list(scheduler._processed_events), [70.0])
-            scheduler.record_processed()
-            self.assertGreater(scheduler.last_processed_at, 70.0)
+            self.assertEqual(tracker.health(now=71.0)["processed_commands_60s"], 1)
+            tracker.record_processed()
+            self.assertGreater(tracker.last_processed_at, 70.0)

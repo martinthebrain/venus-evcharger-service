@@ -24,9 +24,11 @@ class ReadTarget:
         return dbus_path_key(self.service, self.path)
 
 
-def read_target(service: object, path: object) -> ReadTarget | None:  # pragma: no mutate block
-    service_name = str(service or "").strip()
-    dbus_path = str(path or "").strip()
+def read_target(service: object, path: object) -> ReadTarget | None:
+    if not service or not path:
+        return None
+    service_name = str(service).strip()
+    dbus_path = str(path).strip()
     if not service_name or not dbus_path.startswith("/"):
         return None
     return ReadTarget(service_name, dbus_path)

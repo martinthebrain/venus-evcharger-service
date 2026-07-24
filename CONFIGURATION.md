@@ -273,6 +273,11 @@ Aggregation rules:
 
 - `combined_soc` is capacity-weighted when one or more sources provide both
   valid `soc` and `usable_capacity_wh`
+- `AutoEnergySource.<id>.PhysicalId` identifies one physical battery across
+  multiple observation paths; equal non-empty IDs contribute only the newest
+  online observation to capacity-weighted SOC
+- an omitted `PhysicalId` keeps sources independent for backward-compatible,
+  deterministic aggregation
 - `effective_soc` falls back to one readable source SOC when no weighted
   aggregate can be formed
 - charge, discharge, net battery power, and AC power are summed across sources
@@ -284,7 +289,10 @@ Aggregation rules:
 `AutoUseCombinedBatterySoc=1` tells Auto mode to use the aggregated effective
 SOC instead of only the first configured source.
 
-`dbus` sources read directly from Venus DBus.
+The reserved `victron` source is populated from the semantic DBus-gateway
+snapshot. The auto-input helper never reads Venus DBus directly. A legacy
+`dbus` profile/type is accepted only for that reserved semantic alias and is
+rejected for external source IDs.
 
 `template_http` sources read from one small external HTTP/JSON adapter file
 referenced through `AutoEnergySource.<id>.ConfigPath`. That keeps external
@@ -350,6 +358,20 @@ parallel `unit1` + `unit2` setups do not double-count them.
 `command_json` sources run one local helper command that returns a JSON object.
 This is the intended bridge point for custom scripts, vendor SDK wrappers, or
 MQTT consumers that should stay outside the wallbox core.
+
+When the semantic gateway and an external connector both observe the same
+physical battery, assign the same stable ID:
+
+```ini
+AutoEnergySources=victron,huawei
+AutoEnergySource.victron.Profile=dbus-battery
+AutoEnergySource.victron.PhysicalId=house-battery
+AutoEnergySource.huawei.Profile=huawei_ma_native_ap
+AutoEnergySource.huawei.PhysicalId=house-battery
+```
+
+This deduplicates only the capacity-weighted SOC contribution. Independent
+power channels retain their existing scope-key aggregation rules.
 
 Single-source keys are used when `AutoEnergySources` is empty:
 

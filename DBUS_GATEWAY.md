@@ -90,11 +90,76 @@ names, paths, inspection XML, service counts, or path counts.
 `DbusGatewaySocketPath`, `DbusGatewayCommandDir`, and
 `DbusGatewayCoreCommandDir` can override these paths.
 
-`DbusGatewayCachePublishIntervalSeconds=1` limits RAM-backed IPC publication to
-once per second. The adapter enforces a 0.2 second minimum even when an older
-configuration requests a smaller positive interval. An older `0` is migrated
-in memory to the one-second default; cache sequence changes do not bypass this
-resource guard.
+## Publication IPC Arbitration
+
+Live, diagnostic semantic publications may use the low-latency gateway socket.
+Registration, safety, user-critical, and other durable commands remain in the
+atomic file inbox. Both lanes are governed by one arbitration contract:
+
+- Every coalesced publication carries a process-wide monotonic
+  `transport_order` and one `transport_field_orders` entry per field. Separate
+  `GatewayClient` instances share the issuer sequence. Tests may inject an
+  isolated sequence without resetting production-global state. A retry
+  preserves its original order.
+- The gateway retains a bounded high-water history for accepted key/field
+  pairs. It writes this small restart guard atomically below the configured
+  runtime directory, normally `/run`, so it does not add flash wear.
+  Inactive marks expire after 60 seconds. A transient file fallback expires
+  after 30 seconds, so its protective high-water mark always outlives the
+  fallback it guards.
+- If the bounded history is full, a new socket key is rejected and follows the
+  durable fallback path. Safety and other durable commands are never rejected
+  because of this RAM guard.
+- Duplicate or older fields are idempotently superseded regardless of which
+  lane delivered them. Independent fields from Fast and Durable commands are
+  merged without losing either update.
+- A newer socket publication prevents an older file fallback from being
+  revived after an acknowledgement is lost. A newer durable command likewise
+  removes an older queued socket publication.
+- Ready safety and user-critical durable commands reserve an execution
+  opportunity and may overtake continuous socket traffic. A delayed retry does
+  not block unrelated ready socket work.
+- Fast fields have individual TTLs. A deferred key is requeued behind ready
+  work with a bounded retry delay, preventing an unavailable companion from
+  monopolizing a tick.
+- Transient `live` and `diagnostic` publications have at most 30 seconds of
+  lifetime. The fast lane rejects invalid or implausibly future creation
+  timestamps, and the durable scheduler checks an explicitly supplied command
+  deadline again before dispatch.
+- Coalesce keys, field names, field counts, payload bytes, and in-memory queue
+  depth are bounded before admission.
+
+This ordering makes socket acknowledgement loss harmless while preserving the
+durability and priority guarantees of the file inbox.
+
+Publication is split by consumer cost:
+
+- `DbusGatewayEnergyPublishIntervalSeconds=1` keeps the compact binary energy
+  snapshot fresh for control loops.
+- `DbusGatewayHealthPublishIntervalSeconds=1` keeps backpressure and heartbeat
+  observations fresh.
+- `DbusGatewayFullCachePublishIntervalSeconds=10` is the heartbeat for the
+  substantially larger raw diagnostic cache.
+- `DbusGatewayFullCacheDirtyIntervalSeconds=2` permits an earlier full-cache
+  update after a sequence change without turning every tick into JSON work.
+
+The dedicated topology file is written initially and when its discovery
+generation changes. Its reader uses the small, current health snapshot as the
+freshness heartbeat, so an unchanged inventory does not need to be rewritten.
+The full-cache heartbeat also carries the latest topology for operational
+diagnostics, but domain consumers do not use that raw cache as their topology
+API. Positive publication intervals have a 0.2 second minimum.
+
+The adapter creates one coherent control/health snapshot per work tick. The
+command mailbox is locked, decoded, and coalesced once into an immutable
+tick-local view shared by scheduling, health, and pruning; it is never cached
+across ticks. Queue directories, cache freshness, SLO observations, event-loop
+metrics, and backpressure are evaluated once and shared by adaptive regulation
+and file publication. `DbusGatewayResourceSampleIntervalSeconds=2` separately
+limits procfs reads. Resource pressure escalates immediately, while distinct
+recovery thresholds must remain satisfied for
+`DbusGatewayResourceRecoveryHoldSeconds=10` before the state is lowered. This
+prevents tick-rate oscillation near the 64 MiB available-memory boundary.
 
 `DbusGatewayHealthLogPath`, `DbusGatewayHealthLogIntervalSeconds`, and
 `DbusGatewayCommandLifecyclePath` control the JSONL diagnostics. These files are
@@ -105,9 +170,17 @@ but must not derive runtime decisions from them.
 
 The frequent semantic energy consumer reads `energy-inputs.v1.bin` through the
 typed `EnergyInputsSnapshot` contract. The small dependency-free binary format
-avoids parsing the complete raw cache. `energy-topology.json` carries the much
-less frequently consumed topology. Both readers fall back to `dbus-cache.json`
-during an atomic rolling update.
+avoids parsing the complete raw cache and may fall back to the typed
+`energy_inputs` member in `dbus-cache.json` during an atomic rolling update.
+`energy-topology.json` carries the much less frequently consumed topology; its
+freshness is validated against `dbus-health.json`.
+
+The binary reader accepts at most 65,536 bytes. It reads one guard byte beyond
+that limit and rejects an oversized file before decoding it, so a malformed
+runtime file cannot cause an unbounded allocation. Every measurement carries
+its own `observed_at`; the snapshot contract rejects a measurement timestamp
+later than `captured_at + 1 second`. Atomic replacement prevents consumers from
+seeing a partially written snapshot.
 
 Generic and diagnostic consumers read `dbus-cache.json`. Every value is more
 than a scalar:
@@ -149,39 +222,58 @@ therefore remains visible with its last `NoReply`, `error_at`, and
 make a successfully aggregated `pv_power_w` value stale. The first successful
 probe returns the source to `active` immediately.
 
-Standard Auto inputs do not use raw DBus service/path keys. PV power, grid
-power, and battery SOC are gateway-owned semantic read keys:
+Standard Auto inputs do not use raw DBus service/path keys. The gateway
+publishes one typed `EnergyInputsSnapshot` with these semantic fields:
 
 - `pv_power_w`
 - `grid_power_w`
 - `battery_soc`
 
-Core and helper code must request these through `GatewayClient.request_read_key`
-or the strict `gateway_read_value` helpers. This mirrors the publish-side
-semantic field contract: backend policy consumes domain values and does not
-know whether the gateway obtained them from AC PV services, DC PV paths,
-three grid phases, or another future transport.
+Core and helper code load this DTO through `GatewayClient.load_energy_inputs`.
+Missing, stale, or unavailable values cause a typed `EnergyRefreshRequest`
+through `GatewayClient.request_energy_refresh`; the request names a semantic
+scope such as `pv`, `grid`, `battery`, `topology`, or `all`, never a DBus
+service or path. Backend policy therefore does not know whether the gateway
+obtained PV from AC inverter services, a DC charger path, or a future
+transport.
 
-Explicit service/path reads are still possible for deliberately raw detail
-surfaces such as relay readback or configured energy-source diagnostics, but
-they must use the visibly named `GatewayClient.request_raw_value`. Raw reads are
-not a standard Auto input path, and architecture checks reject the old
-`request_read(service, path)` shape.
+There is no public raw service/path read API. GX relay readback is exposed as a
+semantic `GatewayOperationsPort` operation, and discovery health is exposed as
+the validated `GatewayDiagnosticsSnapshot`. The full cache remains an
+operational diagnostic artifact, not a domain-model dependency.
 
 ## Write Model
 
-Consumers submit commands, usually through `GatewayClient`.
-
-Writes use `kind=set_value`, include the target service and path, and should
-provide a `coalesce_key`. Latest commands for the same key win unless a higher
-priority safety command is present.
+Domain code publishes EVCS and companion values through
+`GatewayPublicationPort`. It submits GX relay and ESS setpoint intents through
+`GatewayOperationsPort`. These ports carry semantic fields and validated DTOs;
+only adapter-owned executors translate them to DBus services and paths.
 
 The adapter may delay, drop optional, or coalesce commands depending on DBus
 health. Safety/user commands keep priority, but still go through the scheduler.
+Registration and safety/user-critical work uses the durable file lane. Only
+validated `live` and `diagnostic` field publications may use the bounded fast
+lane.
 
 Commands with a `coalesce_key` use a deterministic command filename derived
 from that key. A newer command therefore atomically replaces the older desired
-state on disk; stale values cannot reappear on the next adapter tick.
+state on disk; stale values cannot reappear on the next adapter tick. A bounded
+advisory `flock` serializes read/compare/replace across producer processes.
+Kernel process teardown releases abandoned locks automatically, and every
+replacement gets a new mailbox revision so a consumer holding an old snapshot
+cannot delete newer work.
+
+The scheduler does not let continuous fast publications starve durable
+safety/user work: a ready urgent durable command reserves the next execution
+opportunity. Fast work whose retry time has not arrived is skipped, and a
+deferred fast item receives a bounded retry delay so unrelated ready items can
+run. Field TTLs are independent, so expiry of one diagnostic field does not
+discard another field in the same coalesced publication.
+
+Durable commands are non-expiring unless their semantic producer supplies a
+deadline. An explicit deadline is checked immediately before dispatch.
+Transient publication deadlines are normalized to a finite positive maximum of
+30 seconds and are converted to monotonic per-field leases on admission.
 
 Temporary DBus failures do not delete command files. The adapter returns an
 internal outcome for each command:
@@ -192,9 +284,15 @@ internal outcome for each command:
 
 ## Discovery And Introspection
 
-Discovery and introspection are gateway-owned. The legacy request/snapshot
-contract is kept only as a compatibility surface; requesters enqueue gateway
-commands and do not touch DBus.
+Discovery and introspection are gateway-owned. Energy consumers request only a
+semantic topology refresh. The adapter schedules concrete discovery and
+introspection targets internally and publishes validated discovery health
+through `gateway-diagnostics.json`.
+
+An adapter-local raw introspection snapshot may be retained as operational
+evidence, but it is not a public request/response contract. Domain, forensic,
+and control code must not parse it or depend on DBus service names, paths, or
+XML.
 
 Forensic code reads the gateway cache and logs the cache state. It must never
 open DBus to investigate a DBus problem.
@@ -259,12 +357,19 @@ same workspace and the current task is strictly about live Pi wiring.
 
 ## Development Rule
 
-When adding new code, search before merging:
+The automated boundary consists of two complementary checks:
 
 ```sh
-rg -n "^import dbus|from dbus|from vedbus|SystemBus\\(|SessionBus\\(|GetValue\\(|SetValue\\(|Introspect\\(|VeDbusService" venus_evcharger venus_evcharger_*.py scripts -g '*.py'
+python3 scripts/dev/check_dbus_isolation.py
+python3 scripts/dev/check_architecture_contracts.py
 ```
 
 Only the gateway entrypoint and modules below `venus_evcharger/dbus_adapter/`
-may contain real DBus access. This package boundary is enforced by
-`scripts/dev/check_dbus_isolation.py`.
+may contain real DBus access. `check_dbus_isolation.py` rejects imports, API
+calls, symbols, and command-line DBus clients elsewhere.
+
+`check_architecture_contracts.py` enforces the next layer: backend/update/read
+consumers may use only semantic gateway ports and DTOs, concrete Victron
+service/path details remain gateway-owned, the Venus surface is imported only
+through the gateway facade, and the bounded IPC, timestamp, deadline,
+mailbox-revision, fairness, and field-ordering contracts must remain present.

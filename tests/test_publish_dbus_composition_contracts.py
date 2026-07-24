@@ -196,9 +196,9 @@ class DbusPublishCompositionContractTests(unittest.TestCase):
             "age_values",
             return_value={"auto_stale_seconds": 2.0},
         ) as age_values:
-            self.assertEqual(controller.diagnostics.snapshot(16.5), snapshot)
-        counter_values.assert_called_once_with(16.5, ANY)
-        age_values.assert_called_once_with(16.5, ANY)
+            self.assertEqual(controller.diagnostics.snapshot(100.0), snapshot)
+        counter_values.assert_called_once_with(100.0, ANY)
+        age_values.assert_called_once_with(100.0, ANY)
 
         with patch.object(controller.diagnostics, "publish_diagnostic_paths", return_value=True) as publish_diagnostics:
             self.assertTrue(controller.publish_diagnostic_paths(17.0))

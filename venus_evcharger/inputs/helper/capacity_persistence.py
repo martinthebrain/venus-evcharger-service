@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
 
 from venus_evcharger.core.shared import write_text_atomically
 from venus_evcharger.energy import EnergySourceDefinition
@@ -145,7 +144,7 @@ def _default_section_bounds(lines: list[str]) -> tuple[int, int]:
     if lines and lines[0].strip().lower() == "[default]":
         start = 1
     end = len(lines)
-    for index in range(start, len(lines)):  # pragma: no branch
+    for index in range(start, len(lines)):
         if _SECTION_RE.match(lines[index]):
             end = index
             break
@@ -165,7 +164,7 @@ def _positive_float(value: object) -> float | None:
     return numeric if numeric > 0.0 else None
 
 
-def _number_text(value: Any) -> str:
+def _number_text(value: object) -> str:
     numeric = _positive_float(value)
     if numeric is None:
         return ""

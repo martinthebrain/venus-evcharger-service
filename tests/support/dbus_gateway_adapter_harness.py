@@ -35,7 +35,6 @@ with patch.dict(
     {"vedbus": _fake_vedbus, "dbus.mainloop.glib": _fake_dbus_mainloop},
 ):
     import venus_evcharger.dbus_adapter.rate as rate_module
-    import venus_evcharger.dbus_adapter.resources as resource_module
     import venus_evcharger.dbus_adapter.health.backpressure as health_backpressure_module
     import venus_evcharger.dbus_adapter.health.freshness as health_freshness_module
     import venus_evcharger.dbus_adapter.health.history as health_history_module
@@ -57,7 +56,6 @@ with patch.dict(
     import venus_evcharger.dbus_adapter.read.targets as read_targets_module
     import venus_evcharger.dbus_adapter.write.core as write_core_module
     import venus_evcharger.dbus_adapter.write.health as write_health_module
-    import venus_evcharger.dbus_adapter.write.publish as write_publish_module
     import venus_evcharger.dbus_adapter.write.support as write_support_module
     import venus_evcharger.dbus_gateway_core as gateway_core_module
     import venus_evcharger_dbus_adapter as adapter_module
@@ -67,13 +65,14 @@ with patch.dict(
         DbusOperationDeferred,
         DbusRateLimiter,
     )
-    from venus_evcharger.dbus_adapter.resources import ResourceMonitor, TickHealth
+    from venus_evcharger.dbus_adapter.resources import ResourceMonitor
     from venus_evcharger.dbus_adapter.scheduling import (
         AtomicJsonWriter,
         DbusDiscoveryManager,
         DbusReadScheduler,
     )
     from venus_evcharger.dbus_adapter.read.spec import read_spec_from_mapping
+    from venus_evcharger.dbus_adapter.tick_health import TickHealth
     from venus_evcharger.dbus_gateway import (
         DbusCacheStore,
         DbusGatewayCommandInbox,
@@ -408,13 +407,11 @@ __all__ = [
     "read_pv_module",
     "read_spec_from_mapping",
     "read_targets_module",
-    "resource_module",
     "runtime_module",
     "tempfile",
     "time",
     "unittest",
     "write_core_module",
     "write_health_module",
-    "write_publish_module",
     "write_support_module",
 ]

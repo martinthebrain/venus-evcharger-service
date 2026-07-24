@@ -75,12 +75,14 @@ class CoreCommandQueuePolicy:
         return dict(command)
 
     @staticmethod
-    def queue_class(_command: CommandMapping) -> str:
+    def queue_class(command: CommandMapping) -> str:
+        del command
         return CORE_COMMAND_QUEUE_CLASS
 
     @staticmethod
-    def merge_coalesced(_existing: CommandMapping | None, _payload: CommandPayload) -> None:
-        return
+    def merge_coalesced(existing: CommandMapping | None, payload: CommandPayload) -> bool:
+        del existing, payload
+        return False
 
     @staticmethod
     def order_key(command: CommandMapping) -> CommandOrderKey:

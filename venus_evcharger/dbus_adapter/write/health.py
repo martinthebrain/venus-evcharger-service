@@ -12,7 +12,6 @@ from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter.health.slo import GatewayPressureState, pressure_limited_queue_budgets
 from venus_evcharger.dbus_adapter.jsonl import append_jsonl
 from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
-from venus_evcharger.dbus_adapter.write.semantic import DbusWriteSchedulerSemantic
 from venus_evcharger.dbus_adapter.write.support import (
     float_or_zero,
     lifecycle_payload,
@@ -39,18 +38,29 @@ _AGING_QUEUE_CLASSES = {"read-fast", "read-slow", "discovery", "introspection"}
 UNKNOWN_QUEUE_CLASS_RANK = max(_QUEUE_CLASS_RANKS.values()) + 1
 
 
-class DbusWriteSchedulerHealth(DbusWriteSchedulerSemantic):
-    adapter: DbusWriteSchedulerAdapter
-    base_queue_class_budgets: dict[str, int]
-    dynamic_local_publish_burst_limit: int
-    last_processed_at: float
-    local_publish_burst_limit: int
-    local_publish_tick_budget_seconds: float
-    queue_class_budgets: dict[str, int]
-    _budget_events: deque[tuple[float, str]]
-    _lifecycle_counts: dict[str, int]
-    _lifecycle_events: deque[tuple[float, str, str]]
-    _processed_events: deque[float]
+class WriteSchedulerHealthTracker:
+    """Own scheduler budgets, lifecycle history, and health metrics."""
+
+    def __init__(self, adapter: DbusWriteSchedulerAdapter) -> None:
+        defaults = adapter.config["DEFAULT"]
+        self.command_lifecycle_path = str(adapter.command_lifecycle_path)
+        self.command_lifecycle_max_bytes = int(adapter.command_lifecycle_max_bytes)
+        self.local_publish_burst_limit = max(
+            1,
+            int(config_get_float(defaults, "DbusGatewayLocalPublishBurstLimit", 20.0)),
+        )
+        self.local_publish_tick_budget_seconds = max(
+            0.001,
+            config_get_float(defaults, "DbusGatewayLocalPublishTickBudgetMs", 75.0) / 1000.0,
+        )
+        self.dynamic_local_publish_burst_limit = self.local_publish_burst_limit
+        self.queue_class_budgets = self._queue_class_budgets(defaults)
+        self.base_queue_class_budgets = dict(self.queue_class_budgets)
+        self._processed_events: deque[float] = deque()
+        self._budget_events: deque[tuple[float, str]] = deque()
+        self._lifecycle_events: deque[tuple[float, str, str]] = deque()
+        self._lifecycle_counts: dict[str, int] = {}
+        self.last_processed_at = 0.0
 
     def health(self, *, now: float | None = None) -> CommandPayload:
         current = time.time() if now is None else float(now)
@@ -98,6 +108,12 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerSemantic):
         cutoff = now - 60.0
         while self._processed_events and self._processed_events[0] < cutoff:
             self._processed_events.popleft()
+
+    def record_processed(self) -> None:
+        now = time.time()
+        self.last_processed_at = now
+        self._processed_events.append(now)
+        self.prune_processed(now)
 
     @staticmethod
     def _queue_class_budgets(defaults: Mapping[str, object]) -> dict[str, int]:
@@ -168,14 +184,14 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerSemantic):
         queue_class: str,
         now: float,
     ) -> None:
-        path = str(self.adapter.command_lifecycle_path or "")
+        path = self.command_lifecycle_path
         if not path:
             return
         try:
             append_jsonl(
                 path,
                 lifecycle_payload(command, state, queue_class, now),
-                max_bytes=max(0, int(self.adapter.command_lifecycle_max_bytes)),
+                max_bytes=max(0, self.command_lifecycle_max_bytes),
             )
         except (OSError, TypeError, ValueError):
             logging.debug("Unable to append DBus gateway command lifecycle event", exc_info=True)
@@ -190,6 +206,7 @@ class DbusWriteSchedulerHealth(DbusWriteSchedulerSemantic):
         for _at, state, _queue_class in self._lifecycle_events:
             counts[state] = counts.get(state, 0) + 1
         return dict(sorted(counts.items()))
+
 
 def effective_command_priority_rank(command: CommandMapping, now: float) -> float:
     rank = float(priority_rank(command.get("priority")))

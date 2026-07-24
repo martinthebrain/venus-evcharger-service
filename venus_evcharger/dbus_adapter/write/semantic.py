@@ -13,8 +13,7 @@ from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
 from venus_evcharger.dbus_adapter.write.generic_shelly import GenericShellyConfigurationExecutor
-from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
-from venus_evcharger.dbus_adapter.write.publish import DbusWriteSchedulerPublish
+from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
 from venus_evcharger.dbus_gateway import dbus_path_key
 from venus_evcharger.ipc.command_types import CommandMapping
 from venus_evcharger.ipc.gateway_operations import (
@@ -39,10 +38,11 @@ _MANUAL_FUNCTION_VALUE = 2
 _DBUS_TIMEOUT_SECONDS = 1.0
 
 
-class DbusWriteSchedulerSemantic(DbusWriteSchedulerPublish):
+class SemanticWriteExecutor:
     """Execute semantic commands without exposing DBus topology to callers."""
 
-    adapter: DbusWriteSchedulerAdapter
+    def __init__(self, adapter: SemanticWriteAdapter) -> None:
+        self.adapter = adapter
 
     def process_semantic_operation(
         self,
@@ -139,7 +139,10 @@ class DbusWriteSchedulerSemantic(DbusWriteSchedulerPublish):
                 command,
                 not_before=time.time() + max(1.0, operation.verify_retry_seconds),
             )
-        logging.debug("Trying legacy manual-function target for GX relay %s", operation.relay_index)
+        logging.debug(
+            "Trying alternate Venus relay-function target for GX relay %s",
+            operation.relay_index,
+        )
         return self._rewrite(
             command_file,
             command,

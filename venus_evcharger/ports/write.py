@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TypeGuard
 
 from venus_evcharger.backend.models import (
     normalize_phase_selection,
@@ -14,7 +14,10 @@ from venus_evcharger.core.contracts import (
     normalized_worker_snapshot,
 )
 from venus_evcharger.core.return_contracts import require_str
-from venus_evcharger.ports.write_runtime import WriteControllerRuntimePort
+from venus_evcharger.ports.write_runtime import (
+    WriteControllerRuntimePort,
+    WriteRuntimeServicePort,
+)
 
 
 @dataclass(frozen=True)
@@ -25,10 +28,29 @@ class _PendingFieldPublication:
     force: bool
 
 
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)
+
+
+def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
+def _normalized_binary_value(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value == 0:
+            return False
+        if value == 1:
+            return True
+    return None
+
+
 class WriteControllerPort(WriteControllerRuntimePort):
     """Expose only the state and hardware surface needed by control writes."""
 
-    def __init__(self, service: Any) -> None:
+    def __init__(self, service: WriteRuntimeServicePort) -> None:
         super().__init__(service)
         self._pending_publications: list[_PendingFieldPublication] | None = None
 
@@ -100,7 +122,7 @@ class WriteControllerPort(WriteControllerRuntimePort):
         """Return whether a relay-output payload has the required shape for freshness checks."""
         return bool(
             confirmed
-            and isinstance(pm_status, dict)
+            and _is_object_mapping(pm_status)
             and "output" in pm_status
             and captured_at is not None
         )
@@ -121,16 +143,23 @@ class WriteControllerPort(WriteControllerRuntimePort):
     @staticmethod
     def _relay_output_value(pm_status: object) -> bool | None:
         """Return a normalized relay output from a status payload with an output field."""
-        if not isinstance(pm_status, dict) or "output" not in pm_status:
+        if not _is_object_mapping(pm_status) or "output" not in pm_status:
             return None
-        return bool(pm_status.get("output"))
+        return _normalized_binary_value(pm_status["output"])
 
     @staticmethod
     def _pending_relay_state_on(sample: object) -> bool:
         """Return whether a pending relay sample requests relay-on."""
-        if not isinstance(sample, tuple) or not sample:
+        if not _is_object_tuple(sample) or not sample:
             return False
-        return bool(sample[0])
+        pending = sample[0]
+        if pending is None:
+            return False
+        normalized = _normalized_binary_value(pending)
+        if normalized is not None:
+            return normalized
+        # A malformed pending state cannot prove that the relay is off.
+        return True
 
     def _fresh_confirmed_relay_output(self, snapshot: object) -> bool | None:
         """Return the latest confirmed relay output only when it is still fresh."""
@@ -175,12 +204,16 @@ class WriteControllerPort(WriteControllerRuntimePort):
         """Publish all fields staged by the active control transaction."""
         pending = self._active_pending_publications()
         for publication in pending:
-            self._service.state.publish_field(
+            accepted = self._service.state.publish_field(
                 publication.field,
                 publication.value,
                 publication.current_time,
                 force=publication.force,
             )
+            if accepted is False:
+                raise RuntimeError(
+                    f"Gateway publication rejected field '{publication.field}'"
+                )
         self._pending_publications = None
 
     def discard_publication_transaction(self) -> None:

@@ -41,6 +41,10 @@ class GatewayCacheReadScriptTests(unittest.TestCase):
             )
             self.assertEqual(len(lines), 2)
             self.assertIn("operating_mode=2 status=fresh", lines[0])
+            self.assertIn(
+                "applicability=applicable changed_at=98.0 confirmed_at=99.0",
+                lines[0],
+            )
             self.assertIn("ac_power_w=1234.5 status=fresh", lines[1])
 
             output = StringIO()

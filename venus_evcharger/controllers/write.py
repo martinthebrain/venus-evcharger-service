@@ -18,6 +18,7 @@ That is why write snapshots and rollback helpers are so prominent here.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable
 
 from venus_evcharger.auto.policy_settings import AUTO_POLICY_SETTING_BY_TARGET
@@ -82,6 +83,7 @@ class ControlWriteController(_ControlWriteSupport):
             current_setting_targets=self.CURRENT_SETTING_TARGETS,
             auto_runtime_setting_targets=self.AUTO_RUNTIME_SETTING_TARGETS,
         )
+        self._command_lock = threading.RLock()
         self._external_side_effect_started = False
 
     @staticmethod
@@ -314,12 +316,17 @@ class ControlWriteController(_ControlWriteSupport):
 
     def handle_control_command(self, command: ControlCommand) -> ControlResult:
         """Handle one canonical Control API command using existing write semantics."""
+        with self._command_lock:
+            return self._handle_control_command_locked(command)
+
+    def _handle_control_command_locked(self, command: ControlCommand) -> ControlResult:
+        """Apply one command while excluding concurrent state transactions."""
         port = self.port
         snapshot = self._snapshot_write_state(port._service)
         self._external_side_effect_started = False
         persistence_completed = False
-        port.begin_publication_transaction()
         try:
+            port.begin_publication_transaction()
             self._control_api.execute(self, command)
             port.save_runtime_state()
             persistence_completed = True

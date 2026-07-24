@@ -734,7 +734,7 @@ class _EnergyAggregateProfileCases:
                 "AutoEnergySource.victron.CapacityEstimatedNominalVoltage": "48",
                 "AutoEnergySource.victron.CapacityEstimatedCellCount": "15",
                 "AutoEnergySource.hybrid.Role": "hybrid-inverter",
-                "AutoEnergySource.hybrid.Type": "template_http_energy",
+                "AutoEnergySource.hybrid.Type": "template_http",
                 "AutoEnergySource.hybrid.ConfigPath": "/data/etc/external-hybrid.ini",
                 "AutoEnergySource.hybrid.Service": "com.victronenergy.hybrid.hybrid",
                 "AutoEnergySource.hybrid.UsableCapacityWh": "10000",

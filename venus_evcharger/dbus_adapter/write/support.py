@@ -8,32 +8,35 @@ import time
 from venus_evcharger.dbus_gateway_core import float_or_zero
 from venus_evcharger.ipc.command_mailbox import command_priority_rank as priority_rank
 from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping, CommandPayload
+from venus_evcharger.ipc.deadline import command_deadline_expired
 
 __all__ = (
     "budget_elapsed",
+    "command_deadline_expired",
     "command_kind",
     "command_ready",
-    "deadline_pair",
     "float_or_zero",
     "is_local_publish_command",
+    "is_urgent_durable_command",
     "lifecycle_payload",
     "local_publish_action_result",
     "priority_rank",
     "stale_coalesced_paths",
 )
 
-
 def command_ready(command: CommandMapping, now: float) -> bool:
     """Return whether an asynchronous command step may run now."""
     return bool(float_or_zero(command.get("not_before")) <= float(now))
 
 
-def deadline_pair(command: CommandMapping) -> tuple[float, float]:
-    return float_or_zero(command.get("deadline_s")), float_or_zero(command.get("created_at"))
-
-
 def is_local_publish_command(command: CommandMapping) -> bool:
     return command_kind(command) in {"publish_evcs_fields", "publish_companion_fields"}
+
+
+def is_urgent_durable_command(command: CommandMapping) -> bool:
+    """Return whether durable work must overtake transient publication bursts."""
+    priority = str(command.get("priority") or "").strip().lower()
+    return priority in {"safety", "user"}
 
 
 def local_publish_action_result(processed: int, action: str) -> tuple[int, bool]:

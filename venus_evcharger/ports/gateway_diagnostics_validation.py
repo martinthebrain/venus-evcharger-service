@@ -4,19 +4,50 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from typing import cast
+from collections.abc import Mapping, Sequence, Set
+from typing import TypeGuard
+
+from venus_evcharger.core.contracts import timestamp_not_future
 
 
-def exact_mapping(value: object, label: str, fields: set[str]) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
+def is_string_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    """Narrow an untrusted JSON object to the diagnostics mapping contract."""
+    return _is_object_mapping(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)
+
+
+def is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    """Narrow a value before validating typed tuple members."""
+    return isinstance(value, tuple)
+
+
+def exact_mapping(
+    value: object,
+    label: str,
+    fields: Set[str],
+) -> Mapping[str, object]:
+    if not is_string_object_mapping(value):
         raise TypeError(f"{label} must be an object with string keys")
-    untyped = cast(Mapping[object, object], value)
-    if any(not isinstance(key, str) for key in untyped):
-        raise TypeError(f"{label} must be an object with string keys")
-    if set(untyped) != fields:
+    if set(value) != fields:
         raise ValueError(f"{label} fields do not match the schema")
-    return cast(Mapping[str, object], untyped)
+    return value
+
+
+def object_sequence(value: object, label: str) -> Sequence[object]:
+    """Parse an untrusted JSON array without accepting text as a sequence."""
+    if not _is_object_sequence(value):
+        raise TypeError(f"{label} must be an array")
+    return value
+
+
+def _is_object_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return (
+        not isinstance(value, (str, bytes, bytearray))
+        and isinstance(value, Sequence)
+    )
 
 
 def member_text(value: object, allowed: frozenset[str], label: str) -> str:
@@ -77,14 +108,28 @@ def bounded_float(value: object, label: str, minimum: float, maximum: float) -> 
     return result
 
 
+def timestamp_not_after(
+    timestamp: float,
+    reference: float,
+    label: str,
+) -> None:
+    """Require a timestamp to remain within the canonical future tolerance."""
+    if not timestamp_not_future(timestamp, reference):
+        raise ValueError(f"{label} exceeds gateway diagnostics captured_at tolerance")
+
+
 __all__ = [
     "boolean",
     "bounded_float",
     "exact_mapping",
     "finite_float",
+    "is_object_tuple",
+    "is_string_object_mapping",
     "member_text",
     "non_negative_float",
     "non_negative_int",
+    "object_sequence",
     "positive_float",
     "text",
+    "timestamp_not_after",
 ]

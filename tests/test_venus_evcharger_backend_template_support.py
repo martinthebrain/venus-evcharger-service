@@ -10,7 +10,6 @@ from venus_evcharger.backend.template_support import (
     _request_auth,
     _request_headers,
     _request_kwargs,
-    _request_method_callable,
     _response_payload_dict,
     enabled_state_from_text,
     json_path_value,
@@ -21,6 +20,7 @@ from venus_evcharger.backend.template_support import (
     render_json_payload,
     resolved_url,
 )
+from venus_evcharger.backend.template_http_transport import request_method_callable
 
 
 class _TemplateBackend(TemplateHttpBackendBase):
@@ -183,20 +183,20 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
 
         session = _Session()
         for method in ("GET", "POST", "PUT", "PATCH"):
-            response = _request_method_callable(session, method)(url="http://test.local", timeout=1.0)
+            response = request_method_callable(session, method)(url="http://test.local", timeout=1.0)
             self.assertEqual(response.json(), {})
         with self.assertRaisesRegex(ValueError, "Unsupported template backend HTTP method"):
-            _request_method_callable(session, "DELETE")
+            request_method_callable(session, "DELETE")
         with self.assertRaisesRegex(TypeError, "does not implement HTTP GET"):
-            _request_method_callable(object(), "GET")
+            request_method_callable(object(), "GET")
         with self.assertRaisesRegex(TypeError, "does not implement HTTP POST"):
-            _request_method_callable(object(), "POST")
+            request_method_callable(object(), "POST")
         with self.assertRaisesRegex(TypeError, "does not implement HTTP PUT"):
-            _request_method_callable(object(), "PUT")
+            request_method_callable(object(), "PUT")
         with self.assertRaisesRegex(TypeError, "does not implement HTTP PATCH"):
-            _request_method_callable(object(), "PATCH")
+            request_method_callable(object(), "PATCH")
         with self.assertRaisesRegex(TypeError, "does not implement HTTP GET"):
-            _request_method_callable(_InvalidDynamicSession(), "GET")
+            request_method_callable(_InvalidDynamicSession(), "GET")
 
         response = _Response(["not", "a", "dict"])
         self.assertEqual(_response_payload_dict(response), {})

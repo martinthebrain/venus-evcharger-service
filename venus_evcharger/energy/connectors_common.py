@@ -3,40 +3,164 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, TypeVar
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from typing import Protocol, TypeVar, runtime_checkable
 
-from venus_evcharger.backend.template_support import json_path_value
+from venus_evcharger.backend.template_support import (
+    TemplateAuthSettings,
+    TemplateHttpBackendBase,
+    json_path_value,
+)
 from venus_evcharger.core.contracts import finite_float_or_none, normalize_binary_flag
 
 T = TypeVar("T")
 
 
-def _runtime_owner(owner: Any) -> Any:
-    return getattr(owner, "service", owner)
+def _empty_runtime_caches() -> dict[str, dict[str, object]]:
+    return {}
 
 
-def _cache_map(runtime: Any, attr_name: str) -> dict[str, object]:
-    cache = getattr(runtime, attr_name, None)
-    if isinstance(cache, dict):
-        normalized = {str(key): value for key, value in cache.items()}
-    else:
-        normalized = {}
-    setattr(runtime, attr_name, normalized)
-    return normalized
+@runtime_checkable
+class EnergyConnectorOwnerPort(Protocol):
+    """Optional service wrapper accepted at the connector facade."""
+
+    service: object
 
 
-def _typed_cache_map(runtime: Any, attr_name: str, expected_type: type[T]) -> dict[str, T]:
-    cache = _cache_map(runtime, attr_name)
-    typed = {key: value for key, value in cache.items() if isinstance(value, expected_type)}
-    setattr(runtime, attr_name, typed)
-    return typed
+@runtime_checkable
+class RequestTimeoutDefaultPort(Protocol):
+    """Runtime value used when a connector has no explicit timeout."""
+
+    shelly_request_timeout_seconds: float
+
+
+@runtime_checkable
+class RequestTimeoutLimiterPort(Protocol):
+    """Cooperative cycle-deadline limiter supplied by the scheduler."""
+
+    def bounded_request_timeout_seconds(self, configured_seconds: float) -> float: ...
+
+
+@dataclass(slots=True)
+class EnergyConnectorRuntimeState:
+    """Typed connector-owned caches attached to one scheduler runtime."""
+
+    caches: dict[str, dict[str, object]] = field(default_factory=_empty_runtime_caches)
+
+
+@runtime_checkable
+class EnergyConnectorRuntimeStatePort(Protocol):
+    """Runtime carrying the connector-owned cache state."""
+
+    _energy_connector_runtime_state: EnergyConnectorRuntimeState
+
+
+class EnergySourceHttpClient(TemplateHttpBackendBase):
+    """Apply a helper-owned cycle deadline to every HTTP request."""
+
+    def __init__(
+        self,
+        service: object,
+        timeout_seconds: float,
+        *,
+        auth_settings: TemplateAuthSettings | None = None,
+    ) -> None:
+        super().__init__(
+            service,
+            timeout_seconds,
+            auth_settings=auth_settings,
+            max_response_bytes=262144,
+        )
+
+    def _perform_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        context: dict[str, str] | None = None,
+        json_template: str | None = None,
+    ) -> dict[str, object]:
+        configured_timeout = self.timeout_seconds
+        self.timeout_seconds = _bounded_request_timeout_seconds(self.service, configured_timeout)
+        try:
+            return super()._perform_request(
+                method,
+                url,
+                context=context,
+                json_template=json_template,
+            )
+        finally:
+            self.timeout_seconds = configured_timeout
+
+
+def _bounded_request_timeout_seconds(runtime: object, configured_seconds: float) -> float:
+    configured = max(0.001, float(configured_seconds))
+    if not isinstance(runtime, RequestTimeoutLimiterPort):
+        return configured
+    return max(
+        0.001,
+        min(configured, float(runtime.bounded_request_timeout_seconds(configured))),
+    )
+
+
+def _runtime_default_timeout_seconds(runtime: object, default_seconds: float) -> float:
+    if not isinstance(runtime, RequestTimeoutDefaultPort):
+        return float(default_seconds)
+    return float(runtime.shelly_request_timeout_seconds or default_seconds)
+
+
+def _runtime_owner(owner: object) -> object:
+    return owner.service if isinstance(owner, EnergyConnectorOwnerPort) else owner
+
+
+def _runtime_state(runtime: object) -> EnergyConnectorRuntimeState:
+    if isinstance(runtime, EnergyConnectorRuntimeStatePort):
+        return runtime._energy_connector_runtime_state
+    state = EnergyConnectorRuntimeState()
+    setattr(runtime, "_energy_connector_runtime_state", state)
+    return state
+
+
+def _runtime_cache_get(
+    runtime: object,
+    namespace: str,
+    key: str,
+    expected_type: type[T],
+) -> T | None:
+    state = _runtime_state(runtime)
+    cache = state.caches.setdefault(namespace, {})
+    value = cache.get(key)
+    if isinstance(value, expected_type):
+        return value
+    cache.pop(key, None)
+    return None
+
+
+def _runtime_cache_put(
+    runtime: object,
+    namespace: str,
+    key: str,
+    value: object,
+) -> None:
+    state = _runtime_state(runtime)
+    state.caches.setdefault(namespace, {})[key] = value
+
+
+def _runtime_cache_pop(
+    runtime: object,
+    namespace: str,
+    key: str,
+) -> object | None:
+    state = _runtime_state(runtime)
+    cache = state.caches.get(namespace)
+    if cache is None:
+        return None
+    return cache.pop(key, None)
 
 
 def _normalized_connector_type(raw_value: object) -> str:
-    normalized = str(raw_value).strip().lower()
-    if normalized == "template_http_energy":
-        return "template_http"
-    return normalized
+    return str(raw_value).strip().lower()
 
 
 def _optional_path(value: object) -> str | None:

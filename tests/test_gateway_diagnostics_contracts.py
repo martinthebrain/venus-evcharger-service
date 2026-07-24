@@ -9,7 +9,6 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 
 from tests.gateway_diagnostics_fixtures import diagnostic_samples, gateway_diagnostics_snapshot
 from venus_evcharger.ipc.gateway_diagnostics import (
@@ -21,16 +20,87 @@ from venus_evcharger.ipc.gateway_diagnostics import (
     gateway_diagnostics_path,
     semantic_gateway_diagnostics_document,
 )
-from venus_evcharger.ports.gateway_diagnostics import (
+from venus_evcharger.ports.gateway_diagnostic_discovery import (
+    GatewayDiscoverySummary,
+    GatewaySourceSummary,
+)
+from venus_evcharger.ports.gateway_diagnostic_health import (
+    GatewayHealthSummary,
+    GatewayPublicationSummary,
+)
+from venus_evcharger.ports.gateway_diagnostic_values import (
+    DiagnosticScalar,
     GatewayDiagnosticFieldName,
     GatewayDiagnosticSample,
+)
+from venus_evcharger.ports.gateway_diagnostics import (
     GatewayDiagnosticsReader,
     GatewayDiagnosticsSnapshot,
     GatewayDiagnosticsUnavailable,
-    GatewayDiscoverySummary,
-    GatewayHealthSummary,
 )
 from venus_evcharger.ports import gateway_diagnostics_validation as diagnostics_validation
+from venus_evcharger.ports import gateway_diagnostics as diagnostics_contract
+
+_FORBIDDEN_MODULE_PREFIXES = (
+    "dbus",
+    "vedbus",
+    "venus_evcharger.dbus_adapter",
+    "venus_evcharger.dbus_gateway",
+    "venus_evcharger.dbus_introspection",
+)
+_FORBIDDEN_SYMBOLS = {
+    "DbusCacheStore",
+    "dbus_path_key",
+    "gateway_paths",
+    "load_introspection_snapshot",
+    "read_dbus_paths",
+}
+_FORBIDDEN_LITERALS = {
+    "/Ac/Power",
+    "/Mode",
+    "/StartStop",
+    "com.victronenergy",
+    "queue_depth",
+    "worker_state",
+}
+
+
+def _node_imported_modules(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Import):
+        return {alias.name for alias in node.names}
+    if isinstance(node, ast.ImportFrom) and node.module is not None:
+        return {node.module}
+    return set()
+
+
+def _imported_modules(tree: ast.AST) -> set[str]:
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        modules.update(_node_imported_modules(node))
+    return modules
+
+
+def _node_used_names(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, ast.ImportFrom):
+        return {alias.name for alias in node.names}
+    return set()
+
+
+def _used_names(tree: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        names.update(_node_used_names(node))
+    return names
+
+
+def _has_forbidden_import(modules: set[str]) -> bool:
+    return any(
+        module == prefix or module.startswith(f"{prefix}.")
+        for module in modules
+        for prefix in _FORBIDDEN_MODULE_PREFIXES
+    )
 
 
 class _Reader:
@@ -42,6 +112,17 @@ class _Reader:
 
 
 class GatewayDiagnosticsContractsTests(unittest.TestCase):
+    def test_component_contracts_are_owned_by_responsibility_modules(self) -> None:
+        for old_aggregate_symbol in (
+            "GatewayDiagnosticSample",
+            "GatewayDiscoverySummary",
+            "GatewayHealthSummary",
+            "GatewayPublicationSummary",
+            "GatewaySourceSummary",
+        ):
+            with self.subTest(symbol=old_aggregate_symbol):
+                self.assertFalse(hasattr(diagnostics_contract, old_aggregate_symbol))
+
     def test_diagnostics_path_follows_gateway_runtime_directory(self) -> None:
         self.assertEqual(gateway_diagnostics_path(), DEFAULT_GATEWAY_DIAGNOSTICS_PATH)
         self.assertEqual(gateway_diagnostics_path(""), DEFAULT_GATEWAY_DIAGNOSTICS_PATH)
@@ -60,60 +141,14 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             root / "venus_evcharger/publish/dbus_diagnostics.py",
             root / "scripts/ops/gateway_cache_read.py",
         )
-        forbidden_module_prefixes = (
-            "dbus",
-            "vedbus",
-            "venus_evcharger.dbus_adapter",
-            "venus_evcharger.dbus_gateway",
-            "venus_evcharger.dbus_introspection",
-        )
-        forbidden_symbols = {
-            "DbusCacheStore",
-            "dbus_path_key",
-            "gateway_paths",
-            "load_introspection_snapshot",
-            "read_dbus_paths",
-        }
-        forbidden_literals = {
-            "/Ac/Power",
-            "/Mode",
-            "/StartStop",
-            "com.victronenergy",
-            "queue_depth",
-            "worker_state",
-        }
 
         for path in consumers:
             with self.subTest(path=path):
                 source = path.read_text(encoding="utf-8")
                 tree = ast.parse(source, filename=str(path))
-                imported_modules = {
-                    alias.name
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.Import)
-                    for alias in node.names
-                }
-                imported_modules.update(
-                    node.module
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.ImportFrom) and node.module is not None
-                )
-                used_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-                used_names.update(
-                    alias.name
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.ImportFrom)
-                    for alias in node.names
-                )
-                self.assertFalse(
-                    any(
-                        module == prefix or module.startswith(f"{prefix}.")
-                        for module in imported_modules
-                        for prefix in forbidden_module_prefixes
-                    )
-                )
-                self.assertTrue(forbidden_symbols.isdisjoint(used_names))
-                self.assertFalse(any(literal in source for literal in forbidden_literals))
+                self.assertFalse(_has_forbidden_import(_imported_modules(tree)))
+                self.assertTrue(_FORBIDDEN_SYMBOLS.isdisjoint(_used_names(tree)))
+                self.assertFalse(any(literal in source for literal in _FORBIDDEN_LITERALS))
 
     def test_snapshot_round_trip_and_reader_protocol(self) -> None:
         snapshot = gateway_diagnostics_snapshot()
@@ -143,13 +178,13 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             with self.assertRaises(GatewayDiagnosticsUnavailable):
                 GatewayDiagnosticsFileReader(str(path.with_name("missing"))).read_snapshot()
 
-        invalid_paths: tuple[Any, ...] = ("", "   ", 1)
+        invalid_paths = ("", "   ")
         for invalid in invalid_paths:
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 GatewayDiagnosticsFileReader(invalid)
 
     def test_diagnostic_samples_enforce_field_specific_types(self) -> None:
-        valid_values: dict[GatewayDiagnosticFieldName, object] = {
+        valid_values: dict[GatewayDiagnosticFieldName, DiagnosticScalar] = {
             "operating_mode": 0,
             "charging_enabled": False,
             "auto_start_enabled": True,
@@ -162,10 +197,10 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             "runtime_overrides_source": "",
         }
         for name, value in valid_values.items():
-            sample = GatewayDiagnosticSample(name, value, "fresh", 1.0, 0.5)
+            sample = GatewayDiagnosticSample(name, value, "fresh", 1.0, 1.5, 0.5)
             self.assertEqual(GatewayDiagnosticSample.from_payload(sample.to_payload()), sample)
 
-        invalid_values: tuple[tuple[Any, object], ...] = (
+        invalid_values: tuple[tuple[object, object], ...] = (
             ("operating_mode", 3),
             ("operating_mode", True),
             ("charger_state_code", -1),
@@ -175,29 +210,64 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             ("decision_state", 1),
             ("not-a-field", 1),
         )
-        for name, value in invalid_values:
-            with self.subTest(name=name, value=value), self.assertRaises((TypeError, ValueError)):
-                GatewayDiagnosticSample(name, value, "fresh", 1.0, 1.0)
+        valid_payload = GatewayDiagnosticSample(
+            "operating_mode",
+            0,
+            "fresh",
+            1.0,
+            1.5,
+            1.0,
+        ).to_payload()
+        for invalid_name, invalid_value in invalid_values:
+            with self.subTest(
+                name=invalid_name,
+                value=invalid_value,
+            ), self.assertRaises((TypeError, ValueError)):
+                GatewayDiagnosticSample.from_payload(
+                    valid_payload
+                    | {
+                        "name": invalid_name,
+                        "value": invalid_value,
+                    }
+                )
 
     def test_diagnostic_quality_state_invariants_are_strict(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires a value"):
-            GatewayDiagnosticSample("operating_mode", None, "fresh", 1.0, 1.0)
-        with self.assertRaisesRegex(ValueError, "positive observed_at"):
-            GatewayDiagnosticSample("operating_mode", 1, "stale", 0.0, 1.0)
+            GatewayDiagnosticSample("operating_mode", None, "fresh", 1.0, 1.0, 1.0)
+        with self.assertRaisesRegex(ValueError, "positive timestamps"):
+            GatewayDiagnosticSample("operating_mode", 1, "stale", 0.0, 1.0, 1.0)
         with self.assertRaisesRegex(ValueError, "must not carry"):
-            GatewayDiagnosticSample("operating_mode", 1, "error", 1.0, 0.0, "read-failed")
+            GatewayDiagnosticSample(
+                "operating_mode",
+                1,
+                "error",
+                1.0,
+                1.0,
+                0.0,
+                reason_code="read-failed",
+            )
         with self.assertRaisesRegex(ValueError, "requires reason_code"):
-            GatewayDiagnosticSample("operating_mode", None, "unavailable", 0.0, 0.0)
+            GatewayDiagnosticSample("operating_mode", None, "unavailable", 0.0, 0.0, 0.0)
         with self.assertRaisesRegex(ValueError, "requires reason_code"):
-            GatewayDiagnosticSample("operating_mode", None, "error", 0.0, 0.0)
+            GatewayDiagnosticSample("operating_mode", None, "error", 0.0, 0.0, 0.0)
 
-        unknown = GatewayDiagnosticSample("operating_mode", None, "unknown", 0.0, 0.0)
+        unknown = GatewayDiagnosticSample(
+            "operating_mode",
+            None,
+            "unknown",
+            0.0,
+            0.0,
+            0.0,
+            applicability="unknown",
+        )
         self.assertEqual(GatewayDiagnosticSample.from_payload(unknown.to_payload()), unknown)
         for replacement in (
             {"status": "invalid"},
-            {"observed_at": -1.0},
+            {"changed_at": -1.0},
+            {"confirmed_at": -1.0},
             {"confidence": 1.1},
             {"confidence": math.nan},
+            {"applicability": "invalid"},
             {"reason_code": 1},
         ):
             payload = unknown.to_payload() | replacement
@@ -245,12 +315,65 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
         disabled = GatewayDiscoverySummary(False, "disabled", 0, 0, 0)
         self.assertEqual(GatewayDiscoverySummary.from_payload(disabled.to_payload()), disabled)
 
+    def test_source_and_publication_summaries_keep_expected_dormancy_explicit(self) -> None:
+        sources = (
+            GatewaySourceSummary("pv-ac", "pv_ac", "dormant", "optional-pv-not-advertising"),
+            GatewaySourceSummary("grid", "grid", "available"),
+        )
+        discovery = GatewayDiscoverySummary(
+            True,
+            "idle",
+            0,
+            2,
+            0,
+            dormant_source_count=1,
+            sources=sources,
+        )
+        self.assertEqual(GatewayDiscoverySummary.from_payload(discovery.to_payload()), discovery)
+        publication = GatewayPublicationSummary(True, 10.0, False)
+        self.assertEqual(
+            GatewayPublicationSummary.from_payload(publication.to_payload()),
+            publication,
+        )
+        with self.assertRaisesRegex(ValueError, "availability counts"):
+            GatewayDiscoverySummary(
+                True,
+                "idle",
+                0,
+                2,
+                1,
+                dormant_source_count=1,
+                sources=sources,
+            )
+        with self.assertRaisesRegex(ValueError, "positive heartbeat"):
+            GatewayPublicationSummary(True, 0.0, False)
+        with self.assertRaisesRegex(ValueError, "heartbeat_at=0"):
+            GatewayPublicationSummary(False, 1.0, False)
+        with self.assertRaisesRegex(ValueError, "requires reason_code"):
+            GatewaySourceSummary("pv-ac", "pv_ac", "dormant")
+        with self.assertRaisesRegex(ValueError, "kind is invalid"):
+            GatewaySourceSummary.from_payload(
+                {
+                    "source_id": "pv-ac",
+                    "kind": "wind",
+                    "availability": "available",
+                    "reason_code": "",
+                }
+            )
+
     def test_snapshot_requires_complete_unique_typed_semantic_fields(self) -> None:
         snapshot = gateway_diagnostics_snapshot()
         self.assertEqual(snapshot.sample("operating_mode").value, 2)
         self.assertEqual(snapshot.critical_unavailable_fields(), ())
-        self.assertEqual(snapshot.age_seconds(90.0), 0.0)
+        self.assertEqual(snapshot.age_seconds(99.0), -1.0)
+        with self.assertRaisesRegex(
+            ValueError,
+            "^gateway diagnostics captured_at exceeds gateway diagnostics captured_at tolerance$",
+        ):
+            snapshot.age_seconds(98.999)
         self.assertEqual(snapshot.age_seconds(125.0), 25.0)
+        self.assertTrue(snapshot.is_fresh(99.0, 0.0))
+        self.assertFalse(snapshot.is_fresh(98.999, 100.0))
         self.assertTrue(snapshot.is_fresh(125.0, 25.0))
         self.assertFalse(snapshot.is_fresh(125.1, 25.0))
 
@@ -260,28 +383,45 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
         self.assertEqual(unavailable.critical_unavailable_fields(), ("operating_mode", "ac_power_w"))
 
         samples = diagnostic_samples()
-        invalid_snapshots: tuple[dict[str, Any], ...] = (
-            {"schema_version": 2},
+        sample_payloads = [sample.to_payload() for sample in samples]
+        invalid_snapshots: tuple[dict[str, object], ...] = (
             {"sequence": -1},
             {"captured_at": 0.0},
             {"health": object()},
             {"discovery": object()},
-            {"ev_charger": list(samples)},
-            {"ev_charger": samples[:-1]},
-            {"ev_charger": samples[:-1] + (samples[0],)},
-            {"ev_charger": samples[:-1] + (object(),)},
+            {"ev_charger": sample_payloads[:-1]},
+            {"ev_charger": sample_payloads[:-1] + [sample_payloads[0]]},
+            {"ev_charger": sample_payloads[:-1] + [object()]},
         )
-        arguments: dict[str, Any] = {
-            "sequence": snapshot.sequence,
-            "captured_at": snapshot.captured_at,
-            "health": snapshot.health,
-            "discovery": snapshot.discovery,
-            "ev_charger": snapshot.ev_charger,
-            "schema_version": snapshot.schema_version,
-        }
+        payload = snapshot.to_payload()
         for replacement in invalid_snapshots:
             with self.subTest(replacement=replacement), self.assertRaises((TypeError, ValueError)):
-                GatewayDiagnosticsSnapshot(**(arguments | replacement))
+                GatewayDiagnosticsSnapshot.from_payload(payload | replacement)
+        with self.assertRaisesRegex(ValueError, "unsupported schema_version"):
+            GatewayDiagnosticsSnapshot(
+                sequence=snapshot.sequence,
+                captured_at=snapshot.captured_at,
+                health=snapshot.health,
+                discovery=snapshot.discovery,
+                publication=snapshot.publication,
+                ev_charger=snapshot.ev_charger,
+                schema_version=3,
+            )
+        with self.assertRaisesRegex(TypeError, "invalid sample"):
+            diagnostics_contract._sample_tuple([*samples])
+        with self.assertRaisesRegex(TypeError, "invalid sample"):
+            diagnostics_contract._sample_tuple((object(),))
+        with self.assertRaisesRegex(ValueError, "duplicate fields"):
+            diagnostics_contract._validate_samples(samples[:-1] + (samples[0],))
+        with self.assertRaisesRegex(ValueError, "every semantic field"):
+            diagnostics_contract._validate_samples(samples[:-1])
+        for value, validator, label in (
+            (object(), diagnostics_contract._health_summary, "health"),
+            (object(), diagnostics_contract._discovery_summary, "discovery"),
+            (object(), diagnostics_contract._publication_summary, "publication"),
+        ):
+            with self.subTest(label=label), self.assertRaisesRegex(TypeError, label):
+                validator(value)
 
     def test_payload_schema_is_exact_at_every_boundary(self) -> None:
         snapshot = gateway_diagnostics_snapshot()
@@ -290,7 +430,7 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             payload | {"extra": True},
             {key: value for key, value in payload.items() if key != "health"},
             payload | {"schema_version": True},
-            payload | {"schema_version": 2},
+            payload | {"schema_version": 3},
             payload | {"sequence": 1.5},
             payload | {"ev_charger": "bad"},
             payload | {"ev_charger": object()},
@@ -304,10 +444,15 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
         sample_payload = snapshot.ev_charger[0].to_payload()
         health_payload = snapshot.health.to_payload()
         discovery_payload = snapshot.discovery.to_payload()
+        publication_payload = snapshot.publication.to_payload()
         for item, decoder in (
             (sample_payload | {"extra": True}, GatewayDiagnosticSample.from_payload),
             (health_payload | {"extra": True}, GatewayHealthSummary.from_payload),
             (discovery_payload | {"extra": True}, GatewayDiscoverySummary.from_payload),
+            (
+                publication_payload | {"extra": True},
+                GatewayPublicationSummary.from_payload,
+            ),
         ):
             with self.assertRaises(ValueError):
                 decoder(item)
@@ -316,14 +461,16 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
 
     def test_time_bounds_reject_non_numeric_non_finite_and_negative_values(self) -> None:
         snapshot = gateway_diagnostics_snapshot()
-        invalid_times: tuple[Any, ...] = (True, "now", math.inf, -1.0)
+        invalid_times = (math.inf, -1.0)
         for now in invalid_times:
             with self.subTest(now=now), self.assertRaises((TypeError, ValueError)):
                 snapshot.age_seconds(now)
         for maximum in invalid_times:
             with self.subTest(maximum=maximum), self.assertRaises((TypeError, ValueError)):
                 snapshot.is_fresh(100.0, maximum)
-
+        for value in (True, "now"):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                diagnostics_validation.finite_float(value, "diagnostic time")
 
 if __name__ == "__main__":
     unittest.main()

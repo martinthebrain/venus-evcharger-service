@@ -137,7 +137,20 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
 
     def test_rate_timing_and_slo_defaults_and_clamps(self) -> None:
         self.assertEqual(config.rate_settings(defaults()), config.GatewayRateSettings(0.25, 0.35, 2.0))
-        self.assertEqual(config.timing_settings(defaults()), config.GatewayTimingSettings(0.2, 1.0, 900.0, 1.0))
+        self.assertEqual(
+            config.timing_settings(defaults()),
+            config.GatewayTimingSettings(
+                0.2,
+                1.0,
+                900.0,
+                60.0,
+                1.0,
+                1.0,
+                10.0,
+                2.0,
+            ),
+        )
+        self.assertEqual(config.resource_settings(defaults()), config.GatewayResourceSettings(2.0, 10.0))
         self.assertEqual(config.slo_settings(defaults()), config.GatewaySloSettings(2.0, 5.0, 10.0, 500.0))
         custom = defaults(
             {
@@ -148,7 +161,11 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "DbusGatewayMinTickSeconds": "0.01",
                 "DbusGatewayMaxTickSeconds": "0.02",
                 "DbusGatewayServiceListIntervalSeconds": "42",
-                "DbusGatewayCachePublishIntervalSeconds": "-1",
+                "DbusGatewayMissingPvDiscoveryIntervalSeconds": "2",
+                "DbusGatewayEnergyPublishIntervalSeconds": "-1",
+                "DbusGatewayHealthPublishIntervalSeconds": "0.1",
+                "DbusGatewayFullCachePublishIntervalSeconds": "-1",
+                "DbusGatewayFullCacheDirtyIntervalSeconds": "0.1",
                 "DbusGatewaySloGuiMaxAgeSeconds": "0",
                 "DbusGatewaySloCoreReadMaxAgeSeconds": "0.2",
                 "DbusGatewaySloQueueMaxAgeSeconds": "0",
@@ -156,11 +173,32 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
             }
         )
         self.assertEqual(config.rate_settings(custom), config.GatewayRateSettings(0.11, 0.22, 0.33))
-        self.assertEqual(config.timing_settings(custom), config.GatewayTimingSettings(0.05, 0.05, 42.0, 1.0))
+        self.assertEqual(
+            config.timing_settings(custom),
+            config.GatewayTimingSettings(
+                0.05,
+                0.05,
+                42.0,
+                15.0,
+                1.0,
+                0.2,
+                10.0,
+                0.2,
+            ),
+        )
         self.assertEqual(config.slo_settings(custom), config.GatewaySloSettings(0.1, 0.2, 0.1, 10.0))
         self.assertEqual(
             config.timing_settings(defaults({"DbusGatewayTickSeconds": "0.7"})),
-            config.GatewayTimingSettings(0.7, 1.0, 900.0, 1.0),
+            config.GatewayTimingSettings(
+                0.7,
+                1.0,
+                900.0,
+                60.0,
+                1.0,
+                1.0,
+                10.0,
+                2.0,
+            ),
         )
         self.assertEqual(
             config.timing_settings(
@@ -169,18 +207,41 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                         "DbusGatewayTickSeconds": "0.7",
                         "DbusGatewayMinTickSeconds": "0.3",
                         "DbusGatewayMaxTickSeconds": "0.8",
-                        "DbusGatewayCachePublishIntervalSeconds": "0.4",
+                        "DbusGatewayEnergyPublishIntervalSeconds": "0.3",
+                        "DbusGatewayHealthPublishIntervalSeconds": "0.4",
+                        "DbusGatewayFullCachePublishIntervalSeconds": "4",
+                        "DbusGatewayFullCacheDirtyIntervalSeconds": "0.5",
                     }
                 )
             ),
-            config.GatewayTimingSettings(0.3, 0.8, 900.0, 0.4),
+            config.GatewayTimingSettings(
+                0.3,
+                0.8,
+                900.0,
+                60.0,
+                0.3,
+                0.4,
+                4.0,
+                0.5,
+            ),
         )
-        for configured, expected in (("0", 1.0), ("0.1", 0.2), ("0.2", 0.2)):
+        for configured, expected in (("0", 10.0), ("0.1", 0.2), ("0.2", 0.2)):
             with self.subTest(configured=configured):
                 timing = config.timing_settings(
-                    defaults({"DbusGatewayCachePublishIntervalSeconds": configured})
+                    defaults({"DbusGatewayFullCachePublishIntervalSeconds": configured})
                 )
                 self.assertEqual(timing.cache_publish_interval_seconds, expected)
+        self.assertEqual(
+            config.resource_settings(
+                defaults(
+                    {
+                        "DbusGatewayResourceSampleIntervalSeconds": "0.1",
+                        "DbusGatewayResourceRecoveryHoldSeconds": "-1",
+                    }
+                )
+            ),
+            config.GatewayResourceSettings(0.2, 0.0),
+        )
 
     def test_file_and_introspection_settings_cover_defaults_custom_and_clamps(self) -> None:
         paths = gateway_paths("/run/test")
@@ -247,6 +308,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 slo=config.slo_settings(empty),
                 files=config.file_settings(empty, paths),
                 introspection=config.introspection_settings(empty, 60),
+                resources=config.resource_settings(empty),
                 stale_after_seconds=12.5,
             ),
         )

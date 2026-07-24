@@ -6,10 +6,69 @@ from __future__ import annotations
 
 import unittest
 
-from venus_evcharger.dbus_adapter.read.aggregate import AggregateState, AggregateStore
+from venus_evcharger.dbus_adapter.read.aggregate import (
+    AggregateState,
+    AggregateStore,
+    aggregate_member_float,
+    aggregate_signature_members,
+)
 
 
 class AggregateStateContractTests(unittest.TestCase):
+    def test_signature_members_accept_only_matching_tuple_pairs(self) -> None:
+        invalid = (
+            None,
+            ("pv-total", (), "extra"),
+            ("sum", (("svc", "/Path"),)),
+            ("pv-total", ["svc"]),
+            ("pv-total", ("svc",)),
+            ("pv-total", (("svc", "/Path", "extra"),)),
+        )
+        for signature in invalid:
+            with self.subTest(signature=signature):
+                self.assertIsNone(aggregate_signature_members(signature, "pv-total"))
+        self.assertEqual(
+            aggregate_signature_members(
+                ("pv-total", ((" svc ", " /Path "), (1, 2))),
+                "pv-total",
+            ),
+            [(" svc ", " /Path "), ("1", "2")],
+        )
+
+    def test_member_numeric_conversion_is_explicit(self) -> None:
+        self.assertEqual(aggregate_member_float(True), 1.0)
+        self.assertEqual(aggregate_member_float(False), 0.0)
+        self.assertEqual(aggregate_member_float("2.5"), 2.5)
+        self.assertEqual(aggregate_member_float(b"3.5"), 3.5)
+        with self.assertRaisesRegex(TypeError, "Aggregate member is not numeric"):
+            aggregate_member_float(object())
+
+    def test_member_and_error_records_produce_a_complete_payload(self) -> None:
+        state = AggregateState(("sum", ()), empty_confidence=0.25)
+        state.record_member("ignored", "/None", None)
+        self.assertEqual(
+            state.payload("fallback"),
+            {
+                "value": 0.0,
+                "source": "fallback",
+                "confidence": 0.25,
+                "last_error": "",
+            },
+        )
+
+        state.record_member("service", "/Power", "2.5")
+        state.record_member("other", "/Power", 1)
+        state.record_error("third", "/Power", RuntimeError("offline"))
+        self.assertEqual(
+            state.payload("fallback"),
+            {
+                "value": 3.5,
+                "source": "service/Power,other/Power",
+                "confidence": 1.0,
+                "last_error": "third/Power: offline",
+            },
+        )
+
     def test_complete_uses_member_count_as_exclusive_work_boundary(self) -> None:
         state = AggregateState(("sum", ()), empty_confidence=0.25, index=1)
         self.assertFalse(state.complete(2))

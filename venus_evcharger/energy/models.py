@@ -9,7 +9,7 @@ from typing import Any
 
 ENERGY_SOURCE_ROLES = frozenset({"battery", "hybrid-inverter", "inverter"})
 ENERGY_SOURCE_CONNECTOR_TYPES = frozenset(
-    {"template_http", "template_http_energy", "modbus", "command_json", "opendtu_http"}
+    {"template_http", "modbus", "command_json", "opendtu_http"}
 )
 DEFAULT_BATTERY_CHEMISTRY = "lfp"
 
@@ -33,6 +33,7 @@ class EnergySourceDefinition:
     estimated_capacity_ah: float | None = None
     estimated_capacity_nominal_voltage_v: float | None = None
     estimated_capacity_cell_count: int | None = None
+    physical_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class EnergySourceSnapshot:
     online: bool = False
     confidence: float = 0.0
     captured_at: float | None = None
+    physical_id: str = ""
 
     @property
     def charge_power_w(self) -> float | None:
@@ -79,6 +81,7 @@ class EnergySourceSnapshot:
     def as_dict(self) -> dict[str, Any]:
         return {
             "source_id": self.source_id,
+            "physical_id": self.physical_id,
             "role": self.role,
             "service_name": self.service_name,
             "soc": self.soc,

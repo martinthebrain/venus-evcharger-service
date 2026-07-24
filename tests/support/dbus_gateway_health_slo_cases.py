@@ -35,7 +35,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                 MagicMock(return_value={"processed_commands_60s": 7, "last_processed_at": 321.0}),
             )
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 12.0}))
-            install_mock(adapter, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
+            install_mock(adapter.health_role, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
             adapter._last_tick_monotonic = 999.75
 
             with (
@@ -49,8 +49,8 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                 health = adapter.health_snapshot()
 
             adapter.write_scheduler.health.assert_called_once_with(now=500.0)
-            adapter.slo_snapshot.assert_called_once()
-            self.assertEqual(adapter.slo_snapshot.call_args.kwargs["current_monotonic"], 1000.0)
+            adapter.health_role.slo_snapshot.assert_called_once()
+            self.assertEqual(adapter.health_role.slo_snapshot.call_args.kwargs["current_monotonic"], 1000.0)
             adapter.tick_health.snapshot.assert_called_once_with(now=1000.0)
             self.assertEqual(health["queues"]["processed_commands_60s"], 7)
             self.assertEqual(health["queues"]["last_processed_at"], 321.0)
@@ -61,7 +61,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             self.assertEqual(health["backpressure"]["state"], "ok")
 
             degraded = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-degraded")))
-            install_mock(degraded, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
+            install_mock(degraded.health_role, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
             degraded.circuit.degraded_until = time.time() + 60.0
             self.assertEqual(degraded.health_snapshot()["backpressure"]["state"], "slow")
 
@@ -70,7 +70,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                     str(config_path),
                     paths=gateway_paths(str(Path(temp_dir) / f"run-heartbeat-{last_tick}")),
                 )
-                install_mock(heartbeat_adapter, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
+                install_mock(heartbeat_adapter.health_role, "slo_snapshot", MagicMock(return_value={"violated": [], "checks": {}}))
                 heartbeat_adapter._last_tick_monotonic = last_tick
                 with patch.object(process_health_module.time, "monotonic", return_value=1000.0):
                     self.assertEqual(heartbeat_adapter.health_snapshot()["mainloop_heartbeat_age_s"], expected)
@@ -109,6 +109,71 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             self.assertNotEqual(health["backpressure"]["state"], "ok")
             self.assertTrue(health["backpressure"]["core_should_throttle"])
 
+    def test_missing_values_drive_slo_backpressure_and_priority_refresh(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            install_mock(
+                adapter.energy_discovery,
+                "dormant_evidence",
+                MagicMock(return_value=()),
+            )
+            control = adapter.health_role.control_snapshot()
+            slo = control.health["slo"]
+            observed = slo["observed"]
+
+            self.assertGreater(observed["gui_missing_field_count"], 0.0)
+            self.assertEqual(observed["core_read_missing_count"], 3.0)
+            self.assertEqual(observed["core_read_nonfresh_count"], 0.0)
+            self.assertFalse(slo["checks"]["gui_fresh"])
+            self.assertFalse(slo["checks"]["core_reads_fresh"])
+            self.assertEqual(control.pressure_state, "congested")
+            self.assertIn("gui_fresh", control.health["backpressure"]["reason"])
+            self.assertIn("core_reads_fresh", control.health["backpressure"]["reason"])
+            self.assertEqual(
+                set(control.stale_core_reads),
+                {"grid_power_w", "pv_power_w", "battery_soc"},
+            )
+
+            install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            install_mock(adapter.health_role, "suspend_advisory_work", MagicMock())
+            adapter.health_role.apply_slo_regulation(control)
+            adapter.read_scheduler.force_due.assert_called_once_with(
+                control.stale_core_reads
+            )
+            adapter.health_role.suspend_advisory_work.assert_called_once_with(
+                monotonic_at=control.monotonic_at,
+                captured_at=control.captured_at,
+            )
+
+    def test_nonfresh_core_status_violates_slo_even_with_zero_age(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            now = time.time()
+            observe_evcs_fields(adapter, {}, now=now)
+            for key in ("grid_power_w", "pv_power_w", "battery_soc"):
+                adapter.cache.update_value(key, 1.0, source="test", now=now)
+            adapter.cache.mark_error(
+                "pv_power_w",
+                source="test",
+                error="temporary",
+                now=now,
+            )
+            install_mock(
+                adapter.energy_discovery,
+                "dormant_evidence",
+                MagicMock(return_value=()),
+            )
+
+            with patch.object(process_health_module.time, "time", return_value=now):
+                control = adapter.health_role.control_snapshot()
+            observed = control.health["slo"]["observed"]
+            self.assertEqual(observed["core_read_max_age_s"], 0.0)
+            self.assertEqual(observed["core_read_missing_count"], 0.0)
+            self.assertEqual(observed["core_read_nonfresh_count"], 1.0)
+            self.assertFalse(control.health["slo"]["checks"]["core_reads_fresh"])
+            self.assertEqual(control.stale_core_reads, ("pv_power_w",))
+            self.assertEqual(control.pressure_state, "congested")
+
     def test_gui_freshness_ignores_idle_session_counters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -130,20 +195,20 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                 now=now,
             )
 
-            self.assertFalse(adapter.charging_session_active_for_gui(now))
-            freshness_fields = adapter.gui_freshness_fields(now)
+            self.assertFalse(adapter.health_role.charging_session_active_for_gui(now))
+            freshness_fields = adapter.health_role.gui_freshness_fields(now)
             self.assertIn("ac_power_w", freshness_fields)
             self.assertIn("ac_current_a", freshness_fields)
             self.assertIn("connected", freshness_fields)
             self.assertIn("mode", freshness_fields)
             self.assertNotIn("session_energy_kwh", freshness_fields)
-            observed = adapter.slo_observed({}, {}, now, time.monotonic())
+            observed = adapter.health_role.slo_observed({}, {}, now, time.monotonic())
             self.assertIn("gui_measurement_max_age_s", observed)
             self.assertIn("gui_measurement_missing_field_count", observed)
             self.assertEqual(observed["gui_session_max_age_s"], 0.0)
             self.assertEqual(observed["gui_session_missing_field_count"], 0.0)
             self.assertEqual(observed["gui_control_missing_field_count"], 0.0)
-            checks = health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())
+            checks = health_slo_module.slo_checks_from_observed(observed, adapter.health_role.slo_thresholds())
             self.assertTrue(checks["gui_fresh"])
             self.assertTrue(checks["gui_controls_fresh"])
 
@@ -166,9 +231,9 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                 now=now,
             )
 
-            observed = adapter.slo_observed({}, {}, now, time.monotonic())
-            checks = health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())
-            targets = health_slo_module.slo_targets(adapter.slo_thresholds())
+            observed = adapter.health_role.slo_observed({}, {}, now, time.monotonic())
+            checks = health_slo_module.slo_checks_from_observed(observed, adapter.health_role.slo_thresholds())
+            targets = health_slo_module.slo_targets(adapter.health_role.slo_thresholds())
 
             self.assertEqual(targets["configured_gui_max_age_s"], 2.0)
             self.assertEqual(targets["gui_control_max_age_s"], 10.0)
@@ -179,8 +244,8 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             self.assertTrue(checks["gui_fresh"])
 
             observe_evcs_fields(adapter, {"mode": (1, 10.1)}, now=now)
-            stale_observed = adapter.slo_observed({}, {}, now, time.monotonic())
-            stale_checks = health_slo_module.slo_checks_from_observed(stale_observed, adapter.slo_thresholds())
+            stale_observed = adapter.health_role.slo_observed({}, {}, now, time.monotonic())
+            stale_checks = health_slo_module.slo_checks_from_observed(stale_observed, adapter.health_role.slo_thresholds())
 
             self.assertFalse(stale_checks["gui_controls_fresh"])
             self.assertFalse(stale_checks["gui_fresh"])
@@ -192,7 +257,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 42.0}))
 
-            observed = adapter.slo_observed(
+            observed = adapter.health_role.slo_observed(
                 {"oldest_command_age_s": 99.0, "oldest_slo_command_age_s": 3.0},
                 {"grid_power_w_age_s": 4.0},
                 now=100.0,
@@ -204,6 +269,8 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             self.assertGreater(observed["gui_measurement_missing_field_count"], 0.0)
             self.assertEqual(observed["queue_oldest_age_s"], 3.0)
             self.assertEqual(observed["core_read_max_age_s"], 4.0)
+            self.assertEqual(observed["core_read_missing_count"], 3.0)
+            self.assertEqual(observed["core_read_nonfresh_count"], 0.0)
             self.assertEqual(observed["mainloop_max_gap_ms_60s"], 42.0)
 
     def test_gui_freshness_includes_session_counters_while_charging(self) -> None:
@@ -225,11 +292,11 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                 now=now,
             )
 
-            self.assertTrue(adapter.charging_session_active_for_gui(now))
-            self.assertIn("session_energy_kwh", adapter.gui_freshness_fields(now))
-            observed = adapter.slo_observed({}, {}, now, time.monotonic())
+            self.assertTrue(adapter.health_role.charging_session_active_for_gui(now))
+            self.assertIn("session_energy_kwh", adapter.health_role.gui_freshness_fields(now))
+            observed = adapter.health_role.slo_observed({}, {}, now, time.monotonic())
             self.assertFalse(
-                health_slo_module.slo_checks_from_observed(observed, adapter.slo_thresholds())["gui_fresh"]
+                health_slo_module.slo_checks_from_observed(observed, adapter.health_role.slo_thresholds())["gui_fresh"]
             )
 
     def test_gui_activity_detection_uses_fresh_power_or_current_thresholds(self) -> None:
@@ -243,18 +310,18 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             now = time.time()
 
             observe_evcs_fields(adapter, {"ac_power_w": (50.0, 0.0), "ac_current_a": (0.0, 0.0)}, now=now)
-            self.assertEqual(adapter.fresh_evcs_field_float("ac_power_w", now), 50.0)
-            self.assertTrue(adapter.charging_session_active_for_gui(now))
+            self.assertEqual(adapter.health_role.fresh_evcs_field_float("ac_power_w", now), 50.0)
+            self.assertTrue(adapter.health_role.charging_session_active_for_gui(now))
 
             observe_evcs_fields(adapter, {"ac_power_w": (0.0, 0.0), "ac_current_a": (0.2, 0.0)}, now=now)
-            self.assertEqual(adapter.fresh_evcs_field_float("ac_current_a", now), 0.2)
-            self.assertTrue(adapter.charging_session_active_for_gui(now))
+            self.assertEqual(adapter.health_role.fresh_evcs_field_float("ac_current_a", now), 0.2)
+            self.assertTrue(adapter.health_role.charging_session_active_for_gui(now))
 
             observe_evcs_fields(adapter, {"ac_power_w": (900.0, 2.0), "ac_current_a": (0.0, 0.0)}, now=now)
-            self.assertEqual(adapter.fresh_evcs_field_float("ac_power_w", now), 900.0)
+            self.assertEqual(adapter.health_role.fresh_evcs_field_float("ac_power_w", now), 900.0)
             observe_evcs_fields(adapter, {"ac_power_w": (900.0, 2.1)}, now=now)
-            self.assertEqual(adapter.fresh_evcs_field_float("ac_power_w", now), 0.0)
-            self.assertFalse(adapter.charging_session_active_for_gui(now))
+            self.assertEqual(adapter.health_role.fresh_evcs_field_float("ac_power_w", now), 0.0)
+            self.assertFalse(adapter.health_role.charging_session_active_for_gui(now))
 
     def test_core_read_stale_requires_fresh_status_and_age(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -20,6 +20,7 @@ from venus_evcharger.dbus_gateway_core import (
     is_object_mapping,
 )
 from venus_evcharger.dbus_gateway_policy import command_allowed_by_backpressure
+from venus_evcharger.ipc.command_mailbox import MailboxLockTimeout, normalized_mapping
 from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
 from venus_evcharger.ipc.energy import (
     EnergyInputsSnapshot,
@@ -27,6 +28,7 @@ from venus_evcharger.ipc.energy import (
     EnergyTopologySnapshot,
 )
 from venus_evcharger.ipc.energy_binary import load_energy_inputs_file
+from venus_evcharger.ipc.fast_publication import is_transient_publication
 from venus_evcharger.ipc.gateway_operations import (
     ess_grid_setpoint_command,
     gx_relay_refresh_command,
@@ -34,6 +36,7 @@ from venus_evcharger.ipc.gateway_operations import (
     gx_relay_state_key,
 )
 from venus_evcharger.ipc.gateway_publication import (
+    SEMANTIC_PUBLICATION_KINDS,
     publish_companion_fields_command,
     publish_evcs_fields_command,
     register_companion_command,
@@ -42,6 +45,7 @@ from venus_evcharger.ipc.gateway_publication import (
 from venus_evcharger.ipc.generic_shelly_configuration import (
     disable_matching_generic_shelly_once_command,
 )
+from venus_evcharger.ipc.publication_order import PublicationOrderIssuer
 from venus_evcharger.ports.gateway_operations import (
     EssSetpointIntent,
     GatewayOperationReceipt,
@@ -70,11 +74,18 @@ def _energy_topology_or_none(payload: object) -> EnergyTopologySnapshot | None:
 class GatewayClient:
     """Small Unix-socket and command-file client used by non-DBus processes."""
 
-    def __init__(self, paths: GatewayPaths | None = None, *, timeout_seconds: float = 0.5) -> None:
+    def __init__(
+        self,
+        paths: GatewayPaths | None = None,
+        *,
+        timeout_seconds: float = 0.5,
+        publication_order_issuer: PublicationOrderIssuer | None = None,
+    ) -> None:
         self.paths = paths or gateway_paths()
         self.timeout_seconds = max(0.05, float(timeout_seconds))
         self.commands = DbusGatewayCommandInbox(self.paths.command_dir)
         self._backpressure_cache: tuple[float, str] = (0.0, "unknown")
+        self._publication_orders = publication_order_issuer or PublicationOrderIssuer()
 
     def send(self, payload: CommandMapping) -> CommandPayload:
         try:
@@ -85,17 +96,30 @@ class GatewayClient:
                 data = sock.recv(65536)
             if not data:
                 return {"ok": True}
-            response: object = json.loads(data)
-            if not is_object_mapping(response):
+            decoded: object = json.loads(data)
+            response = normalized_mapping(decoded)
+            if response is None:
                 return {"ok": False, "error": "invalid-response"}
-            return {str(key): value for key, value in response.items()}
+            return response
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError, TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
 
     def enqueue_command(self, command: CommandMapping) -> str:
-        if not command_allowed_by_backpressure(command, self.backpressure_state(max_age_seconds=2.0)):
+        ordered_command = self._ordered_publication(command)
+        if not command_allowed_by_backpressure(ordered_command, self.backpressure_state(max_age_seconds=2.0)):
             return ""
-        return self.commands.enqueue(command)
+        if is_transient_publication(ordered_command):
+            command_id = _accepted_fast_command_id(self.send(ordered_command))
+            if command_id:
+                return command_id
+        try:
+            return str(self.commands.enqueue(ordered_command))
+        except (MailboxLockTimeout, ValueError):
+            return ""
+
+    def _ordered_publication(self, command: CommandMapping) -> CommandPayload:
+        kind = str(command.get("kind") or "")
+        return self._publication_orders.ordered(command) if kind in SEMANTIC_PUBLICATION_KINDS else dict(command)
 
     def request_energy_refresh(self, request: EnergyRefreshRequest, *, source: str) -> str:
         return self.enqueue_command(request.to_command(source=source))
@@ -117,15 +141,15 @@ class GatewayClient:
             return None
 
     def load_energy_topology(self, *, max_age_seconds: float = 30.0) -> EnergyTopologySnapshot | None:
+        """Load versioned topology while using the small health file as its heartbeat."""
         payload: object = DbusCacheStore.load_snapshot(
             self.paths.energy_topology_path,
-            max_age_seconds=max_age_seconds,
+            max_age_seconds=-1.0,
         )
         snapshot = _energy_topology_or_none(payload)
-        if snapshot is not None:
-            return snapshot
-        fallback = self.load_cache(max_age_seconds=max_age_seconds).get("energy_topology")
-        return _energy_topology_or_none(fallback)
+        if snapshot is None:
+            return None
+        return snapshot if self.load_health(max_age_seconds=max_age_seconds) else None
 
     def load_health(self, *, max_age_seconds: float = 10.0) -> CommandPayload:
         payload = DbusCacheStore.load_snapshot(self.paths.health_path, max_age_seconds=max_age_seconds)
@@ -291,6 +315,13 @@ def _operation_receipt(command_path: str) -> GatewayOperationReceipt:
         accepted=bool(command_path),
         command_id=Path(command_path).stem if command_path else "",
     )
+
+
+def _accepted_fast_command_id(response: CommandMapping) -> str:
+    if response.get("ok") is not True or response.get("accepted") is not True:
+        return ""
+    command_id = response.get("command_id")
+    return str(command_id) if isinstance(command_id, str) and command_id else ""
 
 
 def _binary_integer_or_none(value: object) -> int | None:

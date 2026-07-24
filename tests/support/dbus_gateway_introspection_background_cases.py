@@ -18,7 +18,7 @@ from tests.support.dbus_gateway_adapter_harness import (
 
 def _discover(adapter: DbusAdapter, services: list[str], *, now: float = 1.0) -> None:
     adapter.cache.update_services(services, now=now)
-    adapter.energy_discovery.update_services(services, now=now)
+    adapter.energy_discovery.update_services(services, captured_at=now)
 
 
 def _target_tuple(target: object) -> tuple[object, ...]:
@@ -57,17 +57,33 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
                 "com.victronenergy.system",
             ]
             _discover(adapter, services)
+            pv_services = sorted(
+                service
+                for service in services
+                if service.startswith("com.victronenergy.pvinverter.")
+            )[:10]
+            for service in pv_services:
+                adapter.energy_discovery.record_pv_value(
+                    service,
+                    "/Ac/Power",
+                    0.0,
+                )
+            adapter.energy_discovery.record_pv_value(
+                "com.victronenergy.system",
+                "/Dc/Pv/Power",
+                0.0,
+            )
 
-            self.assertFalse(adapter.background_introspection_due(59.9))
-            self.assertTrue(adapter.background_introspection_due(60.0))
+            self.assertFalse(adapter.introspection_role.background_introspection_due(59.9))
+            self.assertTrue(adapter.introspection_role.background_introspection_due(60.0))
             adapter._last_introspection_full_scan_at = 30.0
-            self.assertFalse(adapter.background_introspection_due(40.0))
+            self.assertFalse(adapter.introspection_role.background_introspection_due(40.0))
             adapter._last_introspection_full_scan_at = 0.0
             adapter.dbus_introspection_enabled = False
-            self.assertFalse(adapter.background_introspection_due(61.0))
+            self.assertFalse(adapter.introspection_role.background_introspection_due(61.0))
             adapter.dbus_introspection_enabled = True
             allows_priority = install_mock(adapter.circuit, "allows_priority", MagicMock(return_value=False))
-            self.assertFalse(adapter.background_introspection_due(61.0))
+            self.assertFalse(adapter.introspection_role.background_introspection_due(61.0))
             allows_priority.assert_called_with("discovery")
             allows_priority.return_value = True
 
@@ -134,8 +150,8 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
                 ),
             )
 
-            topology = adapter.energy_discovery.topology_snapshot(now=100.0)
-            self.assertEqual(topology.generation, 1)
+            topology = adapter.energy_discovery.topology_snapshot(captured_at=100.0)
+            self.assertEqual(topology.generation, 12)
             self.assertEqual(
                 [source.kind for source in topology.sources].count("pv_ac"),
                 10,
@@ -144,14 +160,14 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
             self.assertNotIn("com.victronenergy", str(topology.to_payload()))
 
             queued = install_mock(adapter.commands, "enqueue", MagicMock())
-            adapter.enqueue_introspection_command(
+            adapter.introspection_role.enqueue_introspection_command(
                 "svc.discovery",
                 "/Discovery",
                 priority=89,
                 source="test",
                 reason="discovery-priority",
             )
-            adapter.enqueue_introspection_command(
+            adapter.introspection_role.enqueue_introspection_command(
                 "svc.optional",
                 "/Optional",
                 priority=90,
@@ -163,9 +179,9 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
                 ["discovery", "optional"],
             )
 
-            enqueue = install_mock(adapter, "enqueue_introspection_command", MagicMock())
+            enqueue = install_mock(adapter.introspection_role, "enqueue_introspection_command", MagicMock())
             with patch.object(introspection_module.time, "time", return_value=100.0):
-                adapter.enqueue_background_introspection_if_due()
+                adapter.introspection_role.enqueue_background_introspection_if_due()
             self.assertEqual(enqueue.call_count, len(targets))
             enqueue.assert_any_call(
                 "com.victronenergy.system",
@@ -176,7 +192,7 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
             )
             enqueue.reset_mock()
             with patch.object(introspection_module.time, "time", return_value=100.0):
-                adapter.enqueue_background_introspection_if_due()
+                adapter.introspection_role.enqueue_background_introspection_if_due()
             enqueue.assert_not_called()
 
     def test_introspection_discovery_honors_custom_and_explicit_sources(self) -> None:

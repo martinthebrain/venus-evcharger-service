@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from venus_evcharger.backend.template_support import (
     TemplateAuthSettings,
-    TemplateHttpBackendBase,
     config_section,
     load_template_auth_settings,
     load_template_config,
@@ -18,16 +17,21 @@ from venus_evcharger.backend.template_support import (
 from venus_evcharger.core.contracts import finite_float_or_none
 
 from .connectors_common import (
+    EnergySourceHttpClient as TemplateHttpBackendBase,
+)
+from .connectors_common import (
+    _bounded_request_timeout_seconds,
     _optional_bool_path,
     _optional_confidence_path,
     _optional_float_path,
     _optional_path,
     _optional_text_path,
+    _runtime_cache_get,
+    _runtime_cache_put,
+    _runtime_default_timeout_seconds,
     _runtime_owner,
-    _typed_cache_map,
 )
 from .models import EnergySourceDefinition, EnergySourceSnapshot
-
 
 _DEFAULT_TIMEOUT_SECONDS = 2.0
 _ADAPTER_SECTION = "Adapter"
@@ -38,6 +42,7 @@ _REQUEST_TIMEOUT_KEY = "RequestTimeoutSeconds"
 _METHOD_KEY = "Method"
 _URL_KEY = "Url"
 _DEFAULT_METHOD = "GET"
+_SETTINGS_CACHE = "template_http.settings"
 _RESPONSE_PATH_KEYS = (
     "SocPath",
     "UsableCapacityWhPath",
@@ -71,7 +76,11 @@ class TemplateHttpEnergySourceSettings:
     confidence_path: str | None
 
 
-def _template_http_energy_source_snapshot(owner: Any, source: EnergySourceDefinition, now: float) -> EnergySourceSnapshot:
+def _template_http_energy_source_snapshot(
+    owner: object,
+    source: EnergySourceDefinition,
+    now: float,
+) -> EnergySourceSnapshot:
     runtime = _runtime_owner(owner)
     settings = _template_http_energy_source_settings(runtime, source)
     payload = _template_http_payload(runtime, settings)
@@ -83,6 +92,7 @@ def _template_http_energy_source_snapshot(owner: Any, source: EnergySourceDefini
         source_id=source.source_id,
         role=source.role,
         service_name=_template_source_name(source, settings),
+        physical_id=source.physical_id,
         soc=soc_value,
         usable_capacity_wh=usable_capacity_wh,
         net_battery_power_w=_optional_float_path(payload, settings.battery_power_path),
@@ -104,7 +114,10 @@ def _template_source_name(source: EnergySourceDefinition, settings: TemplateHttp
     return source.config_path or source.source_id
 
 
-def _template_http_payload(runtime: Any, settings: TemplateHttpEnergySourceSettings) -> Any:
+def _template_http_payload(
+    runtime: object,
+    settings: TemplateHttpEnergySourceSettings,
+) -> dict[str, object]:
     return TemplateHttpBackendBase(
         runtime,
         settings.timeout_seconds,
@@ -112,7 +125,10 @@ def _template_http_payload(runtime: Any, settings: TemplateHttpEnergySourceSetti
     )._perform_request(settings.request_method, settings.request_url)
 
 
-def _template_soc_value(payload: Any, settings: TemplateHttpEnergySourceSettings) -> float | None:
+def _template_soc_value(
+    payload: dict[str, object],
+    settings: TemplateHttpEnergySourceSettings,
+) -> float | None:
     soc_value = _optional_float_path(payload, settings.soc_path)
     if soc_value is not None and not 0.0 <= soc_value <= 100.0:
         return None
@@ -120,7 +136,7 @@ def _template_soc_value(payload: Any, settings: TemplateHttpEnergySourceSettings
 
 
 def _template_usable_capacity_wh(
-    payload: Any,
+    payload: dict[str, object],
     settings: TemplateHttpEnergySourceSettings,
     source: EnergySourceDefinition,
 ) -> float | None:
@@ -132,36 +148,55 @@ def _template_usable_capacity_wh(
     return usable_capacity_wh
 
 
-def _template_online(payload: Any, settings: TemplateHttpEnergySourceSettings) -> bool:
+def _template_online(
+    payload: dict[str, object],
+    settings: TemplateHttpEnergySourceSettings,
+) -> bool:
     online = _optional_bool_path(payload, settings.online_path)
     return True if online is None else bool(online)
 
 
-def _template_confidence(payload: Any, settings: TemplateHttpEnergySourceSettings) -> float:
+def _template_confidence(
+    payload: dict[str, object],
+    settings: TemplateHttpEnergySourceSettings,
+) -> float:
     confidence = _optional_confidence_path(payload, settings.confidence_path)
     return 1.0 if confidence is None else confidence
 
 
-def _template_timeout_seconds(runtime: Any, adapter: Any) -> float:
-    default_timeout = float(getattr(runtime, "shelly_request_timeout_seconds", None) or _DEFAULT_TIMEOUT_SECONDS)
+def _template_timeout_seconds(
+    runtime: object,
+    adapter: Mapping[str, object],
+) -> float:
+    default_timeout = _runtime_default_timeout_seconds(runtime, _DEFAULT_TIMEOUT_SECONDS)
     timeout = finite_float_or_none(adapter.get(_REQUEST_TIMEOUT_KEY))
-    if timeout is None or timeout <= 0.0:
-        return default_timeout
-    return float(timeout)
+    configured = default_timeout if timeout is None or timeout <= 0.0 else float(timeout)
+    return _bounded_request_timeout_seconds(runtime, configured)
 
 
-def _section_text(section: Any, key: str, default: str = "") -> str:
+def _section_text(
+    section: Mapping[str, object],
+    key: str,
+    default: str = "",
+) -> str:
     value = section.get(key)
     if value is None:
         return default
     return str(value).strip() or default
 
 
-def _template_http_energy_source_settings(runtime: Any, source: EnergySourceDefinition) -> TemplateHttpEnergySourceSettings:
-    cache = _typed_cache_map(runtime, "_energy_template_settings_cache", TemplateHttpEnergySourceSettings)
+def _template_http_energy_source_settings(
+    runtime: object,
+    source: EnergySourceDefinition,
+) -> TemplateHttpEnergySourceSettings:
     cache_key = str(source.config_path).strip()
-    cached = cache.get(cache_key)
-    if isinstance(cached, TemplateHttpEnergySourceSettings):
+    cached = _runtime_cache_get(
+        runtime,
+        _SETTINGS_CACHE,
+        cache_key,
+        TemplateHttpEnergySourceSettings,
+    )
+    if cached is not None:
         return cached
     if not cache_key:
         raise ValueError(f"Energy source '{source.source_id}' requires ConfigPath for template_http connector")
@@ -188,7 +223,7 @@ def _template_http_energy_source_settings(runtime: Any, source: EnergySourceDefi
         confidence_path=response_paths[8],
     )
     _validate_template_http_energy_source_settings(source, settings)
-    cache[cache_key] = settings
+    _runtime_cache_put(runtime, _SETTINGS_CACHE, cache_key, settings)
     return settings
 
 

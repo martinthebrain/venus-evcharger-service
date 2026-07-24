@@ -6,6 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.ports.auto import AutoDecisionPort, _require_pending_relay_command
 
 
@@ -29,6 +30,13 @@ class AutoDecisionPortContractTests(unittest.TestCase):
     def test_audit_default_is_part_of_the_port_contract(self) -> None:
         signature = inspect.signature(AutoDecisionPort.write_auto_audit_event)
         self.assertIs(signature.parameters["cached"].default, False)
+
+    def test_auto_policy_preserves_the_bootstrap_contract_object(self) -> None:
+        policy = AutoPolicy()
+        self.assertIs(
+            AutoDecisionPort(SimpleNamespace(auto_policy=policy)).auto_policy(),
+            policy,
+        )
 
     def test_side_effects_delegate_once_with_exact_arguments(self) -> None:
         state = SimpleNamespace(save_runtime_state=MagicMock(return_value="saved"))

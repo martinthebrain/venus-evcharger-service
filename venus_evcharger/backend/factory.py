@@ -6,13 +6,18 @@ from __future__ import annotations
 import configparser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import TypeVar
 
 from .base import ChargerBackend, MeterBackend, SwitchBackend
 from .config import (
     runtime_summary_from_service,
 )
 from .config_file import normalized_optional_path
+from .factory_contracts import (
+    BackendRoleCreator,
+    config_from_backend_service,
+    topology_from_backend_service,
+)
 from .models import BackendRuntimeSummary
 from .registry import (
     create_charger_backend,
@@ -51,7 +56,7 @@ class _TopologyBackendRoles:
     charger_config_path: Path | None
 
 
-def _config_path_arg(config_path: object) -> str:
+def _config_path_arg(config_path: Path | None) -> str:
     """Return one backend-constructor argument from an optional normalized path."""
     return "" if config_path is None else str(config_path)
 
@@ -83,13 +88,13 @@ def _section_option_text(section: configparser.SectionProxy, option_lower: str) 
     return ""
 
 
-def _topology_from_service(service: Any) -> EvChargerTopologyConfig | None:
+def _topology_from_service(service: object) -> EvChargerTopologyConfig | None:
     """Return one normalized topology config from runtime state or config."""
-    runtime_topology = getattr(service, "_topology_config", None)
-    if isinstance(runtime_topology, EvChargerTopologyConfig):
+    runtime_topology = topology_from_backend_service(service)
+    if runtime_topology is not None:
         return runtime_topology
-    service_config = getattr(service, "config", None)
-    if not isinstance(service_config, configparser.ConfigParser) or not service_config.has_section(_TOPOLOGY_SECTION):
+    service_config = config_from_backend_service(service)
+    if service_config is None or not service_config.has_section(_TOPOLOGY_SECTION):
         return None
     return parse_topology_config(service_config)
 
@@ -148,9 +153,7 @@ def _is_native_device_topology(topology: EvChargerTopologyConfig) -> bool:
 def _is_hybrid_topology(topology: EvChargerTopologyConfig) -> bool:
     """Return whether one topology carries both charger and actuator roles."""
     return (
-        topology.topology.type == "hybrid_topology"
-        and topology.actuator is not None
-        and topology.charger is not None
+        topology.topology.type == "hybrid_topology" and topology.actuator is not None and topology.charger is not None
     )
 
 
@@ -194,9 +197,9 @@ def _runtime_from_topology_roles(roles: _TopologyBackendRoles) -> BackendRuntime
 
 def _backend_from_role(
     role_type: str | None,
-    config_path: object,
-    service: Any,
-    creator: Callable[[str, Any, str], _BackendT],
+    config_path: Path | None,
+    service: object,
+    creator: BackendRoleCreator[_BackendT],
 ) -> _BackendT | None:
     """Instantiate one backend from normalized role data."""
     if role_type is None:
@@ -204,22 +207,22 @@ def _backend_from_role(
     return creator(role_type, service, _config_path_arg(config_path))
 
 
-def _direct_meter_backend(role_type: str | None, config_path: Path | None, service: Any) -> MeterBackend | None:
+def _direct_meter_backend(role_type: str | None, config_path: Path | None, service: object) -> MeterBackend | None:
     """Instantiate one meter backend directly from topology-resolved role data."""
     return _backend_from_role(role_type, config_path, service, create_meter_backend)
 
 
-def _direct_switch_backend(role_type: str | None, config_path: Path | None, service: Any) -> SwitchBackend | None:
+def _direct_switch_backend(role_type: str | None, config_path: Path | None, service: object) -> SwitchBackend | None:
     """Instantiate one switch backend directly from topology-resolved role data."""
     return _backend_from_role(role_type, config_path, service, create_switch_backend)
 
 
-def _direct_charger_backend(role_type: str | None, config_path: Path | None, service: Any) -> ChargerBackend | None:
+def _direct_charger_backend(role_type: str | None, config_path: Path | None, service: object) -> ChargerBackend | None:
     """Instantiate one charger backend directly from topology-resolved role data."""
     return _backend_from_role(role_type, config_path, service, create_charger_backend)
 
 
-def _resolved_from_topology(service: Any) -> ResolvedBackends | None:
+def _resolved_from_topology(service: object) -> ResolvedBackends | None:
     """Return one directly resolved backend bundle from normalized topology config."""
     topology = _topology_from_service(service)
     if topology is None:
@@ -234,24 +237,23 @@ def _resolved_from_topology(service: Any) -> ResolvedBackends | None:
     return ResolvedBackends(runtime=runtime, meter=meter, switch=switch, charger=charger)
 
 
-def _resolved_meter_backend(runtime: BackendRuntimeSummary, service: Any) -> MeterBackend | None:
+def _resolved_meter_backend(runtime: BackendRuntimeSummary, service: object) -> MeterBackend | None:
     """Return the configured meter backend or validate that meterless mode is allowed."""
     return _backend_from_role(runtime.meter_type, runtime.meter_config_path, service, create_meter_backend)
 
 
-def _resolved_switch_backend(runtime: BackendRuntimeSummary, service: Any) -> SwitchBackend | None:
+def _resolved_switch_backend(runtime: BackendRuntimeSummary, service: object) -> SwitchBackend | None:
     """Return the configured switch backend or validate that switchless mode is allowed."""
     return _backend_from_role(runtime.switch_type, runtime.switch_config_path, service, create_switch_backend)
 
 
-def _resolved_charger_backend(runtime: BackendRuntimeSummary, service: Any) -> ChargerBackend | None:
+def _resolved_charger_backend(runtime: BackendRuntimeSummary, service: object) -> ChargerBackend | None:
     """Return the configured charger backend when present."""
     return _backend_from_role(runtime.charger_type, runtime.charger_config_path, service, create_charger_backend)
 
 
-def build_service_backends(service: Any) -> ResolvedBackends:
-    """Instantiate one normalized backend bundle from service config attrs.
-    """
+def build_service_backends(service: object) -> ResolvedBackends:
+    """Instantiate one normalized backend bundle from service config attrs."""
     topology_resolved = _resolved_from_topology(service)
     if topology_resolved is not None:
         return topology_resolved

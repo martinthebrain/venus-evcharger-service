@@ -18,13 +18,14 @@ from venus_evcharger.dbus_adapter.process.introspection_snapshot import DBUS_INT
 
 
 def adapter(values: dict[str, dict[str, object]] | None = None) -> snapshot.DbusAdapterIntrospectionSnapshot:
-    instance = object.__new__(snapshot.DbusAdapterIntrospectionSnapshot)
-    instance.cache = SimpleNamespace(values=values or {})
-    instance.dbus_introspection_enabled = True
-    instance.dbus_introspection_snapshot_path = "/run/introspection.json"
-    instance._introspection_queue_depth = 3
-    instance._last_introspection_full_scan_at = 90.0
-    return instance
+    context = SimpleNamespace(
+        cache=SimpleNamespace(values=values or {}),
+        dbus_introspection_enabled=True,
+        dbus_introspection_snapshot_path="/run/introspection.json",
+        _introspection_queue_depth=3,
+        _last_introspection_full_scan_at=90.0,
+    )
+    return snapshot.DbusAdapterIntrospectionSnapshot(context)
 
 
 class DbusAdapterIntrospectionSnapshotContractTests(unittest.TestCase):
@@ -108,11 +109,10 @@ class DbusAdapterIntrospectionSnapshotContractTests(unittest.TestCase):
             snapshot._backoff_introspection_finding({}, "", 100.0),
         )
 
-    def test_cache_entries_filter_prefix_and_mapping_payload(self) -> None:
+    def test_cache_entries_filter_introspection_prefix(self) -> None:
         instance = adapter(
             {
                 "introspection:svc:/A": {"status": "fresh"},
-                "introspection:svc:/Bad": "bad",
                 "path:svc/A": {"status": "fresh"},
             }
         )
@@ -198,14 +198,14 @@ class DbusAdapterIntrospectionSnapshotContractTests(unittest.TestCase):
         instance.introspection_services_snapshot.assert_called_once_with(100.0)
 
         for enabled, path in ((False, "/run/map"), (True, "")):
-            instance.dbus_introspection_enabled = enabled
-            instance.dbus_introspection_snapshot_path = path
+            instance._context.dbus_introspection_enabled = enabled
+            instance._context.dbus_introspection_snapshot_path = path
             with patch.object(snapshot, "write_text_atomically") as disabled_write:
                 instance.write_introspection_snapshot()
             disabled_write.assert_not_called()
 
-        instance.dbus_introspection_enabled = True
-        instance.dbus_introspection_snapshot_path = "/run/map"
+        instance._context.dbus_introspection_enabled = True
+        instance._context.dbus_introspection_snapshot_path = "/run/map"
         for error in (OSError("readonly"), RuntimeError("runtime"), TypeError("type"), ValueError("value")):
             with (
                 patch.object(snapshot, "write_text_atomically", side_effect=error),

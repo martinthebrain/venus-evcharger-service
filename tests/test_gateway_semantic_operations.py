@@ -18,9 +18,8 @@ install_venus_adapter_stubs()
 from venus_evcharger.dbus_adapter.scheduling import AtomicJsonWriter
 from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
 from venus_evcharger.dbus_adapter.write import semantic as semantic_module
-from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
-from venus_evcharger.dbus_adapter.write.scheduler import DbusWriteScheduler
-from venus_evcharger.dbus_adapter.write.semantic import DbusWriteSchedulerSemantic
+from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
+from venus_evcharger.dbus_adapter.write.semantic import SemanticWriteExecutor
 from venus_evcharger.dbus_gateway import DbusCacheStore, gateway_paths, read_json_file
 from venus_evcharger.dbus_gateway_client import GatewayClient, GatewayOperationsClient
 from venus_evcharger.dbus_gateway_policy import command_queue_class
@@ -93,8 +92,8 @@ class _Adapter:
         return operation()
 
 
-def _scheduler(adapter: _Adapter) -> DbusWriteSchedulerSemantic:
-    return DbusWriteScheduler(cast(DbusWriteSchedulerAdapter, adapter))
+def _scheduler(adapter: _Adapter) -> SemanticWriteExecutor:
+    return SemanticWriteExecutor(cast(SemanticWriteAdapter, adapter))
 
 
 def _write_command(path: Path, command: CommandMapping) -> None:
@@ -190,7 +189,7 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
             paths = gateway_paths(temp_dir)
             cache = DbusCacheStore(paths)
             cache.update_external_read(gx_relay_state_key(0), 1, source="test")
-            cache.write_snapshot_files()
+            cache.write_cache_snapshot()
             operations = GatewayOperationsClient(GatewayClient(paths))
             self.assertEqual(operations.read_gx_relay_state(0, max_age_seconds=5.0), 1)
             self.assertIsNone(operations.read_gx_relay_state(1, max_age_seconds=5.0))
@@ -535,16 +534,6 @@ class GatewaySemanticAdapterTests(unittest.TestCase):
                 "dropped",
             )
             self.assertEqual(adapter.operations, [])
-
-            full_scheduler = DbusWriteScheduler(cast(DbusWriteSchedulerAdapter, adapter))
-            with patch("venus_evcharger.dbus_adapter.write.core.time.time", return_value=100.0):
-                selected = full_scheduler.select_next_command(
-                    [
-                        ("future", {"kind": GX_RELAY_REFRESH_KIND, "not_before": 101.0}),
-                        ("ready", {"kind": GX_RELAY_REFRESH_KIND, "not_before": 99.0}),
-                    ]
-                )
-            self.assertEqual(selected, ("ready", {"kind": GX_RELAY_REFRESH_KIND, "not_before": 99.0}))
 
 
 if __name__ == "__main__":

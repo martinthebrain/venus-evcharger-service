@@ -11,7 +11,7 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 
-from venus_evcharger.dbus_gateway_cache import CacheValueMetadata, DbusCacheStore
+from venus_evcharger.dbus_gateway_cache import DbusCacheStore
 from venus_evcharger.dbus_gateway_client import (
     GatewayClient,
     GatewayGenericShellyConfigurationClient,
@@ -77,7 +77,6 @@ __all__ = [
     "VENUS_EV_CHARGER_WRITABLE_PATHS",
     "CacheFreshnessKind",
     "CacheSourceState",
-    "CacheValueMetadata",
     "DbusCacheStore",
     "DbusGatewayCommandInbox",
     "GatewayClient",
