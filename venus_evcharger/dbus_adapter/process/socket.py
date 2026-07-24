@@ -205,4 +205,7 @@ def _decoded_socket_request(raw: bytes | bytearray) -> tuple[str, None]:
 
 
 def send_socket_response(conn: socket.socket, response: CommandPayload) -> None:
-    conn.sendall((compact_json(response) + "\n").encode())
+    try:
+        conn.sendall((compact_json(response) + "\n").encode())
+    except (BrokenPipeError, ConnectionResetError):
+        logging.debug("Gateway socket client disconnected before reading its response")

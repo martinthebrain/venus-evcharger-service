@@ -235,6 +235,34 @@ class WriteCommandQueue:
         self.last_scheduled_outcome = self.process_loaded_command(path, command, pending_commands=pending)
         return True
 
+    def process_urgent_once(self) -> bool:
+        """Process one ready safety or user command before ordinary scheduled work."""
+        self.last_scheduled_outcome = None
+        snapshot = self.pending_snapshot()
+        pending = snapshot.physical_list()
+        commands = self.health.prioritized_commands(snapshot.effective_list())
+        now = time.time()
+        self.health.prune_budget(now)
+        selected = next(
+            (
+                (path, command)
+                for path, command in commands
+                if is_urgent_durable_command(command)
+                and self._command_selectable(
+                    command,
+                    include_local_publish=True,
+                    required_kind=None,
+                    now=now,
+                )
+            ),
+            None,
+        )
+        if selected is None:
+            return False
+        path, command = selected
+        self.last_scheduled_outcome = self.process_loaded_command(path, command, pending_commands=pending)
+        return True
+
     def select_next_command(
         self,
         commands: CommandFileList,

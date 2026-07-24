@@ -123,9 +123,12 @@ class DbusAdapterLoop:
         if self.refresh_initial_services_once():
             return True
         self._context.introspection_role.enqueue_background_introspection_if_due()
+        local_publish_count = self._context.write_scheduler.process_local_publish_burst()
+        if self._context.write_scheduler.process_urgent_once():
+            return True
         if self.priority_read_performed():
             return True
-        return self.process_standard_operation_once()
+        return self.process_standard_operation_once(local_publish_count)
 
     def process_evcs_registration_once(self) -> bool:
         """Register our own service before touching any external DBus service."""
@@ -142,8 +145,7 @@ class DbusAdapterLoop:
     def priority_read_performed(self) -> bool:
         return self.reads_need_priority() and self._context.io_role.poll_one_due_read_once()
 
-    def process_standard_operation_once(self) -> bool:
-        local_publish_count = self._context.write_scheduler.process_local_publish_burst()
+    def process_standard_operation_once(self, local_publish_count: int = 0) -> bool:
         if self.process_preferred_read_or_write():
             return True
         return bool(

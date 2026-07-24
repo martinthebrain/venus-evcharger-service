@@ -113,7 +113,17 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             )
             self.assertTrue(priority_adapter.loop_role.process_one_dbus_operation_once())
             priority_adapter.io_role.poll_one_due_read_once.assert_called_once()
-            priority_adapter.write_scheduler.process_local_publish_burst.assert_not_called()
+            priority_adapter.write_scheduler.process_local_publish_burst.assert_called_once()
+
+            install_mock(
+                priority_adapter.write_scheduler,
+                "process_urgent_once",
+                MagicMock(return_value=True),
+            )
+            priority_adapter.io_role.poll_one_due_read_once.reset_mock()
+            self.assertTrue(priority_adapter.loop_role.process_one_dbus_operation_once())
+            priority_adapter.write_scheduler.process_urgent_once.assert_called_once()
+            priority_adapter.io_role.poll_one_due_read_once.assert_not_called()
 
             aggregate_adapter = DbusAdapter(
                 str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-aggregate"))
@@ -143,7 +153,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             )
             self.assertTrue(aggregate_adapter.loop_role.process_one_dbus_operation_once())
             aggregate_adapter.io_role.poll_one_due_read_once.assert_called_once()
-            aggregate_adapter.write_scheduler.process_local_publish_burst.assert_not_called()
+            aggregate_adapter.write_scheduler.process_local_publish_burst.assert_called_once()
 
     def test_tick_records_lifecycle_and_honors_stop_after_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -404,15 +414,15 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             install_mock(adapter.write_scheduler, "process_local_publish_burst", MagicMock(return_value=3))
             install_mock(adapter.loop_role, "process_preferred_read_or_write", MagicMock(return_value=True))
             install_mock(adapter.io_role, "refresh_services_if_due_once", MagicMock(return_value=True))
-            self.assertTrue(adapter.loop_role.process_standard_operation_once())
-            adapter.write_scheduler.process_local_publish_burst.assert_called_once()
+            self.assertTrue(adapter.loop_role.process_standard_operation_once(local_publish_count=3))
+            adapter.write_scheduler.process_local_publish_burst.assert_not_called()
             adapter.loop_role.process_preferred_read_or_write.assert_called_once()
             adapter.io_role.refresh_services_if_due_once.assert_not_called()
 
             install_mock(adapter.write_scheduler, "process_local_publish_burst", MagicMock(return_value=2))
             install_mock(adapter.loop_role, "process_preferred_read_or_write", MagicMock(return_value=False))
             install_mock(adapter.io_role, "refresh_services_if_due_once", MagicMock(return_value=False))
-            self.assertTrue(adapter.loop_role.process_standard_operation_once())
+            self.assertTrue(adapter.loop_role.process_standard_operation_once(local_publish_count=2))
 
             install_mock(adapter.write_scheduler, "process_local_publish_burst", MagicMock(return_value=0))
             install_mock(adapter.loop_role, "process_preferred_read_or_write", MagicMock(return_value=False))

@@ -127,6 +127,7 @@ class ServiceControllerOwner:
         )
         runtime.initialize_runtime_support()
         runtime.init_worker_state()
+        runtime.ensure_observability_state()
         self._gateway_operations = self._build_gateway_operations()
         setattr(self._service, "gateway_operations", self._gateway_operations)
         setattr(self._service, "gateway_publication", self._build_gateway_publication())
