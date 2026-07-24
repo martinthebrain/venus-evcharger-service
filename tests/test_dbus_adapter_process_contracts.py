@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import configparser
+import importlib
 import logging
+import sys
 import unittest
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
@@ -55,6 +57,15 @@ def adapter_settings() -> GatewayAdapterSettings:
 
 
 class DbusAdapterProcessContractTests(unittest.TestCase):
+    def test_adapter_module_import_does_not_duplicate_existing_velib_path(self) -> None:
+        velib_path = process._VELIB_PYTHON_PATH
+        self.assertIn(velib_path, sys.path)
+        occurrences = sys.path.count(velib_path)
+
+        self.assertIs(importlib.reload(process), process)
+
+        self.assertEqual(sys.path.count(velib_path), occurrences)
+
     def test_logging_level_is_normalized_and_invalid_values_fall_back(self) -> None:
         config = CasePreservingConfigParser()
         self.assertEqual(logging_level_from_config(config), logging.INFO)

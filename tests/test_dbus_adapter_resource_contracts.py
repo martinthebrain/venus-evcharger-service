@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from itertools import repeat
 from unittest.mock import patch
 
+import venus_evcharger.dbus_adapter.resources as resources_module
 from venus_evcharger.dbus_adapter.resources import (
     ResourceMonitor,
     ResourceMonitorSettings,
@@ -90,6 +91,14 @@ class _ResourceReader:
 
 
 class TestResourceMonitorContracts(unittest.TestCase):
+    def test_snapshot_copy_preserves_non_mapping_process_metadata(self) -> None:
+        payload = {"state": "unknown", "process": "unavailable"}
+
+        copied = resources_module._snapshot_copy(payload)
+
+        self.assertEqual(copied, payload)
+        self.assertIsNot(copied, payload)
+
     def test_monitor_uses_current_process_and_procfs_reader_by_default(self) -> None:
         with (
             patch("venus_evcharger.dbus_adapter.resources.os.getpid", return_value=321),

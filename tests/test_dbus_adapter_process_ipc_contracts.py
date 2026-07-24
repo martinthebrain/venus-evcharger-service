@@ -150,6 +150,21 @@ class DbusAdapterIpcContractTests(unittest.TestCase):
         self.assertEqual(data, "")
         self.assertEqual(error, {"ok": False, "error": "request-timeout"})
 
+    def test_elapsed_deadline_and_clean_eof_do_not_block(self) -> None:
+        connection = MagicMock()
+        with (
+            patch.object(socket_module.time, "monotonic", side_effect=[1.0, 2.0]),
+            patch.object(socket_module.logging, "debug") as debug,
+        ):
+            self.assertEqual(socket_module.receive_socket_request(connection), ("", {}))
+        connection.recv.assert_not_called()
+        debug.assert_called_once_with("Gateway socket client connected without sending a request")
+
+        connection.reset_mock()
+        connection.recv.return_value = b""
+        self.assertEqual(socket_module.receive_socket_request(connection), ("", None))
+        connection.recv.assert_called_once()
+
     def test_payload_parser_and_dispatch_contracts(self) -> None:
         payload, error = socket_module.parsed_socket_payload('{"type":"health","count":2}')
         self.assertEqual(payload, {"type": "health", "count": 2})
