@@ -78,11 +78,34 @@ class GatewayWritePublishCases(GatewayAdapterContractCase):
             ]
 
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(limit=3), 0)
-            self.assertTrue(adapter.write_scheduler.process_one())
+            self.assertTrue(adapter.write_scheduler.process_urgent_once())
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(limit=3), 2)
 
             self.assertTrue(all(not Path(path).exists() for path in paths))
             self.assertEqual(adapter.write_scheduler.health()["processed_commands_60s"], 3)
+
+    def test_critical_publication_overtakes_aged_refresh_work(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            self.assertEqual(adapter.write_scheduler.publication_executor.process(evcs_registration()), "applied")
+            critical_path = adapter.commands.enqueue(
+                evcs_publication({"mode": 0}, priority="critical")
+            )
+            refresh_path = adapter.commands.enqueue(
+                {
+                    "kind": "refresh_energy_inputs",
+                    "scope": "battery",
+                    "priority": "read",
+                    "queue_class": "read-fast",
+                    "created_at": time.time() - 60.0,
+                }
+            )
+
+            self.assertTrue(adapter.write_scheduler.process_urgent_once())
+
+            self.assertFalse(Path(critical_path).exists())
+            self.assertTrue(Path(refresh_path).exists())
+            self.assertEqual(adapter.cache.values["path:com.victronenergy.evcharger.http_60/Mode"]["value"], 0)
 
     def test_local_burst_stops_after_a_deferred_publication(self) -> None:
         with self.adapter_scenario() as scenario:

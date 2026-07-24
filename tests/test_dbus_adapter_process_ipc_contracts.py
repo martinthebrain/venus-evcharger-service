@@ -130,6 +130,23 @@ class DbusAdapterIpcContractTests(unittest.TestCase):
             self.socket.process_socket_once()
         connection.sendall.assert_called_once_with(b'{"error":"request-too-large","ok":false}\n')
 
+    def test_disconnected_client_does_not_abort_adapter_tick(self) -> None:
+        connection = MagicMock()
+        connection.sendall.side_effect = BrokenPipeError
+
+        with patch.object(socket_module.logging, "debug") as debug:
+            socket_module.send_socket_response(connection, {"ok": True})
+
+        connection.sendall.assert_called_once_with(b'{"ok":true}\n')
+        debug.assert_called_once_with(
+            "Gateway socket client disconnected before reading its response"
+        )
+
+        connection.reset_mock()
+        connection.sendall.side_effect = ConnectionResetError
+        socket_module.send_socket_response(connection, {"ok": False})
+        connection.sendall.assert_called_once_with(b'{"ok":false}\n')
+
     def test_fragmented_request_is_read_until_newline(self) -> None:
         connection = MagicMock()
         connection.recv.side_effect = [b'{"type":', b'"snapshot"', b"}\n"]

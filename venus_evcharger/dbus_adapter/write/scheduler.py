@@ -52,6 +52,9 @@ class DbusWriteScheduler:
             required_kind=required_kind,
         )
 
+    def process_urgent_once(self) -> bool:
+        return self.command_queue.process_urgent_once()
+
     def process_local_publish_burst(self, limit: int | None = None) -> int:
         return self.command_queue.process_local_publish_burst(limit)
 

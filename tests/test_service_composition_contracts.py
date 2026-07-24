@@ -708,8 +708,12 @@ class ServiceCompositionContractTests(unittest.TestCase):
         self.assertTrue(service.topology_configured)
         self.assertFalse(service.primary_rpc_configured)
         self.assertEqual(
-            [call[0] for call in runtime.calls[:2]],
-            ["initialize_runtime_support", "init_worker_state"],
+            [call[0] for call in runtime.calls[:3]],
+            [
+                "initialize_runtime_support",
+                "init_worker_state",
+                "ensure_observability_state",
+            ],
         )
         with self.assertRaisesRegex(RuntimeError, "already initialized"):
             owner.initialize_runtime()
