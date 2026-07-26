@@ -328,8 +328,8 @@ class DbusAdapterHealth:
             pressure_state=control.pressure_state,
         )
         if control.stale_core_reads:
-            context.read_scheduler.force_due(control.stale_core_reads)
-        circuit_state = str(control.health.get("state", "ok"))
+            context.read_scheduler.expedite_healthy(control.stale_core_reads)
+        circuit_state = str(control.health["state"])
         if circuit_state != "ok" or control.pressure_state != "ok":
             self.suspend_advisory_work(
                 monotonic_at=control.monotonic_at,
@@ -344,11 +344,12 @@ class DbusAdapterHealth:
         captured_at: float,
     ) -> None:
         context = self._context
-        context.discovery.defer_for(
-            monotonic_at=monotonic_at,
-            captured_at=captured_at,
-            seconds=60.0,
-        )
+        if context.discovery.last_success_at > 0.0:
+            context.discovery.defer_for(
+                monotonic_at=monotonic_at,
+                captured_at=captured_at,
+                seconds=60.0,
+            )
         context._last_introspection_full_scan_at = max(
             context._last_introspection_full_scan_at,
             captured_at,

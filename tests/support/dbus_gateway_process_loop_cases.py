@@ -23,6 +23,80 @@ from tests.support.dbus_gateway_adapter_harness import (
 class GatewayProcessLoopCases(GatewayAdapterContractCase):
     """Exercise tick and main-loop lifecycle scenarios."""
 
+    def test_initial_discovery_survives_pressure_and_unlocks_energy_sources(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                "AutoBatteryService=\n"
+                "AutoBatteryServicePrefix=com.victronenergy.battery\n"
+                "AutoBatterySocPath=/Soc\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            self.assertEqual(
+                adapter.write_scheduler.publication_executor.process(
+                    evcs_registration()
+                ),
+                "applied",
+            )
+            adapter.health_role.suspend_advisory_work(
+                monotonic_at=100.0,
+                captured_at=1000.0,
+            )
+            self.assertEqual(adapter.discovery.next_scan_monotonic, 0.0)
+
+            services = [
+                "com.victronenergy.system",
+                "com.victronenergy.pvinverter.http_48",
+                "com.victronenergy.battery.socketcan_can0",
+            ]
+            install_mock(
+                adapter.io_role,
+                "list_services",
+                MagicMock(return_value=services),
+            )
+            self.assertTrue(adapter.loop_role.process_one_dbus_operation_once())
+            self.assertEqual(set(adapter.cache.services), set(services))
+            self.assertGreater(adapter.discovery.last_success_at, 0.0)
+            self.assertEqual(len(adapter.energy_discovery.source_ids("battery")), 1)
+
+            install_mock(
+                adapter.read_executor,
+                "read_optional_busitem",
+                MagicMock(side_effect=(1250.0, 0.0)),
+            )
+            pv_spec = adapter.read_scheduler.specs["pv_power_w"]
+            self.assertEqual(
+                adapter.read_executor.poll_read_spec("pv_power_w", pv_spec),
+                "deferred",
+            )
+            self.assertEqual(
+                adapter.read_executor.poll_read_spec("pv_power_w", pv_spec),
+                "applied",
+            )
+            self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 1250.0)
+
+            install_mock(
+                adapter.read_executor,
+                "read_busitem",
+                MagicMock(return_value=62.0),
+            )
+            battery_spec = adapter.read_scheduler.specs["battery_soc"]
+            self.assertEqual(
+                adapter.read_executor.poll_read_spec(
+                    "battery_soc",
+                    battery_spec,
+                ),
+                "applied",
+            )
+            self.assertEqual(adapter.cache.values["battery_soc"]["value"], 62.0)
+
     def test_tick_and_dbus_operation_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
