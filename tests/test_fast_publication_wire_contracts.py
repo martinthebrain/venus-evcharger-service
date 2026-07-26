@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-import plistlib
 import struct
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -27,6 +28,30 @@ _HEADER = struct.Struct("!4sBI")
 
 
 class FastPublicationWireContractTests(unittest.TestCase):
+    def test_wire_import_does_not_require_plistlib_on_venus_python(self) -> None:
+        script = """
+import builtins
+
+real_import = builtins.__import__
+
+def venus_import(name, *args, **kwargs):
+    if name == "plistlib":
+        raise ModuleNotFoundError("No module named 'plistlib'")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = venus_import
+from venus_evcharger.ipc.fast_publication_wire import encode_fast_publication_frame
+assert encode_fast_publication_frame({"ok": True})
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_round_trip_preserves_supported_transport_values(self) -> None:
         large_order = 1 << 96
         payload = {
@@ -49,16 +74,39 @@ class FastPublicationWireContractTests(unittest.TestCase):
         self.assertEqual(fast_publication_frame_size(frame), len(frame))
         self.assertEqual(decode_fast_publication_frame(frame), payload)
 
+    def test_wire_body_is_compact_utf8_json(self) -> None:
+        payload = {"label": "Grün", "values": [True, None, 3]}
+        expected_body = b'{"label":"Gr\\u00fcn","values":[true,null,3]}'
+
+        frame = encode_fast_publication_frame(payload)
+
+        self.assertEqual(frame[FAST_PUBLICATION_WIRE_HEADER_BYTES:], expected_body)
+        self.assertEqual(decode_fast_publication_frame(frame), payload)
+
     def test_header_must_be_complete_versioned_and_bounded(self) -> None:
         self.assertEqual(fast_publication_frame_size(b"EVC"), 0)
         cases = (
-            (_HEADER.pack(b"FAIL", 1, 1) + b"x", "invalid-frame-magic"),
-            (_HEADER.pack(FAST_PUBLICATION_WIRE_MAGIC, 2, 1) + b"x", "unsupported-frame-version"),
-            (_HEADER.pack(FAST_PUBLICATION_WIRE_MAGIC, 1, 0), "empty-frame"),
+            (
+                _HEADER.pack(b"FAIL", FAST_PUBLICATION_WIRE_VERSION, 1) + b"x",
+                "invalid-frame-magic",
+            ),
             (
                 _HEADER.pack(
                     FAST_PUBLICATION_WIRE_MAGIC,
+                    FAST_PUBLICATION_WIRE_VERSION + 1,
                     1,
+                )
+                + b"x",
+                "unsupported-frame-version",
+            ),
+            (
+                _HEADER.pack(FAST_PUBLICATION_WIRE_MAGIC, FAST_PUBLICATION_WIRE_VERSION, 0),
+                "empty-frame",
+            ),
+            (
+                _HEADER.pack(
+                    FAST_PUBLICATION_WIRE_MAGIC,
+                    FAST_PUBLICATION_WIRE_VERSION,
                     FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES + 1,
                 ),
                 "frame-too-large",
@@ -71,7 +119,7 @@ class FastPublicationWireContractTests(unittest.TestCase):
             ):
                 fast_publication_frame_size(frame)
 
-    def test_decode_rejects_size_shape_and_invalid_binary_plist(self) -> None:
+    def test_decode_rejects_size_shape_and_invalid_binary_payload(self) -> None:
         frame = encode_fast_publication_frame({"ok": True})
         for malformed in (frame[:-1], frame + b"x"):
             with self.subTest(size=len(malformed)), self.assertRaisesRegex(
@@ -80,18 +128,24 @@ class FastPublicationWireContractTests(unittest.TestCase):
             ):
                 decode_fast_publication_frame(malformed)
 
-        invalid = _HEADER.pack(FAST_PUBLICATION_WIRE_MAGIC, 1, 1) + b"x"
+        invalid = (
+            _HEADER.pack(FAST_PUBLICATION_WIRE_MAGIC, FAST_PUBLICATION_WIRE_VERSION, 1)
+            + b"x"
+        )
         with self.assertRaisesRegex(FastPublicationWireError, "^payload-not-decodable$"):
             decode_fast_publication_frame(invalid)
 
-        with patch(
-            "venus_evcharger.ipc.fast_publication_wire.plistlib.loads",
-            return_value=["not", "a", "mapping"],
-        ), self.assertRaisesRegex(FastPublicationWireError, "^payload-must-be-object$"):
-            decode_fast_publication_frame(frame)
+        sequence_body = b"[]"
+        sequence = _HEADER.pack(
+            FAST_PUBLICATION_WIRE_MAGIC,
+            FAST_PUBLICATION_WIRE_VERSION,
+            len(sequence_body),
+        ) + sequence_body
+        with self.assertRaisesRegex(FastPublicationWireError, "^payload-must-be-object$"):
+            decode_fast_publication_frame(sequence)
 
         with patch(
-            "venus_evcharger.ipc.fast_publication_wire.plistlib.loads",
+            "venus_evcharger.ipc.fast_publication_wire.json.loads",
             return_value={1: "not-a-string-key"},
         ), self.assertRaisesRegex(
             FastPublicationWireError,
@@ -103,20 +157,10 @@ class FastPublicationWireContractTests(unittest.TestCase):
         with self.assertRaisesRegex(FastPublicationWireError, "^payload-not-encodable$"):
             encode_fast_publication_frame({"unsupported": object()})
 
-        with patch(
-            "venus_evcharger.ipc.fast_publication_wire.plistlib.dumps",
-            return_value=b"x" * (FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES + 1),
-        ), self.assertRaisesRegex(FastPublicationWireError, "^frame-too-large$"):
-            encode_fast_publication_frame({"ok": True})
-
-        with patch(
-            "venus_evcharger.ipc.fast_publication_wire.plistlib.dumps",
-            side_effect=plistlib.InvalidFileException,
-        ), self.assertRaisesRegex(
-            FastPublicationWireError,
-            "^payload-not-encodable$",
-        ):
-            encode_fast_publication_frame({"ok": True})
+        with self.assertRaisesRegex(FastPublicationWireError, "^frame-too-large$"):
+            encode_fast_publication_frame(
+                {"blob": "x" * FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES}
+            )
 
     def test_frame_header_size_is_stable(self) -> None:
         self.assertEqual(FAST_PUBLICATION_WIRE_HEADER_BYTES, 9)

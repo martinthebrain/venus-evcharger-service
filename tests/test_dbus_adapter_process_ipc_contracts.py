@@ -19,6 +19,7 @@ from venus_evcharger.dbus_gateway import gateway_paths
 from venus_evcharger.ipc.fast_publication_wire import (
     FAST_PUBLICATION_WIRE_HEADER_BYTES,
     FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES,
+    FAST_PUBLICATION_WIRE_VERSION,
     decode_fast_publication_frame,
     encode_fast_publication_frame,
 )
@@ -296,7 +297,7 @@ class DbusAdapterIpcContractTests(unittest.TestCase):
     def test_reader_rejects_declared_oversize_before_allocating_body(self) -> None:
         header = (
             b"EVCF"
-            + bytes((1,))
+            + bytes((FAST_PUBLICATION_WIRE_VERSION,))
             + (FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES + 1).to_bytes(4, "big")
         )
         self.assertEqual(len(header), FAST_PUBLICATION_WIRE_HEADER_BYTES)

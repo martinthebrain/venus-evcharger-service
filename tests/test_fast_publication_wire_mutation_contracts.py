@@ -134,8 +134,8 @@ class FastPublicationWireMutationContracts(unittest.TestCase):
         )
 
     def test_binary_payload_limit_is_inclusive_and_reports_encoding_failures(self) -> None:
-        exact_payload = {"blob": b"x" * 49_094}
-        oversized_payload = {"blob": b"x" * 49_095}
+        exact_payload = {"blob": "x" * 49_141}
+        oversized_payload = {"blob": "x" * 49_142}
 
         exact_frame = encode_fast_publication_frame(exact_payload)
         self.assertEqual(
