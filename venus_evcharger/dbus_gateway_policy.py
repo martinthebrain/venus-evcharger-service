@@ -20,14 +20,12 @@ _STATIC_QUEUE_CLASSES = {
     "gx_relay_refresh": "read-fast",
     "gx_relay_set_enabled": "remote-write",
     "ess_grid_setpoint": "remote-write",
-    DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND: "remote-write",
+    DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND: "configuration",
 }
 
 
 def _command_text(command: CommandMapping, key: str) -> str:
-    if key not in command:
-        return ""
-    return str(command[key] or "")
+    return str(command.get(key) or "")
 
 
 def command_queue_class(command: CommandMapping) -> str:
@@ -76,7 +74,12 @@ def _allowed_when_slow(priority: str, queue_class: str) -> bool:
 
 
 def _allowed_when_protective(priority: str, queue_class: str) -> bool:
-    return priority == "safety" or (priority == "user" and queue_class == "gui-critical-publish")
+    if queue_class not in {
+        "gui-critical-publish",
+        "remote-write",
+    }:
+        return False
+    return priority in {"safety", "user"}
 
 
 def _command_kind(command: CommandMapping) -> str:
@@ -88,7 +91,10 @@ def _is_publish_command(kind: str) -> bool:
 
 
 def _normalized_state(state: str) -> str:
-    return str(state).strip().lower()
+    normalized = str(state).strip().lower()
+    if normalized in {"ok", "congested", "protective"}:
+        return normalized
+    return "slow"
 
 
 def _normalized_priority(command: CommandMapping) -> str:

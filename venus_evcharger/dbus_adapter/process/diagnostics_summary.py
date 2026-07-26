@@ -103,7 +103,9 @@ def publication_summary(
     if not registry.evcs_registered:
         return GatewayPublicationSummary(False, 0.0, True)
     heartbeat = _non_negative_float(registry.evcs_publication_heartbeat_at)
-    stale = heartbeat <= 0.0 or captured_at - heartbeat > max(0.0, stale_after_seconds)
+    if heartbeat <= 0.0:
+        return GatewayPublicationSummary(False, 0.0, True)
+    stale = captured_at - heartbeat > max(0.0, stale_after_seconds)
     return GatewayPublicationSummary(True, heartbeat, stale)
 
 
@@ -118,7 +120,7 @@ def diagnostic_freshness_deadline(
     )
     multiplier = max(_PRESSURE_DEADLINE_MULTIPLIERS.get(state, 2.0) for state in states)
     tick_seconds = _non_negative_float(health.get("adaptive_tick_seconds"))
-    return max(0.0, configured_seconds, tick_seconds * multiplier)
+    return max(configured_seconds, tick_seconds * multiplier)
 
 
 def _source_summary(

@@ -8,6 +8,9 @@ from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
 
+_JSON_ENCODING = "utf-8"
+
+
 @runtime_checkable
 class StreamingHttpResponse(Protocol):
     """Streaming response surface required for bounded decoding."""
@@ -15,7 +18,7 @@ class StreamingHttpResponse(Protocol):
     @property
     def headers(self) -> Mapping[str, str]: ...
 
-    def iter_content(self, chunk_size: int) -> Iterable[bytes]: ...
+    def iter_content(self, chunk_size: int) -> Iterable[object]: ...
 
     def close(self) -> None: ...
 
@@ -50,7 +53,7 @@ def _decoded_bounded_response(response: object, max_bytes: int) -> object:
 def _decode_payload(payload: bytes) -> object:
     if not payload:
         return {}
-    return json.loads(payload.decode("utf-8"))
+    return json.loads(payload.decode(_JSON_ENCODING))
 
 
 def _reject_declared_oversize(headers: Mapping[str, str], max_bytes: int) -> None:
@@ -67,7 +70,7 @@ def _reject_declared_oversize(headers: Mapping[str, str], max_bytes: int) -> Non
         raise ValueError(f"HTTP JSON response exceeds {max_bytes} bytes")
 
 
-def _read_bounded_content(chunks: Iterable[bytes], max_bytes: int) -> bytes:
+def _read_bounded_content(chunks: Iterable[object], max_bytes: int) -> bytes:
     payload = bytearray()
     for chunk in chunks:
         if not isinstance(chunk, bytes):

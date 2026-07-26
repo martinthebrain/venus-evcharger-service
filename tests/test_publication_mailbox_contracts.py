@@ -25,6 +25,7 @@ from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter
 from venus_evcharger.dbus_gateway import gateway_paths
 from venus_evcharger.dbus_gateway_commands import DbusGatewayCommandInbox
 from venus_evcharger.ipc.command_mailbox import (
+    MAILBOX_LOCK_RETRY_SECONDS,
     MAILBOX_REVISION_FIELD,
     MailboxLockTimeout,
     write_command_json,
@@ -282,6 +283,28 @@ class DurablePublicationMailboxContracts(unittest.TestCase):
                     inbox.enqueue(
                         _ordered_publication({"mode": 1}, 10, created_at=10.0)
                     )
+
+    def test_contended_lock_retries_once_before_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = DbusGatewayCommandInbox(temp_dir, lock_timeout_seconds=1.0)
+            with (
+                patch(
+                    "venus_evcharger.ipc.command_mailbox.fcntl.flock",
+                    side_effect=(BlockingIOError, None, None),
+                ) as flock,
+                patch(
+                    "venus_evcharger.ipc.command_mailbox.time.monotonic",
+                    side_effect=(10.0, 10.5),
+                ),
+                patch("venus_evcharger.ipc.command_mailbox.time.sleep") as sleep,
+            ):
+                path = inbox.enqueue(
+                    _ordered_publication({"mode": 1}, 10, created_at=10.0)
+                )
+
+            self.assertTrue(Path(path).is_file())
+            self.assertEqual(flock.call_count, 3)
+            sleep.assert_called_once_with(MAILBOX_LOCK_RETRY_SECONDS)
 
     def test_lock_wait_is_bounded_and_process_exit_releases_the_lock(self) -> None:
         context = multiprocessing.get_context("fork")

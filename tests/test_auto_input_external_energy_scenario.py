@@ -34,6 +34,19 @@ from venus_evcharger.inputs.helper.external_sources import (
 )
 from venus_evcharger.inputs.helper.snapshot import SnapshotStore
 from venus_evcharger.inputs.helper.sources import AutoInputSources
+from venus_evcharger.inputs.helper.sources import (
+    _contributing_measurement_status,
+    _measurement_observed_at,
+    _projected_observed_at,
+    _projection_confidence_rank,
+    _projection_quality,
+    _projection_status_rank,
+    _select_pv_projection,
+    _source_scope,
+    _valid_gateway_observation_time,
+    empty_battery_snapshot,
+    gateway_battery_snapshot,
+)
 from venus_evcharger.ipc.energy import MeasuredValue
 
 
@@ -247,6 +260,149 @@ AutoEnergySource.external.ConfigPath=/missing.ini
 
 
 class ExternalEnergyPayloadContractTests(unittest.TestCase):
+    def test_empty_gateway_battery_snapshot_has_an_exact_independent_schema(self) -> None:
+        expected: dict[str, object] = {
+            "battery_soc": None,
+            "battery_combined_soc": None,
+            "battery_combined_usable_capacity_wh": None,
+            "battery_combined_charge_power_w": None,
+            "battery_combined_discharge_power_w": None,
+            "battery_combined_net_power_w": None,
+            "battery_combined_ac_power_w": None,
+            "battery_combined_pv_input_power_w": None,
+            "battery_combined_grid_interaction_w": None,
+            "battery_headroom_charge_w": None,
+            "battery_headroom_discharge_w": None,
+            "expected_near_term_export_w": None,
+            "expected_near_term_import_w": None,
+            "battery_discharge_balance_mode": "",
+            "battery_discharge_balance_target_distribution_mode": "",
+            "battery_discharge_balance_error_w": None,
+            "battery_discharge_balance_max_abs_error_w": None,
+            "battery_discharge_balance_total_discharge_w": None,
+            "battery_discharge_balance_eligible_source_count": 0,
+            "battery_discharge_balance_active_source_count": 0,
+            "battery_discharge_balance_control_candidate_count": 0,
+            "battery_discharge_balance_control_ready_count": 0,
+            "battery_discharge_balance_supported_control_source_count": 0,
+            "battery_discharge_balance_experimental_control_source_count": 0,
+            "battery_average_confidence": None,
+            "battery_source_count": 0,
+            "battery_online_source_count": 0,
+            "battery_valid_soc_source_count": 0,
+            "battery_battery_source_count": 0,
+            "battery_hybrid_inverter_source_count": 0,
+            "battery_inverter_source_count": 0,
+            "battery_sources": [],
+            "battery_learning_profiles": {},
+        }
+
+        first = empty_battery_snapshot()
+        second = empty_battery_snapshot()
+
+        self.assertEqual(first, expected)
+        self.assertEqual(tuple(first), tuple(expected))
+        self.assertIsNot(first["battery_sources"], second["battery_sources"])
+        self.assertIsNot(
+            first["battery_learning_profiles"],
+            second["battery_learning_profiles"],
+        )
+
+    def test_gateway_battery_snapshot_overlays_only_gateway_measurement_fields(self) -> None:
+        expected = empty_battery_snapshot()
+        expected.update(
+            {
+                "battery_soc": 61.5,
+                "battery_combined_soc": 61.5,
+                "battery_average_confidence": 0.75,
+                "battery_source_count": 3,
+                "battery_online_source_count": 3,
+                "battery_valid_soc_source_count": 3,
+                "battery_battery_source_count": 3,
+            }
+        )
+
+        self.assertEqual(
+            gateway_battery_snapshot(61.5, confidence=0.75, source_count=3),
+            expected,
+        )
+        minimum = gateway_battery_snapshot(0.0, confidence=0.0, source_count=0)
+        self.assertEqual(minimum["battery_soc"], 0.0)
+        self.assertEqual(minimum["battery_average_confidence"], 0.0)
+        self.assertEqual(minimum["battery_source_count"], 1)
+        self.assertEqual(minimum["battery_online_source_count"], 1)
+        self.assertEqual(minimum["battery_valid_soc_source_count"], 1)
+        self.assertEqual(minimum["battery_battery_source_count"], 1)
+        defaults = gateway_battery_snapshot(50.0)
+        self.assertEqual(defaults["battery_average_confidence"], 1.0)
+        self.assertEqual(defaults["battery_source_count"], 1)
+
+    def test_projection_ranking_and_timestamp_primitives_have_closed_boundaries(self) -> None:
+        fresh_low = ProjectedEnergyValue(1.0, 10.0, "fresh-low", 0.499, "fresh")
+        fresh_high = ProjectedEnergyValue(2.0, 9.0, "fresh-high", 0.5, "fresh")
+        stale_high = ProjectedEnergyValue(3.0, 8.0, "stale-high", 1.0, "stale")
+
+        self.assertEqual(_projection_status_rank(fresh_low), 1)
+        self.assertEqual(_projection_status_rank(stale_high), 0)
+        self.assertEqual(_projection_confidence_rank(fresh_low), 0)
+        self.assertEqual(_projection_confidence_rank(fresh_high), 1)
+        self.assertEqual(_projection_quality(fresh_low), (1, 0))
+        self.assertEqual(_projection_quality(fresh_high), (1, 1))
+        self.assertEqual(_projection_quality(stale_high), (0, 1))
+        self.assertIs(
+            _select_pv_projection(
+                fresh_low,
+                stale_high,
+                PvProjectionPolicy("external_preferred"),
+            ),
+            fresh_low,
+        )
+        self.assertIs(
+            _select_pv_projection(
+                fresh_low,
+                fresh_high,
+                PvProjectionPolicy("gateway_preferred"),
+            ),
+            fresh_high,
+        )
+
+        for status, expected in (
+            ("fresh", True),
+            ("stale", True),
+            ("unknown", False),
+            ("expired", False),
+            ("", False),
+        ):
+            with self.subTest(status=status):
+                self.assertIs(_contributing_measurement_status(status), expected)
+        for observed_at, current, expected in (
+            (0.0, 10.0, False),
+            (0.001, 10.0, True),
+            (10.0, 10.0, True),
+            (10.001, 10.0, False),
+            (float("nan"), 10.0, False),
+            (float("inf"), 10.0, False),
+        ):
+            with self.subTest(observed_at=observed_at):
+                self.assertIs(
+                    _valid_gateway_observation_time(observed_at, current),
+                    expected,
+                )
+        self.assertIsNone(_projected_observed_at(None))
+        self.assertEqual(_projected_observed_at(fresh_high), 9.0)
+        self.assertIsNone(_measurement_observed_at(None))
+        self.assertIsNone(
+            _measurement_observed_at(MeasuredValue(1.0, 0.0, "unknown", 1.0))
+        )
+        self.assertEqual(
+            _measurement_observed_at(MeasuredValue(1.0, 0.001, "fresh", 1.0)),
+            0.001,
+        )
+        self.assertEqual(_source_scope("grid"), "grid")
+        self.assertEqual(_source_scope("pv"), "all")
+        self.assertEqual(_source_scope("battery"), "all")
+        self.assertEqual(_source_scope("unknown"), "all")
+
     def test_cycle_orchestration_reuses_one_poll_and_one_projection_chain(self) -> None:
         definition = EnergySourceDefinition("external", "battery", "command_json", "/source.ini")
         external = EnergySourceSnapshot(

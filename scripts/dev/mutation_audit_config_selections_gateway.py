@@ -17,6 +17,8 @@ _PROCESS_CONTRACT_TESTS = (
 )
 _PROCESS_IPC_TESTS = (
     "tests/test_dbus_adapter_process_ipc_contracts.py",
+    "tests/test_dbus_adapter_socket_lifecycle_mutation_contracts.py",
+    "tests/test_dbus_adapter_socket_protocol_mutation_contracts.py",
     "tests/test_fast_publication_ipc.py",
 )
 _DIAGNOSTICS_TESTS = (
@@ -134,6 +136,7 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "tests/test_dbus_gateway_adapter_scheduler.py",
             "tests/test_dbus_adapter_process_contracts.py",
+            "tests/test_dbus_adapter_loop_mutation_contracts.py",
             "tests/test_publication_mailbox_contracts.py",
         ),
     ),
@@ -177,6 +180,8 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         "venus_evcharger/dbus_adapter/write/core.py",
         (
             *_GATEWAY_SCHEDULER_TESTS,
+            "tests/test_dbus_adapter_write_core_mutation_contracts.py",
+            "tests/test_dbus_adapter_write_core_lifecycle_mutation_contracts.py",
             "tests/test_fast_publication_ipc.py",
             "tests/test_fast_publication_scheduler_contracts.py",
             "tests/test_ipc_deadline_contracts.py",
@@ -224,10 +229,23 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         "venus_evcharger/dbus_gateway_client.py",
         (
             "tests/test_dbus_gateway_primitives.py",
+            "tests/test_disable_generic_shelly_once_contracts.py",
+            "tests/test_energy_binary_ipc_contracts.py",
             "tests/test_fast_publication_ipc.py",
+            "tests/test_gateway_boundary_edge_contracts.py",
             "tests/test_gateway_semantic_operations.py",
             "tests/test_publication_order_contracts.py",
             "tests/test_publication_mailbox_contracts.py",
+        ),
+    ),
+    (
+        "venus_evcharger/dbus_gateway_policy.py",
+        (
+            "tests/test_dbus_gateway_primitives.py",
+            "tests/test_dbus_gateway_policy_mutation_contracts.py",
+            "tests/test_fast_publication_scheduler_contracts.py",
+            "tests/test_gateway_semantic_operations.py",
+            "tests/test_generic_shelly_gateway_configuration.py",
         ),
     ),
     (
@@ -250,6 +268,25 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "tests/test_dbus_adapter_process_ipc_contracts.py",
             *_PUBLICATION_QUEUE_TESTS,
+            "tests/test_fast_publication_queue_enqueue_mutation_contracts.py",
+            "tests/test_fast_publication_queue_ordering_mutation_contracts.py",
+            "tests/test_fast_publication_queue_payload_mutation_contracts.py",
+        ),
+    ),
+    (
+        "venus_evcharger/ipc/fast_publication_ordering.py",
+        (
+            *_PUBLICATION_ORDER_TESTS,
+            "tests/test_fast_publication_ordering_mutation_contracts.py",
+        ),
+    ),
+    (
+        "venus_evcharger/ipc/fast_publication_wire.py",
+        (
+            "tests/test_fast_publication_wire_contracts.py",
+            "tests/test_fast_publication_wire_mutation_contracts.py",
+            "tests/test_fast_publication_ipc.py",
+            "tests/test_dbus_adapter_process_ipc_contracts.py",
         ),
     ),
     (
@@ -274,7 +311,7 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "venus_evcharger/ipc/publication_order_state.py",
-        _PUBLICATION_ORDER_TESTS,
+        (*_PUBLICATION_ORDER_TESTS, "tests/test_publication_order_state_resilience.py"),
     ),
     (
         "venus_evcharger/ipc/publication_payload.py",

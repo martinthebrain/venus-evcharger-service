@@ -71,7 +71,13 @@ def run_gateway_release_checks(args: argparse.Namespace, pi: PiSession, service:
         poll_seconds=float(args.health_poll_seconds),
     )
     assert_recent_health_history(pi, str(args.gateway_run_dir))
-    values = assert_gui_values(pi, service, str(args.gateway_run_dir), expect_power=True)
+    values = assert_gui_values(
+        pi,
+        service,
+        str(args.gateway_run_dir),
+        expect_power=True,
+        wait_seconds=15.0,
+    )
     if not args.skip_gui_write:
         exercise_gui_write(pi, service, str(args.gateway_run_dir), str(args.remote_dir))
         assert_recent_command_lifecycle(pi, str(args.gateway_run_dir))

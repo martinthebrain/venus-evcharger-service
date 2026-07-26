@@ -112,11 +112,19 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             paths=gateway_paths(str(self.root / "run")),
         )
 
-    def register_evcs(self, fields: dict[str, object]) -> None:
+    def register_evcs(
+        self,
+        fields: dict[str, object],
+        *,
+        observed_at: float = 100.0,
+    ) -> None:
         registration = parse_register_evcs(register_evcs_command(_identity(), fields))
         self.assertIsNotNone(registration)
         assert registration is not None
-        with patch("venus_evcharger.dbus_adapter.publication.registry.time.time", return_value=100.0):
+        with patch(
+            "venus_evcharger.dbus_adapter.publication.registry.time.time",
+            return_value=observed_at,
+        ):
             self.assertEqual(self.adapter.publication_registry.register_evcs(registration), "applied")
 
     def register_semantic_evcs(self) -> None:
@@ -472,6 +480,118 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             ),
             0.0,
         )
+
+    def test_health_staleness_uses_positive_tick_time_and_scaled_heartbeat_boundary(self) -> None:
+        positive_tick = diagnostics_summary.health_summary(
+            _health(last_tick_at=0.5, mainloop_heartbeat_age_s=0.0),
+            max_tick_seconds=0.5,
+        )
+        self.assertFalse(positive_tick.stale)
+
+        scaled_threshold = diagnostics_summary.health_summary(
+            _health(last_tick_at=1.0, mainloop_heartbeat_age_s=2.1),
+            max_tick_seconds=2.0,
+        )
+        self.assertFalse(scaled_threshold.stale)
+
+    def test_publication_staleness_handles_zero_heartbeat_and_clamped_deadline(self) -> None:
+        registry = self.adapter.publication_registry
+        self.register_evcs({"mode": 0}, observed_at=0.0)
+        missing_heartbeat = diagnostics_summary.publication_summary(
+            registry,
+            captured_at=0.0,
+            stale_after_seconds=10.0,
+        )
+        self.assertFalse(missing_heartbeat.registered)
+        self.assertEqual(missing_heartbeat.heartbeat_at, 0.0)
+        self.assertTrue(missing_heartbeat.stale)
+
+        self.register_evcs({"mode": 0}, observed_at=0.5)
+        self.assertFalse(
+            diagnostics_summary.publication_summary(
+                registry,
+                captured_at=0.5,
+                stale_after_seconds=10.0,
+            ).stale
+        )
+        self.assertTrue(
+            diagnostics_summary.publication_summary(
+                registry,
+                captured_at=1.0,
+                stale_after_seconds=-1.0,
+            ).stale
+        )
+
+    def test_freshness_deadline_honors_backpressure_and_resource_state_independently(self) -> None:
+        for pressure_key in ("backpressure", "resources"):
+            with self.subTest(pressure_key=pressure_key):
+                health: dict[str, object] = {
+                    "state": "ok",
+                    "adaptive_tick_seconds": 2.0,
+                    "backpressure": {"state": "ok"},
+                    "resources": {"state": "ok"},
+                }
+                health[pressure_key] = {"state": "protective"}
+                self.assertEqual(
+                    diagnostics_summary.diagnostic_freshness_deadline(health, 1.0),
+                    16.0,
+                )
+
+    def test_discovery_handles_dormant_dc_pv_and_default_unavailability_reason(self) -> None:
+        topology = EnergyTopologySnapshot(
+            generation=1,
+            captured_at=100.0,
+            sources=(
+                EnergySourceDescriptor("dc-array", "pv_dc", "offline", ("power",)),
+                EnergySourceDescriptor("meter", "grid", "offline", ("power",)),
+            ),
+        )
+        summary = diagnostics_summary.discovery_summary(
+            _health(
+                dormant_energy_source_ids=["dc-array"],
+                energy_source_unavailability_reasons={"meter": ""},
+            ),
+            topology,
+            pending_work=0,
+        )
+
+        self.assertEqual(summary.sources[0].availability, "dormant")
+        self.assertEqual(summary.sources[0].reason_code, "pv-sleep-confirmed")
+        self.assertEqual(summary.sources[1].availability, "unavailable")
+        self.assertEqual(summary.sources[1].reason_code, "source-not-advertising")
+
+    def test_health_error_codes_require_each_supported_marker(self) -> None:
+        for message, expected in (
+            ("request timeout", "timeout"),
+            ("service sent no reply", "timeout"),
+            ("service noreply", "timeout"),
+            ("peer disconnected", "connection-failed"),
+        ):
+            with self.subTest(message=message):
+                summary = diagnostics_summary.health_summary(
+                    _health(last_error=message),
+                    max_tick_seconds=0.5,
+                )
+                self.assertEqual(summary.last_error_code, expected)
+
+    def test_dynamic_health_collections_reject_non_text_and_empty_members(self) -> None:
+        self.assertEqual(
+            diagnostics_summary._text_values(["pv", "", 1, None]),
+            frozenset({"pv"}),
+        )
+        topology = EnergyTopologySnapshot(
+            generation=1,
+            captured_at=100.0,
+            sources=(
+                EnergySourceDescriptor("meter", "grid", "offline", ("power",)),
+            ),
+        )
+        summary = diagnostics_summary.discovery_summary(
+            _health(energy_source_unavailability_reasons={"meter": 7}),
+            topology,
+            pending_work=0,
+        )
+        self.assertEqual(summary.sources[0].reason_code, "source-not-advertising")
 
     def test_publish_cache_writes_canonical_document_without_changing_health_shape(self) -> None:
         self.register_evcs({"mode": 0, "start_stop": 1, "ac_power_w": 800.0})

@@ -206,6 +206,9 @@ class UpdateCycleStateRole:
             )
         )
 
+    def maintain_evcs_registration(self, now: float) -> bool:
+        return bool(_fixture_callable(self._owner, "_maintain_evcs_registration")(now))
+
     def publish_config_paths(self, startstop_display: int, now: float) -> bool:
         return bool(_fixture_callable(self._owner, "_publish_config_paths")(startstop_display, now))
 
@@ -277,6 +280,7 @@ def _install_fixture_defaults(fixture: object) -> None:
         "_publish_diagnostic_paths": lambda _now: False,
         "_publish_dbus_field": lambda _field, _value, _now, **_kwargs: False,
         "_publish_energy_time_measurements": lambda *_args: False,
+        "_maintain_evcs_registration": lambda *_args: False,
         "_publish_live_measurements": lambda *_args: False,
         "_publish_local_pm_status": lambda relay_on, _now: {"output": relay_on},
         "_queue_relay_command": lambda _relay_on, _now: None,

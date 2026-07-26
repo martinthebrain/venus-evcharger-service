@@ -8,6 +8,7 @@ import shlex
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 DEV_SCRIPTS = Path("scripts/dev").resolve()
 
@@ -72,6 +73,73 @@ class GatewayIsolationOperationalToolsTests(unittest.TestCase):
 
         self.assertEqual(numeric["/Ac/Power"], 2000.0)
         self.assertTrue(all(command.startswith("cat ") for command in pi.commands))
+
+    def test_release_gate_waits_for_one_consistent_gui_snapshot(self) -> None:
+        service = "com.victronenergy.evcharger.http_60"
+        pi = _PiSession(
+            service,
+            {
+                "/Connected": 1,
+                "/Mode": 0,
+                "/StartStop": 1,
+                "/AutoStart": 1,
+                "/SetCurrent": 10,
+                "/Ac/Power": 2000,
+                "/Ac/Current": 8.7,
+                "/Session/Energy": 0.5,
+                "/Session/Time": 10,
+                "/ChargingTime": 10,
+            },
+        )
+        with (
+            patch.object(
+                self.assertions,
+                "_assert_power_values",
+                side_effect=[self.assertions.GateFailure("not ready"), None],
+            ) as validate,
+            patch.object(self.assertions.time, "monotonic", side_effect=[0.0, 0.1, 0.2]),
+            patch.object(self.assertions.time, "sleep") as sleep,
+        ):
+            numeric = self.assertions.assert_gui_values(
+                pi,
+                service,
+                "/run/gateway",
+                expect_power=True,
+                wait_seconds=1.0,
+            )
+
+        self.assertEqual(numeric["/Session/Time"], 10.0)
+        self.assertEqual(validate.call_count, 2)
+        sleep.assert_called_once_with(0.5)
+
+    def test_release_gate_reports_last_inconsistent_snapshot_at_deadline(self) -> None:
+        service = "com.victronenergy.evcharger.http_60"
+        pi = _PiSession(
+            service,
+            {
+                "/Connected": 1,
+                "/Mode": 0,
+                "/StartStop": 0,
+                "/AutoStart": 1,
+                "/SetCurrent": 10,
+                "/Ac/Power": 0,
+                "/Ac/Current": 0,
+                "/Session/Energy": 0,
+                "/Session/Time": 0,
+                "/ChargingTime": 0,
+            },
+        )
+        with (
+            patch.object(self.assertions.time, "monotonic", side_effect=[0.0, 1.0]),
+            self.assertRaisesRegex(self.assertions.GateFailure, "/Ac/Power did not follow simulator"),
+        ):
+            self.assertions.assert_gui_values(
+                pi,
+                service,
+                "/run/gateway",
+                expect_power=True,
+                wait_seconds=0.5,
+            )
 
     def test_release_gate_write_uses_semantic_core_mailbox_and_restores_mode(self) -> None:
         service = "com.victronenergy.evcharger.http_60"

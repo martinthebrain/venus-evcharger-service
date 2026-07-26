@@ -5,12 +5,14 @@ from __future__ import annotations
 import ast
 import inspect
 import math
+import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import venus_evcharger_generic_shelly_configuration as entrypoint
+from venus_evcharger.dbus_gateway import gateway_paths
 from venus_evcharger.dbus_gateway_client import GatewayClient, GatewayGenericShellyConfigurationClient
 from venus_evcharger.ops import disable_generic_shelly_once as helper
 from venus_evcharger.ipc.generic_shelly_configuration import (
@@ -19,6 +21,7 @@ from venus_evcharger.ipc.generic_shelly_configuration import (
     disable_matching_generic_shelly_once_command,
     parse_disable_matching_generic_shelly_once,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ports.generic_shelly_configuration import (
     DisableMatchingGenericShellyOnceRequest,
     GenericShellyConfigurationPort,
@@ -230,7 +233,12 @@ class GenericShellyConfigurationIpcTests(unittest.TestCase):
 class GenericShellyConfigurationClientTests(unittest.TestCase):
     def test_gateway_client_returns_exact_acceptance_receipts(self) -> None:
         transport = MagicMock(spec=GatewayClient)
-        transport.enqueue_command.return_value = "/run/gateway/command-17.json"
+        transport.enqueue_command.return_value = GatewayEnqueueResult(
+            True,
+            "command-17",
+            "mailbox",
+            command_path="/run/gateway/command-17.json",
+        )
         client = GatewayGenericShellyConfigurationClient(cast(GatewayClient, transport))
 
         receipt = client.disable_matching_device_channel_once(_request())
@@ -241,29 +249,48 @@ class GenericShellyConfigurationClientTests(unittest.TestCase):
         self.assertNotIn("service", command)
         self.assertNotIn("path", command)
 
-        transport.enqueue_command.return_value = ""
+        transport.enqueue_command.return_value = GatewayEnqueueResult(
+            False,
+            reason="mailbox-lock-timeout",
+        )
         rejected = client.disable_matching_device_channel_once(_request())
         self.assertFalse(rejected.accepted)
-        self.assertEqual(rejected.reason, "gateway did not accept the configuration command")
+        self.assertEqual(rejected.reason, "mailbox-lock-timeout")
+
+        transport.enqueue_command.return_value = GatewayEnqueueResult(False)
+        rejected_without_transport_reason = client.disable_matching_device_channel_once(_request())
+        self.assertEqual(
+            rejected_without_transport_reason,
+            GenericShellyConfigurationReceipt(
+                False,
+                reason="gateway did not accept the configuration command",
+            ),
+        )
 
     def test_entrypoint_composes_the_gateway_port_once(self) -> None:
         gateway = object()
         port = object()
-        with (
-            patch.object(entrypoint, "GatewayClient", return_value=gateway) as gateway_factory,
-            patch.object(
-                entrypoint,
-                "GatewayGenericShellyConfigurationClient",
-                return_value=port,
-            ) as port_factory,
-            patch.object(entrypoint, "configuration_main", return_value=7) as workflow,
-        ):
-            result = entrypoint.main(("config.ini",))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                f"[DEFAULT]\nDbusGatewayRunDir={temp_dir}/gateway\n",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(entrypoint, "GatewayClient", return_value=gateway) as gateway_factory,
+                patch.object(
+                    entrypoint,
+                    "GatewayGenericShellyConfigurationClient",
+                    return_value=port,
+                ) as port_factory,
+                patch.object(entrypoint, "configuration_main", return_value=7) as workflow,
+            ):
+                result = entrypoint.main((str(config_path),))
 
         self.assertEqual(result, 7)
-        gateway_factory.assert_called_once_with()
+        gateway_factory.assert_called_once_with(gateway_paths(f"{temp_dir}/gateway"))
         port_factory.assert_called_once_with(gateway)
-        workflow.assert_called_once_with(("config.ini",), configuration_port=port)
+        workflow.assert_called_once_with([str(config_path)], configuration_port=port)
 
     def test_deployment_uses_only_the_composition_entrypoint(self) -> None:
         root = Path(__file__).resolve().parents[1]

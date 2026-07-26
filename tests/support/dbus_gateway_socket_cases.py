@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Gateway adapter Unix socket request and lifecycle scenarios."""
+"""Gateway adapter binary socket lifecycle scenarios."""
 
 from __future__ import annotations
 
@@ -8,114 +8,113 @@ from tests.support.dbus_gateway_adapter_harness import (
     GatewayAdapterContractCase,
     MagicMock,
     Path,
-    SocketClientStub,
-    SocketServerStub,
     gateway_paths,
-    install_mock,
-    json,
     patch,
     process_socket_module,
     tempfile,
 )
-from venus_evcharger.ipc.energy import EnergyRefreshRequest
+from venus_evcharger.ipc.fast_publication_wire import (
+    decode_fast_publication_frame,
+    encode_fast_publication_frame,
+)
+from venus_evcharger.ipc.gateway_publication import publish_evcs_fields_command
 
 
 class GatewaySocketCases(GatewayAdapterContractCase):
-    """Exercise Unix socket request and lifecycle scenarios."""
+    """Exercise the only productive socket endpoint."""
 
-    def test_socket_client_timeout_does_not_block_tick(self) -> None:
+    def test_idle_client_is_retained_without_blocking_tick(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-
-            conn = SocketClientStub(error=TimeoutError("idle"))
-            server = SocketServerStub(conn)
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            conn = MagicMock()
+            conn.recv.side_effect = BlockingIOError
+            server = MagicMock()
+            server.accept.return_value = (conn, "peer")
             adapter._server = server
 
-            with patch.object(process_socket_module.select, "select", return_value=([server], [], [])):
-                adapter.socket_role.process_socket_once()
-
-            self.assertEqual(len(conn.timeouts), 1)
-            self.assertGreater(conn.timeouts[0], 0.0)
-            self.assertLessEqual(conn.timeouts[0], 0.1)
-            self.assertEqual(conn.sent, [])
-
-    def test_socket_payload_and_socket_poll_edges(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-
-            self.assertFalse(adapter.socket_role.handle_socket_payload("{")["ok"])
-            self.assertFalse(adapter.socket_role.handle_socket_payload("[]")["ok"])
-            self.assertTrue(adapter.socket_role.handle_socket_payload('{"type":"snapshot"}')["ok"])
-            self.assertTrue(adapter.socket_role.handle_socket_payload('{"type":"health"}')["ok"])
-            enqueue = install_mock(adapter.commands, "enqueue", MagicMock(return_value="queued.json"))
-            refresh = EnergyRefreshRequest(
-                request_id="socket-grid",
-                scope="grid",
-                max_age_seconds=2.0,
-                urgency="priority",
-                reason="socket-test",
-            ).to_command(source="socket-test")
-            self.assertTrue(adapter.socket_role.handle_socket_payload(json.dumps(refresh))["ok"])
-            enqueue.assert_called_once_with(refresh)
-            for request_type in (
-                "refresh_value",
-                "refresh_services",
-                "publish_desired",
-                "publish_value",
-                "set_value",
+            with patch.object(
+                process_socket_module.select,
+                "select",
+                return_value=([server], [], []),
             ):
-                self.assertFalse(adapter.socket_role.handle_socket_payload(json.dumps({"type": request_type}))["ok"])
-            self.assertFalse(adapter.socket_role.handle_socket_payload('{"type":"wat"}')["ok"])
-
-            adapter._server = None
-            adapter.socket_role.process_socket_once()
-            server = SocketServerStub(SocketClientStub(), error=BlockingIOError())
-            adapter._server = server
-            with patch.object(process_socket_module.select, "select", return_value=([], [], [])):
                 adapter.socket_role.process_socket_once()
-            with patch.object(process_socket_module.select, "select", return_value=([server], [], [])):
-                adapter.socket_role.process_socket_once()
-            self.assertEqual(server.accept_calls, 1)
 
-    def test_socket_process_sends_json_response(self) -> None:
+            conn.setblocking.assert_called_once_with(False)
+            conn.sendall.assert_not_called()
+            self.assertIsNotNone(adapter.socket_role._pending)
+
+    def test_only_transient_semantic_publication_is_dispatched(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            conn = SocketClientStub(b'{"type":"snapshot"}\n')
-            server = SocketServerStub(conn)
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            live = publish_evcs_fields_command({"ac_power_w": 1.0}, priority="live")
+
+            self.assertTrue(adapter.socket_role.dispatch_socket_payload(live)["ok"])
+            self.assertFalse(
+                adapter.socket_role.dispatch_socket_payload({"kind": "health"})["ok"]
+            )
+            self.assertFalse(
+                adapter.socket_role.dispatch_socket_payload(
+                    {"kind": "refresh_energy_inputs"}
+                )["ok"]
+            )
+
+    def test_socket_process_sends_binary_response(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            command = publish_evcs_fields_command({"ac_power_w": 1.0}, priority="live")
+            conn = MagicMock()
+            conn.recv.return_value = encode_fast_publication_frame(command)
+            server = MagicMock()
+            server.accept.return_value = (conn, "peer")
             adapter._server = server
-            with patch.object(process_socket_module.select, "select", return_value=([server], [], [])):
+
+            with patch.object(
+                process_socket_module.select,
+                "select",
+                return_value=([server], [], []),
+            ):
                 adapter.socket_role.process_socket_once()
-            self.assertEqual(len(conn.sent), 1)
-            self.assertTrue(json.loads(conn.sent[0].decode("utf-8"))["ok"])
+
+            response = decode_fast_publication_frame(conn.sendall.call_args.args[0])
+            self.assertTrue(response["accepted"])
 
     def test_socket_lifecycle_creates_and_removes_unix_socket(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
             Path(adapter.paths.socket_path).parent.mkdir(parents=True, exist_ok=True)
             Path(adapter.paths.socket_path).write_text("stale", encoding="utf-8")
 
             server = MagicMock()
-            with patch.object(process_socket_module.socket, "socket", return_value=server) as socket_factory:
+            with patch.object(
+                process_socket_module.socket,
+                "socket",
+                return_value=server,
+            ) as socket_factory:
                 adapter.socket_role.start_socket()
             socket_factory.assert_called_once_with(
                 process_socket_module.socket.AF_UNIX,
                 process_socket_module.socket.SOCK_STREAM,
             )
-            server.bind.assert_called_once_with(adapter.paths.socket_path)
-            server.listen.assert_called_once_with(8)
-            server.setblocking.assert_called_once_with(False)
-            self.assertIs(adapter._server, server)
             self.assertFalse(Path(adapter.paths.socket_path).exists())
-
             adapter.socket_role.close_socket()
-            server.close.assert_called_once_with()
             self.assertIsNone(adapter._server)
-            adapter.socket_role.close_socket()

@@ -106,6 +106,8 @@ def _validate_external_polling_policy(policy: ExternalPollingPolicy) -> None:
     _require_positive(policy.cycle_budget_seconds, "cycle time budget")
     if policy.backoff_max_seconds < policy.backoff_base_seconds:
         raise ValueError("External energy-source backoff maximum must cover its base")
+
+
 def _require_positive(value: float, label: str) -> None:
     if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"External energy-source {label} must be positive")

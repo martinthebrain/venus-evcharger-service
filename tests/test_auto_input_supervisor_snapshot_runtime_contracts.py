@@ -120,6 +120,27 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
         self.assertFalse(service._auto_input_snapshot_seen_for_current_helper)
         self.assertIsNone(service._auto_input_snapshot_last_seen)
 
+    def test_missing_gateway_health_tolerates_snapshot_until_slow_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "snapshot.json"
+            write_snapshot(path, valid_snapshot(), 21)
+            service = AutoInputSupervisorServiceFake(
+                auto_input_snapshot_path=str(path),
+                gateway_pressure_policy=None,
+                now=145.0,
+            )
+            self.supervisor(service).refresh_snapshot()
+            self.assertEqual(service.runtime.snapshots[-1]["pv_power"], 2300.0)
+
+            write_snapshot(path, valid_snapshot(), 22)
+            service.now = 146.0
+            self.supervisor(service).refresh_snapshot()
+
+        fields = service.runtime.snapshots[-1]
+        self.assertIsNone(fields["pv_power"])
+        self.assertIsNone(fields["battery_soc"])
+        self.assertIsNone(fields["grid_power"])
+
     def test_previous_current_helper_liveness_is_preserved_on_foreign_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "snapshot.json"

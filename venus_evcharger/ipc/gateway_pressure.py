@@ -7,7 +7,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import SupportsFloat, SupportsIndex
+from typing import SupportsFloat, SupportsIndex, TypeGuard
 
 from venus_evcharger.ports.gateway_pressure import (
     GatewayPressurePolicy,
@@ -22,21 +22,21 @@ _SLOW: GatewayPressureState = "slow"
 _PROTECTIVE: GatewayPressureState = "protective"
 
 _LIVE_INTERVAL_MULTIPLIERS: Mapping[GatewayPressureState, float] = {
-    _UNKNOWN: 1.0,
+    _UNKNOWN: 3.0,
     _OK: 1.0,
     _CONGESTED: 2.0,
     _SLOW: 3.0,
     _PROTECTIVE: 5.0,
 }
 _OPTIONAL_INTERVAL_MULTIPLIERS: Mapping[GatewayPressureState, float] = {
-    _UNKNOWN: 1.0,
+    _UNKNOWN: 6.0,
     _OK: 1.0,
     _CONGESTED: 3.0,
     _SLOW: 6.0,
     _PROTECTIVE: 12.0,
 }
 _AUDIT_INTERVAL_MULTIPLIERS: Mapping[GatewayPressureState, float] = {
-    _UNKNOWN: 1.0,
+    _UNKNOWN: 4.0,
     _OK: 1.0,
     _CONGESTED: 2.0,
     _SLOW: 4.0,
@@ -48,6 +48,11 @@ _NORMALIZED_STATES: Mapping[str, GatewayPressureState] = {
     _SLOW: _SLOW,
     _PROTECTIVE: _PROTECTIVE,
     "degraded": _SLOW,
+}
+_RESOURCE_STATES: Mapping[str, GatewayPressureState] = {
+    "constrained": _SLOW,
+    "busy": _CONGESTED,
+    "ok": _OK,
 }
 
 
@@ -66,14 +71,15 @@ class CachedGatewayPressurePolicy:
         self._now = now
         self.max_age_seconds = max(0.0, float(max_age_seconds))
         self.cache_seconds = max(0.0, float(cache_seconds))
-        self._cached_at = 0.0
-        self._cached_snapshot = GatewayPressureSnapshot(_UNKNOWN, 0.0, 0.0, False, "unread")
+        self._cached_at: float | None = None
+        self._cached_snapshot: GatewayPressureSnapshot | None = None
 
     def snapshot(self) -> GatewayPressureSnapshot:
         """Return a cached normalized pressure snapshot."""
         now = float(self._now())
-        if self._cache_fresh(now):
-            return self._cached_snapshot
+        cached_snapshot = self._cached_snapshot
+        if cached_snapshot is not None and self._cache_fresh(now):
+            return cached_snapshot
         snapshot = read_gateway_pressure_snapshot(
             self.health_path,
             now=now,
@@ -105,7 +111,7 @@ class CachedGatewayPressurePolicy:
         return _non_negative_seconds(base_seconds) * _LIVE_INTERVAL_MULTIPLIERS[self.state()]
 
     def _cache_fresh(self, now: float) -> bool:
-        return self._cached_at <= now < self._cached_at + self.cache_seconds
+        return self._cached_at is not None and self._cached_at <= now < self._cached_at + self.cache_seconds
 
     def _publish_multiplier(self, group: str) -> float:
         state = self.state()
@@ -123,7 +129,7 @@ def read_gateway_pressure_snapshot(
     """Interpret one untrusted gateway-health JSON document at the IPC boundary."""
     normalized_path = str(health_path or "").strip()
     if not normalized_path:
-        return GatewayPressureSnapshot(_UNKNOWN, 0.0, 0.0, False, "missing-path")
+        return GatewayPressureSnapshot(_SLOW, 0.0, 0.0, True, "missing-path")
     payload = _mapping(_read_json(normalized_path))
     return _snapshot_from_payload(
         payload,
@@ -139,10 +145,14 @@ def _snapshot_from_payload(
     max_age_seconds: float,
 ) -> GatewayPressureSnapshot:
     if not payload:
-        return GatewayPressureSnapshot(_UNKNOWN, 0.0, 0.0, False, "missing-health")
+        return GatewayPressureSnapshot(_SLOW, 0.0, 0.0, True, "missing-health")
     captured_at = _float_or_zero(payload.get("captured_at"))
-    age_s = max(0.0, now - captured_at) if captured_at > 0.0 else 0.0
-    if _payload_stale(captured_at, age_s, max_age_seconds):
+    if captured_at <= 0.0:
+        return GatewayPressureSnapshot(_SLOW, 0.0, 0.0, True, "missing-timestamp")
+    if captured_at > now:
+        return GatewayPressureSnapshot(_SLOW, captured_at, 0.0, True, "future-health")
+    age_s = max(0.0, now - captured_at)
+    if _payload_stale(age_s, max_age_seconds):
         return GatewayPressureSnapshot(_SLOW, captured_at, age_s, True, "stale-health")
     state, source = _state_from_health(_health_mapping(payload))
     return GatewayPressureSnapshot(state, captured_at, age_s, False, source)
@@ -201,13 +211,17 @@ def _float_or_zero(value: object) -> float:
 
 
 def _mapping(value: object) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
+    if not _is_object_mapping(value):
         return {}
     return {str(key): item for key, item in value.items()}
 
 
-def _payload_stale(captured_at: float, age_s: float, max_age_seconds: float) -> bool:
-    return captured_at > 0.0 and max_age_seconds > 0.0 and age_s > max_age_seconds
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)
+
+
+def _payload_stale(age_s: float, max_age_seconds: float) -> bool:
+    return max_age_seconds > 0.0 and age_s > max_age_seconds
 
 
 def _health_mapping(payload: Mapping[str, object]) -> Mapping[str, object]:
@@ -223,21 +237,17 @@ def _state_from_health(health: Mapping[str, object]) -> tuple[GatewayPressureSta
     state = normalized_gateway_pressure_state(health.get("state"))
     if state != _UNKNOWN:
         return state, "gateway-health"
-    return _resource_state(_mapping(health.get("resources")))
+    state, source = _resource_state(_mapping(health.get("resources")))
+    return (state, source) if state != _UNKNOWN else (_SLOW, "missing-state")
 
 
 def _resource_state(resources: Mapping[str, object]) -> tuple[GatewayPressureState, str]:
     value = resources.get("state")
     if not isinstance(value, str):
         return _UNKNOWN, "unknown"
-    state = value.strip().lower()
-    if state == "constrained":
-        return _SLOW, "resources"
-    if state == "busy":
-        return _CONGESTED, "resources"
-    if state == "ok":
-        return _OK, "resources"
-    return _UNKNOWN, "unknown"
+    state = _RESOURCE_STATES.get(value.strip().lower(), _UNKNOWN)
+    source = "resources" if state != _UNKNOWN else "unknown"
+    return state, source
 
 
 __all__ = [

@@ -6,6 +6,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from venus_evcharger.backend.template_support import TemplateAuthSettings
 from venus_evcharger.energy.connectors_common import (
     EnergyConnectorRuntimeState,
     EnergySourceHttpClient,
@@ -88,6 +89,7 @@ class EnergyConnectorsCommonContractTests(unittest.TestCase):
         self.assertEqual(_runtime_cache_get(runtime, "numbers", "valid", int), 3)
         self.assertEqual(_runtime_cache_pop(runtime, "numbers", "valid"), 3)
         self.assertIsNone(_runtime_cache_pop(runtime, "absent", "key"))
+        self.assertIsNone(_runtime_cache_pop(runtime, "numbers", "missing"))
         _runtime_cache_put(runtime, "numbers", "valid", 3)
         self.assertIsNone(_runtime_cache_get(runtime, "numbers", "invalid", int))
         self.assertIsNone(_runtime_cache_get(runtime, "numbers", "missing", int))
@@ -118,7 +120,18 @@ class EnergyConnectorsCommonContractTests(unittest.TestCase):
 
         runtime.timeout_seconds = 0.25
         runtime.requests.clear()
-        client = EnergySourceHttpClient(runtime, 5.0)
+        auth_settings = TemplateAuthSettings(
+            username="",
+            password="",
+            use_digest_auth=False,
+            auth_header_name="Authorization",
+            auth_header_value="Bearer test-token",
+        )
+        client = EnergySourceHttpClient(runtime, 5.0, auth_settings=auth_settings)
+        self.assertIs(client.service, runtime)
+        self.assertEqual(client.timeout_seconds, 5.0)
+        self.assertIs(client.auth_settings, auth_settings)
+        self.assertEqual(client.max_response_bytes, 262144)
         self.assertEqual(
             client._perform_request(
                 "GET",
@@ -133,7 +146,11 @@ class EnergyConnectorsCommonContractTests(unittest.TestCase):
         self.assertEqual(runtime.session.timeout, 0.25)
         self.assertEqual(
             runtime.session.kwargs,
-            {"json": {"source": "meter"}, "stream": True},
+            {
+                "headers": {"Authorization": "Bearer test-token"},
+                "json": {"source": "meter"},
+                "stream": True,
+            },
         )
         self.assertEqual(client.timeout_seconds, 5.0)
 

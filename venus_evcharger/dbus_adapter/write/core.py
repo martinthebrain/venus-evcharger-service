@@ -34,6 +34,7 @@ from venus_evcharger.ipc.pending_snapshot import (
     PendingCommandSnapshot,
     TickPendingSnapshotProvider,
 )
+from venus_evcharger.ipc.publication_order import PublicationOrderDeferredError
 
 GATEWAY_COMMAND_RETRY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
@@ -139,8 +140,7 @@ class WriteCommandQueue:
             if not self._process_fast_publish_candidate(work, started):
                 return _FastPublishBurst(processed, True)
             processed += 1
-        queue_not_empty = bool(len(self.adapter.fast_publications))
-        return _FastPublishBurst(processed, processed >= limit or queue_not_empty)
+        return _FastPublishBurst(processed, True)
 
     def _process_fast_publish_candidate(self, work: FastPublicationWork, started: float) -> bool:
         command = work.command
@@ -155,7 +155,7 @@ class WriteCommandQueue:
             self.health.record_lifecycle(command, outcome)
         self.health.record_budget(command)
         if outcome == "deferred":
-            return False
+            return True
         self.health.record_processed()
         return True
 
@@ -342,7 +342,12 @@ class WriteCommandQueue:
     ) -> CommandOutcome:
         if self.command_expired(command):
             return self._drop_expired_command(path, command, pending_commands=pending_commands)
-        effective_command = self._effective_durable_command(command)
+        try:
+            effective_command = self._effective_durable_command(command)
+        except PublicationOrderDeferredError:
+            self.health.record_budget(command)
+            self.health.record_lifecycle(command, "deferred")
+            return "deferred"
         if effective_command is None:
             return self._drop_superseded_publication(
                 path,
@@ -351,7 +356,10 @@ class WriteCommandQueue:
             )
         outcome = self.command_outcome(path, effective_command)
         if is_local_publish_command(effective_command):
-            self.adapter.fast_publications.record_durable_outcome(outcome)
+            self.adapter.fast_publications.record_durable_outcome(
+                effective_command,
+                outcome,
+            )
         self._apply_command_result(path, effective_command, outcome, pending_commands=pending_commands)
         self.health.record_lifecycle(effective_command, outcome)
         return outcome

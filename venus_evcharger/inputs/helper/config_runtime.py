@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import configparser
-import os
 import uuid
 from dataclasses import dataclass
 from typing import TypeGuard
@@ -19,6 +18,10 @@ from venus_evcharger.inputs.helper.external_contracts import (
     PvProjectionPolicy,
     PvSourcePolicyName,
 )
+from venus_evcharger.ipc.gateway_path_config import (
+    GatewayPaths,
+    configured_gateway_paths,
+)
 
 _SEMANTIC_GATEWAY_ALIAS = "victron"
 _DEFAULT_PV_POLICY = PvProjectionPolicy()
@@ -28,8 +31,6 @@ class _ConfigKey:
     """Canonical names at the case-insensitive ConfigParser boundary."""
 
     SNAPSHOT_PATH = "AutoInputSnapshotPath"
-    GATEWAY_RUN_DIR = "DbusGatewayRunDir"
-    GATEWAY_CACHE_PATH = "DbusGatewayCachePath"
     GATEWAY_MAX_AGE = "DbusGatewayMaxAgeSeconds"
     GATEWAY_ERROR_RETRY = "DbusGatewayErrorRetrySeconds"
     POLL_INTERVAL_MS = "PollIntervalMs"
@@ -71,8 +72,7 @@ class AutoInputHelperSettings:
     parent_pid: int | None
     helper_generation: int
     runtime_instance_id: str
-    gateway_run_dir: str
-    gateway_cache_path: str
+    gateway_paths: GatewayPaths
     gateway_max_age_seconds: float
     gateway_error_retry_seconds: float
     auto_pv_poll_interval_seconds: float
@@ -99,8 +99,7 @@ class _RuntimeIdentity:
 
 @dataclass(frozen=True, slots=True)
 class _GatewaySettings:
-    run_dir: str
-    cache_path: str
+    paths: GatewayPaths
     max_age_seconds: float
     error_retry_seconds: float
 
@@ -147,8 +146,7 @@ def load_auto_input_helper_settings(
         parent_pid=identity.parent_pid,
         helper_generation=identity.helper_generation,
         runtime_instance_id=identity.runtime_instance_id,
-        gateway_run_dir=gateway.run_dir,
-        gateway_cache_path=gateway.cache_path,
+        gateway_paths=gateway.paths,
         gateway_max_age_seconds=gateway.max_age_seconds,
         gateway_error_retry_seconds=gateway.error_retry_seconds,
         auto_pv_poll_interval_seconds=polling.pv_seconds,
@@ -186,7 +184,7 @@ def _bounded_float(
     minimum: float,
     maximum: float | None = None,
 ) -> float:
-    value = max(minimum, config_get_float(config, key, default))
+    value = float(max(minimum, config_get_float(config, key, default)))
     return value if maximum is None else min(maximum, value)
 
 
@@ -209,10 +207,8 @@ def _runtime_instance_id(value: object) -> str:
 
 
 def _gateway_settings(config: configparser.SectionProxy) -> _GatewaySettings:
-    run_dir = _text(config, _ConfigKey.GATEWAY_RUN_DIR, "/run/venus-evcharger")
     return _GatewaySettings(
-        run_dir=run_dir,
-        cache_path=_text(config, _ConfigKey.GATEWAY_CACHE_PATH, os.path.join(run_dir, "dbus-cache.json")),
+        paths=configured_gateway_paths(config),
         max_age_seconds=_bounded_float(
             config,
             _ConfigKey.GATEWAY_MAX_AGE,

@@ -7,6 +7,8 @@ This class keeps historical unittest and mutation-audit node IDs stable.
 
 from __future__ import annotations
 
+from unittest.mock import call
+
 from tests.support import dbus_gateway_adapter_cases as adapter_cases
 from tests.support.dbus_gateway_adapter_harness import (
     MagicMock,
@@ -63,6 +65,7 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                 fake_loop = MagicMock()
                 install_mock(adapter.runtime_role, "install_signal_handlers", MagicMock())
                 install_mock(adapter.socket_role, "start_socket", MagicMock())
+                install_mock(adapter.socket_role, "install_glib_watch", MagicMock())
                 install_mock(adapter.socket_role, "close_socket", MagicMock())
 
                 with (
@@ -84,9 +87,15 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                     ],
                 )
                 adapter.socket_role.start_socket.assert_called_once()
-                timeout_add.assert_called_once_with(
-                    max(50, int(adapter.min_tick_seconds * 1000)),
-                    adapter.loop_role.tick,
+                adapter.socket_role.install_glib_watch.assert_called_once()
+                self.assertEqual(
+                    timeout_add.call_args_list,
+                    [
+                        call(
+                            max(50, int(adapter.min_tick_seconds * 1000)),
+                            adapter.loop_role.tick,
+                        ),
+                    ],
                 )
                 fake_loop.run.assert_called_once_with()
                 self.assertIs(adapter._main_loop, fake_loop)

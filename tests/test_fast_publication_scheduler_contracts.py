@@ -20,6 +20,7 @@ from venus_evcharger.ipc.gateway_publication import publish_evcs_fields_command
 from venus_evcharger.ipc.publication_order import (
     PUBLICATION_FIELD_ORDERS_FIELD,
     PUBLICATION_ORDER_FIELD,
+    PublicationOrderCapacityError,
 )
 
 
@@ -78,6 +79,10 @@ class FastPublicationSchedulerContracts(unittest.TestCase):
                         _ordered({"ac_power_w": 900.0}, 11)
                     ).accepted
                 )
+            fast_work = adapter.fast_publications.pop_next()
+            self.assertIsNotNone(fast_work)
+            assert fast_work is not None
+            adapter.fast_publications.record_outcome(fast_work, "applied")
             durable = _ordered(
                 {"ac_power_w": 100.0, "charged_energy_kwh": 4.2},
                 10,
@@ -101,9 +106,7 @@ class FastPublicationSchedulerContracts(unittest.TestCase):
 
         self.assertEqual(result, "applied")
         self.assertEqual(applied["fields"], {"charged_energy_kwh": 4.2})
-        self.assertIsNotNone(fast)
-        assert fast is not None
-        self.assertEqual(fast.command["fields"], {"ac_power_w": 900.0})
+        self.assertIsNone(fast)
         self.assertFalse(Path(path).exists())
 
     def test_expired_durable_command_is_dropped_before_order_arbitration(self) -> None:
@@ -139,6 +142,42 @@ class FastPublicationSchedulerContracts(unittest.TestCase):
         self.assertEqual(result, "dropped")
         prepare.assert_not_called()
         self.assertFalse(Path(path).exists())
+
+    def test_full_order_history_defers_durable_file_without_applying_or_removing_it(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(root / "run")),
+            )
+            command = _ordered({"mode": 1}, 10)
+            path = adapter.commands.enqueue(command)
+            pending = adapter.commands.load_pending()
+            queue = adapter.write_scheduler.command_queue
+
+            with (
+                patch.object(queue, "command_expired", return_value=False),
+                patch.object(
+                    adapter.fast_publications,
+                    "prepare_durable",
+                    side_effect=PublicationOrderCapacityError,
+                ),
+                patch.object(queue, "command_outcome") as outcome,
+            ):
+                result = queue.process_loaded_command(
+                    path,
+                    pending[0][1],
+                    pending_commands=pending,
+                )
+            file_retained = Path(path).exists()
+
+        self.assertEqual(result, "deferred")
+        outcome.assert_not_called()
+        self.assertTrue(file_retained)
 
 
 if __name__ == "__main__":

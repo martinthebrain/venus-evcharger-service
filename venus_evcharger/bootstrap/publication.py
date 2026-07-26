@@ -3,27 +3,84 @@
 
 from __future__ import annotations
 
+import logging
 import platform
+import time
 from collections.abc import Mapping
+from collections.abc import Callable
 
 from venus_evcharger.auto.policy_settings import auto_policy_control_values
+from venus_evcharger.ports.gateway_diagnostics import (
+    GatewayDiagnosticsReader,
+    GatewayDiagnosticsSnapshot,
+    GatewayDiagnosticsUnavailable,
+)
 from venus_evcharger.ports.gateway_publication import EvcsServiceIdentity, require_gateway_publication
 
+REGISTRATION_CHECK_INTERVAL_SECONDS = 5.0
+REGISTRATION_DIAGNOSTICS_MAX_AGE_SECONDS = 10.0
 
-class EvcsPublicationRegistrar:
-    """Register the EVCS through transport-neutral semantic fields."""
 
-    def __init__(self, service: object, *, script_path: str) -> None:
+class EvcsPublicationOwner:
+    """Own initial registration and RAM-only runtime registration recovery."""
+
+    def __init__(
+        self,
+        service: object,
+        *,
+        script_path: str,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._service = service
         self._script_path = script_path
+        self._monotonic = monotonic
+        self._next_registration_check_at = 0.0
 
     def register(self) -> None:
+        if not self._enqueue_registration():
+            raise RuntimeError("Gateway rejected EVCS registration")
+        self._defer_registration_check(float(self._monotonic()))
+
+    def maintain_registration(
+        self,
+        diagnostics: GatewayDiagnosticsReader,
+        now: float,
+    ) -> bool:
+        """Re-register after a gateway restart without adding a separate poller."""
+        current = float(now)
+        check_at = float(self._monotonic())
+        if check_at < self._next_registration_check_at:
+            return False
+        self._defer_registration_check(check_at)
+        snapshot = self._read_snapshot(diagnostics)
+        if snapshot is None or not _registration_missing(snapshot, current):
+            return False
+        return self._recover_registration()
+
+    @staticmethod
+    def _read_snapshot(
+        diagnostics: GatewayDiagnosticsReader,
+    ) -> GatewayDiagnosticsSnapshot | None:
+        try:
+            return diagnostics.read_snapshot()
+        except GatewayDiagnosticsUnavailable:
+            return None
+
+    def _recover_registration(self) -> bool:
+        accepted = self._enqueue_registration()
+        if not accepted:
+            logging.warning("Gateway rejected EVCS registration recovery")
+        return accepted
+
+    def _defer_registration_check(self, check_at: float) -> None:
+        self._next_registration_check_at = check_at + REGISTRATION_CHECK_INTERVAL_SECONDS
+
+    def _enqueue_registration(self) -> bool:
         receipt = require_gateway_publication(self._service).register_evcs(
             self.identity(),
             self.initial_fields(),
         )
-        if not receipt.accepted:
-            raise RuntimeError("Gateway rejected EVCS registration")
+        return receipt.accepted
 
     def identity(self) -> EvcsServiceIdentity:
         svc = self._service
@@ -42,7 +99,7 @@ class EvcsPublicationRegistrar:
         svc = self._service
         policy = auto_policy_control_values(getattr(svc, "auto_policy"))
         fields: dict[str, object] = {
-            "connected": int(bool(getattr(svc, "topology_configured", getattr(svc, "host_configured", False)))),
+            "connected": int(bool(getattr(svc, "topology_configured"))),
             "status": int(getattr(svc, "last_status", 0)),
             "mode": int(getattr(svc, "virtual_mode", 0)),
             "auto_start": int(getattr(svc, "virtual_autostart", 0)),
@@ -81,9 +138,21 @@ def _required_text(source: object, name: str) -> str:
     return str(value)
 
 
+def _registration_missing(
+    snapshot: GatewayDiagnosticsSnapshot,
+    now: float,
+) -> bool:
+    if snapshot.health.stale or snapshot.captured_at > now:
+        return False
+    return (
+        snapshot.is_fresh(now, REGISTRATION_DIAGNOSTICS_MAX_AGE_SECONDS)
+        and not snapshot.publication.registered
+    )
+
+
 def accepted_publication_fields(source: Mapping[str, object]) -> dict[str, object]:
     """Copy a semantic registration mapping at test and composition boundaries."""
     return {str(field): value for field, value in source.items()}
 
 
-__all__ = ["EvcsPublicationRegistrar", "accepted_publication_fields"]
+__all__ = ["EvcsPublicationOwner", "accepted_publication_fields"]

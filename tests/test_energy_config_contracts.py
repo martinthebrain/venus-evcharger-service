@@ -13,6 +13,7 @@ from venus_evcharger.energy.config import (
     _float_or_none,
     _float_value,
     _int_or_none,
+    _profile_text,
     _text,
     load_energy_source_definitions,
     load_energy_source_settings,
@@ -82,6 +83,35 @@ class EnergyConfigContractTests(unittest.TestCase):
         self.assertEqual(load_energy_source_definitions(raw_dbus_defaults), ())
         self.assertEqual(load_energy_source_settings(raw_dbus_defaults), ((), False))
 
+    def test_missing_profile_values_preserve_definition_defaults(self) -> None:
+        self.assertEqual(_profile_text({}, "missing"), "")
+        self.assertEqual(_profile_text({}, "missing", "fallback"), "fallback")
+
+        self.assertEqual(
+            load_energy_source_definitions({"AutoEnergySources": "source"}),
+            (EnergySourceDefinition(source_id="source"),),
+        )
+
+    def test_global_capacity_defaults_precede_profile_defaults(self) -> None:
+        profile_defaults = {
+            "CapacityEstimateMinSoc": 91.0,
+            "CapacityStartupRecheckSeconds": 410.0,
+        }
+        with patch(
+            "venus_evcharger.energy.config.energy_source_profile_defaults",
+            return_value=profile_defaults,
+        ):
+            definitions = load_energy_source_definitions(
+                {
+                    "AutoEnergySources": "source",
+                    "AutoBatteryCapacityEstimateMinSoc": "72.5",
+                    "AutoBatteryCapacityStartupRecheckSeconds": "123.5",
+                }
+            )
+
+        self.assertEqual(definitions[0].capacity_estimate_min_soc, 72.5)
+        self.assertEqual(definitions[0].capacity_startup_recheck_seconds, 123.5)
+
     def test_explicit_external_source_maps_only_transport_neutral_fields(self) -> None:
         definitions = load_energy_source_definitions(
             {
@@ -94,6 +124,7 @@ class EnergyConfigContractTests(unittest.TestCase):
                 "AutoEnergySource.one.ConfigPath": "/one.ini",
                 "AutoEnergySource.one.Service": "one-source",
                 "AutoEnergySource.one.PhysicalId": " house-battery ",
+                "AutoEnergySource.one.PhysicalPriority": "25",
                 "AutoEnergySource.one.UsableCapacityWh": "1234",
                 "AutoEnergySource.one.Chemistry": "LTO",
                 "AutoEnergySource.one.CapacityAutoEstimate": "1",
@@ -118,6 +149,7 @@ class EnergyConfigContractTests(unittest.TestCase):
                 config_path="/one.ini",
                 service_name="one-source",
                 physical_id="house-battery",
+                physical_priority=25,
                 usable_capacity_wh=1234.0,
                 battery_chemistry="lto",
                 capacity_auto_estimate=True,

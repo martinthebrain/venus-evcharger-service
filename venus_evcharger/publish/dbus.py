@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from venus_evcharger.bootstrap.publication import EvcsPublicationOwner
 from venus_evcharger.publish.dbus_config import DbusPublishConfig
 from venus_evcharger.publish.dbus_core import DbusPublishCore
 from venus_evcharger.publish.dbus_diagnostics import DbusPublishDiagnostics
@@ -31,6 +32,7 @@ class DbusPublishController:
         service: PublishServicePort,
         age_seconds_func: AgeSeconds,
         gateway_diagnostics: GatewayDiagnosticsReader,
+        publication_owner: EvcsPublicationOwner,
     ) -> None:
         context = DbusPublishContext(
             service=service,
@@ -38,6 +40,8 @@ class DbusPublishController:
             gateway_diagnostics=gateway_diagnostics,
         )
         self.core = DbusPublishCore(context)
+        self._gateway_diagnostics = gateway_diagnostics
+        self._publication_owner = publication_owner
         self.learned = DbusPublishLearned(context)
         self.runtime_view = DbusRuntimeView()
         self.config = DbusPublishConfig(context, self.core, self.learned, self.runtime_view)
@@ -57,6 +61,13 @@ class DbusPublishController:
 
     def ensure_state(self) -> None:
         self.core.ensure_state()
+
+    def maintain_evcs_registration(self, now: float) -> bool:
+        """Recover gateway-owned EVCS registration from semantic health."""
+        return self._publication_owner.maintain_registration(
+            self._gateway_diagnostics,
+            now,
+        )
 
     def publish_field(
         self,

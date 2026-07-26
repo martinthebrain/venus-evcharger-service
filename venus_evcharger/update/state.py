@@ -60,6 +60,7 @@ class StateRuntimePort(Protocol):
 
 class StatePublishPort(Protocol):
     def save_runtime_state(self) -> object: ...
+    def maintain_evcs_registration(self, now: float) -> bool: ...
     def publish_energy_time_measurements(
         self,
         session_energy: float,
@@ -335,7 +336,8 @@ class UpdateStateController:
         # Shelly ``aenergy.total`` is a lifetime counter. Venus' EV-charger UI
         # expects the charger-facing energy paths to describe the active charge.
         phase_energies = self.phase_energies_for_total(svc, session_energy)
-        changed = svc.state.publish_energy_time_measurements(
+        changed = svc.state.maintain_evcs_registration(now)
+        changed |= svc.state.publish_energy_time_measurements(
             session_energy,
             phase_energies,
             charging_time,

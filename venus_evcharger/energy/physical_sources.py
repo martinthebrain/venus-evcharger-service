@@ -25,22 +25,18 @@ def unique_weighted_soc_sources(
     return tuple((*independent, *physical.values()))
 
 
-def _soc_source_quality(source: EnergySourceSnapshot) -> tuple[bool, float, float, str]:
-    captured_at = _finite_quality_value(source.captured_at, float("-inf"))
-    confidence = _finite_quality_value(source.confidence, float("-inf"))
+def _soc_source_quality(source: EnergySourceSnapshot) -> tuple[bool, bool, int, float, str]:
+    captured_at = source.captured_at
+    has_finite_timestamp = captured_at is not None and math.isfinite(float(captured_at))
+    confidence = float(source.confidence)
+    finite_confidence = confidence if math.isfinite(confidence) else -math.inf
     return (
         bool(source.online),
-        captured_at,
-        confidence,
+        has_finite_timestamp,
+        int(source.physical_priority),
+        finite_confidence,
         source.source_id,
     )
-
-
-def _finite_quality_value(value: float | None, fallback: float) -> float:
-    if value is None:
-        return fallback
-    numeric = float(value)
-    return numeric if math.isfinite(numeric) else fallback
 
 
 __all__ = ["unique_weighted_soc_sources"]

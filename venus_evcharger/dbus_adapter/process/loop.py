@@ -35,6 +35,7 @@ class DbusAdapterLoop:
         os.makedirs(context.paths.command_dir, exist_ok=True)
         os.makedirs(context.paths.core_command_dir, exist_ok=True)
         context.socket_role.start_socket()
+        context.socket_role.install_glib_watch()
         main_loop = GLib.MainLoop()
         context._main_loop = main_loop
         GLib.timeout_add(max(50, int(context.min_tick_seconds * 1000)), self.tick)
@@ -47,7 +48,6 @@ class DbusAdapterLoop:
     def tick(self) -> bool:
         context = self._context
         tick_started = time.monotonic()
-        pending_tick_active = False
         if context._stop:
             context.socket_role.close_socket()
             return False
@@ -57,19 +57,8 @@ class DbusAdapterLoop:
         context._last_tick_at = time.time()
         context._last_tick_monotonic = tick_started
         try:
-            context.socket_role.process_socket_once()
-            context.write_scheduler.begin_tick()
-            pending_tick_active = True
-            self.process_one_dbus_operation_once()
-            control = context.health_role.control_snapshot()
-            self.update_adaptive_tick(control)
-            context.io_role.publish_cache(control)
-        except GATEWAY_TICK_RECOVERY_ERRORS as error:
-            context.circuit.record_error(error)
-            logging.exception("DBus adapter tick failed: %s", error)
+            self._process_work_tick()
         finally:
-            if pending_tick_active:
-                context.write_scheduler.end_tick()
             context._last_tick_duration_ms = (time.monotonic() - tick_started) * 1000.0
             context.tick_health.record(
                 duration_ms=context._last_tick_duration_ms,
@@ -78,6 +67,23 @@ class DbusAdapterLoop:
             )
             context._next_work_tick_monotonic = time.monotonic() + context.tick_seconds
         return not context._stop
+
+    def _process_work_tick(self) -> None:
+        context = self._context
+        try:
+            context.write_scheduler.begin_tick()
+        except GATEWAY_TICK_RECOVERY_ERRORS as error:
+            logging.exception("Gateway work tick failed outside the DBus circuit: %s", error)
+            return
+        try:
+            self.process_one_dbus_operation_once()
+            control = context.health_role.control_snapshot()
+            self.update_adaptive_tick(control)
+            context.io_role.publish_cache(control)
+        except GATEWAY_TICK_RECOVERY_ERRORS as error:
+            logging.exception("Gateway work tick failed outside the DBus circuit: %s", error)
+        finally:
+            context.write_scheduler.end_tick()
 
     def update_adaptive_tick(
         self,

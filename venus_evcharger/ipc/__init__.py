@@ -24,6 +24,7 @@ from venus_evcharger.ipc.fast_publication import (
     FastPublicationQueue,
     is_transient_publication,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ipc.publication_order import (
     PUBLICATION_ORDER_FIELD,
     PublicationOrderIssuer,
@@ -42,6 +43,7 @@ __all__ = (
     "FileCommandMailbox",
     "FastPublicationEnqueueResult",
     "FastPublicationQueue",
+    "GatewayEnqueueResult",
     "PUBLICATION_ORDER_FIELD",
     "PublicationOrderIssuer",
     "GatewayDiagnosticsFileReader",

@@ -269,6 +269,39 @@ class _EnergyAggregateProfileCases:
             },
         )
 
+    def test_discharge_balance_zero_total_has_no_relative_error(self) -> None:
+        sources = (
+            EnergySourceSnapshot(
+                source_id="first",
+                role="battery",
+                service_name="first",
+                soc=50.0,
+                usable_capacity_wh=1000.0,
+                net_battery_power_w=0.0,
+                online=True,
+            ),
+            EnergySourceSnapshot(
+                source_id="second",
+                role="hybrid-inverter",
+                service_name="second",
+                soc=50.0,
+                usable_capacity_wh=1000.0,
+                net_battery_power_w=0.0,
+                online=True,
+            ),
+        )
+
+        metrics = derive_discharge_balance_metrics(sources)
+
+        self.assertEqual(metrics["total_discharge_w"], 0.0)
+        self.assertEqual(metrics["active_source_count"], 0)
+        self.assertTrue(
+            all(
+                source["discharge_balance_relative_error"] is None
+                for source in metrics["sources"].values()
+            )
+        )
+
     def test_derive_discharge_control_metrics_exposes_profile_write_hints(self) -> None:
         metrics = derive_discharge_control_metrics(
             (
@@ -552,6 +585,10 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(cluster.battery_source_count, 1)
         self.assertEqual(cluster.hybrid_inverter_source_count, 1)
         self.assertEqual(cluster.inverter_source_count, 0)
+        self.assertEqual(
+            tuple(source.source_id for source in cluster.sources),
+            ("victron", "hybrid"),
+        )
 
     def test_aggregate_energy_sources_accepts_tiny_capacity_and_ignores_zero_capacity(self) -> None:
         cluster = aggregate_energy_sources(

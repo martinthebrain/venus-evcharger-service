@@ -93,6 +93,7 @@ def _template_http_energy_source_snapshot(
         role=source.role,
         service_name=_template_source_name(source, settings),
         physical_id=source.physical_id,
+        physical_priority=source.physical_priority,
         soc=soc_value,
         usable_capacity_wh=usable_capacity_wh,
         net_battery_power_w=_optional_float_path(payload, settings.battery_power_path),

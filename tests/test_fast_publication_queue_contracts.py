@@ -11,9 +11,11 @@ from unittest.mock import patch
 
 from venus_evcharger.ipc.command_mailbox import normalized_mapping
 from venus_evcharger.ipc.fast_publication import (
+    FAST_PUBLICATION_DEFERRED_AGING_SECONDS,
     FAST_PUBLICATION_RETRY_SECONDS,
     FastPublicationQueue,
     FastPublicationWork,
+    _fast_work_priority,
 )
 from venus_evcharger.ipc.gateway_publication import (
     publish_companion_fields_command,
@@ -22,12 +24,15 @@ from venus_evcharger.ipc.gateway_publication import (
 from venus_evcharger.ipc.publication_order import (
     PUBLICATION_FIELD_ORDERS_FIELD,
     PUBLICATION_ORDER_FIELD,
+    PublicationOrderCapacityError,
+    PublicationOrderPendingFastError,
 )
 from venus_evcharger.ipc.publication_payload import (
     MAX_PUBLICATION_COALESCE_KEY_BYTES,
     MAX_PUBLICATION_FIELD_NAME_BYTES,
     MAX_PUBLICATION_FIELDS_PER_KEY,
     MAX_PUBLICATION_PAYLOAD_BYTES,
+    publication_payload_limit_reason,
 )
 
 
@@ -172,15 +177,16 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
         )
 
         self.assertTrue(queue.enqueue(new_fast).accepted)
+        work = queue.pop_next()
+        self.assertIsNotNone(work)
+        assert work is not None
+        queue.record_outcome(work, "applied")
         durable = queue.prepare_durable(old_fallback)
 
         self.assertIsNotNone(durable)
         assert durable is not None
         self.assertEqual(durable["fields"], {"energy": 4.2})
-        fast = queue.pop_next()
-        self.assertIsNotNone(fast)
-        assert fast is not None
-        self.assertEqual(_fields(fast), {"power": 900.0})
+        self.assertIsNone(queue.pop_next())
 
     def test_newer_durable_field_removes_only_its_fast_counterpart(self) -> None:
         queue = FastPublicationQueue()
@@ -205,9 +211,15 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
         self.assertEqual(prepared["fields"], {"mode": 2})
         self.assertIsNotNone(remaining)
         assert remaining is not None
-        self.assertEqual(_fields(remaining), {"power": 500.0})
+        self.assertEqual(_fields(remaining), {"mode": 1, "power": 500.0})
+        queue.requeue(remaining)
+        queue.record_durable_outcome(prepared, "applied")
+        after_apply = queue.pop_next()
+        self.assertIsNotNone(after_apply)
+        assert after_apply is not None
+        self.assertEqual(_fields(after_apply), {"power": 500.0})
 
-    def test_same_order_fallback_is_idempotently_superseded(self) -> None:
+    def test_same_order_fallback_waits_until_fast_work_has_resolved(self) -> None:
         queue = FastPublicationQueue()
         command = _ordered(
             publish_evcs_fields_command({"mode": 1}, priority="live"),
@@ -215,11 +227,12 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
         )
 
         self.assertTrue(queue.enqueue(command).accepted)
-        self.assertIsNone(queue.prepare_durable(command))
+        with self.assertRaises(PublicationOrderPendingFastError):
+            queue.prepare_durable(command)
         counts = normalized_mapping(queue.snapshot().get("counts"))
         self.assertIsNotNone(counts)
         assert counts is not None
-        self.assertEqual(counts["durable_superseded"], 1)
+        self.assertEqual(counts["durable_waiting_for_fast"], 1)
 
     def test_unordered_durable_fields_cannot_override_queued_unordered_fast_fields(self) -> None:
         queue = FastPublicationQueue()
@@ -230,11 +243,25 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
         )
 
         self.assertTrue(queue.enqueue(fast).accepted)
-        prepared = queue.prepare_durable(durable)
+        with self.assertRaises(PublicationOrderPendingFastError):
+            queue.prepare_durable(durable)
 
-        self.assertIsNotNone(prepared)
-        assert prepared is not None
-        self.assertEqual(prepared["fields"], {"energy": 2.0})
+    def test_gateway_crash_before_fast_apply_keeps_fallback_admissible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = str(Path(temp_dir) / "orders.json")
+            command = _ordered(
+                publish_evcs_fields_command({"mode": 1}, priority="live"),
+                10,
+            )
+            running = FastPublicationQueue(order_state_path=state_path)
+            self.assertTrue(running.enqueue(command).accepted)
+            with self.assertRaises(PublicationOrderPendingFastError):
+                running.prepare_durable(command)
+
+            restarted = FastPublicationQueue(order_state_path=state_path)
+            prepared = restarted.prepare_durable(command)
+
+        self.assertEqual(prepared, command)
 
     def test_restart_state_blocks_only_stale_fields_from_old_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -252,6 +279,10 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
                 10,
             )
             self.assertTrue(first.enqueue(new_fast).accepted)
+            work = first.pop_next()
+            self.assertIsNotNone(work)
+            assert work is not None
+            first.record_outcome(work, "applied")
 
             restarted = FastPublicationQueue(order_state_path=state_path)
             prepared = restarted.prepare_durable(old_fallback)
@@ -262,7 +293,7 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
         self.assertEqual(prepared["fields"], {"energy": 4.2})
         self.assertTrue(restarted.snapshot()["order_state_persistent"])
 
-    def test_failed_restart_checkpoint_forces_durable_fallback(self) -> None:
+    def test_failed_applied_checkpoint_is_reported_without_rejecting_fast_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             queue = FastPublicationQueue(order_state_path=temp_dir)
             command = _ordered(
@@ -270,12 +301,46 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
                 10,
             )
             result = queue.enqueue(command)
+            work = queue.pop_next()
+            self.assertIsNotNone(work)
+            assert work is not None
+            queue.record_outcome(work, "applied")
 
-        self.assertFalse(result.accepted)
-        self.assertEqual(result.reason, "order-state-unavailable")
+        self.assertTrue(result.accepted)
         self.assertEqual(len(queue), 0)
+        self.assertEqual(
+            queue.snapshot()["counts"],
+            {
+                "accepted": 1,
+                "applied": 1,
+                "applied_samples": 1,
+                "order_state_write_errors": 1,
+            },
+        )
 
-    def test_order_capacity_rejects_fast_but_not_durable_fallback(self) -> None:
+    def test_applied_durable_removes_older_fast_field_when_checkpoint_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            queue = FastPublicationQueue(order_state_path=temp_dir)
+            fast = _ordered(
+                publish_evcs_fields_command({"mode": 1}, priority="live"),
+                10,
+            )
+            durable = _ordered(
+                publish_evcs_fields_command({"mode": 2}, priority="live"),
+                11,
+            )
+            self.assertTrue(queue.enqueue(fast).accepted)
+            prepared = queue.prepare_durable(durable)
+            self.assertIsNotNone(prepared)
+            assert prepared is not None
+
+            queue.record_durable_outcome(prepared, "applied")
+
+        self.assertEqual(len(queue), 0)
+        self.assertIsNone(queue.pop_next())
+        self.assertEqual(queue.snapshot()["counts"]["order_state_write_errors"], 1)
+
+    def test_order_capacity_rejects_fast_and_defers_new_durable_field(self) -> None:
         queue = FastPublicationQueue(order_capacity=1)
         first = _ordered(
             publish_evcs_fields_command({"mode": 1}, priority="live"),
@@ -288,12 +353,24 @@ class FastPublicationFieldArbitrationTests(unittest.TestCase):
 
         self.assertTrue(queue.enqueue(first).accepted)
         rejection = queue.enqueue(second)
-        prepared = queue.prepare_durable(second)
 
         self.assertEqual(rejection.reason, "order-history-full")
-        self.assertIsNotNone(prepared)
-        assert prepared is not None
-        self.assertEqual(prepared["fields"], {"power": 2.0})
+        with self.assertRaises(PublicationOrderCapacityError):
+            queue.prepare_durable(second)
+
+    def test_removing_absent_fast_fields_leaves_work_unchanged(self) -> None:
+        queue = FastPublicationQueue()
+        command = _ordered(
+            publish_evcs_fields_command({"mode": 1}, priority="live"),
+            1,
+        )
+        self.assertTrue(queue.enqueue(command).accepted)
+        before = queue.snapshot()
+        key = str(command["coalesce_key"])
+
+        queue._remove_fast_fields(key, ("not-present",))
+
+        self.assertEqual(queue.snapshot(), before)
 
 
 class FastPublicationTtlAndFairnessTests(unittest.TestCase):
@@ -378,6 +455,85 @@ class FastPublicationTtlAndFairnessTests(unittest.TestCase):
         assert retried is not None
         self.assertEqual(retried.command["service_id"], "blocked")
 
+    def test_aged_deferred_work_cannot_starve_under_continuous_same_priority_load(self) -> None:
+        queue = FastPublicationQueue()
+        queue.enqueue(
+            publish_companion_fields_command(
+                "recovering",
+                {"power": 1.0},
+                priority="live",
+            )
+        )
+        blocked = queue.pop_next(now=10.0)
+        self.assertIsNotNone(blocked)
+        assert blocked is not None
+        queue.requeue(blocked, deferred=True, now=10.0)
+        eligible_at = 10.0 + FAST_PUBLICATION_RETRY_SECONDS
+
+        for index in range(5):
+            queue.enqueue(
+                publish_companion_fields_command(
+                    f"continuous-{index}",
+                    {"power": float(index)},
+                    priority="live",
+                )
+            )
+            selected = queue.pop_next(
+                now=eligible_at + FAST_PUBLICATION_DEFERRED_AGING_SECONDS + 0.1
+            )
+            self.assertIsNotNone(selected)
+            assert selected is not None
+            if index == 0:
+                self.assertEqual(selected.command["service_id"], "recovering")
+                break
+        else:
+            self.fail("aged deferred work starved behind continuous publications")
+
+    def test_deferred_aging_policy_has_explicit_boundary_ranks(self) -> None:
+        command = {"priority": "publish"}
+        recent = FastPublicationWork(command, {}, retry_at=10.0, deferred=True)
+        fresh = FastPublicationWork(command, {}, retry_at=10.0)
+
+        self.assertEqual(_fast_work_priority(recent, 10.5), (2, 2, 10.0))
+        self.assertEqual(
+            _fast_work_priority(
+                recent,
+                10.0 + FAST_PUBLICATION_DEFERRED_AGING_SECONDS,
+            ),
+            (2, 0, 10.0),
+        )
+        self.assertEqual(_fast_work_priority(fresh, 9.0), (2, 1, 10.0))
+
+    def test_aged_diagnostic_work_does_not_overtake_fresh_live_work(self) -> None:
+        queue = FastPublicationQueue()
+        queue.enqueue(
+            publish_companion_fields_command(
+                "diagnostic",
+                {"power": 1.0},
+                priority="diagnostic",
+            )
+        )
+        deferred = queue.pop_next(now=10.0)
+        self.assertIsNotNone(deferred)
+        assert deferred is not None
+        queue.requeue(deferred, deferred=True, now=10.0)
+        queue.enqueue(
+            publish_evcs_fields_command(
+                {"ac_power_w": 500.0},
+                priority="live",
+            )
+        )
+
+        selected = queue.pop_next(
+            now=10.0
+            + FAST_PUBLICATION_RETRY_SECONDS
+            + FAST_PUBLICATION_DEFERRED_AGING_SECONDS
+        )
+
+        self.assertIsNotNone(selected)
+        assert selected is not None
+        self.assertEqual(selected.command["publication_priority"], "live")
+
     def test_requeue_merges_work_arriving_while_an_item_is_in_flight(self) -> None:
         queue = FastPublicationQueue()
         first = _ordered(
@@ -435,12 +591,18 @@ class FastPublicationBoundsTests(unittest.TestCase):
             ),
             (
                 publish_evcs_fields_command({"value": object()}, priority="live"),
-                "payload-not-json",
+                "payload-not-encodable",
             ),
         )
         for command, expected in cases:
             with self.subTest(reason=expected):
                 self.assertEqual(queue.enqueue(command).reason, expected)
+
+    def test_serialization_contract_reports_non_json_payload(self) -> None:
+        self.assertEqual(
+            publication_payload_limit_reason({"fields": {"value": object()}}),
+            "payload-not-json",
+        )
 
     def test_coalesced_field_growth_is_bounded_without_replacing_existing_work(self) -> None:
         queue = FastPublicationQueue()

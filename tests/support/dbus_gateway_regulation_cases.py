@@ -307,6 +307,11 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             )
             install_mock(adapter.read_scheduler, "force_due", MagicMock())
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
+            install_mock(
+                adapter.resource_monitor,
+                "snapshot",
+                MagicMock(return_value={"state": "ok"}),
+            )
             adapter.health_role.apply_slo_regulation()
             adapter.read_scheduler.force_due.assert_not_called()
             install_mock(adapter.health_role, "suspend_advisory_work", MagicMock())

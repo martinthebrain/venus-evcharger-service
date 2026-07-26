@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import call, patch
 
 from requests.auth import HTTPDigestAuth
 
@@ -25,6 +26,7 @@ from venus_evcharger.backend.goe_charger import (
     _goe_status_text,
     load_goe_charger_settings,
 )
+from venus_evcharger.backend.template_http_transport import HttpRequestCallable
 
 
 class _Response:
@@ -49,6 +51,12 @@ class _Session:
         if not self.responses:
             raise AssertionError("unexpected go-e request")
         return self.responses.pop(0)
+
+
+def _resolve_get_request(candidate: object, method: str) -> HttpRequestCallable:
+    if not isinstance(candidate, _Session) or method != "GET":
+        raise AssertionError("unexpected go-e transport contract")
+    return candidate.get
 
 
 @dataclass
@@ -297,6 +305,31 @@ class TestGoEChargerBackend(unittest.TestCase):
         self.assertEqual(fault_state.fault_text, "error-overtemp")
         fallback_state = fallback_backend.read_charger_state()
         self.assertEqual(fallback_state.phase_selection, "P1_P2")
+
+    def test_read_and_write_use_the_explicit_get_transport_contract(self) -> None:
+        session = _Session(
+            _Response({"alw": True}),
+            _Response({"frc": True}),
+        )
+        backend = GoEChargerBackend(
+            self._service(session),
+            self._config("[Adapter]\nBaseUrl=http://goe.local\n"),
+        )
+
+        with patch(
+            "venus_evcharger.backend.goe_charger.request_method_callable",
+            side_effect=_resolve_get_request,
+        ) as resolver:
+            backend.read_charger_state()
+            backend.set_enabled(True)
+
+        self.assertEqual(
+            resolver.call_args_list,
+            [
+                call(session, "GET"),
+                call(session, "GET"),
+            ],
+        )
 
     def test_set_value_enabled_current_and_rejection_contracts(self) -> None:
         ok_response = _Response({"frc": True})

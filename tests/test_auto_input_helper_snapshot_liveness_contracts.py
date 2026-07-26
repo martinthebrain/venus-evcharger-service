@@ -8,8 +8,15 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from venus_evcharger.inputs.helper import snapshot as snapshot_module
 from venus_evcharger.inputs.helper.liveness import HelperLiveness, WarningThrottle
-from venus_evcharger.inputs.helper.snapshot import AtomicSnapshotWriter, SnapshotStore, empty_snapshot
+from venus_evcharger.inputs.helper.snapshot import (
+    BATTERY_SNAPSHOT_FIELDS,
+    AtomicSnapshotWriter,
+    SnapshotStore,
+    _SourceTarget,
+    empty_snapshot,
+)
 from venus_evcharger.inputs.helper.sources import AutoInputSources
 from venus_evcharger.ipc.energy import MeasuredValue
 from tests.support.auto_input_helper import (
@@ -24,6 +31,23 @@ from tests.support.auto_input_helper import (
 
 
 class AutoInputHelperSnapshotContracts(unittest.TestCase):
+    def test_store_initialization_preserves_owned_collaborators_and_schedule(self) -> None:
+        settings = helper_settings()
+        sources = FakeSources()
+        writer = MemoryWriter()
+        stop_requested = MagicMock(return_value=False)
+        store = SnapshotStore(settings, sources, writer, stop_requested)
+
+        self.assertIs(store.settings, settings)
+        self.assertIs(store.sources, sources)
+        self.assertIs(store.writer, writer)
+        self.assertIs(store.stop_requested, stop_requested)
+        self.assertEqual(store._state, empty_snapshot())
+        self.assertEqual(store._next_poll_at, {"pv": 0.0, "battery": 0.0, "grid": 0.0})
+        self.assertEqual(store._grid_fusion.config, settings.grid_fusion_config)
+        atomic_writer = AtomicSnapshotWriter(settings)
+        self.assertIsNone(atomic_writer._last_payload)
+
     def test_collect_reads_due_sources_and_stamps_identity(self) -> None:
         settings = helper_settings()
         sources = FakeSources()
@@ -36,6 +60,31 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         self.assertEqual(snapshot["heartbeat_at"], 100.0)
         self.assertEqual(snapshot["runtime_instance_id"], "test-instance")
         self.assertEqual(writer.payloads, [])
+        self.assertEqual(sources.prepared, 1)
+
+    def test_collect_uses_post_read_times_for_freshness_and_next_schedule(self) -> None:
+        settings = replace(
+            helper_settings(),
+            auto_pv_poll_interval_seconds=2.0,
+            auto_battery_poll_interval_seconds=3.0,
+            auto_grid_poll_interval_seconds=4.0,
+        )
+        sources = FakeSources()
+        sources.observed["battery"] = 7.0
+        store = SnapshotStore(settings, sources, MemoryWriter(), lambda: False)
+
+        with patch(
+            "venus_evcharger.inputs.helper.snapshot.time.time",
+            side_effect=(10.0, 11.0, 12.0, 13.0, 14.0),
+        ):
+            snapshot = store.collect()
+
+        self.assertEqual(snapshot["pv_captured_at"], 11.0)
+        self.assertEqual(snapshot["battery_captured_at"], 7.0)
+        self.assertEqual(snapshot["grid_gateway_captured_at"], 13.0)
+        self.assertEqual(snapshot["captured_at"], 14.0)
+        self.assertEqual(snapshot["heartbeat_at"], 14.0)
+        self.assertEqual(store._next_poll_at, {"pv": 13.0, "battery": 15.0, "grid": 17.0})
 
     def test_collect_keeps_not_yet_due_source(self) -> None:
         settings = helper_settings()
@@ -68,6 +117,24 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         self.assertEqual(writer.payloads[-1]["battery_status"], "ok")
         store.refresh_source("unknown", 11.0)
         self.assertEqual(len(writer.payloads), 1)
+        self.assertEqual(sources.prepared, 2)
+
+    def test_refresh_source_contracts_cover_each_source_and_observation_time(self) -> None:
+        sources = FakeSources()
+        sources.observed = {"pv": 8.0, "grid": 9.0}
+        writer = MemoryWriter()
+        store = SnapshotStore(helper_settings(), sources, writer, lambda: False)
+
+        store.refresh_source("pv", 10.0)
+        store.refresh_source("grid", 11.0)
+
+        self.assertEqual(sources.prepared, 2)
+        self.assertEqual(writer.payloads[0]["pv_power"], 100.0)
+        self.assertEqual(writer.payloads[0]["pv_captured_at"], 8.0)
+        self.assertEqual(writer.payloads[0]["captured_at"], 10.0)
+        self.assertEqual(writer.payloads[1]["grid_gateway_power"], -20.0)
+        self.assertEqual(writer.payloads[1]["grid_gateway_captured_at"], 9.0)
+        self.assertEqual(writer.payloads[1]["captured_at"], 11.0)
 
     def test_missing_source_marks_status_and_capture_time(self) -> None:
         sources = FakeSources()
@@ -81,15 +148,36 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
     def test_refresh_all_validation_and_current_are_public_snapshot_contracts(self) -> None:
         writer = MemoryWriter()
         stopped = True
-        store = SnapshotStore(helper_settings(), FakeSources(), writer, lambda: stopped)
+        sources = FakeSources()
+        store = SnapshotStore(helper_settings(), sources, writer, lambda: stopped)
         with patch("venus_evcharger.inputs.helper.snapshot.time.time", return_value=12.0):
             self.assertFalse(store.validation_poll())
         self.assertEqual(len(writer.payloads), 1)
         self.assertEqual(writer.payloads[0]["pv_power"], 100.0)
+        self.assertEqual(writer.payloads[0]["pv_captured_at"], 12.0)
         self.assertEqual(writer.payloads[0]["battery_soc"], 50.0)
+        self.assertEqual(writer.payloads[0]["battery_captured_at"], 12.0)
         self.assertEqual(writer.payloads[0]["grid_gateway_power"], -20.0)
+        self.assertEqual(writer.payloads[0]["grid_gateway_captured_at"], 12.0)
         self.assertEqual(store.current()["captured_at"], 12.0)
         self.assertIsNone(store._prepared_source_sample("unknown", 12.0))
+        self.assertEqual(sources.prepared, 1)
+
+    def test_refresh_all_uses_one_prepared_cycle_and_source_observation_times(self) -> None:
+        sources = FakeSources()
+        sources.observed = {"pv": 1.0, "battery": 2.0, "grid": 3.0}
+        writer = MemoryWriter()
+        store = SnapshotStore(helper_settings(), sources, writer, lambda: False)
+
+        store.refresh_all(10.0)
+
+        payload = writer.payloads[-1]
+        self.assertEqual(sources.prepared, 1)
+        self.assertEqual(payload["pv_captured_at"], 1.0)
+        self.assertEqual(payload["battery_captured_at"], 2.0)
+        self.assertEqual(payload["grid_gateway_captured_at"], 3.0)
+        self.assertEqual(payload["captured_at"], 10.0)
+        self.assertEqual(payload["heartbeat_at"], 10.0)
 
     def test_heartbeat_and_lifecycle_preserve_values(self) -> None:
         writer = MemoryWriter()
@@ -101,6 +189,45 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         store.write_lifecycle("initializing", 30.0)
         self.assertEqual(writer.payloads[-1]["helper_state"], "initializing")
         self.assertEqual(writer.payloads[-1]["pv_power"], 100.0)
+
+    def test_heartbeat_and_lifecycle_have_exact_time_and_identity_semantics(self) -> None:
+        writer = MemoryWriter()
+        store = SnapshotStore(helper_settings(), FakeSources(), writer, lambda: True)
+
+        with (
+            patch("venus_evcharger.inputs.helper.snapshot.time.time", return_value=20.0),
+            patch("venus_evcharger.inputs.helper.snapshot.os.getpid", return_value=41),
+        ):
+            self.assertFalse(store.heartbeat())
+        heartbeat = writer.payloads[-1]
+        self.assertIsNone(heartbeat["captured_at"])
+        self.assertEqual(heartbeat["heartbeat_at"], 20.0)
+        self.assertEqual(heartbeat["helper_state"], "starting")
+        self.assertEqual(heartbeat["helper_status"], "starting")
+        self.assertEqual(heartbeat["writer_pid"], 41)
+        self.assertEqual(heartbeat["helper_generation"], 3)
+        self.assertEqual(heartbeat["runtime_instance_id"], "test-instance")
+
+        with patch("venus_evcharger.inputs.helper.snapshot.os.getpid", return_value=42):
+            store.write_lifecycle("stopping", 30.0)
+        lifecycle = writer.payloads[-1]
+        self.assertEqual(lifecycle["captured_at"], 30.0)
+        self.assertEqual(lifecycle["heartbeat_at"], 30.0)
+        self.assertEqual(lifecycle["helper_state"], "stopping")
+        self.assertEqual(lifecycle["helper_status"], "stopping")
+        self.assertEqual(lifecycle["writer_pid"], 42)
+        self.assertEqual(store.current(), lifecycle)
+
+    def test_heartbeat_initializes_absent_lifecycle_labels(self) -> None:
+        writer = MemoryWriter()
+        store = SnapshotStore(helper_settings(), FakeSources(), writer, lambda: False)
+        del store._state["helper_state"]
+        del store._state["helper_status"]
+        with patch("venus_evcharger.inputs.helper.snapshot.time.time", return_value=20.0):
+            self.assertTrue(store.heartbeat())
+        self.assertEqual(writer.payloads[-1]["helper_state"], "running")
+        self.assertEqual(writer.payloads[-1]["helper_status"], "running")
+        self.assertNotIn(None, writer.payloads[-1])
 
     def test_atomic_writer_deduplicates_identical_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -114,11 +241,229 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         payload = json.loads(write.call_args.args[1])
         self.assertEqual(payload["helper_generation"], 3)
 
+    def test_atomic_writer_normalizes_exact_identity_without_mutating_input(self) -> None:
+        settings = replace(helper_settings(), snapshot_path="/run/exact.json")
+        writer = AtomicSnapshotWriter(settings)
+        original = {
+            "captured_at": 1.0,
+            "snapshot_version": 9,
+            "writer_pid": 10,
+            "helper_generation": 11,
+            "runtime_instance_id": "old",
+        }
+        with (
+            patch("venus_evcharger.inputs.helper.snapshot.os.getpid", return_value=77),
+            patch("venus_evcharger.inputs.helper.snapshot.write_text_atomically") as write,
+        ):
+            writer.write(original)
+            writer.write({"captured_at": 2.0})
+
+        self.assertEqual(
+            original,
+            {
+                "captured_at": 1.0,
+                "snapshot_version": 9,
+                "writer_pid": 10,
+                "helper_generation": 11,
+                "runtime_instance_id": "old",
+            },
+        )
+        self.assertEqual(write.call_count, 2)
+        self.assertEqual(write.call_args_list[0].args[0], "/run/exact.json")
+        self.assertEqual(
+            json.loads(write.call_args_list[0].args[1]),
+            {
+                "captured_at": 1.0,
+                "snapshot_version": 9,
+                "writer_pid": 77,
+                "helper_generation": 3,
+                "runtime_instance_id": "test-instance",
+            },
+        )
+        self.assertEqual(
+            json.loads(write.call_args_list[1].args[1]),
+            {
+                "captured_at": 2.0,
+                "snapshot_version": 1,
+                "writer_pid": 77,
+                "helper_generation": 3,
+                "runtime_instance_id": "test-instance",
+            },
+        )
+
     def test_empty_snapshot_has_supervisor_liveness_contract(self) -> None:
         snapshot = empty_snapshot(5.0)
         self.assertEqual(snapshot["snapshot_version"], 1)
         self.assertEqual(snapshot["captured_at"], 5.0)
         self.assertEqual(snapshot["helper_status"], "starting")
+
+    def test_empty_snapshot_is_one_exact_complete_boundary_contract(self) -> None:
+        with patch("venus_evcharger.inputs.helper.snapshot.os.getpid", return_value=81):
+            snapshot = empty_snapshot(5.0)
+        self.assertEqual(
+            snapshot,
+            {
+                "snapshot_version": 1,
+                "captured_at": 5.0,
+                "heartbeat_at": 5.0,
+                "writer_pid": 81,
+                "helper_state": "starting",
+                "helper_status": "starting",
+                "pv_status": "missing",
+                "pv_captured_at": None,
+                "pv_power": None,
+                "battery_status": "missing",
+                "battery_captured_at": None,
+                "battery_soc": None,
+                "battery_combined_soc": None,
+                "battery_combined_usable_capacity_wh": None,
+                "battery_combined_charge_power_w": None,
+                "battery_combined_discharge_power_w": None,
+                "battery_combined_net_power_w": None,
+                "battery_combined_ac_power_w": None,
+                "battery_source_count": 0,
+                "battery_online_source_count": 0,
+                "battery_valid_soc_source_count": 0,
+                "battery_sources": [],
+                "battery_learning_profiles": {},
+                "grid_status": "missing",
+                "grid_captured_at": None,
+                "grid_power": None,
+                "grid_gateway_captured_at": None,
+                "grid_gateway_power": None,
+                "grid_primary_captured_at": None,
+                "grid_primary_power": None,
+                "grid_fusion_enabled": False,
+                "grid_fusion_primary_source_id": "",
+                "grid_fusion_backup_source_id": "victron",
+                "grid_selected_source_id": "",
+                "grid_fusion_state": "unavailable",
+                "grid_fusion_confidence": 0.0,
+                "grid_fusion_primary_valid": False,
+                "grid_fusion_backup_valid": False,
+                "grid_fusion_primary_age_seconds": None,
+                "grid_fusion_backup_age_seconds": None,
+                "grid_fusion_difference_watts": None,
+                "grid_fusion_tolerance_watts": None,
+                "grid_fusion_primary_invalid_samples": 0,
+                "grid_fusion_primary_recovery_samples": 0,
+                "grid_fusion_mismatch_samples": 0,
+            },
+        )
+
+    def test_private_snapshot_primitives_have_exact_contracts(self) -> None:
+        explicit, explicit_clock = snapshot_module._collection_clock(3.5)
+        self.assertEqual(explicit, 3.5)
+        self.assertEqual(explicit_clock(), 3.5)
+        with patch(
+            "venus_evcharger.inputs.helper.snapshot.time.time",
+            side_effect=(4.0, 5.0),
+        ):
+            dynamic, dynamic_clock = snapshot_module._collection_clock(None)
+            self.assertEqual(dynamic, 4.0)
+            self.assertEqual(dynamic_clock(), 5.0)
+
+        sources = FakeSources()
+        sources.observed["pv"] = 6.0
+        self.assertEqual(snapshot_module._source_observed_at(sources, "pv", 7.0), 6.0)
+        sources.observed["pv"] = 0.0
+        self.assertEqual(snapshot_module._source_observed_at(sources, "pv", 7.0), 7.0)
+
+        target = _SourceTarget("pv", "pv_power", "pv_captured_at")
+        state = empty_snapshot()
+        SnapshotStore._apply_source(state, target, 123.0, 8.0)
+        self.assertEqual(state["pv_power"], 123.0)
+        self.assertEqual(state["pv_captured_at"], 8.0)
+        self.assertEqual(state["pv_status"], "ok")
+        self.assertEqual(state["helper_state"], "running")
+        self.assertEqual(state["helper_status"], "running")
+
+    def test_battery_application_projects_every_declared_field(self) -> None:
+        value = {
+            field_name: index + 0.5
+            for index, field_name in enumerate(BATTERY_SNAPSHOT_FIELDS)
+        }
+        state = empty_snapshot()
+        SnapshotStore._apply_source(
+            state,
+            _SourceTarget("battery", "battery_soc", "battery_captured_at"),
+            value,
+            9.0,
+        )
+        self.assertEqual(state["battery_captured_at"], 9.0)
+        self.assertEqual(state["battery_status"], "ok")
+        for field_name, expected in value.items():
+            self.assertEqual(state[field_name], expected)
+
+    def test_due_source_and_direct_read_contracts_are_independent(self) -> None:
+        settings = replace(
+            helper_settings(),
+            auto_pv_poll_interval_seconds=1.0,
+            auto_battery_poll_interval_seconds=2.0,
+            auto_grid_poll_interval_seconds=3.0,
+        )
+        sources = FakeSources()
+        store = SnapshotStore(settings, sources, MemoryWriter(), lambda: False)
+        store._next_poll_at = {"pv": 5.0, "battery": 6.0, "grid": 7.0}
+
+        due = store._due_sources(6.0)
+        self.assertEqual(
+            tuple((spec.target, spec.interval) for spec in due),
+            (
+                (_SourceTarget("pv", "pv_power", "pv_captured_at"), 1.0),
+                (_SourceTarget("battery", "battery_soc", "battery_captured_at"), 2.0),
+            ),
+        )
+        self.assertEqual(due[0].getter(), 100.0)
+        self.assertEqual(due[1].getter(), {"battery_soc": 50.0})
+        self.assertEqual(store._source_read("pv"), (100.0, _SourceTarget("pv", "pv_power", "pv_captured_at")))
+        self.assertEqual(
+            store._source_read("battery"),
+            ({"battery_soc": 50.0}, _SourceTarget("battery", "battery_soc", "battery_captured_at")),
+        )
+        self.assertEqual(
+            store._source_read("grid"),
+            (-20.0, _SourceTarget("grid", "grid_gateway_power", "grid_gateway_captured_at")),
+        )
+        self.assertIsNone(store._source_read("unknown"))
+
+    def test_grid_fusion_is_applied_only_to_battery_and_grid_direct_refreshes(self) -> None:
+        store = SnapshotStore(helper_settings(), FakeSources(), MemoryWriter(), lambda: False)
+        with patch("venus_evcharger.inputs.helper.snapshot.apply_grid_fusion") as apply:
+            store.refresh_source("pv", 1.0)
+            store.refresh_source("battery", 2.0)
+            store.refresh_source("grid", 3.0)
+        self.assertEqual(apply.call_count, 2)
+        self.assertEqual(apply.call_args_list[0].args[2], 2.0)
+        self.assertEqual(apply.call_args_list[1].args[2], 3.0)
+
+    def test_identity_stamp_replaces_an_empty_mapping_exactly(self) -> None:
+        store = SnapshotStore(helper_settings(), FakeSources(), MemoryWriter(), lambda: False)
+        state: dict[str, object] = {}
+        with patch("venus_evcharger.inputs.helper.snapshot.os.getpid", return_value=91):
+            store._stamp_identity(state)
+        self.assertEqual(
+            state,
+            {
+                "snapshot_version": 1,
+                "writer_pid": 91,
+                "helper_generation": 3,
+                "runtime_instance_id": "test-instance",
+            },
+        )
+
+    def test_non_battery_mapping_remains_an_ordinary_source_value(self) -> None:
+        state = empty_snapshot()
+        value = {"raw": 1}
+        SnapshotStore._apply_source(
+            state,
+            _SourceTarget("pv", "pv_power", "pv_captured_at"),
+            value,
+            9.0,
+        )
+        self.assertEqual(state["pv_power"], value)
+        self.assertEqual(state["pv_captured_at"], 9.0)
+        self.assertEqual(state["pv_status"], "ok")
 
     def test_composed_source_boundary_uses_only_semantic_measurements(self) -> None:
         gateway = FakeEnergyGateway()

@@ -41,7 +41,11 @@ from venus_evcharger.dbus_gateway import (
 )
 from venus_evcharger.dbus_gateway_cache_metadata import CacheValueMetadata
 from venus_evcharger.dbus_gateway_commands import DbusGatewayCommandQueuePolicy
-from venus_evcharger.ipc.command_mailbox import COMMAND_PRIORITY_RANKS, command_priority_rank
+from venus_evcharger.ipc.command_mailbox import (
+    COMMAND_PRIORITY_RANKS,
+    MailboxScanUnavailable,
+    command_priority_rank,
+)
 from venus_evcharger.ipc.energy import (
     ENERGY_REFRESH_COMMAND_KIND,
     EnergyInputsSnapshot,
@@ -49,6 +53,11 @@ from venus_evcharger.ipc.energy import (
     EnergySourceDescriptor,
     EnergyTopologySnapshot,
     MeasuredValue,
+)
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
+from venus_evcharger.ipc.fast_publication_wire import (
+    decode_fast_publication_frame,
+    encode_fast_publication_frame,
 )
 from venus_evcharger.ipc.gateway_publication import (
     PUBLISH_COMPANION_FIELDS_KIND,
@@ -810,7 +819,8 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertTrue(inbox.load_pending())
             inbox.remove(str(Path(inbox.command_dir) / "missing.json"))
             with patch.object(dbus_gateway.Path, "glob", side_effect=OSError("boom")):
-                self.assertEqual(inbox.load_pending(), [])
+                with self.assertRaises(MailboxScanUnavailable):
+                    inbox.load_pending()
 
             malformed_target = inbox.enqueue(
                 publish_companion_fields_command(
@@ -975,37 +985,41 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                     return self.response if isinstance(self.response, bytes) else b""
 
             for response, expected_ok in (
-                (b"", True),
-                (b'{"ok":true}', True),
+                (b"", False),
+                (encode_fast_publication_frame({"ok": True}), True),
                 (b"[]", False),
                 (RuntimeError("offline"), False),
             ):
                 with patch.object(gateway_client_module.socket, "socket", return_value=FakeSocket(response)):
-                    self.assertEqual(client.send({"kind": "health"})["ok"], expected_ok)
+                    self.assertEqual(
+                        client._send_fast_publication({"kind": "publish_evcs_fields"})["ok"],
+                        expected_ok,
+                    )
 
             publication = GatewayPublicationClient(client)
             register_receipt = publication.register_evcs(
                 _evcs_identity(),
                 {"mode": 0, "connected": 1},
             )
-            publish_receipt = publication.publish_evcs_fields(
-                {"ac_power_w": 1200.0, "session_time_s": 30},
-                priority="live",
-            )
-            refresh_path = client.request_energy_refresh(
-                EnergyRefreshRequest(
-                    "refresh-energy",
-                    "all",
-                    5.0,
-                    "priority",
-                    reason="inputs stale",
-                ),
-                source="auto-input-helper",
-            )
+            with patch.object(client, "backpressure_state", return_value="ok"):
+                publish_receipt = publication.publish_evcs_fields(
+                    {"ac_power_w": 1200.0, "session_time_s": 30},
+                    priority="live",
+                )
+                refresh_path = client.request_energy_refresh(
+                    EnergyRefreshRequest(
+                        "refresh-energy",
+                        "all",
+                        5.0,
+                        "priority",
+                        reason="inputs stale",
+                    ),
+                    source="auto-input-helper",
+                )
             self.assertTrue(register_receipt.accepted)
             self.assertTrue(register_receipt.command_id)
             self.assertTrue(publish_receipt.accepted)
-            self.assertTrue(refresh_path)
+            self.assertTrue(refresh_path.accepted)
 
             pending = DbusGatewayCommandInbox(paths.command_dir).load_pending()
             self.assertEqual(len(pending), 3)
@@ -1066,7 +1080,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(default_client.timeout_seconds, 0.5)
             self.assertEqual(default_client.paths, paths)
             self.assertEqual(default_client.commands.command_dir, paths.command_dir)
-            self.assertEqual(default_client._backpressure_cache, (0.0, "unknown"))
+            self.assertEqual(default_client._backpressure_cache, (0.0, "slow"))
 
             class InspectableSocket:
                 def __init__(self, response: bytes) -> None:
@@ -1095,9 +1109,13 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                     self.recv_size = size
                     return self.response
 
-            sock = InspectableSocket(b'{"ok":true,"answer":42}')
+            sock = InspectableSocket(
+                encode_fast_publication_frame({"ok": True, "answer": 42})
+            )
             with patch.object(gateway_client_module.socket, "socket", return_value=sock) as socket_factory:
-                response = client.send({"kind": "health", "value": object()})
+                response = client._send_fast_publication(
+                    {"kind": "publish_evcs_fields", "value": object()}
+                )
             socket_factory.assert_called_once_with(
                 gateway_client_module.socket.AF_UNIX,
                 gateway_client_module.socket.SOCK_STREAM,
@@ -1105,17 +1123,16 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertEqual(response, {"ok": True, "answer": 42})
             self.assertEqual(sock.timeout, 0.05)
             self.assertEqual(sock.connected_path, paths.socket_path)
-            self.assertEqual(sock.recv_size, 65536)
-            self.assertIn(b'"value"', sock.sent)
-            self.assertIn(b"object object", sock.sent)
-            self.assertTrue(sock.sent.endswith(b"\n"))
-            self.assertEqual(sock.sent.count(b"\n"), 1)
+            self.assertGreater(sock.recv_size, 0)
+            sent = decode_fast_publication_frame(sock.sent)
+            self.assertEqual(sent["kind"], "publish_evcs_fields")
+            self.assertIn("object object", str(sent["value"]))
 
             invalid_sock = InspectableSocket(b"[]")
             with patch.object(gateway_client_module.socket, "socket", return_value=invalid_sock):
                 self.assertEqual(
-                    client.send({"kind": "health"}),
-                    {"ok": False, "error": "invalid-response"},
+                    client._send_fast_publication({"kind": "publish_evcs_fields"}),
+                    {"ok": False, "error": "invalid-frame-magic"},
                 )
 
             class FailingSocket(InspectableSocket):
@@ -1129,7 +1146,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 return_value=FailingSocket(b""),
             ):
                 self.assertEqual(
-                    client.send({"kind": "health"}),
+                    client._send_fast_publication({"kind": "publish_evcs_fields"}),
                     {"ok": False, "error": "offline"},
                 )
 
@@ -1144,7 +1161,9 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 "enqueue",
                 return_value="command-id",
             ) as enqueue:
-                self.assertEqual(enqueuer.enqueue_command(semantic_publish), "command-id")
+                result = enqueuer.enqueue_command(semantic_publish)
+                self.assertTrue(result.accepted)
+                self.assertEqual(result.command_id, "command-id")
             backpressure_state.assert_called_once_with(max_age_seconds=2.0)
             enqueue.assert_called_once()
             queued_publish = enqueue.call_args.args[0]
@@ -1172,12 +1191,20 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 "enqueue",
                 return_value="blocked",
             ) as enqueue:
-                self.assertEqual(blocked.enqueue_command(blocked_command), "")
+                blocked_result = blocked.enqueue_command(blocked_command)
+                self.assertIs(blocked_result.accepted, False)
+                self.assertEqual(blocked_result.reason, "backpressure")
             enqueue.assert_not_called()
 
             inputs, topology = _energy_snapshots()
             publication = GatewayPublicationClient(client)
-            with patch.object(client, "enqueue_command", return_value="/tmp/semantic-command.json") as enqueue_command:
+            accepted = GatewayEnqueueResult(
+                True,
+                "semantic-command",
+                "mailbox",
+                command_path="/tmp/semantic-command.json",
+            )
+            with patch.object(client, "enqueue_command", return_value=accepted) as enqueue_command:
                 evcs_register_receipt = publication.register_evcs(_evcs_identity(), {"mode": 0})
                 evcs_publish_receipt = publication.publish_evcs_fields(
                     {"ac_power_w": 1300.0},
@@ -1208,7 +1235,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertTrue(evcs_publish_receipt.accepted)
             self.assertTrue(companion_register_receipt.accepted)
             self.assertTrue(companion_publish_receipt.accepted)
-            self.assertEqual(refresh_result, "/tmp/semantic-command.json")
+            self.assertEqual(refresh_result, accepted)
 
             queued = [call.args[0] for call in enqueue_command.call_args_list]
             self.assertEqual(
@@ -1281,49 +1308,53 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             load_snapshot.assert_called_once_with(paths.health_path, max_age_seconds=10.0)
 
             cache_client = GatewayClient(paths)
+            pressure = MagicMock(state="slow")
             with patch.object(
-                cache_client,
-                "load_health",
-                return_value={"backpressure": {"state": "slow"}},
-            ) as load_health, patch.object(gateway_client_module, "_now", return_value=10.0):
+                gateway_client_module,
+                "read_gateway_pressure_snapshot",
+                return_value=pressure,
+            ) as read_pressure, patch.object(gateway_client_module, "_now", return_value=10.0):
                 self.assertEqual(cache_client.backpressure_state(max_age_seconds=2.5), "slow")
-            load_health.assert_called_once_with(max_age_seconds=2.5)
+            read_pressure.assert_called_once_with(
+                paths.health_path,
+                now=10.0,
+                max_age_seconds=2.5,
+            )
             self.assertEqual(cache_client._backpressure_cache, (10.0, "slow"))
 
-            with patch.object(cache_client, "load_health") as load_health, patch.object(
+            with patch.object(
+                gateway_client_module,
+                "read_gateway_pressure_snapshot",
+            ) as read_pressure, patch.object(
                 gateway_client_module,
                 "_now",
                 return_value=10.5,
             ):
                 self.assertEqual(cache_client.backpressure_state(), "slow")
-            load_health.assert_not_called()
+            read_pressure.assert_not_called()
 
-            with patch.object(cache_client, "load_health", return_value={}) as load_health, patch.object(
+            pressure.state = "slow"
+            with patch.object(
+                gateway_client_module,
+                "read_gateway_pressure_snapshot",
+                return_value=pressure,
+            ) as read_pressure, patch.object(
                 gateway_client_module,
                 "_now",
                 return_value=11.1,
             ):
-                self.assertEqual(cache_client.backpressure_state(), "unknown")
-            load_health.assert_called_once_with(max_age_seconds=10.0)
-            self.assertEqual(cache_client._backpressure_cache, (11.1, "unknown"))
-            self.assertFalse(gateway_client_module._backpressure_cache_fresh(10.0, "unknown", 10.5))
+                self.assertEqual(cache_client.backpressure_state(), "slow")
+            read_pressure.assert_called_once_with(
+                paths.health_path,
+                now=11.1,
+                max_age_seconds=10.0,
+            )
+            self.assertEqual(cache_client._backpressure_cache, (11.1, "slow"))
+            self.assertTrue(gateway_client_module._backpressure_cache_fresh(10.0, "slow", 10.5))
+            self.assertFalse(gateway_client_module._backpressure_cache_fresh(0.0, "slow", 0.5))
             self.assertFalse(gateway_client_module._backpressure_cache_fresh(10.0, "ok", 11.0))
             self.assertTrue(gateway_client_module._backpressure_cache_fresh(10.0, "ok", 10.999))
-            self.assertEqual(gateway_client_module._backpressure_state_from_health({}), "unknown")
-            self.assertEqual(
-                gateway_client_module._backpressure_state_from_health({"backpressure": []}),
-                "unknown",
-            )
-            self.assertEqual(
-                gateway_client_module._backpressure_state_from_health({"backpressure": {"state": ""}}),
-                "unknown",
-            )
-            self.assertEqual(
-                gateway_client_module._backpressure_state_from_health(
-                    {"backpressure": {"state": "protective"}}
-                ),
-                "protective",
-            )
+            self.assertFalse(gateway_client_module._backpressure_cache_fresh(10.0, "ok", 9.999))
 
     def test_gateway_client_default_energy_and_publication_payload_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1337,7 +1368,16 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 reason="missing",
             )
 
-            with patch.object(client, "enqueue_command", return_value="/tmp/queued.json") as enqueue_command:
+            with patch.object(
+                client,
+                "enqueue_command",
+                return_value=GatewayEnqueueResult(
+                    True,
+                    "queued",
+                    "mailbox",
+                    command_path="/tmp/queued.json",
+                ),
+            ) as enqueue_command:
                 publication.publish_evcs_fields({"ac_power_w": 1.5}, priority="live")
                 client.request_energy_refresh(refresh, source="helper")
 
@@ -1414,6 +1454,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             ({"kind": "gx_relay_refresh"}, "read-fast"),
             ({"kind": "gx_relay_set_enabled"}, "remote-write"),
             ({"kind": "ess_grid_setpoint"}, "remote-write"),
+            ({"kind": "disable_matching_generic_shelly_once"}, "configuration"),
             ({"kind": "unknown"}, "diagnostic"),
             ({}, "diagnostic"),
         ]
@@ -1423,9 +1464,10 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
 
         registration = register_evcs_command(_evcs_identity(), {"mode": 0})
         self.assertTrue(command_allowed_by_backpressure(registration, "slow"))
-        self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, "mystery"))
+        self.assertFalse(command_allowed_by_backpressure({"kind": "unknown"}, "mystery"))
         self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, " OK "))
-        self.assertTrue(command_allowed_by_backpressure({"kind": "unknown"}, ""))
+        self.assertFalse(command_allowed_by_backpressure({"kind": "unknown"}, ""))
+        self.assertFalse(command_allowed_by_backpressure({"kind": "unknown"}, "degraded"))
 
     def test_backpressure_filter_uses_semantic_priority_and_queue_class(self) -> None:
         registration = register_evcs_command(_evcs_identity(), {"mode": 0})
@@ -1446,6 +1488,14 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             "topology",
             60.0,
         ).to_command(source="helper")
+        user_remote_write = {
+            "kind": "gx_relay_set_enabled",
+            "priority": "user",
+        }
+        generic_shelly_configuration = {
+            "kind": "disable_matching_generic_shelly_once",
+            "priority": "user",
+        }
 
         cases = [
             (registration, "protective", True),
@@ -1459,11 +1509,18 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             (priority_refresh, "congested", True),
             (priority_refresh, "slow", False),
             (priority_refresh, "protective", False),
+            (user_remote_write, "slow", True),
+            (user_remote_write, "protective", True),
+            (generic_shelly_configuration, "slow", True),
+            (generic_shelly_configuration, "protective", False),
+            ({"kind": "introspect", "priority": "user"}, "protective", False),
+            ({"kind": "introspect", "priority": "safety"}, "protective", False),
+            ({"kind": "gx_relay_set_enabled", "priority": "safety"}, "protective", True),
             (topology_refresh, "congested", True),
             (topology_refresh, "slow", False),
             ({**critical, "queue_class": "diagnostic"}, "congested", False),
             ({"kind": "unknown", "priority": "normal"}, "congested", False),
-            ({"kind": "unknown", "priority": "diagnostic"}, "unknown", True),
+            ({"kind": "unknown", "priority": "diagnostic"}, "unknown", False),
             (critical, " protective ", True),
         ]
         for command, state, expected in cases:
@@ -1473,11 +1530,11 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
     def test_publication_client_gateway_value_and_latency_window(self) -> None:
         fake_client = MagicMock()
         fake_client.enqueue_command.side_effect = [
-            "/tmp/register-evcs.json",
-            "/tmp/publish-evcs.json",
-            "/tmp/register-companion.json",
-            "/tmp/publish-companion.json",
-            "",
+            GatewayEnqueueResult(True, "register-evcs", "mailbox"),
+            GatewayEnqueueResult(True, "publish-evcs", "mailbox"),
+            GatewayEnqueueResult(True, "register-companion", "mailbox"),
+            GatewayEnqueueResult(True, "publish-companion", "mailbox"),
+            GatewayEnqueueResult(False, reason="mailbox-lock-timeout"),
         ]
         publication = GatewayPublicationClient(fake_client)
 
@@ -1507,6 +1564,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertTrue(published_companion.accepted)
         self.assertFalse(rejected.accepted)
         self.assertEqual(rejected.command_id, "")
+        self.assertEqual(rejected.reason, "mailbox-lock-timeout")
 
         commands = [call.args[0] for call in fake_client.enqueue_command.call_args_list]
         evcs_registration = parse_register_evcs(commands[0])

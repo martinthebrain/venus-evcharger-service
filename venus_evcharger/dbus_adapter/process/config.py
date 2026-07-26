@@ -12,7 +12,10 @@ from dataclasses import dataclass
 from venus_evcharger.core.shared import config_get_float
 from venus_evcharger.dbus_adapter.jsonl import DEFAULT_COMMAND_LIFECYCLE_MAX_BYTES, DEFAULT_HEALTH_HISTORY_MAX_BYTES
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec, ReadSpecs
-from venus_evcharger.dbus_gateway import GatewayPaths, gateway_paths
+from venus_evcharger.ipc.gateway_path_config import (
+    GatewayPaths,
+    configured_gateway_paths,
+)
 from venus_evcharger.runtime.output_path import validated_output_file_path
 
 _COMMAND_LIFECYCLE_PATH_LABEL = "DbusGatewayCommandLifecyclePath"
@@ -113,7 +116,7 @@ def adapter_settings(
     *,
     explicit_paths: GatewayPaths | None = None,
 ) -> GatewayAdapterSettings:
-    paths = explicit_paths or gateway_paths(defaults.get("DbusGatewayRunDir"))
+    paths = explicit_paths or configured_gateway_paths(defaults)
     device_instance = configured_device_instance(defaults)
     return GatewayAdapterSettings(
         paths=paths,

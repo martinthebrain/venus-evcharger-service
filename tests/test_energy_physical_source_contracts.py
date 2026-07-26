@@ -19,6 +19,7 @@ def _battery(
     online: bool = True,
     captured_at: float | None = 10.0,
     confidence: float = 1.0,
+    physical_priority: int = 0,
 ) -> EnergySourceSnapshot:
     return EnergySourceSnapshot(
         source_id=source_id,
@@ -30,6 +31,7 @@ def _battery(
         online=online,
         captured_at=captured_at,
         confidence=confidence,
+        physical_priority=physical_priority,
     )
 
 
@@ -42,6 +44,7 @@ class EnergyPhysicalSourceContracts(unittest.TestCase):
             physical_id="house",
             captured_at=9.0,
             confidence=1.0,
+            physical_priority=10,
         )
         external = _battery(
             "huawei",
@@ -55,10 +58,70 @@ class EnergyPhysicalSourceContracts(unittest.TestCase):
         selected = unique_weighted_soc_sources((gateway, external))
         cluster = aggregate_energy_sources((gateway, external))
 
-        self.assertEqual(selected, (external,))
-        self.assertEqual(cluster.combined_soc, 60.0)
+        self.assertEqual(selected, (gateway,))
+        self.assertEqual(cluster.combined_soc, 40.0)
         self.assertEqual(cluster.combined_usable_capacity_wh, 5000.0)
         self.assertEqual(cluster.valid_soc_source_count, 1)
+
+    def test_preferred_source_is_stable_while_observation_timestamps_alternate(self) -> None:
+        first_cycle = (
+            _battery(
+                "preferred",
+                40.0,
+                5000.0,
+                physical_id="house",
+                physical_priority=100,
+                captured_at=10.0,
+            ),
+            _battery(
+                "secondary",
+                60.0,
+                5000.0,
+                physical_id="house",
+                physical_priority=50,
+                captured_at=11.0,
+            ),
+        )
+        second_cycle = (
+            _battery(
+                "preferred",
+                41.0,
+                5000.0,
+                physical_id="house",
+                physical_priority=100,
+                captured_at=12.0,
+            ),
+            _battery(
+                "secondary",
+                61.0,
+                5000.0,
+                physical_id="house",
+                physical_priority=50,
+                captured_at=13.0,
+            ),
+        )
+
+        self.assertEqual(unique_weighted_soc_sources(first_cycle)[0].source_id, "preferred")
+        self.assertEqual(unique_weighted_soc_sources(second_cycle)[0].source_id, "preferred")
+
+    def test_online_secondary_replaces_offline_preferred_source(self) -> None:
+        preferred = _battery(
+            "preferred",
+            40.0,
+            5000.0,
+            physical_id="house",
+            physical_priority=100,
+            online=False,
+        )
+        secondary = _battery(
+            "secondary",
+            60.0,
+            5000.0,
+            physical_id="house",
+            physical_priority=50,
+        )
+
+        self.assertEqual(unique_weighted_soc_sources((preferred, secondary)), (secondary,))
 
     def test_online_finite_quality_wins_and_ties_are_deterministic(self) -> None:
         online = _battery(
@@ -116,6 +179,51 @@ class EnergyPhysicalSourceContracts(unittest.TestCase):
         self.assertEqual(cluster.combined_soc, 65.0)
         self.assertEqual(cluster.combined_usable_capacity_wh, 4000.0)
         self.assertEqual(cluster.valid_soc_source_count, 2)
+
+    def test_equal_quality_retains_first_observation_and_confidence_breaks_ties(self) -> None:
+        first = _battery("same", 20.0, 1000.0, physical_id="same-battery")
+        second = _battery("same", 80.0, 1000.0, physical_id="same-battery")
+        self.assertEqual(unique_weighted_soc_sources((first, second)), (first,))
+
+        high_confidence = _battery(
+            "a",
+            30.0,
+            1000.0,
+            physical_id="confidence-battery",
+            confidence=0.9,
+        )
+        low_confidence = _battery(
+            "z",
+            70.0,
+            1000.0,
+            physical_id="confidence-battery",
+            confidence=0.1,
+        )
+        self.assertEqual(
+            unique_weighted_soc_sources((high_confidence, low_confidence)),
+            (high_confidence,),
+        )
+
+        finite_confidence = _battery(
+            "finite",
+            40.0,
+            1000.0,
+            physical_id="finite-confidence-battery",
+            confidence=0.1,
+        )
+        non_finite_confidence = _battery(
+            "non-finite",
+            60.0,
+            1000.0,
+            physical_id="finite-confidence-battery",
+            confidence=float("inf"),
+        )
+        self.assertEqual(
+            unique_weighted_soc_sources(
+                (non_finite_confidence, finite_confidence)
+            ),
+            (finite_confidence,),
+        )
 
 
 if __name__ == "__main__":

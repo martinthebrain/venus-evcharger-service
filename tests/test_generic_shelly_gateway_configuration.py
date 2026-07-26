@@ -250,9 +250,9 @@ class GenericShellyGatewayConfigurationTests(unittest.TestCase):
                 command = {**_request(), "phase": phase}
                 self.assertEqual(scheduler.process_semantic_operation(command, command_file=path), "dropped")
 
-    def test_wire_command_is_remote_write_and_contains_no_dbus_target(self) -> None:
+    def test_wire_command_is_configuration_and_contains_no_dbus_target(self) -> None:
         command = _request()
-        self.assertEqual(command_queue_class(command), "remote-write")
+        self.assertEqual(command_queue_class(command), "configuration")
         self.assertTrue({"service", "path", "value"}.isdisjoint(command))
 
 

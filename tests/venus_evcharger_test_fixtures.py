@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+from tests.support.gateway_pressure import FreshOkGatewayPressurePolicy
 from venus_evcharger.auto.policy import AutoPolicy, AutoStopEwmaPolicy, AutoThresholdProfile
 
 
@@ -169,6 +170,7 @@ def make_auto_controller_service(**overrides: object) -> SimpleNamespace:
 def make_runtime_support_service(**overrides: object) -> SimpleNamespace:
     data: dict[str, object] = {
         "poll_interval_ms": 1000,
+        "gateway_pressure_policy": FreshOkGatewayPressurePolicy(captured_at=1000.0),
         "deviceinstance": 60,
         "time_now": lambda: 1000.0,
         "_state_summary": lambda: "state",

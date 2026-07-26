@@ -45,6 +45,13 @@ def _int_or_none(value: Any) -> int | None:
     return numeric if numeric > 0 else None
 
 
+def _int_value(value: Any, default: int = 0) -> int:
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def _bool(value: Any, default: bool) -> bool:
     if value is None:
         return default
@@ -68,6 +75,7 @@ def _configured_source(defaults: Mapping[str, Any], source_id: str) -> EnergySou
     return EnergySourceDefinition(
         source_id=source_id,
         physical_id=_text(defaults.get(f"{prefix}PhysicalId")),
+        physical_priority=_int_value(defaults.get(f"{prefix}PhysicalPriority")),
         profile_name=_profile_text(profile_defaults, "Profile", profile_name),
         role=role,
         connector_type=connector_type,

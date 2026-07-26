@@ -9,6 +9,7 @@ from venus_evcharger.runtime.audit import RuntimeAuditLogger
 from venus_evcharger.runtime.audit_fields import RuntimeAuditFields
 from tests.venus_evcharger_runtime_support_support import RuntimeSupportController, RuntimeSupportTestCaseBase
 from tests.venus_evcharger_test_fixtures import make_auto_metrics, make_runtime_support_service
+from venus_evcharger.ipc.gateway_pressure import CachedGatewayPressurePolicy
 
 
 def _with_backends_config(
@@ -83,6 +84,11 @@ class TestRuntimeSupportControllerAudit(RuntimeSupportTestCaseBase):
                 time_now=lambda: current_time[0],
                 auto_audit_log_path=path,
                 gateway_health_path=health_path,
+                gateway_pressure_policy=CachedGatewayPressurePolicy(
+                    health_path,
+                    now=lambda: current_time[0],
+                    cache_seconds=0.0,
+                ),
                 _last_auto_metrics=make_auto_metrics(),
             )
             controller = RuntimeSupportController(service, self._age_zero, self._health_zero)

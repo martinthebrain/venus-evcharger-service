@@ -10,16 +10,27 @@ from venus_evcharger.backend.factory import build_service_backends
 from venus_evcharger.backend.shelly_io import ShellyIoController
 from venus_evcharger.bootstrap.contracts import MonthWindow
 from venus_evcharger.bootstrap.controller import ServiceBootstrapController
+from venus_evcharger.bootstrap.publication import EvcsPublicationOwner
 from venus_evcharger.companion import EnergyCompanionPublisher
 from venus_evcharger.controllers.auto import AutoDecisionController
 from venus_evcharger.controllers.state import ServiceStateController
 from venus_evcharger.controllers.write import ControlWriteController
-from venus_evcharger.dbus_gateway import GatewayClient, gateway_paths
+from venus_evcharger.dbus_gateway import GatewayClient
 from venus_evcharger.dbus_gateway_client import GatewayOperationsClient, GatewayPublicationClient
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
 from venus_evcharger.ipc.gateway_diagnostics import (
     GatewayDiagnosticsFileReader,
     gateway_diagnostics_path,
+)
+from venus_evcharger.ipc.gateway_path_config import (
+    DBUS_GATEWAY_CACHE_PATH_KEY,
+    DBUS_GATEWAY_COMMAND_DIR_KEY,
+    DBUS_GATEWAY_CORE_COMMAND_DIR_KEY,
+    DBUS_GATEWAY_HEALTH_PATH_KEY,
+    DBUS_GATEWAY_RUN_DIR_KEY,
+    DBUS_GATEWAY_SOCKET_PATH_KEY,
+    GatewayPaths,
+    configured_gateway_paths,
 )
 from venus_evcharger.ports import AutoDecisionPort, WriteControllerPort
 from venus_evcharger.ports.gateway_operations import GatewayOperationsPort
@@ -95,6 +106,10 @@ class ServiceControllerOwner:
         self._service = service
         self.functions = functions
         self.state = ServiceStateController(service, functions.normalize_mode)
+        self._publication_owner = EvcsPublicationOwner(
+            service,
+            script_path=functions.script_path,
+        )
         self.bootstrap = ServiceBootstrapController(
             service,
             normalize_phase_func=functions.normalize_phase,
@@ -104,9 +119,11 @@ class ServiceControllerOwner:
             read_version_func=functions.read_version,
             gobject_module=functions.gobject,
             script_path=functions.script_path,
+            publication_owner=self._publication_owner,
         )
         self._runtime: RuntimeControllers | None = None
         self._prepared_runtime: RuntimeSupportController | None = None
+        self._gateway_paths: GatewayPaths | None = None
         self._gateway_operations: GatewayOperationsPort | None = None
 
     @property
@@ -120,6 +137,8 @@ class ServiceControllerOwner:
         """Initialize shared runtime state and resolve backends before composing controllers."""
         if self._runtime is not None or self._prepared_runtime is not None:
             raise RuntimeError("wallbox runtime state is already prepared")
+        self._gateway_paths = self._resolve_gateway_paths()
+        self._apply_gateway_paths(self._gateway_paths)
         runtime = RuntimeSupportController(
             service=self._service,
             age_seconds_func=self.functions.age_seconds,
@@ -152,7 +171,10 @@ class ServiceControllerOwner:
         publisher = DbusPublishController(
             require_publish_service(service),
             self.functions.age_seconds,
-            GatewayDiagnosticsFileReader(gateway_diagnostics_path(self._gateway_run_dir())),
+            GatewayDiagnosticsFileReader(
+                gateway_diagnostics_path(self._required_gateway_paths().run_dir)
+            ),
+            self._publication_owner,
         )
         shelly = ShellyIoController(service)
         write = ControlWriteController(
@@ -187,14 +209,37 @@ class ServiceControllerOwner:
         return self.functions.phase_values(power, voltage, str(phase), str(voltage_mode))
 
     def _build_gateway_operations(self) -> GatewayOperationsPort:
-        return GatewayOperationsClient(GatewayClient(gateway_paths(self._gateway_run_dir())))
+        return GatewayOperationsClient(GatewayClient(self._required_gateway_paths()))
 
     def _build_gateway_publication(self) -> GatewayPublicationClient:
-        return GatewayPublicationClient(GatewayClient(gateway_paths(self._gateway_run_dir())))
+        return GatewayPublicationClient(GatewayClient(self._required_gateway_paths()))
 
-    def _gateway_run_dir(self) -> str | None:
-        run_dir = str(getattr(self._service, "dbus_gateway_run_dir", "") or "").strip()
-        return run_dir or None
+    def _resolve_gateway_paths(self) -> GatewayPaths:
+        service = self._service
+        return configured_gateway_paths(
+            {
+                DBUS_GATEWAY_RUN_DIR_KEY: getattr(service, "dbus_gateway_run_dir", None),
+                DBUS_GATEWAY_CACHE_PATH_KEY: getattr(service, "dbus_gateway_cache_path", None),
+                DBUS_GATEWAY_HEALTH_PATH_KEY: getattr(service, "gateway_health_path", None),
+                DBUS_GATEWAY_SOCKET_PATH_KEY: getattr(service, "dbus_gateway_socket_path", None),
+                DBUS_GATEWAY_COMMAND_DIR_KEY: getattr(service, "dbus_gateway_command_dir", None),
+                DBUS_GATEWAY_CORE_COMMAND_DIR_KEY: getattr(service, "core_command_mailbox_dir", None),
+            }
+        )
+
+    def _apply_gateway_paths(self, paths: GatewayPaths) -> None:
+        service = self._service
+        setattr(service, "dbus_gateway_run_dir", paths.run_dir)
+        setattr(service, "dbus_gateway_cache_path", paths.cache_path)
+        setattr(service, "gateway_health_path", paths.health_path)
+        setattr(service, "dbus_gateway_socket_path", paths.socket_path)
+        setattr(service, "dbus_gateway_command_dir", paths.command_dir)
+        setattr(service, "core_command_mailbox_dir", paths.core_command_dir)
+
+    def _required_gateway_paths(self) -> GatewayPaths:
+        if self._gateway_paths is None:
+            raise RuntimeError("gateway paths are not initialized")
+        return self._gateway_paths
 
     def _required_gateway_operations(self) -> GatewayOperationsPort:
         if self._gateway_operations is None:

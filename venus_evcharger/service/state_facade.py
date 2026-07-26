@@ -53,6 +53,9 @@ class ServiceStateFacade:
     def ensure_publish_state(self) -> None:
         self._controllers.runtime.publisher.ensure_state()
 
+    def maintain_evcs_registration(self, now: float) -> bool:
+        return self._controllers.runtime.publisher.maintain_evcs_registration(now)
+
     def publish_field(self, field: str, value: object, now: float | None, *, force: bool = False) -> bool:
         return self._controllers.runtime.publisher.publish_field(field, value, now, force=force)
 

@@ -29,6 +29,7 @@ from .template_http_transport import http_session, request_method_callable
 
 
 _GOE_STATUS_FILTER = "alw,amp,acu,car,err,eto,nrg,pnp"
+_GOE_BASE_URL_KEY = "BaseUrl"
 _GOE_SUPPORTED_PHASE_SELECTIONS: tuple[PhaseSelection, ...] = ("P1",)
 _GOE_CAR_STATUS_TEXT: dict[int, str] = {
     0: "error",
@@ -93,7 +94,7 @@ def load_goe_charger_settings(service: object, config_path: str) -> GoEChargerSe
     """Return normalized go-e charger backend settings."""
     parser = load_template_config(str(config_path).strip())
     adapter = config_section(parser, "Adapter")
-    base_url = str(adapter.get("BaseUrl", "")).strip()
+    base_url = str(adapter.get(_GOE_BASE_URL_KEY, "")).strip()
     if not base_url:
         raise ValueError("go-e charger backend requires Adapter.BaseUrl")
     return GoEChargerSettings(

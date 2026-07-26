@@ -65,12 +65,10 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             self.assertTrue(fresh_adapter.loop_role.process_one_dbus_operation_once())
             fresh_adapter.write_scheduler.process_local_publish_burst.assert_called_once()
 
-            install_mock(adapter.socket_role, "process_socket_once", MagicMock())
             install_mock(adapter.loop_role, "process_one_dbus_operation_once", MagicMock())
             install_mock(adapter.io_role, "publish_cache", MagicMock())
             adapter._next_work_tick_monotonic = 0.0
             self.assertTrue(adapter.tick())
-            adapter.socket_role.process_socket_once.assert_called_once()
             adapter.loop_role.process_one_dbus_operation_once.assert_called_once()
             adapter.io_role.publish_cache.assert_called_once()
 

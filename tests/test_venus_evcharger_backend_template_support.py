@@ -20,7 +20,7 @@ from venus_evcharger.backend.template_support import (
     render_json_payload,
     resolved_url,
 )
-from venus_evcharger.backend.template_http_transport import request_method_callable
+from venus_evcharger.backend.template_http_transport import http_session, request_method_callable
 
 
 class _TemplateBackend(TemplateHttpBackendBase):
@@ -64,6 +64,19 @@ class _Session:
 class _InvalidDynamicSession:
     def __getattr__(self, name: str) -> object:
         return name
+
+
+class _DynamicSession:
+    def __init__(self) -> None:
+        self.requested_members: list[str] = []
+
+    def __getattr__(self, name: str) -> object:
+        self.requested_members.append(name)
+
+        def request(**kwargs: object) -> _Response:
+            return _Response({"member": name, "kwargs": kwargs})
+
+        return request
 
 
 class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
@@ -185,6 +198,12 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         for method in ("GET", "POST", "PUT", "PATCH"):
             response = request_method_callable(session, method)(url="http://test.local", timeout=1.0)
             self.assertEqual(response.json(), {})
+        self.assertEqual([method for method, _kwargs in session.calls], ["GET", "POST", "PUT", "PATCH"])
+        self.assertEqual(
+            request_method_callable(session, " get ")(url="http://normalized.local", timeout=2.0).json(),
+            {},
+        )
+        self.assertEqual(session.calls[-1], ("GET", {"url": "http://normalized.local", "timeout": 2.0}))
         with self.assertRaisesRegex(ValueError, "Unsupported template backend HTTP method"):
             request_method_callable(session, "DELETE")
         with self.assertRaisesRegex(TypeError, "does not implement HTTP GET"):
@@ -198,8 +217,42 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "does not implement HTTP GET"):
             request_method_callable(_InvalidDynamicSession(), "GET")
 
+        dynamic = _DynamicSession()
+        dynamic_response = request_method_callable(dynamic, "PATCH")(
+            url="http://dynamic.local",
+            timeout=3.0,
+        )
+        self.assertEqual(dynamic.requested_members, ["patch"])
+        self.assertEqual(
+            dynamic_response.json(),
+            {
+                "member": "patch",
+                "kwargs": {"url": "http://dynamic.local", "timeout": 3.0},
+            },
+        )
+
         response = _Response(["not", "a", "dict"])
         self.assertEqual(_response_payload_dict(response), {})
+        self.assertEqual(_response_payload_dict(_Response({7: "seven"})), {"7": "seven"})
+        bounded_response = _Response({"ignored": True})
+        with patch(
+            "venus_evcharger.backend.template_support.decoded_json_response",
+            return_value={"bounded": True},
+        ) as decode:
+            self.assertEqual(
+                _response_payload_dict(bounded_response, 4096),
+                {"bounded": True},
+            )
+        decode.assert_called_once_with(bounded_response, 4096)
+
+    def test_http_session_reuses_injected_session_or_constructs_one_owner(self) -> None:
+        injected = object()
+        self.assertIs(http_session(injected), injected)
+
+        owned = object()
+        with patch("venus_evcharger.backend.template_http_transport.requests.Session", return_value=owned) as session:
+            self.assertIs(http_session(None), owned)
+        session.assert_called_once_with()
 
     def test_template_enabled_state_tokens_are_exhaustive_contract(self) -> None:
         for token in ("1", "true", "on", "yes", "enabled"):
@@ -215,7 +268,52 @@ class TestShellyWallboxBackendTemplateSupport(unittest.TestCase):
         self.assertIs(backend.service, service)
         self.assertEqual(backend.timeout_seconds, 1.25)
         self.assertEqual(backend.auth_settings, TemplateAuthSettings("", "", False, None, None))
+        self.assertIsNone(backend.max_response_bytes)
         self.assertIsNotNone(backend._session)
+
+    def test_template_http_backend_preserves_auth_and_bounded_decode_contract(self) -> None:
+        response = _Response({"ignored": True})
+        session = _Session(response)
+        auth_settings = TemplateAuthSettings(
+            "user",
+            "secret",
+            False,
+            "X-Token",
+            "token",
+        )
+        backend = _TemplateBackend(
+            SimpleNamespace(session=session),
+            3.5,
+            auth_settings=auth_settings,
+            max_response_bytes=4096,
+        )
+
+        with patch(
+            "venus_evcharger.backend.template_support._response_payload_dict",
+            return_value={"bounded": True},
+        ) as decode:
+            payload = backend._perform_request("GET", "http://adapter.local/state")
+
+        self.assertIs(backend.auth_settings, auth_settings)
+        self.assertEqual(backend.max_response_bytes, 4096)
+        self.assertEqual(payload, {"bounded": True})
+        self.assertTrue(response.raise_called)
+        self.assertEqual(
+            session.calls,
+            [
+                (
+                    "GET",
+                    {
+                        "url": "http://adapter.local/state",
+                        "timeout": 3.5,
+                        "auth": ("user", "secret"),
+                        "headers": {"X-Token": "token"},
+                        "stream": True,
+                    },
+                )
+            ],
+        )
+        decode.assert_called_once_with(response, 4096)
 
     def test_template_http_backend_perform_request_renders_templates(self) -> None:
         response = _Response({"ok": True})

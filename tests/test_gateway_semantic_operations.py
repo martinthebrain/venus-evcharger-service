@@ -36,6 +36,7 @@ from venus_evcharger.ipc.gateway_operations import (
     parse_gx_relay_refresh,
     parse_gx_relay_set,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ports.gateway_operations import GxRelayContactMode, GxRelaySetRequest
 
 _T = TypeVar("_T")
@@ -190,9 +191,11 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
             cache = DbusCacheStore(paths)
             cache.update_external_read(gx_relay_state_key(0), 1, source="test")
             cache.write_cache_snapshot()
-            operations = GatewayOperationsClient(GatewayClient(paths))
+            client = GatewayClient(paths)
+            operations = GatewayOperationsClient(client)
             self.assertEqual(operations.read_gx_relay_state(0, max_age_seconds=5.0), 1)
-            self.assertIsNone(operations.read_gx_relay_state(1, max_age_seconds=5.0))
+            with patch.object(client, "backpressure_state", return_value="ok"):
+                self.assertIsNone(operations.read_gx_relay_state(1, max_age_seconds=5.0))
             pending = GatewayClient(paths).commands.load_pending()
             self.assertEqual(len(pending), 1)
             self.assertEqual(pending[0][1]["kind"], GX_RELAY_REFRESH_KIND)
@@ -200,9 +203,9 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
     def test_gateway_client_receipts_reflect_transport_acceptance(self) -> None:
         client = MagicMock(spec=GatewayClient)
         client.enqueue_command.side_effect = [
-            "/tmp/relay-command.json",
-            "/tmp/ess-command.json",
-            "",
+            GatewayEnqueueResult(True, "relay-command", "mailbox"),
+            GatewayEnqueueResult(True, "ess-command", "mailbox"),
+            GatewayEnqueueResult(False, reason="backpressure"),
         ]
         operations = GatewayOperationsClient(client)
         request = GxRelaySetRequest(
@@ -225,6 +228,7 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
         self.assertEqual(ess.command_id, "ess-command")
         self.assertFalse(rejected.accepted)
         self.assertEqual(rejected.command_id, "")
+        self.assertEqual(rejected.reason, "backpressure")
         client.enqueue_command.assert_has_calls(
             [
                 call(

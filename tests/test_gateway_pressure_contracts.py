@@ -77,26 +77,85 @@ class GatewayPressureContractTests(unittest.TestCase):
             resources = read_gateway_pressure_snapshot(path, now=100.0, max_age_seconds=10.0)
             self.assertEqual((resources.state, resources.source), ("congested", "resources"))
 
-    def test_reader_fails_open_for_missing_or_invalid_documents(self) -> None:
+            _write_payload(path, {"captured_at": 100.0, "resources": {"state": 1}})
+            invalid_resource = read_gateway_pressure_snapshot(
+                path,
+                now=100.0,
+                max_age_seconds=10.0,
+            )
+            self.assertEqual(
+                (invalid_resource.state, invalid_resource.source),
+                ("slow", "missing-state"),
+            )
+
+    def test_reader_is_conservative_for_missing_or_invalid_documents(self) -> None:
         missing_path = read_gateway_pressure_snapshot("", now=100.0, max_age_seconds=10.0)
-        self.assertEqual((missing_path.state, missing_path.source), ("unknown", "missing-path"))
+        self.assertEqual(
+            missing_path,
+            GatewayPressureSnapshot("slow", 0.0, 0.0, True, "missing-path"),
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             path = f"{temp_dir}/gateway-health.json"
             missing = read_gateway_pressure_snapshot(path, now=100.0, max_age_seconds=10.0)
-            self.assertEqual((missing.state, missing.source), ("unknown", "missing-health"))
+            self.assertEqual(
+                missing,
+                GatewayPressureSnapshot("slow", 0.0, 0.0, True, "missing-health"),
+            )
             Path(path).write_text("not-json", encoding="utf-8")
             invalid = read_gateway_pressure_snapshot(path, now=100.0, max_age_seconds=10.0)
-            self.assertEqual((invalid.state, invalid.source), ("unknown", "missing-health"))
+            self.assertEqual((invalid.state, invalid.source), ("slow", "missing-health"))
             _write_payload(path, ["not", "an", "object"])
             non_object = read_gateway_pressure_snapshot(path, now=100.0, max_age_seconds=10.0)
-            self.assertEqual((non_object.state, non_object.source), ("unknown", "missing-health"))
+            self.assertEqual((non_object.state, non_object.source), ("slow", "missing-health"))
 
             _write_payload(path, {"captured_at": "not-a-number", "backpressure": {"state": "ok"}})
             invalid_time = read_gateway_pressure_snapshot(path, now=100.0, max_age_seconds=10.0)
-            self.assertEqual(invalid_time.captured_at, 0.0)
-            self.assertEqual(invalid_time.age_s, 0.0)
-            self.assertEqual(invalid_time.state, "ok")
+            self.assertEqual(
+                invalid_time,
+                GatewayPressureSnapshot(
+                    "slow",
+                    0.0,
+                    0.0,
+                    True,
+                    "missing-timestamp",
+                ),
+            )
+
+            _write_payload(
+                path,
+                {"captured_at": 0.5, "backpressure": {"state": "ok"}},
+            )
+            early = read_gateway_pressure_snapshot(
+                path,
+                now=1.0,
+                max_age_seconds=10.0,
+            )
+            self.assertEqual(
+                early,
+                GatewayPressureSnapshot("ok", 0.5, 0.5, False, "backpressure"),
+            )
+
+            _write_payload(path, {"captured_at": 100.001, "backpressure": {"state": "ok"}})
+            future = read_gateway_pressure_snapshot(path, now=100.0, max_age_seconds=10.0)
+            self.assertEqual(
+                future,
+                GatewayPressureSnapshot("slow", 100.001, 0.0, True, "future-health"),
+            )
+
+            _write_payload(
+                path,
+                {"captured_at": 80.0, "backpressure": {"state": "ok"}},
+            )
+            stale = read_gateway_pressure_snapshot(
+                path,
+                now=100.0,
+                max_age_seconds=10.0,
+            )
+            self.assertEqual(
+                stale,
+                GatewayPressureSnapshot("slow", 80.0, 20.0, True, "stale-health"),
+            )
 
     def test_policy_caches_snapshots_and_applies_explicit_budgets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -112,6 +171,8 @@ class GatewayPressureContractTests(unittest.TestCase):
             self.assertEqual(policy.audit_cleanup_interval_seconds(2.0), 16.0)
             self.assertEqual(policy.optional_work_interval_seconds(2.0), 24.0)
             self.assertEqual(policy.liveness_timeout_seconds(2.0), 10.0)
+            self.assertTrue(policy._cache_fresh(100.0))
+            self.assertFalse(policy._cache_fresh(99.999))
 
             _write_payload(path, {"captured_at": 101.0, "backpressure": {"state": "ok"}})
             current[0] = 101.9

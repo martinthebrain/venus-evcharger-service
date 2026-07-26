@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from unittest.mock import ANY, patch
 
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
+from venus_evcharger.bootstrap.publication import EvcsPublicationOwner
 from venus_evcharger.ports.gateway_publication import (
     CompanionServiceIdentity,
     EvcsServiceIdentity,
@@ -112,10 +113,12 @@ def _service() -> _PublishServiceHarness:
 
 
 def _controller() -> DbusPublishController:
+    service = _service()
     return DbusPublishController(
-        _service(),
+        service,
         lambda _timestamp, _now: 0.0,
         gateway_diagnostics_reader(),
+        EvcsPublicationOwner(service, script_path="test-service.py"),
     )
 
 
@@ -158,6 +161,14 @@ class DbusPublishCompositionContractTests(unittest.TestCase):
         with patch.object(controller.core, "ensure_state") as ensure_state:
             controller.ensure_state()
         ensure_state.assert_called_once_with()
+
+        with patch.object(
+            controller._publication_owner,
+            "maintain_registration",
+            return_value=True,
+        ) as maintain:
+            self.assertTrue(controller.maintain_evcs_registration(10.0))
+        maintain.assert_called_once_with(controller._gateway_diagnostics, 10.0)
 
         with patch.object(controller.core, "publish_field", return_value=True) as publish_field:
             self.assertTrue(controller.publish_field("mode", 2, 11.0, 4.0, True))

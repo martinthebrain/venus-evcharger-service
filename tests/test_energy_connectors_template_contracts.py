@@ -53,6 +53,8 @@ class EnergyConnectorsTemplateContractTests(unittest.TestCase):
         source = EnergySourceDefinition(
             source_id="source",
             role="hybrid-inverter",
+            physical_id="battery-bank-a",
+            physical_priority=7,
             usable_capacity_wh=5000.0,
         )
         settings = _settings()
@@ -80,6 +82,8 @@ class EnergyConnectorsTemplateContractTests(unittest.TestCase):
                 source_id="source",
                 role="hybrid-inverter",
                 service_name="http://energy.local",
+                physical_id="battery-bank-a",
+                physical_priority=7,
                 soc=61.5,
                 usable_capacity_wh=8400.0,
                 net_battery_power_w=-1200.0,

@@ -27,7 +27,7 @@ from venus_evcharger.bootstrap.contracts import (
     MonthWindow,
     require_gobject_timers,
 )
-from venus_evcharger.bootstrap.publication import EvcsPublicationRegistrar
+from venus_evcharger.bootstrap.publication import EvcsPublicationOwner
 from venus_evcharger.bootstrap.runtime import RuntimeInitializer
 
 
@@ -40,7 +40,7 @@ class ServiceBootstrapComponents:
     auto: AutoConfigLoader
     config: ServiceConfigLoader
     runtime: RuntimeInitializer
-    publication: EvcsPublicationRegistrar
+    publication: EvcsPublicationOwner
 
 
 def _enable_fault_diagnostics() -> None:
@@ -83,6 +83,7 @@ class ServiceBootstrapController:
         read_version_func: Callable[[str], str],
         gobject_module: object,
         script_path: str,
+        publication_owner: EvcsPublicationOwner,
     ) -> None:
         self.service = service
         self.dependencies = BootstrapDependencies(
@@ -109,7 +110,7 @@ class ServiceBootstrapController:
                 read_version=read_version_func,
                 gobject=require_gobject_timers(gobject_module),
             ),
-            publication=EvcsPublicationRegistrar(service, script_path=script_path),
+            publication=publication_owner,
         )
 
     def initialize_service(self) -> None:

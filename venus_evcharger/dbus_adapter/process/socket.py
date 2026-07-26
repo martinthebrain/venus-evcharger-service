@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Unix-socket IPC for the DBus adapter process."""
+"""Non-blocking binary IPC for transient gateway publications."""
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import select
@@ -13,27 +12,73 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Protocol, cast
 
-from venus_evcharger.core.shared import compact_json
+from gi.repository import GLib as _RAW_GLIB
+
 from venus_evcharger.dbus_adapter.process.protocols.runtime import DbusAdapterSocketContext
-from venus_evcharger.ipc.command_mailbox import normalized_mapping
-from venus_evcharger.ipc.command_types import CommandPayload
+from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
+from venus_evcharger.ipc.fast_publication_wire import (
+    FAST_PUBLICATION_WIRE_HEADER_BYTES,
+    FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES,
+    FastPublicationWireError,
+    decode_fast_publication_frame,
+    encode_fast_publication_frame,
+    fast_publication_frame_size,
+)
 from venus_evcharger.ipc.gateway_publication import (
     PUBLISH_COMPANION_FIELDS_KIND,
     PUBLISH_EVCS_FIELDS_KIND,
 )
 
-SocketHandler = Callable[[CommandPayload, str], CommandPayload]
-SocketReadResult = tuple[str, CommandPayload | None]
 SOCKET_BACKLOG = 8
-SOCKET_REQUEST_BYTES = 65536
 SOCKET_READ_CHUNK_BYTES = 4096
-SOCKET_CLIENT_TIMEOUT_SECONDS = 0.1
+SOCKET_READ_CHUNKS_PER_EVENT = 4
+SOCKET_REQUEST_DEADLINE_SECONDS = 0.1
+SOCKET_PENDING_POLL_INTERVAL_MS = 5
+SOCKET_RECOVERY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+_FAST_PUBLICATION_KINDS = frozenset((PUBLISH_EVCS_FIELDS_KIND, PUBLISH_COMPANION_FIELDS_KIND))
+_MAX_FRAME_BYTES = FAST_PUBLICATION_WIRE_HEADER_BYTES + FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES
+
+
+class _GlibEventApi(Protocol):
+    PRIORITY_DEFAULT: int
+    IO_IN: int
+
+    def io_add_watch(
+        self,
+        source: int,
+        priority: int,
+        condition: int,
+        callback: Callable[[int, int], bool],
+    ) -> int: ...
+
+    def timeout_add(
+        self,
+        interval: int,
+        callback: Callable[[], bool],
+    ) -> int: ...
+
+    def source_remove(self, source_id: int) -> bool: ...
+
+
+GLIB = cast(_GlibEventApi, _RAW_GLIB)
 
 
 class DbusAdapterSocket:
-    def __init__(self, context: DbusAdapterSocketContext) -> None:
+    """Serve only the latency-sensitive, transient publication boundary."""
+
+    def __init__(
+        self,
+        context: DbusAdapterSocketContext,
+        *,
+        events: _GlibEventApi = GLIB,
+    ) -> None:
         self._context = context
+        self._events = events
+        self._pending: _PendingSocketRequest | None = None
+        self._server_watch_id: int | None = None
+        self._pending_timer_id: int | None = None
 
     def start_socket(self) -> None:
         with suppress(FileNotFoundError):
@@ -44,94 +89,125 @@ class DbusAdapterSocket:
         server.setblocking(False)
         self._context._server = server
 
+    def install_glib_watch(self) -> None:
+        """Wake the gateway only when the Unix server socket becomes readable."""
+        if self._server_watch_id is not None:
+            return
+        server = self._context._server
+        if server is None:
+            return
+        self._server_watch_id = int(
+            self._events.io_add_watch(
+                server.fileno(),
+                self._events.PRIORITY_DEFAULT,
+                self._events.IO_IN,
+                self._on_server_ready,
+            )
+        )
+
     def close_socket(self) -> None:
+        self._remove_glib_source("_server_watch_id")
+        self._remove_glib_source("_pending_timer_id")
+        if self._pending is not None:
+            self._pending.conn.close()
+            self._pending = None
         if self._context._server is not None:
             self._context._server.close()
             self._context._server = None
         with suppress(FileNotFoundError):
             os.unlink(self._context.paths.socket_path)
 
-    def process_socket_once(self) -> None:
-        if self._context._server is None:
-            return
-        conn = accept_socket_connection(self._context._server)
-        if conn is None:
-            return
-        with conn:
-            self.serve_socket_connection(conn)
+    def process_socket_once(self) -> bool:
+        if self._pending is None:
+            server = self._context._server
+            if server is None:
+                return False
+            conn = accept_socket_connection(server)
+            if conn is None:
+                return False
+            self._pending = _PendingSocketRequest(
+                conn,
+                time.monotonic() + SOCKET_REQUEST_DEADLINE_SECONDS,
+                bytearray(),
+            )
+        return self._service_pending_request()
 
-    def serve_socket_connection(self, conn: socket.socket) -> None:
-        data, error = receive_socket_request(conn)
-        if error is None:
-            send_socket_response(conn, self.handle_socket_payload(data))
-        elif error:
-            send_socket_response(conn, error)
+    def _service_pending_request(self) -> bool:
+        pending = self._pending
+        if pending is None:
+            return False
+        complete, frame, error = read_pending_socket_request(pending)
+        if not complete:
+            return True
+        self._pending = None
+        try:
+            response = error if error is not None else self.handle_socket_frame(frame)
+            send_socket_response(pending.conn, response)
+        finally:
+            pending.conn.close()
+        return True
 
-    def handle_socket_payload(self, data: str) -> CommandPayload:
-        payload, error = parsed_socket_payload(data)
-        if error:
-            return {"ok": False, "error": error}
+    def _on_server_ready(self, _source: int, _condition: int) -> bool:
+        self._server_watch_id = None
+        return self._process_event()
+
+    def _on_pending_timer(self) -> bool:
+        self._pending_timer_id = None
+        return self._process_event()
+
+    def _process_event(self) -> bool:
+        self._process_socket_safely()
+        if self._pending is not None:
+            self._install_pending_timer()
+        else:
+            self.install_glib_watch()
+        return False
+
+    def _process_socket_safely(self) -> None:
+        try:
+            self.process_socket_once()
+        except SOCKET_RECOVERY_ERRORS as error:
+            self._discard_pending_request()
+            logging.exception("Gateway IPC event failed: %s", error)
+
+    def _discard_pending_request(self) -> None:
+        pending = self._pending
+        self._pending = None
+        if pending is not None:
+            with suppress(OSError):
+                pending.conn.close()
+
+    def _install_pending_timer(self) -> None:
+        if self._pending_timer_id is not None:
+            return
+        self._pending_timer_id = int(
+            self._events.timeout_add(
+                SOCKET_PENDING_POLL_INTERVAL_MS,
+                self._on_pending_timer,
+            )
+        )
+
+    def _remove_glib_source(self, attribute: str) -> None:
+        source_id = getattr(self, attribute)
+        if source_id is None:
+            return
+        setattr(self, attribute, None)
+        self._events.source_remove(source_id)
+
+    def handle_socket_frame(self, frame: bytes | None) -> CommandPayload:
+        if frame is None:
+            return {"ok": False, "error": "request-incomplete"}
+        try:
+            payload = decode_fast_publication_frame(frame)
+        except FastPublicationWireError as error:
+            return {"ok": False, "error": str(error)}
         return self.dispatch_socket_payload(payload)
 
-    def dispatch_socket_payload(self, payload: CommandPayload) -> CommandPayload:
-        request_type = str(payload.get("type") or payload.get("kind") or "")
-        handler = self.socket_handlers().get(request_type, self.unsupported_socket_request)
-        return handler(payload, request_type)
-
-    @staticmethod
-    def unsupported_socket_request(_payload: CommandPayload, request_type: str) -> CommandPayload:
-        return {"ok": False, "error": f"unsupported request type: {request_type}"}
-
-    def socket_handlers(self) -> dict[str, SocketHandler]:
-        return {
-            "snapshot": self.socket_snapshot,
-            "health": self.socket_health,
-            "refresh_energy_inputs": self.socket_enqueue,
-            PUBLISH_EVCS_FIELDS_KIND: self.socket_fast_publish,
-            PUBLISH_COMPANION_FIELDS_KIND: self.socket_fast_publish,
-        }
-
-    def socket_snapshot(
-        self,
-        _payload: CommandPayload,
-        _request_type: str,
-    ) -> CommandPayload:
-        return {"ok": True, "snapshot": self._context.cache.snapshot()}
-
-    def socket_health(
-        self,
-        _payload: CommandPayload,
-        _request_type: str,
-    ) -> CommandPayload:
-        return {"ok": True, "dbus_health": self._context.health_role.health_snapshot()}
-
-    def socket_enqueue(
-        self,
-        payload: CommandPayload,
-        request_type: str,
-    ) -> CommandPayload:
-        self._context.commands.enqueue(
-            {**payload, "kind": request_type, "source": payload.get("source", "socket")}
-        )
-        return {"ok": True}
-
-    def socket_fast_publish(
-        self,
-        payload: CommandPayload,
-        _request_type: str,
-    ) -> CommandPayload:
+    def dispatch_socket_payload(self, payload: CommandMapping) -> CommandPayload:
+        request_type = str(payload.get("kind") or "")
+        if request_type not in _FAST_PUBLICATION_KINDS:
+            return {"ok": False, "error": f"unsupported request type: {request_type}"}
         return self._context.fast_publications.enqueue(payload).to_payload()
-
-
-def parsed_socket_payload(data: str) -> tuple[CommandPayload, str]:
-    try:
-        decoded: object = json.loads(data)
-    except json.JSONDecodeError as error:
-        return {}, str(error)
-    payload = normalized_mapping(decoded)
-    if payload is None:
-        return {}, "request must be an object"
-    return payload, ""
 
 
 def accept_socket_connection(server: socket.socket) -> socket.socket | None:
@@ -142,70 +218,105 @@ def accept_socket_connection(server: socket.socket) -> socket.socket | None:
         conn, _addr = server.accept()
     except BlockingIOError:
         return None
+    conn.setblocking(False)
     return conn
 
 
-def receive_socket_request(conn: socket.socket) -> tuple[str, CommandPayload | None]:
-    return _SocketRequestReader(
-        conn=conn,
-        deadline=time.monotonic() + SOCKET_CLIENT_TIMEOUT_SECONDS,
-        received=bytearray(),
-    ).read()
+def receive_socket_request(
+    conn: socket.socket,
+) -> tuple[bytes | None, CommandPayload | None]:
+    """Read one immediately available frame for direct boundary tests."""
+    pending = _PendingSocketRequest(
+        conn,
+        time.monotonic() + SOCKET_REQUEST_DEADLINE_SECONDS,
+        bytearray(),
+    )
+    _complete, frame, error = read_pending_socket_request(pending)
+    return frame, error
 
 
 @dataclass(slots=True)
-class _SocketRequestReader:
+class _PendingSocketRequest:
     conn: socket.socket
     deadline: float
     received: bytearray
 
-    def read(self) -> SocketReadResult:
-        while True:
-            result = self._read_next_chunk()
-            if result is not None:
-                return result
 
-    def _read_next_chunk(self) -> SocketReadResult | None:
-        remaining = self.deadline - time.monotonic()
-        if remaining <= 0.0:
-            return _socket_read_timeout(self.received)
-        self.conn.settimeout(remaining)
-        try:
-            chunk = self.conn.recv(
-                min(
-                    SOCKET_READ_CHUNK_BYTES,
-                    SOCKET_REQUEST_BYTES + 1 - len(self.received),
-                )
-            )
-        except TimeoutError:
-            return _socket_read_timeout(self.received)
-        return self._consume(chunk)
+def read_pending_socket_request(
+    pending: _PendingSocketRequest,
+) -> tuple[bool, bytes | None, CommandPayload | None]:
+    result = _buffered_request_result(pending.received)
+    for _unused in range(SOCKET_READ_CHUNKS_PER_EVENT):
+        if result is not None:
+            return result
+        result = _receive_request_chunk(pending)
+        if result is None:
+            result = _buffered_request_result(pending.received)
+    return result if result is not None else (False, None, None)
 
-    def _consume(self, chunk: bytes) -> SocketReadResult | None:
-        if not chunk:
-            return _decoded_socket_request(self.received)
-        self.received.extend(chunk)
-        if len(self.received) > SOCKET_REQUEST_BYTES:
-            return "", {"ok": False, "error": "request-too-large"}
-        newline = self.received.find(b"\n")
-        if newline >= 0:
-            return _decoded_socket_request(self.received[:newline])
+
+def _buffered_request_result(
+    received: bytearray,
+) -> tuple[bool, bytes | None, CommandPayload | None] | None:
+    expected_size, error = _expected_request_size(received)
+    if error is not None:
+        return True, None, error
+    if expected_size and len(received) == expected_size:
+        return True, bytes(received), None
+    return None
+
+
+def _receive_request_chunk(
+    pending: _PendingSocketRequest,
+) -> tuple[bool, bytes | None, CommandPayload | None] | None:
+    chunk = _receive_available_chunk(pending.conn, len(pending.received))
+    if chunk is None:
+        return _pending_read_result(pending.deadline)
+    if not chunk:
+        return True, None, {"ok": False, "error": "request-incomplete"}
+    pending.received.extend(chunk)
+    return None
+
+
+def _pending_read_result(
+    deadline: float,
+) -> tuple[bool, bytes | None, CommandPayload | None]:
+    if time.monotonic() < deadline:
+        return False, None, None
+    return True, None, {"ok": False, "error": "request-timeout"}
+
+
+def _expected_request_size(
+    received: bytearray,
+) -> tuple[int, CommandPayload | None]:
+    if len(received) > _MAX_FRAME_BYTES:
+        return 0, {"ok": False, "error": "request-too-large"}
+    try:
+        expected_size = fast_publication_frame_size(received)
+    except FastPublicationWireError as error:
+        return 0, {"ok": False, "error": str(error)}
+    if expected_size and len(received) > expected_size:
+        return 0, {"ok": False, "error": "request-too-large"}
+    return expected_size, None
+
+
+def _receive_available_chunk(
+    conn: socket.socket,
+    received_bytes: int,
+) -> bytes | None:
+    try:
+        return conn.recv(min(SOCKET_READ_CHUNK_BYTES, _MAX_FRAME_BYTES + 1 - received_bytes))
+    except BlockingIOError:
         return None
 
 
-def _socket_read_timeout(received: bytearray) -> tuple[str, CommandPayload | None]:
-    if received:
-        return "", {"ok": False, "error": "request-timeout"}
-    logging.debug("Gateway socket client connected without sending a request")
-    return "", {}
-
-
-def _decoded_socket_request(raw: bytes | bytearray) -> tuple[str, None]:
-    return bytes(raw).decode(errors="replace").strip(), None
-
-
-def send_socket_response(conn: socket.socket, response: CommandPayload) -> None:
+def send_socket_response(conn: socket.socket, response: CommandMapping) -> None:
     try:
-        conn.sendall((compact_json(response) + "\n").encode())
-    except (BrokenPipeError, ConnectionResetError):
+        conn.sendall(encode_fast_publication_frame(response))
+    except (
+        BlockingIOError,
+        BrokenPipeError,
+        ConnectionResetError,
+        FastPublicationWireError,
+    ):
         logging.debug("Gateway socket client disconnected before reading its response")

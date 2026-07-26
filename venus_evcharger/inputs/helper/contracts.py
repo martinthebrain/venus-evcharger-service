@@ -13,6 +13,7 @@ from venus_evcharger.ipc.energy import (
     EnergyTopologySnapshot,
     MeasuredValue,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 
 Snapshot: TypeAlias = dict[str, object]
 
@@ -29,7 +30,12 @@ class EnergyGatewayClientPort(Protocol):  # pragma: no cover
 
     def load_energy_topology(self, *, max_age_seconds: float) -> EnergyTopologySnapshot | None: ...
 
-    def request_energy_refresh(self, request: EnergyRefreshRequest, *, source: str) -> str: ...
+    def request_energy_refresh(
+        self,
+        request: EnergyRefreshRequest,
+        *,
+        source: str,
+    ) -> GatewayEnqueueResult: ...
 
 
 class EnergySnapshotReaderPort(Protocol):  # pragma: no cover

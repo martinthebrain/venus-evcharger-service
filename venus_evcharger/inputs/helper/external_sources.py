@@ -188,6 +188,7 @@ def _gateway_battery_source(
         role="battery",
         service_name=_gateway_service_name(measurement.source_ids, configured_service),
         physical_id="" if definition is None else definition.physical_id,
+        physical_priority=0 if definition is None else definition.physical_priority,
         soc=measurement.value,
         usable_capacity_wh=usable_capacity_wh,
         battery_chemistry=battery_chemistry,

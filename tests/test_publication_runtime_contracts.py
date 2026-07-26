@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import platform
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.auto.policy import AutoPolicy
-from venus_evcharger.bootstrap.publication import EvcsPublicationRegistrar, accepted_publication_fields
+from venus_evcharger.auto.policy_settings import auto_policy_control_values
+from venus_evcharger.bootstrap.publication import EvcsPublicationOwner, accepted_publication_fields
 from venus_evcharger.companion.grid_projection import (
     GridProjection,
     GridProjectionConfig,
@@ -21,6 +25,11 @@ from venus_evcharger.ports.gateway_publication import (
     EvcsServiceIdentity,
     PublicationPriority,
     PublicationReceipt,
+)
+from venus_evcharger.ports.gateway_diagnostic_health import GatewayPublicationSummary
+from venus_evcharger.ports.gateway_diagnostics import (
+    GatewayDiagnosticsSnapshot,
+    GatewayDiagnosticsUnavailable,
 )
 
 
@@ -76,6 +85,72 @@ class _Runtime:
         return self.snapshot
 
 
+class _DiagnosticsReader:
+    def __init__(
+        self,
+        snapshot: GatewayDiagnosticsSnapshot | None = None,
+        *,
+        unavailable: bool = False,
+    ) -> None:
+        self.snapshot = snapshot or gateway_diagnostics_snapshot()
+        self.unavailable = unavailable
+        self.calls = 0
+
+    def read_snapshot(self) -> GatewayDiagnosticsSnapshot:
+        self.calls += 1
+        if self.unavailable:
+            raise GatewayDiagnosticsUnavailable("offline")
+        return self.snapshot
+
+
+def _unregistered_snapshot(
+    *,
+    captured_at: float = 100.0,
+    health_stale: bool = False,
+) -> GatewayDiagnosticsSnapshot:
+    snapshot = gateway_diagnostics_snapshot(
+        captured_at=captured_at,
+        health_stale=health_stale,
+    )
+    return replace(
+        snapshot,
+        publication=GatewayPublicationSummary(False, 0.0, True),
+    )
+
+
+def _expected_initial_fields(**overrides: object) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "connected": 0,
+        "status": 0,
+        "mode": 0,
+        "auto_start": 0,
+        "start_stop": 0,
+        "enable": 0,
+        "min_current": 0.0,
+        "max_current": 0.0,
+        "set_current": 0.0,
+        "phase_selection": "P1",
+        "phase_selection_active": "P1",
+        "supported_phase_selections": "P1",
+        "auto_health": "init",
+        "auto_health_code": 0,
+        "auto_state": "idle",
+        "auto_state_code": 0,
+        "auto_status_source": "unknown",
+        "auto_start_delay_seconds": 0.0,
+        "auto_stop_delay_seconds": 0.0,
+        "auto_scheduled_enabled_days": "",
+        "auto_scheduled_fallback_delay_seconds": 0.0,
+        "auto_scheduled_latest_end_time": "06:30",
+        "auto_scheduled_night_current": 0.0,
+        "auto_dbus_backoff_base_seconds": 0.0,
+        "auto_dbus_backoff_max_seconds": 0.0,
+    }
+    fields.update(auto_policy_control_values(AutoPolicy()))
+    fields.update(overrides)
+    return fields
+
+
 def _identity_service(publication: _PublicationRecorder) -> SimpleNamespace:
     return SimpleNamespace(
         gateway_publication=publication,
@@ -86,6 +161,7 @@ def _identity_service(publication: _PublicationRecorder) -> SimpleNamespace:
         hardware_version="meter-and-switch",
         serial="serial-1",
         connection_name="LAN",
+        topology_configured=False,
     )
 
 
@@ -117,7 +193,7 @@ class BootstrapPublicationContractTests(unittest.TestCase):
     def test_registration_publishes_complete_semantic_identity_and_initial_state(self) -> None:
         publication = _PublicationRecorder()
         service = _identity_service(publication)
-        service.host_configured = True
+        service.topology_configured = True
         service.last_status = 2
         service.virtual_mode = 1
         service.virtual_autostart = 1
@@ -127,7 +203,7 @@ class BootstrapPublicationContractTests(unittest.TestCase):
         service.max_current = 16
         service.virtual_set_current = 10
         service.requested_phase_selection = "P3"
-        service.active_phase_selection = "P1"
+        service.active_phase_selection = "P3"
         service.supported_phase_selections = ("P1", "P3")
         service._last_health_reason = "ready"
         service._last_health_code = 4
@@ -142,24 +218,57 @@ class BootstrapPublicationContractTests(unittest.TestCase):
         service.auto_scheduled_night_current_amps = 8
         service.auto_dbus_backoff_base_seconds = 2
         service.auto_dbus_backoff_max_seconds = 30
-        registrar = EvcsPublicationRegistrar(service, script_path="/opt/evcs/service.py")
+        registrar = EvcsPublicationOwner(service, script_path="/opt/evcs/service.py")
 
         registrar.register()
 
         self.assertEqual(len(publication.evcs_registrations), 1)
         identity, fields = publication.evcs_registrations[0]
-        self.assertEqual(identity.product_name, "EVCS")
-        self.assertEqual(identity.process_name, "/opt/evcs/service.py")
-        self.assertTrue(identity.process_version.startswith("Unknown version, and running on Python "))
         self.assertEqual(
-            {key: fields[key] for key in ("connected", "status", "mode", "start_stop", "phase_selection")},
-            {"connected": 1, "status": 2, "mode": 1, "start_stop": 1, "phase_selection": "P3"},
+            identity,
+            EvcsServiceIdentity(
+                product_name="EVCS",
+                custom_name="Garage",
+                firmware_version="1.2.3",
+                hardware_version="meter-and-switch",
+                serial="serial-1",
+                connection_name="LAN",
+                process_name="/opt/evcs/service.py",
+                process_version=(
+                    "Unknown version, and running on Python " + platform.python_version()
+                ),
+            ),
         )
-        self.assertEqual(fields["supported_phase_selections"], "P1,P3")
-        self.assertEqual(fields["auto_health"], "ready")
-        self.assertEqual(fields["auto_scheduled_latest_end_time"], "07:15")
-        self.assertEqual(fields["auto_dbus_backoff_max_seconds"], 30.0)
-        self.assertEqual(fields["auto_min_soc"], service.auto_policy.min_soc)
+        self.assertEqual(
+            fields,
+            _expected_initial_fields(
+                connected=1,
+                status=2,
+                mode=1,
+                auto_start=1,
+                start_stop=1,
+                enable=1,
+                min_current=6.0,
+                max_current=16.0,
+                set_current=10.0,
+                phase_selection="P3",
+                phase_selection_active="P3",
+                supported_phase_selections="P1,P3",
+                auto_health="ready",
+                auto_health_code=4,
+                auto_state="charging",
+                auto_state_code=3,
+                auto_status_source="meter",
+                auto_start_delay_seconds=12.0,
+                auto_stop_delay_seconds=34.0,
+                auto_scheduled_enabled_days="1,2,3",
+                auto_scheduled_fallback_delay_seconds=45.0,
+                auto_scheduled_latest_end_time="07:15",
+                auto_scheduled_night_current=8.0,
+                auto_dbus_backoff_base_seconds=2.0,
+                auto_dbus_backoff_max_seconds=30.0,
+            ),
+        )
 
     def test_registration_defaults_topology_and_rejection_are_explicit(self) -> None:
         publication = _PublicationRecorder()
@@ -167,27 +276,132 @@ class BootstrapPublicationContractTests(unittest.TestCase):
         service = _identity_service(publication)
         service.topology_configured = False
         service.host_configured = True
-        registrar = EvcsPublicationRegistrar(service, script_path="service.py")
+        registrar = EvcsPublicationOwner(service, script_path="service.py")
 
         fields = registrar.initial_fields()
-        self.assertEqual(fields["connected"], 0)
-        self.assertEqual(fields["mode"], 0)
-        self.assertEqual(fields["phase_selection"], "P1")
-        self.assertEqual(fields["auto_health"], "init")
-        with self.assertRaisesRegex(RuntimeError, "Gateway rejected EVCS registration"):
+        self.assertEqual(fields, _expected_initial_fields())
+        with self.assertRaises(RuntimeError) as rejected:
             registrar.register()
+        self.assertEqual(str(rejected.exception), "Gateway rejected EVCS registration")
 
     def test_identity_and_mapping_boundaries_reject_missing_data_and_copy_keys(self) -> None:
         publication = _PublicationRecorder()
         service = _identity_service(publication)
         service.serial = None
-        with self.assertRaisesRegex(TypeError, "EVCS identity attribute serial is missing"):
-            EvcsPublicationRegistrar(service, script_path="service.py").identity()
+        with self.assertRaises(TypeError) as missing:
+            EvcsPublicationOwner(service, script_path="service.py").identity()
+        self.assertEqual(
+            str(missing.exception),
+            "EVCS identity attribute serial is missing",
+        )
+        delattr(service, "serial")
+        with self.assertRaises(TypeError) as absent:
+            EvcsPublicationOwner(service, script_path="service.py").identity()
+        self.assertEqual(
+            str(absent.exception),
+            "EVCS identity attribute serial is missing",
+        )
 
         source = {1: "numeric", "mode": 2}
         copied = accepted_publication_fields(source)
         self.assertEqual(copied, {"1": "numeric", "mode": 2})
         self.assertIsNot(copied, source)
+
+    def test_runtime_owner_recovers_once_from_fresh_unregistered_gateway(self) -> None:
+        publication = _PublicationRecorder()
+        service = _identity_service(publication)
+        service.virtual_mode = 2
+        monotonic_values = iter((10.0, 14.999, 15.0))
+        owner = EvcsPublicationOwner(
+            service,
+            script_path="service.py",
+            monotonic=lambda: next(monotonic_values),
+        )
+        reader = _DiagnosticsReader(_unregistered_snapshot())
+
+        self.assertTrue(owner.maintain_registration(reader, 100.0))
+        self.assertFalse(owner.maintain_registration(reader, 100.1))
+        self.assertEqual(reader.calls, 1)
+        self.assertEqual(len(publication.evcs_registrations), 1)
+        self.assertEqual(publication.evcs_registrations[0][1]["mode"], 2)
+
+        reader.snapshot = gateway_diagnostics_snapshot(captured_at=100.2)
+        self.assertFalse(owner.maintain_registration(reader, 100.2))
+        self.assertEqual(reader.calls, 2)
+        self.assertEqual(len(publication.evcs_registrations), 1)
+
+    def test_runtime_owner_checks_immediately_at_monotonic_origin(self) -> None:
+        publication = _PublicationRecorder()
+        owner = EvcsPublicationOwner(
+            _identity_service(publication),
+            script_path="service.py",
+            monotonic=lambda: 0.0,
+        )
+
+        self.assertTrue(
+            owner.maintain_registration(
+                _DiagnosticsReader(_unregistered_snapshot()),
+                100.0,
+            )
+        )
+        self.assertEqual(len(publication.evcs_registrations), 1)
+
+    def test_bootstrap_acceptance_defers_the_first_runtime_health_check(self) -> None:
+        publication = _PublicationRecorder()
+        monotonic_values = iter((10.0, 14.999, 15.0))
+        owner = EvcsPublicationOwner(
+            _identity_service(publication),
+            script_path="service.py",
+            monotonic=lambda: next(monotonic_values),
+        )
+        reader = _DiagnosticsReader(_unregistered_snapshot())
+
+        owner.register()
+        self.assertFalse(owner.maintain_registration(reader, 100.0))
+        self.assertEqual(reader.calls, 0)
+        self.assertTrue(owner.maintain_registration(reader, 100.0))
+        self.assertEqual(reader.calls, 1)
+        self.assertEqual(len(publication.evcs_registrations), 2)
+
+    def test_runtime_owner_ignores_unavailable_stale_future_and_registered_health(self) -> None:
+        cases = (
+            (_DiagnosticsReader(unavailable=True), 100.0),
+            (_DiagnosticsReader(_unregistered_snapshot(health_stale=True)), 100.0),
+            (_DiagnosticsReader(_unregistered_snapshot(captured_at=89.9)), 100.0),
+            (_DiagnosticsReader(_unregistered_snapshot(captured_at=100.1)), 100.0),
+            (_DiagnosticsReader(gateway_diagnostics_snapshot()), 100.0),
+        )
+        for reader, now in cases:
+            with self.subTest(snapshot=reader.snapshot, unavailable=reader.unavailable):
+                publication = _PublicationRecorder()
+                owner = EvcsPublicationOwner(
+                    _identity_service(publication),
+                    script_path="service.py",
+                    monotonic=lambda: 10.0,
+                )
+                self.assertFalse(owner.maintain_registration(reader, now))
+                self.assertEqual(publication.evcs_registrations, [])
+
+    def test_runtime_owner_reports_rejected_registration_recovery(self) -> None:
+        publication = _PublicationRecorder()
+        publication.accept_registration = False
+        owner = EvcsPublicationOwner(
+            _identity_service(publication),
+            script_path="service.py",
+            monotonic=lambda: 10.0,
+        )
+
+        with self.assertLogs(level="WARNING") as captured:
+            accepted = owner.maintain_registration(
+                _DiagnosticsReader(_unregistered_snapshot()),
+                100.0,
+            )
+
+        self.assertFalse(accepted)
+        self.assertEqual(
+            captured.output,
+            ["WARNING:root:Gateway rejected EVCS registration recovery"],
+        )
 
 
 class GridProjectionContractTests(unittest.TestCase):

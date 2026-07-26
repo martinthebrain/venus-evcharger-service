@@ -15,6 +15,7 @@ from venus_evcharger.ipc.energy import (
     EnergyTopologySnapshot,
     MeasuredValue,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,11 +49,20 @@ class FakeGatewayClient:
         del max_age_seconds
         return self.topology
 
-    def request_energy_refresh(self, request: EnergyRefreshRequest, *, source: str) -> str:
+    def request_energy_refresh(
+        self,
+        request: EnergyRefreshRequest,
+        *,
+        source: str,
+    ) -> GatewayEnqueueResult:
         if self.error is not None:
             raise self.error
         self.refresh_requests.append((request, source))
-        return f"command-{len(self.refresh_requests)}"
+        return GatewayEnqueueResult(
+            True,
+            f"command-{len(self.refresh_requests)}",
+            "mailbox",
+        )
 
 
 class FakeEnergyGateway:

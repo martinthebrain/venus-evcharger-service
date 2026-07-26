@@ -17,6 +17,7 @@ class PublicationReceipt:
 
     accepted: bool
     command_id: str = ""
+    reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)

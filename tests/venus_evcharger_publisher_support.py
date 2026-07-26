@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
+from venus_evcharger.bootstrap.publication import EvcsPublicationOwner
 from tests.support.publish_runtime import PublishServiceHarness as SimpleNamespace
 from venus_evcharger.ports.gateway_diagnostics import GatewayDiagnosticsReader
 from venus_evcharger.publish.dbus import DbusPublishController as _DbusPublishController
@@ -19,6 +20,7 @@ def build_publish_controller(
         service,
         age_seconds,
         gateway_diagnostics or gateway_diagnostics_reader(),
+        EvcsPublicationOwner(service, script_path="test-service.py"),
     )
 
 
