@@ -89,6 +89,16 @@ names, paths, inspection XML, service counts, or path counts.
 `DbusGatewayRunDir`, `DbusGatewayCachePath`, `DbusGatewayHealthPath`,
 `DbusGatewaySocketPath`, `DbusGatewayCommandDir`, and
 `DbusGatewayCoreCommandDir` can override these paths.
+All gateway participants derive these values through the single typed
+`venus_evcharger.ipc.gateway_path_config.configured_gateway_paths` boundary.
+The adapter, core, auto-input helper, and generic-Shelly helper therefore use
+the same complete `GatewayPaths` contract; no process reconstructs filenames
+or applies only a subset of the overrides. Configured paths must be absolute.
+Without a runtime override, configured individual paths are authoritative. An
+explicit adapter `--run-dir` argument has higher precedence and relocates the
+entire derived `GatewayPaths` set together; configured individual paths are
+then intentionally ignored so an isolated runtime cannot cross into another
+gateway's socket, cache, health, or command queues.
 
 ## Publication IPC Arbitration
 

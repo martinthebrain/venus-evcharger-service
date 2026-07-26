@@ -208,6 +208,34 @@ class TestAutoInputSupervisorProcessContracts(unittest.TestCase):
         manager.ensure_helper_process()
         self.assertEqual(process.kill_calls, 1)
 
+    def test_missing_gateway_health_extends_stale_and_restart_grace(self) -> None:
+        process = HelperProcessFake()
+        service = AutoInputSupervisorServiceFake(
+            gateway_pressure_policy=None,
+            now=100.0,
+            _auto_input_helper_process=process,
+            _auto_input_helper_last_start_at=50.0,
+            _auto_input_snapshot_last_seen=70.0,
+            _auto_input_snapshot_seen_for_current_helper=True,
+        )
+        manager = lifecycle(service)
+
+        manager.ensure_helper_process()
+        self.assertEqual(process.terminate_calls, 0)
+
+        service.now = 116.0
+        manager.ensure_helper_process()
+        self.assertEqual(process.terminate_calls, 1)
+        self.assertEqual(service._auto_input_helper_restart_requested_at, 116.0)
+
+        service.now = 131.0
+        manager.ensure_helper_process()
+        self.assertEqual(process.kill_calls, 0)
+
+        service.now = 132.0
+        manager.ensure_helper_process()
+        self.assertEqual(process.kill_calls, 1)
+
     def test_helper_start_time_is_liveness_fallback_until_first_snapshot(self) -> None:
         process = HelperProcessFake()
         service = AutoInputSupervisorServiceFake(
@@ -237,6 +265,30 @@ class TestAutoInputSupervisorProcessContracts(unittest.TestCase):
         service.now = 104.0
         spawned = HelperProcessFake(pid=8888)
         with patch("venus_evcharger.inputs.supervisor_process.os.unlink", side_effect=FileNotFoundError), patch(
+            "venus_evcharger.inputs.supervisor_process.subprocess.Popen",
+            return_value=spawned,
+        ):
+            manager.ensure_helper_process()
+        self.assertIs(service._auto_input_helper_process, spawned)
+
+    def test_missing_gateway_health_extends_exited_helper_restart_cooldown(self) -> None:
+        service = AutoInputSupervisorServiceFake(
+            gateway_pressure_policy=None,
+            now=110.0,
+            _auto_input_helper_process=HelperProcessFake(return_code=9),
+            _auto_input_helper_last_start_at=98.0,
+        )
+        manager = lifecycle(service)
+        with patch("venus_evcharger.inputs.supervisor_process.subprocess.Popen") as popen:
+            manager.ensure_helper_process()
+        popen.assert_not_called()
+
+        service.now = 114.0
+        spawned = HelperProcessFake(pid=8888)
+        with patch(
+            "venus_evcharger.inputs.supervisor_process.os.unlink",
+            side_effect=FileNotFoundError,
+        ), patch(
             "venus_evcharger.inputs.supervisor_process.subprocess.Popen",
             return_value=spawned,
         ):

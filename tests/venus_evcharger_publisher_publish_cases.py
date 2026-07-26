@@ -12,6 +12,7 @@ from tests.venus_evcharger_publisher_support import (
     build_publish_controller,
     patch,
 )
+from tests.support.gateway_pressure import FreshOkGatewayPressurePolicy
 from venus_evcharger.ipc.gateway_pressure import CachedGatewayPressurePolicy
 from venus_evcharger.ports.gateway_publication import GatewayPublicationPort, PublicationReceipt
 
@@ -23,12 +24,14 @@ def _publication(*, accepted: bool = True) -> MagicMock:
 
 
 def _publish_service(publication: MagicMock | None = None, **values: object) -> SimpleNamespace:
-    return SimpleNamespace(
-        gateway_publication=publication or _publication(),
-        _dbus_live_publish_interval_seconds=1.0,
-        _dbus_slow_publish_interval_seconds=5.0,
-        **values,
-    )
+    defaults: dict[str, object] = {
+        "gateway_publication": publication or _publication(),
+        "gateway_pressure_policy": FreshOkGatewayPressurePolicy(),
+        "_dbus_live_publish_interval_seconds": 1.0,
+        "_dbus_slow_publish_interval_seconds": 5.0,
+    }
+    defaults.update(values)
+    return SimpleNamespace(**defaults)
 
 
 class TestDbusPublishControllerPublish(DbusPublishControllerTestCase):

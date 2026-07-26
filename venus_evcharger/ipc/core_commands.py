@@ -26,6 +26,9 @@ CORE_COMMAND_SCHEMA_VERSION = 1
 CORE_COMMAND_QUEUE_CLASS = "core-control"
 CORE_USER_COMMAND_KIND = "user_command"
 DEFAULT_CORE_COMMAND_DIR = "/run/venus-evcharger/core-commands"
+CORE_COMMAND_RETRY_INITIAL_SECONDS = 0.5
+CORE_COMMAND_RETRY_MAX_SECONDS = 30.0
+CORE_COMMAND_RETRY_MAX_EXPONENT = 6
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,6 @@ class CoreControlCommand:
 class _CoreControlEnvelope:
     """Normalized fields shared by validation and command construction."""
 
-    kind: str
     name: ControlCommandName
     target: str
     source: ControlCommandSource
@@ -102,6 +104,15 @@ class CoreCommandMailbox(FileCommandMailbox):
         super().__init__(command_dir, policy=CoreCommandQueuePolicy())
 
 
+def core_command_retry_delay(failure_count: int) -> float:
+    """Return bounded exponential delay for a durable core command retry."""
+    exponent = min(max(0, failure_count - 1), CORE_COMMAND_RETRY_MAX_EXPONENT)
+    return min(
+        CORE_COMMAND_RETRY_MAX_SECONDS,
+        CORE_COMMAND_RETRY_INITIAL_SECONDS * float(2**exponent),
+    )
+
+
 def core_control_command_payload(
     name: ControlCommandName,
     target: str,
@@ -149,7 +160,7 @@ def _parse_core_control_envelope(payload: CommandMapping) -> _CoreControlEnvelop
         created_at=created_at,
     ):
         return None
-    return _CoreControlEnvelope(kind, name, target, source, origin, command_id, created_at)
+    return _CoreControlEnvelope(name, target, source, origin, command_id, created_at)
 
 
 def _core_control_text_fields(payload: CommandMapping) -> tuple[str, str, str, str] | None:
@@ -240,7 +251,7 @@ def _route_supported(name: ControlCommandName, target: str) -> bool:
         return target in CONTROL_AUTO_RUNTIME_TARGETS
     if name == "set_current_setting":
         return target in CONTROL_CURRENT_SETTING_TARGETS
-    return CONTROL_COMMAND_DEFAULT_TARGETS.get(name) == target
+    return bool(CONTROL_COMMAND_DEFAULT_TARGETS.get(name) == target)
 
 
 def _required_text(value: str, field: str) -> str:

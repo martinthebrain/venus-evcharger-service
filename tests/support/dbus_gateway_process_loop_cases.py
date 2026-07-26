@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import call
+
 from tests.support.dbus_gateway_adapter_harness import (
     DbusAdapter,
     GatewayAdapterContractCase,
@@ -33,9 +35,13 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter.socket_role.close_socket.assert_called_once()
 
             adapter._stop = False
-            install_mock(adapter.socket_role, "process_socket_once", MagicMock(side_effect=RuntimeError("tick failed")))
-            self.assertTrue(adapter.tick())
-            self.assertEqual(adapter.circuit.last_error, "tick failed")
+            with patch.object(
+                adapter.loop_role,
+                "process_one_dbus_operation_once",
+                side_effect=RuntimeError("tick failed"),
+            ):
+                self.assertTrue(adapter.tick())
+            self.assertEqual(adapter.circuit.last_error, "")
 
             install_mock(adapter.io_role, "poll_one_due_read_once", MagicMock(return_value=True))
             install_mock(adapter.write_scheduler, "process_one", MagicMock(return_value=True))
@@ -161,7 +167,6 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter._next_work_tick_monotonic = 100.0
-            install_mock(adapter.socket_role, "process_socket_once", MagicMock())
             install_mock(adapter.loop_role, "process_one_dbus_operation_once", MagicMock())
             install_mock(adapter.io_role, "publish_cache", MagicMock())
             install_mock(adapter.tick_health, "record", MagicMock())
@@ -199,16 +204,13 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter.loop_role.update_adaptive_tick.assert_called_once_with(control)
             self.assertEqual(adapter.tick_seconds, adapter.max_tick_seconds)
             self.assertAlmostEqual(adapter._next_work_tick_monotonic, 100.03 + adapter.tick_seconds)
-            adapter.socket_role.process_socket_once.assert_called_once()
             adapter.loop_role.process_one_dbus_operation_once.assert_called_once()
             adapter.io_role.publish_cache.assert_called_once_with(control)
 
             deferred_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-deferred")))
             deferred_adapter._next_work_tick_monotonic = 100.01
-            install_mock(deferred_adapter.socket_role, "process_socket_once", MagicMock())
             with patch.object(process_loop_module.time, "monotonic", return_value=100.0):
                 self.assertTrue(deferred_adapter.tick())
-            deferred_adapter.socket_role.process_socket_once.assert_not_called()
 
             stop_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-stop")))
             stop_adapter._next_work_tick_monotonic = 0.0
@@ -216,8 +218,11 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             def stop_during_work() -> None:
                 stop_adapter._stop = True
 
-            install_mock(stop_adapter.socket_role, "process_socket_once", MagicMock(side_effect=stop_during_work))
-            install_mock(stop_adapter.loop_role, "process_one_dbus_operation_once", MagicMock())
+            install_mock(
+                stop_adapter.loop_role,
+                "process_one_dbus_operation_once",
+                MagicMock(side_effect=stop_during_work),
+            )
             install_mock(stop_adapter.io_role, "publish_cache", MagicMock())
             stop_control = object()
             install_mock(stop_adapter.health_role, "control_snapshot", MagicMock(return_value=stop_control))
@@ -238,6 +243,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             fake_loop = MagicMock()
             install_mock(adapter.runtime_role, "install_signal_handlers", MagicMock())
             install_mock(adapter.socket_role, "start_socket", MagicMock())
+            install_mock(adapter.socket_role, "install_glib_watch", MagicMock())
             install_mock(adapter.socket_role, "close_socket", MagicMock())
 
             with (
@@ -257,10 +263,16 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             self.assertTrue(Path(paths.command_dir).is_dir())
             self.assertTrue(Path(paths.core_command_dir).is_dir())
             adapter.socket_role.start_socket.assert_called_once()
+            adapter.socket_role.install_glib_watch.assert_called_once()
             main_loop_factory.assert_called_once_with()
-            timeout_add.assert_called_once_with(
-                max(50, int(adapter.min_tick_seconds * 1000)),
-                adapter.loop_role.tick,
+            self.assertEqual(
+                timeout_add.call_args_list,
+                [
+                    call(
+                        max(50, int(adapter.min_tick_seconds * 1000)),
+                        adapter.loop_role.tick,
+                    ),
+                ],
             )
             fake_loop.run.assert_called_once_with()
             self.assertIs(adapter._main_loop, fake_loop)
@@ -274,6 +286,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-fast")))
             install_mock(adapter.runtime_role, "install_signal_handlers", MagicMock())
             install_mock(adapter.socket_role, "start_socket", MagicMock())
+            install_mock(adapter.socket_role, "install_glib_watch", MagicMock())
             install_mock(adapter.socket_role, "close_socket", MagicMock())
 
             with (
@@ -287,7 +300,10 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             ):
                 adapter.run()
 
-            timeout_add.assert_called_once_with(50, adapter.loop_role.tick)
+            self.assertEqual(
+                timeout_add.call_args_list,
+                [call(50, adapter.loop_role.tick)],
+            )
 
     def test_tick_recovery_records_and_logs_gateway_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -296,18 +312,44 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter._next_work_tick_monotonic = 0.0
             error = RuntimeError("tick boom")
-            install_mock(adapter.socket_role, "process_socket_once", MagicMock(side_effect=error))
-            install_mock(adapter.loop_role, "process_one_dbus_operation_once", MagicMock())
+            install_mock(
+                adapter.loop_role,
+                "process_one_dbus_operation_once",
+                MagicMock(side_effect=error),
+            )
             install_mock(adapter.io_role, "publish_cache", MagicMock())
             install_mock(adapter.circuit, "record_error", MagicMock())
 
             with patch.object(process_loop_module.logging, "exception") as log_exception:
                 self.assertTrue(adapter.tick())
 
-            adapter.circuit.record_error.assert_called_once_with(error)
-            log_exception.assert_called_once_with("DBus adapter tick failed: %s", error)
-            adapter.loop_role.process_one_dbus_operation_once.assert_not_called()
+            adapter.circuit.record_error.assert_not_called()
+            log_exception.assert_called_once_with(
+                "Gateway work tick failed outside the DBus circuit: %s",
+                error,
+            )
+            adapter.loop_role.process_one_dbus_operation_once.assert_called_once()
             adapter.io_role.publish_cache.assert_not_called()
+
+    def test_tick_does_not_end_a_scheduler_tick_that_never_began(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            adapter._next_work_tick_monotonic = 0.0
+            install_mock(
+                adapter.write_scheduler,
+                "begin_tick",
+                MagicMock(side_effect=RuntimeError("begin failed")),
+            )
+            install_mock(adapter.write_scheduler, "end_tick", MagicMock())
+
+            self.assertTrue(adapter.tick())
+
+            adapter.write_scheduler.end_tick.assert_not_called()
 
     def test_loop_core_read_freshness_and_priority_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -153,6 +153,7 @@ class ShellyControllerPort(Protocol):
 
 class PublishControllerPort(Protocol):
     def ensure_state(self) -> None: ...
+    def maintain_evcs_registration(self, now: float) -> bool: ...
     def publish_field(
         self,
         field: str,

@@ -202,6 +202,84 @@ class EnergyConnectorsFacadeContractTests(unittest.TestCase):
         self.assertEqual(runtime.requests, [1.25])
         self.assertEqual(client.timeout_seconds, 0.25)
 
+    def test_modbus_multistep_read_persists_only_incomplete_progress(self) -> None:
+        runtime = _DeadlineRuntime(0.25)
+        source = EnergySourceDefinition(
+            source_id="modbus",
+            connector_type="modbus",
+            config_path=" source.ini ",
+        )
+        soc_field = ModbusEnergyFieldSettings("holding", 10, "uint16", 1.0, "big")
+        mode_field = ModbusEnergyFieldSettings("input", 11, "uint16", 1.0, "little")
+        settings = replace(
+            _modbus_settings(),
+            soc_field=soc_field,
+            operating_mode_field=mode_field,
+            operating_mode_map={"2": "support"},
+        )
+        client = MagicMock(spec=ModbusClient)
+        client.timeout_seconds = 9.0
+        result = EnergySourceSnapshot("modbus", "battery", "service")
+        progress_key = connectors._connector_progress_key(source)
+
+        with (
+            patch.object(connectors, "_modbus_energy_source_settings", return_value=settings),
+            patch.object(connectors, "_modbus_energy_source_client", return_value=client),
+            patch.object(connectors, "_modbus_field_value", side_effect=(61.0, 2.0)) as read,
+            patch.object(connectors, "_build_modbus_energy_source_snapshot", return_value=result) as build,
+        ):
+            first = connectors._modbus_energy_source_step(runtime, source, 10.0)
+            cached = runtime._energy_connector_runtime_state.caches[
+                connectors._MODBUS_PROGRESS_CACHE
+            ][progress_key]
+            self.assertIsNone(first.snapshot)
+            self.assertEqual(cached.next_field_index, 1)
+            self.assertEqual(cached.values, {"soc": 61.0})
+            build.assert_not_called()
+
+            second = connectors._modbus_energy_source_step(runtime, source, 11.0)
+
+        self.assertIs(second.snapshot, result)
+        self.assertEqual(
+            read.call_args_list,
+            [call(client, soc_field), call(client, mode_field)],
+        )
+        build.assert_called_once_with(
+            source,
+            11.0,
+            settings,
+            {"soc": 61.0, "operating_mode": "support"},
+        )
+        self.assertNotIn(
+            progress_key,
+            runtime._energy_connector_runtime_state.caches[
+                connectors._MODBUS_PROGRESS_CACHE
+            ],
+        )
+        self.assertEqual(runtime.requests, [1.25, 1.25])
+        self.assertEqual(client.timeout_seconds, 0.25)
+
+    def test_modbus_progress_loader_rejects_wrong_cached_type(self) -> None:
+        runtime = SimpleNamespace()
+        progress_key = "source\0config.ini"
+        connectors._runtime_cache_put(
+            runtime,
+            connectors._MODBUS_PROGRESS_CACHE,
+            progress_key,
+            "invalid",
+        )
+
+        progress = connectors._modbus_read_progress(runtime, progress_key)
+
+        self.assertEqual(progress.next_field_index, 0)
+        self.assertEqual(progress.values, {})
+        self.assertNotIn(
+            progress_key,
+            runtime._energy_connector_runtime_state.caches[
+                connectors._MODBUS_PROGRESS_CACHE
+            ],
+        )
+
     def test_modbus_empty_fields_complete_without_io_and_read_failure_clears_progress(
         self,
     ) -> None:
@@ -328,6 +406,27 @@ class EnergyConnectorsFacadeContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "did not return a JSON object"):
                 connectors._command_json_energy_source_step(owner, source, 9.5)
         self.assertEqual(runtime.requests, [2.5])
+
+    def test_template_http_wrapper_completes_exact_snapshot(self) -> None:
+        owner = object()
+        source = EnergySourceDefinition(
+            source_id="template",
+            connector_type="template_http",
+        )
+        snapshot = EnergySourceSnapshot("template", "battery", "service")
+        with patch.object(
+            connectors,
+            "_template_http_energy_source_snapshot",
+            return_value=snapshot,
+        ) as read:
+            result = connectors._template_http_energy_source_step(
+                owner,
+                source,
+                17.25,
+            )
+
+        self.assertIs(result.snapshot, snapshot)
+        read.assert_called_once_with(owner, source, 17.25)
 
 
 if __name__ == "__main__":

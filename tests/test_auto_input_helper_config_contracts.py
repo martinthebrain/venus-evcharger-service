@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
+from venus_evcharger.dbus_gateway_core import gateway_paths
 from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig
 from venus_evcharger.inputs.helper.config_runtime import (
     AutoInputHelperSettings,
@@ -68,8 +69,7 @@ class AutoInputHelperConfigContracts(unittest.TestCase):
                 parent_pid=None,
                 helper_generation=0,
                 runtime_instance_id="generated",
-                gateway_run_dir="/run/venus-evcharger",
-                gateway_cache_path="/run/venus-evcharger/dbus-cache.json",
+                gateway_paths=gateway_paths(),
                 gateway_max_age_seconds=10.0,
                 gateway_error_retry_seconds=30.0,
                 auto_pv_poll_interval_seconds=1.0,
@@ -113,14 +113,17 @@ DbusGatewayCachePath = /tmp/custom-cache.json
         empty_override, _ = self._load(config, snapshot_path="")
 
         self.assertEqual(configured.snapshot_path, "/run/from-config.json")
-        self.assertEqual(configured.gateway_run_dir, "/run/custom-gateway")
-        self.assertEqual(configured.gateway_cache_path, "/tmp/custom-cache.json")
+        self.assertEqual(configured.gateway_paths.run_dir, "/run/custom-gateway")
+        self.assertEqual(configured.gateway_paths.cache_path, "/tmp/custom-cache.json")
         self.assertEqual(overridden.snapshot_path, "/run/from-argument.json")
         self.assertEqual(empty_override.snapshot_path, "/run/from-config.json")
 
     def test_default_cache_path_follows_the_configured_gateway_run_directory(self) -> None:
         settings, _ = self._load("[DEFAULT]\nDbusGatewayRunDir=/run/isolated\n")
-        self.assertEqual(settings.gateway_cache_path, "/run/isolated/dbus-cache.json")
+        self.assertEqual(
+            settings.gateway_paths.cache_path,
+            "/run/isolated/dbus-cache.json",
+        )
 
     def test_config_keys_remain_case_insensitive(self) -> None:
         settings, _ = self._load(
@@ -132,7 +135,10 @@ autopvsourcepolicy=GATEWAY-ONLY
 """
         )
         self.assertEqual(settings.snapshot_path, "/run/lowercase.json")
-        self.assertEqual(settings.gateway_cache_path, "/run/lowercase-gateway/dbus-cache.json")
+        self.assertEqual(
+            settings.gateway_paths.cache_path,
+            "/run/lowercase-gateway/dbus-cache.json",
+        )
         self.assertEqual(settings.gateway_max_age_seconds, 9.0)
         self.assertEqual(settings.pv_projection_policy.name, "gateway_only")
 

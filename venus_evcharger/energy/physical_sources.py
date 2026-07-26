@@ -29,7 +29,7 @@ def _soc_source_quality(source: EnergySourceSnapshot) -> tuple[bool, bool, int, 
     captured_at = source.captured_at
     has_finite_timestamp = captured_at is not None and math.isfinite(float(captured_at))
     confidence = float(source.confidence)
-    finite_confidence = confidence if math.isfinite(confidence) else float("-inf")
+    finite_confidence = confidence if math.isfinite(confidence) else -math.inf
     return (
         bool(source.online),
         has_finite_timestamp,

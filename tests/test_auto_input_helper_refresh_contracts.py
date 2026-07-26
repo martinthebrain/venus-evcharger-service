@@ -14,8 +14,15 @@ class AutoInputHelperRefreshContracts(unittest.TestCase):
         snapshots = FakeSnapshots()
         coordinator = EnergyRefreshCoordinator(gateway, snapshots, lambda: False)
         self.assertFalse(coordinator.refresh())
-        self.assertEqual([request[0] for request in gateway.requests], ["all", "topology"])
-        self.assertTrue(gateway.requests[0][2])
+        self.assertEqual(
+            gateway.requests,
+            [
+                ("all", "initial semantic energy snapshot", True),
+                ("topology", "initial semantic energy topology", False),
+            ],
+        )
+        self.assertEqual(gateway.input_refreshes, 1)
+        self.assertEqual(gateway.topology_refreshes, 1)
         self.assertEqual(snapshots.refresh_all_calls, 1)
 
     def test_existing_snapshots_need_no_startup_request(self) -> None:
@@ -34,12 +41,19 @@ class AutoInputHelperRefreshContracts(unittest.TestCase):
         stopped = False
         coordinator = EnergyRefreshCoordinator(gateway, snapshots, lambda: stopped)
         self.assertTrue(coordinator.timer_tick())
-        self.assertEqual(gateway.requests[-1][0], "topology")
+        self.assertEqual(
+            gateway.requests[-1],
+            ("topology", "periodic semantic topology refresh", False),
+        )
+        self.assertEqual(gateway.topology_refreshes, 1)
         coordinator.reset()
         self.assertEqual(gateway.reset_calls, 1)
         stopped = True
         self.assertFalse(coordinator.timer_tick())
         self.assertFalse(coordinator.refresh())
+        self.assertEqual(gateway.topology_refreshes, 1)
+        self.assertEqual(gateway.input_refreshes, 0)
+        self.assertEqual(snapshots.refresh_all_calls, 0)
 
 
 if __name__ == "__main__":

@@ -1,19 +1,27 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Atomic JSON-file command mailbox shared by independent processes."""
+"""Atomic JSON-file command mailbox shared by independent processes.
+
+The transport owns locking, atomic replacement, conditional retirement, and
+RAM-only quarantine. Domain-specific validation and ordering remain in queue
+policies, so corruption handling cannot accidentally reinterpret commands.
+"""
 
 from __future__ import annotations
 
 import fcntl
 import hashlib
 import json
+import logging
 import os
+import stat
 import time
 import uuid
 from collections import OrderedDict
 from collections.abc import Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator, Protocol, TypeGuard, TypeVar
+from typing import Generator, Protocol, TypeGuard, TypeVar, runtime_checkable
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
 from venus_evcharger.ipc.command_types import (
@@ -37,18 +45,35 @@ COMMAND_PRIORITY_RANKS = {
 MAILBOX_LOCK_TIMEOUT_SECONDS = 0.25
 MAILBOX_LOCK_RETRY_SECONDS = 0.005
 MAILBOX_REVISION_FIELD = "mailbox_revision"
+MAILBOX_ERROR_LOG_INTERVAL_SECONDS = 60.0
+MAX_MAILBOX_QUARANTINE_ENTRIES = 128
 
 
 class MailboxLockTimeout(TimeoutError):
     """Raised when another process holds a mailbox lock for too long."""
 
 
+class MailboxScanUnavailable(RuntimeError):
+    """Raised when mailbox contents cannot be determined reliably."""
+
+    def __init__(self, command_dir: str, error: OSError) -> None:
+        super().__init__(f"Command mailbox scan unavailable path={command_dir}: {error}")
+        self.command_dir = command_dir
+        self.error = error
+
+
+@dataclass(frozen=True, slots=True)
+class _QuarantinedCommandFile:
+    signature: tuple[int, int, int] | None
+    reason: str
+
+
+@runtime_checkable
 class CommandMailboxReader(Protocol):  # pragma: no cover
     """Consumer surface for a command mailbox."""
 
     def load_pending(self) -> CommandFileList: ...
     def coalesce(self, commands: CommandFileList) -> CommandFileList: ...
-    def remove(self, path: str) -> None: ...
     def remove_if_current(self, path: str, expected: CommandMapping) -> bool: ...
 
 
@@ -93,6 +118,8 @@ class FileCommandMailbox:
         self._policy = policy
         self._lock_timeout_seconds = max(0.0, float(lock_timeout_seconds))
         self._lock_path = os.path.join(command_dir, ".mailbox.lock")
+        self._quarantined: OrderedDict[str, _QuarantinedCommandFile] = OrderedDict()
+        self._last_directory_error_log_at: float | None = None
 
     def enqueue(self, command: CommandMapping) -> str:
         os.makedirs(self.command_dir, exist_ok=True)
@@ -136,27 +163,110 @@ class FileCommandMailbox:
         return False
 
     def load_pending(self) -> CommandFileList:
-        if not os.path.isdir(self.command_dir):
-            return []
         try:
+            if not self._command_directory_available():
+                return []
             with self._locked():
                 return self._load_pending_unlocked()
+        except (MailboxLockTimeout, MailboxScanUnavailable):
+            raise
         except PermissionError:
             # Read-only observers cannot create the advisory lock file. They
             # may still inspect atomically written command files safely.
             return self._load_pending_unlocked()
+        except OSError as error:
+            raise self._scan_unavailable(error) from error
+
+    def _command_directory_available(self) -> bool:
+        try:
+            mode = os.stat(self.command_dir).st_mode
+        except FileNotFoundError:
+            self._quarantined.clear()
+            return False
+        except OSError as error:
+            raise self._scan_unavailable(error) from error
+        if stat.S_ISDIR(mode):
+            return True
+        shape_error = NotADirectoryError(self.command_dir)
+        raise self._scan_unavailable(shape_error) from shape_error
 
     def _load_pending_unlocked(self) -> CommandFileList:
+        """Load valid files while unchanged corrupt generations stay isolated."""
         try:
             paths = sorted(Path(self.command_dir).glob("*.json"))
-        except OSError:
-            return []
+        except OSError as error:
+            raise self._scan_unavailable(error) from error
+        self._forget_absent_quarantine_entries(paths)
         pending: CommandFileList = []
         for path in paths:
-            payload = normalized_mapping(read_command_json(str(path)))
-            if payload is not None:
-                pending.append((str(path), self._policy.normalize(payload)))
+            command = self._load_command_file(path)
+            if command is not None:
+                pending.append(command)
         return pending
+
+    def _load_command_file(self, path: Path) -> CommandFile | None:
+        path_text = str(path)
+        signature = _command_file_signature(path_text)
+        if self._is_unchanged_quarantined(path_text, signature):
+            return None
+        try:
+            raw_payload = _read_command_json(path_text)
+        except (OSError, json.JSONDecodeError) as error:
+            reason = f"{type(error).__name__}: {error}"
+            self._quarantine(path_text, signature, reason)
+            return None
+        payload = normalized_mapping(raw_payload)
+        if payload is None:
+            self._quarantine(path_text, signature, "payload-is-not-object")
+            return None
+        self._quarantined.pop(path_text, None)
+        return path_text, self._policy.normalize(payload)
+
+    def _forget_absent_quarantine_entries(self, paths: list[Path]) -> None:
+        present = {str(path) for path in paths}
+        for path in tuple(self._quarantined):
+            if path not in present:
+                self._quarantined.pop(path)
+
+    def _is_unchanged_quarantined(
+        self,
+        path: str,
+        signature: tuple[int, int, int] | None,
+    ) -> bool:
+        entry = self._quarantined.get(path)
+        return entry is not None and entry.signature == signature
+
+    def _quarantine(
+        self,
+        path: str,
+        signature: tuple[int, int, int] | None,
+        reason: str,
+    ) -> None:
+        """Remember only the newest bounded set of invalid file generations."""
+        entry = _QuarantinedCommandFile(signature=signature, reason=reason)
+        if self._quarantined.get(path) == entry:
+            return
+        self._quarantined[path] = entry
+        self._quarantined.move_to_end(path)
+        while len(self._quarantined) > MAX_MAILBOX_QUARANTINE_ENTRIES:
+            oldest = next(iter(self._quarantined))
+            self._quarantined.pop(oldest)
+        logging.warning("Quarantined unreadable command file path=%s reason=%s", path, reason)
+
+    def _record_directory_error(self, error: OSError) -> None:
+        """Rate-limit repeated scan failures while retaining no disk state."""
+        now = time.monotonic()
+        if (
+            self._last_directory_error_log_at is not None
+            and now - self._last_directory_error_log_at < MAILBOX_ERROR_LOG_INTERVAL_SECONDS
+        ):
+            return
+        self._last_directory_error_log_at = now
+        logging.warning("Command mailbox directory scan failed path=%s error=%s", self.command_dir, error)
+
+    def _scan_unavailable(self, error: OSError) -> MailboxScanUnavailable:
+        self._record_directory_error(error)
+        return MailboxScanUnavailable(self.command_dir, error)
 
     def remove(self, path: str) -> None:
         os.makedirs(self.command_dir, exist_ok=True)
@@ -287,8 +397,8 @@ def _same_mailbox_revision(current: CommandMapping, expected: CommandMapping) ->
     expected_revision = expected.get(MAILBOX_REVISION_FIELD)
     current_revision = current.get(MAILBOX_REVISION_FIELD)
     if isinstance(expected_revision, str) and expected_revision:
-        return current_revision == expected_revision
-    return current == expected
+        return bool(current_revision == expected_revision)
+    return bool(current == expected)
 
 
 def _acquire_lock(descriptor: int, timeout_seconds: float) -> None:
@@ -311,11 +421,23 @@ def normalized_mapping(value: object) -> CommandPayload | None:
 
 def read_command_json(path: str) -> object:
     try:
-        with open(path, encoding="utf-8") as handle:
-            payload: object = json.load(handle)
-            return payload
+        return _read_command_json(path)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _read_command_json(path: str) -> object:
+    with open(path, encoding="utf-8") as handle:
+        payload: object = json.load(handle)
+    return payload
+
+
+def _command_file_signature(path: str) -> tuple[int, int, int] | None:
+    try:
+        status = os.stat(path)
+    except OSError:
+        return None
+    return status.st_ino, status.st_size, status.st_mtime_ns
 
 
 def write_command_json(path: str, payload: CommandMapping) -> None:

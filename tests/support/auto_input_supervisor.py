@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
 from venus_evcharger.inputs.supervisor_contracts import HelperProcess
+from tests.support.gateway_pressure import FreshOkGatewayPressurePolicy
+from venus_evcharger.ports.gateway_pressure import GatewayPressurePolicy
 
 
 @dataclass
@@ -85,6 +87,9 @@ class AutoInputSupervisorServiceFake:
     auto_input_helper_stale_seconds: float = 15.0
     auto_input_snapshot_path: str = "/tmp/auto-input.json"
     gateway_health_path: str = ""
+    gateway_pressure_policy: GatewayPressurePolicy | None = field(
+        default_factory=FreshOkGatewayPressurePolicy
+    )
     virtual_mode: int = 1
     now: float = 100.0
     _auto_input_helper_generation: int = 0

@@ -16,8 +16,8 @@ from venus_evcharger.ipc.publication_order_state import (
     PublicationFieldKey,
     PublicationLane,
     PublicationOrderMark,
+    checkpoint_publication_order_marks,
     load_publication_order_marks,
-    persist_publication_order_marks,
 )
 
 PUBLICATION_ORDER_FIELD = "transport_order"
@@ -26,7 +26,19 @@ PUBLICATION_ORDER_RETENTION_SECONDS = 60.0
 PUBLICATION_ORDER_STATE_NAME = "publication-order-state.json"
 PUBLICATION_ORDER_PROCESS_BITS = 32
 PUBLICATION_ORDER_PROCESS_MASK = (1 << PUBLICATION_ORDER_PROCESS_BITS) - 1
-PublicationOrderClaim = Literal["accepted", "superseded", "full", "state-error"]
+PublicationOrderClaim = Literal["accepted", "superseded", "full"]
+
+
+class PublicationOrderDeferredError(RuntimeError):
+    """A durable publication must remain queued without being applied."""
+
+
+class PublicationOrderCapacityError(PublicationOrderDeferredError):
+    """The bounded order history cannot safely admit another field."""
+
+
+class PublicationOrderPendingFastError(PublicationOrderDeferredError):
+    """A volatile publication must resolve before its fallback is considered."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,14 +110,21 @@ class PublicationOrderHistory:
     ) -> PublicationFieldClaim:
         candidate = self._pruned_marks(time.monotonic(), active_fields)
         claim = _field_claim(key, field_orders, candidate, _fast_order_claim_blocked)
-        if claim.state == "superseded":
-            return claim
-        updated = _with_claimed_marks(key, field_orders, "fast", claim, candidate)
-        if len(updated) > self.capacity:
+        if not _claim_fits_capacity(
+            key,
+            field_orders,
+            claim,
+            candidate,
+            self.capacity,
+        ):
             return PublicationFieldClaim("full")
-        if not self._persist(updated):
-            return PublicationFieldClaim("state-error")
-        self._marks = updated
+        self._marks = _with_claimed_marks(
+            key,
+            field_orders,
+            "fast",
+            claim,
+            candidate,
+        )
         return claim
 
     def claim_durable(
@@ -122,19 +141,83 @@ class PublicationOrderHistory:
             candidate,
             _durable_order_claim_blocked,
         )
+        if not _claim_fits_capacity(
+            key,
+            field_orders,
+            claim,
+            candidate,
+            self.capacity,
+        ):
+            return PublicationFieldClaim("full")
+        return claim
+
+    def confirm_fast_applied(
+        self,
+        key: str,
+        field_orders: Mapping[str, int],
+    ) -> bool:
+        """Persist only fast marks matching the publication just applied."""
+        now = time.monotonic()
+        updated = OrderedDict(self._marks)
+        changed: OrderedDict[PublicationFieldKey, PublicationOrderMark] = OrderedDict()
+        for field, order in field_orders.items():
+            field_key = (key, field)
+            current = updated.get(field_key)
+            if _fast_mark_matches(current, order):
+                mark = PublicationOrderMark(order, "durable", now)
+                updated[field_key] = mark
+                updated.move_to_end(field_key)
+                changed[field_key] = mark
+        self._marks = updated
+        return self._persist(changed, updated)
+
+    def confirm_durable_applied(
+        self,
+        key: str,
+        field_orders: Mapping[str, int],
+        *,
+        active_fields: Collection[PublicationFieldKey],
+    ) -> bool:
+        """Confirm a durable claim after publication succeeded."""
+        candidate = self._pruned_marks(time.monotonic(), active_fields)
+        claim = _field_claim(
+            key,
+            field_orders,
+            candidate,
+            _durable_order_claim_blocked,
+        )
+        if not _claim_fits_capacity(
+            key,
+            field_orders,
+            claim,
+            candidate,
+            self.capacity,
+        ):
+            return False
         self._marks = _with_claimed_marks(
             key,
             field_orders,
             "durable",
             claim,
             candidate,
-            capacity=self.capacity,
         )
-        return claim
+        changed = OrderedDict(
+            (field_key, self._marks[field_key])
+            for field_key in _claimed_field_keys(key, field_orders, claim)
+        )
+        return self._persist(changed, self._marks)
 
-    def commit_durable(self) -> bool:
-        """Persist accepted durable marks only after their publication applied."""
-        return self._persist(self._marks)
+    def release_fast(
+        self,
+        key: str,
+        field_orders: Mapping[str, int],
+    ) -> None:
+        """Release failed or expired volatile claims without touching newer marks."""
+        for field, order in field_orders.items():
+            field_key = (key, field)
+            current = self._marks.get(field_key)
+            if _fast_mark_matches(current, order):
+                del self._marks[field_key]
 
     def snapshot(self) -> CommandPayload:
         return {
@@ -159,9 +242,14 @@ class PublicationOrderHistory:
 
     def _persist(
         self,
-        marks: OrderedDict[PublicationFieldKey, PublicationOrderMark],
+        changed: OrderedDict[PublicationFieldKey, PublicationOrderMark],
+        current: OrderedDict[PublicationFieldKey, PublicationOrderMark],
     ) -> bool:
-        return persist_publication_order_marks(self.state_path, marks)
+        return checkpoint_publication_order_marks(
+            self.state_path,
+            changed,
+            current,
+        )
 
     def _load_marks(
         self,
@@ -171,7 +259,6 @@ class PublicationOrderHistory:
             self.state_path,
             now=now,
             retention_seconds=self.retention_seconds,
-            capacity=self.capacity,
         )
 
 
@@ -199,21 +286,12 @@ def _with_claimed_marks(
     lane: PublicationLane,
     claim: PublicationFieldClaim,
     marks: OrderedDict[PublicationFieldKey, PublicationOrderMark],
-    *,
-    capacity: int | None = None,
 ) -> OrderedDict[PublicationFieldKey, PublicationOrderMark]:
     updated = OrderedDict(marks)
     now = time.monotonic()
     for field in claim.accepted_fields:
         field_key = (key, field)
-        mark = _claimed_order_mark(
-            field_key,
-            field_orders[field],
-            lane,
-            now,
-            updated,
-            capacity,
-        )
+        mark = _claimed_order_mark(field_orders[field], lane, now)
         if mark is None:
             continue
         updated[field_key] = mark
@@ -222,29 +300,50 @@ def _with_claimed_marks(
 
 
 def _claimed_order_mark(
-    field_key: PublicationFieldKey,
     order: int,
     lane: PublicationLane,
     now: float,
-    marks: Mapping[PublicationFieldKey, PublicationOrderMark],
-    capacity: int | None,
 ) -> PublicationOrderMark | None:
     if order <= 0:
-        return None
-    if _new_mark_exceeds_capacity(field_key, marks, capacity):
         return None
     return PublicationOrderMark(order, lane, now)
 
 
-def _new_mark_exceeds_capacity(
-    field_key: PublicationFieldKey,
-    marks: Mapping[PublicationFieldKey, PublicationOrderMark],
-    capacity: int | None,
+def _fast_mark_matches(
+    current: PublicationOrderMark | None,
+    order: int,
 ) -> bool:
     return (
-        capacity is not None
-        and field_key not in marks
-        and len(marks) >= capacity
+        current is not None
+        and current.lane == "fast"
+        and current.order == order
+    )
+
+
+def _claim_fits_capacity(
+    key: str,
+    field_orders: Mapping[str, int],
+    claim: PublicationFieldClaim,
+    marks: Mapping[PublicationFieldKey, PublicationOrderMark],
+    capacity: int,
+) -> bool:
+    new_fields = {
+        field_key
+        for field_key in _claimed_field_keys(key, field_orders, claim)
+        if field_key not in marks
+    }
+    return len(marks) + len(new_fields) <= capacity
+
+
+def _claimed_field_keys(
+    key: str,
+    field_orders: Mapping[str, int],
+    claim: PublicationFieldClaim,
+) -> tuple[PublicationFieldKey, ...]:
+    return tuple(
+        (key, field)
+        for field in claim.accepted_fields
+        if field_orders[field] > 0
     )
 
 
@@ -333,8 +432,11 @@ __all__ = [
     "PUBLICATION_ORDER_STATE_NAME",
     "PublicationFieldKey",
     "PublicationFieldClaim",
+    "PublicationOrderCapacityError",
+    "PublicationOrderDeferredError",
     "PublicationOrderHistory",
     "PublicationOrderIssuer",
+    "PublicationOrderPendingFastError",
     "PublicationOrderSequence",
     "publication_field_orders",
     "publication_order",

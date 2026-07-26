@@ -3,14 +3,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import socket
-from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
-from venus_evcharger.core.shared import compact_json
 from venus_evcharger.dbus_gateway_cache import DbusCacheStore
 from venus_evcharger.dbus_gateway_commands import DbusGatewayCommandInbox
 from venus_evcharger.dbus_gateway_core import (
@@ -20,9 +17,10 @@ from venus_evcharger.dbus_gateway_core import (
     float_or_zero,
     gateway_paths,
     is_object_mapping,
+    normalized_object_mapping,
 )
 from venus_evcharger.dbus_gateway_policy import command_allowed_by_backpressure
-from venus_evcharger.ipc.command_mailbox import MailboxLockTimeout, normalized_mapping
+from venus_evcharger.ipc.command_mailbox import MailboxLockTimeout
 from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
 from venus_evcharger.ipc.energy import (
     EnergyInputsSnapshot,
@@ -32,12 +30,21 @@ from venus_evcharger.ipc.energy import (
 from venus_evcharger.ipc.energy_binary import load_energy_inputs_file
 from venus_evcharger.ipc.enqueue_result import GatewayEnqueueFailure, GatewayEnqueueResult
 from venus_evcharger.ipc.fast_publication import is_transient_publication
+from venus_evcharger.ipc.fast_publication_wire import (
+    FAST_PUBLICATION_WIRE_HEADER_BYTES,
+    FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES,
+    FastPublicationWireError,
+    decode_fast_publication_frame,
+    encode_fast_publication_frame,
+    fast_publication_frame_size,
+)
 from venus_evcharger.ipc.gateway_operations import (
     ess_grid_setpoint_command,
     gx_relay_refresh_command,
     gx_relay_set_command,
     gx_relay_state_key,
 )
+from venus_evcharger.ipc.gateway_pressure import read_gateway_pressure_snapshot
 from venus_evcharger.ipc.gateway_publication import (
     SEMANTIC_PUBLICATION_KINDS,
     publish_companion_fields_command,
@@ -87,25 +94,22 @@ class GatewayClient:
         self.paths = paths or gateway_paths()
         self.timeout_seconds = max(0.05, float(timeout_seconds))
         self.commands = DbusGatewayCommandInbox(self.paths.command_dir)
-        self._backpressure_cache: tuple[float, str] = (0.0, "unknown")
+        self._backpressure_cache: tuple[float, str] = (0.0, "slow")
         self._publication_orders = publication_order_issuer or PublicationOrderIssuer()
-        self._durable_enqueue_failures: Counter[GatewayEnqueueFailure] = Counter()
 
-    def send(self, payload: CommandMapping) -> CommandPayload:
+    def _send_fast_publication(self, payload: CommandMapping) -> CommandPayload:
         try:
+            ready = _json_ready(dict(payload))
+            ready_payload = normalized_object_mapping(ready)
+            if ready_payload is None:
+                raise FastPublicationWireError("payload-must-be-object")
+            frame = encode_fast_publication_frame(ready_payload)
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.settimeout(self.timeout_seconds)
                 sock.connect(self.paths.socket_path)
-                sock.sendall((compact_json(_json_ready(dict(payload))) + "\n").encode())
-                data = sock.recv(65536)
-            if not data:
-                return {"ok": True}
-            decoded: object = json.loads(data)
-            response = normalized_mapping(decoded)
-            if response is None:
-                return {"ok": False, "error": "invalid-response"}
-            return response
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError, TypeError, ValueError) as error:
+                sock.sendall(frame)
+                return _receive_fast_response(sock)
+        except (FastPublicationWireError, OSError, RuntimeError, TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
 
     def enqueue_command(self, command: CommandMapping) -> GatewayEnqueueResult:
@@ -113,7 +117,7 @@ class GatewayClient:
         if not command_allowed_by_backpressure(ordered_command, self.backpressure_state(max_age_seconds=2.0)):
             return GatewayEnqueueResult(False, reason="backpressure")
         if is_transient_publication(ordered_command):
-            command_id = _accepted_fast_command_id(self.send(ordered_command))
+            command_id = _accepted_fast_command_id(self._send_fast_publication(ordered_command))
             if command_id:
                 return GatewayEnqueueResult(True, command_id, "socket")
         return self._enqueue_durable_command(ordered_command)
@@ -135,15 +139,7 @@ class GatewayClient:
         except ValueError:
             return self._durable_enqueue_failed("invalid-command")
 
-    def enqueue_health(self) -> CommandPayload:
-        """Expose process-local durable enqueue failures to diagnostics."""
-        return {
-            "durable_enqueue_failures": sum(self._durable_enqueue_failures.values()),
-            "durable_enqueue_failures_by_reason": dict(sorted(self._durable_enqueue_failures.items())),
-        }
-
     def _durable_enqueue_failed(self, reason: GatewayEnqueueFailure) -> GatewayEnqueueResult:
-        self._durable_enqueue_failures[reason] += 1
         logging.error("Durable gateway command was not accepted: %s", reason)
         return GatewayEnqueueResult(False, reason=reason)
 
@@ -196,8 +192,11 @@ class GatewayClient:
         now = _now()
         if _backpressure_cache_fresh(cached_at, cached_state, now):
             return cached_state
-        health = self.load_health(max_age_seconds=max_age_seconds)
-        state = _backpressure_state_from_health(health)
+        state = read_gateway_pressure_snapshot(
+            self.paths.health_path,
+            now=now,
+            max_age_seconds=max_age_seconds,
+        ).state
         self._backpressure_cache = (now, state)
         return state
 
@@ -223,7 +222,13 @@ class GatewayOperationsClient:
         state = _binary_integer_or_none(value)
         if state is not None:
             return state
-        self._client.enqueue_command(gx_relay_refresh_command(relay_index))
+        result = self._client.enqueue_command(gx_relay_refresh_command(relay_index))
+        if not result.accepted:
+            logging.warning(
+                "Gateway rejected GX relay refresh for relay %d: %s",
+                relay_index,
+                result.reason or "unknown",
+            )
         return None
 
     def set_gx_relay_enabled(
@@ -335,15 +340,12 @@ def gateway_value(snapshot: CommandMapping, key: str, *, max_age_seconds: float)
 
 
 def _backpressure_cache_fresh(cached_at: float, cached_state: str, now: float) -> bool:
-    return now - cached_at < 1.0 and cached_state != "unknown"
-
-
-def _backpressure_state_from_health(health: CommandMapping) -> str:
-    backpressure = health.get("backpressure")
-    if not is_object_mapping(backpressure):
-        return "unknown"
-    state = backpressure.get("state")
-    return str(state) if state else "unknown"
+    return (
+        cached_at > 0.0
+        and cached_at <= now
+        and now - cached_at < 1.0
+        and bool(cached_state)
+    )
 
 
 def _operation_receipt(result: GatewayEnqueueResult) -> GatewayOperationReceipt:
@@ -359,6 +361,39 @@ def _accepted_fast_command_id(response: CommandMapping) -> str:
         return ""
     command_id = response.get("command_id")
     return str(command_id) if isinstance(command_id, str) and command_id else ""
+
+
+def _receive_fast_response(sock: socket.socket) -> CommandPayload:
+    received = bytearray()
+    expected_size = 0
+    maximum_size = FAST_PUBLICATION_WIRE_HEADER_BYTES + FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES
+    while expected_size == 0 or len(received) < expected_size:
+        received.extend(_receive_response_chunk(sock, maximum_size, len(received)))
+        expected_size = fast_publication_frame_size(received)
+        if _response_exceeds_bounds(received, expected_size, maximum_size):
+            raise FastPublicationWireError("response-too-large")
+    return decode_fast_publication_frame(bytes(received))
+
+
+def _receive_response_chunk(
+    sock: socket.socket,
+    maximum_size: int,
+    received_size: int,
+) -> bytes:
+    chunk = sock.recv(min(4096, maximum_size + 1 - received_size))
+    if not chunk:
+        raise FastPublicationWireError("response-incomplete")
+    return chunk
+
+
+def _response_exceeds_bounds(
+    received: bytearray,
+    expected_size: int,
+    maximum_size: int,
+) -> bool:
+    return len(received) > maximum_size or (
+        expected_size > 0 and len(received) > expected_size
+    )
 
 
 def _binary_integer_or_none(value: object) -> int | None:

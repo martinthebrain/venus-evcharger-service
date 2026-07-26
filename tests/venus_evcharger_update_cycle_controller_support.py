@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from tests.support.gateway_pressure import FreshOkGatewayPressurePolicy
 from tests.support.update_cycle_roles import install_update_cycle_roles
 from tests.venus_evcharger_shelly_io_controller_support import ShellyIoController
 
@@ -470,6 +471,7 @@ class UpdateCycleControllerTestBase(unittest.TestCase):
             "_software_update_no_update_active": 0,
             "_software_update_next_check_at": None,
             "_software_update_boot_auto_due_at": None,
+            "gateway_pressure_policy": FreshOkGatewayPressurePolicy(),
         }
         data.update(overrides)
         return SimpleNamespace(**data)

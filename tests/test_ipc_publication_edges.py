@@ -73,7 +73,8 @@ class PublicationQueueEdgeContracts(unittest.TestCase):
             queue = FastPublicationQueue(order_state_path=temp_dir)
             command = _ordered({"mode": 1}, {"mode": 10})
             prepared = queue.prepare_durable(command)
-            queue.record_durable_outcome("applied")
+            assert prepared is not None
+            queue.record_durable_outcome(prepared, "applied")
 
         self.assertEqual(prepared, command)
         self.assertEqual(queue.snapshot()["counts"], {"order_state_write_errors": 1})
@@ -82,6 +83,8 @@ class PublicationQueueEdgeContracts(unittest.TestCase):
         self.assertTrue(queue.enqueue(command).accepted)
         newer = _ordered({"mode": 2}, {"mode": 11})
         self.assertEqual(queue.prepare_durable(newer), newer)
+        self.assertEqual(len(queue), 1)
+        queue.record_durable_outcome(newer, "applied")
         self.assertEqual(len(queue), 0)
 
     def test_snapshot_prunes_a_fully_expired_fast_command(self) -> None:
@@ -120,10 +123,10 @@ class PublicationQueueEdgeContracts(unittest.TestCase):
 
 
 class PublicationStateEdgeContracts(unittest.TestCase):
-    def test_state_loader_bounds_capacity_and_accepts_durable_marks(self) -> None:
+    def test_state_loader_keeps_all_valid_durable_marks_without_unsafe_eviction(self) -> None:
         records = [
             {"key": "first", "field": "mode", "order": 1, "lane": "durable", "seen_at": 9.0},
-            {"key": "second", "field": "mode", "order": 2, "lane": "fast", "seen_at": 9.0},
+            {"key": "second", "field": "mode", "order": 2, "lane": "durable", "seen_at": 9.0},
         ]
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "orders.json"
@@ -135,10 +138,9 @@ class PublicationStateEdgeContracts(unittest.TestCase):
                 str(path),
                 now=10.0,
                 retention_seconds=5.0,
-                capacity=1,
             )
 
-        self.assertEqual(tuple(marks), (("first", "mode"),))
+        self.assertEqual(tuple(marks), (("first", "mode"), ("second", "mode")))
         self.assertEqual(marks[("first", "mode")].lane, "durable")
 
     def test_state_loader_ignores_nonmapping_and_bad_timestamp_records(self) -> None:
@@ -158,7 +160,6 @@ class PublicationStateEdgeContracts(unittest.TestCase):
                 str(path),
                 now=10.0,
                 retention_seconds=5.0,
-                capacity=4,
             )
 
         self.assertEqual(marks, {})

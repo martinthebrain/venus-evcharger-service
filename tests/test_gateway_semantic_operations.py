@@ -191,9 +191,11 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
             cache = DbusCacheStore(paths)
             cache.update_external_read(gx_relay_state_key(0), 1, source="test")
             cache.write_cache_snapshot()
-            operations = GatewayOperationsClient(GatewayClient(paths))
+            client = GatewayClient(paths)
+            operations = GatewayOperationsClient(client)
             self.assertEqual(operations.read_gx_relay_state(0, max_age_seconds=5.0), 1)
-            self.assertIsNone(operations.read_gx_relay_state(1, max_age_seconds=5.0))
+            with patch.object(client, "backpressure_state", return_value="ok"):
+                self.assertIsNone(operations.read_gx_relay_state(1, max_age_seconds=5.0))
             pending = GatewayClient(paths).commands.load_pending()
             self.assertEqual(len(pending), 1)
             self.assertEqual(pending[0][1]["kind"], GX_RELAY_REFRESH_KIND)

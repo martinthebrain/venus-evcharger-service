@@ -454,6 +454,7 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
     def test_publish_virtual_state_paths_contract_uses_session_energy_for_total_and_phases(self):
         service = SimpleNamespace(
             phase="L2",
+            _maintain_evcs_registration=MagicMock(return_value=True),
             _publish_energy_time_measurements=MagicMock(return_value=True),
             _publish_config_paths=MagicMock(return_value=True),
             _publish_diagnostic_paths=MagicMock(return_value=False),
@@ -461,6 +462,7 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
 
         self.assertTrue(controller.components.state.publish_virtual_state_paths(123.0, 45, 6.0, 1, 100.0))
+        service._maintain_evcs_registration.assert_called_once_with(100.0)
         service._publish_energy_time_measurements.assert_called_once_with(
             6.0,
             {"L1": 0.0, "L2": 6.0, "L3": 0.0},

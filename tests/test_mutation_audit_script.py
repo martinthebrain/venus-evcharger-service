@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -25,6 +26,12 @@ from scripts.dev import (
     mutation_audit_verification,
 )
 from scripts.dev import run_mutation_audit as mutation_audit
+from scripts.dev.mutation_audit_config_selections_application import FOCUSED_TEST_SELECTIONS_APPLICATION
+from scripts.dev.mutation_audit_config_selections_backend import FOCUSED_TEST_SELECTIONS_BACKEND
+from scripts.dev.mutation_audit_config_selections_energy_inputs import FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS
+from scripts.dev.mutation_audit_config_selections_ipc_gateway import FOCUSED_TEST_SELECTIONS_IPC_GATEWAY
+from scripts.dev.mutation_audit_config_selections_runtime_services import FOCUSED_TEST_SELECTIONS_RUNTIME_SERVICES
+from scripts.dev.mutation_audit_config_selections_update import FOCUSED_TEST_SELECTIONS_UPDATE
 
 
 def _source_repository_root() -> Path:
@@ -242,6 +249,36 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertEqual(missing_targets, [])
         self.assertEqual(missing_tests, [])
 
+    def test_split_core_selections_preserve_order_and_unique_ownership(self) -> None:
+        core_selections = (
+            *FOCUSED_TEST_SELECTIONS_APPLICATION,
+            *FOCUSED_TEST_SELECTIONS_IPC_GATEWAY,
+            *FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS,
+            *FOCUSED_TEST_SELECTIONS_RUNTIME_SERVICES,
+            *FOCUSED_TEST_SELECTIONS_UPDATE,
+            *FOCUSED_TEST_SELECTIONS_BACKEND,
+        )
+        prefixes = tuple(prefix for prefix, _selection in core_selections)
+        serialized = json.dumps(core_selections, separators=(",", ":")).encode()
+
+        self.assertEqual(len(core_selections), 236)
+        self.assertEqual(len(prefixes), len(set(prefixes)))
+        self.assertEqual(
+            hashlib.sha256(serialized).hexdigest(),
+            "1bfb7df2f862695709326d570f8ecb25f6bab67924cbd00e3b514225bf1186d7",
+        )
+
+        all_selections = mutation_audit_config.focused_test_selections()
+        first_core_index = all_selections.index(core_selections[0])
+        self.assertEqual(
+            all_selections[first_core_index : first_core_index + len(core_selections)],
+            core_selections,
+        )
+        self.assertEqual(
+            hashlib.sha256(json.dumps(all_selections, separators=(",", ":")).encode()).hexdigest(),
+            "82182de66256227014ff50f280a5b73fc0627948a191106dd687641aac30ce92",
+        )
+
     def test_mutation_config_can_target_dev_scripts(self) -> None:
         config = mutation_audit_config.mutmut_config_toml("scripts/dev/mutation_audit_support.py")
         parsed = tomllib.loads(config)
@@ -376,6 +413,22 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_fast_publication_queue_contracts.py",
                 "tests/test_ipc_publication_edges.py",
                 "tests/test_fast_publication_ipc.py",
+                "tests/test_fast_publication_queue_enqueue_mutation_contracts.py",
+                "tests/test_fast_publication_queue_ordering_mutation_contracts.py",
+                "tests/test_fast_publication_queue_payload_mutation_contracts.py",
+            ),
+            "venus_evcharger/ipc/fast_publication_ordering.py": (
+                "tests/test_publication_order_contracts.py",
+                "tests/test_fast_publication_queue_contracts.py",
+                "tests/test_ipc_publication_edges.py",
+                "tests/test_fast_publication_ipc.py",
+                "tests/test_fast_publication_ordering_mutation_contracts.py",
+            ),
+            "venus_evcharger/ipc/fast_publication_wire.py": (
+                "tests/test_fast_publication_wire_contracts.py",
+                "tests/test_fast_publication_wire_mutation_contracts.py",
+                "tests/test_fast_publication_ipc.py",
+                "tests/test_dbus_adapter_process_ipc_contracts.py",
             ),
             "venus_evcharger/ipc/fast_publication_metrics.py": (
                 "tests/test_fast_publication_queue_contracts.py",
@@ -408,6 +461,7 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_fast_publication_queue_contracts.py",
                 "tests/test_ipc_publication_edges.py",
                 "tests/test_fast_publication_ipc.py",
+                "tests/test_publication_order_state_resilience.py",
             ),
             "venus_evcharger/ipc/publication_payload.py": (
                 "tests/test_fast_publication_queue_contracts.py",
@@ -677,6 +731,7 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/ipc/gateway_pressure.py": (
                 "tests/test_gateway_pressure_contracts.py",
+                "tests/test_gateway_pressure_mutation_contracts.py",
             ),
             "venus_evcharger/ipc/gateway_publication.py": (
                 "tests/test_gateway_publication_contracts.py",
@@ -739,6 +794,8 @@ class MutationAuditScriptTests(unittest.TestCase):
             ),
             "venus_evcharger/dbus_adapter/process/socket.py": (
                 "tests/test_dbus_adapter_process_ipc_contracts.py",
+                "tests/test_dbus_adapter_socket_lifecycle_mutation_contracts.py",
+                "tests/test_dbus_adapter_socket_protocol_mutation_contracts.py",
                 "tests/test_fast_publication_ipc.py",
             ),
             "venus_evcharger/dbus_adapter/read/aggregate.py": ("tests/test_dbus_adapter_read_aggregate_contracts.py",),

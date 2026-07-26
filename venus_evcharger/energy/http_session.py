@@ -25,14 +25,13 @@ class ConnectorHttpSession:
         )
 
     def close(self) -> None:
-        if not self._owned:
+        if not self._owned or self.session is None:
             return
         session = self.session
         if not isinstance(session, ClosableHttpSession):
             raise TypeError("Owned connector HTTP session cannot be closed")
         session.close()
         self.session = None
-        self._owned = False
 
 
 __all__ = ["ClosableHttpSession", "ConnectorHttpSession"]

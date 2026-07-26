@@ -11,26 +11,46 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scripts.dev.mutation_audit_config_selections_bootstrap import FOCUSED_TEST_SELECTIONS_BOOTSTRAP
-    from scripts.dev.mutation_audit_config_selections_core import FOCUSED_TEST_SELECTIONS_CORE
+    from scripts.dev.mutation_audit_config_selections_application import FOCUSED_TEST_SELECTIONS_APPLICATION
+    from scripts.dev.mutation_audit_config_selections_backend import FOCUSED_TEST_SELECTIONS_BACKEND
+    from scripts.dev.mutation_audit_config_selections_energy_inputs import FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS
     from scripts.dev.mutation_audit_config_selections_gateway import FOCUSED_TEST_SELECTIONS_GATEWAY
+    from scripts.dev.mutation_audit_config_selections_ipc_gateway import FOCUSED_TEST_SELECTIONS_IPC_GATEWAY
+    from scripts.dev.mutation_audit_config_selections_runtime_services import FOCUSED_TEST_SELECTIONS_RUNTIME_SERVICES
     from scripts.dev.mutation_audit_config_selections_tail import FOCUSED_TEST_SELECTIONS_TAIL
+    from scripts.dev.mutation_audit_config_selections_update import FOCUSED_TEST_SELECTIONS_UPDATE
     from scripts.dev.mutation_audit_targets import DEFAULT_TEST_SELECTION
 elif __package__:
-    from .mutation_audit_config_selections_gateway import FOCUSED_TEST_SELECTIONS_GATEWAY
+    from .mutation_audit_config_selections_application import FOCUSED_TEST_SELECTIONS_APPLICATION
+    from .mutation_audit_config_selections_backend import FOCUSED_TEST_SELECTIONS_BACKEND
     from .mutation_audit_config_selections_bootstrap import FOCUSED_TEST_SELECTIONS_BOOTSTRAP
-    from .mutation_audit_config_selections_core import FOCUSED_TEST_SELECTIONS_CORE
+    from .mutation_audit_config_selections_energy_inputs import FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS
+    from .mutation_audit_config_selections_gateway import FOCUSED_TEST_SELECTIONS_GATEWAY
+    from .mutation_audit_config_selections_ipc_gateway import FOCUSED_TEST_SELECTIONS_IPC_GATEWAY
+    from .mutation_audit_config_selections_runtime_services import FOCUSED_TEST_SELECTIONS_RUNTIME_SERVICES
     from .mutation_audit_config_selections_tail import FOCUSED_TEST_SELECTIONS_TAIL
+    from .mutation_audit_config_selections_update import FOCUSED_TEST_SELECTIONS_UPDATE
     from .mutation_audit_targets import DEFAULT_TEST_SELECTION
 else:
-    from mutation_audit_config_selections_gateway import FOCUSED_TEST_SELECTIONS_GATEWAY
+    from mutation_audit_config_selections_application import FOCUSED_TEST_SELECTIONS_APPLICATION
+    from mutation_audit_config_selections_backend import FOCUSED_TEST_SELECTIONS_BACKEND
     from mutation_audit_config_selections_bootstrap import FOCUSED_TEST_SELECTIONS_BOOTSTRAP
-    from mutation_audit_config_selections_core import FOCUSED_TEST_SELECTIONS_CORE
+    from mutation_audit_config_selections_energy_inputs import FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS
+    from mutation_audit_config_selections_gateway import FOCUSED_TEST_SELECTIONS_GATEWAY
+    from mutation_audit_config_selections_ipc_gateway import FOCUSED_TEST_SELECTIONS_IPC_GATEWAY
+    from mutation_audit_config_selections_runtime_services import FOCUSED_TEST_SELECTIONS_RUNTIME_SERVICES
     from mutation_audit_config_selections_tail import FOCUSED_TEST_SELECTIONS_TAIL
+    from mutation_audit_config_selections_update import FOCUSED_TEST_SELECTIONS_UPDATE
     from mutation_audit_targets import DEFAULT_TEST_SELECTION
 
 _FOCUSED_TEST_SELECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     *FOCUSED_TEST_SELECTIONS_GATEWAY,
-    *FOCUSED_TEST_SELECTIONS_CORE,
+    *FOCUSED_TEST_SELECTIONS_APPLICATION,
+    *FOCUSED_TEST_SELECTIONS_IPC_GATEWAY,
+    *FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS,
+    *FOCUSED_TEST_SELECTIONS_RUNTIME_SERVICES,
+    *FOCUSED_TEST_SELECTIONS_UPDATE,
+    *FOCUSED_TEST_SELECTIONS_BACKEND,
     *FOCUSED_TEST_SELECTIONS_BOOTSTRAP,
     *FOCUSED_TEST_SELECTIONS_TAIL,
 )

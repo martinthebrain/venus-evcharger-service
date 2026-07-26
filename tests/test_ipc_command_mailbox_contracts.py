@@ -4,11 +4,19 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import venus_evcharger.ipc.command_mailbox as mailbox_module
+import venus_evcharger.ipc.core_commands as core_commands_module
+from venus_evcharger.core.contracts_control_surface import (
+    CONTROL_AUTO_RUNTIME_TARGETS,
+    CONTROL_CURRENT_SETTING_TARGETS,
+)
 from venus_evcharger.ipc.command_mailbox import (
     FileCommandMailbox,
+    MailboxLockTimeout,
+    MailboxScanUnavailable,
+    MAX_MAILBOX_QUARANTINE_ENTRIES,
     command_file_id,
     command_float,
     command_priority_rank,
@@ -22,10 +30,13 @@ from venus_evcharger.ipc.command_mailbox import (
     write_command_json,
 )
 from venus_evcharger.ipc.core_commands import (
+    CORE_COMMAND_RETRY_INITIAL_SECONDS,
+    CORE_COMMAND_RETRY_MAX_SECONDS,
     CORE_COMMAND_QUEUE_CLASS,
     CORE_COMMAND_SCHEMA_VERSION,
     CoreCommandMailbox,
     CoreCommandQueuePolicy,
+    core_command_retry_delay,
     core_control_command_payload,
     parse_core_control_command,
 )
@@ -157,12 +168,276 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
             mailbox.remove(str(command_dir / "missing.json"))
             mailbox.remove(first)
             self.assertFalse(Path(first).exists())
-            with patch.object(mailbox_module.Path, "glob", side_effect=OSError("unavailable")):
-                self.assertEqual(mailbox.load_pending(), [])
+            with (
+                patch.object(mailbox_module.Path, "glob", side_effect=OSError("unavailable")),
+                patch.object(mailbox_module.logging, "warning") as warning,
+            ):
+                with self.assertRaises(MailboxScanUnavailable) as raised:
+                    mailbox.load_pending()
+            self.assertEqual(raised.exception.command_dir, mailbox.command_dir)
+            self.assertEqual(str(raised.exception.error), "unavailable")
+            self.assertEqual(
+                str(raised.exception),
+                f"Command mailbox scan unavailable path={mailbox.command_dir}: unavailable",
+            )
+            warning.assert_called_once_with(
+                "Command mailbox directory scan failed path=%s error=%s",
+                mailbox.command_dir,
+                unittest.mock.ANY,
+            )
 
             with patch.object(mailbox, "_locked", side_effect=PermissionError("read-only")):
                 pending = mailbox.load_pending()
             self.assertEqual([path for path, _payload in pending], [second])
+
+    def test_invalid_files_are_ram_quarantined_until_their_signature_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mailbox = CoreCommandMailbox(str(Path(temp_dir) / "commands"))
+            command_dir = Path(mailbox.command_dir)
+            command_dir.mkdir(parents=True)
+            invalid_json = command_dir / "invalid.json"
+            invalid_shape = command_dir / "list.json"
+            invalid_json.write_text("{", encoding="utf-8")
+            invalid_shape.write_text("[]", encoding="utf-8")
+
+            with patch.object(mailbox_module.logging, "warning") as warning:
+                self.assertEqual(mailbox.load_pending(), [])
+                self.assertEqual(mailbox.load_pending(), [])
+            self.assertEqual(warning.call_count, 2)
+            self.assertEqual(
+                tuple(Path(path).name for path in mailbox._quarantined),
+                ("invalid.json", "list.json"),
+            )
+
+            invalid_json.write_text('{"value": 1}', encoding="utf-8")
+            self.assertEqual(mailbox.load_pending(), [(str(invalid_json), {"value": 1})])
+            self.assertEqual(tuple(Path(path).name for path in mailbox._quarantined), ("list.json",))
+            invalid_shape.unlink()
+            self.assertEqual(mailbox.load_pending(), [(str(invalid_json), {"value": 1})])
+            self.assertEqual(mailbox._quarantined, {})
+
+    def test_quarantine_and_directory_error_logging_are_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mailbox = CoreCommandMailbox(str(Path(temp_dir) / "commands"))
+            command_dir = Path(mailbox.command_dir)
+            command_dir.mkdir(parents=True)
+            for index in range(3):
+                (command_dir / f"bad-{index}.json").write_text("{", encoding="utf-8")
+
+            with patch.object(mailbox_module, "MAX_MAILBOX_QUARANTINE_ENTRIES", 2):
+                mailbox.load_pending()
+            self.assertEqual(
+                tuple(Path(path).name for path in mailbox._quarantined),
+                ("bad-1.json", "bad-2.json"),
+            )
+            self.assertEqual(MAX_MAILBOX_QUARANTINE_ENTRIES, 128)
+
+            with (
+                patch.object(mailbox_module.Path, "glob", side_effect=OSError("scan failed")),
+                patch.object(
+                    mailbox_module.time,
+                    "monotonic",
+                    side_effect=(0.0, 0.0, 10.0, 10.0, 60.0, 60.0),
+                ),
+                patch.object(mailbox_module.logging, "warning") as warning,
+            ):
+                for _index in range(3):
+                    with self.assertRaises(MailboxScanUnavailable):
+                        mailbox.load_pending()
+            self.assertEqual(warning.call_count, 2)
+
+    def test_unreadable_file_is_observable_without_writing_a_quarantine_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mailbox = CoreCommandMailbox(str(Path(temp_dir) / "commands"))
+            command_dir = Path(mailbox.command_dir)
+            command_dir.mkdir(parents=True)
+            command_path = command_dir / "denied.json"
+            command_path.write_text("{}", encoding="utf-8")
+
+            with (
+                patch.object(mailbox_module, "open", side_effect=PermissionError("denied"), create=True),
+                patch.object(mailbox_module.logging, "warning") as warning,
+            ):
+                self.assertEqual(mailbox.load_pending(), [])
+            warning.assert_called_once_with(
+                "Quarantined unreadable command file path=%s reason=%s",
+                str(command_path),
+                "PermissionError: denied",
+            )
+            self.assertEqual(
+                {path.name for path in command_dir.iterdir()},
+                {".mailbox.lock", command_path.name},
+            )
+
+    def test_directory_shape_and_stat_failures_are_observable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            not_directory = Path(temp_dir) / "commands"
+            not_directory.write_text("not a directory", encoding="utf-8")
+            mailbox = CoreCommandMailbox(str(not_directory))
+            with patch.object(mailbox_module.logging, "warning") as warning:
+                with self.assertRaises(MailboxScanUnavailable) as raised:
+                    mailbox.load_pending()
+            self.assertIsInstance(raised.exception.error, NotADirectoryError)
+            warning.assert_called_once()
+
+            missing = CoreCommandMailbox(str(Path(temp_dir) / "missing"))
+            self.assertEqual(missing.load_pending(), [])
+
+            denied = CoreCommandMailbox(str(Path(temp_dir) / "denied"))
+            with (
+                patch.object(mailbox_module.os, "stat", side_effect=PermissionError("blocked")),
+                patch.object(mailbox_module.logging, "warning") as warning,
+            ):
+                with self.assertRaises(MailboxScanUnavailable) as raised:
+                    denied.load_pending()
+            self.assertIsInstance(raised.exception.error, PermissionError)
+            warning.assert_called_once()
+
+            locked = CoreCommandMailbox(temp_dir)
+            with patch.object(locked, "_locked", side_effect=MailboxLockTimeout("busy")):
+                with self.assertRaisesRegex(MailboxLockTimeout, "busy"):
+                    locked.load_pending()
+            with (
+                patch.object(locked, "_locked", side_effect=OSError("lock unavailable")),
+                patch.object(mailbox_module.logging, "warning") as warning,
+            ):
+                with self.assertRaises(MailboxScanUnavailable) as raised:
+                    locked.load_pending()
+            self.assertEqual(str(raised.exception.error), "lock unavailable")
+            warning.assert_called_once_with(
+                "Command mailbox directory scan failed path=%s error=%s",
+                locked.command_dir,
+                unittest.mock.ANY,
+            )
+            self.assertEqual(str(warning.call_args.args[2]), "lock unavailable")
+
+    def test_directory_and_file_quarantine_helpers_preserve_exact_error_context(self) -> None:
+        mailbox = CoreCommandMailbox("/tmp/commands")
+        mailbox._quarantined["stale"] = mailbox_module._QuarantinedCommandFile(
+            signature=(1, 2, 3),
+            reason="old",
+        )
+        with patch.object(mailbox_module.os, "stat", side_effect=FileNotFoundError):
+            self.assertFalse(mailbox._command_directory_available())
+        self.assertEqual(mailbox._quarantined, {})
+
+        denied = PermissionError("blocked")
+        with (
+            patch.object(mailbox_module.os, "stat", side_effect=denied),
+            patch.object(mailbox, "_record_directory_error") as record_error,
+        ):
+            with self.assertRaises(MailboxScanUnavailable) as raised:
+                mailbox._command_directory_available()
+        self.assertIs(raised.exception.error, denied)
+        record_error.assert_called_once_with(denied)
+
+        regular_file = MagicMock(st_mode=0o100600)
+        with (
+            patch.object(mailbox_module.os, "stat", return_value=regular_file),
+            patch.object(mailbox, "_record_directory_error") as record_error,
+        ):
+            with self.assertRaises(MailboxScanUnavailable) as raised:
+                mailbox._command_directory_available()
+        shape_error = raised.exception.error
+        self.assertIsInstance(shape_error, NotADirectoryError)
+        self.assertEqual(shape_error.args, (mailbox.command_dir,))
+        record_error.assert_called_once_with(shape_error)
+
+        scan_error = OSError("scan")
+        with (
+            patch.object(mailbox_module.Path, "glob", side_effect=scan_error),
+            patch.object(mailbox, "_record_directory_error") as record_error,
+        ):
+            with self.assertRaises(MailboxScanUnavailable) as raised:
+                mailbox._load_pending_unlocked()
+        self.assertIs(raised.exception.error, scan_error)
+        record_error.assert_called_once_with(scan_error)
+
+    def test_load_command_file_passes_exact_generation_and_reason_to_quarantine(self) -> None:
+        mailbox = CoreCommandMailbox("/tmp/commands")
+        path = Path("/tmp/commands/item.json")
+        signature = (11, 22, 33)
+        with (
+            patch.object(mailbox_module, "_command_file_signature", return_value=signature) as file_signature,
+            patch.object(mailbox, "_is_unchanged_quarantined", return_value=False) as unchanged,
+            patch.object(mailbox_module, "_read_command_json", return_value=[]) as read_json,
+            patch.object(mailbox, "_quarantine") as quarantine,
+        ):
+            self.assertIsNone(mailbox._load_command_file(path))
+        file_signature.assert_called_once_with(str(path))
+        unchanged.assert_called_once_with(str(path), signature)
+        read_json.assert_called_once_with(str(path))
+        quarantine.assert_called_once_with(str(path), signature, "payload-is-not-object")
+
+        read_error = PermissionError("denied")
+        with (
+            patch.object(mailbox_module, "_command_file_signature", return_value=signature),
+            patch.object(mailbox, "_is_unchanged_quarantined", return_value=False),
+            patch.object(mailbox_module, "_read_command_json", side_effect=read_error),
+            patch.object(mailbox, "_quarantine") as quarantine,
+        ):
+            self.assertIsNone(mailbox._load_command_file(path))
+        quarantine.assert_called_once_with(str(path), signature, "PermissionError: denied")
+
+    def test_quarantine_generation_matching_and_fifo_bound_are_exact(self) -> None:
+        mailbox = CoreCommandMailbox("/tmp/commands")
+        signature = (1, 2, 3)
+        self.assertFalse(mailbox._is_unchanged_quarantined("/tmp/a.json", signature))
+        with patch.object(mailbox_module.logging, "warning"):
+            mailbox._quarantine("/tmp/a.json", signature, "invalid-a")
+        self.assertTrue(mailbox._is_unchanged_quarantined("/tmp/a.json", signature))
+        self.assertFalse(mailbox._is_unchanged_quarantined("/tmp/a.json", (1, 2, 4)))
+        entry = mailbox._quarantined["/tmp/a.json"]
+        self.assertEqual(entry.signature, signature)
+        self.assertEqual(entry.reason, "invalid-a")
+
+        with (
+            patch.object(mailbox_module, "MAX_MAILBOX_QUARANTINE_ENTRIES", 2),
+            patch.object(mailbox_module.logging, "warning"),
+        ):
+            mailbox._quarantine("/tmp/b.json", (2, 2, 2), "invalid-b")
+            mailbox._quarantine("/tmp/c.json", (3, 3, 3), "invalid-c")
+        self.assertEqual(tuple(mailbox._quarantined), ("/tmp/b.json", "/tmp/c.json"))
+
+    def test_directory_error_logging_uses_exact_interval_and_error(self) -> None:
+        mailbox = CoreCommandMailbox("/tmp/commands")
+        first = OSError("first")
+        second = OSError("second")
+        third = OSError("third")
+        with (
+            patch.object(mailbox_module.time, "monotonic", side_effect=(40.0, 50.0, 100.0)),
+            patch.object(mailbox_module.logging, "warning") as warning,
+        ):
+            mailbox._record_directory_error(first)
+            mailbox._record_directory_error(second)
+            mailbox._record_directory_error(third)
+        self.assertEqual(
+            warning.call_args_list,
+            [
+                unittest.mock.call(
+                    "Command mailbox directory scan failed path=%s error=%s",
+                    mailbox.command_dir,
+                    first,
+                ),
+                unittest.mock.call(
+                    "Command mailbox directory scan failed path=%s error=%s",
+                    mailbox.command_dir,
+                    third,
+                ),
+            ],
+        )
+        self.assertEqual(mailbox._last_directory_error_log_at, 100.0)
+
+    def test_quarantine_deduplicates_identical_events_and_stat_failure_has_no_signature(self) -> None:
+        mailbox = CoreCommandMailbox("/tmp/not-used")
+        signature = (1, 2, 3)
+        with patch.object(mailbox_module.logging, "warning") as warning:
+            mailbox._quarantine("/tmp/bad.json", signature, "invalid")
+            mailbox._quarantine("/tmp/bad.json", signature, "invalid")
+        self.assertEqual(len(mailbox._quarantined), 1)
+        warning.assert_called_once()
+        with patch.object(mailbox_module.os, "stat", side_effect=OSError("gone")):
+            self.assertIsNone(mailbox_module._command_file_signature("/tmp/bad.json"))
 
     def test_transport_helpers_define_priority_and_latest_wins_semantics(self) -> None:
         self.assertEqual(command_priority_rank(" SAFETY "), 0)
@@ -185,6 +460,8 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
         random_id = command_file_id({})
         self.assertTrue(random_id.startswith("cmd-"))
         self.assertEqual(len(random_id.rsplit("-", 1)[1]), 8)
+        self.assertTrue(mailbox_module._same_mailbox_revision({"value": 1}, {"value": 1}))
+        self.assertFalse(mailbox_module._same_mailbox_revision({"value": 2}, {"value": 1}))
 
         diagnostic = {"priority": "diagnostic", "created_at": 20.0}
         user = {"priority": "user", "created_at": 10.0}
@@ -217,6 +494,30 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
         payload = {"priority": "user", "created_at": 22.0}
         mark_coalesced_payload({"priority": "user", "created_at": 0.0}, payload)
         self.assertEqual(payload["created_at"], 22.0)
+
+    def test_advisory_lock_retries_once_and_times_out_at_the_deadline(self) -> None:
+        with (
+            patch.object(
+                mailbox_module.fcntl,
+                "flock",
+                side_effect=(BlockingIOError("busy"), None),
+            ) as flock,
+            patch.object(mailbox_module.time, "monotonic", side_effect=(10.0, 10.25)),
+            patch.object(mailbox_module.time, "sleep") as sleep,
+        ):
+            mailbox_module._acquire_lock(7, 1.0)
+        self.assertEqual(flock.call_count, 2)
+        sleep.assert_called_once_with(mailbox_module.MAILBOX_LOCK_RETRY_SECONDS)
+
+        timeout_error = BlockingIOError("still busy")
+        with (
+            patch.object(mailbox_module.fcntl, "flock", side_effect=timeout_error),
+            patch.object(mailbox_module.time, "monotonic", side_effect=(20.0, 20.25)),
+            patch.object(mailbox_module.time, "sleep") as sleep,
+            self.assertRaisesRegex(MailboxLockTimeout, "Command mailbox lock timed out"),
+        ):
+            mailbox_module._acquire_lock(8, 0.25)
+        sleep.assert_not_called()
 
     def test_json_transport_normalizes_untrusted_values(self) -> None:
         self.assertIsNone(normalized_mapping([]))
@@ -265,6 +566,42 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
             policy.order_key({"priority": "user", "created_at": 2.0, "id": "a"}),
             policy.order_key({"priority": "normal", "created_at": 1.0, "id": "b"}),
         )
+        self.assertEqual(core_command_retry_delay(-5), CORE_COMMAND_RETRY_INITIAL_SECONDS)
+        self.assertEqual(core_command_retry_delay(1), CORE_COMMAND_RETRY_INITIAL_SECONDS)
+        self.assertEqual(core_command_retry_delay(2), 1.0)
+        self.assertEqual(core_command_retry_delay(6), 16.0)
+        self.assertEqual(core_command_retry_delay(7), CORE_COMMAND_RETRY_MAX_SECONDS)
+        self.assertEqual(core_command_retry_delay(1000), CORE_COMMAND_RETRY_MAX_SECONDS)
+        auto_target = min(CONTROL_AUTO_RUNTIME_TARGETS)
+        current_target = min(CONTROL_CURRENT_SETTING_TARGETS)
+        self.assertEqual(
+            core_control_command_payload(
+                "set_auto_runtime_setting",
+                auto_target,
+                1,
+                source="control-surface",
+                origin="test",
+            )["target"],
+            auto_target,
+        )
+        self.assertEqual(
+            core_control_command_payload(
+                "set_current_setting",
+                current_target,
+                6.0,
+                source="control-surface",
+                origin="test",
+            )["target"],
+            current_target,
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported core control route"):
+            core_control_command_payload(
+                "set_auto_runtime_setting",
+                current_target,
+                1,
+                source="control-surface",
+                origin="test",
+            )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             mailbox = CoreCommandMailbox(str(Path(temp_dir) / "commands"))
@@ -385,8 +722,28 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
             ),
         )
         for kwargs, message in invalid_payload_arguments:
-            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, message):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError) as raised:
                 core_control_command_payload(value=1, **kwargs)
+            self.assertEqual(str(raised.exception), message)
+
+    def test_core_command_private_validation_helpers_reject_each_untrusted_text_field(self) -> None:
+        fields = {
+            "kind": "user_command",
+            "target": "mode",
+            "origin": "gateway-gui",
+            "id": "command-1",
+        }
+        self.assertEqual(
+            core_commands_module._core_control_text_fields(fields),
+            ("user_command", "mode", "gateway-gui", "command-1"),
+        )
+        for name in fields:
+            with self.subTest(field=name):
+                invalid = dict(fields)
+                invalid[name] = ""
+                self.assertIsNone(core_commands_module._core_control_text_fields(invalid))
+        self.assertFalse(core_commands_module._is_control_command_name("unsupported"))
+        self.assertFalse(core_commands_module._is_control_command_name(7))
 
 
 if __name__ == "__main__":  # pragma: no cover

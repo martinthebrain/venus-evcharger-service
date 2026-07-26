@@ -6,15 +6,36 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from venus_evcharger.control import ControlCommand
 from venus_evcharger.core.contracts import finite_float_or_none
-from venus_evcharger.ipc.command_types import CommandMapping
-from venus_evcharger.ipc.core_commands import CoreControlCommand, parse_core_control_command
+from venus_evcharger.ipc.command_mailbox import (
+    CommandMailboxReader,
+    MailboxLockTimeout,
+    MailboxScanUnavailable,
+)
+from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
+from venus_evcharger.ipc.core_commands import (
+    CoreControlCommand,
+    core_command_retry_delay,
+    parse_core_control_command,
+)
+from venus_evcharger.runtime.async_mainloop_control import ASYNC_CONTROL_COMMAND_ERRORS
 from venus_evcharger.runtime.contracts import ControlCommandQueuePort
 
 ASYNC_UPDATE_CYCLE_ERRORS = (OSError, RuntimeError, TypeError, ValueError)
+CORE_MAILBOX_POLL_ERRORS = (MailboxLockTimeout, MailboxScanUnavailable, OSError)
+
+
+@dataclass(frozen=True, slots=True)
+class _CoreCommandRetry:
+    expected: CommandPayload
+    failure_count: int
+    retry_at: float
+    retire_only: bool
+    reason: str
 
 
 class RuntimeExecutor:
@@ -23,6 +44,8 @@ class RuntimeExecutor:
     def __init__(self, service: Any, control_commands: ControlCommandQueuePort) -> None:
         self.service = service
         self.control_commands = control_commands
+        self._core_command_retries: dict[str, _CoreCommandRetry] = {}
+        self._core_mailbox_poll_failures = 0
 
     def start_update_worker(self) -> None:
         """Enable periodic update cycles in the serialized runtime executor."""
@@ -99,28 +122,162 @@ class RuntimeExecutor:
 
     def drain_core_commands_once(self) -> bool:
         """Handle external control commands delivered through the IPC boundary."""
-        svc = self.service
-        inbox = getattr(svc, "_core_command_mailbox", None)
-        if inbox is None:
+        inbox = getattr(
+            self.service,
+            "_core_command_mailbox",
+            None,
+        )
+        if not isinstance(inbox, CommandMailboxReader):
             return False
-        pending = inbox.load_pending()
+        pending = self._load_core_pending(inbox)
+        if pending is None:
+            return False
+        return self._drain_loaded_core_commands(inbox, pending)
+
+    def _load_core_pending(
+        self,
+        inbox: CommandMailboxReader,
+    ) -> list[tuple[str, CommandMapping]] | None:
+        try:
+            pending: list[tuple[str, CommandMapping]] = inbox.load_pending()
+        except CORE_MAILBOX_POLL_ERRORS as error:
+            self._core_mailbox_poll_failures += 1
+            _log_repeated_failure(
+                self._core_mailbox_poll_failures,
+                "Core command mailbox poll deferred failures=%s error=%s",
+                error,
+            )
+            return None
+        self._core_mailbox_poll_failures = 0
+        return pending
+
+    def _drain_loaded_core_commands(
+        self,
+        inbox: CommandMailboxReader,
+        pending: list[tuple[str, CommandMapping]],
+    ) -> bool:
         if not pending:
+            self._core_command_retries.clear()
             return False
-        for path, payload in inbox.coalesce(pending):
-            try:
-                self.handle_core_command(payload, command_file=path)
-            finally:
-                inbox.remove(path)
+        self._forget_absent_core_retries(pending)
+        outcomes = [
+            self._process_core_command(inbox, path, payload)
+            for path, payload in inbox.coalesce(pending)
+        ]
+        return any(outcomes)
+
+    def _process_core_command(
+        self,
+        inbox: CommandMailboxReader,
+        path: str,
+        payload: CommandMapping,
+    ) -> bool:
+        retry = self._matching_retry(path, payload)
+        if _retry_is_waiting(retry, time.monotonic()):
+            return False
+        if _retry_needs_only_retirement(retry):
+            return self._retire_core_command(inbox, path, payload)
+        return self._dispatch_and_retire_core_command(inbox, path, payload)
+
+    def _dispatch_and_retire_core_command(
+        self,
+        inbox: CommandMailboxReader,
+        path: str,
+        payload: CommandMapping,
+    ) -> bool:
+        try:
+            self.handle_core_command(payload, command_file=path)
+        except ASYNC_CONTROL_COMMAND_ERRORS as error:
+            retry = self._defer_core_command(
+                path,
+                payload,
+                reason="dispatch",
+                retire_only=False,
+            )
+            _log_repeated_failure(
+                retry.failure_count,
+                "Core command dispatch deferred failures=%s file=%s error=%s",
+                error,
+                path,
+            )
+            return True
+        return self._retire_core_command(inbox, path, payload)
+
+    def _retire_core_command(
+        self,
+        inbox: CommandMailboxReader,
+        path: str,
+        payload: CommandMapping,
+    ) -> bool:
+        try:
+            inbox.remove_if_current(path, payload)
+        except CORE_MAILBOX_POLL_ERRORS as error:
+            retry = self._defer_core_command(
+                path,
+                payload,
+                reason="retire",
+                retire_only=True,
+            )
+            _log_repeated_failure(
+                retry.failure_count,
+                "Core command retire deferred failures=%s file=%s error=%s",
+                error,
+                path,
+            )
+            return True
+        self._core_command_retries.pop(path, None)
         return True
 
-    def handle_core_command(self, payload: CommandMapping, *, command_file: str = "") -> None:
+    def _matching_retry(
+        self,
+        path: str,
+        payload: CommandMapping,
+    ) -> _CoreCommandRetry | None:
+        retry = self._core_command_retries.get(path)
+        if retry is None:
+            return None
+        if retry.expected == payload:
+            return retry
+        self._core_command_retries.pop(path)
+        return None
+
+    def _defer_core_command(
+        self,
+        path: str,
+        payload: CommandMapping,
+        *,
+        reason: str,
+        retire_only: bool,
+    ) -> _CoreCommandRetry:
+        previous = self._matching_retry(path, payload)
+        failure_count = 1
+        if previous is not None and previous.reason == reason:
+            failure_count = previous.failure_count + 1
+        retry = _CoreCommandRetry(
+            expected=dict(payload),
+            failure_count=failure_count,
+            retry_at=time.monotonic() + core_command_retry_delay(failure_count),
+            retire_only=retire_only,
+            reason=reason,
+        )
+        self._core_command_retries[path] = retry
+        return retry
+
+    def _forget_absent_core_retries(self, pending: list[tuple[str, CommandMapping]]) -> None:
+        present = {path for path, _payload in pending}
+        for path in tuple(self._core_command_retries):
+            if path not in present:
+                self._core_command_retries.pop(path)
+
+    def handle_core_command(self, payload: CommandMapping, *, command_file: str = "") -> bool:
         """Validate and dispatch one command from the core IPC mailbox."""
         command = parse_core_control_command(payload)
         if command is None:
             logging.warning("Dropping invalid core control command file=%s", command_file or "unknown")
-            return
+            return False
         _log_core_control_command(command, command_file=command_file, now=time.time())
         self.dispatch_core_control_command(command)
+        return True
 
     def dispatch_core_control_command(self, command: CoreControlCommand) -> None:
         """Dispatch a validated semantic IPC command to the control core."""
@@ -192,3 +349,21 @@ def _core_command_age_label(command: CoreControlCommand, now: float) -> str:
     if command.created_at <= 0.0:
         return "unknown"
     return f"{max(0.0, float(now) - command.created_at):.3f}"
+
+
+def _retry_is_waiting(retry: _CoreCommandRetry | None, now: float) -> bool:
+    return retry is not None and now < retry.retry_at
+
+
+def _retry_needs_only_retirement(retry: _CoreCommandRetry | None) -> bool:
+    return retry is not None and retry.retire_only
+
+
+def _log_repeated_failure(
+    failure_count: int,
+    message: str,
+    error: Exception,
+    *context: object,
+) -> None:
+    if failure_count & (failure_count - 1) == 0:
+        logging.warning(message, failure_count, *context, error)

@@ -95,14 +95,20 @@ def _assert(condition: bool, message: str) -> None:
 
 def scenario_dbus_hang(temp_dir: str) -> None:
     adapter = _adapter(temp_dir)
+
+    def timed_out_dbus_operation() -> bool:
+        def raise_timeout() -> bool:
+            raise TimeoutError("simulated 5s DBus hang")
+
+        return adapter.io_role.timed_dbus_operation("read", raise_timeout)
+
     with (
-        patch.object(adapter, "process_socket_once", return_value=None),
         patch.object(
-            adapter,
+            adapter.loop_role,
             "process_one_dbus_operation_once",
-            side_effect=TimeoutError("simulated 5s DBus hang"),
+            side_effect=timed_out_dbus_operation,
         ),
-        patch.object(adapter, "publish_cache", return_value=None),
+        patch.object(adapter.io_role, "publish_cache", return_value=None),
     ):
         _assert(bool(adapter.tick()), "tick should survive simulated DBus timeout")
     _assert(bool(adapter.circuit.last_error), "circuit should record the simulated DBus timeout")
@@ -160,7 +166,7 @@ def scenario_resource_pressure(temp_dir: str) -> None:
     now = time.monotonic()
     adapter.tick_health.record(duration_ms=1.0, expected_interval_s=0.1, now=now - 1.0)
     adapter.tick_health.record(duration_ms=250.0, expected_interval_s=0.1, now=now)
-    adapter.update_adaptive_tick()
+    adapter.loop_role.update_adaptive_tick()
     _assert(
         adapter.tick_seconds >= RESOURCE_PRESSURE_MIN_TICK_SECONDS,
         "long tick pressure should slow adaptive tick",

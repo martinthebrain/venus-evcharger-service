@@ -8,14 +8,61 @@ import time
 
 from pi_gateway_release_gate_common import GUI_PATHS, GateFailure, PiSession, json_object, object_dict
 
+GUI_ASSERT_POLL_SECONDS = 0.5
 
-def assert_gui_values(pi: PiSession, service: str, run_dir: str, *, expect_power: bool) -> dict[str, float]:
+
+def assert_gui_values(
+    pi: PiSession,
+    service: str,
+    run_dir: str,
+    *,
+    expect_power: bool,
+    wait_seconds: float = 0.0,
+) -> dict[str, float]:
+    deadline = time.monotonic() + max(0.0, float(wait_seconds))
+    while True:
+        numeric, error = _gui_values_attempt(pi, service, run_dir, expect_power=expect_power)
+        if numeric is not None:
+            return numeric
+        if not _wait_for_gui_retry(deadline):
+            assert error is not None
+            raise error
+
+
+def _gui_values_attempt(
+    pi: PiSession,
+    service: str,
+    run_dir: str,
+    *,
+    expect_power: bool,
+) -> tuple[dict[str, float] | None, GateFailure | None]:
+    try:
+        return _validated_gui_values(pi, service, run_dir, expect_power=expect_power), None
+    except GateFailure as error:
+        return None, error
+
+
+def _validated_gui_values(
+    pi: PiSession,
+    service: str,
+    run_dir: str,
+    *,
+    expect_power: bool,
+) -> dict[str, float]:
     values = {path: _gateway_get(pi, run_dir, service, path) for path in GUI_PATHS}
-    numeric = {path: _float_value(value) for path, value in values.items() if path not in {"/Mode"}}
+    numeric = {path: _float_value(value) for path, value in values.items() if path != "/Mode"}
     _assert_evcs_connected(values)
     if expect_power:
         _assert_power_values(numeric)
     return numeric
+
+
+def _wait_for_gui_retry(deadline: float) -> bool:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0.0:
+        return False
+    time.sleep(min(GUI_ASSERT_POLL_SECONDS, remaining))
+    return True
 
 
 def exercise_gui_write(pi: PiSession, service: str, run_dir: str, remote_dir: str) -> None:

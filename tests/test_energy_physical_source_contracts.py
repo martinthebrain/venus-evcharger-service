@@ -180,6 +180,51 @@ class EnergyPhysicalSourceContracts(unittest.TestCase):
         self.assertEqual(cluster.combined_usable_capacity_wh, 4000.0)
         self.assertEqual(cluster.valid_soc_source_count, 2)
 
+    def test_equal_quality_retains_first_observation_and_confidence_breaks_ties(self) -> None:
+        first = _battery("same", 20.0, 1000.0, physical_id="same-battery")
+        second = _battery("same", 80.0, 1000.0, physical_id="same-battery")
+        self.assertEqual(unique_weighted_soc_sources((first, second)), (first,))
+
+        high_confidence = _battery(
+            "a",
+            30.0,
+            1000.0,
+            physical_id="confidence-battery",
+            confidence=0.9,
+        )
+        low_confidence = _battery(
+            "z",
+            70.0,
+            1000.0,
+            physical_id="confidence-battery",
+            confidence=0.1,
+        )
+        self.assertEqual(
+            unique_weighted_soc_sources((high_confidence, low_confidence)),
+            (high_confidence,),
+        )
+
+        finite_confidence = _battery(
+            "finite",
+            40.0,
+            1000.0,
+            physical_id="finite-confidence-battery",
+            confidence=0.1,
+        )
+        non_finite_confidence = _battery(
+            "non-finite",
+            60.0,
+            1000.0,
+            physical_id="finite-confidence-battery",
+            confidence=float("inf"),
+        )
+        self.assertEqual(
+            unique_weighted_soc_sources(
+                (non_finite_confidence, finite_confidence)
+            ),
+            (finite_confidence,),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

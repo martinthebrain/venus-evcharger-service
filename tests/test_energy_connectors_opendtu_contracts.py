@@ -98,6 +98,7 @@ class EnergyConnectorsOpenDtuContractTests(unittest.TestCase):
             source_id="pv",
             role="inverter",
             physical_id="roof-array",
+            physical_priority=7,
         )
         settings = _settings()
         payload = {"payload": True}
@@ -124,6 +125,7 @@ class EnergyConnectorsOpenDtuContractTests(unittest.TestCase):
                 role="inverter",
                 service_name="http://opendtu.local",
                 physical_id="roof-array",
+                physical_priority=7,
                 ac_power_w=123.0,
                 pv_input_power_w=145.0,
                 operating_mode="producing",
@@ -265,18 +267,21 @@ class EnergyConnectorsOpenDtuContractTests(unittest.TestCase):
         client = MagicMock()
         complete = _inverter("A")
         old_shape = {"serial": "B", "reachable": True, "producing": True}
+        detail = _inverter("B", ac_power=222.0)
+        detail_payload = {"inverters": [detail]}
         payload: dict[str, object] = {"inverters": [complete, old_shape, "invalid"]}
         client._perform_request.side_effect = (
             payload,
-            {"inverters": [_inverter("B", ac_power=222.0)]},
+            detail_payload,
         )
 
         progress = opendtu._opendtu_start_read(client, settings)
         self.assertEqual(progress.inverters, {"A": complete})
         self.assertEqual(progress.detail_serials, ("B",))
         self.assertEqual(progress.next_detail_index, 0)
-        opendtu._opendtu_continue_read(client, settings, progress)
-        self.assertEqual(progress.inverters["B"], _inverter("B", ac_power=222.0))
+        with patch.object(opendtu, "_opendtu_detail_inverter", return_value=detail) as parse_detail:
+            opendtu._opendtu_continue_read(client, settings, progress)
+        self.assertEqual(progress.inverters["B"], detail)
         self.assertEqual(progress.next_detail_index, 1)
         self.assertEqual(client._perform_request.call_count, 2)
         self.assertEqual(
@@ -291,6 +296,214 @@ class EnergyConnectorsOpenDtuContractTests(unittest.TestCase):
             client._perform_request.call_args_list[1].kwargs,
             {"context": {"serial": "B"}},
         )
+        parse_detail.assert_called_once_with(detail_payload, "B")
+
+    def test_start_read_uses_exact_payload_filter_and_measurement_partition(self) -> None:
+        settings = _settings(serial_filter=("configured-a", "configured-b"))
+        client = object()
+        payload = {"status": "payload"}
+        complete = {"serial": "A"}
+        incomplete = {"serial": "B"}
+        with (
+            patch.object(opendtu, "_opendtu_snapshot_payload", return_value=payload) as status_payload,
+            patch.object(
+                opendtu,
+                "_opendtu_unique_raw_inverters",
+                return_value=(complete, incomplete),
+            ) as unique_inverters,
+            patch.object(
+                opendtu,
+                "_opendtu_inverter_has_measurements",
+                side_effect=(True, False, True, False),
+            ) as has_measurements,
+            patch.object(opendtu, "_opendtu_serial", side_effect=("A", "B")) as inverter_serial,
+        ):
+            progress = opendtu._opendtu_start_read(client, settings)
+
+        self.assertEqual(
+            progress,
+            opendtu.OpenDtuReadProgress(
+                payload=payload,
+                inverters={"A": complete},
+                detail_serials=("B",),
+                next_detail_index=0,
+            ),
+        )
+        status_payload.assert_called_once_with(client, settings)
+        unique_inverters.assert_called_once_with(payload, ("configured-a", "configured-b"))
+        self.assertEqual(
+            has_measurements.call_args_list,
+            [
+                unittest.mock.call(complete),
+                unittest.mock.call(incomplete),
+                unittest.mock.call(complete),
+                unittest.mock.call(incomplete),
+            ],
+        )
+        self.assertEqual(
+            inverter_serial.call_args_list,
+            [
+                unittest.mock.call(complete),
+                unittest.mock.call(incomplete),
+            ],
+        )
+
+    def test_continue_read_advances_from_the_current_detail_index(self) -> None:
+        settings = _settings()
+        client = MagicMock()
+        detail_payload = {"inverters": [_inverter("B")]}
+        detail = _inverter("B", ac_power=222.0)
+        client._perform_request.return_value = detail_payload
+        progress = opendtu.OpenDtuReadProgress(
+            payload={},
+            inverters={"A": _inverter("A")},
+            detail_serials=("A", "B", "C"),
+            next_detail_index=1,
+        )
+
+        with patch.object(opendtu, "_opendtu_detail_inverter", return_value=detail) as parse_detail:
+            opendtu._opendtu_continue_read(client, settings, progress)
+
+        self.assertEqual(progress.next_detail_index, 2)
+        self.assertIs(progress.inverters["B"], detail)
+        client._perform_request.assert_called_once_with(
+            "GET",
+            "http://opendtu.local/inverter?serial=${serial}",
+            context={"serial": "B"},
+        )
+        parse_detail.assert_called_once_with(detail_payload, "B")
+
+    def test_step_start_pending_preserves_every_dependency_argument(self) -> None:
+        owner = object()
+        runtime = object()
+        source = EnergySourceDefinition(source_id="pv", config_path="source.ini")
+        settings = _settings()
+        client = object()
+        progress = opendtu.OpenDtuReadProgress(
+            payload={"status": "initial"},
+            inverters={},
+            detail_serials=("A",),
+            next_detail_index=0,
+        )
+        with (
+            patch.object(opendtu, "_runtime_owner", return_value=runtime) as runtime_owner,
+            patch.object(opendtu, "_opendtu_energy_source_settings", return_value=settings) as load_settings,
+            patch.object(opendtu, "_opendtu_snapshot_client", return_value=client) as build_client,
+            patch.object(opendtu, "_opendtu_progress_key", return_value="progress-key") as progress_key,
+            patch.object(opendtu, "_runtime_cache_get", return_value=None) as cache_get,
+            patch.object(opendtu, "_opendtu_start_read", return_value=progress) as start_read,
+            patch.object(opendtu, "_opendtu_continue_read") as continue_read,
+            patch.object(opendtu, "_runtime_cache_put") as cache_put,
+            patch.object(opendtu, "_runtime_cache_pop") as cache_pop,
+        ):
+            result = opendtu._opendtu_energy_source_step(owner, source, 123.5)
+
+        self.assertFalse(result.complete)
+        self.assertIsNone(result.snapshot)
+        runtime_owner.assert_called_once_with(owner)
+        load_settings.assert_called_once_with(runtime, source)
+        build_client.assert_called_once_with(runtime, settings)
+        progress_key.assert_called_once_with(source)
+        cache_get.assert_called_once_with(
+            runtime,
+            "opendtu.progress",
+            "progress-key",
+            opendtu.OpenDtuReadProgress,
+        )
+        start_read.assert_called_once_with(client, settings)
+        continue_read.assert_not_called()
+        cache_put.assert_called_once_with(
+            runtime,
+            "opendtu.progress",
+            "progress-key",
+            progress,
+        )
+        cache_pop.assert_not_called()
+
+    def test_step_resume_completion_preserves_cache_and_snapshot_arguments(self) -> None:
+        owner = object()
+        runtime = object()
+        source = EnergySourceDefinition(source_id="pv", config_path="source.ini")
+        settings = _settings()
+        client = object()
+        inverter = _inverter("A")
+        progress = opendtu.OpenDtuReadProgress(
+            payload={"status": "initial"},
+            inverters={"A": inverter},
+            detail_serials=("A",),
+            next_detail_index=0,
+        )
+        snapshot = EnergySourceSnapshot(
+            source_id="pv",
+            role="",
+            service_name="opendtu",
+            captured_at=123.5,
+        )
+
+        def complete_detail(
+            actual_client: object,
+            actual_settings: opendtu.OpenDtuEnergySourceSettings,
+            actual_progress: opendtu.OpenDtuReadProgress,
+        ) -> None:
+            self.assertIs(actual_client, client)
+            self.assertIs(actual_settings, settings)
+            self.assertIs(actual_progress, progress)
+            actual_progress.next_detail_index = 1
+
+        with (
+            patch.object(opendtu, "_runtime_owner", return_value=runtime),
+            patch.object(opendtu, "_opendtu_energy_source_settings", return_value=settings),
+            patch.object(opendtu, "_opendtu_snapshot_client", return_value=client),
+            patch.object(opendtu, "_opendtu_progress_key", return_value="progress-key"),
+            patch.object(opendtu, "_runtime_cache_get", return_value=progress) as cache_get,
+            patch.object(opendtu, "_opendtu_start_read") as start_read,
+            patch.object(opendtu, "_opendtu_continue_read", side_effect=complete_detail) as continue_read,
+            patch.object(opendtu, "_runtime_cache_put") as cache_put,
+            patch.object(opendtu, "_runtime_cache_pop") as cache_pop,
+            patch.object(opendtu, "_opendtu_completed_snapshot", return_value=snapshot) as complete_snapshot,
+        ):
+            result = opendtu._opendtu_energy_source_step(owner, source, 123.5)
+
+        self.assertTrue(result.complete)
+        self.assertIs(result.snapshot, snapshot)
+        cache_get.assert_called_once_with(
+            runtime,
+            "opendtu.progress",
+            "progress-key",
+            opendtu.OpenDtuReadProgress,
+        )
+        start_read.assert_not_called()
+        continue_read.assert_called_once_with(client, settings, progress)
+        cache_put.assert_not_called()
+        cache_pop.assert_called_once_with(runtime, "opendtu.progress", "progress-key")
+        complete_snapshot.assert_called_once_with(
+            source,
+            settings,
+            {"status": "initial"},
+            (inverter,),
+            123.5,
+        )
+
+    def test_step_failure_removes_only_its_exact_progress_entry(self) -> None:
+        runtime = object()
+        source = EnergySourceDefinition(source_id="pv", config_path="source.ini")
+        settings = _settings()
+        client = object()
+        with (
+            patch.object(opendtu, "_runtime_owner", return_value=runtime),
+            patch.object(opendtu, "_opendtu_energy_source_settings", return_value=settings),
+            patch.object(opendtu, "_opendtu_snapshot_client", return_value=client),
+            patch.object(opendtu, "_opendtu_progress_key", return_value="progress-key"),
+            patch.object(opendtu, "_runtime_cache_get", return_value=None),
+            patch.object(opendtu, "_opendtu_start_read", side_effect=TimeoutError("offline")),
+            patch.object(opendtu, "_runtime_cache_put") as cache_put,
+            patch.object(opendtu, "_runtime_cache_pop") as cache_pop,
+            self.assertRaisesRegex(TimeoutError, "offline"),
+        ):
+            opendtu._opendtu_energy_source_step(object(), source, 123.5)
+
+        cache_put.assert_not_called()
+        cache_pop.assert_called_once_with(runtime, "opendtu.progress", "progress-key")
 
     def test_failed_status_or_detail_step_discards_partial_progress(self) -> None:
         source = EnergySourceDefinition(
@@ -397,14 +610,19 @@ class EnergyConnectorsOpenDtuContractTests(unittest.TestCase):
         self.assertIs(payloads.opendtu_matches_serial_filter(complete, ("A",)), True)
         self.assertIs(payloads.opendtu_matches_serial_filter(complete, ("B",)), False)
         self.assertIs(payloads.opendtu_matches_serial_filter({"serial": None}, ("None",)), False)
-        for detail_payload in (
-            {},
-            {"inverters": []},
-            {"inverters": ["invalid"]},
-            {"inverters": [complete, duplicate]},
+        self.assertEqual(payloads.opendtu_serial({"serial": None}), "")
+        for detail_payload, message in (
+            ({}, "OpenDTU detail response is missing inverter A"),
+            ({"inverters": []}, "OpenDTU detail response does not uniquely identify inverter A"),
+            ({"inverters": ["invalid"]}, "OpenDTU detail response does not uniquely identify inverter A"),
+            (
+                {"inverters": [complete, duplicate]},
+                "OpenDTU detail response does not uniquely identify inverter A",
+            ),
         ):
-            with self.subTest(payload=detail_payload), self.assertRaises(ValueError):
+            with self.subTest(payload=detail_payload), self.assertRaises(ValueError) as invalid_detail:
                 payloads.opendtu_detail_inverter(detail_payload, "A")
+            self.assertEqual(str(invalid_detail.exception), message)
         self.assertEqual(
             payloads.opendtu_detail_inverter({"inverters": [complete]}, "A"),
             complete,

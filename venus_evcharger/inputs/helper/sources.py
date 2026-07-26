@@ -287,7 +287,7 @@ def _measurement_observed_at(
 ) -> float | None:
     if measurement is None or measurement.observed_at <= 0.0:
         return None
-    return measurement.observed_at
+    return float(measurement.observed_at)
 
 
 def _source_scope(source_name: str) -> EnergyRefreshScope:

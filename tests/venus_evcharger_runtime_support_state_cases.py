@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -15,8 +16,11 @@ from venus_evcharger.control import ControlCommand
 from venus_evcharger.ipc.core_commands import (
     CORE_COMMAND_QUEUE_CLASS,
     CORE_COMMAND_SCHEMA_VERSION,
+    CoreCommandMailbox,
     CoreControlCommand,
+    core_control_command_payload,
 )
+from venus_evcharger.ipc.command_mailbox import MailboxLockTimeout, MailboxScanUnavailable
 from tests.venus_evcharger_runtime_support_support import RuntimeSupportController
 from tests.venus_evcharger_test_fixtures import make_runtime_support_service
 
@@ -677,9 +681,17 @@ class TestRuntimeSupportControllerState(unittest.TestCase):
         service._core_command_mailbox = None
         self.assertFalse(controller.executor.drain_core_commands_once())
 
-        inbox = SimpleNamespace(load_pending=MagicMock(return_value=[]))
+        inbox = SimpleNamespace(
+            load_pending=MagicMock(return_value=[]),
+            coalesce=MagicMock(return_value=[]),
+            remove_if_current=MagicMock(return_value=True),
+        )
         service._core_command_mailbox = inbox
         self.assertFalse(controller.executor.drain_core_commands_once())
+
+        inbox.load_pending.return_value = [("ignored", {})]
+        inbox.coalesce = MagicMock(return_value=[])
+        self.assertIs(controller.executor.drain_core_commands_once(), False)
 
         first_payload = {
             "schema_version": CORE_COMMAND_SCHEMA_VERSION,
@@ -697,7 +709,7 @@ class TestRuntimeSupportControllerState(unittest.TestCase):
         }
         inbox.load_pending = MagicMock(return_value=[("first", first_payload)])
         inbox.coalesce = MagicMock(return_value=[("first", first_payload)])
-        inbox.remove = MagicMock()
+        inbox.remove_if_current = MagicMock(return_value=True)
         service.handle_control_command = MagicMock(return_value=SimpleNamespace(accepted=True))
 
         with patch("venus_evcharger.runtime.async_mainloop_executor.time.time", return_value=100.0), patch(
@@ -725,7 +737,7 @@ class TestRuntimeSupportControllerState(unittest.TestCase):
             "1.500",
             "first",
         )
-        inbox.remove.assert_called_once_with("first")
+        inbox.remove_if_current.assert_called_once_with("first", first_payload)
 
         service.handle_control_command.reset_mock()
         inbox.coalesce.return_value = [
@@ -758,8 +770,8 @@ class TestRuntimeSupportControllerState(unittest.TestCase):
                 command_id="cmd-second",
             )
         )
-        self.assertEqual(inbox.remove.call_args_list[-2][0][0], "ignored")
-        self.assertEqual(inbox.remove.call_args_list[-1][0][0], "second")
+        self.assertEqual(inbox.remove_if_current.call_args_list[-2].args, ("ignored", {"kind": "refresh_value", "target": "mode", "value": 3}))
+        self.assertEqual(inbox.remove_if_current.call_args_list[-1].args[0], "second")
 
     def test_runtime_executor_core_command_boundary_contracts(self) -> None:
         service = make_runtime_support_service()
@@ -790,6 +802,417 @@ class TestRuntimeSupportControllerState(unittest.TestCase):
         with patch("venus_evcharger.runtime.async_mainloop_executor.logging.warning") as log_warning:
             controller.executor.handle_core_command({"kind": "invalid"})
         log_warning.assert_called_once_with("Dropping invalid core control command file=%s", "unknown")
+
+    def test_core_command_retire_is_revision_bound_during_coalesced_race(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mailbox = CoreCommandMailbox(str(Path(temp_dir) / "core"))
+            service._core_command_mailbox = mailbox
+            first = core_control_command_payload(
+                "set_mode",
+                "mode",
+                1,
+                source="control-surface",
+                origin="gateway-gui",
+            )
+            mailbox.enqueue(first)
+
+            def replace_during_dispatch(_command: ControlCommand) -> SimpleNamespace:
+                mailbox.enqueue({**first, "value": 2})
+                return SimpleNamespace(accepted=True)
+
+            service.handle_control_command = MagicMock(side_effect=replace_during_dispatch)
+            self.assertTrue(controller.executor.drain_core_commands_once())
+            pending = mailbox.load_pending()
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(pending[0][1]["value"], 2)
+
+            service.handle_control_command.side_effect = None
+            service.handle_control_command.return_value = SimpleNamespace(accepted=True)
+            self.assertTrue(controller.executor.drain_core_commands_once())
+            self.assertEqual(mailbox.load_pending(), [])
+        self.assertEqual(
+            [call.args[0].value for call in service.handle_control_command.call_args_list],
+            [1, 2],
+        )
+
+    def test_dispatch_failure_retries_with_backoff_and_preserves_command(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        payload = {
+            "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+            "queue_class": CORE_COMMAND_QUEUE_CLASS,
+            "kind": "user_command",
+            "name": "set_mode",
+            "target": "mode",
+            "source": "control-surface",
+            "origin": "gateway-gui",
+            "id": "retry",
+            "created_at": 1.0,
+            "value": 2,
+            "priority": "user",
+            "coalesce_key": "core:set_mode:mode",
+            "mailbox_revision": "revision-1",
+        }
+        inbox = SimpleNamespace(
+            load_pending=MagicMock(return_value=[("retry.json", payload)]),
+            coalesce=MagicMock(side_effect=lambda commands: commands),
+            remove_if_current=MagicMock(return_value=True),
+        )
+        service._core_command_mailbox = inbox
+        dispatch_error = RuntimeError("dispatch failed")
+        service.handle_control_command = MagicMock(
+            side_effect=(dispatch_error, SimpleNamespace(accepted=True))
+        )
+        clock = [10.0]
+        with (
+            patch.object(executor_module.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(executor_module.logging, "warning") as warning,
+        ):
+            self.assertTrue(controller.executor.drain_core_commands_once())
+            self.assertEqual(inbox.remove_if_current.call_count, 0)
+            retry = controller.executor._core_command_retries["retry.json"]
+            self.assertIs(retry.retire_only, False)
+            self.assertEqual(retry.reason, "dispatch")
+            self.assertEqual(retry.expected, payload)
+            clock[0] = 10.49
+            self.assertFalse(controller.executor.drain_core_commands_once())
+            self.assertEqual(service.handle_control_command.call_count, 1)
+            clock[0] = 10.5
+            self.assertTrue(controller.executor.drain_core_commands_once())
+        self.assertEqual(service.handle_control_command.call_count, 2)
+        inbox.remove_if_current.assert_called_once_with("retry.json", payload)
+        warning.assert_called_once_with(
+            "Core command dispatch deferred failures=%s file=%s error=%s",
+            1,
+            "retry.json",
+            dispatch_error,
+        )
+        self.assertEqual(controller.executor._core_command_retries, {})
+
+    def test_retire_timeout_never_redispatches_an_applied_revision(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        payload = {
+            "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+            "queue_class": CORE_COMMAND_QUEUE_CLASS,
+            "kind": "user_command",
+            "name": "set_mode",
+            "target": "mode",
+            "source": "control-surface",
+            "origin": "gateway-gui",
+            "id": "retire",
+            "created_at": 1.0,
+            "value": 2,
+            "priority": "user",
+            "coalesce_key": "core:set_mode:mode",
+            "mailbox_revision": "revision-1",
+        }
+        retire_error = MailboxLockTimeout("busy")
+        inbox = SimpleNamespace(
+            load_pending=MagicMock(return_value=[("retire.json", payload)]),
+            coalesce=MagicMock(side_effect=lambda commands: commands),
+            remove_if_current=MagicMock(side_effect=(retire_error, True)),
+        )
+        service._core_command_mailbox = inbox
+        service.handle_control_command = MagicMock(return_value=SimpleNamespace(accepted=True))
+        clock = [20.0]
+        with (
+            patch.object(executor_module.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(executor_module.logging, "warning") as warning,
+        ):
+            self.assertTrue(controller.executor.drain_core_commands_once())
+            retry = controller.executor._core_command_retries["retire.json"]
+            self.assertIs(retry.retire_only, True)
+            self.assertEqual(retry.reason, "retire")
+            self.assertEqual(retry.expected, payload)
+            clock[0] = 20.49
+            self.assertFalse(controller.executor.drain_core_commands_once())
+            clock[0] = 20.5
+            self.assertTrue(controller.executor.drain_core_commands_once())
+        service.handle_control_command.assert_called_once()
+        self.assertEqual(inbox.remove_if_current.call_count, 2)
+        warning.assert_called_once_with(
+            "Core command retire deferred failures=%s file=%s error=%s",
+            1,
+            "retire.json",
+            retire_error,
+        )
+
+    def test_poll_lock_timeout_is_recoverable_and_logging_is_bounded(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        poll_error = MailboxLockTimeout("busy")
+        inbox = SimpleNamespace(
+            load_pending=MagicMock(side_effect=poll_error),
+            coalesce=MagicMock(),
+            remove_if_current=MagicMock(),
+        )
+        service._core_command_mailbox = inbox
+        with patch.object(executor_module.logging, "warning") as warning:
+            for _index in range(4):
+                self.assertFalse(controller.executor.drain_core_commands_once())
+        self.assertEqual(warning.call_count, 3)
+        self.assertEqual([call.args[1] for call in warning.call_args_list], [1, 2, 4])
+        self.assertTrue(all(call.args[2] is poll_error for call in warning.call_args_list))
+        self.assertEqual(controller.executor._core_mailbox_poll_failures, 4)
+
+        inbox.load_pending.side_effect = None
+        inbox.load_pending.return_value = []
+        self.assertFalse(controller.executor.drain_core_commands_once())
+        self.assertEqual(controller.executor._core_mailbox_poll_failures, 0)
+
+    def test_new_revision_bypasses_old_dispatch_backoff_and_absent_retry_is_forgotten(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        old_payload = {
+            "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+            "queue_class": CORE_COMMAND_QUEUE_CLASS,
+            "kind": "user_command",
+            "name": "set_mode",
+            "target": "mode",
+            "source": "control-surface",
+            "origin": "gateway-gui",
+            "id": "mode",
+            "created_at": 1.0,
+            "value": 1,
+            "priority": "user",
+            "coalesce_key": "core:set_mode:mode",
+            "mailbox_revision": "old",
+        }
+        new_payload = {**old_payload, "value": 2, "mailbox_revision": "new"}
+        pending = [[("mode.json", old_payload)]]
+        inbox = SimpleNamespace(
+            load_pending=MagicMock(side_effect=lambda: pending[0]),
+            coalesce=MagicMock(side_effect=lambda commands: commands),
+            remove_if_current=MagicMock(return_value=True),
+        )
+        service._core_command_mailbox = inbox
+        service.handle_control_command = MagicMock(
+            side_effect=(RuntimeError("old failed"), SimpleNamespace(accepted=True))
+        )
+        clock = [30.0]
+        with (
+            patch.object(executor_module.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(executor_module.logging, "warning"),
+        ):
+            self.assertTrue(controller.executor.drain_core_commands_once())
+            clock[0] = 30.1
+            pending[0] = [("mode.json", new_payload)]
+        self.assertTrue(controller.executor.drain_core_commands_once())
+        self.assertEqual(service.handle_control_command.call_count, 2)
+        self.assertEqual(controller.executor._core_command_retries, {})
+
+        controller.executor._defer_core_command(
+            "gone.json",
+            old_payload,
+            reason="dispatch",
+            retire_only=False,
+        )
+        pending[0] = [("other.json", new_payload)]
+        service.handle_control_command.return_value = SimpleNamespace(accepted=True)
+        service.handle_control_command.side_effect = None
+        self.assertTrue(controller.executor.drain_core_commands_once())
+        self.assertNotIn("gone.json", controller.executor._core_command_retries)
+
+    def test_repeated_dispatch_failure_increases_delay_and_preserves_reason(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        payload = {
+            "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+            "queue_class": CORE_COMMAND_QUEUE_CLASS,
+            "kind": "user_command",
+            "name": "set_mode",
+            "target": "mode",
+            "source": "control-surface",
+            "origin": "gateway-gui",
+            "id": "retry",
+            "created_at": 1.0,
+            "value": 2,
+            "priority": "user",
+            "coalesce_key": "core:set_mode:mode",
+        }
+        inbox = SimpleNamespace(
+            load_pending=MagicMock(return_value=[("retry.json", payload)]),
+            coalesce=MagicMock(side_effect=lambda commands: commands),
+            remove_if_current=MagicMock(),
+        )
+        service._core_command_mailbox = inbox
+        service.handle_control_command = MagicMock(side_effect=RuntimeError("failed"))
+        clock = [40.0]
+        with (
+            patch.object(executor_module.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(executor_module.logging, "warning"),
+        ):
+            self.assertTrue(controller.executor.drain_core_commands_once())
+            clock[0] = 40.5
+            self.assertTrue(controller.executor.drain_core_commands_once())
+        retry = controller.executor._core_command_retries["retry.json"]
+        self.assertEqual(retry.failure_count, 2)
+        self.assertEqual(retry.retry_at, 41.5)
+        self.assertEqual(retry.reason, "dispatch")
+
+    def test_poll_oserror_is_logged_and_does_not_escape(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        poll_error = OSError("directory unavailable")
+        service._core_command_mailbox = SimpleNamespace(
+            load_pending=MagicMock(side_effect=poll_error),
+            coalesce=MagicMock(),
+            remove_if_current=MagicMock(),
+        )
+        with patch.object(executor_module.logging, "warning") as warning:
+            self.assertFalse(controller.executor.drain_core_commands_once())
+        warning.assert_called_once_with(
+            "Core command mailbox poll deferred failures=%s error=%s",
+            1,
+            poll_error,
+        )
+
+    def test_scan_unavailable_preserves_retry_until_a_reliable_snapshot_arrives(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        payload = {
+            "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+            "queue_class": CORE_COMMAND_QUEUE_CLASS,
+            "kind": "user_command",
+            "name": "set_mode",
+            "target": "mode",
+            "source": "control-surface",
+            "origin": "gateway-gui",
+            "id": "retire-after-scan",
+            "created_at": 1.0,
+            "value": 2,
+            "priority": "user",
+            "coalesce_key": "core:set_mode:mode",
+            "mailbox_revision": "revision-1",
+        }
+        pending = [("retire-after-scan.json", payload)]
+        scan_error = MailboxScanUnavailable("/run/core-commands", OSError("scan failed"))
+        inbox = SimpleNamespace(
+            load_pending=MagicMock(return_value=pending),
+            coalesce=MagicMock(side_effect=lambda commands: commands),
+            remove_if_current=MagicMock(side_effect=(MailboxLockTimeout("busy"), True)),
+        )
+        service._core_command_mailbox = inbox
+        service.handle_control_command = MagicMock(return_value=SimpleNamespace(accepted=True))
+        clock = [10.0]
+
+        with (
+            patch.object(executor_module.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(executor_module.logging, "warning"),
+        ):
+            self.assertTrue(controller.executor.drain_core_commands_once())
+            retry_before_scan = controller.executor._core_command_retries["retire-after-scan.json"]
+
+            inbox.load_pending.side_effect = scan_error
+            self.assertFalse(controller.executor.drain_core_commands_once())
+            self.assertIs(
+                controller.executor._core_command_retries["retire-after-scan.json"],
+                retry_before_scan,
+            )
+
+            inbox.load_pending.side_effect = None
+            inbox.load_pending.return_value = pending
+            clock[0] = retry_before_scan.retry_at
+            self.assertTrue(controller.executor.drain_core_commands_once())
+
+        service.handle_control_command.assert_called_once()
+        self.assertEqual(inbox.remove_if_current.call_count, 2)
+        self.assertEqual(controller.executor._core_command_retries, {})
+
+        controller.executor._core_command_retries["gone.json"] = retry_before_scan
+        inbox.load_pending.return_value = []
+        self.assertFalse(controller.executor.drain_core_commands_once())
+        self.assertEqual(controller.executor._core_command_retries, {})
+
+    def test_dispatch_does_not_swallow_programming_or_process_control_errors(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        payload = {
+            "schema_version": CORE_COMMAND_SCHEMA_VERSION,
+            "queue_class": CORE_COMMAND_QUEUE_CLASS,
+            "kind": "user_command",
+            "name": "set_mode",
+            "target": "mode",
+            "source": "control-surface",
+            "origin": "gateway-gui",
+            "id": "fatal",
+            "created_at": 1.0,
+            "value": 2,
+            "priority": "user",
+            "coalesce_key": "core:set_mode:mode",
+        }
+        service._core_command_mailbox = SimpleNamespace(
+            load_pending=MagicMock(return_value=[("fatal.json", payload)]),
+            coalesce=MagicMock(side_effect=lambda commands: commands),
+            remove_if_current=MagicMock(),
+        )
+        for error in (AssertionError("broken invariant"), SystemExit(23)):
+            with self.subTest(error=type(error).__name__):
+                service.handle_control_command = MagicMock(side_effect=error)
+                with self.assertRaises(type(error)):
+                    controller.executor.drain_core_commands_once()
+                service._core_command_mailbox.remove_if_current.assert_not_called()
+                self.assertEqual(controller.executor._core_command_retries, {})
+
+    def test_handle_core_command_reports_validity_and_retry_predicates_are_exact(self) -> None:
+        service = make_runtime_support_service()
+        controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
+        controller.initialize_runtime_support()
+        self.assertFalse(controller.executor.handle_core_command({"kind": "invalid"}))
+        retry = executor_module._CoreCommandRetry(
+            expected={},
+            failure_count=1,
+            retry_at=5.0,
+            retire_only=True,
+            reason="retire",
+        )
+        self.assertTrue(executor_module._retry_is_waiting(retry, 4.999))
+        self.assertFalse(executor_module._retry_is_waiting(retry, 5.0))
+        self.assertFalse(executor_module._retry_is_waiting(None, 0.0))
+        self.assertTrue(executor_module._retry_needs_only_retirement(retry))
+        self.assertFalse(executor_module._retry_needs_only_retirement(None))
+
+        inbox = SimpleNamespace()
+        payload = {"mailbox_revision": "one"}
+        controller.executor._core_command_retries["command.json"] = executor_module._CoreCommandRetry(
+            expected=dict(payload),
+            failure_count=1,
+            retry_at=0.0,
+            retire_only=True,
+            reason="retire",
+        )
+        with patch.object(controller.executor, "_retire_core_command", return_value=True) as retire:
+            self.assertTrue(controller.executor._process_core_command(inbox, "command.json", payload))
+        retire.assert_called_once_with(inbox, "command.json", payload)
+
+        valid = CoreControlCommand(
+            name="set_mode",
+            target="mode",
+            value=1,
+            source="control-surface",
+            origin="gateway-gui",
+            command_id="valid",
+            created_at=1.0,
+        )
+        with (
+            patch.object(executor_module, "parse_core_control_command", return_value=valid),
+            patch.object(controller.executor, "dispatch_core_control_command") as dispatch,
+            patch.object(executor_module, "_log_core_control_command"),
+        ):
+            self.assertIs(controller.executor.handle_core_command({}, command_file="valid.json"), True)
+        dispatch.assert_called_once_with(valid)
 
     def test_runtime_executor_core_command_metadata_helpers(self) -> None:
         self.assertFalse(executor_module._update_worker_enabled(SimpleNamespace()))

@@ -18,6 +18,7 @@ from venus_evcharger.dbus_gateway_surface import (
     venus_path_for_control_target,
 )
 from venus_evcharger.ipc.core_commands import core_control_command_payload
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ipc.gateway_operations import (
     ess_grid_setpoint_command,
     gx_relay_set_command,
@@ -137,10 +138,10 @@ class GatewayBoundaryEdgeContractTests(unittest.TestCase):
 
     def test_pressure_reader_normalizes_all_resource_states_and_foreign_timestamps(self) -> None:
         cases = (
-            ({"captured_at": object(), "resources": {}}, ("unknown", "unknown")),
-            ({"resources": {"state": "constrained"}}, ("slow", "resources")),
-            ({"resources": {"state": "ok"}}, ("ok", "resources")),
-            ({"resources": {"state": "idle"}}, ("unknown", "unknown")),
+            ({"captured_at": object(), "resources": {}}, ("slow", "missing-timestamp")),
+            ({"captured_at": 100.0, "resources": {"state": "constrained"}}, ("slow", "resources")),
+            ({"captured_at": 100.0, "resources": {"state": "ok"}}, ("ok", "resources")),
+            ({"captured_at": 100.0, "resources": {"state": "idle"}}, ("slow", "missing-state")),
         )
         with patch("venus_evcharger.ipc.gateway_pressure._read_json") as read_json:
             for payload, expected in cases:
@@ -161,6 +162,57 @@ class GatewayBoundaryEdgeContractTests(unittest.TestCase):
         with patch.object(gateway_client_module, "gateway_value", return_value=0):
             self.assertEqual(operations.read_gx_relay_state(0, max_age_seconds=2.0), 0)
         client.enqueue_command.assert_not_called()
+
+    def test_rejected_relay_refresh_is_observable(self) -> None:
+        client = MagicMock(spec=GatewayClient)
+        client.enqueue_command.return_value = GatewayEnqueueResult(
+            False,
+            reason="backpressure",
+        )
+        operations = GatewayOperationsClient(client)
+
+        with (
+            patch.object(gateway_client_module, "gateway_value", return_value=None),
+            patch.object(gateway_client_module.logging, "warning") as warning,
+        ):
+            self.assertIsNone(
+                operations.read_gx_relay_state(1, max_age_seconds=2.0)
+            )
+        warning.assert_called_once_with(
+            "Gateway rejected GX relay refresh for relay %d: %s",
+            1,
+            "backpressure",
+        )
+
+    def test_fast_client_rejects_non_object_normalization_and_oversized_response(self) -> None:
+        client = GatewayClient()
+        with patch.object(gateway_client_module, "_json_ready", return_value=[]):
+            response = client._send_fast_publication({"kind": "publish_evcs_fields"})
+        self.assertEqual(response, {"ok": False, "error": "payload-must-be-object"})
+
+        sock = MagicMock()
+        oversized = b"x" * (
+            gateway_client_module.FAST_PUBLICATION_WIRE_HEADER_BYTES
+            + gateway_client_module.FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES
+            + 1
+        )
+        with (
+            patch.object(
+                gateway_client_module,
+                "_receive_response_chunk",
+                return_value=oversized,
+            ),
+            patch.object(
+                gateway_client_module,
+                "fast_publication_frame_size",
+                return_value=0,
+            ),
+            self.assertRaisesRegex(
+                gateway_client_module.FastPublicationWireError,
+                "^response-too-large$",
+            ),
+        ):
+            gateway_client_module._receive_fast_response(sock)
 
     def test_unavailable_operations_are_explicit_and_boundary_checked(self) -> None:
         unavailable = UnavailableGatewayOperations()

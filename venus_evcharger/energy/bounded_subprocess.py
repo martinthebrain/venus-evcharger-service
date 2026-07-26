@@ -174,7 +174,7 @@ def _remaining_seconds(deadline: float, command: tuple[str, ...]) -> float:
 
 def _decode_output(payload: bytes, label: str) -> str:
     try:
-        return payload.decode("utf-8")
+        return payload.decode()
     except UnicodeDecodeError as error:
         raise ValueError(f"Command {label} is not valid UTF-8") from error
 

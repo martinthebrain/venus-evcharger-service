@@ -7,10 +7,8 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import replace
 
 from venus_evcharger.dbus_gateway_client import GatewayClient
-from venus_evcharger.dbus_gateway_core import gateway_paths
 from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
 from venus_evcharger.inputs.helper.contracts import EnergyGatewayClientPort, EnergySnapshotReaderPort, SnapshotPort
 from venus_evcharger.ipc.energy import (
@@ -31,11 +29,7 @@ class GatewayEnergySnapshots:
         client: EnergyGatewayClientPort | None = None,
     ) -> None:
         self.settings = settings
-        paths = replace(
-            gateway_paths(settings.gateway_run_dir),
-            cache_path=settings.gateway_cache_path,
-        )
-        self._client = client or GatewayClient(paths)
+        self._client = client or GatewayClient(settings.gateway_paths)
         self._inputs: EnergyInputsSnapshot | None = None
         self._topology: EnergyTopologySnapshot | None = None
         self._request_after: dict[tuple[EnergyRefreshScope, str], float] = {}
@@ -83,10 +77,12 @@ class GatewayEnergySnapshots:
             reason=reason,
         )
         try:
-            return self._client.request_energy_refresh(
-                request,
-                source="auto-input-helper",
-            ).accepted
+            return bool(
+                self._client.request_energy_refresh(
+                    request,
+                    source="auto-input-helper",
+                ).accepted
+            )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             logging.debug("Energy refresh request failed scope=%s: %s", scope, error)
             return False

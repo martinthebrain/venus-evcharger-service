@@ -6,7 +6,7 @@ This layer keeps source-level readings separate from cluster-level summaries.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, TypeGuard
 
 from .models import EnergyClusterSnapshot, EnergySourceDefinition, EnergySourceSnapshot
 from .numeric import non_negative_optional_float, sum_optional
@@ -112,11 +112,21 @@ def _non_negative_optional_float(value: Any) -> float | None:
 
 
 def _balance_profile_for_source(
-    learning_profiles: Mapping[str, Any],
+    learning_profiles: Mapping[str, object],
     source_id: str,
-) -> Mapping[str, Any]:
+) -> Mapping[str, object]:
     raw_profile = learning_profiles.get(source_id)
-    return raw_profile if isinstance(raw_profile, Mapping) else {}
+    if not _is_object_mapping(raw_profile):
+        return {}
+    normalized: dict[str, object] = {}
+    for key in raw_profile:
+        if isinstance(key, str):
+            normalized[key] = raw_profile[key]
+    return normalized
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)
 
 
 def _available_energy_above_reserve(
@@ -147,7 +157,7 @@ def _discharge_balance_weight(
 
 def _discharge_balance_eligible_source(
     source: EnergySourceSnapshot,
-    profiles: Mapping[str, Any],
+    profiles: Mapping[str, object],
 ) -> dict[str, Any] | None:
     if source.role not in {"battery", "hybrid-inverter"} or not bool(source.online):
         return None
@@ -208,7 +218,7 @@ def _empty_discharge_balance_metrics() -> dict[str, Any]:
 
 def _eligible_discharge_balance_sources(
     normalized_sources: tuple[EnergySourceSnapshot, ...],
-    profiles: Mapping[str, Any],
+    profiles: Mapping[str, object],
 ) -> tuple[list[dict[str, Any]], float]:
     eligible_sources: list[dict[str, Any]] = []
     total_discharge_w = 0.0
@@ -270,7 +280,7 @@ def _discharge_balance_metric_totals(
 
 def derive_discharge_balance_metrics(
     sources: Iterable[EnergySourceSnapshot],
-    learning_profiles: Mapping[str, Any] | None = None,
+    learning_profiles: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Return fairness diagnostics for concurrent ESS discharge behavior."""
     normalized_sources = tuple(sources)

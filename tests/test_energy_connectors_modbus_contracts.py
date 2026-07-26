@@ -102,21 +102,29 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
         for scale in ("nan", "inf", "-inf"):
             parser = ConfigParser()
             parser.read_dict({"Read": {"Address": "1", "Scale": scale}})
-            with self.subTest(scale=scale), self.assertRaisesRegex(
-                ValueError,
-                "scale must be finite",
-            ):
+            with self.subTest(scale=scale), self.assertRaises(ValueError) as raised:
                 modbus._modbus_field_settings(parser, "Read")
+            self.assertEqual(
+                str(raised.exception),
+                "Modbus field scale must be finite",
+            )
 
         field = _field(1)
         for raw_value in (float("nan"), float("inf"), float("-inf")):
             client = MagicMock()
             client.read_scalar.return_value = raw_value
-            with self.subTest(raw_value=raw_value), self.assertRaisesRegex(
-                ValueError,
-                "non-finite value",
-            ):
+            with self.subTest(raw_value=raw_value), self.assertRaises(
+                ValueError
+            ) as raised:
                 modbus._modbus_field_value(client, field)
+            self.assertEqual(
+                str(raised.exception),
+                "Modbus energy-source field returned a non-finite value",
+            )
+
+        parser = ConfigParser()
+        parser.read_dict({"Read": {"Address": "1", "Scale": "0"}})
+        self.assertEqual(modbus._modbus_field_scale(parser["Read"]), 0.0)
 
     def test_settings_loader_assembles_every_role_and_caches(self) -> None:
         parser = ConfigParser()
@@ -226,7 +234,13 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
         )
 
     def test_snapshot_builder_maps_every_field_and_boundary(self) -> None:
-        source = EnergySourceDefinition(source_id="source", role="hybrid-inverter", usable_capacity_wh=5000.0)
+        source = EnergySourceDefinition(
+            source_id="source",
+            role="hybrid-inverter",
+            physical_id="battery-rack",
+            physical_priority=17,
+            usable_capacity_wh=5000.0,
+        )
         settings = _settings()
         values: dict[str, float | str | None] = {
             "soc": 61.0,
@@ -250,6 +264,8 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
                 source_id="source",
                 role="hybrid-inverter",
                 service_name="192.0.2.10",
+                physical_id="battery-rack",
+                physical_priority=17,
                 soc=61.0,
                 usable_capacity_wh=8400.0,
                 net_battery_power_w=-1200.0,
@@ -283,6 +299,52 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
                 )
                 self.assertEqual(snapshot.soc, expected_soc)
                 self.assertEqual(snapshot.usable_capacity_wh, expected_capacity)
+
+    def test_read_field_order_and_operating_mode_conversion_are_exact(self) -> None:
+        settings = _settings()
+        self.assertEqual(
+            modbus._modbus_read_fields(settings),
+            (
+                ("soc", settings.soc_field),
+                ("usable_capacity", settings.usable_capacity_field),
+                ("battery_power", settings.battery_power_field),
+                ("charge_limit_power", settings.charge_limit_power_field),
+                ("discharge_limit_power", settings.discharge_limit_power_field),
+                ("ac_power", settings.ac_power_field),
+                ("pv_input_power", settings.pv_input_power_field),
+                ("grid_interaction", settings.grid_interaction_field),
+                ("operating_mode", settings.operating_mode_field),
+            ),
+        )
+        self.assertEqual(modbus._modbus_progress_value("soc", 2.0, settings), 2.0)
+        self.assertEqual(
+            modbus._modbus_progress_value("operating_mode", 2.0, settings),
+            "support",
+        )
+        self.assertEqual(
+            modbus._modbus_progress_value("operating_mode", -0.0, settings),
+            "0",
+        )
+        self.assertEqual(
+            modbus._modbus_progress_value("operating_mode", 2.25, settings),
+            "2.25",
+        )
+
+    def test_progress_value_extractors_reject_cross_typed_values(self) -> None:
+        values: dict[str, float | str | None] = {
+            "numeric": 12.5,
+            "boolean": True,
+            "text": "support",
+            "missing": None,
+        }
+        self.assertEqual(modbus._numeric_progress_value(values, "numeric"), 12.5)
+        self.assertEqual(modbus._numeric_progress_value(values, "boolean"), 1.0)
+        self.assertIsNone(modbus._numeric_progress_value(values, "text"))
+        self.assertIsNone(modbus._numeric_progress_value(values, "absent"))
+        self.assertEqual(modbus._text_progress_value(values, "text"), "support")
+        self.assertEqual(modbus._text_progress_value(values, "numeric"), "")
+        self.assertEqual(modbus._text_progress_value(values, "missing"), "")
+        self.assertEqual(modbus._text_progress_value(values, "absent"), "")
 
     def test_validation_accepts_each_read_role_and_capacity_fallback(self) -> None:
         field_names = (
