@@ -20,6 +20,7 @@ from venus_evcharger.dbus_gateway_client import GatewayClient
 from venus_evcharger.dbus_gateway_commands import DbusGatewayCommandQueuePolicy
 from venus_evcharger.ipc.command_mailbox import MailboxLockTimeout, normalized_mapping
 from venus_evcharger.ipc.deadline import TRANSIENT_PUBLICATION_DEADLINE_SECONDS
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ipc.gateway_publication import (
     PublishEvcsFields,
     publish_companion_fields_command,
@@ -78,7 +79,10 @@ class FastPublicationTransportTests(unittest.TestCase):
             ) as send,
             patch.object(client.commands, "enqueue", return_value="durable.json") as durable,
         ):
-            self.assertEqual(client.enqueue_command(live), "fast-one")
+            self.assertEqual(
+                client.enqueue_command(live),
+                GatewayEnqueueResult(True, "fast-one", "socket"),
+            )
         sent = send.call_args.args[0]
         self.assertEqual(sent["fields"], live["fields"])
         self.assertIsInstance(sent[PUBLICATION_ORDER_FIELD], int)
@@ -93,10 +97,49 @@ class FastPublicationTransportTests(unittest.TestCase):
             ),
             patch.object(client.commands, "enqueue", return_value="/run/durable.json") as durable,
         ):
-            self.assertEqual(client.enqueue_command(live), "/run/durable.json")
+            self.assertEqual(
+                client.enqueue_command(live),
+                GatewayEnqueueResult(
+                    True,
+                    "durable",
+                    "mailbox",
+                    command_path="/run/durable.json",
+                ),
+            )
         fallback = durable.call_args.args[0]
         self.assertEqual(fallback["fields"], live["fields"])
         self.assertIsInstance(fallback[PUBLICATION_ORDER_FIELD], int)
+
+    def test_client_rejects_incomplete_or_invalid_socket_acceptance(self) -> None:
+        live = publish_evcs_fields_command({"ac_power_w": 1200.0}, priority="live")
+        rejected_responses = (
+            {"ok": False, "accepted": True, "command_id": "fast"},
+            {"ok": True, "accepted": False, "command_id": "fast"},
+            {"ok": True, "accepted": True, "command_id": 7},
+            {"ok": True, "accepted": True},
+        )
+        for response in rejected_responses:
+            with self.subTest(response=response):
+                client = GatewayClient(self.paths)
+                with (
+                    patch.object(client, "backpressure_state", return_value="ok"),
+                    patch.object(client, "send", return_value=response),
+                    patch.object(
+                        client.commands,
+                        "enqueue",
+                        return_value="/run/durable.json",
+                    ),
+                ):
+                    result = client.enqueue_command(live)
+                self.assertEqual(
+                    result,
+                    GatewayEnqueueResult(
+                        True,
+                        "durable",
+                        "mailbox",
+                        command_path="/run/durable.json",
+                    ),
+                )
 
     def test_mailbox_lock_timeout_is_a_bounded_client_rejection(self) -> None:
         client = GatewayClient(self.paths)
@@ -108,8 +151,44 @@ class FastPublicationTransportTests(unittest.TestCase):
                 "enqueue",
                 side_effect=MailboxLockTimeout("busy"),
             ),
+            self.assertLogs(level="ERROR") as captured,
         ):
-            self.assertEqual(client.enqueue_command(critical), "")
+            result = client.enqueue_command(critical)
+            repeated = client.enqueue_command(critical)
+        self.assertEqual(result, GatewayEnqueueResult(False, reason="mailbox-lock-timeout"))
+        self.assertEqual(repeated, result)
+        self.assertEqual(
+            captured.output,
+            [
+                "ERROR:root:Durable gateway command was not accepted: mailbox-lock-timeout",
+                "ERROR:root:Durable gateway command was not accepted: mailbox-lock-timeout",
+            ],
+        )
+        self.assertEqual(
+            client.enqueue_health(),
+            {
+                "durable_enqueue_failures": 2,
+                "durable_enqueue_failures_by_reason": {"mailbox-lock-timeout": 2},
+            },
+        )
+
+    def test_invalid_durable_command_is_rejected_with_exact_health_reason(self) -> None:
+        client = GatewayClient(self.paths)
+        critical = publish_evcs_fields_command({"connected": 0}, priority="critical")
+        with (
+            patch.object(client, "backpressure_state", return_value="ok"),
+            patch.object(client.commands, "enqueue", side_effect=ValueError("invalid")),
+        ):
+            result = client.enqueue_command(critical)
+
+        self.assertEqual(result, GatewayEnqueueResult(False, reason="invalid-command"))
+        self.assertEqual(
+            client.enqueue_health(),
+            {
+                "durable_enqueue_failures": 1,
+                "durable_enqueue_failures_by_reason": {"invalid-command": 1},
+            },
+        )
 
     def test_transient_durable_fallback_expires_but_critical_publication_does_not(self) -> None:
         client = GatewayClient(self.paths)
@@ -119,8 +198,8 @@ class FastPublicationTransportTests(unittest.TestCase):
             patch.object(client, "backpressure_state", return_value="ok"),
             patch.object(client, "send", return_value={"ok": False}),
         ):
-            live_path = client.enqueue_command(live)
-            critical_path = client.enqueue_command(critical)
+            live_path = client.enqueue_command(live).command_path
+            critical_path = client.enqueue_command(critical).command_path
 
         pending = {Path(path).name: command for path, command in client.commands.load_pending()}
         self.assertEqual(
@@ -180,8 +259,8 @@ class FastPublicationTransportTests(unittest.TestCase):
             patch.object(client, "send") as send,
             patch.object(client.commands, "enqueue", side_effect=("register.json", "critical.json")) as durable,
         ):
-            self.assertEqual(client.enqueue_command(registration), "register.json")
-            self.assertEqual(client.enqueue_command(critical), "critical.json")
+            self.assertEqual(client.enqueue_command(registration).command_id, "register")
+            self.assertEqual(client.enqueue_command(critical).command_id, "critical")
         send.assert_not_called()
         self.assertEqual(durable.call_count, 2)
 
@@ -190,7 +269,7 @@ class FastPublicationTransportTests(unittest.TestCase):
             patch.object(client, "send") as send,
             patch.object(client.commands, "enqueue") as durable,
         ):
-            self.assertEqual(client.enqueue_command(diagnostic), "")
+            self.assertEqual(client.enqueue_command(diagnostic).reason, "backpressure")
         send.assert_not_called()
         durable.assert_not_called()
 
@@ -306,14 +385,14 @@ class FastPublicationTransportTests(unittest.TestCase):
             patch.object(client, "backpressure_state", return_value="ok"),
             patch.object(client, "send", side_effect=accept_without_ack),
         ):
-            fallback_path = client.enqueue_command(old)
+            fallback_path = client.enqueue_command(old).command_path
         self.assertTrue(Path(fallback_path).exists())
 
         with (
             patch.object(client, "backpressure_state", return_value="ok"),
             patch.object(client, "send", side_effect=accept_with_ack),
         ):
-            self.assertTrue(client.enqueue_command(new).startswith("fast-"))
+            self.assertTrue(client.enqueue_command(new).command_id.startswith("fast-"))
 
         published: list[float] = []
 

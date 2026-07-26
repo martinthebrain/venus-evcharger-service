@@ -50,6 +50,7 @@ from venus_evcharger.ipc.energy import (
     EnergyTopologySnapshot,
     MeasuredValue,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ipc.gateway_publication import (
     PUBLISH_COMPANION_FIELDS_KIND,
     PUBLISH_EVCS_FIELDS_KIND,
@@ -1005,7 +1006,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertTrue(register_receipt.accepted)
             self.assertTrue(register_receipt.command_id)
             self.assertTrue(publish_receipt.accepted)
-            self.assertTrue(refresh_path)
+            self.assertTrue(refresh_path.accepted)
 
             pending = DbusGatewayCommandInbox(paths.command_dir).load_pending()
             self.assertEqual(len(pending), 3)
@@ -1144,7 +1145,9 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 "enqueue",
                 return_value="command-id",
             ) as enqueue:
-                self.assertEqual(enqueuer.enqueue_command(semantic_publish), "command-id")
+                result = enqueuer.enqueue_command(semantic_publish)
+                self.assertTrue(result.accepted)
+                self.assertEqual(result.command_id, "command-id")
             backpressure_state.assert_called_once_with(max_age_seconds=2.0)
             enqueue.assert_called_once()
             queued_publish = enqueue.call_args.args[0]
@@ -1172,12 +1175,20 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 "enqueue",
                 return_value="blocked",
             ) as enqueue:
-                self.assertEqual(blocked.enqueue_command(blocked_command), "")
+                blocked_result = blocked.enqueue_command(blocked_command)
+                self.assertIs(blocked_result.accepted, False)
+                self.assertEqual(blocked_result.reason, "backpressure")
             enqueue.assert_not_called()
 
             inputs, topology = _energy_snapshots()
             publication = GatewayPublicationClient(client)
-            with patch.object(client, "enqueue_command", return_value="/tmp/semantic-command.json") as enqueue_command:
+            accepted = GatewayEnqueueResult(
+                True,
+                "semantic-command",
+                "mailbox",
+                command_path="/tmp/semantic-command.json",
+            )
+            with patch.object(client, "enqueue_command", return_value=accepted) as enqueue_command:
                 evcs_register_receipt = publication.register_evcs(_evcs_identity(), {"mode": 0})
                 evcs_publish_receipt = publication.publish_evcs_fields(
                     {"ac_power_w": 1300.0},
@@ -1208,7 +1219,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             self.assertTrue(evcs_publish_receipt.accepted)
             self.assertTrue(companion_register_receipt.accepted)
             self.assertTrue(companion_publish_receipt.accepted)
-            self.assertEqual(refresh_result, "/tmp/semantic-command.json")
+            self.assertEqual(refresh_result, accepted)
 
             queued = [call.args[0] for call in enqueue_command.call_args_list]
             self.assertEqual(
@@ -1337,7 +1348,16 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                 reason="missing",
             )
 
-            with patch.object(client, "enqueue_command", return_value="/tmp/queued.json") as enqueue_command:
+            with patch.object(
+                client,
+                "enqueue_command",
+                return_value=GatewayEnqueueResult(
+                    True,
+                    "queued",
+                    "mailbox",
+                    command_path="/tmp/queued.json",
+                ),
+            ) as enqueue_command:
                 publication.publish_evcs_fields({"ac_power_w": 1.5}, priority="live")
                 client.request_energy_refresh(refresh, source="helper")
 
@@ -1473,11 +1493,11 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
     def test_publication_client_gateway_value_and_latency_window(self) -> None:
         fake_client = MagicMock()
         fake_client.enqueue_command.side_effect = [
-            "/tmp/register-evcs.json",
-            "/tmp/publish-evcs.json",
-            "/tmp/register-companion.json",
-            "/tmp/publish-companion.json",
-            "",
+            GatewayEnqueueResult(True, "register-evcs", "mailbox"),
+            GatewayEnqueueResult(True, "publish-evcs", "mailbox"),
+            GatewayEnqueueResult(True, "register-companion", "mailbox"),
+            GatewayEnqueueResult(True, "publish-companion", "mailbox"),
+            GatewayEnqueueResult(False, reason="mailbox-lock-timeout"),
         ]
         publication = GatewayPublicationClient(fake_client)
 
@@ -1507,6 +1527,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertTrue(published_companion.accepted)
         self.assertFalse(rejected.accepted)
         self.assertEqual(rejected.command_id, "")
+        self.assertEqual(rejected.reason, "mailbox-lock-timeout")
 
         commands = [call.args[0] for call in fake_client.enqueue_command.call_args_list]
         evcs_registration = parse_register_evcs(commands[0])

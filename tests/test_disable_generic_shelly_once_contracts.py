@@ -19,6 +19,7 @@ from venus_evcharger.ipc.generic_shelly_configuration import (
     disable_matching_generic_shelly_once_command,
     parse_disable_matching_generic_shelly_once,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ports.generic_shelly_configuration import (
     DisableMatchingGenericShellyOnceRequest,
     GenericShellyConfigurationPort,
@@ -230,7 +231,12 @@ class GenericShellyConfigurationIpcTests(unittest.TestCase):
 class GenericShellyConfigurationClientTests(unittest.TestCase):
     def test_gateway_client_returns_exact_acceptance_receipts(self) -> None:
         transport = MagicMock(spec=GatewayClient)
-        transport.enqueue_command.return_value = "/run/gateway/command-17.json"
+        transport.enqueue_command.return_value = GatewayEnqueueResult(
+            True,
+            "command-17",
+            "mailbox",
+            command_path="/run/gateway/command-17.json",
+        )
         client = GatewayGenericShellyConfigurationClient(cast(GatewayClient, transport))
 
         receipt = client.disable_matching_device_channel_once(_request())
@@ -241,10 +247,23 @@ class GenericShellyConfigurationClientTests(unittest.TestCase):
         self.assertNotIn("service", command)
         self.assertNotIn("path", command)
 
-        transport.enqueue_command.return_value = ""
+        transport.enqueue_command.return_value = GatewayEnqueueResult(
+            False,
+            reason="mailbox-lock-timeout",
+        )
         rejected = client.disable_matching_device_channel_once(_request())
         self.assertFalse(rejected.accepted)
-        self.assertEqual(rejected.reason, "gateway did not accept the configuration command")
+        self.assertEqual(rejected.reason, "mailbox-lock-timeout")
+
+        transport.enqueue_command.return_value = GatewayEnqueueResult(False)
+        rejected_without_transport_reason = client.disable_matching_device_channel_once(_request())
+        self.assertEqual(
+            rejected_without_transport_reason,
+            GenericShellyConfigurationReceipt(
+                False,
+                reason="gateway did not accept the configuration command",
+            ),
+        )
 
     def test_entrypoint_composes_the_gateway_port_once(self) -> None:
         gateway = object()

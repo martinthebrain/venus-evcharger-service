@@ -36,6 +36,7 @@ from venus_evcharger.ipc.gateway_operations import (
     parse_gx_relay_refresh,
     parse_gx_relay_set,
 )
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 from venus_evcharger.ports.gateway_operations import GxRelayContactMode, GxRelaySetRequest
 
 _T = TypeVar("_T")
@@ -200,9 +201,9 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
     def test_gateway_client_receipts_reflect_transport_acceptance(self) -> None:
         client = MagicMock(spec=GatewayClient)
         client.enqueue_command.side_effect = [
-            "/tmp/relay-command.json",
-            "/tmp/ess-command.json",
-            "",
+            GatewayEnqueueResult(True, "relay-command", "mailbox"),
+            GatewayEnqueueResult(True, "ess-command", "mailbox"),
+            GatewayEnqueueResult(False, reason="backpressure"),
         ]
         operations = GatewayOperationsClient(client)
         request = GxRelaySetRequest(
@@ -225,6 +226,7 @@ class GatewaySemanticWireContractTests(unittest.TestCase):
         self.assertEqual(ess.command_id, "ess-command")
         self.assertFalse(rejected.accepted)
         self.assertEqual(rejected.command_id, "")
+        self.assertEqual(rejected.reason, "backpressure")
         client.enqueue_command.assert_has_calls(
             [
                 call(

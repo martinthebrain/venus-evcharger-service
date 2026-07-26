@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -23,6 +24,8 @@ PUBLICATION_ORDER_FIELD = "transport_order"
 PUBLICATION_FIELD_ORDERS_FIELD = "transport_field_orders"
 PUBLICATION_ORDER_RETENTION_SECONDS = 60.0
 PUBLICATION_ORDER_STATE_NAME = "publication-order-state.json"
+PUBLICATION_ORDER_PROCESS_BITS = 32
+PUBLICATION_ORDER_PROCESS_MASK = (1 << PUBLICATION_ORDER_PROCESS_BITS) - 1
 PublicationOrderClaim = Literal["accepted", "superseded", "full", "state-error"]
 
 
@@ -38,8 +41,9 @@ class PublicationFieldClaim:
 class PublicationOrderSequence:
     """Thread-safe monotone sequence that can be shared or injected."""
 
-    def __init__(self) -> None:
+    def __init__(self, process_id: int | None = None) -> None:
         self._last_order = 0
+        self._process_id = os.getpid() if process_id is None else int(process_id)
         self._lock = threading.Lock()
 
     def remember(self, order: int) -> None:
@@ -48,7 +52,21 @@ class PublicationOrderSequence:
 
     def next_order(self) -> int:
         with self._lock:
-            order = max(time.monotonic_ns(), self._last_order + 1)
+            monotonic_order = int(time.monotonic_ns())
+            if self._process_id == 0:
+                order = max(monotonic_order, self._last_order + 1)
+            else:
+                epoch = max(
+                    monotonic_order,
+                    self._last_order >> PUBLICATION_ORDER_PROCESS_BITS,
+                )
+                order = (epoch << PUBLICATION_ORDER_PROCESS_BITS) | (
+                    self._process_id & PUBLICATION_ORDER_PROCESS_MASK
+                )
+                if order <= self._last_order:
+                    order = ((epoch + 1) << PUBLICATION_ORDER_PROCESS_BITS) | (
+                        self._process_id & PUBLICATION_ORDER_PROCESS_MASK
+                    )
             self._last_order = order
             return order
 

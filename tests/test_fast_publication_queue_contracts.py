@@ -11,9 +11,11 @@ from unittest.mock import patch
 
 from venus_evcharger.ipc.command_mailbox import normalized_mapping
 from venus_evcharger.ipc.fast_publication import (
+    FAST_PUBLICATION_DEFERRED_AGING_SECONDS,
     FAST_PUBLICATION_RETRY_SECONDS,
     FastPublicationQueue,
     FastPublicationWork,
+    _fast_work_priority,
 )
 from venus_evcharger.ipc.gateway_publication import (
     publish_companion_fields_command,
@@ -377,6 +379,85 @@ class FastPublicationTtlAndFairnessTests(unittest.TestCase):
         self.assertIsNotNone(retried)
         assert retried is not None
         self.assertEqual(retried.command["service_id"], "blocked")
+
+    def test_aged_deferred_work_cannot_starve_under_continuous_same_priority_load(self) -> None:
+        queue = FastPublicationQueue()
+        queue.enqueue(
+            publish_companion_fields_command(
+                "recovering",
+                {"power": 1.0},
+                priority="live",
+            )
+        )
+        blocked = queue.pop_next(now=10.0)
+        self.assertIsNotNone(blocked)
+        assert blocked is not None
+        queue.requeue(blocked, deferred=True, now=10.0)
+        eligible_at = 10.0 + FAST_PUBLICATION_RETRY_SECONDS
+
+        for index in range(5):
+            queue.enqueue(
+                publish_companion_fields_command(
+                    f"continuous-{index}",
+                    {"power": float(index)},
+                    priority="live",
+                )
+            )
+            selected = queue.pop_next(
+                now=eligible_at + FAST_PUBLICATION_DEFERRED_AGING_SECONDS + 0.1
+            )
+            self.assertIsNotNone(selected)
+            assert selected is not None
+            if index == 0:
+                self.assertEqual(selected.command["service_id"], "recovering")
+                break
+        else:
+            self.fail("aged deferred work starved behind continuous publications")
+
+    def test_deferred_aging_policy_has_explicit_boundary_ranks(self) -> None:
+        command = {"priority": "publish"}
+        recent = FastPublicationWork(command, {}, retry_at=10.0, deferred=True)
+        fresh = FastPublicationWork(command, {}, retry_at=10.0)
+
+        self.assertEqual(_fast_work_priority(recent, 10.5), (2, 2, 10.0))
+        self.assertEqual(
+            _fast_work_priority(
+                recent,
+                10.0 + FAST_PUBLICATION_DEFERRED_AGING_SECONDS,
+            ),
+            (2, 0, 10.0),
+        )
+        self.assertEqual(_fast_work_priority(fresh, 9.0), (2, 1, 10.0))
+
+    def test_aged_diagnostic_work_does_not_overtake_fresh_live_work(self) -> None:
+        queue = FastPublicationQueue()
+        queue.enqueue(
+            publish_companion_fields_command(
+                "diagnostic",
+                {"power": 1.0},
+                priority="diagnostic",
+            )
+        )
+        deferred = queue.pop_next(now=10.0)
+        self.assertIsNotNone(deferred)
+        assert deferred is not None
+        queue.requeue(deferred, deferred=True, now=10.0)
+        queue.enqueue(
+            publish_evcs_fields_command(
+                {"ac_power_w": 500.0},
+                priority="live",
+            )
+        )
+
+        selected = queue.pop_next(
+            now=10.0
+            + FAST_PUBLICATION_RETRY_SECONDS
+            + FAST_PUBLICATION_DEFERRED_AGING_SECONDS
+        )
+
+        self.assertIsNotNone(selected)
+        assert selected is not None
+        self.assertEqual(selected.command["publication_priority"], "live")
 
     def test_requeue_merges_work_arriving_while_an_item_is_in_flight(self) -> None:
         queue = FastPublicationQueue()

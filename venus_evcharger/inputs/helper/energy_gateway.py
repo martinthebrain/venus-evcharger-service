@@ -83,7 +83,10 @@ class GatewayEnergySnapshots:
             reason=reason,
         )
         try:
-            return bool(self._client.request_energy_refresh(request, source="auto-input-helper"))
+            return self._client.request_energy_refresh(
+                request,
+                source="auto-input-helper",
+            ).accepted
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             logging.debug("Energy refresh request failed scope=%s: %s", scope, error)
             return False

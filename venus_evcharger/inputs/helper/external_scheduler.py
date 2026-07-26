@@ -8,7 +8,7 @@ import math
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from venus_evcharger.energy.models import EnergySourceDefinition, EnergySourceSnapshot
@@ -141,6 +141,7 @@ class ExternalSourceScheduler:
             return "in_progress"
         snapshot = step.snapshot
         assert snapshot is not None
+        snapshot = _configured_snapshot(definition, snapshot)
         if not _confirms_measurement(snapshot, now):
             self._record_failure(
                 definition,
@@ -245,6 +246,20 @@ def _confirms_measurement(
     )
 
 
+def _configured_snapshot(
+    definition: EnergySourceDefinition,
+    snapshot: EnergySourceSnapshot,
+) -> EnergySourceSnapshot:
+    """Apply identity fields owned by configuration at the connector boundary."""
+    return replace(
+        snapshot,
+        source_id=definition.source_id,
+        role=definition.role,
+        physical_id=definition.physical_id,
+        physical_priority=definition.physical_priority,
+    )
+
+
 def _has_contributing_value(snapshot: EnergySourceSnapshot) -> bool:
     values = (
         snapshot.soc,
@@ -316,8 +331,8 @@ def _offline_source(definition: EnergySourceDefinition) -> EnergySourceSnapshot:
         service_name=definition.service_name or definition.config_path or definition.source_id,
         usable_capacity_wh=definition.usable_capacity_wh,
         battery_chemistry=definition.battery_chemistry,
-        captured_at=None,
         physical_id=definition.physical_id,
+        physical_priority=definition.physical_priority,
     )
 
 

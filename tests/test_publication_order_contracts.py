@@ -39,7 +39,7 @@ class PublicationOrderIssuerTests(unittest.TestCase):
         )
 
     def test_issuer_preserves_retry_and_assigns_every_field(self) -> None:
-        sequence = PublicationOrderSequence()
+        sequence = PublicationOrderSequence(process_id=0)
         issuer = PublicationOrderIssuer(sequence)
         command = publish_evcs_fields_command(
             {"mode": 1, "ac_power_w": 100.0},
@@ -63,12 +63,12 @@ class PublicationOrderIssuerTests(unittest.TestCase):
         self.assertEqual(issuer.ordered({"kind": "other"}), {"kind": "other"})
 
     def test_sequence_starts_at_the_first_positive_clock_order(self) -> None:
-        sequence = PublicationOrderSequence()
+        sequence = PublicationOrderSequence(process_id=0)
         with patch("venus_evcharger.ipc.publication_order.time.monotonic_ns", return_value=1):
             self.assertEqual(sequence.next_order(), 1)
 
     def test_fieldless_coalesced_command_receives_a_positive_order(self) -> None:
-        issuer = PublicationOrderIssuer(PublicationOrderSequence())
+        issuer = PublicationOrderIssuer(PublicationOrderSequence(process_id=0))
         with patch("venus_evcharger.ipc.publication_order.time.monotonic_ns", return_value=3):
             ordered = issuer.ordered({"kind": "refresh", "coalesce_key": "refresh:key"})
 
@@ -76,7 +76,7 @@ class PublicationOrderIssuerTests(unittest.TestCase):
         self.assertNotIn(PUBLICATION_FIELD_ORDERS_FIELD, ordered)
 
     def test_existing_field_orders_advance_the_shared_sequence(self) -> None:
-        sequence = PublicationOrderSequence()
+        sequence = PublicationOrderSequence(process_id=0)
         issuer = PublicationOrderIssuer(sequence)
         command = {
             **publish_evcs_fields_command({"mode": 1, "connected": 1}, priority="live"),
@@ -104,7 +104,10 @@ class PublicationOrderIssuerTests(unittest.TestCase):
             first_order = publication_order(first.ordered(command))
             second_order = publication_order(second.ordered(command))
 
-        self.assertEqual(second_order, first_order + 1)
+        self.assertEqual(
+            second_order,
+            first_order + (1 << 32),
+        )
 
     def test_two_gateway_clients_cannot_issue_the_same_order(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -125,14 +128,17 @@ class PublicationOrderIssuerTests(unittest.TestCase):
                 patch.object(second, "send", side_effect=accept),
                 patch("venus_evcharger.ipc.publication_order.time.monotonic_ns", return_value=11),
             ):
-                self.assertEqual(first.enqueue_command(command), "fast")
-                self.assertEqual(second.enqueue_command(command), "fast")
+                self.assertEqual(first.enqueue_command(command).command_id, "fast")
+                self.assertEqual(second.enqueue_command(command).command_id, "fast")
 
         self.assertEqual(len(set(sent)), 2)
-        self.assertEqual(sent[1], sent[0] + 1)
+        self.assertEqual(
+            sent[1],
+            sent[0] + (1 << 32),
+        )
 
     def test_shared_sequence_is_unique_under_concurrency(self) -> None:
-        sequence = PublicationOrderSequence()
+        sequence = PublicationOrderSequence(process_id=17)
         command = publish_evcs_fields_command({"mode": 1}, priority="live")
 
         def issue(_index: int) -> int:
@@ -145,7 +151,22 @@ class PublicationOrderIssuerTests(unittest.TestCase):
             orders = list(pool.map(issue, range(40)))
 
         self.assertEqual(len(set(orders)), 40)
-        self.assertEqual(sorted(orders), list(range(100, 140)))
+        self.assertEqual(
+            sorted(orders),
+            [((100 + index) << 32) | 17 for index in range(40)],
+        )
+
+    def test_sequences_are_unique_across_process_ids_at_identical_clock_values(self) -> None:
+        sequences = tuple(PublicationOrderSequence(process_id=process_id) for process_id in range(1, 5))
+        with patch("venus_evcharger.ipc.publication_order.time.monotonic_ns", return_value=200):
+            orders = [
+                sequence.next_order()
+                for sequence in sequences
+                for _index in range(100)
+            ]
+
+        self.assertEqual(len(orders), 400)
+        self.assertEqual(len(set(orders)), 400)
 
     def test_order_validation_rejects_bool_zero_and_non_integer_values(self) -> None:
         self.assertEqual(publication_order({PUBLICATION_ORDER_FIELD: 1}), 1)

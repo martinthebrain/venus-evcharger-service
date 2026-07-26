@@ -38,6 +38,7 @@ from venus_evcharger.ipc.publication_payload import (
 FAST_PUBLICATION_CAPACITY = 64
 FAST_PUBLICATION_ORDER_CAPACITY_FACTOR = 64
 FAST_PUBLICATION_RETRY_SECONDS = 0.25
+FAST_PUBLICATION_DEFERRED_AGING_SECONDS = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,9 +213,9 @@ class FastPublicationQueue:
             return None
         key = min(
             eligible,
-            key=lambda item: (
-                self._commands[item].deferred,
-                command_priority_rank(self._commands[item].command.get("priority")),
+            key=lambda item: _fast_work_priority(
+                self._commands[item],
+                current,
             ),
         )
         return self._commands.pop(key)
@@ -383,9 +384,22 @@ def _claim_rejection_reason(claim: PublicationFieldClaim) -> str:
     return ""
 
 
+def _fast_work_priority(work: FastPublicationWork, now: float) -> tuple[int, int, float]:
+    priority = command_priority_rank(work.command.get("priority"))
+    deferred_age = max(0.0, now - work.retry_at)
+    if work.deferred and deferred_age >= FAST_PUBLICATION_DEFERRED_AGING_SECONDS:
+        fairness_rank = 0
+    elif work.deferred:
+        fairness_rank = 2
+    else:
+        fairness_rank = 1
+    return priority, fairness_rank, work.retry_at
+
+
 __all__ = [
     "FAST_PUBLICATION_CAPACITY",
     "FAST_PUBLICATION_RETRY_SECONDS",
+    "FAST_PUBLICATION_DEFERRED_AGING_SECONDS",
     "FastPublicationEnqueueResult",
     "FastPublicationQueue",
     "FastPublicationWork",

@@ -34,6 +34,7 @@ class EnergySourceDefinition:
     estimated_capacity_nominal_voltage_v: float | None = None
     estimated_capacity_cell_count: int | None = None
     physical_id: str = ""
+    physical_priority: int = 0
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class EnergySourceSnapshot:
     confidence: float = 0.0
     captured_at: float | None = None
     physical_id: str = ""
+    physical_priority: int = 0
 
     @property
     def charge_power_w(self) -> float | None:
@@ -82,6 +84,7 @@ class EnergySourceSnapshot:
         return {
             "source_id": self.source_id,
             "physical_id": self.physical_id,
+            "physical_priority": self.physical_priority,
             "role": self.role,
             "service_name": self.service_name,
             "soc": self.soc,

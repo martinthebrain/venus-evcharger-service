@@ -128,9 +128,10 @@ def _sources(
     *,
     use_combined_soc: bool = False,
     stale_age: float = 5.0,
+    definition: EnergySourceDefinition | None = None,
 ) -> ConfiguredEnergySources:
     return ConfiguredEnergySources(
-        (_definition(),),
+        (definition or _definition(),),
         use_combined_soc=use_combined_soc,
         request_timeout_seconds=1.25,
         polling_policy=_policy(stale_age=stale_age),
@@ -259,6 +260,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         external_definition = replace(
             _definition(),
             physical_id="house-battery",
+            physical_priority=10,
             usable_capacity_wh=5000.0,
         )
         gateway_definition = EnergySourceDefinition(
@@ -270,7 +272,10 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
             [
                 replace(
                     _online_source(80.0, 100.0, capacity_wh=5000.0),
-                    physical_id="house-battery",
+                    source_id="connector-alias",
+                    role="battery",
+                    physical_id="connector-physical-id",
+                    physical_priority=-5,
                 )
             ]
         )
@@ -298,6 +303,38 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         )
         self.assertEqual(cycle.battery["battery_valid_soc_source_count"], 1)
         self.assertEqual(cycle.battery_observed_at, 100.0)
+        external_payload = _source_payload(cycle, 0)
+        self.assertEqual(external_payload["source_id"], "external")
+        self.assertEqual(external_payload["role"], "hybrid-inverter")
+        self.assertEqual(external_payload["physical_id"], "house-battery")
+        self.assertEqual(external_payload["physical_priority"], 10)
+
+    def test_offline_snapshot_preserves_complete_configured_identity(self) -> None:
+        definition = replace(
+            _definition(),
+            service_name="configured-service",
+            usable_capacity_wh=7200.0,
+            battery_chemistry="nmc",
+            physical_id="configured-physical-id",
+            physical_priority=17,
+        )
+        sources = _sources(
+            _SequenceReader([OSError("offline")]),
+            _Clock(),
+            definition=definition,
+        )
+
+        cycle = sources.collect_cycle(None, 10.0)
+
+        payload = _source_payload(cycle, 0)
+        self.assertEqual(payload["source_id"], definition.source_id)
+        self.assertEqual(payload["role"], definition.role)
+        self.assertEqual(payload["service_name"], definition.service_name)
+        self.assertEqual(payload["usable_capacity_wh"], definition.usable_capacity_wh)
+        self.assertEqual(payload["battery_chemistry"], definition.battery_chemistry)
+        self.assertIsNone(payload["captured_at"])
+        self.assertEqual(payload["physical_id"], definition.physical_id)
+        self.assertEqual(payload["physical_priority"], definition.physical_priority)
 
     def test_failures_are_coalesced_and_recovery_restores_external_soc(self) -> None:
         failure = subprocess.CalledProcessError(1, ("energy-helper",))

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -28,6 +30,7 @@ from venus_evcharger.ipc.energy import (
     EnergyTopologySnapshot,
 )
 from venus_evcharger.ipc.energy_binary import load_energy_inputs_file
+from venus_evcharger.ipc.enqueue_result import GatewayEnqueueFailure, GatewayEnqueueResult
 from venus_evcharger.ipc.fast_publication import is_transient_publication
 from venus_evcharger.ipc.gateway_operations import (
     ess_grid_setpoint_command,
@@ -86,6 +89,7 @@ class GatewayClient:
         self.commands = DbusGatewayCommandInbox(self.paths.command_dir)
         self._backpressure_cache: tuple[float, str] = (0.0, "unknown")
         self._publication_orders = publication_order_issuer or PublicationOrderIssuer()
+        self._durable_enqueue_failures: Counter[GatewayEnqueueFailure] = Counter()
 
     def send(self, payload: CommandMapping) -> CommandPayload:
         try:
@@ -104,24 +108,55 @@ class GatewayClient:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError, TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
 
-    def enqueue_command(self, command: CommandMapping) -> str:
+    def enqueue_command(self, command: CommandMapping) -> GatewayEnqueueResult:
         ordered_command = self._ordered_publication(command)
         if not command_allowed_by_backpressure(ordered_command, self.backpressure_state(max_age_seconds=2.0)):
-            return ""
+            return GatewayEnqueueResult(False, reason="backpressure")
         if is_transient_publication(ordered_command):
             command_id = _accepted_fast_command_id(self.send(ordered_command))
             if command_id:
-                return command_id
+                return GatewayEnqueueResult(True, command_id, "socket")
+        return self._enqueue_durable_command(ordered_command)
+
+    def _enqueue_durable_command(
+        self,
+        command: CommandMapping,
+    ) -> GatewayEnqueueResult:
         try:
-            return str(self.commands.enqueue(ordered_command))
-        except (MailboxLockTimeout, ValueError):
-            return ""
+            command_path = str(self.commands.enqueue(command))
+            return GatewayEnqueueResult(
+                True,
+                Path(command_path).stem,
+                "mailbox",
+                command_path=command_path,
+            )
+        except MailboxLockTimeout:
+            return self._durable_enqueue_failed("mailbox-lock-timeout")
+        except ValueError:
+            return self._durable_enqueue_failed("invalid-command")
+
+    def enqueue_health(self) -> CommandPayload:
+        """Expose process-local durable enqueue failures to diagnostics."""
+        return {
+            "durable_enqueue_failures": sum(self._durable_enqueue_failures.values()),
+            "durable_enqueue_failures_by_reason": dict(sorted(self._durable_enqueue_failures.items())),
+        }
+
+    def _durable_enqueue_failed(self, reason: GatewayEnqueueFailure) -> GatewayEnqueueResult:
+        self._durable_enqueue_failures[reason] += 1
+        logging.error("Durable gateway command was not accepted: %s", reason)
+        return GatewayEnqueueResult(False, reason=reason)
 
     def _ordered_publication(self, command: CommandMapping) -> CommandPayload:
-        kind = str(command.get("kind") or "")
+        kind = command.get("kind")
         return self._publication_orders.ordered(command) if kind in SEMANTIC_PUBLICATION_KINDS else dict(command)
 
-    def request_energy_refresh(self, request: EnergyRefreshRequest, *, source: str) -> str:
+    def request_energy_refresh(
+        self,
+        request: EnergyRefreshRequest,
+        *,
+        source: str,
+    ) -> GatewayEnqueueResult:
         return self.enqueue_command(request.to_command(source=source))
 
     def load_cache(self, *, max_age_seconds: float = 10.0) -> CommandPayload:
@@ -195,7 +230,7 @@ class GatewayOperationsClient:
         self,
         request: GxRelaySetRequest,
     ) -> GatewayOperationReceipt:
-        command_path = self._client.enqueue_command(
+        result = self._client.enqueue_command(
             gx_relay_set_command(
                 request.relay_index,
                 request.contact_mode,
@@ -205,7 +240,7 @@ class GatewayOperationsClient:
                 verify_retry_seconds=request.verify_retry_seconds,
             )
         )
-        return _operation_receipt(command_path)
+        return _operation_receipt(result)
 
     def set_ess_grid_setpoint(
         self,
@@ -213,8 +248,8 @@ class GatewayOperationsClient:
         *,
         intent: EssSetpointIntent,
     ) -> GatewayOperationReceipt:
-        command_path = self._client.enqueue_command(ess_grid_setpoint_command(watts, intent=intent))
-        return _operation_receipt(command_path)
+        result = self._client.enqueue_command(ess_grid_setpoint_command(watts, intent=intent))
+        return _operation_receipt(result)
 
 
 class GatewayPublicationClient:
@@ -255,10 +290,11 @@ class GatewayPublicationClient:
         return self._enqueue(publish_companion_fields_command(service_id, fields, priority=priority))
 
     def _enqueue(self, command: CommandMapping) -> PublicationReceipt:
-        command_path = self._client.enqueue_command(command)
+        result = self._client.enqueue_command(command)
         return PublicationReceipt(
-            accepted=bool(command_path),
-            command_id=Path(command_path).stem if command_path else "",
+            accepted=result.accepted,
+            command_id=result.command_id,
+            reason=result.reason,
         )
 
 
@@ -272,17 +308,17 @@ class GatewayGenericShellyConfigurationClient:
         self,
         request: DisableMatchingGenericShellyOnceRequest,
     ) -> GenericShellyConfigurationReceipt:
-        command_path = self._client.enqueue_command(
+        result = self._client.enqueue_command(
             disable_matching_generic_shelly_once_command(request)
         )
-        if not command_path:
+        if not result.accepted:
             return GenericShellyConfigurationReceipt(
                 accepted=False,
-                reason="gateway did not accept the configuration command",
+                reason=result.reason or "gateway did not accept the configuration command",
             )
         return GenericShellyConfigurationReceipt(
             accepted=True,
-            command_id=Path(command_path).stem,
+            command_id=result.command_id,
         )
 
 
@@ -310,10 +346,11 @@ def _backpressure_state_from_health(health: CommandMapping) -> str:
     return str(state) if state else "unknown"
 
 
-def _operation_receipt(command_path: str) -> GatewayOperationReceipt:
+def _operation_receipt(result: GatewayEnqueueResult) -> GatewayOperationReceipt:
     return GatewayOperationReceipt(
-        accepted=bool(command_path),
-        command_id=Path(command_path).stem if command_path else "",
+        accepted=result.accepted,
+        command_id=result.command_id,
+        reason=result.reason,
     )
 
 
