@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import plistlib
+import json
 import struct
 from collections.abc import Mapping
 from typing import TypeGuard
@@ -22,7 +22,7 @@ from venus_evcharger.ipc.publication_payload import (
 )
 
 FAST_PUBLICATION_WIRE_MAGIC = b"EVCF"
-FAST_PUBLICATION_WIRE_VERSION = 1
+FAST_PUBLICATION_WIRE_VERSION = 2
 FAST_PUBLICATION_WIRE_MAX_PAYLOAD_BYTES = 64 * 1024
 _FRAME_HEADER = struct.Struct("!4sBI")
 FAST_PUBLICATION_WIRE_HEADER_BYTES = _FRAME_HEADER.size
@@ -90,8 +90,10 @@ def decode_fast_publication_frame(frame: bytes) -> CommandPayload:
     if len(frame) != body_size:
         raise FastPublicationWireError("frame-size-mismatch")
     try:
-        decoded: object = plistlib.loads(frame[FAST_PUBLICATION_WIRE_HEADER_BYTES:])
-    except (plistlib.InvalidFileException, OverflowError, TypeError, ValueError) as error:
+        decoded: object = json.loads(
+            frame[FAST_PUBLICATION_WIRE_HEADER_BYTES:].decode()
+        )
+    except (json.JSONDecodeError, TypeError, UnicodeError, ValueError) as error:
         raise FastPublicationWireError("payload-not-decodable") from error
     return _restore_publication_orders(_string_mapping(decoded))
 
@@ -121,31 +123,12 @@ def _validate_body_size(body_size: int) -> None:
 
 def _encode_body(payload: CommandMapping) -> bytes:
     try:
-        return plistlib.dumps(
-            _plist_ready_payload(payload),
-            fmt=plistlib.FMT_BINARY,
-        )
-    except (
-        OverflowError,
-        TypeError,
-        ValueError,
-        plistlib.InvalidFileException,
-    ) as error:
+        return json.dumps(
+            dict(payload),
+            separators=(",", ":"),
+        ).encode()
+    except (OverflowError, TypeError, UnicodeError, ValueError) as error:
         raise FastPublicationWireError("payload-not-encodable") from error
-
-
-def _plist_ready_payload(payload: CommandMapping) -> CommandPayload:
-    ready = dict(payload)
-    order = ready.get(PUBLICATION_ORDER_FIELD)
-    if type(order) is int:
-        ready[PUBLICATION_ORDER_FIELD] = str(order)
-    field_orders = ready.get(PUBLICATION_FIELD_ORDERS_FIELD)
-    if _is_object_mapping(field_orders):
-        ready[PUBLICATION_FIELD_ORDERS_FIELD] = {
-            str(field): str(value) if type(value) is int else value
-            for field, value in field_orders.items()
-        }
-    return ready
 
 
 def _restore_publication_orders(payload: CommandPayload) -> CommandPayload:
