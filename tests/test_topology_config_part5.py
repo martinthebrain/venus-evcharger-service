@@ -56,7 +56,7 @@ class _TopologyConfigTestsPart5:
         parser.read_string(
             """
 [DEFAULT]
-Host=192.168.178.76
+Host=192.0.2.76
 """
         )
 
@@ -271,7 +271,7 @@ ChargerType=goe_charger
         parser.read_string(
             """
 [DEFAULT]
-Host=192.168.178.76
+Host=192.0.2.76
 
 [Backends]
 MeterType=template_meter
@@ -385,8 +385,8 @@ ChargerType=
         )
 
         self.assertFalse(runtime_summary_is_configured(split_unconfigured))
-        self.assertFalse(runtime_summary_is_configured(split_unconfigured, legacy_host="192.168.178.76"))
-        self.assertFalse(runtime_summary_uses_legacy_primary_rpc(split_unconfigured, legacy_host="192.168.178.76"))
+        self.assertFalse(runtime_summary_is_configured(split_unconfigured, legacy_host="192.0.2.76"))
+        self.assertFalse(runtime_summary_uses_legacy_primary_rpc(split_unconfigured, legacy_host="192.0.2.76"))
 
         split_primary_rpc = BackendRuntimeSummary(
             backend_mode="split",
@@ -437,7 +437,7 @@ ChargerType=
         parser.read_string(
             """
 [DEFAULT]
-Host=192.168.178.76
+Host=192.0.2.76
 
 [Backends]
 SwitchType=shelly_combined

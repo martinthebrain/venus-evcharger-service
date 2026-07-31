@@ -31,6 +31,7 @@ jobs:
             python3-requests \
             python3-dbus \
             python3-gi \
+            doxygen \
             shellcheck
 
       - name: Install pinned Python dev tools
@@ -41,6 +42,9 @@ jobs:
 
       - name: Run optional audits
         run: make audit
+
+      - name: Build and validate developer documentation
+        run: make docs-check
 
       - name: Run unit and platform coverage gates
         run: bash ./scripts/dev/run_coverage.sh

@@ -43,6 +43,7 @@ class DbusAdapterIpcContractTests(unittest.TestCase):
         server = MagicMock()
         with (
             patch.object(socket_module.os, "unlink") as unlink,
+            patch.object(socket_module.os, "chmod") as chmod,
             patch.object(socket_module.socket, "socket", return_value=server) as socket_factory,
         ):
             self.socket.start_socket()
@@ -53,6 +54,7 @@ class DbusAdapterIpcContractTests(unittest.TestCase):
             socket_module.socket.SOCK_STREAM,
         )
         server.bind.assert_called_once_with(self.adapter.paths.socket_path)
+        chmod.assert_called_once_with(self.adapter.paths.socket_path, 0o600)
         server.listen.assert_called_once_with(socket_module.SOCKET_BACKLOG)
         server.setblocking.assert_called_once_with(False)
 
@@ -74,10 +76,24 @@ class DbusAdapterIpcContractTests(unittest.TestCase):
         server = MagicMock()
         with (
             patch.object(socket_module.os, "unlink", side_effect=FileNotFoundError),
+            patch.object(socket_module.os, "chmod"),
             patch.object(socket_module.socket, "socket", return_value=server),
         ):
             self.socket.start_socket()
         server.bind.assert_called_once_with(self.adapter.paths.socket_path)
+
+    def test_start_socket_cleans_up_when_permission_hardening_fails(self) -> None:
+        server = MagicMock()
+        with (
+            patch.object(socket_module.os, "unlink") as unlink,
+            patch.object(socket_module.os, "chmod", side_effect=PermissionError("denied")),
+            patch.object(socket_module.socket, "socket", return_value=server),
+            self.assertRaisesRegex(PermissionError, "denied"),
+        ):
+            self.socket.start_socket()
+        server.close.assert_called_once_with()
+        self.assertEqual(unlink.call_count, 2)
+        self.assertIsNone(self.adapter._server)
 
     def test_glib_watch_is_idle_event_driven_and_pending_reads_use_bounded_timer(self) -> None:
         server = MagicMock()

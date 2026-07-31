@@ -254,9 +254,10 @@ For Shelly-style setups, the service has no vehicle communication. It infers
 looks wrong, compare the published state with the raw Shelly RPC values:
 
 ```bash
-curl -s 'http://192.168.178.76/rpc/PM1.GetStatus?id=0'
-curl -s 'http://192.168.178.76/rpc/Switch.GetStatus?id=0'
-curl -s 'http://192.168.178.76/rpc/Shelly.GetDeviceInfo'
+SHELLY_HOST=192.0.2.76
+curl -s "http://${SHELLY_HOST}/rpc/PM1.GetStatus?id=0"
+curl -s "http://${SHELLY_HOST}/rpc/Switch.GetStatus?id=0"
+curl -s "http://${SHELLY_HOST}/rpc/Shelly.GetDeviceInfo"
 ```
 
 Important fields:
@@ -283,7 +284,7 @@ python3 ./scripts/dev/mock_shelly_rpc.py --bind 0.0.0.0 --port 8080
 Point the Venus config to that host including the port:
 
 ```ini
-Host=192.168.1.25:8080
+Host=192.0.2.25:8080
 ```
 
 Supported RPC endpoints:

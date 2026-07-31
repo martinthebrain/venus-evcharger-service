@@ -155,7 +155,7 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "switch.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nComponent=Switch\nId=0\n[Capabilities]\nSwitchingMode=contactor\nSupportedPhaseSelections=P1\n",
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.11\nComponent=Switch\nId=0\n[Capabilities]\nSwitchingMode=contactor\nSupportedPhaseSelections=P1\n",
                 encoding="utf-8",
             )
             backend = ShellyContactorSwitchBackend(self._service(MagicMock()), config_path=str(path))
@@ -164,7 +164,7 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
     def test_contactor_switch_backend_defaults_to_contactor_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "switch.ini"
-            path.write_text("[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.11\nComponent=Switch\nId=0\n", encoding="utf-8")
+            path.write_text("[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.11\nComponent=Switch\nId=0\n", encoding="utf-8")
             backend = ShellyContactorSwitchBackend(self._service(MagicMock()), config_path=str(path))
             self.assertEqual(backend.capabilities().switching_mode, "contactor")
 
@@ -172,7 +172,7 @@ class TestShellyWallboxBackendSwitchGroup(SwitchBackendTestCaseBase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "switch.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.11\nComponent=Switch\nId=0\n"
+                "[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.11\nComponent=Switch\nId=0\n"
                 "[Feedback]\nComponent=Input\nId=7\nValuePath=state\n"
                 "[Interlock]\nComponent=Input\nId=8\nValuePath=state\nInvert=1\n",
                 encoding="utf-8",

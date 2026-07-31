@@ -9,7 +9,7 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
                 temp_dir,
                 "charger.ini",
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSmartEvseTransport()
             service = SimpleNamespace(
@@ -20,7 +20,7 @@ class TestUpdateCycleControllerSenary(UpdateCycleControllerTestBase):
                 meter_backend_config_path="",
                 switch_backend_config_path="",
                 charger_backend_config_path=str(charger_path),
-                host="192.168.1.20",
+                host="192.0.2.20",
                 pm_component="Switch",
                 pm_id=0,
                 shelly_request_timeout_seconds=2.0,

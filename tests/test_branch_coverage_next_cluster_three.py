@@ -176,7 +176,7 @@ class BranchCoverageNextClusterThreeOpenDtuCases(unittest.TestCase):
 
 class BranchCoverageNextClusterThreeHuaweiCases(unittest.TestCase):
     def test_huawei_recommendation_helpers_cover_template_and_text_fallbacks(self) -> None:
-        detected = {"host": "10.0.0.2", "port": "502", "unit_id": "1"}
+        detected = {"host": "198.51.100.2", "port": "502", "unit_id": "1"}
         detection = {"detected": detected, "profile_details": {"platform": "MB", "access_mode": "native"}}
         recommendation = probe_huawei_mod._huawei_recommendation(
             "huawei_mb_native_lan",

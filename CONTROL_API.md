@@ -115,6 +115,15 @@ Locality rules:
 - unix sockets are created with owner-only permissions
 - the API does not terminate TLS; remote TCP belongs behind an authenticated VPN or trusted local TLS proxy
 
+Resource limits:
+
+- command request bodies are limited to 64 KiB and oversized requests receive `413 Payload Too Large`
+- command transport authentication is checked before the request body is read
+- at most eight request handlers run concurrently; excess connections are closed
+- accepted connections have a 10-second socket timeout
+- event history requests are capped at 256 entries
+- event streams are capped at 30 seconds and heartbeat intervals at 10 seconds
+
 ## `GET /v1/capabilities`
 
 Returns the stable capability view for the running setup, including:
@@ -475,9 +484,9 @@ curl -N \
 <!-- BEGIN:CONTROL_API_GETTING_STARTED -->
 Official example files:
 
-- Python example: [examples/control_api_client.py](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/examples/control_api_client.py)
-- Small CLI: [venus_evchargerctl.py](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/venus_evchargerctl.py)
-- Target-system wrapper: [venus_evchargerctl.sh](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/deploy/venus/venus_evchargerctl.sh)
+- Python example: [examples/control_api_client.py](examples/control_api_client.py)
+- Small CLI: [venus_evchargerctl.py](venus_evchargerctl.py)
+- Target-system wrapper: [venus_evchargerctl.sh](deploy/venus/venus_evchargerctl.sh)
 - Local developer runbook: [DEV_API_WORKFLOW.md](DEV_API_WORKFLOW.md)
 
 CLI quick start:

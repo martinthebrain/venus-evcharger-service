@@ -22,7 +22,7 @@ class TestVenusEvchargerControlGolden(unittest.TestCase):
         service.config.read_string(
             """
 [DEFAULT]
-Host=192.168.1.20
+Host=192.0.2.20
 
 [Backends]
 Mode=split

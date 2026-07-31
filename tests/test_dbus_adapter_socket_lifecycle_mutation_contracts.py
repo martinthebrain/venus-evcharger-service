@@ -50,17 +50,21 @@ class DbusAdapterSocketLifecycleMutationContracts(unittest.TestCase):
         server = ServerProbe()
         socket_path = self.context.paths.socket_path
         Path(socket_path).write_text("stale", encoding="utf-8")
-        with patch.object(
-            socket,
-            "socket",
-            return_value=cast(socket.socket, server),
-        ) as socket_factory:
+        with (
+            patch.object(
+                socket,
+                "socket",
+                return_value=cast(socket.socket, server),
+            ) as socket_factory,
+            patch.object(socket_module.os, "chmod") as chmod,
+        ):
             self.role.start_socket()
 
         socket_factory.assert_called_once_with(socket.AF_UNIX, socket.SOCK_STREAM)
         self.assertEqual(server.bind_calls, [socket_path])
         self.assertEqual(server.listen_calls, [socket_module.SOCKET_BACKLOG])
         self.assertEqual(server.blocking, [False])
+        chmod.assert_called_once_with(socket_path, 0o600)
         self.assertIs(self.context._server, server)
         self.assertFalse(Path(socket_path).exists())
 

@@ -229,7 +229,7 @@ class _WizardBranchRuntimeImportPolicyCases:
                             "scheduled_latest_end_time": "06:30",
                             "scheduled_night_current_amps": 6,
                             "transport_kind": "tcp",
-                            "transport_host": "192.168.1.90",
+                            "transport_host": "192.0.2.90",
                             "transport_port": 502,
                             "transport_device": "/dev/ttyUSB0",
                             "transport_unit_id": 1,

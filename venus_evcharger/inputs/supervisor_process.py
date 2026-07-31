@@ -119,7 +119,8 @@ class AutoInputProcessLifecycle:
     @staticmethod
     def _snapshot_path_is_volatile(path: str) -> bool:
         normalized = os.path.abspath(path)
-        return normalized.startswith(("/run/", "/tmp/", "/var/volatile/"))
+        # Supervisor snapshots are restricted to the explicit volatile roots below.
+        return normalized.startswith(("/run/", "/tmp/", "/var/volatile/"))  # nosec B108
 
     def _stale_snapshot_path_removable(self, path: str) -> bool:
         """Return whether a stale helper snapshot may be removed safely."""

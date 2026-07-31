@@ -306,12 +306,23 @@ The repository keeps a tight local quality gate:
 - type checks
 - complexity checks
 - file-size guardrails
+- complete Python-callable inventory and exact Doxygen member-count validation
 
 The usual local check is:
 
 ```bash
 ./scripts/dev/check_all.sh
 ```
+
+Build the English developer and API reference with:
+
+```bash
+make docs
+```
+
+The generated entry point is `build/doxygen/html/index.html`. The source
+coverage rules and authoring conventions are documented in
+[Developer Documentation](docs/DEVELOPER_DOCUMENTATION.md).
 
 ## Documentation Map
 
@@ -328,3 +339,5 @@ The usual local check is:
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md): field debugging guide
 - [UPDATE_FLOW.md](UPDATE_FLOW.md): bootstrap, update, rollback, and `noUpdate`
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor guidance
+- [Developer Documentation](docs/DEVELOPER_DOCUMENTATION.md): Doxygen build,
+  source coverage, and English docstring conventions

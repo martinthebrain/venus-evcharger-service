@@ -10,12 +10,12 @@ from venus_evcharger.bootstrap import wizard_cli_prompts as prompts
 class BootstrapWizardCliPromptTests(unittest.TestCase):
     def test_prompt_text_contract(self) -> None:
         with patch("builtins.input", return_value=" typed ") as input_fn:
-            self.assertEqual(prompts._prompt_text("Host", "192.168.1.50"), "typed")
-        input_fn.assert_called_once_with("Host [192.168.1.50]: ")
+            self.assertEqual(prompts._prompt_text("Host", "192.0.2.50"), "typed")
+        input_fn.assert_called_once_with("Host [192.0.2.50]: ")
 
         with patch("builtins.input", return_value="") as input_fn:
-            self.assertEqual(prompts._prompt_text("Host", "192.168.1.50"), "192.168.1.50")
-        input_fn.assert_called_once_with("Host [192.168.1.50]: ")
+            self.assertEqual(prompts._prompt_text("Host", "192.0.2.50"), "192.0.2.50")
+        input_fn.assert_called_once_with("Host [192.0.2.50]: ")
 
     def test_prompt_password_contract(self) -> None:
         with (

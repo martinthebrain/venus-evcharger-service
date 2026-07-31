@@ -322,14 +322,15 @@ This is useful when:
 ### Regular bootstrap run
 
 ```bash
-cd /data/bootstrap-venus-evcharger
+cd /data/venus-evcharger
 ./install.sh
 ```
 
 ### Preview an update without changing the target tree
 
 ```bash
-bash deploy/venus/bootstrap_updater.sh --dry-run /data/shellyWB
+bash dbus-venus-evcharger/deploy/venus/bootstrap_updater.sh \
+  --dry-run /data/venus-evcharger/dbus-venus-evcharger
 ```
 
 The dry-run prints a JSON summary that includes:
@@ -342,7 +343,7 @@ The dry-run prints a JSON summary that includes:
 ### Freeze updates with `noUpdate`
 
 ```bash
-cd /data/bootstrap-venus-evcharger
+cd /data/venus-evcharger
 touch noUpdate
 ./install.sh
 ```

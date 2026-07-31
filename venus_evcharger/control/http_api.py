@@ -9,8 +9,8 @@ import os
 import socketserver
 import stat
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Protocol, cast
 
 from venus_evcharger.control.http_api_auth import ControlApiAuthConfig, ControlApiHttpAuthenticator
 from venus_evcharger.control.http_api_command_contracts import ControlApiHttpService
@@ -28,14 +28,50 @@ from venus_evcharger.core.contracts import (
 )
 
 
-class _ThreadingLocalControlHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
+CONTROL_API_MAX_WORKERS = 8
+CONTROL_API_REQUEST_TIMEOUT_SECONDS = 10.0
+CONTROL_API_LISTEN_BACKLOG = 8
 
 
-class _ThreadingLocalControlUnixHttpServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+class _RequestShutdownPort(Protocol):
+    def shutdown_request(self, request: Any) -> None: ...
+
+
+class _BoundedThreadingMixIn(socketserver.ThreadingMixIn):
+    """Bound concurrent handlers and slow clients on constrained GX hardware."""
+
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = CONTROL_API_LISTEN_BACKLOG
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._worker_slots = threading.BoundedSemaphore(CONTROL_API_MAX_WORKERS)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._worker_slots.acquire(blocking=False):
+            cast(_RequestShutdownPort, self).shutdown_request(request)
+            return
+        try:
+            request.settimeout(CONTROL_API_REQUEST_TIMEOUT_SECONDS)
+            super().process_request(request, client_address)
+        except BaseException:
+            self._worker_slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._worker_slots.release()
+
+
+class _ThreadingLocalControlHttpServer(_BoundedThreadingMixIn, HTTPServer):
+    """Bounded threaded TCP transport."""
+
+
+class _ThreadingLocalControlUnixHttpServer(_BoundedThreadingMixIn, socketserver.UnixStreamServer):
+    """Bounded threaded Unix-domain transport."""
 
 
 class LocalControlApiHttpServer:

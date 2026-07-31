@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import xml.etree.ElementTree as xml_et
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, TypeGuard, TypeVar
@@ -13,6 +12,7 @@ import dbus
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.introspection_xml import parse_bounded_introspection_xml
 from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
 from venus_evcharger.ipc.command_types import CommandMapping
 from venus_evcharger.ipc.generic_shelly_configuration import (
@@ -134,10 +134,9 @@ class GenericShellyConfigurationExecutor:
             "introspection",
             lambda: self._introspect_now(service, _DEVICES_PATH),
         )
-        try:
-            root = xml_et.fromstring(str(xml_data))
-        except xml_et.ParseError:
-            logging.warning("Generic Shelly discovery returned malformed introspection XML")
+        root = parse_bounded_introspection_xml(xml_data)
+        if root is None:
+            logging.warning("Generic Shelly discovery returned rejected introspection XML")
             return ()
         return tuple(
             name

@@ -21,7 +21,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 temp_dir,
                 "charger.ini",
                 "[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n"
+                "[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n"
                 "[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n"
                 "[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n",
             )
@@ -38,7 +38,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 "charger.ini",
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1_P2_P3\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
 
             payload = validate_backend_config(charger_path)
@@ -52,7 +52,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 temp_dir,
                 "charger.ini",
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
 
             payload = validate_backend_config(charger_path)
@@ -66,7 +66,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 temp_dir,
                 "charger.ini",
                 "[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n"
+                "[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n"
                 "[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n"
                 "[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n",
             )
@@ -92,7 +92,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 "charger.ini",
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1_P2_P3\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
 
             stdout = io.StringIO()
@@ -140,7 +140,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 "charger.ini",
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1_P2\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
 
             stdout = io.StringIO()
@@ -164,7 +164,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 temp_dir,
                 "charger.ini",
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
 
             stdout = io.StringIO()
@@ -192,7 +192,7 @@ class TestShellyWallboxBackendProbeTransport(BackendProbeTestCase):
                 temp_dir,
                 "charger.ini",
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
 
             stdout = io.StringIO()

@@ -16,13 +16,14 @@ svstat /service/dbus-venus-evcharger
 Then reinstall the service wiring:
 
 ```bash
-cd /data/shellyWB
-./deploy/venus/install_venus_evcharger_service.sh
+cd /data/venus-evcharger
+./install.sh
 ```
 
 If you want the direct traceback, start the service once in the foreground:
 
 ```bash
+cd /data/venus-evcharger/dbus-venus-evcharger
 python3 ./venus_evcharger_service.py
 ```
 

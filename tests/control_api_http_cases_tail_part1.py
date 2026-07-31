@@ -183,11 +183,11 @@ class __ControlApiHttpTailCasesPart1:
 
         self.assertEqual(ControlApiHttpAuthenticator.client_host(handler), "127.0.0.1")
         self.assertEqual(ControlApiHttpAuthenticator.client_host(SimpleNamespace()), "127.0.0.1")
-        self.assertEqual(ControlApiHttpAuthenticator.client_host(SimpleNamespace(client_address=("10.0.0.5", 2345))), "10.0.0.5")
+        self.assertEqual(ControlApiHttpAuthenticator.client_host(SimpleNamespace(client_address=("198.51.100.5", 2345))), "198.51.100.5")
         self.assertTrue(ControlApiHttpAuthenticator.is_loopback_host("localhost"))
         self.assertTrue(ControlApiHttpAuthenticator.is_loopback_host("::1"))
         self.assertTrue(ControlApiHttpAuthenticator.is_loopback_host("127.0.0.1"))
-        self.assertFalse(ControlApiHttpAuthenticator.is_loopback_host("192.168.1.10"))
+        self.assertFalse(ControlApiHttpAuthenticator.is_loopback_host("192.0.2.10"))
         self.assertFalse(ControlApiHttpAuthenticator.is_loopback_host("not-an-ip"))
 
     def test_request_target_parser_keeps_blank_query_values(self) -> None:

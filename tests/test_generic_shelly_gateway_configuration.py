@@ -15,6 +15,7 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 install_venus_adapter_stubs()
 
 from venus_evcharger.dbus_adapter.scheduling import AtomicJsonWriter
+from venus_evcharger.dbus_adapter.introspection_xml import DBUS_INTROSPECTION_XML_MAX_BYTES
 from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
 from venus_evcharger.dbus_adapter.write.semantic import SemanticWriteExecutor
 from venus_evcharger.dbus_gateway import DbusCacheStore, gateway_paths, read_json_file
@@ -219,6 +220,25 @@ class GenericShellyGatewayConfigurationTests(unittest.TestCase):
             with patch("venus_evcharger.dbus_adapter.write.generic_shelly.dbus.Interface", return_value=interface):
                 self.assertEqual(scheduler.process_semantic_operation(command, command_file=str(path)), "dropped")
             self.assertEqual(adapter.operations, ["read"])
+
+    def test_oversized_discovery_is_rejected_without_creating_device_work(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = _Adapter(Path(temp_dir))
+            scheduler = _scheduler(adapter)
+            path = Path(temp_dir) / "command.json"
+            interface = _Interface(
+                xml="<node>" + " " * DBUS_INTROSPECTION_XML_MAX_BYTES + "</node>"
+            )
+            with patch(
+                "venus_evcharger.dbus_adapter.write.generic_shelly.dbus.Interface",
+                return_value=interface,
+            ):
+                self.assertEqual(
+                    scheduler.process_semantic_operation(_request(), command_file=str(path)),
+                    "applied",
+                )
+            self.assertEqual(adapter.operations, ["introspection"])
+            self.assertFalse(path.exists())
 
     def test_invalid_commands_and_disabled_adapter_target_are_dropped_without_io(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

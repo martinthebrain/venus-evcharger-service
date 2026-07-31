@@ -9,4 +9,5 @@ import os
 def is_runtime_path(path: str) -> bool:
     """Return whether a path points at volatile runtime storage."""
     normalized = os.path.abspath(path)
-    return normalized.startswith("/run/") or normalized.startswith("/tmp/")
+    # These are the two explicit volatile roots accepted by the local control transport.
+    return normalized.startswith("/run/") or normalized.startswith("/tmp/")  # nosec B108

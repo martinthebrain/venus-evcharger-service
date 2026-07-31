@@ -14,7 +14,7 @@ class _WizardSetupConfigCases:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -27,7 +27,7 @@ class _WizardSetupConfigCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -42,7 +42,7 @@ class _WizardSetupConfigCases:
             parser = configparser.ConfigParser()
             parser.read(config_path, encoding="utf-8")
             topology_text = (config_path.parent / "config.ini.wizard-topology.txt").read_text(encoding="utf-8")
-            self.assertEqual(parser["DEFAULT"]["Host"], "192.168.1.44")
+            self.assertEqual(parser["DEFAULT"]["Host"], "192.0.2.44")
             self.assertEqual(parser["DEFAULT"]["DeviceInstance"], "61")
             self.assertFalse(parser.has_section("Backends"))
             self.assertTrue((config_path.parent / "config.ini.wizard-result.json").exists())
@@ -50,8 +50,8 @@ class _WizardSetupConfigCases:
             self.assertTrue((config_path.parent / "config.ini.wizard-topology.txt").exists())
             self.assertTrue((config_path.parent / "config.ini.wizard-inventory.ini").exists())
             self.assertIn("setup: simple_relay\n", topology_text)
-            self.assertIn("role_endpoints:\n  - meter: 192.168.1.44\n  - switch: 192.168.1.44\n", topology_text)
-            self.assertEqual(result.role_hosts, {"meter": "192.168.1.44", "switch": "192.168.1.44"})
+            self.assertIn("role_endpoints:\n  - meter: 192.0.2.44\n  - switch: 192.0.2.44\n", topology_text)
+            self.assertEqual(result.role_hosts, {"meter": "192.0.2.44", "switch": "192.0.2.44"})
             self.assertEqual(result.validation["resolved_roles"], {"meter": True, "switch": True, "charger": False})
             self.assertEqual(result.topology_config["topology"]["type"], "simple_relay")
             self.assertEqual(result.topology_config["actuator"]["type"], "shelly_contactor_switch")
@@ -124,7 +124,7 @@ class _WizardSetupConfigCases:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -137,7 +137,7 @@ class _WizardSetupConfigCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -196,7 +196,7 @@ class _WizardSetupConfigCases:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -209,7 +209,7 @@ class _WizardSetupConfigCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -245,7 +245,7 @@ class _WizardSetupConfigCases:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -258,7 +258,7 @@ class _WizardSetupConfigCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -320,7 +320,7 @@ class _WizardSetupConfigCases:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -333,7 +333,7 @@ class _WizardSetupConfigCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -370,7 +370,7 @@ class _WizardSetupConfigCases:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -383,7 +383,7 @@ class _WizardSetupConfigCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -428,7 +428,7 @@ class _WizardSetupConfigCases:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -441,7 +441,7 @@ class _WizardSetupConfigCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,

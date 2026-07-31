@@ -650,16 +650,16 @@ class _EnergyAggregateProfileCases:
                 EnergySourceSnapshot(
                     source_id="mb-unit1",
                     role="hybrid-inverter",
-                    service_name="10.0.0.20",
+                    service_name="198.51.100.20",
                     soc=55.0,
                     usable_capacity_wh=7000.0,
                     net_battery_power_w=600.0,
                     ac_power_w=4200.0,
                     pv_input_power_w=5100.0,
                     grid_interaction_w=-1200.0,
-                    ac_power_scope_key="10.0.0.20:502:ac",
-                    pv_input_power_scope_key="10.0.0.20:502:pv",
-                    grid_interaction_scope_key="10.0.0.20:502:meter",
+                    ac_power_scope_key="198.51.100.20:502:ac",
+                    pv_input_power_scope_key="198.51.100.20:502:pv",
+                    grid_interaction_scope_key="198.51.100.20:502:meter",
                     online=True,
                     confidence=1.0,
                     captured_at=100.0,
@@ -667,16 +667,16 @@ class _EnergyAggregateProfileCases:
                 EnergySourceSnapshot(
                     source_id="mb-unit2",
                     role="hybrid-inverter",
-                    service_name="10.0.0.20",
+                    service_name="198.51.100.20",
                     soc=60.0,
                     usable_capacity_wh=7000.0,
                     net_battery_power_w=-400.0,
                     ac_power_w=4200.0,
                     pv_input_power_w=5100.0,
                     grid_interaction_w=-1200.0,
-                    ac_power_scope_key="10.0.0.20:502:ac",
-                    pv_input_power_scope_key="10.0.0.20:502:pv",
-                    grid_interaction_scope_key="10.0.0.20:502:meter",
+                    ac_power_scope_key="198.51.100.20:502:ac",
+                    pv_input_power_scope_key="198.51.100.20:502:pv",
+                    grid_interaction_scope_key="198.51.100.20:502:meter",
                     online=True,
                     confidence=1.0,
                     captured_at=100.0,
@@ -871,7 +871,7 @@ class _EnergyAggregateProfileCases:
         details = energy_source_profile_details("huawei_ma_native_ap")
         plan = energy_source_profile_probe_plan(
             "huawei_ma_native_ap",
-            configured_host="10.0.0.15",
+            configured_host="198.51.100.15",
             configured_port="6607",
             configured_unit_id=1,
         )
@@ -885,7 +885,7 @@ class _EnergyAggregateProfileCases:
         self.assertEqual(details["default_unit_id_candidates"], [0, 1])
         self.assertEqual(details["write_support"], "experimental")
         self.assertTrue(details["probe_required"])
-        self.assertEqual(plan["host"], "10.0.0.15")
+        self.assertEqual(plan["host"], "198.51.100.15")
         self.assertEqual(plan["port_candidates"], [6607])
         self.assertEqual(plan["unit_id_candidates"], [1])
 

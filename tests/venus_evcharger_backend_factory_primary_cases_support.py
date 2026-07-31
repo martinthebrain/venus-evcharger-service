@@ -37,7 +37,7 @@ def _service_from_backends_config(
     meter_config_path: str = "",
     switch_config_path: str = "",
     charger_config_path: str = "",
-    host: str = "192.168.1.20",
+    host: str = "192.0.2.20",
     phase: str = "L1",
 ) -> SimpleNamespace:
     parser = configparser.ConfigParser()

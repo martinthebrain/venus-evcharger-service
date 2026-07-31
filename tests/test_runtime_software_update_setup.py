@@ -32,7 +32,6 @@ class TestRuntimeSoftwareUpdateSetup(unittest.TestCase):
                 "started_at",
                 "software_update_repo_root",
                 "software_update_install_script",
-                "software_update_restart_script",
                 "software_update_no_update_file",
                 "software_update_log_path",
                 "software_update_repo_slug",
@@ -86,7 +85,6 @@ class TestRuntimeSoftwareUpdateSetup(unittest.TestCase):
         self.assert_runtime_state_keys(service)
         self.assertEqual(service.software_update_repo_root, "")
         self.assertEqual(service.software_update_install_script, "")
-        self.assertEqual(service.software_update_restart_script, "")
         self.assertEqual(service.software_update_no_update_file, "")
         self.assertEqual(
             service.software_update_log_path,
@@ -143,10 +141,6 @@ class TestRuntimeSoftwareUpdateSetup(unittest.TestCase):
         self.assertEqual(service.software_update_repo_root, str(repo_root))
         self.assert_runtime_state_keys(service)
         self.assertEqual(service.software_update_install_script, str(repo_root / "install.sh"))
-        self.assertEqual(
-            service.software_update_restart_script,
-            str(repo_root / "deploy/venus/restart_venus_evcharger_service.sh"),
-        )
         self.assertEqual(service.software_update_no_update_file, str(repo_root / "noUpdate"))
         self.assertEqual(service.software_update_repo_slug, "owner/project")
         self.assertEqual(service.software_update_channel, "stable")

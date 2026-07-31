@@ -23,7 +23,7 @@ class TestServiceStateControllerSecondary(ServiceStateControllerTestBase):
             with open(config_path, "w", encoding="utf-8") as handle:
                 handle.write(
                     "[DEFAULT]\n"
-                    "Host=192.168.1.20\n"
+                    "Host=192.0.2.20\n"
                     f"RuntimeOverridesPath={overrides_path}\n"
                     "Mode=0\n"
                     "AutoStart=1\n"

@@ -255,7 +255,7 @@ class BootstrapWizardImportContracts(unittest.TestCase):
                             "scheduled_latest_end_time": "06:30",
                             "scheduled_night_current_amps": 6,
                             "transport_kind": "tcp",
-                            "transport_host": "192.168.1.90",
+                            "transport_host": "192.0.2.90",
                             "transport_port": 502,
                             "transport_device": "/dev/ttyUSB0",
                             "transport_unit_id": 1,
@@ -298,7 +298,7 @@ class BootstrapWizardImportContracts(unittest.TestCase):
         self.assertEqual(defaults.scheduled_latest_end_time, "06:30")
         self.assertEqual(defaults.scheduled_night_current_amps, 6.0)
         self.assertEqual(defaults.transport_kind, "tcp")
-        self.assertEqual(defaults.transport_host, "192.168.1.90")
+        self.assertEqual(defaults.transport_host, "192.0.2.90")
         self.assertEqual(defaults.transport_port, 502)
         self.assertEqual(defaults.transport_device, "/dev/ttyUSB0")
         self.assertEqual(defaults.transport_unit_id, 1)

@@ -70,11 +70,11 @@ class _WizardBranchCoverageOutputCases:
             _result(
                 profile="multi_adapter_topology",
                 topology_preset="shelly-meter-cerbo-relay",
-                role_hosts={"meter": "192.168.178.76"},
+                role_hosts={"meter": "192.0.2.76"},
                 answer_defaults={"cerbo_relay_contact_mode": "NC"},
             )
         )
-        self.assertIn("192.168.178.76 measures energy; the local Cerbo GX relay switches", cerbo_text)
+        self.assertIn("192.0.2.76 measures energy; the local Cerbo GX relay switches", cerbo_text)
         self.assertIn("Medium: Cerbo relay uses NC wiring", cerbo_text)
         self.assertIn("confirm Relay 1/2 and NO/NC wiring", cerbo_text)
 

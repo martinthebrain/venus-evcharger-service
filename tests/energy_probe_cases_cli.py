@@ -32,7 +32,7 @@ class _EnergyProbeCliCases(_EnergyProbeBase):
 
             with patch("venus_evcharger.energy.probe.create_modbus_transport", side_effect=fake_transport):
                 with redirect_stdout(stdout):
-                    rc = main(["validate-huawei-energy", config_path, "--profile", "huawei_smartlogger_modbus_tcp", "--host", "10.0.0.30"])
+                    rc = main(["validate-huawei-energy", config_path, "--profile", "huawei_smartlogger_modbus_tcp", "--host", "198.51.100.30"])
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(rc, 0)
@@ -62,7 +62,7 @@ class _EnergyProbeCliCases(_EnergyProbeBase):
 
             with patch("venus_evcharger.energy.probe.create_modbus_transport", side_effect=fake_transport):
                 with redirect_stdout(stdout):
-                    rc = main(["validate-huawei-energy", config_path, "--profile", "huawei_smartlogger_modbus_tcp", "--host", "10.0.0.30", "--emit", "ini"])
+                    rc = main(["validate-huawei-energy", config_path, "--profile", "huawei_smartlogger_modbus_tcp", "--host", "198.51.100.30", "--emit", "ini"])
 
         output = stdout.getvalue()
         self.assertEqual(rc, 0)
@@ -89,7 +89,7 @@ class _EnergyProbeCliCases(_EnergyProbeBase):
 
             with patch("venus_evcharger.energy.probe.create_modbus_transport", side_effect=fake_transport):
                 with redirect_stdout(stdout):
-                    rc = main(["validate-huawei-energy", config_path, "--profile", "huawei_smartlogger_modbus_tcp", "--host", "10.0.0.30", "--emit", "wizard-hint"])
+                    rc = main(["validate-huawei-energy", config_path, "--profile", "huawei_smartlogger_modbus_tcp", "--host", "198.51.100.30", "--emit", "wizard-hint"])
 
         output = stdout.getvalue()
         self.assertEqual(rc, 0)
@@ -124,7 +124,7 @@ class _EnergyProbeCliCases(_EnergyProbeBase):
                             "--profile",
                             "huawei_smartlogger_modbus_tcp",
                             "--host",
-                            "10.0.0.30",
+                            "198.51.100.30",
                             "--write-recommendation-prefix",
                             str(output_prefix),
                         ]

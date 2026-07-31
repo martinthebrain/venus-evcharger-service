@@ -24,7 +24,7 @@ SwitchType=none
 [DEFAULT]
 Mode=2
 Phase=L2
-Host=192.168.1.44
+Host=192.0.2.44
 """
         )
         parsed = legacy_topology_from_config(parser)
@@ -36,7 +36,7 @@ Host=192.168.1.44
         parser.read_string(
             """
 [DEFAULT]
-Host=192.168.1.44
+Host=192.0.2.44
 
 [Backends]
 SwitchType=shelly_combined
@@ -91,7 +91,7 @@ SwitchType=unknown_switch
         parser.read_string(
             """
 [DEFAULT]
-Host=192.168.1.44
+Host=192.0.2.44
 Mode=0
 
 [Backends]
@@ -138,7 +138,7 @@ ChargerType=
         )
 
         self.assertFalse(runtime_summary_is_configured(summary, legacy_host=""))
-        self.assertTrue(runtime_summary_is_configured(summary, legacy_host="192.168.1.44"))
+        self.assertTrue(runtime_summary_is_configured(summary, legacy_host="192.0.2.44"))
 
     def test_runtime_summary_is_configured_accepts_split_topology_without_legacy_host(self) -> None:
         summary = BackendRuntimeSummary(

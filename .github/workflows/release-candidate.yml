@@ -10,7 +10,6 @@ on:
       pi_target:
         description: Dedicated Pi test target
         required: true
-        default: root@192.168.142.129
         type: string
 
 permissions:

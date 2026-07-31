@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import socketserver
 import unittest
 from http.server import BaseHTTPRequestHandler
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from tests.control_api_http_cases_common import ControlApiHttpServiceHarness, control_api_http_service
+from venus_evcharger.control import http_api as http_api_module
 from venus_evcharger.control.http_api import LocalControlApiHttpServer
 from venus_evcharger.control.http_api_command_payloads import tracked_command
 from venus_evcharger.control.models import ControlCommand, ControlResult
@@ -355,6 +357,60 @@ class ControlHttpLifecycleContractTests(unittest.TestCase):
         get.assert_called_once_with(handler)
         post.assert_called_once_with(handler)
         debug.assert_called_once_with("Control API HTTP: value=%s", 7)
+
+    def test_transport_rejects_connections_after_worker_budget_is_exhausted(self) -> None:
+        transport = object.__new__(http_api_module._ThreadingLocalControlHttpServer)
+        transport._worker_slots = MagicMock()
+        transport._worker_slots.acquire.return_value = False
+        transport.shutdown_request = MagicMock()
+        request = MagicMock()
+        client_address = ("192.0.2.1", 1234)
+
+        transport.process_request(request, client_address)
+
+        transport._worker_slots.acquire.assert_called_once_with(blocking=False)
+        transport.shutdown_request.assert_called_once_with(request)
+        request.settimeout.assert_not_called()
+
+    def test_transport_applies_timeout_and_releases_worker_slot_on_all_paths(self) -> None:
+        transport = object.__new__(http_api_module._ThreadingLocalControlHttpServer)
+        transport._worker_slots = MagicMock()
+        transport._worker_slots.acquire.return_value = True
+        request = MagicMock()
+        client_address = ("192.0.2.1", 1234)
+
+        with patch.object(socketserver.ThreadingMixIn, "process_request") as parent_process:
+            transport.process_request(request, client_address)
+        request.settimeout.assert_called_once_with(http_api_module.CONTROL_API_REQUEST_TIMEOUT_SECONDS)
+        parent_process.assert_called_once_with(request, client_address)
+        transport._worker_slots.release.assert_not_called()
+
+        transport._worker_slots.reset_mock()
+        transport._worker_slots.acquire.return_value = True
+        with (
+            patch.object(socketserver.ThreadingMixIn, "process_request", side_effect=OSError("thread failed")),
+            self.assertRaisesRegex(OSError, "thread failed"),
+        ):
+            transport.process_request(request, client_address)
+        transport._worker_slots.release.assert_called_once_with()
+
+        transport._worker_slots.reset_mock()
+        with patch.object(socketserver.ThreadingMixIn, "process_request_thread") as parent_thread:
+            transport.process_request_thread(request, client_address)
+        parent_thread.assert_called_once_with(request, client_address)
+        transport._worker_slots.release.assert_called_once_with()
+
+        transport._worker_slots.reset_mock()
+        with (
+            patch.object(
+                socketserver.ThreadingMixIn,
+                "process_request_thread",
+                side_effect=RuntimeError("handler failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "handler failed"),
+        ):
+            transport.process_request_thread(request, client_address)
+        transport._worker_slots.release.assert_called_once_with()
 
 
 if __name__ == "__main__":

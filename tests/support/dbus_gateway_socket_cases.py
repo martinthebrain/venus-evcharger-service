@@ -105,16 +105,20 @@ class GatewaySocketCases(GatewayAdapterContractCase):
             Path(adapter.paths.socket_path).write_text("stale", encoding="utf-8")
 
             server = MagicMock()
-            with patch.object(
-                process_socket_module.socket,
-                "socket",
-                return_value=server,
-            ) as socket_factory:
+            with (
+                patch.object(
+                    process_socket_module.socket,
+                    "socket",
+                    return_value=server,
+                ) as socket_factory,
+                patch.object(process_socket_module.os, "chmod") as chmod,
+            ):
                 adapter.socket_role.start_socket()
             socket_factory.assert_called_once_with(
                 process_socket_module.socket.AF_UNIX,
                 process_socket_module.socket.SOCK_STREAM,
             )
+            chmod.assert_called_once_with(adapter.paths.socket_path, 0o600)
             self.assertFalse(Path(adapter.paths.socket_path).exists())
             adapter.socket_role.close_socket()
             self.assertIsNone(adapter._server)

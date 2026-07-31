@@ -16,7 +16,7 @@ def _with_backends_config(
     meter_type: str,
     switch_type: str,
     charger_type: str | None,
-    host: str = "192.168.1.20",
+    host: str = "192.0.2.20",
 ) -> SimpleNamespace:
     parser = configparser.ConfigParser()
     parser.read_string(

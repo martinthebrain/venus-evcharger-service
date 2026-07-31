@@ -25,6 +25,8 @@ from venus_evcharger.control.http_api_rate_limit import ControlApiHttpRateLimit,
 from venus_evcharger.control.http_api_response import ControlApiHttpResponder
 from venus_evcharger.control.models import ControlCommand, ControlResult
 
+CONTROL_API_MAX_REQUEST_BODY_BYTES = 64 * 1024
+
 
 class ControlApiHttpCommandEndpoint:
     """Validate, execute, audit, and serialize Control API commands."""
@@ -64,7 +66,7 @@ class ControlApiHttpCommandEndpoint:
 
     def _content_length(self, handler: BaseHTTPRequestHandler) -> int | None:
         try:
-            return int(handler.headers.get("Content-Length", "0"))
+            content_length = int(handler.headers.get("Content-Length", "0"))
         except ValueError:
             self._responder.write_error(
                 handler,
@@ -73,10 +75,27 @@ class ControlApiHttpCommandEndpoint:
                 "Invalid Content-Length.",
             )
             return None
+        if content_length < 0:
+            self._responder.write_error(
+                handler,
+                HTTPStatus.BAD_REQUEST,
+                "invalid_content_length",
+                "Content-Length must not be negative.",
+            )
+            return None
+        if content_length > CONTROL_API_MAX_REQUEST_BODY_BYTES:
+            self._responder.write_error(
+                handler,
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                "payload_too_large",
+                f"JSON body exceeds the {CONTROL_API_MAX_REQUEST_BODY_BYTES}-byte limit.",
+            )
+            return None
+        return content_length
 
     def _parsed_json(self, handler: BaseHTTPRequestHandler, content_length: int) -> object:
         try:
-            raw_payload = handler.rfile.read(max(0, content_length))
+            raw_payload = handler.rfile.read(content_length)
             return json.loads(raw_payload.decode() or "{}")
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._responder.write_error(handler, HTTPStatus.BAD_REQUEST, "invalid_json", "Invalid JSON body.")

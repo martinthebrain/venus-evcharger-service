@@ -87,6 +87,7 @@ def _shelly_command(args: argparse.Namespace) -> list[str]:
 
 
 def _http_json(url: str, *, timeout: float = 5.0) -> dict[str, object]:
-    with urlopen(url, timeout=timeout) as response:  # noqa: S310 - dev-only local testbed URL
+    # The caller constructs this dev-only URL for the local HTTP testbed.
+    with urlopen(url, timeout=timeout) as response:  # nosec B310
         data = response.read().decode("utf-8")
     return json_object(data, detail="mock Shelly response")

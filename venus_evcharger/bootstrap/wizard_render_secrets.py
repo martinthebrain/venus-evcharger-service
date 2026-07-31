@@ -7,7 +7,16 @@ from types import SimpleNamespace
 from venus_evcharger.bootstrap.wizard_render_text import CasePreservingConfigParser
 
 
-SENSITIVE_ASSIGNMENT_KEYS = frozenset(("Password", "ControlApiAuthToken"))
+SENSITIVE_ASSIGNMENT_KEYS = frozenset(
+    (
+        "Password",
+        "ControlApiAuthToken",
+        "ControlApiReadToken",
+        "ControlApiControlToken",
+        "ControlApiAdminToken",
+        "ControlApiUpdateToken",
+    )
+)
 DIGEST_AUTH_TRUE_VALUES = frozenset(("1", "true", "yes", "on"))
 
 KEY_HOST = "Host"

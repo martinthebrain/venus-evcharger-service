@@ -41,10 +41,6 @@ def initialize_software_update_runtime_state(
     svc.started_at = started_at
     svc.software_update_repo_root = repo_root
     svc.software_update_install_script = _software_update_repo_path(repo_root, "install.sh")
-    svc.software_update_restart_script = _software_update_repo_path(
-        repo_root,
-        "deploy/venus/restart_venus_evcharger_service.sh",
-    )
     svc.software_update_no_update_file = _software_update_repo_path(repo_root, "noUpdate")
     svc.software_update_log_path = "/var/volatile/log/dbus-venus-evcharger/software-update.log"
     svc.software_update_repo_slug = _software_update_env(

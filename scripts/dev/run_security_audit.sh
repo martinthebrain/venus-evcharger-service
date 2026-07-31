@@ -19,7 +19,7 @@ fi
 "${BANDIT[@]}" \
 	-q \
 	-r \
-	--severity-level high \
+	--severity-level medium \
 	venus_evcharger \
 	venus_evcharger_service.py \
 	venus_evcharger_observer.py \

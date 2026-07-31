@@ -13,7 +13,7 @@ development input, not a customer release.
 
    ```bash
    bash scripts/dev/run_release_candidate_gate.sh \
-     --pi root@192.168.142.129 \
+     --pi user@pi-testbed.example \
      --receipt /tmp/venus-evcharger-release-candidate.json
    ```
 

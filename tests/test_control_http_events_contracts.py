@@ -10,6 +10,11 @@ from unittest.mock import MagicMock, call, patch
 
 from tests.control_api_http_cases_common import control_api_http_service
 from venus_evcharger.control.http_api import LocalControlApiHttpServer
+from venus_evcharger.control.http_api_events import (
+    CONTROL_API_MAX_EVENT_HISTORY,
+    CONTROL_API_MAX_EVENT_STREAM_SECONDS,
+    CONTROL_API_MAX_HEARTBEAT_SECONDS,
+)
 
 
 class TestControlHttpEventsContracts(unittest.TestCase):
@@ -89,11 +94,18 @@ class TestControlHttpEventsContracts(unittest.TestCase):
             self.server.events.write_stream(handler, {})
         self.assertEqual(
             query_int.call_args_list,
-            [call({}, "limit", 20), call({}, "after", 0), call({}, "resume", 0)],
+            [
+                call({}, "limit", 20, maximum=CONTROL_API_MAX_EVENT_HISTORY),
+                call({}, "after", 0),
+                call({}, "resume", 0),
+            ],
         )
         self.assertEqual(
             query_float.call_args_list,
-            [call({}, "timeout", 5.0), call({}, "heartbeat", 1.0)],
+            [
+                call({}, "timeout", 5.0, maximum=CONTROL_API_MAX_EVENT_STREAM_SECONDS),
+                call({}, "heartbeat", 1.0, maximum=CONTROL_API_MAX_HEARTBEAT_SECONDS),
+            ],
         )
         query_kinds.assert_called_once_with({})
         retry.assert_called_once_with(1.0)
@@ -287,9 +299,14 @@ class TestControlHttpEventsContracts(unittest.TestCase):
         self.assertEqual(self.server.events.query_int({}, "limit", 7), 7)
         self.assertEqual(self.server.events.query_int({"limit": ["-2"]}, "limit", 7), 0)
         self.assertEqual(self.server.events.query_int({"limit": ["bad"]}, "limit", 7), 7)
+        self.assertEqual(self.server.events.query_int({"limit": ["99"]}, "limit", 7, maximum=8), 8)
         self.assertEqual(self.server.events.query_float({}, "timeout", 2.5), 2.5)
         self.assertEqual(self.server.events.query_float({"timeout": ["-2"]}, "timeout", 2.5), 0.0)
         self.assertEqual(self.server.events.query_float({"timeout": ["bad"]}, "timeout", 2.5), 2.5)
+        self.assertEqual(
+            self.server.events.query_float({"timeout": ["99"]}, "timeout", 2.5, maximum=3.0),
+            3.0,
+        )
         for raw in ("1", "true", "yes", "on", " TRUE "):
             self.assertTrue(self.server.events.query_bool({"once": [raw]}, "once", False), raw)
         for raw in ("0", "false", "no", "off", "unknown"):

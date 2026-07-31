@@ -15,7 +15,7 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             wallbox_path = self._write_config(
                 temp_dir,
                 "config.ini",
-                "[DEFAULT]\nHost=192.168.1.20\n"
+                "[DEFAULT]\nHost=192.0.2.20\n"
                 "[Backends]\nMode=split\nMeterType=none\nSwitchType=shelly_combined\n"
                 f"ChargerType=template_charger\nChargerConfigPath={charger_path}\n",
             )
@@ -47,12 +47,12 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             phase2_path = self._write_config(
                 temp_dir,
                 "phase2-switch.ini",
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.61\n",
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.61\n",
             )
             phase3_path = self._write_config(
                 temp_dir,
                 "phase3-switch.ini",
-                "[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.62\n",
+                "[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.62\n",
             )
             switch_path = self._write_config(
                 temp_dir,
@@ -69,7 +69,7 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             wallbox_path = self._write_config(
                 temp_dir,
                 "config.ini",
-                "[DEFAULT]\nHost=192.168.1.20\n"
+                "[DEFAULT]\nHost=192.0.2.20\n"
                 "[Backends]\nMode=split\nMeterType=none\nSwitchType=switch_group\n"
                 f"SwitchConfigPath={switch_path}\n"
                 "ChargerType=simpleevse_charger\n"
@@ -98,12 +98,12 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             phase2_path = self._write_config(
                 temp_dir,
                 "phase2-switch.ini",
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.61\n",
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.61\n",
             )
             phase3_path = self._write_config(
                 temp_dir,
                 "phase3-switch.ini",
-                "[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.62\n",
+                "[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.62\n",
             )
             switch_path = self._write_config(
                 temp_dir,
@@ -120,7 +120,7 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             wallbox_path = self._write_config(
                 temp_dir,
                 "config.ini",
-                "[DEFAULT]\nHost=192.168.1.20\n"
+                "[DEFAULT]\nHost=192.0.2.20\n"
                 "[Backends]\nMode=split\nMeterType=none\nSwitchType=switch_group\n"
                 f"SwitchConfigPath={switch_path}\n"
                 "ChargerType=smartevse_charger\n"
@@ -141,7 +141,7 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             wallbox_path = self._write_config(
                 temp_dir,
                 "config.ini",
-                "[DEFAULT]\nHost=192.168.1.20\n"
+                "[DEFAULT]\nHost=192.0.2.20\n"
                 "[Backends]\nMode=split\nMeterType=none\nSwitchType=shelly_combined\nChargerType=\n",
             )
 
@@ -153,7 +153,7 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             wallbox_path = self._write_config(
                 temp_dir,
                 "config.ini",
-                "[DEFAULT]\nHost=192.168.1.20\n"
+                "[DEFAULT]\nHost=192.0.2.20\n"
                 "[Backends]\nMode=combined\nMeterType=none\nSwitchType=shelly_combined\nChargerType=\n",
             )
 
@@ -165,7 +165,7 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             wallbox_path = self._write_config(
                 temp_dir,
                 "config.ini",
-                "[DEFAULT]\nHost=192.168.1.20\n"
+                "[DEFAULT]\nHost=192.0.2.20\n"
                 "[Backends]\nMode=combined\nMeterType=shelly_combined\nSwitchType=none\nChargerType=\n",
             )
 
@@ -177,12 +177,12 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             switch_path = self._write_config(
                 temp_dir,
                 "switch.ini",
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.21\nShellyProfile=switch_1ch_with_pm\n",
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.21\nShellyProfile=switch_1ch_with_pm\n",
             )
             meter_path = self._write_config(
                 temp_dir,
                 "meter.ini",
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.22\nShellyProfile=em1_meter_single_or_dual\n",
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.22\nShellyProfile=em1_meter_single_or_dual\n",
             )
             modbus_charger_path = self._write_config(
                 temp_dir,
@@ -200,13 +200,13 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
             cases = (
                 (
                     "combined-default",
-                    "[DEFAULT]\nHost=192.168.1.20\n",
+                    "[DEFAULT]\nHost=192.0.2.20\n",
                     {"mode": "combined", "meter_type": "shelly_meter", "switch_type": "shelly_contactor_switch"},
                     {"meter": True, "switch": True, "charger": False},
                 ),
                 (
                     "split-meter-switch-modbus",
-                    "[DEFAULT]\nHost=192.168.1.20\n"
+                    "[DEFAULT]\nHost=192.0.2.20\n"
                     "[Backends]\nMode=split\n"
                     "MeterType=shelly_meter\n"
                     f"MeterConfigPath={meter_path}\n"
@@ -224,7 +224,7 @@ class TestShellyWallboxBackendProbeTopology(BackendProbeTestCase):
                 ),
                 (
                     "split-switchless-goe",
-                    "[DEFAULT]\nHost=192.168.1.20\n"
+                    "[DEFAULT]\nHost=192.0.2.20\n"
                     "[Backends]\nMode=split\nMeterType=none\nSwitchType=none\n"
                     "ChargerType=goe_charger\n"
                     f"ChargerConfigPath={goe_charger_path}\n",

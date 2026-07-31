@@ -112,15 +112,15 @@ class _WizardBranchCoverageGuidanceCases:
         self.assertIsNone(probe_roles(_namespace()))
 
     def test_transport_guidance_covers_serial_tcp_and_prompted_defaults(self) -> None:
-        imported = _imported_defaults(transport_kind="tcp", transport_host="10.0.0.2", transport_port=1502, transport_unit_id=7)
+        imported = _imported_defaults(transport_kind="tcp", transport_host="198.51.100.2", transport_port=1502, transport_unit_id=7)
 
         tcp_transport = prompt_transport_inputs(
             "modbus_charger",
             "abb-terra-ac-modbus",
-            "10.0.0.1",
+            "198.51.100.1",
             imported,
             prompt_choice=lambda *_args: "tcp",
-            prompt_text=lambda label, default: {"Modbus TCP host": "10.0.0.8", "Modbus TCP port": "2502", "Modbus unit id": "9"}[label],
+            prompt_text=lambda label, default: {"Modbus TCP host": "198.51.100.8", "Modbus TCP port": "2502", "Modbus unit id": "9"}[label],
         )
         serial_transport = prompt_transport_inputs(
             "simpleevse_charger",
@@ -130,7 +130,7 @@ class _WizardBranchCoverageGuidanceCases:
             prompt_choice=lambda *_args: "serial_rtu",
             prompt_text=lambda label, default: {"Serial device": "/dev/ttyUSB9", "Modbus unit id": "4"}[label],
         )
-        self.assertEqual(tcp_transport, ("tcp", "10.0.0.8", 2502, "/dev/ttyUSB0", 9))
+        self.assertEqual(tcp_transport, ("tcp", "198.51.100.8", 2502, "/dev/ttyUSB0", 9))
         self.assertEqual(serial_transport, ("serial_rtu", "serial.local", 502, "/dev/ttyUSB9", 4))
         self.assertEqual(preset_transport_port("cfos-power-brain-modbus", "tcp"), 4701)
         self.assertEqual(preset_transport_port("openwb-modbus-secondary", "tcp"), 1502)

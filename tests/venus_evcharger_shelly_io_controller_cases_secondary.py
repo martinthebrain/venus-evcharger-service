@@ -320,7 +320,7 @@ class TestShellyIoControllerSecondary(ShellyIoControllerTestBase):
             )
         )
         service = SimpleNamespace(
-            host="192.168.178.76",
+            host="192.0.2.76",
             pm_component="Switch",
             pm_id=0,
             _charger_backend=charger_backend,

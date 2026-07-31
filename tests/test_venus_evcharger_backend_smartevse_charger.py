@@ -71,7 +71,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSmartEvseTransport()
             with patch(
@@ -94,7 +94,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n"
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1_P2\n",
             )
             fake_transport = _FakeSmartEvseTransport()
@@ -114,7 +114,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSmartEvseTransport()
             fake_transport.holding_registers[0x0000] = 1
@@ -138,7 +138,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSmartEvseTransport()
             fake_transport.holding_registers[0x0000] = 4
@@ -165,7 +165,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSmartEvseTransport()
             with patch(
@@ -186,7 +186,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSmartEvseTransport()
             fake_transport.holding_registers[0x0007] = 13
@@ -204,7 +204,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             backend = SmartEvseChargerBackend(self._service(), config_path=config_path)
 
@@ -216,7 +216,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n"
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2_P3\n",
             )
 
@@ -292,7 +292,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
 
     def test_smartevse_boundary_helpers_receive_exact_context_and_service(self) -> None:
         parser = configparser.ConfigParser()
-        parser["Transport"] = {"Host": "192.168.1.60", "Port": "502", "UnitId": "7"}
+        parser["Transport"] = {"Host": "192.0.2.60", "Port": "502", "UnitId": "7"}
         service = self._service()
         with patch(
             "venus_evcharger.backend.smartevse_charger.fixed_supported_phase_selections",
@@ -384,7 +384,7 @@ class TestShellyWallboxBackendSmartEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             backend = SmartEvseChargerBackend(self._service(), config_path=config_path)
             backend._transport = _FakeSmartEvseTransport()

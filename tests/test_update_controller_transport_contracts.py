@@ -232,11 +232,15 @@ class UpdateControllerContractTests(unittest.TestCase):
             patch.object(software_update_module.subprocess, "Popen", return_value=process) as popen,
         ):
             self.assertEqual(
-                SoftwareUpdateController._spawn_software_update_process("update.log", "/repo", "restart.sh"),
+                SoftwareUpdateController._spawn_software_update_process(
+                    "update.log",
+                    "/repo/install.sh",
+                    "/repo",
+                ),
                 (process, log_handle),
             )
         open_log.assert_called_once_with("update.log")
-        build.assert_called_once_with("/repo", "restart.sh")
+        build.assert_called_once_with("/repo/install.sh")
         popen.assert_called_once_with(
             command,
             cwd="/repo",
@@ -252,7 +256,11 @@ class UpdateControllerContractTests(unittest.TestCase):
             patch.object(SoftwareUpdateController, "_close_open_log_handle") as close,
         ):
             with self.assertRaisesRegex(OSError, "failed"):
-                SoftwareUpdateController._spawn_software_update_process("update.log", "/repo", "restart.sh")
+                SoftwareUpdateController._spawn_software_update_process(
+                    "update.log",
+                    "/repo/install.sh",
+                    "/repo",
+                )
         close.assert_called_once_with(log_handle)
 
     def test_sign_of_life_logs_power_without_transport_identity(self) -> None:

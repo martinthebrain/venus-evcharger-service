@@ -12,7 +12,7 @@ from venus_evcharger.energy.profiles import EnergySourceProfile
 class EnergyProbeHuaweiContractTests(unittest.TestCase):
     def test_ready_recommendation_bundle_is_exact(self) -> None:
         detection = {
-            "detected": {"host": " 10.0.0.2 ", "port": "502", "unit_id": "2"},
+            "detected": {"host": " 198.51.100.2 ", "port": "502", "unit_id": "2"},
             "profile_details": {"platform": "MB", "access_mode": "sdongle"},
         }
         recommendation = probe_huawei._huawei_recommendation(
@@ -33,7 +33,7 @@ class EnergyProbeHuaweiContractTests(unittest.TestCase):
                 "suggested_profile": "huawei_mb_sdongle",
                 "suggested_template": template,
                 "suggested_config_path": config_path,
-                "host": " 10.0.0.2 ",
+                "host": " 198.51.100.2 ",
                 "port": "502",
                 "unit_id": "2",
                 "platform": "MB",
@@ -45,7 +45,7 @@ class EnergyProbeHuaweiContractTests(unittest.TestCase):
                 "capacity_hint": "Set usable battery capacity in Wh when you want weighted combined SOC.",
                 "summary": (
                     f"Use profile huawei_mb_sdongle with template {template}; "
-                    "host= 10.0.0.2 , port=502, unit=2; meter block present."
+                    "host= 198.51.100.2 , port=502, unit=2; meter block present."
                 ),
                 "config_snippet": "\n".join(
                     (
@@ -53,7 +53,7 @@ class EnergyProbeHuaweiContractTests(unittest.TestCase):
                         "# Example: AutoEnergySources=victron,hybrid",
                         "AutoEnergySource.hybrid.Profile=huawei_mb_sdongle",
                         f"AutoEnergySource.hybrid.ConfigPath={config_path}",
-                        "AutoEnergySource.hybrid.Host=10.0.0.2",
+                        "AutoEnergySource.hybrid.Host=198.51.100.2",
                         "AutoEnergySource.hybrid.Port=502",
                         "AutoEnergySource.hybrid.UnitId=2",
                         "# Copy the matching starter template to the ConfigPath above:",
@@ -68,7 +68,7 @@ class EnergyProbeHuaweiContractTests(unittest.TestCase):
                         "- profile: huawei_mb_sdongle",
                         f"- template: {template}",
                         f"- config path: {config_path}",
-                        "- host: 10.0.0.2",
+                        "- host: 198.51.100.2",
                         "- port: 502",
                         "- unit id: 2",
                         "- meter block: present",

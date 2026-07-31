@@ -87,8 +87,10 @@ class TestVenusEvchargerControlDocgen(unittest.TestCase):
         )
 
         getting_started = render_control_api_getting_started_markdown()
+        self.assertNotIn("/home/", getting_started)
         for expected in (
             "Official example files:",
+            "[examples/control_api_client.py](examples/control_api_client.py)",
             "CLI quick start:",
             "python3 ./venus_evchargerctl.py --token READ-TOKEN health",
             "python3 ./venus_evchargerctl.py --token CONTROL-TOKEN safe-write set-mode 1",
@@ -99,6 +101,7 @@ class TestVenusEvchargerControlDocgen(unittest.TestCase):
             self.assertIn(expected, getting_started)
 
         overview = render_api_overview_client_starting_points_markdown()
+        self.assertNotIn("/home/", overview)
         self.assertIn("Practical local client entrypoints in this repository:", overview)
         self.assertIn("[CONTROL_API.md](CONTROL_API.md) and [STATE_API.md](STATE_API.md).", overview)
 

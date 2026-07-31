@@ -11,10 +11,11 @@ from __future__ import annotations
 import logging
 import os
 import time
-import xml.etree.ElementTree as xml_et
 from typing import TypeGuard
+from xml.etree.ElementTree import Element
 
 from venus_evcharger.core.shared import compact_json, write_text_atomically
+from venus_evcharger.dbus_adapter.introspection_xml import parse_bounded_introspection_xml
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionSnapshotContext
 from venus_evcharger.dbus_gateway_core import float_or_default
 from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
@@ -97,9 +98,8 @@ class DbusAdapterIntrospectionSnapshot:
 
     @staticmethod
     def parse_introspection_xml(xml_data: object) -> tuple[list[str], list[str]]:
-        try:
-            root = xml_et.fromstring(str(xml_data))
-        except xml_et.ParseError:
+        root = parse_bounded_introspection_xml(xml_data)
+        if root is None:
             return [], []
         return _xml_names(root, "interface"), _xml_names(root, "node")
 
@@ -152,5 +152,5 @@ def _backoff_introspection_finding(entry: CommandMapping, status: str, now: floa
     }
 
 
-def _xml_names(root: xml_et.Element, tag: str) -> list[str]:
+def _xml_names(root: Element, tag: str) -> list[str]:
     return [str(node.attrib["name"]) for node in root.findall(tag) if node.attrib.get("name")]
