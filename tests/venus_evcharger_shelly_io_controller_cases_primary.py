@@ -67,7 +67,7 @@ class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
         session = MagicMock()
         session.get.return_value = response
         service = SimpleNamespace(
-            host="192.168.178.76",
+            host="192.0.2.76",
             session=session,
         )
 
@@ -75,14 +75,14 @@ class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
         controller.rpc_call("Switch.Set", id=0, on=False)
 
         session.get.assert_called_once_with(
-            url="http://192.168.178.76/rpc/Switch.Set?id=0&on=false",
+            url="http://192.0.2.76/rpc/Switch.Set?id=0&on=false",
             timeout=2.0,
         )
 
     def test_rpc_url_without_params_uses_plain_endpoint(self):
-        service = SimpleNamespace(host="192.168.178.76")
+        service = SimpleNamespace(host="192.0.2.76")
         controller = ShellyIoController(service)
-        self.assertEqual(controller.requests._rpc_url("Switch.GetStatus", None), "http://192.168.178.76/rpc/Switch.GetStatus")
+        self.assertEqual(controller.requests._rpc_url("Switch.GetStatus", None), "http://192.0.2.76/rpc/Switch.GetStatus")
 
     def test_request_component_session_rpc_and_status_helpers_use_expected_methods(self):
         response = MagicMock()
@@ -92,7 +92,7 @@ class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
         worker_session = MagicMock()
         worker_session.get.return_value = response
         service = SimpleNamespace(
-            host="192.168.178.76",
+            host="192.0.2.76",
             pm_component="Switch",
             pm_id=2,
             session=session,
@@ -114,19 +114,19 @@ class TestShellyIoControllerPrimary(ShellyIoControllerTestBase):
         controller.worker_fetch_pm_status()
 
         session.get.assert_any_call(
-            url="http://192.168.178.76/rpc/Switch.Set?id=2&on=true",
+            url="http://192.0.2.76/rpc/Switch.Set?id=2&on=true",
             timeout=2.0,
         )
         session.get.assert_any_call(
-            url="http://192.168.178.76/rpc/Switch.GetStatus?id=2",
+            url="http://192.0.2.76/rpc/Switch.GetStatus?id=2",
             timeout=2.0,
         )
         session.get.assert_any_call(
-            url="http://192.168.178.76/rpc/Switch.Set?id=2&on=false",
+            url="http://192.0.2.76/rpc/Switch.Set?id=2&on=false",
             timeout=2.0,
         )
         worker_session.get.assert_called_once_with(
-            url="http://192.168.178.76/rpc/Switch.GetStatus?id=2",
+            url="http://192.0.2.76/rpc/Switch.GetStatus?id=2",
             timeout=2.0,
         )
 

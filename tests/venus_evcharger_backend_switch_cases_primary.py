@@ -28,9 +28,9 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
             self.assertEqual(
                 urls,
                 [
-                    "http://192.168.1.11/rpc/Switch.Set?id=0&on=true",
-                    "http://192.168.1.11/rpc/Switch.Set?id=1&on=true",
-                    "http://192.168.1.11/rpc/Switch.Set?id=2&on=false",
+                    "http://192.0.2.11/rpc/Switch.Set?id=0&on=true",
+                    "http://192.0.2.11/rpc/Switch.Set?id=1&on=true",
+                    "http://192.0.2.11/rpc/Switch.Set?id=2&on=false",
                 ],
             )
 
@@ -51,7 +51,7 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
 
             path = Path(temp_dir) / "meter-profile-switch.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nShellyProfile=pm1_meter_only\n",
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.11\nShellyProfile=pm1_meter_only\n",
                 encoding="utf-8",
             )
 
@@ -64,7 +64,7 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
 
             path = Path(temp_dir) / "switch.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nComponent=Switch\nId=0\n"
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.11\nComponent=Switch\nId=0\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2\n"
                 "[Phase]\nMeasuredPhaseSelection=P1_P2_P3\n"
                 "[PhaseMap]\nP1=0\nP1_P2=0,1\n",
@@ -80,8 +80,8 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
             self.assertEqual(
                 [call.kwargs["url"] for call in session.get.call_args_list],
                 [
-                    "http://192.168.1.11/rpc/Switch.Set?id=0&on=true",
-                    "http://192.168.1.11/rpc/Switch.Set?id=1&on=false",
+                    "http://192.0.2.11/rpc/Switch.Set?id=0&on=true",
+                    "http://192.0.2.11/rpc/Switch.Set?id=1&on=false",
                 ],
             )
 
@@ -184,7 +184,7 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
     def test_shelly_phase_distribution_helper_and_contactor_switch_backend(self) -> None:
         service = SimpleNamespace(
             phase="L1",
-            host="192.168.1.11",
+            host="192.0.2.11",
             pm_component="Switch",
             pm_id=0,
             max_current=16.0,
@@ -204,13 +204,13 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
         backend.set_enabled(True)
         self.assertEqual(
             service.session.get.call_args_list[-1].kwargs["url"],
-            "http://192.168.1.11/rpc/Switch.Set?id=0&on=true",
+            "http://192.0.2.11/rpc/Switch.Set?id=0&on=true",
         )
 
     def test_shelly_meter_and_contactor_backend_cover_guard_paths(self) -> None:
         meter_service = SimpleNamespace(
             phase=None,
-            host="192.168.1.20",
+            host="192.0.2.20",
             pm_component="Switch",
             pm_id=0,
             max_current=None,
@@ -231,7 +231,7 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
 
         switch_service = SimpleNamespace(
             phase="L1",
-            host="192.168.1.11",
+            host="192.0.2.11",
             pm_component="Switch",
             pm_id=0,
             max_current=None,
@@ -252,7 +252,7 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
     def test_shelly_meter_and_direct_switch_cover_positive_current_and_power_limit(self) -> None:
         meter_service = SimpleNamespace(
             phase="3P",
-            host="192.168.1.20",
+            host="192.0.2.20",
             pm_component="Switch",
             pm_id=0,
             max_current=16.0,
@@ -297,7 +297,7 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
             path = self._write_switch_config(temp_dir).replace("switch.ini", "profile-switch.ini")
             from pathlib import Path
             Path(path).write_text(
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.33\nShellyProfile=switch_1ch_with_pm\n",
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.33\nShellyProfile=switch_1ch_with_pm\n",
                 encoding="utf-8",
             )
             session = MagicMock()
@@ -328,5 +328,5 @@ class TestShellyWallboxBackendSwitchPrimary(SwitchBackendTestCaseBase):
             self.assertEqual(len(session.post.call_args_list), 2)
             self.assertEqual(
                 [call.kwargs["url"] for call in session.get.call_args_list],
-                ["http://192.168.1.22/rpc/Switch.Set?id=0&on=true"],
+                ["http://192.0.2.22/rpc/Switch.Set?id=0&on=true"],
             )

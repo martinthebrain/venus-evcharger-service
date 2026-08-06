@@ -214,7 +214,7 @@ Type=custom_topology
         parser.read_string(
             """
 [DEFAULT]
-Host=192.168.1.44
+Host=192.0.2.44
 Mode=0
 Phase=L1
 """

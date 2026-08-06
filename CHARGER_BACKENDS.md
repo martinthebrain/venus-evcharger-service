@@ -106,7 +106,7 @@ Profile=generic
 Transport=tcp
 
 [Transport]
-Host=192.168.1.40
+Host=192.0.2.40
 Port=502
 UnitId=7
 

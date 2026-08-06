@@ -68,13 +68,13 @@ class TestShellyWallboxHelpersTertiary(ShellyWallboxHelpersTestBase):
 
     def test_rpc_call_bool_is_lowercase_query_param(self):
         service = make_helper_service()
-        service.host = "192.168.178.76"
+        service.host = "192.0.2.76"
         service.controllers.runtime.shelly.requests.request = MagicMock(return_value={"was_on": True})
 
         service.runtime.rpc_call("Switch.Set", id=0, on=False)
 
         service.controllers.runtime.shelly.requests.request.assert_called_once_with(
-            "http://192.168.178.76/rpc/Switch.Set?id=0&on=false"
+            "http://192.0.2.76/rpc/Switch.Set?id=0&on=false"
         )
 
     def test_handle_write_startstop_switches_relay_and_updates_dbus(self):

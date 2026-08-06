@@ -42,7 +42,7 @@ needs a small variation.
 ```ini
 [Adapter]
 Type=shelly_switch
-Host=192.168.1.20
+Host=192.0.2.20
 ShellyProfile=switch_1ch_with_pm
 ```
 
@@ -51,7 +51,7 @@ ShellyProfile=switch_1ch_with_pm
 ```ini
 [Adapter]
 Type=shelly_meter
-Host=192.168.1.30
+Host=192.0.2.30
 ShellyProfile=em1_meter_single_or_dual
 Id=1
 ```
@@ -61,7 +61,7 @@ Id=1
 ```ini
 [Adapter]
 Type=shelly_meter
-Host=192.168.1.40
+Host=192.0.2.40
 ShellyProfile=em_3phase_profiled
 
 [Phase]

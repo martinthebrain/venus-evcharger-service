@@ -45,14 +45,21 @@ make audit
 make check
 make typecheck
 make stress
+make docs-check
 ```
+
+Production APIs and non-trivial implementation logic use English docstrings.
+The Doxygen build additionally inventories every deployed function, including
+private and nested callables, without adding generated strings to GX runtime
+modules. See
+[Developer Documentation](docs/DEVELOPER_DOCUMENTATION.md).
 
 For DBus gateway or GUI-visible EVCS changes, run the Raspberry-Pi release gate
 when the Pi test target is available:
 
 ```bash
 python3 scripts/dev/pi_gateway_release_gate.py \
-  --pi root@192.168.142.129 \
+  --pi user@pi-testbed.example \
   --deploy \
   --configure-host \
   --start-host-shelly \
@@ -67,7 +74,7 @@ values and writes.
 Before publishing a production release, run the complete clean-tree gate:
 
 ```bash
-bash scripts/dev/run_release_candidate_gate.sh --pi root@192.168.142.129
+bash scripts/dev/run_release_candidate_gate.sh --pi user@pi-testbed.example
 ```
 
 The dedicated Pi must contain `/data/venus-evcharger-testbed`; deployment is

@@ -128,7 +128,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
             transport_kind="tcp",
             unit_id=7,
             timeout_seconds=2.5,
-            host="192.168.1.40",
+            host="192.0.2.40",
             port=502,
             device=None,
             baudrate=9600,
@@ -320,7 +320,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n"
+                "[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2_P3\n"
                 "[StateEnabled]\nRegisterType=coil\nAddress=10\n"
                 "[StateCurrent]\nRegisterType=holding\nAddress=11\nDataType=uint16\nScale=10\n"
@@ -357,7 +357,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n"
+                "[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2_P3\n"
                 "[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n"
                 "[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n"
@@ -383,7 +383,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n"
+                "[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2_P3\n"
                 "[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n"
                 "[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n",
@@ -400,7 +400,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n"
+                "[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2\n"
                 "[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n"
                 "[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n"
@@ -426,7 +426,7 @@ class TestShellyWallboxBackendModbusCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n"
+                "[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n"
                 "[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n"
                 "[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n",
             )

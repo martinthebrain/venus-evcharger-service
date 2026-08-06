@@ -19,6 +19,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     unittest,
 )
 from venus_evcharger.ipc.pending_snapshot import PendingCommandSnapshot
+from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
 
 
 class GatewayRegulationCases(GatewayAdapterContractCase):
@@ -64,6 +65,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             adapter.circuit.degraded_until = time.time() + 60.0
             adapter.discovery.next_scan_monotonic = 0.0
             adapter.discovery.next_scan_at = 0.0
+            adapter.discovery.last_success_at = now
             adapter.health_role.apply_slo_regulation()
 
             self.assertGreater(adapter.discovery.next_scan_monotonic, time.monotonic())
@@ -102,7 +104,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             install_mock(adapter.commands, "load_pending", MagicMock(return_value=pending))
             install_mock(adapter.health_role, "cache_freshness_snapshot", MagicMock(return_value=freshness))
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 3000.0}))
-            install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            install_mock(adapter.read_scheduler, "expedite_healthy", MagicMock())
             install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
             install_mock(adapter.health_role, "suspend_advisory_work", MagicMock())
             install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
@@ -129,7 +131,9 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                 adapter.health_role.apply_slo_regulation()
 
             adapter.write_scheduler.set_dynamic_local_publish_burst.assert_called_once_with(5, pressure_state="slow")
-            adapter.read_scheduler.force_due.assert_called_once_with(("battery_soc", "pv_power_w"))
+            adapter.read_scheduler.expedite_healthy.assert_called_once_with(
+                ("battery_soc", "pv_power_w")
+            )
             adapter.health_role.suspend_advisory_work.assert_called_once_with(
                 monotonic_at=2000.0,
                 captured_at=1000.0,
@@ -174,7 +178,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             install_mock(adapter.commands, "load_pending", MagicMock(return_value=[]))
             install_mock(adapter.health_role, "cache_freshness_snapshot", MagicMock(return_value={}))
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
-            install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            install_mock(adapter.read_scheduler, "expedite_healthy", MagicMock())
             install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
             install_mock(adapter.health_role, "suspend_advisory_work", MagicMock())
             install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
@@ -219,7 +223,7 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             install_mock(adapter.commands, "load_pending", MagicMock(return_value=[]))
             install_mock(adapter.health_role, "cache_freshness_snapshot", MagicMock(return_value={}))
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
-            install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            install_mock(adapter.read_scheduler, "expedite_healthy", MagicMock())
             install_mock(adapter.write_scheduler, "set_dynamic_local_publish_burst", MagicMock())
             install_mock(adapter.health_role, "suspend_advisory_work", MagicMock())
             install_mock(adapter.circuit, "state", MagicMock(return_value="ok"))
@@ -305,7 +309,11 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                     }
                 ),
             )
-            install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            install_mock(
+                adapter.read_scheduler,
+                "expedite_healthy",
+                MagicMock(),
+            )
             install_mock(adapter.tick_health, "snapshot", MagicMock(return_value={"max_tick_gap_ms_60s": 0.0}))
             install_mock(
                 adapter.resource_monitor,
@@ -313,10 +321,27 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                 MagicMock(return_value={"state": "ok"}),
             )
             adapter.health_role.apply_slo_regulation()
-            adapter.read_scheduler.force_due.assert_not_called()
+            adapter.read_scheduler.expedite_healthy.assert_not_called()
             install_mock(adapter.health_role, "suspend_advisory_work", MagicMock())
             adapter.health_role.apply_slo_regulation()
             adapter.health_role.suspend_advisory_work.assert_not_called()
+            degraded = GatewayControlSnapshot(
+                captured_at=100.0,
+                monotonic_at=200.0,
+                health={"state": "degraded"},
+                queue_age_seconds=0.0,
+                core_read_age_seconds=0.0,
+                eventloop_gap_ms=0.0,
+                eventloop_max_duration_ms=0.0,
+                resource_state="ok",
+                pressure_state="ok",
+                stale_core_reads=(),
+            )
+            adapter.health_role.apply_slo_regulation(degraded)
+            adapter.health_role.suspend_advisory_work.assert_called_once_with(
+                monotonic_at=200.0,
+                captured_at=100.0,
+            )
 
             adapter.write_scheduler.health_tracker.local_publish_burst_limit = 20
             install_mock(adapter.health_role, "cache_freshness_snapshot", MagicMock(return_value={}))
@@ -339,10 +364,10 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
             quiet_adapter.discovery.next_scan_at = 0.0
             quiet_adapter._last_introspection_full_scan_at = 50.0
             advisory = [
+                ("remote.json", {"queue_class": "remote-write"}),
                 ("introspection.json", {"queue_class": "introspection"}),
                 ("discovery.json", {"queue_class": "discovery"}),
                 ("diagnostic.json", {"queue_class": "diagnostic"}),
-                ("remote.json", {"queue_class": "remote-write"}),
             ]
             install_mock(
                 quiet_adapter.write_scheduler,
@@ -360,6 +385,15 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                 MagicMock(),
             )
             install_mock(quiet_adapter.write_scheduler, "record_lifecycle", MagicMock())
+            quiet_adapter.health_role.suspend_advisory_work(
+                monotonic_at=100.0,
+                captured_at=100.0,
+            )
+            self.assertEqual(quiet_adapter.discovery.next_scan_monotonic, 0.0)
+            self.assertEqual(quiet_adapter.discovery.next_scan_at, 0.0)
+            quiet_adapter.write_scheduler.remove_pending.reset_mock()
+            quiet_adapter.write_scheduler.record_lifecycle.reset_mock()
+            quiet_adapter.discovery.last_success_at = 0.5
             quiet_adapter.health_role.suspend_advisory_work(
                 monotonic_at=100.0,
                 captured_at=100.0,

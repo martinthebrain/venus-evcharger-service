@@ -23,7 +23,7 @@ from pi_gateway_release_gate_support import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run EV charger DBus gateway release checks on a Raspberry Pi.")
-    parser.add_argument("--pi", default="root@192.168.142.129")
+    parser.add_argument("--pi", required=True)
     parser.add_argument("--ssh-config", default="/dev/null")
     parser.add_argument("--remote-dir", default="/data/bootstrap-venus-evcharger/dbus-venus-evcharger")
     parser.add_argument("--gateway-run-dir", default="/run/venus-evcharger")
@@ -32,7 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--restart", action="store_true", help="Restart Pi runit services before testing.")
     parser.add_argument("--configure-host", action="store_true", help="Write Host/DeviceInstance/RunDir into the Pi config.")
     parser.add_argument("--start-host-shelly", action="store_true", help="Run the Shelly simulator on this host.")
-    parser.add_argument("--shelly-bind", default="0.0.0.0")
+    # The simulator intentionally binds to the dedicated LAN testbed.
+    parser.add_argument("--shelly-bind", default="0.0.0.0")  # nosec B104
     parser.add_argument("--shelly-port", type=int, default=18080)
     parser.add_argument("--shelly-power-w", type=float, default=2000.0)
     parser.add_argument("--shelly-current-a", type=float, default=8.7)

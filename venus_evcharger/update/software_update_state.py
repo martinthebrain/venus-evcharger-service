@@ -48,11 +48,6 @@ class _SoftwareUpdateState(ABC):
         return not install_script or not os.path.isfile(install_script) or not repo_root
 
     @staticmethod
-    def _software_update_restart_script_missing(restart_script: str) -> bool:
-        """Return whether the restart handoff script is unavailable."""
-        return not restart_script or not os.path.isfile(restart_script)
-
-    @staticmethod
     def _read_text_file(path: Any) -> str:
         """Return one text file payload, or an empty string when unavailable."""
         if not path:

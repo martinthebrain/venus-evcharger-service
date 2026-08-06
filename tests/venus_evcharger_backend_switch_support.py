@@ -22,7 +22,7 @@ class SwitchBackendTestCaseBase(unittest.TestCase):
     def _service(session: object) -> SimpleNamespace:
         return SimpleNamespace(
             session=session,
-            host="192.168.1.11",
+            host="192.0.2.11",
             username="",
             password="",
             use_digest_auth=False,
@@ -38,7 +38,7 @@ class SwitchBackendTestCaseBase(unittest.TestCase):
     def _write_switch_config(directory: str) -> str:
         path = Path(directory) / "switch.ini"
         path.write_text(
-            "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nComponent=Switch\nId=0\n"
+            "[Adapter]\nType=shelly_switch\nHost=192.0.2.11\nComponent=Switch\nId=0\n"
             "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2,P1_P2_P3\n"
             "[PhaseMap]\nP1=0\nP1_P2=0,1\nP1_P2_P3=0,1,2\n",
             encoding="utf-8",
@@ -59,7 +59,7 @@ class SwitchBackendTestCaseBase(unittest.TestCase):
             encoding="utf-8",
         )
         p2_path.write_text(
-            "[Adapter]\nType=shelly_switch\nHost=192.168.1.22\nComponent=Switch\nId=0\n",
+            "[Adapter]\nType=shelly_switch\nHost=192.0.2.22\nComponent=Switch\nId=0\n",
             encoding="utf-8",
         )
         p3_path.write_text(

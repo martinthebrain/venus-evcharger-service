@@ -112,7 +112,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSimpleEvseTransport()
             with patch(
@@ -137,7 +137,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n"
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1_P2_P3\n",
             )
             fake_transport = _FakeSimpleEvseTransport()
@@ -165,7 +165,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSimpleEvseTransport()
             fake_transport.holding_registers[1002] = 99
@@ -186,7 +186,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSimpleEvseTransport()
             fake_transport.holding_registers[1002] = 5
@@ -208,7 +208,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
             fake_transport = _FakeSimpleEvseTransport()
             with patch(
@@ -229,7 +229,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
             backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
 
@@ -242,7 +242,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
             backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
 
@@ -262,7 +262,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n"
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n"
                 "[Capabilities]\nSupportedPhaseSelections=P1,P1_P2_P3\n",
             )
 
@@ -308,7 +308,7 @@ class TestShellyWallboxBackendSimpleEvseCharger(unittest.TestCase):
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=simpleevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n",
             )
             backend = SimpleEvseChargerBackend(self._service(), config_path=config_path)
             backend._transport = _FakeSimpleEvseTransport()

@@ -26,7 +26,7 @@ def _with_backends_config(
     meter_type: str,
     switch_type: str,
     charger_type: str | None,
-    host: str = "192.168.1.20",
+    host: str = "192.0.2.20",
 ) -> SimpleNamespace:
     parser = configparser.ConfigParser()
     parser.read_string(
@@ -386,7 +386,7 @@ class TestServiceStateControllerPrimary(ServiceStateControllerTestBase):
         controller.load_runtime_state()
 
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
-            handle.write("[DEFAULT]\nHost=192.168.1.20\n")
+            handle.write("[DEFAULT]\nHost=192.0.2.20\n")
             config_path = handle.name
         def _cleanup_config() -> None:
             if os.path.exists(config_path):
@@ -397,4 +397,4 @@ class TestServiceStateControllerPrimary(ServiceStateControllerTestBase):
         with patch.object(ServiceStateController, "config_path", return_value=config_path):
             config = controller.load_config()
 
-        self.assertEqual(config["DEFAULT"]["Host"], "192.168.1.20")
+        self.assertEqual(config["DEFAULT"]["Host"], "192.0.2.20")

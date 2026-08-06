@@ -101,7 +101,11 @@ class ShellyRpcBackendProbe:
     def probe(self) -> BackendProbeResult:
         url = f"http://{self.host}{_SHELLY_STATUS_PATH}"
         try:
-            with urllib.request.urlopen(url, timeout=self.timeout_seconds) as response:
+            # The URL is constructed internally with a fixed HTTP scheme.
+            with urllib.request.urlopen(  # nosec B310
+                url,
+                timeout=self.timeout_seconds,
+            ) as response:
                 payload = response.read(65536).decode(errors="replace")
         except _HTTP_ERRORS as error:
             return BackendProbeResult(

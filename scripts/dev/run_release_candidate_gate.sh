@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
-PI_TARGET="root@192.168.142.129"
+PI_TARGET=""
 SSH_CONFIG="/dev/null"
 RECEIPT_PATH="/tmp/venus-evcharger-release-candidate.json"
 TESTBED_MARKER="/data/venus-evcharger-testbed"
@@ -41,6 +41,8 @@ while [ "$#" -gt 0 ]; do
 		;;
 	esac
 done
+
+[ -n "$PI_TARGET" ] || usage
 
 cd "$REPO_DIR"
 if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then

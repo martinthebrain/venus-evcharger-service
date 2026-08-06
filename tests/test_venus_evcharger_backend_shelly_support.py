@@ -236,7 +236,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
     def test_shelly_settings_use_service_defaults_without_legacy_config(self) -> None:
         service = SimpleNamespace(
-            host="192.168.1.20",
+            host="192.0.2.20",
             pm_component="PM1",
             pm_id=3,
             phase="P1_P2",
@@ -251,7 +251,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         settings = load_shelly_backend_settings(service)
 
         self.assertIsNone(settings.profile_name)
-        self.assertEqual(settings.host, "192.168.1.20")
+        self.assertEqual(settings.host, "192.0.2.20")
         self.assertEqual(settings.component, "PM1")
         self.assertEqual(settings.device_id, 3)
         self.assertEqual(settings.timeout_seconds, 4.5)
@@ -312,7 +312,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
                     (
                         "[Adapter]",
                         "ShellyProfile=pm1_meter",
-                        "Host=192.168.1.30",
+                        "Host=192.0.2.30",
                         "Component=EM1",
                         "Id=4",
                         "RequestTimeoutSeconds=7.5",
@@ -360,7 +360,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
             settings = load_shelly_backend_settings(service, str(config_path))
 
         self.assertEqual(settings.profile_name, "pm1_meter")
-        self.assertEqual(settings.host, "192.168.1.30")
+        self.assertEqual(settings.host, "192.0.2.30")
         self.assertEqual(settings.component, "EM1")
         self.assertEqual(settings.device_id, 4)
         self.assertEqual(settings.timeout_seconds, 7.5)
@@ -427,7 +427,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "shelly.ini"
             config_path.write_text(
-                "[Adapter]\nHost=192.168.1.20\nUsername=user\nPassword=secret\nDigestAuth=1\n",
+                "[Adapter]\nHost=192.0.2.20\nUsername=user\nPassword=secret\nDigestAuth=1\n",
                 encoding="utf-8",
             )
             session = MagicMock()
@@ -439,16 +439,16 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
             with patch("venus_evcharger.backend.shelly_support.HTTPDigestAuth", return_value="digest-auth") as auth_mock:
                 self.assertEqual(backend._auth(), "digest-auth")
                 auth_mock.assert_called_once_with("user", "secret")
-                self.assertEqual(backend._rpc_url("Switch.GetStatus"), "http://192.168.1.20/rpc/Switch.GetStatus")
-                backend._request_json("http://192.168.1.20/rpc/Test")
+                self.assertEqual(backend._rpc_url("Switch.GetStatus"), "http://192.0.2.20/rpc/Switch.GetStatus")
+                backend._request_json("http://192.0.2.20/rpc/Test")
                 session.get.assert_called_once_with(
-                    url="http://192.168.1.20/rpc/Test",
+                    url="http://192.0.2.20/rpc/Test",
                     timeout=2.0,
                     auth="digest-auth",
                 )
                 self.assertEqual(
                     backend._rpc_url("Switch.Set", {"id": 0, "on": True, "brightness": 12.5}),
-                    "http://192.168.1.20/rpc/Switch.Set?id=0&on=true&brightness=12.5",
+                    "http://192.0.2.20/rpc/Switch.Set?id=0&on=true&brightness=12.5",
                 )
 
             backend.settings = SimpleNamespace(username="user", password="secret", use_digest_auth=False, timeout_seconds=2.0)
@@ -461,11 +461,11 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
             response.json.return_value = ["not", "a", "dict"]
             with self.assertRaises(ValueError) as error_context:
-                backend._request_json("http://192.168.1.20/rpc/Test")
+                backend._request_json("http://192.0.2.20/rpc/Test")
             self.assertEqual(str(error_context.exception), "Shelly RPC response must be a JSON object")
 
             response.json.return_value = {1: "one", "two": 2}
-            self.assertEqual(backend._request_json("http://192.168.1.20/rpc/Test"), {"1": "one", "two": 2})
+            self.assertEqual(backend._request_json("http://192.0.2.20/rpc/Test"), {"1": "one", "two": 2})
 
             backend.settings = SimpleNamespace(component="Switch", device_id=0, timeout_seconds=2.0)
             backend._rpc_call = MagicMock(return_value={"output": True})
@@ -484,7 +484,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
     def test_shelly_backend_base_init_defaults_are_contractual(self) -> None:
         service = SimpleNamespace(
             session=None,
-            host="192.168.1.40",
+            host="192.0.2.40",
             pm_component="Switch",
             pm_id=0,
             phase="P1",
@@ -501,14 +501,14 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
 
         self.assertIs(backend.service, service)
         self.assertEqual(backend.config_path, "")
-        self.assertEqual(backend.settings.host, "192.168.1.40")
+        self.assertEqual(backend.settings.host, "192.0.2.40")
         self.assertEqual(backend.settings.switching_mode, "direct")
         self.assertEqual(backend.settings.supported_phase_selections, ("P1",))
         self.assertEqual(backend._session, "new-session")
 
     def test_shelly_backend_base_init_creates_session_when_service_has_no_session_attr(self) -> None:
         service = SimpleNamespace(
-            host="192.168.1.40",
+            host="192.0.2.40",
             pm_component="Switch",
             pm_id=0,
             phase="P1",
@@ -529,13 +529,13 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
     def test_shelly_backend_base_strips_config_path_before_loading(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "shelly.ini"
-            config_path.write_text("[Adapter]\nHost=192.168.1.41\n", encoding="utf-8")
+            config_path.write_text("[Adapter]\nHost=192.0.2.41\n", encoding="utf-8")
             service = SimpleNamespace(session=MagicMock(), max_current=10.0, _last_voltage=230.0)
 
             backend = ShellyBackendBase(service, f"  {config_path}  ")
 
         self.assertEqual(backend.config_path, str(config_path))
-        self.assertEqual(backend.settings.host, "192.168.1.41")
+        self.assertEqual(backend.settings.host, "192.0.2.41")
 
     def test_shelly_response_and_phase_status_contracts_cover_invalid_and_valid_edges(self) -> None:
         with self.assertRaisesRegex(ValueError, "Shelly response must be a JSON object"):
@@ -654,7 +654,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
     def test_shelly_backend_base_can_reset_transport_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "shelly.ini"
-            config_path.write_text("[Adapter]\nHost=192.168.1.20\n", encoding="utf-8")
+            config_path.write_text("[Adapter]\nHost=192.0.2.20\n", encoding="utf-8")
             old_session = MagicMock()
             new_session = MagicMock()
             backend = ShellyBackendBase(SimpleNamespace(session=old_session), str(config_path))
@@ -707,7 +707,7 @@ class TestShellyWallboxBackendShellySupport(unittest.TestCase):
             use_digest_auth=False,
             username="",
             password="",
-            host="192.168.1.20",
+            host="192.0.2.20",
             pm_component="switch",
             pm_id=0,
             _worker_session=MagicMock(),

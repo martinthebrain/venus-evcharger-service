@@ -23,7 +23,7 @@ def _service_from_backends_config(
     meter_config_path: str = "",
     switch_config_path: str = "",
     charger_config_path: str = "",
-    host: str = "192.168.1.20",
+    host: str = "192.0.2.20",
     phase: str = "L1",
 ) -> SimpleNamespace:
     parser = configparser.ConfigParser()
@@ -67,7 +67,7 @@ class TestShellyWallboxBackendFactoryChargers(unittest.TestCase):
             )
             resolved = build_service_backends(service)
             self.assertIsInstance(resolved.charger, TemplateChargerBackend)
-            charger_path.write_text("[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n[Transport]\nHost=192.168.1.40\nPort=502\nUnitId=7\n[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n", encoding="utf-8")
+            charger_path.write_text("[Adapter]\nType=modbus_charger\nProfile=generic\nTransport=tcp\n[Transport]\nHost=192.0.2.40\nPort=502\nUnitId=7\n[EnableWrite]\nRegisterType=coil\nAddress=20\nTrueValue=1\nFalseValue=0\n[CurrentWrite]\nRegisterType=holding\nAddress=30\nDataType=uint16\nScale=10\n", encoding="utf-8")
             service.config["Backends"]["ChargerType"] = "modbus_charger"
             resolved = build_service_backends(service)
             self.assertIsInstance(resolved.charger, ModbusChargerBackend)
@@ -75,7 +75,7 @@ class TestShellyWallboxBackendFactoryChargers(unittest.TestCase):
     def test_build_service_backends_supports_simpleevse_and_smartevse_chargers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             charger_path = Path(temp_dir) / "charger.ini"
-            charger_path.write_text("[Adapter]\nType=simpleevse_charger\nTransport=tcp\n[Capabilities]\nSupportedPhaseSelections=P1_P2_P3\n[Transport]\nHost=192.168.1.50\nPort=502\nUnitId=1\n", encoding="utf-8")
+            charger_path.write_text("[Adapter]\nType=simpleevse_charger\nTransport=tcp\n[Capabilities]\nSupportedPhaseSelections=P1_P2_P3\n[Transport]\nHost=192.0.2.50\nPort=502\nUnitId=1\n", encoding="utf-8")
             service = _service_from_backends_config(
                 mode="split",
                 meter_type="none",
@@ -85,7 +85,7 @@ class TestShellyWallboxBackendFactoryChargers(unittest.TestCase):
             )
             resolved = build_service_backends(service)
             self.assertIsInstance(resolved.charger, SimpleEvseChargerBackend)
-            charger_path.write_text("[Adapter]\nType=smartevse_charger\nTransport=tcp\n[Capabilities]\nSupportedPhaseSelections=P1_P2\n[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n", encoding="utf-8")
+            charger_path.write_text("[Adapter]\nType=smartevse_charger\nTransport=tcp\n[Capabilities]\nSupportedPhaseSelections=P1_P2\n[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n", encoding="utf-8")
             service.config["Backends"]["ChargerType"] = "smartevse_charger"
             resolved = build_service_backends(service)
             self.assertIsInstance(resolved.charger, SmartEvseChargerBackend)
@@ -100,7 +100,7 @@ class TestShellyWallboxBackendFactoryChargers(unittest.TestCase):
                 encoding="utf-8",
             )
             switch_path.write_text(
-                "[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.21\n",
+                "[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.21\n",
                 encoding="utf-8",
             )
             charger_path.write_text("[Adapter]\nType=goe_charger\nBaseUrl=http://goe.local\n", encoding="utf-8")

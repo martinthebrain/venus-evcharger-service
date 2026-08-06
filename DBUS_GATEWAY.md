@@ -335,7 +335,7 @@ are considered ready for a real GX device:
 
 ```sh
 python3 scripts/dev/pi_gateway_release_gate.py \
-  --pi root@192.168.142.129 \
+  --pi user@pi-testbed.example \
   --deploy \
   --configure-host \
   --start-host-shelly \

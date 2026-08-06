@@ -70,7 +70,7 @@ class WizardTransportGuidanceContractTests(unittest.TestCase):
 
         def prompt_text(label: str, default: str) -> str:
             text_calls.append((label, default))
-            return {"Modbus TCP host": "10.0.0.8", "Modbus TCP port": "2502", "Modbus unit id": "9"}[label]
+            return {"Modbus TCP host": "198.51.100.8", "Modbus TCP port": "2502", "Modbus unit id": "9"}[label]
 
         self.assertEqual(
             guidance.prompt_transport_inputs(
@@ -81,7 +81,7 @@ class WizardTransportGuidanceContractTests(unittest.TestCase):
                 prompt_choice=prompt_choice,
                 prompt_text=prompt_text,
             ),
-            ("tcp", "10.0.0.8", 2502, "/dev/ttyUSB0", 9),
+            ("tcp", "198.51.100.8", 2502, "/dev/ttyUSB0", 9),
         )
         self.assertEqual(choice_calls, [("Choose the transport:", ("serial_rtu", "tcp"), None, "tcp")])
         self.assertEqual(

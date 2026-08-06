@@ -141,7 +141,7 @@ class RemainingCoverageHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = os.path.join(temp_dir, "shelly.ini")
             with open(config_path, "w", encoding="utf-8") as handle:
-                handle.write("[Adapter]\nHost=192.168.1.20\n")
+                handle.write("[Adapter]\nHost=192.0.2.20\n")
             original_session = SimpleNamespace(get=MagicMock())
             replacement_session = SimpleNamespace(get=MagicMock())
             backend = ShellyBackendBase(SimpleNamespace(session=original_session), config_path)

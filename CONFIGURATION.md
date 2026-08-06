@@ -378,11 +378,17 @@ Single-source keys are used when `AutoEnergySources` is empty:
 - `AutoBatteryService`
 - `AutoBatteryServicePrefix`
 - `AutoBatterySocPath`
-- `AutoBatteryPowerPath`
-- `AutoBatteryAcPowerPath`
-- `AutoBatteryPvPowerPath`
-- `AutoBatteryGridInteractionPath`
-- `AutoBatteryOperatingModePath`
+- `AutoBatteryCapacityWh`
+- `AutoBatteryCapacityWhPath`
+- `AutoBatteryCapacityAhPath`
+- `AutoBatteryVoltagePath`
+
+Power, AC throughput, PV contribution, grid interaction, and operating mode are
+part of the multi-source model. Configure them as
+`AutoEnergySource.<id>.BatteryPowerPath`, `AutoEnergySource.<id>.AcPowerPath`,
+`AutoEnergySource.<id>.PvPowerPath`,
+`AutoEnergySource.<id>.GridInteractionPath`, and
+`AutoEnergySource.<id>.OperatingModePath`.
 
 Additional per-source field meanings:
 
@@ -408,8 +414,8 @@ for runtime learning. In particular, the service now learns:
 - small near-term import/export estimates from current grid interaction plus
   learned response and bias metrics
 - `AutoBatteryCapacityWh`
-- `AutoBatteryPowerPath`
-- `AutoBatteryAcPowerPath`
+- `AutoEnergySource.<id>.BatteryPowerPath`
+- `AutoEnergySource.<id>.AcPowerPath`
 
 ### Companion DBus Bridge
 
@@ -853,7 +859,7 @@ Example `modbus` energy-source file:
 Transport=tcp
 
 [Transport]
-Host=192.168.1.90
+Host=192.0.2.90
 Port=502
 UnitId=7
 RequestTimeoutSeconds=2.0
@@ -917,13 +923,13 @@ The mode values are part of the service contract:
   daytime window and adds target-day night/fallback charging after that window.
 
 The night/fallback window starts after the configured daytime window plus
-`AutoScheduledFallbackDelaySeconds`, and it is capped by
+`AutoScheduledNightStartDelaySeconds`, and it is capped by
 `AutoScheduledLatestEndTime`.
 
 Main settings:
 
 - `AutoScheduledEnabledDays`
-- `AutoScheduledFallbackDelaySeconds`
+- `AutoScheduledNightStartDelaySeconds`
 - `AutoScheduledLatestEndTime`
 - `AutoScheduledNightCurrentAmps`
 

@@ -66,13 +66,13 @@ class SoftwareUpdateController(_SoftwareUpdateRun):
     def _spawn_software_update_process(
         cls,
         log_path: str,
+        install_script: str,
         repo_root: str,
-        restart_script: str,
     ) -> tuple[subprocess.Popen[bytes], BinaryIO]:
         log_handle = cls._software_update_log_handle(log_path)
         try:
             process = subprocess.Popen(  # pylint: disable=consider-using-with
-                cls._software_update_command(repo_root, restart_script),
+                cls._software_update_command(install_script),
                 cwd=repo_root,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,

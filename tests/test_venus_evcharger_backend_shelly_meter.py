@@ -30,7 +30,7 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
     def _service(session: object) -> SimpleNamespace:
         return SimpleNamespace(
             session=session,
-            host="192.168.1.10",
+            host="192.0.2.10",
             username="",
             password="",
             use_digest_auth=False,
@@ -46,7 +46,7 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "meter.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.50\nShellyProfile=pm1_meter_only\n",
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.50\nShellyProfile=pm1_meter_only\n",
                 encoding="utf-8",
             )
             session = MagicMock()
@@ -68,14 +68,14 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
             self.assertEqual(reading.energy_kwh, 1.234)
             self.assertEqual(
                 [call.kwargs["url"] for call in session.get.call_args_list],
-                ["http://192.168.1.50/rpc/PM1.GetStatus?id=0"],
+                ["http://192.0.2.50/rpc/PM1.GetStatus?id=0"],
             )
 
     def test_shelly_meter_normalizes_em1_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "meter.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.51\nShellyProfile=em1_meter_single_or_dual\n",
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.51\nShellyProfile=em1_meter_single_or_dual\n",
                 encoding="utf-8",
             )
             session = MagicMock()
@@ -98,14 +98,14 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
             self.assertEqual(reading.energy_kwh, 6.789)
             self.assertEqual(
                 [call.kwargs["url"] for call in session.get.call_args_list],
-                ["http://192.168.1.51/rpc/EM1.GetStatus?id=0"],
+                ["http://192.0.2.51/rpc/EM1.GetStatus?id=0"],
             )
 
     def test_shelly_meter_normalizes_em_three_phase_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "meter.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.52\nShellyProfile=em_3phase_profiled\n"
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.52\nShellyProfile=em_3phase_profiled\n"
                 "[Phase]\nMeasuredPhaseSelection=P1_P2_P3\n",
                 encoding="utf-8",
             )
@@ -141,7 +141,7 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
             self.assertEqual(reading.phase_currents_a, (4.8, 5.1, 5.0))
             self.assertEqual(
                 [call.kwargs["url"] for call in session.get.call_args_list],
-                ["http://192.168.1.52/rpc/EM.GetStatus?id=0"],
+                ["http://192.0.2.52/rpc/EM.GetStatus?id=0"],
             )
 
     def test_average_nonzero_handles_none_and_zero_only_inputs(self) -> None:
@@ -167,7 +167,7 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "meter.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.53\nShellyProfile=switch_1ch\n",
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.53\nShellyProfile=switch_1ch\n",
                 encoding="utf-8",
             )
 
@@ -239,7 +239,7 @@ class TestShellyWallboxBackendShellyMeter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "meter.ini"
             path.write_text(
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.54\nShellyProfile=pm1_meter_only\n"
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.54\nShellyProfile=pm1_meter_only\n"
                 "[Phase]\nMeasuredPhaseSelection=P1_P2\n",
                 encoding="utf-8",
             )

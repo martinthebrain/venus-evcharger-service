@@ -14,6 +14,12 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 install_venus_adapter_stubs()
 
 import venus_evcharger.dbus_adapter.process.introspection_snapshot as snapshot
+from venus_evcharger.dbus_adapter.introspection_xml import (
+    DBUS_INTROSPECTION_XML_MAX_BYTES,
+    DBUS_INTROSPECTION_XML_MAX_DEPTH,
+    DBUS_INTROSPECTION_XML_MAX_ELEMENTS,
+    parse_bounded_introspection_xml,
+)
 from venus_evcharger.dbus_adapter.process.introspection_snapshot import DBUS_INTROSPECTION_SCHEMA_VERSION
 
 
@@ -107,6 +113,36 @@ class DbusAdapterIntrospectionSnapshotContractTests(unittest.TestCase):
         self.assertEqual(
             snapshot.DbusAdapterIntrospectionSnapshot.introspection_finding({}, 100.0),
             snapshot._backoff_introspection_finding({}, "", 100.0),
+        )
+
+    def test_introspection_xml_parser_enforces_every_resource_boundary(self) -> None:
+        self.assertIsNotNone(parse_bounded_introspection_xml("<node><node name='ok'/></node>"))
+        self.assertIsNone(parse_bounded_introspection_xml("<bad"))
+        self.assertIsNone(parse_bounded_introspection_xml("\ud800"))
+        self.assertIsNone(
+            parse_bounded_introspection_xml("x" * (DBUS_INTROSPECTION_XML_MAX_BYTES + 1))
+        )
+        multi_byte = "€" * (DBUS_INTROSPECTION_XML_MAX_BYTES // 2)
+        self.assertLess(len(multi_byte), DBUS_INTROSPECTION_XML_MAX_BYTES)
+        self.assertGreater(len(multi_byte.encode("utf-8")), DBUS_INTROSPECTION_XML_MAX_BYTES)
+        self.assertIsNone(parse_bounded_introspection_xml(multi_byte))
+        for declaration in (
+            "<!DOCTYPE node><node/>",
+            "<!ENTITY injected 'x'><node/>",
+        ):
+            with self.subTest(declaration=declaration):
+                self.assertIsNone(parse_bounded_introspection_xml(declaration))
+
+        too_many_elements = "<node>" + "<node/>" * DBUS_INTROSPECTION_XML_MAX_ELEMENTS + "</node>"
+        self.assertIsNone(parse_bounded_introspection_xml(too_many_elements))
+        too_deep = "<node>" * (DBUS_INTROSPECTION_XML_MAX_DEPTH + 1)
+        too_deep += "</node>" * (DBUS_INTROSPECTION_XML_MAX_DEPTH + 1)
+        self.assertIsNone(parse_bounded_introspection_xml(too_deep))
+
+        oversized = "<node>" + " " * DBUS_INTROSPECTION_XML_MAX_BYTES + "</node>"
+        self.assertEqual(
+            snapshot.DbusAdapterIntrospectionSnapshot.parse_introspection_xml(oversized),
+            ([], []),
         )
 
     def test_cache_entries_filter_introspection_prefix(self) -> None:

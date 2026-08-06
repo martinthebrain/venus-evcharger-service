@@ -133,7 +133,15 @@ class WizardRenderContractTests(unittest.TestCase):
             "Path=/tmp/out/adapter/b.ini\nPath=/tmp/out/adapter/a.ini\n",
         )
         self.assertEqual(
-            wizard_render.redact_sensitive_assignments("Password=secret\nUserPasswordHint=keep\nControlApiAuthToken=token\n"),
+            wizard_render.redact_sensitive_assignments(
+                "Password=secret\n"
+                "UserPasswordHint=keep\n"
+                "ControlApiAuthToken=legacy\n"
+                "ControlApiReadToken=read\n"
+                "ControlApiControlToken=control\n"
+                "ControlApiAdminToken=admin\n"
+                "ControlApiUpdateToken=update\n"
+            ),
             "UserPasswordHint=keep\n",
         )
         self.assertEqual(

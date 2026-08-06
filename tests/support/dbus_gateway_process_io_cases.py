@@ -178,8 +178,12 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             Path(adapter.paths.socket_path).parent.mkdir(parents=True, exist_ok=True)
             server = MagicMock()
-            with patch.object(process_socket_module.socket, "socket", return_value=server):
+            with (
+                patch.object(process_socket_module.socket, "socket", return_value=server),
+                patch.object(process_socket_module.os, "chmod") as chmod,
+            ):
                 adapter.socket_role.start_socket()
+            chmod.assert_called_once_with(adapter.paths.socket_path, 0o600)
             adapter.socket_role.close_socket()
             server.close.assert_called_once_with()
             install_mock(adapter.cache, "write_cache_snapshot", MagicMock())

@@ -81,12 +81,12 @@ class _EnergyProbeDetectCases(_EnergyProbeBase):
                 temp_dir,
                 "energy.ini",
                 "[Adapter]\nType=modbus\n"
-                "[Transport]\nHost=10.0.0.8\nPort=1502\nUnitId=7\nRequestTimeoutSeconds=2.0\n"
+                "[Transport]\nHost=198.51.100.8\nPort=1502\nUnitId=7\nRequestTimeoutSeconds=2.0\n"
                 "[BatteryPowerRead]\nRegisterType=holding\nAddress=10\nDataType=int16\nScale=1\n",
             )
 
             def fake_transport(settings: object) -> object:
-                self.assertEqual(getattr(settings, "host"), "10.0.0.15")
+                self.assertEqual(getattr(settings, "host"), "198.51.100.15")
                 self.assertEqual(getattr(settings, "port"), 6607)
                 self.assertEqual(getattr(settings, "unit_id"), 3)
                 return _ProbeTransport(expected_port=6607, expected_unit_id=3, value=42)
@@ -95,12 +95,12 @@ class _EnergyProbeDetectCases(_EnergyProbeBase):
                 payload = detect_modbus_energy_source(
                     config_path,
                     profile_name="huawei_ma_native_lan",
-                    host="10.0.0.15",
+                    host="198.51.100.15",
                     port=6607,
                     unit_id=3,
                 )
 
-        self.assertEqual(payload["detected"]["host"], "10.0.0.15")
+        self.assertEqual(payload["detected"]["host"], "198.51.100.15")
         self.assertEqual(payload["detected"]["port"], 6607)
         self.assertEqual(payload["detected"]["unit_id"], 3)
         self.assertEqual(payload["attempts"], [payload["detected"]])
@@ -128,7 +128,7 @@ class _EnergyProbeDetectCases(_EnergyProbeBase):
                             "--profile",
                             "huawei_smartlogger_modbus_tcp",
                             "--host",
-                            "10.0.0.20",
+                            "198.51.100.20",
                             "--unit-id",
                             "0",
                         ]

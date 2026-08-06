@@ -321,7 +321,7 @@ Type=custom_topology
         parser.read_string(
             """
 [DEFAULT]
-Host= 192.168.178.76
+Host= 192.0.2.76
 Mode= 2
 Phase= L3
 
@@ -337,7 +337,7 @@ ChargerConfigPath= /data/etc/charger.ini
 
         runtime = _legacy_runtime_values(parser)
 
-        self.assertEqual(runtime.host, "192.168.178.76")
+        self.assertEqual(runtime.host, "192.0.2.76")
         self.assertEqual(runtime.meter_type, "template_meter")
         self.assertEqual(runtime.switch_type, "template_switch")
         self.assertEqual(runtime.charger_type_raw, "goe_charger")
@@ -368,16 +368,16 @@ ChargerConfigPath= /default/charger.ini
         self.assertEqual(default_runtime.charger_path, "/default/charger.ini")
 
     def test_legacy_role_helpers_keep_alias_and_none_semantics_explicit(self) -> None:
-        self.assertEqual(_legacy_switch_type("", "192.168.178.76"), "shelly_contactor_switch")
+        self.assertEqual(_legacy_switch_type("", "192.0.2.76"), "shelly_contactor_switch")
         self.assertEqual(_legacy_switch_type("", ""), "")
-        self.assertEqual(_legacy_switch_alias("shelly_combined", "192.168.178.76"), "shelly_contactor_switch")
+        self.assertEqual(_legacy_switch_alias("shelly_combined", "192.0.2.76"), "shelly_contactor_switch")
         self.assertIsNone(_legacy_switch_alias("shelly_combined", ""))
         self.assertTrue(_known_legacy_switch_type("template_switch"))
         self.assertFalse(_known_legacy_switch_type("custom"))
         self.assertEqual(_legacy_switch_actuator_type("unknown", ""), "custom")
-        self.assertEqual(_legacy_switch_actuator_type("", "192.168.178.76"), "shelly_contactor_switch")
+        self.assertEqual(_legacy_switch_actuator_type("", "192.0.2.76"), "shelly_contactor_switch")
         self.assertIsNone(_legacy_actuator_config("none", None, ""))
-        self.assertEqual(_legacy_actuator_config("none", None, "192.168.178.76").type, "custom")
+        self.assertEqual(_legacy_actuator_config("none", None, "192.0.2.76").type, "custom")
         self.assertEqual(
             _legacy_actuator_config("template_switch", "/data/etc/switch.ini", "").config_path,
             "/data/etc/switch.ini",
@@ -395,7 +395,7 @@ ChargerConfigPath= /default/charger.ini
                 "simple relay with meter path",
                 """
 [DEFAULT]
-Host=192.168.178.76
+Host=192.0.2.76
 Mode=2
 Phase=L3
 

@@ -275,8 +275,8 @@ class TestBackendFactoryContracts(unittest.TestCase):
 
     def test_adapter_type_from_config_path_returns_empty_when_type_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            adapter_path = _write_config(temp_dir, "adapter.ini", "[Adapter]\nHost=192.168.1.20\n")
-            default_path = _write_config(temp_dir, "default.ini", "[DEFAULT]\nHost=192.168.1.20\n")
+            adapter_path = _write_config(temp_dir, "adapter.ini", "[Adapter]\nHost=192.0.2.20\n")
+            default_path = _write_config(temp_dir, "default.ini", "[DEFAULT]\nHost=192.0.2.20\n")
 
             self.assertEqual(factory._adapter_type_from_config_path(adapter_path), "")
             self.assertEqual(factory._adapter_type_from_config_path(default_path), "")
@@ -630,7 +630,7 @@ class TestBackendProbeContracts(unittest.TestCase):
     def test_probe_service_from_wallbox_config_normalizes_defaults(self) -> None:
         config = _parser_from_text(
             "[DEFAULT]\n"
-            "Host= 192.168.1.20 \nUsername=user\nPassword=pass\nDigestAuth=YES\n"
+            "Host= 192.0.2.20 \nUsername=user\nPassword=pass\nDigestAuth=YES\n"
             "ShellyRequestTimeoutSeconds=3.5\nShellyComponent=EM\nShellyId=2\n"
             "Phase=L3\nMaxCurrent=10.5\n"
         )
@@ -641,7 +641,7 @@ class TestBackendProbeContracts(unittest.TestCase):
 
         self.assertIs(service.config, config)
         self.assertIs(service.session, session)
-        self.assertEqual(service.host, "192.168.1.20")
+        self.assertEqual(service.host, "192.0.2.20")
         self.assertEqual(service.username, "user")
         self.assertEqual(service.password, "pass")
         self.assertTrue(service.use_digest_auth)
@@ -694,9 +694,9 @@ class TestBackendProbeContracts(unittest.TestCase):
     def test_adapter_type_contract_handles_adapter_default_and_legacy_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             adapter_path = _write_config(temp_dir, "adapter.ini", "[Adapter]\nType= Template_Meter \n")
-            adapter_missing_path = _write_config(temp_dir, "adapter-missing.ini", "[Adapter]\nHost=192.168.1.20\n")
+            adapter_missing_path = _write_config(temp_dir, "adapter-missing.ini", "[Adapter]\nHost=192.0.2.20\n")
             default_path = _write_config(temp_dir, "default.ini", "[DEFAULT]\nType= Shelly_Switch \n")
-            legacy_path = _write_config(temp_dir, "legacy.ini", "[DEFAULT]\nHost=192.168.1.20\n")
+            legacy_path = _write_config(temp_dir, "legacy.ini", "[DEFAULT]\nHost=192.0.2.20\n")
 
             self.assertEqual(probe._adapter_type(adapter_path), "template_meter")
             self.assertEqual(probe._adapter_type(adapter_missing_path), "shelly_combined")
@@ -911,7 +911,7 @@ class TestBackendProbeContracts(unittest.TestCase):
         resolved = factory.ResolvedBackends(runtime=runtime, meter=None, switch="switch", charger="charger")
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            path = _write_config(temp_dir, "wallbox.ini", "[DEFAULT]\nHost=192.168.1.20\n")
+            path = _write_config(temp_dir, "wallbox.ini", "[DEFAULT]\nHost=192.0.2.20\n")
             with (
                 patch("venus_evcharger.backend.probe.build_service_backends", return_value=resolved),
                 patch(

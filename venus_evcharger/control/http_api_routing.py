@@ -115,6 +115,10 @@ class ControlApiHttpRouter:
         if locality_error is not None:
             self._responder.write_error(handler, *locality_error)
             return True
+        auth_error = self._authenticator.command_transport_auth_error(handler)
+        if auth_error is not None:
+            self._responder.write_error(handler, *auth_error)
+            return True
         return False
 
     def _write_command_guard_error(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> bool:

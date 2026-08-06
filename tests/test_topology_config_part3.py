@@ -298,7 +298,7 @@ ChargerType=goe_charger
             charger_config_path=None,
             primary_rpc_configured=False,
         )
-        self.assertTrue(runtime_summary_uses_legacy_primary_rpc(combined_summary, legacy_host="192.168.1.20"))
+        self.assertTrue(runtime_summary_uses_legacy_primary_rpc(combined_summary, legacy_host="192.0.2.20"))
         with self.assertRaisesRegex(TypeError, "BackendRuntimeSummary"):
             backend_selection_view(cast(Any, None))
         self.assertEqual(backend_selection_view_from_config(legacy_parser)["mode"], "split")

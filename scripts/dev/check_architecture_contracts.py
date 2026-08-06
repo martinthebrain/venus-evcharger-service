@@ -169,9 +169,13 @@ ALLOWED_MULTIPLE_INHERITANCE = {
         )
     },
     "venus_evcharger/control/http_api.py": {
+        "_ThreadingLocalControlHttpServer": _allowed(
+            "_BoundedThreadingMixIn", "HTTPServer",
+            reason="bounded stdlib server composition for threaded TCP HTTP."
+        ),
         "_ThreadingLocalControlUnixHttpServer": _allowed(
-            "socketserver.ThreadingMixIn", "socketserver.UnixStreamServer",
-            reason="stdlib server composition for threaded Unix-domain HTTP."
+            "_BoundedThreadingMixIn", "socketserver.UnixStreamServer",
+            reason="bounded stdlib server composition for threaded Unix-domain HTTP."
         )
     },
     "venus_evcharger/update/offline_publish.py": {

@@ -825,8 +825,8 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
             )
 
         self.assertEqual(
-            SoftwareUpdateController._software_update_command("/data/venus-evcharger", "/tmp/restart.sh"),
-            ["/bin/bash", "-lc", 'cd "/data/venus-evcharger" && "./install.sh" && "/tmp/restart.sh"'],
+            SoftwareUpdateController._software_update_command("/data/venus-evcharger/install.sh"),
+            ["/data/venus-evcharger/install.sh"],
         )
         self.assertTrue(SoftwareUpdateController._software_update_due(100.0, 99.9))
         self.assertTrue(SoftwareUpdateController._software_update_due(100.0, 100.0))
@@ -838,12 +838,11 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
             "",
             software_update_install_script=None,
             software_update_repo_root=None,
-            software_update_restart_script=None,
             _software_update_available=True,
             _software_update_available_version="9.9.9",
         )
 
-        self.assertEqual(SoftwareUpdateController._software_update_run_paths(service), ("", "", ""))
+        self.assertEqual(SoftwareUpdateController._software_update_run_paths(service), ("", ""))
         self.assertEqual(
             SoftwareUpdateController._completed_software_update_state(service, 0),
             ("installed", "completed", False, "", "success"),
@@ -883,9 +882,16 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
             "_spawn_software_update_process",
             return_value=(process, log_handle),
         ) as spawn_mock:
-            self.assertTrue(controller.components.software_update._launch_software_update_run(service, ("/repo", "/restart.sh"), 123.0, "manual"))
+            self.assertTrue(
+                controller.components.software_update._launch_software_update_run(
+                    service,
+                    ("/repo/install.sh", "/repo"),
+                    123.0,
+                    "manual",
+                )
+            )
 
-        spawn_mock.assert_called_once_with("/tmp/update.log", "/repo", "/restart.sh")
+        spawn_mock.assert_called_once_with("/tmp/update.log", "/repo/install.sh", "/repo")
         self.assertIs(service._software_update_process, process)
         self.assertIs(service._software_update_process_log_handle, log_handle)
         self.assertEqual(service._software_update_last_run_at, 123.0)
@@ -1068,10 +1074,6 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
             self.assertEqual(service.started_at, 123.0)
             self.assertEqual(service.software_update_repo_root, str(repo_root))
             self.assertEqual(service.software_update_install_script, str(repo_root / "install.sh"))
-            self.assertEqual(
-                service.software_update_restart_script,
-                str(repo_root / "deploy/venus/restart_venus_evcharger_service.sh"),
-            )
             self.assertEqual(service.software_update_no_update_file, str(repo_root / "noUpdate"))
             self.assertEqual(
                 service.software_update_log_path,
@@ -1109,7 +1111,6 @@ class TestUpdateCycleControllerTertiary(UpdateCycleControllerTestBase):
             self.assertEqual(empty_service.started_at, 200.0)
             self.assertEqual(empty_service.software_update_repo_root, "")
             self.assertEqual(empty_service.software_update_install_script, "")
-            self.assertEqual(empty_service.software_update_restart_script, "")
             self.assertEqual(empty_service.software_update_no_update_file, "")
             self.assertEqual(
                 empty_service.software_update_log_path,

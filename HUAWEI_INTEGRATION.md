@@ -23,9 +23,9 @@ families.
 
 ## Template Choice
 
-- Use [template-energy-source-huawei-ma-modbus.ini](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/deploy/venus/template-energy-source-huawei-ma-modbus.ini) for one MA-family inverter baseline.
-- Use [template-energy-source-huawei-mb-modbus.ini](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/deploy/venus/template-energy-source-huawei-mb-modbus.ini) for one MB-family inverter baseline.
-- Use [template-energy-source-huawei-mb-unit1-modbus.ini](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/deploy/venus/template-energy-source-huawei-mb-unit1-modbus.ini) and [template-energy-source-huawei-mb-unit2-modbus.ini](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/deploy/venus/template-energy-source-huawei-mb-unit2-modbus.ini) when you want to expose two MB energy-storage units separately.
+- Use [template-energy-source-huawei-ma-modbus.ini](deploy/venus/template-energy-source-huawei-ma-modbus.ini) for one MA-family inverter baseline.
+- Use [template-energy-source-huawei-mb-modbus.ini](deploy/venus/template-energy-source-huawei-mb-modbus.ini) for one MB-family inverter baseline.
+- Use [template-energy-source-huawei-mb-unit1-modbus.ini](deploy/venus/template-energy-source-huawei-mb-unit1-modbus.ini) and [template-energy-source-huawei-mb-unit2-modbus.ini](deploy/venus/template-energy-source-huawei-mb-unit2-modbus.ini) when you want to expose two MB energy-storage units separately.
 
 Family mapping:
 
@@ -123,26 +123,26 @@ This writes:
 - `/data/tmp/huawei-mb.manifest.json`
 
 The generic bundle contract is described in
-[ENERGY_RECOMMENDATION_SCHEMA.md](/home/martin/Schreibtisch/cerbo300126/vomCerbo/data/dbus-opendtuAndi/github/venus-evcharger-service/ENERGY_RECOMMENDATION_SCHEMA.md).
+[ENERGY_RECOMMENDATION_SCHEMA.md](ENERGY_RECOMMENDATION_SCHEMA.md).
 
 You can then feed that bundle into the setup wizard:
 
 ```bash
-python3 -m venus_evcharger.bootstrap.wizard --non-interactive --dry-run --profile simple-relay --host 192.168.1.44 --energy-recommendation-prefix /data/tmp/huawei-mb
+python3 -m venus_evcharger.bootstrap.wizard --non-interactive --dry-run --profile simple-relay --host 192.0.2.44 --energy-recommendation-prefix /data/tmp/huawei-mb
 ```
 
 When you want the wizard to merge the suggested `AutoEnergySources=` and
 `AutoEnergySource.<id>.*` lines directly into the generated main config, add:
 
 ```bash
-python3 -m venus_evcharger.bootstrap.wizard --non-interactive --profile simple-relay --host 192.168.1.44 --energy-recommendation-prefix /data/tmp/huawei-mb --apply-energy-merge
+python3 -m venus_evcharger.bootstrap.wizard --non-interactive --profile simple-relay --host 192.0.2.44 --energy-recommendation-prefix /data/tmp/huawei-mb --apply-energy-merge
 ```
 
 When you already know the usable battery capacity, you can set it in the same
 run:
 
 ```bash
-python3 -m venus_evcharger.bootstrap.wizard --non-interactive --profile simple-relay --host 192.168.1.44 --energy-recommendation-prefix /data/tmp/huawei-mb --apply-energy-merge --energy-default-usable-capacity-wh 15360
+python3 -m venus_evcharger.bootstrap.wizard --non-interactive --profile simple-relay --host 192.0.2.44 --energy-recommendation-prefix /data/tmp/huawei-mb --apply-energy-merge --energy-default-usable-capacity-wh 15360
 ```
 
 When you want to merge more than one recommendation bundle in one wizard run,
@@ -150,7 +150,7 @@ repeat `--energy-recommendation-prefix`. For per-source capacities, use
 `--energy-usable-capacity-wh <source_id>=<Wh>`:
 
 ```bash
-python3 -m venus_evcharger.bootstrap.wizard --non-interactive --profile simple-relay --host 192.168.1.44 --energy-recommendation-prefix /data/tmp/huawei-unit1 --energy-recommendation-prefix /data/tmp/huawei-unit2 --apply-energy-merge --energy-usable-capacity-wh huawei_unit1=15360 --energy-usable-capacity-wh huawei_unit2=7680
+python3 -m venus_evcharger.bootstrap.wizard --non-interactive --profile simple-relay --host 192.0.2.44 --energy-recommendation-prefix /data/tmp/huawei-unit1 --energy-recommendation-prefix /data/tmp/huawei-unit2 --apply-energy-merge --energy-usable-capacity-wh huawei_unit1=15360 --energy-usable-capacity-wh huawei_unit2=7680
 ```
 
 The wizard result will copy the Huawei helper files into its output directory

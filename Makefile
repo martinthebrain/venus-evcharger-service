@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: test lint pylint-audit security-audit spellcheck shell-audit quality-audit audit typecheck check stress soakcheck mutation-audit
+.PHONY: test lint pylint-audit security-audit spellcheck shell-audit quality-audit audit typecheck check stress soakcheck mutation-audit docs docs-check
 
 test:
 	$(PYTHON) -m unittest
@@ -40,3 +40,8 @@ soakcheck:
 
 mutation-audit:
 	$(PYTHON) scripts/dev/run_mutation_audit.py
+
+docs:
+	bash ./scripts/dev/run_doxygen.sh
+
+docs-check: docs

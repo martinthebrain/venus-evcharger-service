@@ -95,12 +95,12 @@ class BootstrapWizardAdaptersContractsTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            wizard_adapters.shelly_meter_config("192.168.1.10"),
-            "[Adapter]\nType=shelly_meter\nHost=192.168.1.10\nShellyProfile=em1_meter_single_or_dual\n",
+            wizard_adapters.shelly_meter_config("192.0.2.10"),
+            "[Adapter]\nType=shelly_meter\nHost=192.0.2.10\nShellyProfile=em1_meter_single_or_dual\n",
         )
         self.assertEqual(
-            wizard_adapters.shelly_switch_config("192.168.1.11"),
-            "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nShellyProfile=switch_1ch_with_pm\n",
+            wizard_adapters.shelly_switch_config("192.0.2.11"),
+            "[Adapter]\nType=shelly_switch\nHost=192.0.2.11\nShellyProfile=switch_1ch_with_pm\n",
         )
 
     def test_tuya_tasmota_and_cerbo_switch_configs_are_rendered_exactly(self) -> None:

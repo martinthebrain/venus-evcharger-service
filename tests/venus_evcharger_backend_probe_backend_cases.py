@@ -22,7 +22,7 @@ class TestShellyWallboxBackendProbeBackend(BackendProbeTestCase):
             meter_path = self._write_config(
                 temp_dir,
                 "meter.ini",
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.10\n",
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.10\n",
             )
 
             payload = validate_backend_config(meter_path)
@@ -97,7 +97,7 @@ class TestShellyWallboxBackendProbeBackend(BackendProbeTestCase):
             meter_path = self._write_config(
                 temp_dir,
                 "meter.ini",
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.10\n",
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.10\n",
             )
 
             stdout = io.StringIO()
@@ -112,7 +112,7 @@ class TestShellyWallboxBackendProbeBackend(BackendProbeTestCase):
             switch_path = self._write_config(
                 temp_dir,
                 "switch.ini",
-                "[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.11\n",
+                "[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.11\n",
             )
 
             payload = validate_backend_config(switch_path)

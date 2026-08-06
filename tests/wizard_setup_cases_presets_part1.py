@@ -8,7 +8,7 @@ class __WizardSetupPresetCasesPart1:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="hybrid_topology",
-                    host_input="192.168.1.80",
+                    host_input="192.0.2.80",
                     meter_host_input=None,
                     switch_host_input="switch.local",
                     charger_host_input="charger.local",
@@ -21,7 +21,7 @@ class __WizardSetupPresetCasesPart1:
                     topology_preset=None,
                     charger_backend="simpleevse_charger",
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.80",
+                    transport_host="192.0.2.80",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -49,7 +49,7 @@ class __WizardSetupPresetCasesPart1:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="native_device",
-                    host_input="192.168.1.90",
+                    host_input="192.0.2.90",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -62,7 +62,7 @@ class __WizardSetupPresetCasesPart1:
                     topology_preset=None,
                     charger_backend="modbus_charger",
                     transport_kind="tcp",
-                    transport_host="192.168.1.91",
+                    transport_host="192.0.2.91",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=7,
@@ -75,7 +75,7 @@ class __WizardSetupPresetCasesPart1:
             charger_text = (config_path.parent / "wizard-charger.ini").read_text(encoding="utf-8")
             self.assertIn("Type=modbus_charger\n", charger_text)
             self.assertIn("Transport=tcp\n", charger_text)
-            self.assertIn("Host=192.168.1.91\n", charger_text)
+            self.assertIn("Host=192.0.2.91\n", charger_text)
             self.assertIn("UnitId=7\n", charger_text)
             self.assertEqual(result.transport_kind, "tcp")
             self.assertEqual(result.validation["resolved_roles"], {"meter": False, "switch": False, "charger": True})
@@ -202,9 +202,9 @@ class __WizardSetupPresetCasesPart1:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="multi_adapter_topology",
-                    host_input="192.168.1.92",
-                    meter_host_input="192.168.1.20",
-                    switch_host_input="192.168.1.21",
+                    host_input="192.0.2.92",
+                    meter_host_input="192.0.2.20",
+                    switch_host_input="192.0.2.21",
                     charger_host_input=None,
                     device_instance=65,
                     phase="L1",
@@ -215,7 +215,7 @@ class __WizardSetupPresetCasesPart1:
                     topology_preset="shelly-io-modbus-charger",
                     charger_backend="modbus_charger",
                     transport_kind="tcp",
-                    transport_host="192.168.1.93",
+                    transport_host="192.0.2.93",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=8,
@@ -231,9 +231,9 @@ class __WizardSetupPresetCasesPart1:
             self.assertIn("Type=shelly_meter\n", meter_text)
             self.assertIn("Type=shelly_switch\n", switch_text)
             self.assertIn("Type=modbus_charger\n", charger_text)
-            self.assertIn("Host=192.168.1.20\n", meter_text)
-            self.assertIn("Host=192.168.1.21\n", switch_text)
-            self.assertEqual(result.role_hosts, {"meter": "192.168.1.20", "switch": "192.168.1.21"})
+            self.assertIn("Host=192.0.2.20\n", meter_text)
+            self.assertIn("Host=192.0.2.21\n", switch_text)
+            self.assertEqual(result.role_hosts, {"meter": "192.0.2.20", "switch": "192.0.2.21"})
             self.assertEqual(result.topology_preset, "shelly-io-modbus-charger")
             self.assertEqual(result.validation["resolved_roles"], {"meter": True, "switch": True, "charger": True})
             self.assertEqual(result.topology_config["topology"]["type"], "hybrid_topology")

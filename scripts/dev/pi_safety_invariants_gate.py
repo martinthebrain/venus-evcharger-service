@@ -31,9 +31,13 @@ class SafetyStep:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run EV charger safety invariant checks on a Raspberry Pi.")
-    parser.add_argument("--pi", default="root@192.168.142.129")
+    parser.add_argument("--pi", required=True)
     parser.add_argument("--ssh-config", default="/dev/null")
-    parser.add_argument("--remote-dir", default="/tmp/venus-evcharger-safety-gate")
+    parser.add_argument(
+        "--remote-dir",
+        # This is an isolated throwaway directory on the dedicated test Pi.
+        default="/tmp/venus-evcharger-safety-gate",  # nosec B108
+    )
     parser.add_argument("--skip-deploy", action="store_true", help="Reuse the existing --remote-dir contents.")
     parser.add_argument("--stress-iters", type=int, default=800)
     parser.add_argument("--stress-threads", type=int, default=4)

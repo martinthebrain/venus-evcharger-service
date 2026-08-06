@@ -76,7 +76,7 @@ class _WizardBranchRuntimeCoreCases:
             result = wizard.configure_wallbox(
                 wizard.WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -106,7 +106,7 @@ class _WizardBranchRuntimeCoreCases:
         custom_result = wizard.configure_wallbox(
             wizard.WizardAnswers(
                 profile="simple_relay",
-                host_input="192.168.1.44",
+                host_input="192.0.2.44",
                 meter_host_input=None,
                 switch_host_input=None,
                 charger_host_input=None,
@@ -497,7 +497,7 @@ class _WizardBranchRuntimeCoreCases:
         stdout = io.StringIO()
         with redirect_stdout(stdout):
             with self.assertRaises(SystemExit) as raised:
-                with patch("sys.argv", ["wizard.py", "--non-interactive", "--dry-run", "--json", "--profile", "simple_relay", "--host", "192.168.1.44"]):
+                with patch("sys.argv", ["wizard.py", "--non-interactive", "--dry-run", "--json", "--profile", "simple_relay", "--host", "192.0.2.44"]):
                     runpy.run_module("venus_evcharger.bootstrap.wizard", run_name="__main__")
         self.assertEqual(raised.exception.code, 0)
         self.assertIn('"profile": "simple_relay"', stdout.getvalue())

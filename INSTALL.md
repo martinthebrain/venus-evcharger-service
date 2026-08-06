@@ -286,9 +286,9 @@ Non-interactive native Modbus charger over TCP:
   --profile native-charger \
   --charger-backend modbus_charger \
   --transport tcp \
-  --transport-host 192.168.1.91 \
+  --transport-host 192.0.2.91 \
   --transport-unit-id 7 \
-  --host 192.168.1.90
+  --host 192.0.2.90
 ```
 
 Non-interactive ABB Terra AC preset over Modbus TCP:
@@ -358,7 +358,7 @@ Non-interactive split topology with Shelly meter and native `go-e` charger:
   --force \
   --profile split-topology \
   --split-preset shelly-meter-goe \
-  --meter-host 192.168.1.24 \
+  --meter-host 192.0.2.24 \
   --charger-host goe.local
 ```
 
@@ -383,7 +383,7 @@ Non-interactive split topology with Shelly meter, `go-e`, and external 3-phase s
   --force \
   --profile split-topology \
   --split-preset shelly-meter-goe-switch-group \
-  --meter-host 192.168.1.24 \
+  --meter-host 192.0.2.24 \
   --switch-host http://switch.local \
   --charger-host goe.local
 ```
@@ -396,12 +396,12 @@ Non-interactive split topology with Shelly meter/switch plus Modbus charger:
   --force \
   --profile split-topology \
   --split-preset shelly-io-modbus-charger \
-  --meter-host 192.168.1.20 \
-  --switch-host 192.168.1.21 \
+  --meter-host 192.0.2.20 \
+  --switch-host 192.0.2.21 \
   --transport tcp \
-  --transport-host 192.168.1.93 \
+  --transport-host 192.0.2.93 \
   --transport-unit-id 8 \
-  --host 192.168.1.92
+  --host 192.0.2.92
 ```
 
 Non-interactive split topology with Shelly meter, Modbus charger, and external 3-phase switch group:
@@ -412,12 +412,12 @@ Non-interactive split topology with Shelly meter, Modbus charger, and external 3
   --force \
   --profile split-topology \
   --split-preset shelly-meter-modbus-switch-group \
-  --meter-host 192.168.1.24 \
+  --meter-host 192.0.2.24 \
   --switch-host http://switch.local \
   --transport tcp \
-  --transport-host 192.168.1.95 \
+  --transport-host 192.0.2.95 \
   --transport-unit-id 9 \
-  --host 192.168.1.94
+  --host 192.0.2.94
 ```
 
 Non-interactive split topology with Shelly meter plus cFos Power Brain preset:
@@ -429,13 +429,13 @@ Non-interactive split topology with Shelly meter plus cFos Power Brain preset:
   --profile split-topology \
   --split-preset shelly-meter-modbus-charger \
   --charger-preset cfos-power-brain-modbus \
-  --meter-host 192.168.1.24 \
+  --meter-host 192.0.2.24 \
   --charger-host cfos.local \
   --transport tcp \
   --transport-host cfos.local \
   --transport-port 4701 \
   --transport-unit-id 1 \
-  --host 192.168.1.94
+  --host 192.0.2.94
 ```
 
 Clone an existing config from another path and adjust only the host:
@@ -444,7 +444,7 @@ Clone an existing config from another path and adjust only the host:
 ./deploy/venus/configure_venus_evcharger_service.sh \
   --non-interactive \
   --import-config /data/etc/old-wallbox.ini \
-  --host 192.168.1.120 \
+  --host 192.0.2.120 \
   --config-path ./deploy/venus/config.venus_evcharger.ini
 ```
 

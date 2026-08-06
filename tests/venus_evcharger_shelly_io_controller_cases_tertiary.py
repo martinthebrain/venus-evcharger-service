@@ -6,7 +6,7 @@ from tests.venus_evcharger_shelly_io_controller_support import *
 class TestShellyIoControllerTertiary(_TestShellyIoControllerTertiaryPart2, ShellyIoControllerTestBase):
     def test_fetch_pm_status_keeps_pm_flow_when_native_charger_readback_fails(self):
         service = SimpleNamespace(
-            host="192.168.178.76",
+            host="192.0.2.76",
             pm_component="Switch",
             pm_id=0,
             _charger_backend=SimpleNamespace(
@@ -44,10 +44,10 @@ class TestShellyIoControllerTertiary(_TestShellyIoControllerTertiaryPart2, Shell
             config_path = self._write_config(
                 temp_dir,
                 "[Adapter]\nType=smartevse_charger\nTransport=tcp\n"
-                "[Transport]\nHost=192.168.1.60\nPort=502\nUnitId=1\n",
+                "[Transport]\nHost=192.0.2.60\nPort=502\nUnitId=1\n",
             )
             service = SimpleNamespace(
-                host="192.168.178.76",
+                host="192.0.2.76",
                 pm_component="Switch",
                 pm_id=0,
                 supported_phase_selections=("P1",),
@@ -84,7 +84,7 @@ class TestShellyIoControllerTertiary(_TestShellyIoControllerTertiaryPart2, Shell
     def test_fetch_pm_status_skips_native_charger_readback_while_retry_backoff_is_active(self):
         charger_backend = SimpleNamespace(read_charger_state=MagicMock())
         service = SimpleNamespace(
-            host="192.168.178.76",
+            host="192.0.2.76",
             pm_component="Switch",
             pm_id=0,
             _charger_backend=charger_backend,

@@ -46,7 +46,7 @@ class _EnergyProbeValidateCases(_EnergyProbeBase):
                 )
 
             with patch("venus_evcharger.energy.probe.create_modbus_transport", side_effect=fake_transport):
-                payload = validate_huawei_energy_source(config_path, profile_name="huawei_mb_native_lan", host="10.0.0.25")
+                payload = validate_huawei_energy_source(config_path, profile_name="huawei_mb_native_lan", host="198.51.100.25")
 
         self.assertTrue(payload["validation_ok"])
         self.assertTrue(payload["meter_block_detected"])
@@ -117,11 +117,11 @@ class _EnergyProbeValidateCases(_EnergyProbeBase):
                 )
 
             with patch("venus_evcharger.energy.probe.create_modbus_transport", side_effect=fake_transport):
-                unit_payload = validate_huawei_energy_source(config_path, profile_name="huawei_map0_unit1", host="10.0.0.26")
+                unit_payload = validate_huawei_energy_source(config_path, profile_name="huawei_map0_unit1", host="198.51.100.26")
                 smartlogger_payload = validate_huawei_energy_source(
                     config_path,
                     profile_name="huawei_l1_smartlogger_modbus_tcp",
-                    host="10.0.0.27",
+                    host="198.51.100.27",
                 )
 
         self.assertEqual(unit_payload["recommendation"]["suggested_profile"], "huawei_map0_unit1")
@@ -161,7 +161,7 @@ class _EnergyProbeValidateCases(_EnergyProbeBase):
                 payload = validate_huawei_energy_source(
                     config_path,
                     profile_name="huawei_mb_sdongle",
-                    host="10.0.0.30",
+                    host="198.51.100.30",
                     source_id="hybrid_ext",
                 )
 

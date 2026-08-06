@@ -87,6 +87,13 @@ class TestDbusAdapterSchedulerContracts(unittest.TestCase):
         scheduler.next_read_at["grid"] = 99.0
         scheduler.force_due(["missing", "grid"])
         self.assertEqual(scheduler.next_read_at, {"grid": 0.0})
+        scheduler.next_read_at["grid"] = 42.0
+        scheduler.failure_counts["grid"] = 1
+        scheduler.expedite_healthy(["missing", "grid"])
+        self.assertEqual(scheduler.next_read_at, {"grid": 42.0})
+        scheduler.failure_counts["grid"] = 0
+        scheduler.expedite_healthy(["grid"])
+        self.assertEqual(scheduler.next_read_at, {"grid": 0.0})
         scheduler.record_success("grid", monotonic_at=10.0, interval=4.0)
         self.assertEqual(scheduler.next_read_at["grid"], 14.0)
 
@@ -195,8 +202,11 @@ class TestDbusAdapterSchedulerContracts(unittest.TestCase):
         self.assertEqual(slow.next_scan_monotonic, 160.0)
         self.assertEqual(slow.next_scan_at, 70.0)
         slow.defer_for(monotonic_at=120.0, captured_at=20.0, seconds=90.0)
-        self.assertEqual(slow.next_scan_monotonic, 210.0)
-        self.assertEqual(slow.next_scan_at, 110.0)
+        self.assertEqual(slow.next_scan_monotonic, 160.0)
+        self.assertEqual(slow.next_scan_at, 70.0)
+        slow.defer_for(monotonic_at=160.0, captured_at=70.0, seconds=90.0)
+        self.assertEqual(slow.next_scan_monotonic, 250.0)
+        self.assertEqual(slow.next_scan_at, 160.0)
         slow.force_due()
         self.assertEqual(slow.next_scan_monotonic, 0.0)
         self.assertEqual(slow.next_scan_at, 0.0)

@@ -29,8 +29,8 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
     def _spawn_software_update_process(
         cls,
         log_path: str,
+        install_script: str,
         repo_root: str,
-        restart_script: str,
     ) -> tuple[Any, BinaryIO]:
         """Start the detached installer process."""
 
@@ -56,13 +56,13 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         source: str,
     ) -> bool:
         """Spawn the detached update process and publish the running state."""
-        repo_root, restart_script = run_paths
+        install_script, repo_root = run_paths
         log_path = cls._software_update_text_attr(svc, "software_update_log_path")
         try:
             process, log_handle = cls._spawn_software_update_process(
                 log_path,
+                install_script,
                 repo_root,
-                restart_script,
             )
         except SOFTWARE_UPDATE_PROCESS_ERRORS as error:
             cls._software_update_mark_install_failed(svc, error)
@@ -81,25 +81,23 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
 
     @classmethod
     def _prepared_software_update_run_paths(cls, svc: Any) -> tuple[str, str] | None:
-        """Return normalized repo-root and restart-script paths when the run is available."""
-        install_script, repo_root, restart_script = cls._software_update_run_paths(svc)
+        """Return the validated installer and repository paths for one update run."""
+        install_script, repo_root = cls._software_update_run_paths(svc)
         unavailable_detail = cls._software_update_unavailable_detail(
             install_script,
             repo_root,
-            restart_script,
         )
         if unavailable_detail is None:
-            return repo_root, restart_script
+            return install_script, repo_root
         cls._software_update_mark_unavailable(svc, unavailable_detail)
         return None
 
     @classmethod
-    def _software_update_run_paths(cls, svc: Any) -> tuple[str, str, str]:
-        """Return normalized install, repo-root, and restart paths for update runs."""
+    def _software_update_run_paths(cls, svc: Any) -> tuple[str, str]:
+        """Return normalized installer and repository paths for update runs."""
         return (
             cls._software_update_text_attr(svc, "software_update_install_script"),
             cls._software_update_text_attr(svc, "software_update_repo_root"),
-            cls._software_update_text_attr(svc, "software_update_restart_script"),
         )
 
     @staticmethod
@@ -136,13 +134,10 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         cls,
         install_script: str,
         repo_root: str,
-        restart_script: str,
     ) -> str | None:
         """Return the missing-resource detail for one update run or ``None`` when usable."""
         if cls._software_update_install_script_missing(install_script, repo_root):
             return "install.sh missing"
-        if cls._software_update_restart_script_missing(restart_script):
-            return "restart script missing"
         return None
 
     @classmethod
@@ -176,9 +171,10 @@ class _SoftwareUpdateRun(_SoftwareUpdateState):
         return open(log_path, "ab")  # pylint: disable=consider-using-with
 
     @staticmethod
-    def _software_update_command(repo_root: str, restart_script: str) -> list[str]:
-        """Return the shell command used for detached update execution."""
-        return ["/bin/bash", "-lc", f'cd "{repo_root}" && "./install.sh" && "{restart_script}"']
+    def _software_update_command(install_script: str) -> list[str]:
+        """Return the direct installer command without shell interpolation."""
+
+        return [install_script]
 
     @staticmethod
     def _close_open_log_handle(log_handle: Any) -> None:

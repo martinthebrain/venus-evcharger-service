@@ -452,7 +452,6 @@ class UpdateCycleControllerTestBase(unittest.TestCase):
         data: dict[str, object] = {
             "software_update_repo_root": repo_root,
             "software_update_install_script": str(Path(repo_root) / "install.sh"),
-            "software_update_restart_script": str(Path(repo_root) / "deploy/venus/restart_venus_evcharger_service.sh"),
             "software_update_no_update_file": str(Path(repo_root) / "noUpdate"),
             "software_update_log_path": str(Path(repo_root) / "software-update.log"),
             "software_update_manifest_source": "https://example.invalid/bootstrap_manifest.json",

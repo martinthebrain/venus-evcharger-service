@@ -116,7 +116,7 @@ class _TestShellyWallboxSetupWizardExtensionsPart2:
             configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,

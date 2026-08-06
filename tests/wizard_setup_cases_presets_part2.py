@@ -8,8 +8,8 @@ class __WizardSetupPresetCasesPart2:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="multi_adapter_topology",
-                    host_input="192.168.178.76",
-                    meter_host_input="192.168.178.76",
+                    host_input="192.0.2.76",
+                    meter_host_input="192.0.2.76",
                     switch_host_input=None,
                     charger_host_input=None,
                     device_instance=78,
@@ -43,12 +43,12 @@ class __WizardSetupPresetCasesPart2:
             self.assertIn(f"SwitchConfigPath={config_path.parent / 'wizard-switch.ini'}\n", config_text)
             self.assertIn("ChargerType=\n", config_text)
             self.assertIn("Type=shelly_meter\n", meter_text)
-            self.assertIn("Host=192.168.178.76\n", meter_text)
+            self.assertIn("Host=192.0.2.76\n", meter_text)
             self.assertIn("Type=cerbo_gx_relay_switch\n", switch_text)
             self.assertIn("RelayIndex=1\n", switch_text)
             self.assertIn("ContactMode=NC\n", switch_text)
             self.assertIn("EnsureManualFunction=1\n", switch_text)
-            self.assertEqual(result.role_hosts, {"meter": "192.168.178.76"})
+            self.assertEqual(result.role_hosts, {"meter": "192.0.2.76"})
             self.assertEqual(result.validation["resolved_roles"], {"meter": True, "switch": True, "charger": False})
             self.assertEqual(result.topology_preset, "shelly-meter-cerbo-relay")
             self.assertEqual(result.topology_config["topology"]["type"], "simple_relay")
@@ -195,8 +195,8 @@ class __WizardSetupPresetCasesPart2:
             result = configure_wallbox(
                 WizardAnswers(
                     profile="multi_adapter_topology",
-                    host_input="192.168.1.94",
-                    meter_host_input="192.168.1.24",
+                    host_input="192.0.2.94",
+                    meter_host_input="192.0.2.24",
                     switch_host_input="switch.local",
                     charger_host_input=None,
                     device_instance=69,
@@ -208,7 +208,7 @@ class __WizardSetupPresetCasesPart2:
                     topology_preset="shelly-meter-modbus-switch-group",
                     charger_backend="modbus_charger",
                     transport_kind="tcp",
-                    transport_host="192.168.1.95",
+                    transport_host="192.0.2.95",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=9,
@@ -224,11 +224,11 @@ class __WizardSetupPresetCasesPart2:
             phase1_text = (config_path.parent / "wizard-phase1-switch.ini").read_text(encoding="utf-8")
             self.assertIn("Type=modbus_charger\n", charger_text)
             self.assertIn("Transport=tcp\n", charger_text)
-            self.assertIn("Host=192.168.1.95\n", charger_text)
+            self.assertIn("Host=192.0.2.95\n", charger_text)
             self.assertIn("SupportedPhaseSelections=P1,P1_P2,P1_P2_P3\n", group_text)
-            self.assertIn("Host=192.168.1.24\n", meter_text)
+            self.assertIn("Host=192.0.2.24\n", meter_text)
             self.assertIn("BaseUrl=http://switch.local\n", phase1_text)
-            self.assertEqual(result.role_hosts, {"meter": "192.168.1.24", "switch": "switch.local"})
+            self.assertEqual(result.role_hosts, {"meter": "192.0.2.24", "switch": "switch.local"})
             self.assertEqual(result.topology_preset, "shelly-meter-modbus-switch-group")
             self.assertEqual(result.transport_kind, "tcp")
             self.assertEqual(result.validation["resolved_roles"], {"meter": True, "switch": True, "charger": True})

@@ -77,6 +77,16 @@ class DbusReadScheduler:
             if normalized in self.specs:
                 self.next_read_at[normalized] = 0.0
 
+    def expedite_healthy(self, keys: set[str] | tuple[str, ...] | list[str]) -> None:
+        """Expedite stale reads without defeating an active failure backoff."""
+        for key in keys:
+            normalized = str(key)
+            if (
+                normalized in self.specs
+                and self.failure_counts[normalized] == 0
+            ):
+                self.next_read_at[normalized] = 0.0
+
     @staticmethod
     def effective_interval(spec: Mapping[str, object], circuit_state: str) -> float:
         interval = _interval_seconds(spec.get("interval"))
@@ -160,15 +170,13 @@ class DbusDiscoveryManager:
         captured_at: float,
         seconds: float,
     ) -> None:
+        """Defer due discovery once instead of sliding its deadline forever."""
         delay = max(0.0, float(seconds))
-        self.next_scan_monotonic = max(
-            self.next_scan_monotonic,
-            float(monotonic_at) + delay,
-        )
-        self.next_scan_at = max(
-            self.next_scan_at,
-            float(captured_at) + delay,
-        )
+        current_monotonic = float(monotonic_at)
+        if self.next_scan_monotonic > current_monotonic:
+            return
+        self.next_scan_monotonic = current_monotonic + delay
+        self.next_scan_at = float(captured_at) + delay
 
     def force_due(self) -> None:
         """Schedule one topology refresh without exposing DBus discovery details."""

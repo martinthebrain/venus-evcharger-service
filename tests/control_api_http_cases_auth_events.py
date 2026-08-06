@@ -26,6 +26,7 @@ class _ControlApiHttpAuthEventsCases:
         server.router.handle_post(handler)
 
         self.assertEqual(handler.status_code, 401)
+        self.assertEqual(handler.rfile.tell(), 0)
         service.control_command_from_payload.assert_not_called()
 
     def test_state_and_capabilities_endpoints_enforce_bearer_token_but_health_and_openapi_stay_open(self) -> None:
@@ -179,7 +180,7 @@ class _ControlApiHttpAuthEventsCases:
             handle_control_command=MagicMock(),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, localhost_only=True)
-        handler = _FakeHandler("/v1/control/health", client_host="192.168.1.10")
+        handler = _FakeHandler("/v1/control/health", client_host="192.0.2.10")
 
         server.router.handle_get(handler)
 
@@ -192,7 +193,7 @@ class _ControlApiHttpAuthEventsCases:
             handle_control_command=MagicMock(),
         )
         localhost_only_server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765, localhost_only=True)
-        remote_post = _FakeHandler("/v1/control/command", body=b'{"name":"set_mode","value":1}', client_host="192.168.1.10")
+        remote_post = _FakeHandler("/v1/control/command", body=b'{"name":"set_mode","value":1}', client_host="192.0.2.10")
 
         localhost_only_server.router.handle_post(remote_post)
 

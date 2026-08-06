@@ -178,6 +178,11 @@ class ControlApiHttpAuthenticator:
     def command_auth_error(self, handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> AccessError | None:
         return self.auth_error(handler, required_scope=self.required_scope_for_command(payload))
 
+    def command_transport_auth_error(self, handler: BaseHTTPRequestHandler) -> AccessError | None:
+        """Reject unauthenticated command transports before reading their body."""
+
+        return self.auth_error(handler, required_scope="control_basic")
+
     def required_scope_for_command(self, payload: dict[str, Any]) -> str:
         command_name = str(payload.get("name", "")).strip()
         return CONTROL_API_COMMAND_SCOPE_REQUIREMENTS.get(command_name, "control_admin")

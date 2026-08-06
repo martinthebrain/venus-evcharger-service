@@ -65,7 +65,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         self.assertEqual(_config_int(defaults, "MissingInt", 7), 7)
         self.assertEqual(_config_float(defaults, "FloatValue", 1.25), 3.5)
         self.assertEqual(_config_float(defaults, "MissingFloat", 1.25), 1.25)
-        self.assertTrue(_host_is_configured("  192.168.1.2  "))
+        self.assertTrue(_host_is_configured("  192.0.2.2  "))
         self.assertTrue(_host_is_configured(123))
         self.assertFalse(_host_is_configured(""))
         self.assertFalse(_host_is_configured("   "))
@@ -213,7 +213,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
             {
                 "DEFAULT": {
                     "DeviceInstance": "77",
-                    "Host": "192.168.1.44",
+                    "Host": "192.0.2.44",
                     "Phase": "L2",
                     "Position": "3",
                     "PollIntervalMs": "2500",
@@ -323,7 +323,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         controller.load_runtime_configuration()
 
         self.assertEqual(service.deviceinstance, 77)
-        self.assertEqual(service.host, "192.168.1.44")
+        self.assertEqual(service.host, "192.0.2.44")
         self.assertTrue(service.host_configured)
         self.assertEqual(service.phase, "L2")
         self.assertEqual(service.position, 3)
@@ -516,7 +516,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         parser = configparser.ConfigParser()
         parser.read_dict(
             {
-                "DEFAULT": {"Host": "192.168.1.20"},
+                "DEFAULT": {"Host": "192.0.2.20"},
                 "Backends": {
                     "Mode": "split",
                     "MeterType": "shelly_combined",
@@ -588,7 +588,7 @@ class TestServiceBootstrapControllerConfig(ServiceBootstrapControllerTestCase):
         parser = configparser.ConfigParser()
         parser.read_dict(
             {
-                "DEFAULT": {"Host": "192.168.1.20"},
+                "DEFAULT": {"Host": "192.0.2.20"},
                 "Backends": {
                     "Mode": "split",
                     "MeterType": "none",

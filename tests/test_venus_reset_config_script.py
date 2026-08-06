@@ -45,7 +45,7 @@ class TestVenusResetConfigScript(unittest.TestCase):
 
             config_path.write_text(
                 "[DEFAULT]\n"
-                "Host=192.168.1.50\n"
+                "Host=192.0.2.50\n"
                 f"RuntimeStatePath={runtime_state_path}\n"
                 f"RuntimeOverridesPath={runtime_overrides_path}\n"
                 "DeviceInstance=77\n",
@@ -67,7 +67,7 @@ class TestVenusResetConfigScript(unittest.TestCase):
             self.assertEqual(config_path.read_text(encoding="utf-8"), default_config_path.read_text(encoding="utf-8"))
             backup_candidates = sorted(deploy_dir.glob("config.venus_evcharger.ini.reset-backup-*"))
             self.assertEqual(len(backup_candidates), 1)
-            self.assertIn("Host=192.168.1.50\n", backup_candidates[0].read_text(encoding="utf-8"))
+            self.assertIn("Host=192.0.2.50\n", backup_candidates[0].read_text(encoding="utf-8"))
             self.assertFalse(runtime_state_path.exists())
             self.assertFalse(runtime_overrides_path.exists())
             self.assertFalse((deploy_dir / "wizard-charger.ini").exists())

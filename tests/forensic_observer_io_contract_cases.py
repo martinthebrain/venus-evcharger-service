@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.ops import forensic_observer as observer
+from venus_evcharger.ops import forensic_observer_artifacts as artifacts
 from venus_evcharger.ops import forensic_observer_schema as schema
 from venus_evcharger.ports.gateway_diagnostics import (
     GatewayDiagnosticsSnapshot,
@@ -75,7 +76,7 @@ class ForensicObserverIOContractCases(unittest.TestCase):
 
     def test_public_reader_defaults_are_part_of_the_contract(self) -> None:
         expectations = {
-            observer.read_mounts: {"path": "/proc/mounts"},
+            artifacts.read_mounts: {"path": "/proc/mounts"},
             observer.command_output: {"timeout": 3.0},
             observer.tail_file: {"max_bytes": 20000},
             observer.tail_log_dir: {"max_bytes": 20000},
@@ -136,11 +137,11 @@ class ForensicObserverIOContractCases(unittest.TestCase):
     def test_redaction_contract_is_line_preserving_and_case_insensitive(self) -> None:
         source = "plain\nHost=x\nPassword=p=tail\nAPI_TOKEN=t\nsecretKey=s\nAuthorization=a\n"
         self.assertEqual(
-            observer.redact_config_text(source),
+            artifacts.redact_config_text(source),
             "plain\nHost=x\nPassword=<redacted>\nAPI_TOKEN=<redacted>\n"
             "secretKey=<redacted>\nAuthorization=<redacted>\n",
         )
-        self.assertEqual(observer.redact_config_text(""), "\n")
+        self.assertEqual(artifacts.redact_config_text(""), "\n")
 
     def test_mount_candidates_require_supported_device_and_mount_prefix(self) -> None:
         mounts = (
@@ -154,32 +155,32 @@ class ForensicObserverIOContractCases(unittest.TestCase):
             "/dev/sda2 /srv/no ext4 rw 0 0\n"
         )
         self.assertEqual(
-            observer.mounted_storage_candidates(mounts),
+            artifacts.mounted_storage_candidates(mounts),
             ["/media/two-parts", "/media/Card One", "/run/media/card", "/mnt/archive"],
         )
 
     def test_mount_and_writable_directory_error_contracts(self) -> None:
         with patch.object(Path, "read_text", side_effect=OSError("missing")):
-            self.assertEqual(observer.read_mounts("mounts"), "")
+            self.assertEqual(artifacts.read_mounts("mounts"), "")
         with patch.object(Path, "read_text", return_value="mounted") as read:
-            self.assertEqual(observer.read_mounts("mounts"), "mounted")
+            self.assertEqual(artifacts.read_mounts("mounts"), "mounted")
         read.assert_called_once_with(encoding="utf-8")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             blocked = Path(temp_dir) / "blocked"
             blocked.write_text("file", encoding="utf-8")
             valid = Path(temp_dir) / "valid"
-            selected = observer.first_writable_log_dir(
+            selected = artifacts.first_writable_log_dir(
                 [str(blocked), str(valid)],
                 subdir="evidence",
             )
             self.assertEqual(selected, str(valid / "evidence"))
             self.assertFalse((valid / "evidence/.write-test").exists())
             self.assertEqual(
-                observer.first_writable_log_dir([str(valid)], subdir="evidence"),
+                artifacts.first_writable_log_dir([str(valid)], subdir="evidence"),
                 str(valid / "evidence"),
             )
-        self.assertEqual(observer.first_writable_log_dir([], subdir="evidence"), "")
+        self.assertEqual(artifacts.first_writable_log_dir([], subdir="evidence"), "")
 
     def test_command_output_bounds_and_reports_subprocess_contract(self) -> None:
         completed = SimpleNamespace(returncode=3, stdout="a" * 5000, stderr="b" * 5001)
@@ -292,15 +293,15 @@ class ForensicObserverIOContractCases(unittest.TestCase):
             path.write_bytes(b"0123456789")
             self.assertEqual(observer.tail_file(str(path), max_bytes=4), "6789")
             self.assertEqual(observer.tail_file(str(path), max_bytes=20), "0123456789")
-            self.assertEqual(observer.read_text_safe(str(path)), "0123456789")
+            self.assertEqual(artifacts.read_text_safe(str(path)), "0123456789")
             path.write_bytes(b"abc\xff")
             self.assertEqual(observer.tail_file(str(path), max_bytes=4), "abc\ufffd")
             missing = str(Path(temp_dir) / "missing")
             self.assertTrue(observer.tail_file(missing).startswith("<unavailable: "))
-            self.assertTrue(observer.read_text_safe(missing).startswith("<unavailable: "))
-            self.assertTrue(observer.read_text_safe(missing).endswith("\n"))
+            self.assertTrue(artifacts.read_text_safe(missing).startswith("<unavailable: "))
+            self.assertTrue(artifacts.read_text_safe(missing).endswith("\n"))
         with patch.object(Path, "read_text", return_value="safe") as read_text:
-            self.assertEqual(observer.read_text_safe("state"), "safe")
+            self.assertEqual(artifacts.read_text_safe("state"), "safe")
         read_text.assert_called_once_with(encoding="utf-8")
 
     def test_tail_log_dir_uses_four_newest_files_and_requested_limit(self) -> None:
@@ -425,15 +426,15 @@ class ForensicObserverIOContractCases(unittest.TestCase):
         )
 
     def test_artifact_timestamp_accepts_numbers_but_not_bool_or_text(self) -> None:
-        self.assertEqual(observer._artifact_timestamp({"timestamp": 7}), 7.0)
-        self.assertEqual(observer._artifact_timestamp({"timestamp": 7.5}), 7.5)
+        self.assertEqual(artifacts._artifact_timestamp({"timestamp": 7}), 7.0)
+        self.assertEqual(artifacts._artifact_timestamp({"timestamp": 7.5}), 7.5)
         for invalid in (True, "7", None):
             with self.subTest(value=invalid):
                 with self.assertRaisesRegex(
                     ValueError,
                     "^forensic snapshot timestamp must be numeric$",
                 ):
-                    observer._artifact_timestamp({"timestamp": invalid})
+                    artifacts._artifact_timestamp({"timestamp": invalid})
 
     def test_marker_json_and_process_contracts_are_exact(self) -> None:
         self.assertEqual(

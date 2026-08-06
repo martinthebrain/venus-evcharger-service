@@ -17,6 +17,9 @@ from venus_evcharger.core.contracts import CONTROL_API_EVENT_KINDS, normalized_c
 
 
 RETRY_HEADER = "X-Control-Api-Retry-Ms"
+CONTROL_API_MAX_EVENT_HISTORY = 256
+CONTROL_API_MAX_EVENT_STREAM_SECONDS = 30.0
+CONTROL_API_MAX_HEARTBEAT_SECONDS = 10.0
 
 
 class ControlApiHttpEventEndpoint:
@@ -28,10 +31,20 @@ class ControlApiHttpEventEndpoint:
 
     def write_stream(self, handler: BaseHTTPRequestHandler, params: dict[str, list[str]]) -> None:
         event_bus = self._service.event_bus()
-        limit = self.query_int(params, "limit", 20)
+        limit = self.query_int(params, "limit", 20, maximum=CONTROL_API_MAX_EVENT_HISTORY)
         after_seq = max(self.query_int(params, "after", 0), self.query_int(params, "resume", 0))
-        timeout = self.query_float(params, "timeout", 5.0)
-        heartbeat_interval = self.query_float(params, "heartbeat", 1.0)
+        timeout = self.query_float(
+            params,
+            "timeout",
+            5.0,
+            maximum=CONTROL_API_MAX_EVENT_STREAM_SECONDS,
+        )
+        heartbeat_interval = self.query_float(
+            params,
+            "heartbeat",
+            1.0,
+            maximum=CONTROL_API_MAX_HEARTBEAT_SECONDS,
+        )
         event_kinds = self.query_event_kinds(params)
         retry_ms = self.recommended_retry_ms(heartbeat_interval)
         once = self.query_bool(params, "once", False)
@@ -195,24 +208,38 @@ class ControlApiHttpEventEndpoint:
         return max(250, int(interval * 1000))
 
     @staticmethod
-    def query_int(params: dict[str, list[str]], key: str, default: int) -> int:
+    def query_int(
+        params: dict[str, list[str]],
+        key: str,
+        default: int,
+        *,
+        maximum: int | None = None,
+    ) -> int:
         values = params.get(key)
         if not values:
             return default
         try:
-            return max(0, int(values[0]))
+            value = max(0, int(values[0]))
         except ValueError:
             return default
+        return min(value, maximum) if maximum is not None else value
 
     @staticmethod
-    def query_float(params: dict[str, list[str]], key: str, default: float) -> float:
+    def query_float(
+        params: dict[str, list[str]],
+        key: str,
+        default: float,
+        *,
+        maximum: float | None = None,
+    ) -> float:
         values = params.get(key)
         if not values:
             return default
         try:
-            return max(0.0, float(values[0]))
+            value = max(0.0, float(values[0]))
         except ValueError:
             return default
+        return min(value, maximum) if maximum is not None else value
 
     @staticmethod
     def query_bool(params: dict[str, list[str]], key: str, default: bool) -> bool:

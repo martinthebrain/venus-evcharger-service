@@ -84,9 +84,16 @@ class DbusAdapterSocket:
         with suppress(FileNotFoundError):
             os.unlink(self._context.paths.socket_path)
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind(self._context.paths.socket_path)
-        server.listen(SOCKET_BACKLOG)
-        server.setblocking(False)
+        try:
+            server.bind(self._context.paths.socket_path)
+            os.chmod(self._context.paths.socket_path, 0o600)
+            server.listen(SOCKET_BACKLOG)
+            server.setblocking(False)
+        except OSError:
+            server.close()
+            with suppress(FileNotFoundError):
+                os.unlink(self._context.paths.socket_path)
+            raise
         self._context._server = server
 
     def install_glib_watch(self) -> None:

@@ -130,6 +130,67 @@ filesystem_mountpoint() {
 	df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $6 }'
 }
 
+filesystem_device() {
+	df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $1 }'
+}
+
+path_is_on_removable_storage() {
+	storage_probe_path="$1"
+	while [ ! -e "$storage_probe_path" ] && [ "$storage_probe_path" != "/" ]; do
+		storage_probe_path=$(dirname "$storage_probe_path")
+	done
+	storage_mountpoint=$(filesystem_mountpoint "$storage_probe_path")
+	storage_device=$(filesystem_device "$storage_probe_path")
+	case "$storage_device:$storage_mountpoint" in
+	/dev/mmcblk*:/media/* | /dev/mmcblk*:/run/media/* | /dev/mmcblk*:/mnt/* | \
+		/dev/sd*:/media/* | /dev/sd*:/run/media/* | /dev/sd*:/mnt/*)
+		return 0
+		;;
+	esac
+	return 1
+}
+
+acquire_removable_storage_write_lease() {
+	[ "${REMOVABLE_STORAGE_LOCK_HELD:-0}" = "0" ] || return 0
+	if ! command -v flock >/dev/null 2>&1; then
+		log "flock is unavailable; refusing removable-storage updater workspace"
+		return 1
+	fi
+	storage_lock_parent=$(dirname "$REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH")
+	mkdir -p "$storage_lock_parent" || return 1
+	if ! exec 8>"$REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH"; then
+		log "Unable to open removable-storage maintenance lock"
+		return 1
+	fi
+	storage_wait_seconds="$REMOVABLE_STORAGE_MAINTENANCE_WAIT_SECONDS"
+	case "$storage_wait_seconds" in
+	"" | *[!0-9]*) storage_wait_seconds=300 ;;
+	esac
+	storage_waited_seconds=0
+	while ! flock -s -n 8; do
+		if [ "$storage_waited_seconds" -ge "$storage_wait_seconds" ]; then
+			log "Removable-storage maintenance remained active; skipping SD workspace"
+			exec 8>&-
+			return 1
+		fi
+		if [ "$storage_waited_seconds" -eq 0 ]; then
+			log "Waiting for removable-storage maintenance to finish (up to ${storage_wait_seconds}s)"
+		fi
+		sleep 1
+		storage_waited_seconds=$((storage_waited_seconds + 1))
+	done
+	REMOVABLE_STORAGE_LOCK_HELD=1
+	return 0
+}
+
+release_removable_storage_write_lease() {
+	if [ "${REMOVABLE_STORAGE_LOCK_HELD:-0}" = "1" ]; then
+		flock -u 8 2>/dev/null || true
+		exec 8>&-
+		REMOVABLE_STORAGE_LOCK_HELD=0
+	fi
+}
+
 ram_work_area_available() {
 	[ -d "$RAM_WORK_BASE" ] && [ -w "$RAM_WORK_BASE" ] || return 1
 	ram_mountpoint=$(filesystem_mountpoint "$RAM_WORK_BASE")
@@ -152,30 +213,47 @@ detected_sd_mountpoint() {
 }
 
 select_sd_work_root() {
+	acquire_removable_storage_write_lease || return 1
 	if [ -n "$SD_WORK_ROOT_OVERRIDE" ]; then
 		sd_work_root="$SD_WORK_ROOT_OVERRIDE"
 		sd_parent=$(dirname "$sd_work_root")
 	else
 		sd_mountpoint=$(detected_sd_mountpoint)
-		[ -n "$sd_mountpoint" ] || return 1
+		if [ -z "$sd_mountpoint" ]; then
+			release_removable_storage_write_lease
+			return 1
+		fi
 		sd_parent="$sd_mountpoint"
 		sd_work_root="${sd_mountpoint}/.venus-evcharger-updater-work"
 	fi
-	[ -d "$sd_parent" ] && [ -w "$sd_parent" ] || return 1
+	if [ ! -d "$sd_parent" ] || [ ! -w "$sd_parent" ]; then
+		release_removable_storage_write_lease
+		return 1
+	fi
 	sd_available=$(filesystem_available_kb "$sd_parent")
-	[ -n "$sd_available" ] && [ "$sd_available" -ge "$RESOURCE_MIN_DISK_AVAILABLE_KB" ] || return 1
-	printf '%s\n' "$sd_work_root"
+	if [ -z "$sd_available" ] || [ "$sd_available" -lt "$RESOURCE_MIN_DISK_AVAILABLE_KB" ]; then
+		release_removable_storage_write_lease
+		return 1
+	fi
+	SELECTED_SD_WORK_ROOT="$sd_work_root"
+	return 0
 }
 
 select_update_work_root() {
 	if [ -n "$WORK_ROOT_OVERRIDE" ]; then
 		WORK_ROOT="$WORK_ROOT_OVERRIDE"
 		WORK_STORAGE="override"
+		if path_is_on_removable_storage "$WORK_ROOT"; then
+			if ! acquire_removable_storage_write_lease; then
+				WORK_ROOT="$FALLBACK_WORK_ROOT"
+				WORK_STORAGE="data"
+			fi
+		fi
 	elif ram_work_area_available; then
 		WORK_ROOT="${RAM_WORK_BASE}/venus-evcharger-updater-work"
 		WORK_STORAGE="ram"
-	elif selected_sd_root=$(select_sd_work_root); then
-		WORK_ROOT="$selected_sd_root"
+	elif select_sd_work_root; then
+		WORK_ROOT="$SELECTED_SD_WORK_ROOT"
 		WORK_STORAGE="sd"
 	else
 		WORK_ROOT="$FALLBACK_WORK_ROOT"
@@ -194,6 +272,7 @@ finalize_run() {
 	if [ "${DRY_RUN:-0}" != "1" ] && [ -n "${TARGET_DIR:-}" ]; then
 		write_update_status
 	fi
+	release_removable_storage_write_lease
 	release_update_lock
 	return "$status"
 }

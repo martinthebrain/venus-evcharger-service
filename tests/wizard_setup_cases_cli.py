@@ -50,7 +50,7 @@ class _WizardSetupCliCases:
                     "--profile",
                     "simple_relay",
                     "--host",
-                    "192.168.1.44",
+                    "192.0.2.44",
                 ]
             )
 
@@ -71,14 +71,14 @@ class _WizardSetupCliCases:
                     "--profile",
                     "simple_relay",
                     "--host",
-                    "192.168.1.55",
+                    "192.0.2.55",
                 ]
             )
 
             parser = configparser.ConfigParser()
             parser.read(config_path, encoding="utf-8")
             self.assertEqual(rc, 0)
-            self.assertEqual(parser["DEFAULT"]["Host"], "192.168.1.55")
+            self.assertEqual(parser["DEFAULT"]["Host"], "192.0.2.55")
             self.assertTrue(any(path.name.startswith("config.ini.wizard-backup-") for path in config_path.parent.iterdir()))
 
     def test_main_import_config_seeds_non_interactive_defaults(self) -> None:
@@ -87,9 +87,9 @@ class _WizardSetupCliCases:
             configure_wallbox(
                 WizardAnswers(
                     profile="multi_adapter_topology",
-                    host_input="192.168.1.92",
-                    meter_host_input="192.168.1.20",
-                    switch_host_input="192.168.1.21",
+                    host_input="192.0.2.92",
+                    meter_host_input="192.0.2.20",
+                    switch_host_input="192.0.2.21",
                     charger_host_input=None,
                     device_instance=65,
                     phase="L1",
@@ -100,7 +100,7 @@ class _WizardSetupCliCases:
                     topology_preset="shelly-io-modbus-charger",
                     charger_backend="modbus_charger",
                     transport_kind="tcp",
-                    transport_host="192.168.1.93",
+                    transport_host="192.0.2.93",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=8,
@@ -131,7 +131,7 @@ class _WizardSetupCliCases:
             self.assertEqual(payload["topology_preset"], "shelly-io-modbus-charger")
             self.assertEqual(payload["charger_backend"], "modbus_charger")
             self.assertEqual(payload["transport_kind"], "tcp")
-            self.assertEqual(payload["role_hosts"], {"meter": "192.168.1.20", "switch": "192.168.1.21"})
+            self.assertEqual(payload["role_hosts"], {"meter": "192.0.2.20", "switch": "192.0.2.21"})
 
     def test_main_import_config_recognizes_goe_switch_group_topology_preset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -223,7 +223,7 @@ class _WizardSetupCliCases:
             configure_wallbox(
                 WizardAnswers(
                     profile="simple_relay",
-                    host_input="192.168.1.44",
+                    host_input="192.0.2.44",
                     meter_host_input=None,
                     switch_host_input=None,
                     charger_host_input=None,
@@ -236,7 +236,7 @@ class _WizardSetupCliCases:
                     topology_preset=None,
                     charger_backend=None,
                     transport_kind="serial_rtu",
-                    transport_host="192.168.1.44",
+                    transport_host="192.0.2.44",
                     transport_port=502,
                     transport_device="/dev/ttyUSB0",
                     transport_unit_id=1,
@@ -271,7 +271,7 @@ class _WizardSetupCliCases:
             ["--profile", "simple_relay", "--phase", "L1", "--policy-mode", "manual", "--device-instance", "60"]
         )
         with (
-            patch("venus_evcharger.bootstrap.wizard_cli_interactive._prompt_text", side_effect=["192.168.1.50", "admin"]),
+            patch("venus_evcharger.bootstrap.wizard_cli_interactive._prompt_text", side_effect=["192.0.2.50", "admin"]),
             patch("venus_evcharger.bootstrap.wizard_cli_interactive.prompt_yes_no", return_value=True),
             patch("venus_evcharger.bootstrap.wizard_cli_prompts.getpass.getpass", return_value="very-secret") as password_prompt,
         ):

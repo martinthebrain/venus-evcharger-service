@@ -74,8 +74,8 @@ Type=actuator_native
         with tempfile.TemporaryDirectory() as temp_dir:
             meter_path = Path(temp_dir) / "meter.ini"
             switch_path = Path(temp_dir) / "switch.ini"
-            meter_path.write_text("[Adapter]\nType=shelly_meter\nHost=192.168.1.20\n", encoding="utf-8")
-            switch_path.write_text("[Adapter]\nType=shelly_switch\nHost=192.168.1.21\n[Capabilities]\nSupportedPhaseSelections=P1,P1_P2,P1_P2_P3\n[PhaseMap]\nP1=0\nP1_P2=0,1\nP1_P2_P3=0,1,2\n", encoding="utf-8")
+            meter_path.write_text("[Adapter]\nType=shelly_meter\nHost=192.0.2.20\n", encoding="utf-8")
+            switch_path.write_text("[Adapter]\nType=shelly_switch\nHost=192.0.2.21\n[Capabilities]\nSupportedPhaseSelections=P1,P1_P2,P1_P2_P3\n[PhaseMap]\nP1=0\nP1_P2=0,1\nP1_P2_P3=0,1,2\n", encoding="utf-8")
             service = _service_from_backends_config(
                 mode="split",
                 meter_type="shelly_meter",
@@ -90,7 +90,7 @@ Type=actuator_native
     def test_build_service_backends_supports_contactor_and_template_switches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             switch_path = Path(temp_dir) / "switch.ini"
-            switch_path.write_text("[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.21\n", encoding="utf-8")
+            switch_path.write_text("[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.21\n", encoding="utf-8")
             service = _service_from_backends_config(
                 mode="split",
                 meter_type="shelly_combined",
@@ -110,7 +110,7 @@ Type=actuator_native
             p2_path = Path(temp_dir) / "phase2-switch.ini"
             switch_path = Path(temp_dir) / "switch.ini"
             p1_path.write_text("[Adapter]\nType=template_switch\nBaseUrl=http://phase1.local\n[StateRequest]\nUrl=/state\n[StateResponse]\nEnabledPath=enabled\n[CommandRequest]\nMethod=POST\nUrl=/control\n", encoding="utf-8")
-            p2_path.write_text("[Adapter]\nType=shelly_switch\nHost=192.168.1.21\n", encoding="utf-8")
+            p2_path.write_text("[Adapter]\nType=shelly_switch\nHost=192.0.2.21\n", encoding="utf-8")
             switch_path.write_text("[Adapter]\nType=switch_group\n[Members]\nP1=phase1-switch.ini\nP2=phase2-switch.ini\n", encoding="utf-8")
             meter_path = Path(temp_dir) / "meter.ini"
             meter_path.write_text("[Adapter]\nType=template_meter\nBaseUrl=http://adapter.local\n[MeterRequest]\nUrl=/meter/state\n[MeterResponse]\nPowerPath=power_w\nEnergyKwhPath=energy_kwh\n", encoding="utf-8")

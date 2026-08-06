@@ -10,6 +10,7 @@ from unittest.mock import patch
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.ipc.gateway_diagnostics import encode_gateway_diagnostics
 from venus_evcharger.ops import forensic_observer as observer
+from venus_evcharger.ops import forensic_observer_artifacts as artifacts
 
 
 def _repository_script(name: str) -> Path:
@@ -31,14 +32,14 @@ class ForensicObserverTests(unittest.TestCase):
             defaults = observer.load_config(str(config_path))["DEFAULT"]
 
             self.assertEqual(observer.device_instance(defaults), 70)
-            self.assertIn("Password=<redacted>", observer.redact_config_text(config_path.read_text(encoding="utf-8")))
+            self.assertIn("Password=<redacted>", artifacts.redact_config_text(config_path.read_text(encoding="utf-8")))
             config_path.write_text("[DEFAULT]\nDeviceInstance=bad\nServiceName=\n", encoding="utf-8")
             invalid_defaults = observer.load_config(str(config_path))["DEFAULT"]
             self.assertEqual(observer.device_instance(invalid_defaults), 60)
             self.assertEqual(observer.auto_input_snapshot_path(invalid_defaults), "/run/dbus-venus-evcharger-auto-60.json")
             self.assertEqual(observer.runtime_state_path(invalid_defaults), "/run/dbus-venus-evcharger-60.json")
             self.assertEqual(
-                observer.mounted_storage_candidates(
+                artifacts.mounted_storage_candidates(
                     "broken-line\n"
                     "/dev/root / ext4 rw 0 0\n"
                     "/dev/sda2 /not-removable ext4 rw 0 0\n"
@@ -47,9 +48,9 @@ class ForensicObserverTests(unittest.TestCase):
                 ),
                 ["/media/SD Card", "/mnt/card"],
             )
-            self.assertEqual(observer.first_writable_log_dir([str(Path(temp_dir) / "card")]), str(Path(temp_dir) / "card/venus-evcharger-forensics"))
-            self.assertEqual(observer.first_writable_log_dir([str(config_path)]), "")
-            self.assertEqual(observer.read_mounts(str(Path(temp_dir) / "missing-mounts")), "")
+            self.assertEqual(artifacts.first_writable_log_dir([str(Path(temp_dir) / "card")]), str(Path(temp_dir) / "card/venus-evcharger-forensics"))
+            self.assertEqual(artifacts.first_writable_log_dir([str(config_path)]), "")
+            self.assertEqual(artifacts.read_mounts(str(Path(temp_dir) / "missing-mounts")), "")
             config_path.write_text("[DEFAULT]\nAutoInputSnapshotPath=/tmp/custom-auto.json\n", encoding="utf-8")
             self.assertEqual(
                 observer.auto_input_snapshot_path(
@@ -108,12 +109,12 @@ class ForensicObserverTests(unittest.TestCase):
             self.assertEqual(observer.trace_markers_in_text("hello malloc() NoReply"), ["malloc()", "NoReply"])
             self.assertIn("Traceback", observer.tail_log_dir(str(log_source))["current"])
             self.assertEqual(observer.tail_log_dir(str(Path(temp_dir) / "missing-logs")), {})
-            self.assertIn("<unavailable:", observer.read_text_safe(str(Path(temp_dir) / "missing-config")))
+            self.assertIn("<unavailable:", artifacts.read_text_safe(str(Path(temp_dir) / "missing-config")))
 
             with patch.object(observer.subprocess, "run", side_effect=RuntimeError("boom")):
                 self.assertFalse(observer.command_output(["false"])["ok"])
 
-            incident_dir = observer.write_incident(
+            incident_dir = artifacts.write_incident(
                 str(target),
                 {"timestamp": 100.0, "dbus": {"ok": False}, "trace_markers": []},
                 str(config_path),
@@ -175,14 +176,26 @@ class ForensicObserverTests(unittest.TestCase):
         self.assertEqual(observer.helper_processes("venus_evcharger_auto_input_helper.py\n"), [{"pid": "venus_evcharger_auto_input_helper.py", "line": "venus_evcharger_auto_input_helper.py"}])
 
     def test_observer_loop_skips_collection_without_removable_storage(self):
+        sleep_calls: list[float] = []
+
+        def stop_after_one_iteration(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            if len(sleep_calls) == 2:
+                raise KeyboardInterrupt
+
         with (
-            patch.object(observer.time, "sleep", return_value=None),
-            patch.object(observer, "read_mounts", side_effect=["", KeyboardInterrupt]),
+            patch.object(
+                observer.time,
+                "sleep",
+                side_effect=stop_after_one_iteration,
+            ),
+            patch.object(artifacts, "read_mounts", return_value=""),
             patch.object(observer, "collect_snapshot") as collect_snapshot,
         ):
             with self.assertRaises(KeyboardInterrupt):
                 observer.observer_loop("/tmp/config.ini", start_delay=0, interval=1)
 
+        self.assertEqual(sleep_calls, [0.0, 1.0])
         collect_snapshot.assert_not_called()
 
     def test_observer_loop_writes_incident_only_when_sd_and_reasons_exist(self):
@@ -199,8 +212,8 @@ class ForensicObserverTests(unittest.TestCase):
 
             with (
                 patch.object(observer.time, "sleep", side_effect=fake_sleep),
-                patch.object(observer, "read_mounts", return_value="mounted\n"),
-                patch.object(observer, "mounted_storage_candidates", return_value=[str(card)]),
+                patch.object(artifacts, "read_mounts", return_value="mounted\n"),
+                patch.object(artifacts, "mounted_storage_candidates", return_value=[str(card)]),
                 patch.object(observer, "collect_snapshot", return_value={"timestamp": 100.0}),
                 patch.object(
                     observer,
@@ -209,7 +222,13 @@ class ForensicObserverTests(unittest.TestCase):
                 ),
             ):
                 with self.assertRaises(KeyboardInterrupt):
-                    observer.observer_loop(str(config_path), start_delay=0, interval=1, incident_cooldown=900)
+                    observer.observer_loop(
+                        str(config_path),
+                        start_delay=0,
+                        interval=1,
+                        incident_cooldown=900,
+                        storage_lock_path=str(Path(temp_dir) / "maintenance.lock"),
+                    )
 
             incidents = list((card / "venus-evcharger-forensics").glob("incident-*"))
             self.assertEqual(len(incidents), 1)
@@ -226,8 +245,8 @@ class ForensicObserverTests(unittest.TestCase):
 
             with (
                 patch.object(observer.time, "sleep", side_effect=fake_sleep),
-                patch.object(observer, "read_mounts", return_value="mounted\n"),
-                patch.object(observer, "mounted_storage_candidates", return_value=[str(card)]),
+                patch.object(artifacts, "read_mounts", return_value="mounted\n"),
+                patch.object(artifacts, "mounted_storage_candidates", return_value=[str(card)]),
                 patch.object(observer, "collect_snapshot", return_value={"timestamp": 100.0}),
                 patch.object(observer, "incident_reasons", return_value=[]),
             ):

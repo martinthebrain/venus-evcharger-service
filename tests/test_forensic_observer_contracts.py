@@ -7,6 +7,7 @@ import inspect
 import json
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import call, patch
 
@@ -17,6 +18,7 @@ from tests.forensic_observer_io_contract_cases import (
 )
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.ops import forensic_observer as observer
+from venus_evcharger.ops import forensic_observer_artifacts as artifacts
 from venus_evcharger.ops.forensic_observer_probe import DisabledBackendProbe
 
 __all__ = ["ForensicObserverContractTests", "TestForensicObserverIOContractCases"]
@@ -76,8 +78,8 @@ class ForensicObserverContractTests(unittest.TestCase):
             observer.incident_reasons(invalid),
             ["gateway-diagnostics-invalid"],
         )
-        self.assertEqual(observer._slug(" A/B ++ "), "a-b")
-        self.assertEqual(observer._slug("---"), "event")
+        self.assertEqual(artifacts.slug_text(" A/B ++ "), "a-b")
+        self.assertEqual(artifacts.slug_text("---"), "event")
 
     def test_collect_snapshot_wires_every_source_into_stable_schema(self) -> None:
         config = _config("")
@@ -242,7 +244,7 @@ class ForensicObserverContractTests(unittest.TestCase):
         for invalid_timestamp in (True, "1"):
             with self.subTest(timestamp=invalid_timestamp):
                 with self.assertRaisesRegex(ValueError, "timestamp must be numeric"):
-                    observer.write_incident(
+                    artifacts.write_incident(
                         "log",
                         {"timestamp": invalid_timestamp},
                         "config",
@@ -253,10 +255,10 @@ class ForensicObserverContractTests(unittest.TestCase):
             config = Path(temp_dir) / "config.ini"
             config.write_text("Password=secret\n", encoding="utf-8")
             with (
-                patch.object(observer.time, "strftime", return_value="STAMP") as stamp,
-                patch.object(observer.time, "localtime", return_value="LOCAL") as localtime,
+                patch.object(artifacts.time, "strftime", return_value="STAMP") as stamp,
+                patch.object(artifacts.time, "localtime", return_value="LOCAL") as localtime,
             ):
-                incident = observer.write_incident(
+                incident = artifacts.write_incident(
                     str(root),
                     {"timestamp": 42.0, "value": 1},
                     str(config),
@@ -286,7 +288,7 @@ class ForensicObserverContractTests(unittest.TestCase):
             )
 
             long_reason = "x" * 100
-            long_incident = observer.write_incident(
+            long_incident = artifacts.write_incident(
                 str(root),
                 {"timestamp": 43},
                 str(config),
@@ -294,7 +296,7 @@ class ForensicObserverContractTests(unittest.TestCase):
             )
             self.assertEqual(len(Path(long_incident).name.rsplit("-", 1)[-1]), 80)
             self.assertEqual(
-                observer.write_incident(
+                artifacts.write_incident(
                     str(root),
                     {"timestamp": 43},
                     str(config),
@@ -304,13 +306,13 @@ class ForensicObserverContractTests(unittest.TestCase):
             )
 
         with (
-            patch.object(observer.time, "strftime", return_value="STAMP"),
-            patch.object(observer.time, "localtime", return_value="LOCAL"),
+            patch.object(artifacts.time, "strftime", return_value="STAMP"),
+            patch.object(artifacts.time, "localtime", return_value="LOCAL"),
             patch.object(Path, "mkdir"),
             patch.object(Path, "write_text", return_value=1) as write_text,
-            patch.object(observer, "read_text_safe", return_value="Host=x\n"),
+            patch.object(artifacts, "read_text_safe", return_value="Host=x\n"),
         ):
-            observer.write_incident(
+            artifacts.write_incident(
                 "log",
                 {"timestamp": 1.0},
                 "config",
@@ -326,13 +328,13 @@ class ForensicObserverContractTests(unittest.TestCase):
         diagnostics_reader = _DiagnosticsReader()
         backend_probe = DisabledBackendProbe("iteration")
         with (
-            patch.object(observer, "read_mounts", return_value="mounts") as read_mounts,
+            patch.object(artifacts, "read_mounts", return_value="mounts") as read_mounts,
             patch.object(
-                observer,
+                artifacts,
                 "mounted_storage_candidates",
-                return_value=["card"],
+                return_value=[],
             ) as candidates,
-            patch.object(observer, "first_writable_log_dir", return_value="") as writable,
+            patch.object(artifacts, "first_writable_log_dir", return_value="") as writable,
             patch.object(observer, "collect_snapshot") as collect,
         ):
             self.assertEqual(
@@ -348,14 +350,14 @@ class ForensicObserverContractTests(unittest.TestCase):
             )
         read_mounts.assert_called_once_with("mounts-file")
         candidates.assert_called_once_with("mounts")
-        writable.assert_called_once_with(["card"])
+        writable.assert_not_called()
         collect.assert_not_called()
 
         snapshot = {"timestamp": 1.0}
         with (
-            patch.object(observer, "read_mounts", return_value="mounts"),
-            patch.object(observer, "mounted_storage_candidates", return_value=["card"]),
-            patch.object(observer, "first_writable_log_dir", return_value="log"),
+            patch.object(artifacts, "read_mounts", return_value="mounts"),
+            patch.object(artifacts, "mounted_storage_candidates", return_value=["card"]),
+            patch.object(artifacts, "first_writable_log_dir", return_value="log"),
             patch.object(
                 observer,
                 "collect_snapshot",
@@ -363,7 +365,12 @@ class ForensicObserverContractTests(unittest.TestCase):
             ) as collect,
             patch.object(observer, "incident_reasons", return_value=["reason"]) as reasons,
             patch.object(observer.time, "time", return_value=20.0),
-            patch.object(observer, "write_incident") as write,
+            patch.object(
+                artifacts,
+                "removable_storage_write_lease",
+                return_value=nullcontext(True),
+            ),
+            patch.object(artifacts, "write_incident") as write,
         ):
             self.assertEqual(
                 observer._observer_iteration(
@@ -385,13 +392,13 @@ class ForensicObserverContractTests(unittest.TestCase):
         write.assert_called_once_with("log", snapshot, "config", ["reason"])
 
         with (
-            patch.object(observer, "read_mounts", return_value="mounts"),
-            patch.object(observer, "mounted_storage_candidates", return_value=["card"]),
-            patch.object(observer, "first_writable_log_dir", return_value="log"),
+            patch.object(artifacts, "read_mounts", return_value="mounts"),
+            patch.object(artifacts, "mounted_storage_candidates", return_value=["card"]),
+            patch.object(artifacts, "first_writable_log_dir", return_value="log"),
             patch.object(observer, "collect_snapshot", return_value=snapshot),
             patch.object(observer, "incident_reasons", return_value=["reason"]),
             patch.object(observer.time, "time", return_value=19.9),
-            patch.object(observer, "write_incident") as no_write,
+            patch.object(artifacts, "write_incident") as no_write,
         ):
             self.assertEqual(
                 observer._observer_iteration(
@@ -406,12 +413,102 @@ class ForensicObserverContractTests(unittest.TestCase):
             )
         no_write.assert_not_called()
 
+    def test_observer_defers_incident_during_storage_maintenance(self) -> None:
+        snapshot = {"timestamp": 1.0}
+        with (
+            patch.object(artifacts, "read_mounts", return_value="mounts"),
+            patch.object(
+                artifacts,
+                "mounted_storage_candidates",
+                return_value=["card"],
+            ),
+            patch.object(observer, "collect_snapshot", return_value=snapshot),
+            patch.object(observer, "incident_reasons", return_value=["reason"]),
+            patch.object(observer.time, "time", return_value=20.0),
+            patch.object(
+                artifacts,
+                "removable_storage_write_lease",
+                return_value=nullcontext(False),
+            ) as lease,
+            patch.object(artifacts, "first_writable_log_dir") as writable,
+            patch.object(artifacts, "write_incident") as write,
+        ):
+            self.assertEqual(
+                observer._observer_iteration(
+                    "config",
+                    10.0,
+                    incident_cooldown=10.0,
+                    mounts_path="mounts",
+                    diagnostics_reader=None,
+                    backend_probe=None,
+                    storage_lock_path="maintenance.lock",
+                ),
+                10.0,
+            )
+        lease.assert_called_once_with("maintenance.lock")
+        writable.assert_not_called()
+        write.assert_not_called()
+
+    def test_observer_revalidates_storage_after_acquiring_lease(self) -> None:
+        snapshot = {"timestamp": 1.0}
+        with (
+            patch.object(
+                artifacts,
+                "read_mounts",
+                side_effect=["mounted-before", "mounted-after"],
+            ) as read_mounts,
+            patch.object(
+                artifacts,
+                "mounted_storage_candidates",
+                side_effect=[["card"], []],
+            ) as candidates,
+            patch.object(observer, "collect_snapshot", return_value=snapshot),
+            patch.object(observer, "incident_reasons", return_value=["reason"]),
+            patch.object(observer.time, "time", return_value=20.0),
+            patch.object(
+                artifacts,
+                "removable_storage_write_lease",
+                return_value=nullcontext(True),
+            ),
+            patch.object(
+                artifacts,
+                "first_writable_log_dir",
+                return_value="",
+            ) as writable,
+            patch.object(artifacts, "write_incident") as write,
+        ):
+            self.assertEqual(
+                observer._observer_iteration(
+                    "config",
+                    10.0,
+                    incident_cooldown=10.0,
+                    mounts_path="mounts",
+                    diagnostics_reader=None,
+                    backend_probe=None,
+                ),
+                10.0,
+            )
+        self.assertEqual(
+            read_mounts.call_args_list,
+            [call("mounts"), call("mounts")],
+        )
+        self.assertEqual(
+            candidates.call_args_list,
+            [call("mounted-before"), call("mounted-after")],
+        )
+        writable.assert_called_once_with([])
+        write.assert_not_called()
+
     def test_observer_loop_clamps_delays_and_carries_incident_timestamp(self) -> None:
         signature = inspect.signature(observer.observer_loop)
         self.assertEqual(signature.parameters["start_delay"].default, 180.0)
         self.assertEqual(signature.parameters["interval"].default, 30.0)
         self.assertEqual(signature.parameters["incident_cooldown"].default, 900.0)
         self.assertEqual(signature.parameters["mounts_path"].default, "/proc/mounts")
+        self.assertEqual(
+            signature.parameters["storage_lock_path"].default,
+            observer.DEFAULT_REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH,
+        )
         sleeps: list[float] = []
         diagnostics_reader = _DiagnosticsReader()
         backend_probe = DisabledBackendProbe("loop")
@@ -450,6 +547,9 @@ class ForensicObserverContractTests(unittest.TestCase):
                     mounts_path="mounts",
                     diagnostics_reader=diagnostics_reader,
                     backend_probe=backend_probe,
+                    storage_lock_path=(
+                        observer.DEFAULT_REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH
+                    ),
                 ),
                 call(
                     "config",
@@ -458,6 +558,9 @@ class ForensicObserverContractTests(unittest.TestCase):
                     mounts_path="mounts",
                     diagnostics_reader=diagnostics_reader,
                     backend_probe=backend_probe,
+                    storage_lock_path=(
+                        observer.DEFAULT_REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH
+                    ),
                 ),
             ],
         )

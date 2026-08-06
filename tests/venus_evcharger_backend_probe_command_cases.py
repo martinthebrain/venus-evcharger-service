@@ -24,7 +24,7 @@ class TestShellyWallboxBackendProbeCommands(BackendProbeTestCase):
             meter_path = self._write_config(
                 temp_dir,
                 "meter.ini",
-                "[Adapter]\nType=shelly_meter\nHost=192.168.1.10\nShellyProfile=em_3phase_profiled\n"
+                "[Adapter]\nType=shelly_meter\nHost=192.0.2.10\nShellyProfile=em_3phase_profiled\n"
                 "[Phase]\nMeasuredPhaseSelection=P1_P2_P3\n",
             )
             session = MagicMock()
@@ -100,7 +100,7 @@ class TestShellyWallboxBackendProbeCommands(BackendProbeTestCase):
             switch_path = self._write_config(
                 temp_dir,
                 "switch.ini",
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.11\nShellyProfile=switch_1ch_with_pm\nId=1\n"
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.11\nShellyProfile=switch_1ch_with_pm\nId=1\n"
                 "[Capabilities]\nSwitchingMode=contactor\nSupportedPhaseSelections=P1,P1_P2_P3\n"
                 "RequiresChargePauseForPhaseChange=1\n"
                 "[PhaseMap]\nP1=1\nP1_P2_P3=1,2,3\n",
@@ -133,7 +133,7 @@ class TestShellyWallboxBackendProbeCommands(BackendProbeTestCase):
             switch_path = self._write_config(
                 temp_dir,
                 "switch.ini",
-                "[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.11\nComponent=Switch\nId=1\n",
+                "[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.11\nComponent=Switch\nId=1\n",
             )
             session = MagicMock()
             session.get.return_value = _FakeResponse({"output": False})
@@ -154,7 +154,7 @@ class TestShellyWallboxBackendProbeCommands(BackendProbeTestCase):
             switch_path = self._write_config(
                 temp_dir,
                 "switch.ini",
-                "[Adapter]\nType=shelly_contactor_switch\nHost=192.168.1.11\nComponent=Switch\nId=1\n"
+                "[Adapter]\nType=shelly_contactor_switch\nHost=192.0.2.11\nComponent=Switch\nId=1\n"
                 "[Feedback]\nComponent=Input\nId=7\nValuePath=state\n"
                 "[Interlock]\nComponent=Input\nId=8\nValuePath=state\nInvert=1\n",
             )
@@ -194,7 +194,7 @@ class TestShellyWallboxBackendProbeCommands(BackendProbeTestCase):
             self._write_config(
                 temp_dir,
                 "phase2-switch.ini",
-                "[Adapter]\nType=shelly_switch\nHost=192.168.1.22\nComponent=Switch\nId=0\n",
+                "[Adapter]\nType=shelly_switch\nHost=192.0.2.22\nComponent=Switch\nId=0\n",
             )
             self._write_config(
                 temp_dir,
@@ -327,7 +327,7 @@ class TestShellyWallboxBackendProbeCommands(BackendProbeTestCase):
             wallbox_path = self._write_config(
                 temp_dir,
                 "config.ini",
-                "[DEFAULT]\nHost=192.168.1.20\n"
+                "[DEFAULT]\nHost=192.0.2.20\n"
                 "[Backends]\nMode=split\nMeterType=none\nSwitchType=none\n"
                 f"ChargerType=template_charger\nChargerConfigPath={charger_path}\n",
             )

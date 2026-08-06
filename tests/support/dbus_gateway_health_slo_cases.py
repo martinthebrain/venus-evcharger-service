@@ -134,10 +134,10 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                 {"grid_power_w", "pv_power_w", "battery_soc"},
             )
 
-            install_mock(adapter.read_scheduler, "force_due", MagicMock())
+            install_mock(adapter.read_scheduler, "expedite_healthy", MagicMock())
             install_mock(adapter.health_role, "suspend_advisory_work", MagicMock())
             adapter.health_role.apply_slo_regulation(control)
-            adapter.read_scheduler.force_due.assert_called_once_with(
+            adapter.read_scheduler.expedite_healthy.assert_called_once_with(
                 control.stale_core_reads
             )
             adapter.health_role.suspend_advisory_work.assert_called_once_with(

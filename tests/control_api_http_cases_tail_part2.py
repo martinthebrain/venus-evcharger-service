@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from tests.control_api_http_cases_tail_support import *  # noqa: F401,F403
+from venus_evcharger.control.http_api_commands import CONTROL_API_MAX_REQUEST_BODY_BYTES
 from venus_evcharger.control.http_api_command_payloads import (
     command_response_payload,
     idempotency_conflict_response,
@@ -67,12 +68,30 @@ class __ControlApiHttpTailCasesPart2:
 
         self.assertEqual(server.commands.read_json_payload(empty_handler), {})
         self.assertEqual(server.commands.read_json_payload(valid_handler), {"name": "set_mode", "value": 1})
-        self.assertEqual(server.commands.read_json_payload(negative_length_handler), {})
+        self.assertIsNone(server.commands.read_json_payload(negative_length_handler))
+        self.assertEqual(negative_length_handler.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(negative_length_handler.json_payload()["error"]["code"], "invalid_content_length")
+        self.assertEqual(negative_length_handler.rfile.tell(), 0)
         self.assertEqual(server.commands.read_json_payload(missing_length_handler), {})
         self.assertIsNone(server.commands.read_json_payload(bad_utf8_handler))
         self.assertEqual(bad_utf8_handler.status_code, HTTPStatus.BAD_REQUEST)
         self.assertEqual(bad_utf8_handler.json_payload()["error"]["code"], "invalid_json")
         self.assertEqual(bad_utf8_handler.json_payload()["detail"], "Invalid JSON body.")
+
+    def test_read_json_payload_rejects_oversized_body_without_reading_it(self) -> None:
+        server = LocalControlApiHttpServer(
+            control_api_http_service(),
+            host="127.0.0.1",
+            port=8765,
+        )
+        handler = _FakeHandler("/v1/control/command", body=b"{}")
+        handler.headers["Content-Length"] = str(CONTROL_API_MAX_REQUEST_BODY_BYTES + 1)
+
+        self.assertIsNone(server.commands.read_json_payload(handler))
+        self.assertEqual(handler.status_code, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        self.assertEqual(handler.json_payload()["error"]["code"], "payload_too_large")
+        self.assertIn(str(CONTROL_API_MAX_REQUEST_BODY_BYTES), handler.json_payload()["detail"])
+        self.assertEqual(handler.rfile.tell(), 0)
 
     def test_command_role_rate_limit_replay_cache_concurrency_and_audit_paths(self) -> None:
         command = ControlCommand(
@@ -223,7 +242,7 @@ class __ControlApiHttpTailCasesPart2:
             handle_control_command=MagicMock(return_value=result),
         )
         server = LocalControlApiHttpServer(service, host="127.0.0.1", port=8765)
-        handler = _FakeHandler("/v1/control/command", client_host="10.0.0.7")
+        handler = _FakeHandler("/v1/control/command", client_host="198.51.100.7")
         tracked = {"name": "set_mode", "command_id": "cmd-1", "idempotency_key": "idem-1"}
         replay = (HTTPStatus.OK, {"replayed": True})
         rate_limit = (HTTPStatus.TOO_MANY_REQUESTS, {"error": {"code": "rate_limited"}}, {"Retry-After": "1"})

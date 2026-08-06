@@ -177,7 +177,7 @@ class ShellyWallboxHelpersTestBase(unittest.TestCase):
         service.config.read_string(
             """
 [DEFAULT]
-Host=192.168.1.20
+Host=192.0.2.20
 
 [Backends]
 Mode=combined
@@ -187,7 +187,7 @@ ChargerType=
 """
         )
         service.poll_interval_ms = 1000
-        service.host = "192.168.1.20"
+        service.host = "192.0.2.20"
         service.use_digest_auth = False
         service.username = ""
         service.password = ""
