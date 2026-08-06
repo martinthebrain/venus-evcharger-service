@@ -319,10 +319,18 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("venus_evcharger/ops/forensic_observer.py", _FORENSIC_OBSERVER_TESTS),
     (
+        "venus_evcharger/ops/forensic_observer_artifacts.py",
+        _FORENSIC_OBSERVER_TESTS,
+    ),
+    (
         "venus_evcharger/ops/forensic_observer_probe.py",
         ("tests/test_forensic_observer_probe_contracts.py",),
     ),
     ("venus_evcharger/ops/forensic_observer_schema.py", _FORENSIC_OBSERVER_TESTS),
+    (
+        "venus_evcharger/ops/removable_storage_coordination.py",
+        ("tests/test_removable_storage_coordination.py",),
+    ),
     (
         "venus_evcharger/ports/gateway_diagnostic_discovery.py",
         _GATEWAY_DIAGNOSTIC_PORT_TESTS,

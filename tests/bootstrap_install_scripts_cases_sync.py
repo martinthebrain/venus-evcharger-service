@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import fcntl
 import json
 
 from tests.bootstrap_install_scripts_cases_common import Path, _BootstrapInstallScriptsBase, hashlib, os, subprocess, tempfile, UPDATER_SCRIPT
@@ -65,6 +66,9 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                             "VENUS_EVCHARGER_UPDATER_MEMINFO_PATH": str(meminfo_path),
                             "VENUS_EVCHARGER_UPDATER_MOUNTS_PATH": str(mounts_path),
                             "VENUS_EVCHARGER_UPDATER_RESOURCE_GUARD": "0",
+                            "VENUS_REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH": str(
+                                root / f"storage-maintenance-{index}.lock"
+                            ),
                             **(
                                 {"VENUS_EVCHARGER_UPDATER_SD_WORK_ROOT": str(expected_root)}
                                 if expected_storage == "sd"
@@ -80,6 +84,67 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                     self.assertEqual(status["work_root"], str(expected_root))
                     self.assertEqual(status["failure_reason"], "incomplete-local-source")
                     self.assertEqual(list(expected_root.iterdir()), [])
+
+    def test_bootstrap_updater_avoids_sd_during_external_maintenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sd_mount = root / "sd"
+            sd_mount.mkdir()
+            mounts_path = root / "mounts"
+            mounts_path.write_text(
+                f"/dev/mmcblk0p1 {sd_mount} vfat rw 0 0\n",
+                encoding="utf-8",
+            )
+            meminfo_path = root / "meminfo"
+            meminfo_path.write_text(
+                "MemAvailable:      131072 kB\n",
+                encoding="utf-8",
+            )
+            lock_path = root / "storage-maintenance.lock"
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                target_dir = root / "target"
+                completed = subprocess.run(
+                    ["bash", str(UPDATER_SCRIPT), str(target_dir)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "VENUS_EVCHARGER_SOURCE_DIR": str(
+                            root / "missing-source"
+                        ),
+                        "VENUS_EVCHARGER_UPDATER_RAM_WORK_BASE": str(
+                            root / "missing-ram"
+                        ),
+                        "VENUS_EVCHARGER_UPDATER_MEMINFO_PATH": str(
+                            meminfo_path
+                        ),
+                        "VENUS_EVCHARGER_UPDATER_MOUNTS_PATH": str(mounts_path),
+                        "VENUS_EVCHARGER_UPDATER_SD_WORK_ROOT": str(
+                            sd_mount / ".venus-evcharger-updater-work"
+                        ),
+                        "VENUS_EVCHARGER_UPDATER_RESOURCE_GUARD": "0",
+                        "VENUS_EVCHARGER_UPDATER_STORAGE_MAINTENANCE_WAIT_SECONDS": "0",
+                        "VENUS_REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH": str(
+                            lock_path
+                        ),
+                    },
+                )
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                os.close(descriptor)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "Removable-storage maintenance remained active; skipping SD workspace",
+                completed.stderr,
+            )
+            self.assertIn("Using data updater workspace", completed.stderr)
+            status = self._read_normalized_status(target_dir)
+            self.assertEqual(status["work_storage"], "data")
+            self.assertFalse((sd_mount / ".venus-evcharger-updater-work").exists())
 
     def test_bootstrap_updater_rejects_a_concurrent_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -181,6 +246,9 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                     "VENUS_EVCHARGER_UPDATER_MIN_MEM_AVAILABLE_KB": "65536",
                     "VENUS_EVCHARGER_UPDATER_PERSISTENT_MIN_MEM_AVAILABLE_KB": "32768",
                     "VENUS_EVCHARGER_UPDATER_RESOURCE_WAIT_SECONDS": "0",
+                    "VENUS_REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH": str(
+                        root / "storage-maintenance.lock"
+                    ),
                 },
             )
 
@@ -212,6 +280,9 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                     "VENUS_EVCHARGER_UPDATER_MEMINFO_PATH": str(meminfo_path),
                     "VENUS_EVCHARGER_UPDATER_PERSISTENT_MIN_MEM_AVAILABLE_KB": "32768",
                     "VENUS_EVCHARGER_UPDATER_RESOURCE_WAIT_SECONDS": "0",
+                    "VENUS_REMOVABLE_STORAGE_MAINTENANCE_LOCK_PATH": str(
+                        root / "storage-maintenance.lock"
+                    ),
                 },
             )
 
