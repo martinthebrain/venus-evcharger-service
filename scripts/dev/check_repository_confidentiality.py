@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Iterable
+from enum import Enum
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -47,6 +48,16 @@ TAILSCALE_CGNAT = ipaddress.IPv4Network("100.64.0.0/10")
 IPV4_PATTERN = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
 HOME_PATH_PATTERN = re.compile(r"/home/[^/\s]+/")
 INCIDENT_PATH_PATTERN = re.compile(r"(?:^|/)incident-[0-9]{8}(?:-|/)")
+
+
+class ConfidentialityIssueKind(Enum):
+    """Safe, non-secret categories suitable for CI output."""
+
+    HOST_HOME_DIRECTORY = "host-specific home directory"
+    LOCAL_CONFIDENTIAL_LITERAL = "locally classified confidential literal"
+    NON_PUBLIC_NETWORK_ADDRESS = "non-public network address"
+    INTERNAL_DOCUMENT = "internal document must not be tracked"
+    FIELD_INCIDENT_ARTIFACT = "field incident artifact must not be tracked"
 
 
 def tracked_paths(repo: Path) -> tuple[Path, ...]:
@@ -147,32 +158,39 @@ def contains_local_pattern(text: str, local_patterns: Iterable[str]) -> bool:
     return any(pattern.casefold() in lowered for pattern in local_patterns)
 
 
-def text_issues(path: Path, text: str, local_patterns: Iterable[str]) -> list[str]:
+def text_issues(
+    path: Path,
+    text: str,
+    local_patterns: Iterable[str],
+) -> list[ConfidentialityIssueKind]:
     """Return confidentiality-policy violations in one tracked text file."""
 
-    issues: list[str] = []
+    issues: list[ConfidentialityIssueKind] = []
     if HOME_PATH_PATTERN.search(text):
-        issues.append(f"{path}: host-specific home directory")
+        issues.append(ConfidentialityIssueKind.HOST_HOME_DIRECTORY)
     if contains_local_pattern(text, local_patterns):
-        issues.append(f"{path}: locally classified confidential literal")
+        issues.append(ConfidentialityIssueKind.LOCAL_CONFIDENTIAL_LITERAL)
     address_count = len(
         disallowed_address_tokens(
             text,
             sensitive_surface=is_sensitive_text_surface(path),
         )
     )
-    issues.extend(f"{path}: non-public network address" for _index in range(address_count))
+    issues.extend(
+        ConfidentialityIssueKind.NON_PUBLIC_NETWORK_ADDRESS
+        for _index in range(address_count)
+    )
     return issues
 
 
-def tracked_path_issue(path: Path) -> str | None:
+def tracked_path_issue(path: Path) -> ConfidentialityIssueKind | None:
     """Return a path-level confidentiality failure when one applies."""
 
     normalized = path.as_posix()
     if normalized in FORBIDDEN_TRACKED_PATHS:
-        return f"{normalized}: internal document must not be tracked"
+        return ConfidentialityIssueKind.INTERNAL_DOCUMENT
     if INCIDENT_PATH_PATTERN.search(normalized):
-        return f"{normalized}: field incident artifact must not be tracked"
+        return ConfidentialityIssueKind.FIELD_INCIDENT_ARTIFACT
     return None
 
 
@@ -185,10 +203,13 @@ def readable_text(path: Path) -> str | None:
         return None
 
 
-def confidentiality_issues(repo: Path, paths: Iterable[Path]) -> list[str]:
+def confidentiality_issues(
+    repo: Path,
+    paths: Iterable[Path],
+) -> list[ConfidentialityIssueKind]:
     """Return all tracked-path and text confidentiality violations."""
 
-    issues: list[str] = []
+    issues: list[ConfidentialityIssueKind] = []
     local_patterns = local_confidential_patterns(repo)
     for relative_path in paths:
         if relative_path == POLICY_SOURCE_PATH:
@@ -205,13 +226,19 @@ def confidentiality_issues(repo: Path, paths: Iterable[Path]) -> list[str]:
 
 
 def main() -> int:
-    """Check the current Git index and print actionable failures."""
+    """Check the Git index while keeping sensitive details out of CI logs."""
 
     issues = confidentiality_issues(REPO, tracked_paths(REPO))
     if issues:
         print("Repository confidentiality check failed:", file=sys.stderr)
-        for issue in issues:
-            print(f"- {issue}", file=sys.stderr)
+        observed_kinds = frozenset(issues)
+        for known_kind in ConfidentialityIssueKind:
+            if known_kind in observed_kinds:
+                print(f"- {known_kind.value}", file=sys.stderr)
+        print(
+            "Potentially sensitive paths and matched text were suppressed.",
+            file=sys.stderr,
+        )
         return 1
     print("Repository confidentiality contracts passed.")
     return 0

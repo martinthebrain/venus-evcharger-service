@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,9 +35,9 @@ class RepositoryConfidentialityContractTests(unittest.TestCase):
         self.assertEqual(
             issues,
             [
-                "docs/report.md: host-specific home directory",
-                "docs/report.md: locally classified confidential literal",
-                "docs/report.md: non-public network address",
+                confidentiality.ConfidentialityIssueKind.HOST_HOME_DIRECTORY,
+                confidentiality.ConfidentialityIssueKind.LOCAL_CONFIDENTIAL_LITERAL,
+                confidentiality.ConfidentialityIssueKind.NON_PUBLIC_NETWORK_ADDRESS,
             ],
         )
 
@@ -53,10 +54,25 @@ class RepositoryConfidentialityContractTests(unittest.TestCase):
         self.assertEqual(
             issues,
             [
-                "docs/KNOWN_VENUS_OS_ISSUES.md: internal document must not be tracked",
-                "reports/incident-20260731-example/trace.txt: field incident artifact must not be tracked",
+                confidentiality.ConfidentialityIssueKind.INTERNAL_DOCUMENT,
+                confidentiality.ConfidentialityIssueKind.FIELD_INCIDENT_ARTIFACT,
             ],
         )
+
+    def test_main_never_logs_sensitive_issue_paths(self) -> None:
+        sensitive_path = Path("private/customer-name/incident.txt")
+        issue = confidentiality.ConfidentialityIssueKind.LOCAL_CONFIDENTIAL_LITERAL
+        stderr = io.StringIO()
+        with (
+            patch.object(confidentiality, "tracked_paths", return_value=(sensitive_path,)),
+            patch.object(confidentiality, "confidentiality_issues", return_value=[issue]),
+            patch.object(confidentiality.sys, "stderr", stderr),
+        ):
+            self.assertEqual(confidentiality.main(), 1)
+        output = stderr.getvalue()
+        self.assertNotIn(str(sensitive_path), output)
+        self.assertIn("locally classified confidential literal", output)
+        self.assertIn("sensitive paths and matched text were suppressed", output)
 
     def test_local_patterns_are_optional_private_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
