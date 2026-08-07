@@ -64,6 +64,19 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
                 self.assertEqual(len(python_commands), 1)
                 self.assertTrue(python_commands[0].startswith("exec python3 "))
 
+    def test_each_runit_service_has_a_bounded_volatile_logger(self) -> None:
+        services = (
+            ("service_venus_evcharger", "dbus-venus-evcharger"),
+            ("service_venus_evcharger_dbus_adapter", "dbus-venus-evcharger-dbus-adapter"),
+            ("service_venus_evcharger_observer", "dbus-venus-evcharger-observer"),
+        )
+        for service_dir, service_name in services:
+            with self.subTest(service_name=service_name):
+                logger_path = REPO_ROOT / "deploy/venus" / service_dir / "log/run"
+                logger = logger_path.read_text(encoding="utf-8")
+                self.assertIn(f"LOG_DIR=/var/volatile/log/{service_name}", logger)
+                self.assertIn('exec multilog t s153600 n2 "$LOG_DIR"', logger)
+
     @staticmethod
     def _make_executable(path: Path) -> None:
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

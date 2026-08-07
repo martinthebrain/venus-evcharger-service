@@ -337,8 +337,12 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
-            (source_dir / "deploy/venus/service_venus_evcharger_observer").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/log").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/log/run").write_text(
+                "#!/bin/sh\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/config.venus_evcharger.ini").write_text(
                 "[DEFAULT]\n"
                 "ConfigSchemaVersion=1\n"
@@ -508,8 +512,12 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
-            (source_dir / "deploy/venus/service_venus_evcharger_observer").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/log").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/log/run").write_text(
+                "#!/bin/sh\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/config.venus_evcharger.ini").write_text(
                 "[DEFAULT]\nHost=template-host\nNewToggle=1\n",
                 encoding="utf-8",
@@ -563,8 +571,12 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
-            (source_dir / "deploy/venus/service_venus_evcharger_observer").mkdir(parents=True)
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/log").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/log/run").write_text(
+                "#!/bin/sh\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/config.venus_evcharger.ini").write_text(
                 "[DEFAULT]\nConfigSchemaVersion=1\nHost=template-host\nNewToggle=1\n",
                 encoding="utf-8",

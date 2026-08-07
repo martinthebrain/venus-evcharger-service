@@ -23,7 +23,6 @@ _PROTECTIVE_PERFORMANCE_SIGNALS = frozenset(
 _DEGRADED_PERFORMANCE_SIGNALS = frozenset(
     {
         ("slo", "violated"),
-        ("resource", "busy"),
         ("backpressure", "congested"),
         ("backpressure", "slow"),
     }
@@ -126,7 +125,7 @@ def performance_health_state(
     resource_state: str,
     backpressure_state: str,
 ) -> GatewayHealthState:
-    """Derive a bounded performance verdict from existing observations."""
+    """Derive a verdict from service impact, not managed resource pressure."""
     signals = {
         ("slo", slo_state),
         ("resource", resource_state),

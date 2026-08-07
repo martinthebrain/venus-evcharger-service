@@ -46,6 +46,11 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                     }
                 ),
             )
+            install_mock(
+                adapter.resource_monitor,
+                "snapshot",
+                MagicMock(return_value={"state": "busy"}),
+            )
             adapter._last_tick_monotonic = 999.75
 
             with (
@@ -69,6 +74,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
             self.assertEqual(health["eventloop"]["mainloop_heartbeat_age_s"], 0.25)
             self.assertEqual(health["eventloop"]["max_tick_gap_ms_60s"], 12.0)
             self.assertEqual(health["backpressure"]["state"], "ok")
+            self.assertEqual(health["resources"]["state"], "busy")
             self.assertEqual(health["operational_state"], "ok")
             self.assertEqual(health["performance_state"], "ok")
             self.assertEqual(health["state"], "ok")

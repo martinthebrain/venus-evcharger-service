@@ -1,0 +1,9 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Dedicated bounded logger for the forensic observer. The volatile destination
+# avoids persistent flash writes while retaining logs across service restarts.
+exec 2>&1
+LOG_DIR=/var/volatile/log/dbus-venus-evcharger-observer
+mkdir -p "$LOG_DIR"
+exec multilog t s153600 n2 "$LOG_DIR"
