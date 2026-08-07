@@ -121,6 +121,8 @@ chmod a+x "$DBUS_ADAPTER_SERVICE_DIR/log/run"
 chmod 755 "$DBUS_ADAPTER_SERVICE_DIR/log/run"
 chmod a+x "$OBSERVER_SERVICE_DIR/run"
 chmod 755 "$OBSERVER_SERVICE_DIR/run"
+chmod a+x "$OBSERVER_SERVICE_DIR/log/run"
+chmod 755 "$OBSERVER_SERVICE_DIR/log/run"
 
 # shellcheck source=deploy/venus/service_lifecycle.sh
 . "$SERVICE_LIFECYCLE"

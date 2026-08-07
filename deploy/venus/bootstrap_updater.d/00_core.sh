@@ -234,6 +234,7 @@ require_source_layout() {
 	[ -f "${src_dir}/deploy/venus/service_venus_evcharger/run" ] || return 1
 	[ -f "${src_dir}/deploy/venus/service_venus_evcharger_dbus_adapter/run" ] || return 1
 	[ -f "${src_dir}/deploy/venus/service_venus_evcharger_observer/run" ] || return 1
+	[ -f "${src_dir}/deploy/venus/service_venus_evcharger_observer/log/run" ] || return 1
 	[ -d "${src_dir}/venus_evcharger" ] || return 1
 	return 0
 }

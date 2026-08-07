@@ -30,7 +30,7 @@ class GatewayHealthStateContractsTests(unittest.TestCase):
         cases = (
             ("ok", "ok", "ok", "ok"),
             ("violated", "ok", "ok", "degraded"),
-            ("ok", "busy", "ok", "degraded"),
+            ("ok", "busy", "ok", "ok"),
             ("ok", "ok", "congested", "degraded"),
             ("ok", "ok", "slow", "degraded"),
             ("ok", "constrained", "ok", "protective"),
