@@ -48,11 +48,19 @@ class PublicationFieldObservation:
     changed_at: float
     confirmed_at: float
     service_heartbeat_at: float
+    changed_monotonic: float
+    confirmed_monotonic: float
+    service_heartbeat_monotonic: float
 
     @property
     def observed_at(self) -> float:
         """Health freshness is based on field confirmation, not value changes."""
         return self.confirmed_at
+
+    @property
+    def observed_monotonic(self) -> float:
+        """Return the monotonic field-confirmation anchor."""
+        return self.confirmed_monotonic
 
 
 @dataclass(slots=True)
@@ -69,6 +77,9 @@ class RegisteredPublicationService:
     field_changed_at: dict[str, float]
     field_confirmed_at: dict[str, float]
     publication_heartbeat_at: float
+    field_changed_monotonic: dict[str, float]
+    field_confirmed_monotonic: dict[str, float]
+    publication_heartbeat_monotonic: float
     update_index: int = 0
 
 
@@ -130,6 +141,9 @@ class GatewayPublicationRegistry:
             changed_at=record.field_changed_at[normalized],
             confirmed_at=record.field_confirmed_at[normalized],
             service_heartbeat_at=record.publication_heartbeat_at,
+            changed_monotonic=record.field_changed_monotonic[normalized],
+            confirmed_monotonic=record.field_confirmed_monotonic[normalized],
+            service_heartbeat_monotonic=record.publication_heartbeat_monotonic,
         )
 
     @property
@@ -137,6 +151,12 @@ class GatewayPublicationRegistry:
         """Return the last EVCS publication receipt, including value-identical updates."""
         record = self._services.get(EVCS_SERVICE_ID)
         return 0.0 if record is None else record.publication_heartbeat_at
+
+    @property
+    def evcs_publication_heartbeat_monotonic(self) -> float:
+        """Return the monotonic EVCS publication heartbeat."""
+        record = self._services.get(EVCS_SERVICE_ID)
+        return 0.0 if record is None else record.publication_heartbeat_monotonic
 
     def register_evcs(self, publication: RegisterEvcsPublication) -> CommandOutcome:
         existing = self._services.get(EVCS_SERVICE_ID)
@@ -210,6 +230,7 @@ class GatewayPublicationRegistry:
         values: dict[str, object] = {}
         semantic_values = _initial_semantic_values(normalized, plan.specs)
         observed_at = time.time()
+        observed_monotonic = time.monotonic()
         _add_identity_paths(service, values, plan.identity_paths)
         self._add_semantic_paths(
             service,
@@ -231,6 +252,15 @@ class GatewayPublicationRegistry:
             field_changed_at=dict.fromkeys(semantic_values, observed_at),
             field_confirmed_at=dict.fromkeys(semantic_values, observed_at),
             publication_heartbeat_at=observed_at,
+            field_changed_monotonic=dict.fromkeys(
+                semantic_values,
+                observed_monotonic,
+            ),
+            field_confirmed_monotonic=dict.fromkeys(
+                semantic_values,
+                observed_monotonic,
+            ),
+            publication_heartbeat_monotonic=observed_monotonic,
         )
         self._services[plan.service_id] = record
         self._cache_record(record)
@@ -283,17 +313,22 @@ class GatewayPublicationRegistry:
         normalized = validate_fields(fields, specs, surface=record.kind)
         changed = False
         observed_at = time.time()
+        observed_monotonic = time.monotonic()
         record.publication_heartbeat_at = observed_at
+        record.publication_heartbeat_monotonic = observed_monotonic
         for field, value in normalized.items():
             path = specs[field].path
             if record.values.get(path) == value:
                 record.field_confirmed_at[field] = observed_at
+                record.field_confirmed_monotonic[field] = observed_monotonic
                 continue
             self._publish_service_value(record, path, value)
             record.values[path] = value
             record.semantic_values[field] = value
             record.field_changed_at[field] = observed_at
             record.field_confirmed_at[field] = observed_at
+            record.field_changed_monotonic[field] = observed_monotonic
+            record.field_confirmed_monotonic[field] = observed_monotonic
             self._cache_path(record, path, value)
             changed = True
         if changed:

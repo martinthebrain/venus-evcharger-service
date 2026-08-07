@@ -35,6 +35,7 @@ class SloThresholds:
     core_read_max_age_seconds: float
     queue_max_age_seconds: float
     mainloop_gap_max_ms: float
+    publication_scheduler_tolerance_seconds: float = 0.0
 
 
 def slo_payload(
@@ -135,6 +136,9 @@ def slo_targets(thresholds: SloThresholds) -> dict[str, float]:
         "gui_control_missing_field_count": 0.0,
         "gui_session_missing_field_count": 0.0,
         "configured_gui_max_age_s": thresholds.gui_max_age_seconds,
+        "publication_scheduler_tolerance_s": (
+            thresholds.publication_scheduler_tolerance_seconds
+        ),
         "core_read_max_age_s": thresholds.core_read_max_age_seconds,
         "core_read_missing_count": 0.0,
         "core_read_nonfresh_count": 0.0,
@@ -144,7 +148,11 @@ def slo_targets(thresholds: SloThresholds) -> dict[str, float]:
 
 
 def effective_gui_max_age_seconds(thresholds: SloThresholds) -> float:
-    return max(thresholds.gui_max_age_seconds, thresholds.core_read_max_age_seconds * 2.0)
+    base = max(
+        thresholds.gui_max_age_seconds,
+        thresholds.core_read_max_age_seconds * 2.0,
+    )
+    return base + max(0.0, thresholds.publication_scheduler_tolerance_seconds)
 
 
 def max_core_read_age(cache_freshness: Mapping[str, object]) -> float:

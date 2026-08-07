@@ -80,6 +80,22 @@ class GatewayDiagnosticsBoundaryContractsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^age must be non-negative$"):
             diagnostics_validation.non_negative_float(-0.1, "age")
 
+    def test_epoch_timestamp_normalization_fails_closed_at_ipc_boundary(self) -> None:
+        normalize = diagnostics_validation.normalized_epoch_timestamp
+        self.assertEqual(normalize(4, 5.0), 4.0)
+        self.assertEqual(normalize(6.0, 5.0), 5.0)
+        for invalid in (
+            True,
+            "4",
+            -1.0,
+            float("inf"),
+            float("-inf"),
+            float("nan"),
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(normalize(invalid, 5.0), 0.0)
+        self.assertEqual(normalize(4.0, False), 0.0)
+
     def test_positive_float_validation_rejects_zero_and_negative_values(self) -> None:
         self.assertEqual(diagnostics_validation.positive_float(0.1, "interval"), 0.1)
         with self.assertRaisesRegex(ValueError, "^interval must be finite$"):

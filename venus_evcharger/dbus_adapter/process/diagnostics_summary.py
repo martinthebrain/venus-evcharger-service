@@ -21,6 +21,9 @@ from venus_evcharger.ports.gateway_diagnostic_health import (
     GatewayHealthSummary,
     GatewayPublicationSummary,
 )
+from venus_evcharger.ports.gateway_diagnostics_validation import (
+    normalized_epoch_timestamp,
+)
 
 _PRESSURE_DEADLINE_MULTIPLIERS = {
     "ok": 2.0,
@@ -52,7 +55,7 @@ def health_summary(
         maximum_latency_ms=maximum,
         pending_gateway_commands=_non_negative_int(health.get("pending_command_count")),
         pending_core_commands=_non_negative_int(health.get("core_command_count")),
-        maximum_event_loop_gap_ms_60s=_non_negative_float(eventloop.get("max_tick_gap_ms_60s")),
+        maximum_event_loop_gap_ms_60s=_eventloop_lateness(eventloop),
         last_success_at=_non_negative_float(health.get("last_success_at")),
         last_error_code=_last_error_code(health.get("last_error")),
     )
@@ -98,6 +101,7 @@ def publication_summary(
     registry: GatewayPublicationRegistry,
     *,
     captured_at: float,
+    captured_monotonic: float,
     stale_after_seconds: float,
 ) -> GatewayPublicationSummary:
     if not registry.evcs_registered:
@@ -105,14 +109,31 @@ def publication_summary(
     heartbeat = _non_negative_float(registry.evcs_publication_heartbeat_at)
     if heartbeat <= 0.0:
         return GatewayPublicationSummary(False, 0.0, True)
-    stale = captured_at - heartbeat > max(0.0, stale_after_seconds)
-    return GatewayPublicationSummary(True, heartbeat, stale)
+    heartbeat_monotonic = _non_negative_float(
+        registry.evcs_publication_heartbeat_monotonic
+    )
+    if heartbeat_monotonic <= 0.0:
+        return GatewayPublicationSummary(False, 0.0, True)
+    stale = (
+        captured_monotonic - heartbeat_monotonic
+        > max(0.0, stale_after_seconds)
+    )
+    return GatewayPublicationSummary(
+        True,
+        normalized_epoch_timestamp(heartbeat, captured_at),
+        stale,
+    )
 
 
 def diagnostic_freshness_deadline(
     health: Mapping[str, object],
     configured_seconds: float,
 ) -> float:
+    shared_deadline = _non_negative_float(
+        health.get("publication_freshness_deadline_s")
+    )
+    if shared_deadline > 0.0:
+        return shared_deadline
     states = (
         _text(health.get("state")),
         _text(_mapping(health.get("backpressure")).get("state")),
@@ -206,6 +227,13 @@ def _health_state(value: object) -> GatewayHealthState:
     if normalized == "protective":
         return "protective"
     return "unknown"
+
+
+def _eventloop_lateness(eventloop: Mapping[str, object]) -> float:
+    callback_lateness = eventloop.get("max_glib_callback_lateness_ms_60s")
+    if callback_lateness is not None:
+        return _non_negative_float(callback_lateness)
+    return _non_negative_float(eventloop.get("max_tick_gap_ms_60s"))
 
 
 def _last_error_code(value: object) -> str:

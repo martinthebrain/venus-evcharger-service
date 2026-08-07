@@ -8,6 +8,9 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from venus_evcharger.dbus_adapter.health.freshness import (
+    publication_freshness_monotonic,
+)
 from venus_evcharger.dbus_adapter.publication.registry import (
     GatewayPublicationRegistry,
     PublicationFieldObservation,
@@ -17,6 +20,9 @@ from venus_evcharger.ports.gateway_diagnostic_values import (
     GatewayDiagnosticFieldName,
     GatewayDiagnosticSample,
     GatewayDiagnosticStatus,
+)
+from venus_evcharger.ports.gateway_diagnostics_validation import (
+    normalized_epoch_timestamp,
 )
 
 _DIAGNOSTIC_FIELDS: tuple[GatewayDiagnosticFieldName, ...] = (
@@ -40,11 +46,19 @@ _AUTO_ONLY_FIELDS = frozenset(
         "runtime_overrides_source",
     }
 )
+_SERVICE_HEARTBEAT_FIELDS = frozenset(
+    {
+        "operating_mode",
+        "charging_enabled",
+        "auto_start_enabled",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
 class _FreshnessWindow:
     captured_at: float
+    captured_monotonic: float
     stale_after_seconds: float
 
 
@@ -52,6 +66,7 @@ def evcs_samples(
     registry: GatewayPublicationRegistry,
     *,
     captured_at: float,
+    captured_monotonic: float,
     stale_after_seconds: float,
 ) -> tuple[GatewayDiagnosticSample, ...]:
     if not registry.evcs_registered:
@@ -59,6 +74,7 @@ def evcs_samples(
     samples = _observed_evcs_samples(
         registry.evcs_field_observation,
         captured_at,
+        captured_monotonic,
         stale_after_seconds,
     )
     if _non_auto_mode(samples["operating_mode"]):
@@ -69,42 +85,67 @@ def evcs_samples(
 def _observed_evcs_samples(
     field_reader: Callable[[str], PublicationFieldObservation | None],
     captured_at: float,
+    captured_monotonic: float,
     stale_after_seconds: float,
 ) -> dict[GatewayDiagnosticFieldName, GatewayDiagnosticSample]:
+    window = _FreshnessWindow(
+        captured_at,
+        captured_monotonic,
+        stale_after_seconds,
+    )
     operating_mode = _observed_sample(
         "operating_mode",
         field_reader("mode"),
         _mode,
-        captured_at,
-        stale_after_seconds,
+        window,
     )
     active = _observed_sample(
         "runtime_overrides_active",
         field_reader("auto_runtime_overrides_active"),
         _boolean,
-        captured_at,
-        stale_after_seconds,
+        window,
     )
     return {
         "operating_mode": operating_mode,
-        "charging_enabled": _charging_enabled_sample(field_reader, captured_at, stale_after_seconds),
+        "charging_enabled": _charging_enabled_sample(
+            field_reader,
+            window,
+        ),
         "auto_start_enabled": _observed_sample(
-            "auto_start_enabled", field_reader("auto_start"), _boolean, captured_at, stale_after_seconds
+            "auto_start_enabled",
+            field_reader("auto_start"),
+            _boolean,
+            window,
         ),
         "ac_power_w": _observed_sample(
-            "ac_power_w", field_reader("ac_power_w"), _finite_float, captured_at, stale_after_seconds
+            "ac_power_w",
+            field_reader("ac_power_w"),
+            _finite_float,
+            window,
         ),
         "charger_state_code": _observed_sample(
-            "charger_state_code", field_reader("status"), _non_negative_integer, captured_at, stale_after_seconds
+            "charger_state_code",
+            field_reader("status"),
+            _non_negative_integer,
+            window,
         ),
         "decision_reason": _observed_sample(
-            "decision_reason", field_reader("auto_decision_reason"), _text, captured_at, stale_after_seconds
+            "decision_reason",
+            field_reader("auto_decision_reason"),
+            _text,
+            window,
         ),
         "decision_state": _observed_sample(
-            "decision_state", field_reader("auto_decision_state"), _text, captured_at, stale_after_seconds
+            "decision_state",
+            field_reader("auto_decision_state"),
+            _text,
+            window,
         ),
         "last_health_reason": _observed_sample(
-            "last_health_reason", field_reader("auto_health"), _text, captured_at, stale_after_seconds
+            "last_health_reason",
+            field_reader("auto_health"),
+            _text,
+            window,
         ),
         "runtime_overrides_active": active,
         "runtime_overrides_source": _runtime_overrides_source(active),
@@ -139,16 +180,14 @@ def _inactive_sample(sample: GatewayDiagnosticSample) -> GatewayDiagnosticSample
 
 def _charging_enabled_sample(
     field_reader: Callable[[str], PublicationFieldObservation | None],
-    captured_at: float,
-    stale_after_seconds: float,
+    window: _FreshnessWindow,
 ) -> GatewayDiagnosticSample:
     observation = field_reader("start_stop") or field_reader("enable")
     return _observed_sample(
         "charging_enabled",
         observation,
         _boolean,
-        captured_at,
-        stale_after_seconds,
+        window,
     )
 
 
@@ -171,8 +210,7 @@ def _observed_sample(
     name: GatewayDiagnosticFieldName,
     observation: PublicationFieldObservation | None,
     converter: Callable[[object], DiagnosticScalar],
-    captured_at: float,
-    stale_after_seconds: float,
+    window: _FreshnessWindow,
 ) -> GatewayDiagnosticSample:
     if observation is None:
         return GatewayDiagnosticSample(
@@ -199,28 +237,39 @@ def _observed_sample(
     return _valid_observed_sample(
         name,
         value,
-        observation.changed_at,
-        observation.confirmed_at,
-        window=_FreshnessWindow(captured_at, stale_after_seconds),
+        observation,
+        window=window,
     )
 
 
 def _valid_observed_sample(
     name: GatewayDiagnosticFieldName,
     value: DiagnosticScalar,
-    changed_at: float,
-    confirmed_at: float,
+    observation: PublicationFieldObservation,
     *,
     window: _FreshnessWindow,
 ) -> GatewayDiagnosticSample:
-    stale = window.captured_at - confirmed_at > max(0.0, window.stale_after_seconds)
+    freshness_at = publication_freshness_monotonic(
+        observation,
+        use_service_heartbeat=name in _SERVICE_HEARTBEAT_FIELDS,
+    )
+    stale = (
+        window.captured_monotonic - freshness_at
+        > max(0.0, window.stale_after_seconds)
+    )
     status: GatewayDiagnosticStatus = "stale" if stale else "fresh"
     return GatewayDiagnosticSample(
         name=name,
         value=value,
         status=status,
-        changed_at=changed_at,
-        confirmed_at=confirmed_at,
+        changed_at=normalized_epoch_timestamp(
+            observation.changed_at,
+            window.captured_at,
+        ),
+        confirmed_at=normalized_epoch_timestamp(
+            observation.confirmed_at,
+            window.captured_at,
+        ),
         confidence=0.5 if stale else 1.0,
         reason_code="publication-stale" if stale else "",
     )

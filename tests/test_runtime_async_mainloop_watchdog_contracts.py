@@ -19,9 +19,89 @@ def _controller() -> tuple[SimpleNamespace, RuntimeSupportController]:
 class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
     def test_heartbeat_records_exact_time_and_returns_true(self) -> None:
         service, controller = _controller()
-        with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=123.5):
+        service._process_started_at = 100.0
+        with (
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic", return_value=456.0),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=123.5),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.os.getpid", return_value=77),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.write_text_atomically") as write_heartbeat,
+        ):
             self.assertTrue(controller.mainloop_heartbeat_tick())
         self.assertEqual(service._mainloop_heartbeat_at, 123.5)
+        self.assertEqual(service._mainloop_heartbeat_monotonic, 456.0)
+        self.assertEqual(service._process_heartbeat_last_write_monotonic, 456.0)
+        write_heartbeat.assert_called_once_with(
+            "/run/dbus-venus-evcharger-60.heartbeat.json",
+            (
+                '{"mainloop_heartbeat_at":123.5,"pid":77,'
+                '"process_heartbeat_at":123.5,"process_started_at":100.0}'
+            ),
+        )
+
+    def test_process_heartbeat_is_throttled_and_recovers_from_monotonic_reset(self) -> None:
+        service, controller = _controller()
+        service._process_started_at = 100.0
+        with (
+            patch(
+                "venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic",
+                side_effect=(100.0, 104.999, 105.0, 90.0),
+            ),
+            patch(
+                "venus_evcharger.runtime.async_mainloop_watchdog.time.time",
+                side_effect=(10.0, 11.0, 12.0, 13.0),
+            ),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.write_text_atomically") as write_heartbeat,
+        ):
+            for _unused in range(4):
+                controller.mainloop_heartbeat_tick()
+
+        self.assertEqual(write_heartbeat.call_count, 3)
+        self.assertEqual(service._process_heartbeat_last_write_monotonic, 90.0)
+
+    def test_process_heartbeat_due_normalizes_invalid_state_and_interval(self) -> None:
+        service, controller = _controller()
+        del service._process_heartbeat_last_write_monotonic
+        self.assertTrue(controller.mainloop_watchdog._heartbeat_due(service, 100.0))
+        for last_write in (None, True, "invalid"):
+            with self.subTest(last_write=last_write):
+                service._process_heartbeat_last_write_monotonic = last_write
+                self.assertTrue(controller.mainloop_watchdog._heartbeat_due(service, 100.0))
+
+        service._process_heartbeat_last_write_monotonic = 100.0
+        service._process_heartbeat_interval_seconds = 0.0
+        self.assertFalse(controller.mainloop_watchdog._heartbeat_due(service, 100.0))
+        self.assertFalse(controller.mainloop_watchdog._heartbeat_due(service, 100.999))
+        self.assertTrue(controller.mainloop_watchdog._heartbeat_due(service, 101.0))
+
+    def test_process_heartbeat_rejects_non_run_path_and_throttles_write_failures(self) -> None:
+        service, controller = _controller()
+        service._process_heartbeat_path = "/data/heartbeat.json"
+        with (
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.logging.error") as error,
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.write_text_atomically") as write_heartbeat,
+        ):
+            controller.mainloop_watchdog._write_process_heartbeat_if_due(service, 100.0, 10.0)
+        write_heartbeat.assert_not_called()
+        error.assert_called_once_with("Refusing process heartbeat path outside /run: %s", "/data/heartbeat.json")
+
+        service._process_heartbeat_path = "/run/heartbeat.json"
+        failure = OSError("read-only")
+        with (
+            patch(
+                "venus_evcharger.runtime.async_mainloop_watchdog.write_text_atomically",
+                side_effect=failure,
+            ),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.logging.warning") as warning,
+        ):
+            controller.mainloop_watchdog._write_process_heartbeat_if_due(service, 100.0, 10.0)
+            controller.mainloop_watchdog._write_process_heartbeat_if_due(service, 101.0, 11.0)
+
+        self.assertEqual(service._process_heartbeat_last_write_monotonic, 100.0)
+        warning.assert_called_once_with(
+            "Unable to write process heartbeat to %s: %s",
+            "/run/heartbeat.json",
+            failure,
+        )
 
     def test_watchdog_start_is_idempotent_and_constructs_exact_thread(self) -> None:
         service, controller = _controller()
@@ -51,7 +131,7 @@ class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
         service._mainloop_watchdog_stop_event.wait = MagicMock(side_effect=(False, True))
         with (
             patch.object(controller.mainloop_watchdog, "check") as check,
-            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time") as now,
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic") as now,
         ):
             controller.mainloop_watchdog._watchdog_loop()
 
@@ -62,13 +142,13 @@ class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
 
     def test_watchdog_loop_ignores_recent_heartbeat(self) -> None:
         service, controller = _controller()
-        service._mainloop_heartbeat_at = 95.0
+        service._mainloop_heartbeat_monotonic = 95.0
         service._mainloop_watchdog_stale_seconds = 10.0
 
         with (
             patch.object(controller.mainloop_watchdog, "dump_traceback") as dump_traceback,
             patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
-            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=100.0) as now,
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic", return_value=100.0) as now,
         ):
             controller.mainloop_watchdog.check(service)
 
@@ -78,13 +158,13 @@ class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
 
     def test_watchdog_loop_dumps_logs_and_exits_on_stale_heartbeat(self) -> None:
         service, controller = _controller()
-        service._mainloop_heartbeat_at = 80.0
+        service._mainloop_heartbeat_monotonic = 80.0
         service._mainloop_watchdog_stale_seconds = 0.5
 
         with (
             patch.object(controller.mainloop_watchdog, "dump_traceback") as dump_traceback,
             patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
-            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=101.0),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic", return_value=101.0),
             patch("venus_evcharger.runtime.async_mainloop_watchdog.logging.critical") as critical,
         ):
             controller.mainloop_watchdog.check(service)
@@ -104,7 +184,7 @@ class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
         ):
             for stale_seconds in (0.0, -1.0):
                 service._mainloop_watchdog_stale_seconds = stale_seconds
-                with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time") as now:
+                with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic") as now:
                     controller.mainloop_watchdog.check(service)
                 now.assert_not_called()
 
@@ -113,18 +193,55 @@ class RuntimeAsyncMainloopWatchdogContractTests(unittest.TestCase):
 
     def test_watchdog_check_treats_exact_stale_threshold_as_healthy(self) -> None:
         service, controller = _controller()
-        service._mainloop_heartbeat_at = 90.0
+        service._mainloop_heartbeat_monotonic = 90.0
         service._mainloop_watchdog_stale_seconds = 10.0
 
         with (
             patch.object(controller.mainloop_watchdog, "dump_traceback") as dump_traceback,
             patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
-            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.time", return_value=100.0),
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic", return_value=100.0),
         ):
             controller.mainloop_watchdog.check(service)
 
         dump_traceback.assert_not_called()
         exit_for_restart.assert_not_called()
+
+    def test_watchdog_check_ignores_missing_clock_state_and_backward_monotonic_sample(self) -> None:
+        service, controller = _controller()
+        service._mainloop_watchdog_stale_seconds = 10.0
+        del service._mainloop_heartbeat_monotonic
+        controller.mainloop_watchdog.check(service)
+        for invalid_heartbeat in (None, True, "invalid"):
+            with self.subTest(invalid_heartbeat=invalid_heartbeat):
+                service._mainloop_heartbeat_monotonic = invalid_heartbeat
+                with patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic") as now:
+                    controller.mainloop_watchdog.check(service)
+                now.assert_not_called()
+
+        service._mainloop_heartbeat_monotonic = 101.0
+        with (
+            patch.object(controller.mainloop_watchdog, "exit_for_restart") as exit_for_restart,
+            patch("venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic", return_value=100.0),
+        ):
+            controller.mainloop_watchdog.check(service)
+        exit_for_restart.assert_not_called()
+
+    def test_watchdog_clamps_backward_clock_age_to_zero(self) -> None:
+        service, controller = _controller()
+        service._mainloop_heartbeat_monotonic = 101.0
+        service._mainloop_watchdog_stale_seconds = 0.5
+        with (
+            patch.object(controller.mainloop_watchdog, "dump_traceback") as dump,
+            patch.object(controller.mainloop_watchdog, "exit_for_restart") as restart,
+            patch(
+                "venus_evcharger.runtime.async_mainloop_watchdog.time.monotonic",
+                return_value=100.0,
+            ),
+        ):
+            controller.mainloop_watchdog.check(service)
+
+        dump.assert_not_called()
+        restart.assert_not_called()
 
     def test_traceback_dump_uses_exact_path_content_and_faulthandler_options(self) -> None:
         service, controller = _controller()

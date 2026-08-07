@@ -56,10 +56,14 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
             def get_dbus_name(self) -> str:
                 raise RuntimeError("name unavailable")
 
-        with patch.object(rate_module.time, "time", return_value=1000.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=1000.0),
+            patch.object(rate_module.time, "monotonic", return_value=100.0),
+        ):
             for _index in range(3):
                 breaker.record_error(_NamedTimeout("slow"))
             self.assertEqual(breaker.state(now=1001.0), "degraded")
+            self.assertEqual(breaker.state(monotonic_at=101.0), "degraded")
             self.assertFalse(breaker.allows_priority("discovery"))
             self.assertTrue(breaker.allows_priority("optional"))
             for _index in range(2):
@@ -72,27 +76,40 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
             self.assertFalse(breaker.allows_priority("optional"))
             self.assertTrue(breaker.allows_priority("read"))
 
-        with patch.object(rate_module.time, "time", return_value=1010.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=1010.0),
+            patch.object(rate_module.time, "monotonic", return_value=110.0),
+        ):
             breaker.record_success(3.5, kind="write")
         self.assertEqual(breaker.last_success_at, 1010.0)
         self.assertEqual(breaker.last_error, "")
         self.assertEqual(breaker.consecutive_failures, 0)
         self.assertIn("write", breaker.latencies_by_kind)
-        with patch.object(rate_module.time, "time", return_value=1011.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=1011.0),
+            patch.object(rate_module.time, "monotonic", return_value=111.0),
+        ):
             breaker.record_success(4.5)
         self.assertIn("dbus", breaker.latencies_by_kind)
-        breaker.record_error(_BrokenName("plain"))
-        health = breaker.health()
-        self.assertEqual(health["state"], breaker.state())
-        self.assertEqual(health["last_success_at"], breaker.last_success_at)
-        self.assertEqual(health["last_error"], "plain")
-        self.assertIn("avg_latency_ms", health)
-        self.assertIn("operations", health)
-        self.assertIn("write", health["operations"])
-        self.assertEqual(health["errors_60s"], 1)
-        self.assertEqual(health["consecutive_failures"], 1)
+        with (
+            patch.object(rate_module.time, "time", return_value=1100.0),
+            patch.object(rate_module.time, "monotonic", return_value=200.0),
+        ):
+            breaker.record_error(_BrokenName("plain"))
+            health = breaker.health()
+            self.assertEqual(health["state"], breaker.state())
+            self.assertEqual(health["last_success_at"], breaker.last_success_at)
+            self.assertEqual(health["last_error"], "plain")
+            self.assertIn("avg_latency_ms", health)
+            self.assertIn("operations", health)
+            self.assertIn("write", health["operations"])
+            self.assertEqual(health["errors_60s"], 1)
+            self.assertEqual(health["consecutive_failures"], 1)
         self.assertEqual(breaker.state(now=2000.0), "ok")
-        with patch.object(rate_module.time, "time", return_value=3000.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=3000.0),
+            patch.object(rate_module.time, "monotonic", return_value=300.0),
+        ):
             breaker.record_success(1.0, kind="")
             self.assertIn("dbus", breaker.latencies_by_kind)
             breaker.record_error(TimeoutError("timeout"))
@@ -100,30 +117,51 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
             self.assertIn(("dbus"), breaker.latencies_by_kind)
             self.assertGreaterEqual(breaker.health()["successes_60s"], 1)
         pruning_breaker = DbusCircuitBreaker()
-        with patch.object(rate_module.time, "time", return_value=1.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=1.0),
+            patch.object(rate_module.time, "monotonic", return_value=1.0),
+        ):
             pruning_breaker.record_success(1.0)
             pruning_breaker.record_error(TimeoutError("timeout"))
-        with patch.object(rate_module.time, "time", return_value=100.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=100.0),
+            patch.object(rate_module.time, "monotonic", return_value=100.0),
+        ):
             self.assertEqual(pruning_breaker.health()["successes_60s"], 0)
             self.assertEqual(pruning_breaker.health()["errors_60s"], 0)
         pruning_breaker = DbusCircuitBreaker()
-        with patch.object(rate_module.time, "time", return_value=40.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=40.0),
+            patch.object(rate_module.time, "monotonic", return_value=40.0),
+        ):
             pruning_breaker.record_success(1.0)
             pruning_breaker.record_error(RuntimeError("plain"), kind=" write ")
-        with patch.object(rate_module.time, "time", return_value=100.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=100.0),
+            patch.object(rate_module.time, "monotonic", return_value=100.0),
+        ):
             boundary_health = pruning_breaker.health()
         self.assertEqual(boundary_health["successes_60s"], 1)
         self.assertEqual(boundary_health["errors_60s"], 1)
         self.assertEqual(list(pruning_breaker._errors), [(40.0, "write")])
         self.assertEqual(list(pruning_breaker._successes), [(40.0, "dbus")])
         pruning_breaker = DbusCircuitBreaker()
-        with patch.object(rate_module.time, "time", return_value=39.5):
+        with (
+            patch.object(rate_module.time, "time", return_value=39.5),
+            patch.object(rate_module.time, "monotonic", return_value=39.5),
+        ):
             pruning_breaker.record_success(1.0)
             pruning_breaker.record_error(RuntimeError("plain"))
-        with patch.object(rate_module.time, "time", return_value=40.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=40.0),
+            patch.object(rate_module.time, "monotonic", return_value=40.0),
+        ):
             pruning_breaker.record_success(1.0)
             pruning_breaker.record_error(RuntimeError("plain"))
-        with patch.object(rate_module.time, "time", return_value=100.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=100.0),
+            patch.object(rate_module.time, "monotonic", return_value=100.0),
+        ):
             narrowed_health = pruning_breaker.health()
         self.assertEqual(narrowed_health["successes_60s"], 1)
         self.assertEqual(narrowed_health["errors_60s"], 1)
@@ -189,12 +227,16 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         kind_window = MagicMock()
         breaker.latencies = latency_window
         with patch.object(breaker, "_kind_window", MagicMock(return_value=kind_window)) as kind_window_factory:
-            with patch.object(rate_module.time, "time", return_value=42.0):
+            with (
+                patch.object(rate_module.time, "time", return_value=420.0),
+                patch.object(rate_module.time, "monotonic", return_value=42.0),
+            ):
                 breaker.record_success(7.5)
         latency_window.record_latency.assert_called_once_with(7.5, now=42.0)
         kind_window.record_latency.assert_called_once_with(7.5, now=42.0)
         kind_window_factory.assert_called_once_with("dbus")
         self.assertEqual(list(breaker._successes), [(42.0, "dbus")])
+        self.assertEqual(breaker.last_success_at, 420.0)
 
         breaker = DbusCircuitBreaker()
         latency_window = MagicMock()
@@ -202,7 +244,10 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         latency_window.summary.return_value = {"timeouts_60s": 1}
         breaker.latencies = latency_window
         with patch.object(breaker, "_kind_window", MagicMock(return_value=kind_window)) as kind_window_factory:
-            with patch.object(rate_module.time, "time", return_value=50.0):
+            with (
+                patch.object(rate_module.time, "time", return_value=500.0),
+                patch.object(rate_module.time, "monotonic", return_value=50.0),
+            ):
                 breaker.record_error(TimeoutError("timeout"))
         latency_window.record_timeout.assert_called_once_with(now=50.0)
         latency_window.summary.assert_called_once_with(now=50.0)
@@ -220,7 +265,10 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         read_window = MagicMock()
         read_window.summary.return_value = read_summary
         breaker.latencies_by_kind = {"read": read_window}
-        with patch.object(rate_module.time, "time", return_value=77.0):
+        with (
+            patch.object(rate_module.time, "time", return_value=770.0),
+            patch.object(rate_module.time, "monotonic", return_value=77.0),
+        ):
             health = breaker.health()
 
         breaker.latencies.summary.assert_called_once_with(now=77.0)
@@ -229,6 +277,93 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         self.assertEqual(health["operations"], {"read": read_summary})
         self.assertEqual(health["avg_latency_ms"], 1.5)
         self.assertEqual(health["timeouts_60s"], 2)
+
+    def test_circuit_source_attribution_slowdown_and_monotonic_deadlines(self) -> None:
+        breaker = DbusCircuitBreaker()
+        source = "svc.optional/Power"
+        with (
+            patch.object(rate_module.time, "time", return_value=1000.0),
+            patch.object(rate_module.time, "monotonic", return_value=100.0),
+        ):
+            for latency_ms in (100.0, 150.0, 200.0):
+                breaker.record_success(
+                    latency_ms,
+                    kind="optional_read",
+                    source=source,
+                )
+            self.assertEqual(
+                breaker.optional_source_interval_factor(source),
+                1.0,
+            )
+            breaker.record_success(
+                300.0,
+                kind="optional_read",
+                source=source,
+            )
+            self.assertEqual(
+                breaker.optional_source_interval_factor(source),
+                rate_module.OPTIONAL_SLOW_SOURCE_INTERVAL_FACTOR,
+            )
+            breaker.record_success(
+                800.0,
+                kind="optional_read",
+                source=source,
+            )
+            self.assertEqual(
+                breaker.optional_source_interval_factor(source),
+                rate_module.OPTIONAL_VERY_SLOW_SOURCE_INTERVAL_FACTOR,
+            )
+            breaker.record_error(
+                TimeoutError("source timeout"),
+                kind="optional_read",
+                source=source,
+                latency_ms=1000.0,
+            )
+            breaker.record_error(
+                RuntimeError("plain"),
+                kind="optional_read",
+                source=source,
+                latency_ms=50.0,
+            )
+            breaker.record_optional_source_failure(
+                TimeoutError("night source timeout"),
+                source="svc.night/Power",
+                latency_ms=900.0,
+            )
+            breaker.record_optional_source_failure(
+                RuntimeError("optional plain"),
+                source="svc.night/Power",
+                latency_ms=60.0,
+            )
+            breaker.record_optional_source_failure(
+                TimeoutError("unattributed"),
+                source="",
+                latency_ms=70.0,
+            )
+            health = breaker.health()
+
+        source_health = health["operation_sources"]["optional_read"][source]
+        self.assertEqual(source_health["samples_60s"], 7)
+        self.assertEqual(source_health["timeouts_60s"], 1)
+        night_health = health["operation_sources"]["optional_read"]["svc.night/Power"]
+        self.assertEqual(night_health["samples_60s"], 2)
+        self.assertEqual(night_health["timeouts_60s"], 1)
+        self.assertEqual(health["operations"]["optional_read"]["samples_60s"], 10)
+        self.assertEqual(health["errors_60s"], 2)
+
+        deadlines = DbusCircuitBreaker()
+        with (
+            patch.object(rate_module.time, "time", return_value=2000.0),
+            patch.object(rate_module.time, "monotonic", return_value=200.0),
+        ):
+            deadlines.degraded_until = 2010.0
+            deadlines.protective_until = 2005.0
+        self.assertEqual(deadlines.state(monotonic_at=204.0), "protective")
+        self.assertEqual(deadlines.state(monotonic_at=205.0), "degraded")
+        self.assertEqual(deadlines.state(monotonic_at=210.0), "ok")
+        deadlines.degraded_until = 0.0
+        deadlines.protective_until = 0.0
+        self.assertEqual(deadlines.state(monotonic_at=0.0), "ok")
 
     def test_connection_manager_delegates_private_bus_and_resets_safely(self) -> None:
         manager = DbusConnectionManager()

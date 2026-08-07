@@ -24,8 +24,16 @@ class RuntimeAsyncMainloopStateContractTests(unittest.TestCase):
         self.assertEqual(AsyncRuntimeState._float_attr("bad"), 0.0)
 
     def test_initialize_sets_all_scalar_runtime_defaults(self) -> None:
-        service, controller = _controller(poll_interval_ms=1000, auto_watchdog_stale_seconds=180.0)
-        with patch("venus_evcharger.runtime.async_mainloop_state.time.time", return_value=123.0):
+        service, controller = _controller(
+            poll_interval_ms=1000,
+            auto_watchdog_stale_seconds=180.0,
+            runtime_state_path="/data/runtime/dbus-venus-evcharger-60.json",
+            started_at=100.0,
+        )
+        with (
+            patch("venus_evcharger.runtime.async_mainloop_state.time.time", return_value=123.0),
+            patch("venus_evcharger.runtime.async_mainloop_state.time.monotonic", return_value=456.0),
+        ):
             controller.initialize()
 
         expected = {
@@ -47,10 +55,15 @@ class RuntimeAsyncMainloopStateContractTests(unittest.TestCase):
             "_last_write_command_queue_lag_seconds": 0.0,
             "_write_command_budget_seconds": 2.0,
             "_mainloop_heartbeat_at": 123.0,
+            "_mainloop_heartbeat_monotonic": 456.0,
             "_mainloop_watchdog_thread": None,
             "_mainloop_watchdog_interval_seconds": 1.0,
             "_mainloop_watchdog_stale_seconds": 180.0,
             "_mainloop_watchdog_log_path": "/run/dbus-venus-evcharger-mainloop-hang.log",
+            "_process_heartbeat_path": "/run/dbus-venus-evcharger-60.heartbeat.json",
+            "_process_heartbeat_interval_seconds": 5.0,
+            "_process_heartbeat_last_write_monotonic": None,
+            "_process_started_at": 100.0,
         }
         for name, value in expected.items():
             with self.subTest(name=name):
@@ -107,6 +120,24 @@ class RuntimeAsyncMainloopStateContractTests(unittest.TestCase):
         controller.initialize()
         self.assertEqual(service._update_worker_budget_seconds, 5.0)
         self.assertEqual(service._mainloop_watchdog_stale_seconds, 180.0)
+
+    def test_initialize_keeps_heartbeat_on_run_and_normalizes_missing_start_time(self) -> None:
+        cases: tuple[tuple[dict[str, object], str], ...] = (
+            ({}, "/run/dbus-venus-evcharger-60.heartbeat.json"),
+            ({"runtime_state_path": "/data/custom-state"}, "/run/custom-state.heartbeat.json"),
+            ({"runtime_state_path": "/"}, "/run/dbus-venus-evcharger-60.heartbeat.json"),
+            ({"runtime_state_path": "/data/.."}, "/run/dbus-venus-evcharger-60.heartbeat.json"),
+        )
+        for overrides, expected_path in cases:
+            with self.subTest(overrides=overrides):
+                service, controller = _controller(started_at=0.0, **overrides)
+                with (
+                    patch("venus_evcharger.runtime.async_mainloop_state.time.time", return_value=123.0),
+                    patch("venus_evcharger.runtime.async_mainloop_state.time.monotonic", return_value=456.0),
+                ):
+                    controller.initialize()
+                self.assertEqual(service._process_heartbeat_path, expected_path)
+                self.assertEqual(service._process_started_at, 123.0)
 
 
 if __name__ == "__main__":  # pragma: no cover

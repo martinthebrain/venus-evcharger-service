@@ -135,18 +135,43 @@ def observe_evcs_fields(
     observations: Mapping[str, tuple[object, float]],
     *,
     now: float,
-) -> None:
+    monotonic_at: float | None = None,
+) -> float:
     """Apply timestamped semantic EVCS observations through the real registry."""
+    monotonic_now = time.monotonic() if monotonic_at is None else float(monotonic_at)
     if not adapter.publication_registry.evcs_registered:
-        with patch.object(publication_registry_module.time, "time", return_value=now):
+        with (
+            patch.object(
+                publication_registry_module.time,
+                "time",
+                return_value=now,
+            ),
+            patch.object(
+                publication_registry_module.time,
+                "monotonic",
+                return_value=monotonic_now,
+            ),
+        ):
             outcome = adapter.write_scheduler.process_command(evcs_registration({"connected": 1}))
         if outcome != "applied":
             raise AssertionError(f"EVCS registration failed: {outcome}")
     for field, (value, age_seconds) in observations.items():
-        with patch.object(publication_registry_module.time, "time", return_value=now - age_seconds):
+        with (
+            patch.object(
+                publication_registry_module.time,
+                "time",
+                return_value=now - age_seconds,
+            ),
+            patch.object(
+                publication_registry_module.time,
+                "monotonic",
+                return_value=monotonic_now - age_seconds,
+            ),
+        ):
             outcome = adapter.write_scheduler.process_command(evcs_publication({field: value}))
         if outcome != "applied":
             raise AssertionError(f"EVCS publication failed for {field}: {outcome}")
+    return monotonic_now
 
 
 def companion_identity(service_id: str = "aggregate-grid") -> CompanionServiceIdentity:

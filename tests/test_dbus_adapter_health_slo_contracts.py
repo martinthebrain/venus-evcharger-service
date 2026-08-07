@@ -76,6 +76,7 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
                 "gui_control_missing_field_count": 0.0,
                 "gui_session_missing_field_count": 0.0,
                 "configured_gui_max_age_s": 2.0,
+                "publication_scheduler_tolerance_s": 0.0,
                 "core_read_max_age_s": 5.0,
                 "core_read_missing_count": 0.0,
                 "core_read_nonfresh_count": 0.0,
@@ -85,6 +86,8 @@ class DbusAdapterHealthSloContractTests(unittest.TestCase):
         )
         configured = SloThresholds(12.0, 1.0, 7.0, 3000.0)
         self.assertEqual(effective_gui_max_age_seconds(configured), 12.0)
+        with_tolerance = SloThresholds(12.0, 1.0, 7.0, 3000.0, 0.5)
+        self.assertEqual(effective_gui_max_age_seconds(with_tolerance), 12.5)
 
     def test_checks_accept_exact_limits_and_reject_values_just_above(self) -> None:
         at_limit = {

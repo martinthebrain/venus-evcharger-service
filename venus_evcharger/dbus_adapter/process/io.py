@@ -44,6 +44,9 @@ class DbusAdapterIo:
                 key,
                 monotonic_at=monotonic_at,
                 interval=interval,
+                interval_factor=context.read_executor.consume_interval_factor(
+                    key
+                ),
             )
         elif outcome == "dropped":
             context.read_scheduler.record_error(
@@ -104,16 +107,31 @@ class DbusAdapterIo:
 
         return _service_names(self.timed_dbus_operation("read", _read))
 
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T:
+    def timed_dbus_operation(
+        self,
+        kind: str,
+        operation: Callable[[], _T],
+        *,
+        source: str = "",
+    ) -> _T:
         context = self._context
         context.rate_limiter.require_due(kind)
         started = time.monotonic()
         try:
             result = operation()
-            context.circuit.record_success((time.monotonic() - started) * 1000.0, kind=kind)
+            context.circuit.record_success(
+                (time.monotonic() - started) * 1000.0,
+                kind=kind,
+                source=source,
+            )
             return result
         except DBUS_GATEWAY_OPERATION_ERRORS as error:
-            context.circuit.record_error(error, kind=kind)
+            context.circuit.record_error(
+                error,
+                kind=kind,
+                source=source,
+                latency_ms=(time.monotonic() - started) * 1000.0,
+            )
             raise
 
     def timed_local_publish(self, operation: Callable[[], _T]) -> _T:
@@ -214,6 +232,7 @@ class DbusAdapterIo:
                 health=control.health,
                 topology=topology,
                 captured_at=control.captured_at,
+                captured_monotonic=control.monotonic_at,
             )
             context.health_role.append_health_log(control.health)
             context._last_health_publish_monotonic = now

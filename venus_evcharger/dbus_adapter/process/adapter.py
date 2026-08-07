@@ -203,8 +203,18 @@ class DbusAdapter:
     def process_non_write_command(self, command: CommandMapping) -> CommandOutcome:
         return self.introspection_role.process_non_write_command(command)
 
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T:
-        return self.io_role.timed_dbus_operation(kind, operation)
+    def timed_dbus_operation(
+        self,
+        kind: str,
+        operation: Callable[[], _T],
+        *,
+        source: str = "",
+    ) -> _T:
+        return self.io_role.timed_dbus_operation(
+            kind,
+            operation,
+            source=source,
+        )
 
     def timed_local_publish(self, operation: Callable[[], _T]) -> _T:
         return self.io_role.timed_local_publish(operation)

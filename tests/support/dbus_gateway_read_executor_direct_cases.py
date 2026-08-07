@@ -257,12 +257,56 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
 
             install_mock(adapter.rate_limiter, "require_due", MagicMock())
             install_mock(adapter.circuit, "record_success", MagicMock())
+            install_mock(adapter.circuit, "record_error", MagicMock())
+            install_mock(
+                adapter.circuit,
+                "record_optional_source_failure",
+                MagicMock(),
+            )
             install_mock(adapter.read_executor, "read_busitem_now", MagicMock(return_value="8.5"))
             with patch.object(read_module.time, "monotonic", side_effect=[10.0, 10.25]):
                 self.assertEqual(adapter.read_executor.read_optional_busitem("svc.optional", "/Power"), "8.5")
             adapter.rate_limiter.require_due.assert_called_once_with("read")
             adapter.read_executor.read_busitem_now.assert_called_once_with("svc.optional", "/Power")
-            adapter.circuit.record_success.assert_called_once_with(250.0, kind="optional_read")
+            adapter.circuit.record_success.assert_called_once_with(
+                250.0,
+                kind="optional_read",
+                source="svc.optional/Power",
+            )
+            adapter.circuit.record_error.assert_not_called()
+            adapter.circuit.record_optional_source_failure.assert_not_called()
+
+            error = RuntimeError("optional failed")
+            adapter.read_executor.read_busitem_now.side_effect = error
+            with (
+                patch.object(
+                    read_module.time,
+                    "monotonic",
+                    side_effect=[20.0, 20.5],
+                ),
+                self.assertRaises(RuntimeError),
+            ):
+                adapter.read_executor.read_optional_busitem(
+                    "svc.optional",
+                    "/Power",
+                )
+            adapter.circuit.record_optional_source_failure.assert_called_once_with(
+                error,
+                source="svc.optional/Power",
+                latency_ms=500.0,
+            )
+            adapter.circuit.record_error.assert_not_called()
+
+            adapter.circuit.record_optional_source_failure.reset_mock()
+            adapter.read_executor.read_busitem_now.side_effect = DbusOperationDeferred(
+                "read"
+            )
+            with self.assertRaises(DbusOperationDeferred):
+                adapter.read_executor.read_optional_busitem(
+                    "svc.optional",
+                    "/Power",
+                )
+            adapter.circuit.record_optional_source_failure.assert_not_called()
 
             low_level_adapter = DbusAdapter(
                 str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-low-level"))

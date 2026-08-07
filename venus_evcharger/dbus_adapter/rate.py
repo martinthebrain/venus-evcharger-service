@@ -11,6 +11,7 @@ from contextlib import suppress
 import dbus
 
 from venus_evcharger.dbus_gateway import LatencyWindow
+from venus_evcharger.dbus_gateway_latency import BoundedLatencyAttribution
 from venus_evcharger.ipc.command_types import CommandPayload
 
 DBUS_OPERATION_KIND = "dbus"
@@ -28,6 +29,13 @@ def _dbus_exception_type() -> type[BaseException]:
 
 DBUS_DEGRADED_TIMEOUTS_PER_MINUTE = 3
 DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE = 5
+DBUS_LATENCY_OPERATION_KIND_LIMIT = 8
+DBUS_LATENCY_SOURCES_PER_KIND_LIMIT = 16
+OPTIONAL_SLOW_SOURCE_MIN_SAMPLES = 3
+OPTIONAL_SLOW_SOURCE_P95_MS = 250.0
+OPTIONAL_VERY_SLOW_SOURCE_P99_MS = 750.0
+OPTIONAL_SLOW_SOURCE_INTERVAL_FACTOR = 3.0
+OPTIONAL_VERY_SLOW_SOURCE_INTERVAL_FACTOR = 5.0
 PRIORITY_RANKS = {
     "safety": 0,
     "user": 1,
@@ -57,6 +65,12 @@ def _normalized_kind(kind: str) -> str:
 def _normalized_priority(priority: str) -> str:
     normalized = str(priority).strip().lower()
     return normalized if normalized else "diagnostic"
+
+
+def _epoch_deadline_to_monotonic(deadline: float) -> float:
+    if deadline <= 0.0:
+        return 0.0
+    return time.monotonic() + max(0.0, deadline - time.time())
 
 
 class DbusOperationDeferred(RuntimeError):
@@ -99,8 +113,14 @@ class DbusCircuitBreaker:
     def __init__(self, *, degraded_seconds: float = 60.0, protective_seconds: float = 180.0) -> None:
         self.latencies = LatencyWindow()
         self.latencies_by_kind: dict[str, LatencyWindow] = {}
-        self.degraded_until = 0.0
-        self.protective_until = 0.0
+        self.latencies_by_source = BoundedLatencyAttribution(
+            max_operation_kinds=DBUS_LATENCY_OPERATION_KIND_LIMIT,
+            max_sources_per_kind=DBUS_LATENCY_SOURCES_PER_KIND_LIMIT,
+        )
+        self._degraded_until_monotonic = 0.0
+        self._protective_until_monotonic = 0.0
+        self._degraded_until_epoch = 0.0
+        self._protective_until_epoch = 0.0
         self.degraded_seconds = max(1.0, float(degraded_seconds))
         self.protective_seconds = max(1.0, float(protective_seconds))
         self.last_success_at = 0.0
@@ -109,38 +129,102 @@ class DbusCircuitBreaker:
         self._successes: deque[tuple[float, str]] = deque()
         self.consecutive_failures = 0
 
-    def record_success(self, latency_ms: float, *, kind: str = DBUS_OPERATION_KIND) -> None:
-        now = time.time()
+    @property
+    def degraded_until(self) -> float:
+        return self._degraded_until_epoch
+
+    @degraded_until.setter
+    def degraded_until(self, value: float) -> None:
+        self._degraded_until_epoch = max(0.0, float(value))
+        self._degraded_until_monotonic = _epoch_deadline_to_monotonic(
+            self._degraded_until_epoch
+        )
+
+    @property
+    def protective_until(self) -> float:
+        return self._protective_until_epoch
+
+    @protective_until.setter
+    def protective_until(self, value: float) -> None:
+        self._protective_until_epoch = max(0.0, float(value))
+        self._protective_until_monotonic = _epoch_deadline_to_monotonic(
+            self._protective_until_epoch
+        )
+
+    def record_success(
+        self,
+        latency_ms: float,
+        *,
+        kind: str = DBUS_OPERATION_KIND,
+        source: str = "",
+    ) -> None:
+        captured_at = time.time()
+        monotonic_at = time.monotonic()
         normalized_kind = _normalized_kind(kind)
-        self.latencies.record_latency(latency_ms, now=now)
-        self._kind_window(normalized_kind).record_latency(latency_ms, now=now)
-        self._successes.append((now, normalized_kind))
-        self._prune_events(now)
-        self.last_success_at = now
+        self._record_latency(
+            latency_ms,
+            kind=normalized_kind,
+            source=source,
+            monotonic_at=monotonic_at,
+        )
+        self._successes.append((monotonic_at, normalized_kind))
+        self._prune_events(monotonic_at)
+        self.last_success_at = captured_at
         self.last_error = ""
         self.consecutive_failures = 0
 
-    def record_error(self, error: BaseException, *, kind: str = DBUS_OPERATION_KIND) -> None:
-        now = time.time()
+    def record_error(
+        self,
+        error: BaseException,
+        *,
+        kind: str = DBUS_OPERATION_KIND,
+        source: str = "",
+        latency_ms: float | None = None,
+    ) -> None:
+        captured_at = time.time()
+        monotonic_at = time.monotonic()
         normalized_kind = _normalized_kind(kind)
         self.last_error = str(error)
-        self._errors.append((now, normalized_kind))
-        self._prune_events(now)
+        self._errors.append((monotonic_at, normalized_kind))
+        self._prune_events(monotonic_at)
         self.consecutive_failures += 1
+        if latency_ms is not None:
+            self._record_latency(
+                latency_ms,
+                kind=normalized_kind,
+                source=source,
+                monotonic_at=monotonic_at,
+            )
         if self._looks_like_timeout(error):
-            self.latencies.record_timeout(now=now)
-            self._kind_window(normalized_kind).record_timeout(now=now)
-            count = int(self.latencies.summary(now=now)["timeouts_60s"])
+            self._record_timeout(
+                kind=normalized_kind,
+                source=source,
+                monotonic_at=monotonic_at,
+            )
+            count = self.latencies.summary(now=monotonic_at)["timeouts_60s"]
             if count > DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE:
-                self.protective_until = max(self.protective_until, now + self.protective_seconds)
+                self._extend_protective_deadline(
+                    monotonic_at=monotonic_at,
+                    captured_at=captured_at,
+                )
             elif count >= DBUS_DEGRADED_TIMEOUTS_PER_MINUTE:
-                self.degraded_until = max(self.degraded_until, now + self.degraded_seconds)
+                self._extend_degraded_deadline(
+                    monotonic_at=monotonic_at,
+                    captured_at=captured_at,
+                )
 
-    def state(self, *, now: float | None = None) -> str:
-        current = time.time() if now is None else float(now)
-        if current < self.protective_until:
+    def state(
+        self,
+        *,
+        now: float | None = None,
+        monotonic_at: float | None = None,
+    ) -> str:
+        if now is not None:
+            return self._state_for_epoch(float(now))
+        current = time.monotonic() if monotonic_at is None else float(monotonic_at)
+        if current < self._protective_until_monotonic:
             return "protective"
-        if current < self.degraded_until:
+        if current < self._degraded_until_monotonic:
             return "degraded"
         return "ok"
 
@@ -154,10 +238,13 @@ class DbusCircuitBreaker:
         return True
 
     def health(self) -> CommandPayload:
-        now = time.time()
-        self._prune_events(now)
-        summary = self.latencies.summary(now=now)
-        operations = {kind: window.summary(now=now) for kind, window in sorted(self.latencies_by_kind.items())}
+        monotonic_at = time.monotonic()
+        self._prune_events(monotonic_at)
+        summary = self.latencies.summary(now=monotonic_at)
+        operations = {
+            kind: window.summary(now=monotonic_at)
+            for kind, window in sorted(self.latencies_by_kind.items())
+        }
         return {
             "state": self.state(),
             "degraded_until": max(self.degraded_until, self.protective_until),
@@ -167,8 +254,111 @@ class DbusCircuitBreaker:
             "successes_60s": len(self._successes),
             "consecutive_failures": self.consecutive_failures,
             "operations": operations,
+            "operation_sources": self.latencies_by_source.summary(
+                now=monotonic_at
+            ),
             **summary,
         }
+
+    def optional_source_interval_factor(self, source: str) -> float:
+        """Return a conservative scheduler multiplier for one optional source."""
+        summary = self.latencies_by_source.source_summary(
+            "optional_read",
+            str(source),
+            now=time.monotonic(),
+        )
+        if summary["samples_60s"] < OPTIONAL_SLOW_SOURCE_MIN_SAMPLES:
+            return 1.0
+        if summary["p99_latency_ms"] >= OPTIONAL_VERY_SLOW_SOURCE_P99_MS:
+            return OPTIONAL_VERY_SLOW_SOURCE_INTERVAL_FACTOR
+        if summary["p95_latency_ms"] >= OPTIONAL_SLOW_SOURCE_P95_MS:
+            return OPTIONAL_SLOW_SOURCE_INTERVAL_FACTOR
+        return 1.0
+
+    def record_optional_source_failure(
+        self,
+        error: BaseException,
+        *,
+        source: str,
+        latency_ms: float,
+    ) -> None:
+        """Measure an optional source failure without tripping the circuit."""
+        monotonic_at = time.monotonic()
+        self._record_latency(
+            latency_ms,
+            kind="optional_read",
+            source=source,
+            monotonic_at=monotonic_at,
+        )
+        if source and self._looks_like_timeout(error):
+            self.latencies_by_source.record_timeout(
+                "optional_read",
+                str(source),
+                now=monotonic_at,
+            )
+
+    def _record_latency(
+        self,
+        latency_ms: float,
+        *,
+        kind: str,
+        source: str,
+        monotonic_at: float,
+    ) -> None:
+        self.latencies.record_latency(latency_ms, now=monotonic_at)
+        self._kind_window(kind).record_latency(latency_ms, now=monotonic_at)
+        if source:
+            self.latencies_by_source.record_latency(
+                kind,
+                str(source),
+                latency_ms,
+                now=monotonic_at,
+            )
+
+    def _record_timeout(
+        self,
+        *,
+        kind: str,
+        source: str,
+        monotonic_at: float,
+    ) -> None:
+        self.latencies.record_timeout(now=monotonic_at)
+        self._kind_window(kind).record_timeout(now=monotonic_at)
+        if source:
+            self.latencies_by_source.record_timeout(
+                kind,
+                str(source),
+                now=monotonic_at,
+            )
+
+    def _extend_degraded_deadline(
+        self,
+        *,
+        monotonic_at: float,
+        captured_at: float,
+    ) -> None:
+        candidate = monotonic_at + self.degraded_seconds
+        if candidate > self._degraded_until_monotonic:
+            self._degraded_until_monotonic = candidate
+            self._degraded_until_epoch = captured_at + self.degraded_seconds
+
+    def _extend_protective_deadline(
+        self,
+        *,
+        monotonic_at: float,
+        captured_at: float,
+    ) -> None:
+        candidate = monotonic_at + self.protective_seconds
+        if candidate > self._protective_until_monotonic:
+            self._protective_until_monotonic = candidate
+            self._protective_until_epoch = captured_at + self.protective_seconds
+
+    def _state_for_epoch(self, captured_at: float) -> str:
+        if captured_at < self.protective_until:
+            return "protective"
+        if captured_at < self.degraded_until:
+            return "degraded"
+        return "ok"
 
     def _kind_window(self, kind: str) -> LatencyWindow:
         normalized = _normalized_kind(kind)

@@ -292,8 +292,12 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                     }
                 ),
             )
-            adapter.health_role.slo_snapshot(queue_health={}, cache_freshness={}, now=111.0, current_monotonic=222.0)
-            adapter.health_role.slo_observed.assert_called_once_with({}, {}, 111.0, 222.0)
+            adapter.health_role.slo_snapshot(
+                queue_health={},
+                cache_freshness={},
+                current_monotonic=222.0,
+            )
+            adapter.health_role.slo_observed.assert_called_once_with({}, {}, 222.0)
 
             install_mock(
                 adapter.health_role,

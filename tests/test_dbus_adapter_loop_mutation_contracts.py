@@ -62,9 +62,10 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
                 *,
                 duration_ms: float,
                 expected_interval_s: float,
+                scheduled_at: float,
                 now: float,
             ) -> None:
-                del duration_ms, expected_interval_s, now
+                del duration_ms, expected_interval_s, scheduled_at, now
                 events.append("record")
 
             install_mock(
@@ -123,7 +124,10 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
             self.assertEqual(adapter._last_tick_at, 50.0)
             self.assertEqual(adapter._last_tick_monotonic, 10.0)
             self.assertAlmostEqual(adapter._last_tick_duration_ms, 4.0)
-            self.assertAlmostEqual(adapter._next_work_tick_monotonic, 10.006 + adapter.tick_seconds)
+            self.assertAlmostEqual(
+                adapter._next_work_tick_monotonic,
+                10.0 + adapter.tick_seconds,
+            )
 
     def test_tick_return_contract_distinguishes_stop_wait_and_stop_during_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -162,9 +166,10 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
                 *,
                 duration_ms: float,
                 expected_interval_s: float,
+                scheduled_at: float,
                 now: float,
             ) -> None:
-                del duration_ms, expected_interval_s, now
+                del duration_ms, expected_interval_s, scheduled_at, now
                 events.append("record")
 
             install_mock(
@@ -229,9 +234,10 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
                 *,
                 duration_ms: float,
                 expected_interval_s: float,
+                scheduled_at: float,
                 now: float,
             ) -> None:
-                del duration_ms, expected_interval_s, now
+                del duration_ms, expected_interval_s, scheduled_at, now
                 events.append("record")
 
             install_mock(

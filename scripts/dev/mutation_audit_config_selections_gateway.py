@@ -92,6 +92,10 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("scripts/dev/architecture_suppression_contracts.py", _ARCHITECTURE_TESTS),
     ("scripts/dev/check_architecture_contracts.py", _ARCHITECTURE_TESTS),
     ("scripts/ops/gateway_cache_read.py", _CACHE_SCRIPT_TESTS),
+    (
+        "venus_evcharger/dbus_adapter/health/state.py",
+        ("tests/test_dbus_adapter_health_state_contracts.py",),
+    ),
     ("venus_evcharger/dbus_adapter/process/adapter.py", (*_PROCESS_CONTRACT_TESTS, "tests/test_fast_publication_ipc.py")),
     (
         "venus_evcharger/dbus_adapter/process/config.py",
@@ -176,6 +180,10 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("venus_evcharger/dbus_adapter/resource_pressure.py", _RESOURCE_TESTS),
     ("venus_evcharger/dbus_adapter/resource_procfs.py", _RESOURCE_TESTS),
     ("venus_evcharger/dbus_adapter/tick_health.py", _RESOURCE_TESTS),
+    (
+        "venus_evcharger/dbus_gateway_latency.py",
+        ("tests/test_dbus_gateway_primitives.py",),
+    ),
     (
         "venus_evcharger/dbus_adapter/write/core.py",
         (

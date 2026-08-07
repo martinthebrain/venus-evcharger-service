@@ -118,6 +118,20 @@ def timestamp_not_after(
         raise ValueError(f"{label} exceeds gateway diagnostics captured_at tolerance")
 
 
+def normalized_epoch_timestamp(value: object, captured_at: object) -> float:
+    """Normalize an untrusted epoch timestamp at the diagnostics boundary."""
+    timestamp = _non_negative_finite_or_zero(value)
+    boundary = _non_negative_finite_or_zero(captured_at)
+    return min(timestamp, boundary)
+
+
+def _non_negative_finite_or_zero(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    result = float(value)
+    return result if math.isfinite(result) and result > 0.0 else 0.0
+
+
 __all__ = [
     "boolean",
     "bounded_float",
@@ -128,6 +142,7 @@ __all__ = [
     "member_text",
     "non_negative_float",
     "non_negative_int",
+    "normalized_epoch_timestamp",
     "object_sequence",
     "positive_float",
     "text",
