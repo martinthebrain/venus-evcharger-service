@@ -53,6 +53,7 @@ class DbusAdapterLoop:
             return False
         if tick_started < context._next_work_tick_monotonic:
             return True
+        scheduled_at = context._next_work_tick_monotonic
         expected_tick_interval_seconds = context.tick_seconds
         context._last_tick_at = time.time()
         context._last_tick_monotonic = tick_started
@@ -63,9 +64,12 @@ class DbusAdapterLoop:
             context.tick_health.record(
                 duration_ms=context._last_tick_duration_ms,
                 expected_interval_s=expected_tick_interval_seconds,
+                scheduled_at=scheduled_at,
                 now=tick_started,
             )
-            context._next_work_tick_monotonic = time.monotonic() + context.tick_seconds
+            context._next_work_tick_monotonic = (
+                tick_started + context.tick_seconds
+            )
         return not context._stop
 
     def _process_work_tick(self) -> None:

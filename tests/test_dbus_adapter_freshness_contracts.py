@@ -34,6 +34,11 @@ from venus_evcharger.dbus_adapter.health.freshness import (
 class _Observation:
     value: object
     observed_at: float
+    service_heartbeat_monotonic: float = 0.0
+
+    @property
+    def observed_monotonic(self) -> float:
+        return self.observed_at
 
 
 class _Observations:
@@ -176,6 +181,14 @@ class DbusAdapterFreshnessContractTests(unittest.TestCase):
         self.assertEqual(publication_field_age(observations.evcs_field_observation("future"), 100.0), 0.0)
         self.assertEqual(publication_field_age(observations.evcs_field_observation("zero"), 100.0), 0.0)
         self.assertEqual(publication_field_age(_Observation(5, 0.5), 1.0), 0.5)
+        self.assertAlmostEqual(
+            publication_field_age(
+                _Observation(5, 0.5, 0.9),
+                1.0,
+                use_service_heartbeat=True,
+            ),
+            0.1,
+        )
         self.assertEqual(publication_field_age(None, 100.0), 0.0)
         self.assertEqual(publication_field_float(observations.evcs_field_observation("old")), 12.5)
         self.assertEqual(publication_field_float(observations.evcs_field_observation("recent")), -3.0)

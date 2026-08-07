@@ -83,7 +83,29 @@ class ReadRateLimiterProtocol(Protocol):  # pragma: no cover
 class ReadCircuitProtocol(Protocol):  # pragma: no cover
     """Circuit-breaker surface required by direct read execution."""
 
-    def record_success(self, latency_ms: float, *, kind: str = "dbus") -> None: ...
+    def record_success(
+        self,
+        latency_ms: float,
+        *,
+        kind: str = "dbus",
+        source: str = "",
+    ) -> None: ...
+    def record_error(
+        self,
+        error: BaseException,
+        *,
+        kind: str = "dbus",
+        source: str = "",
+        latency_ms: float | None = None,
+    ) -> None: ...
+    def record_optional_source_failure(
+        self,
+        error: BaseException,
+        *,
+        source: str,
+        latency_ms: float,
+    ) -> None: ...
+    def optional_source_interval_factor(self, source: str) -> float: ...
 
 
 class DbusReadAdapter(Protocol):  # pragma: no cover
@@ -107,4 +129,10 @@ class DbusReadAdapter(Protocol):  # pragma: no cover
     @property
     def circuit(self) -> ReadCircuitProtocol: ...
 
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T: ...
+    def timed_dbus_operation(
+        self,
+        kind: str,
+        operation: Callable[[], _T],
+        *,
+        source: str = "",
+    ) -> _T: ...

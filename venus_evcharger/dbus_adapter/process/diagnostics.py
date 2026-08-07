@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 
 from venus_evcharger.dbus_adapter.process.diagnostics_summary import (
@@ -34,11 +35,13 @@ class DbusAdapterDiagnostics:
         health: Mapping[str, object],
         topology: EnergyTopologySnapshot,
         captured_at: float,
+        captured_monotonic: float | None = None,
     ) -> None:
         snapshot = self.gateway_diagnostics_snapshot(
             health=health,
             topology=topology,
             captured_at=captured_at,
+            captured_monotonic=captured_monotonic,
         )
         path = gateway_diagnostics_path(self._context.paths.run_dir)
         self._context.json_writer.write(path, gateway_diagnostics_payload(snapshot))
@@ -49,8 +52,14 @@ class DbusAdapterDiagnostics:
         health: Mapping[str, object],
         topology: EnergyTopologySnapshot,
         captured_at: float,
+        captured_monotonic: float | None = None,
     ) -> GatewayDiagnosticsSnapshot:
         context = self._context
+        monotonic_at = (
+            time.monotonic()
+            if captured_monotonic is None
+            else max(0.0, captured_monotonic)
+        )
         freshness_deadline = diagnostic_freshness_deadline(
             health,
             context.slo_gui_max_age_seconds,
@@ -67,11 +76,13 @@ class DbusAdapterDiagnostics:
             publication=publication_summary(
                 context.publication_registry,
                 captured_at=captured_at,
+                captured_monotonic=monotonic_at,
                 stale_after_seconds=freshness_deadline,
             ),
             ev_charger=evcs_samples(
                 context.publication_registry,
                 captured_at=captured_at,
+                captured_monotonic=monotonic_at,
                 stale_after_seconds=freshness_deadline,
             ),
         )

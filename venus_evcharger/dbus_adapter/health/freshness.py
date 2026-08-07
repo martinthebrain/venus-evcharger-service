@@ -25,6 +25,12 @@ class PublicationFieldObservation(Protocol):
     @property
     def observed_at(self) -> float: ...
 
+    @property
+    def observed_monotonic(self) -> float: ...
+
+    @property
+    def service_heartbeat_monotonic(self) -> float: ...
+
 
 class EvcsPublicationObservations(Protocol):
     """Minimal semantic observation surface required by health calculations."""
@@ -156,9 +162,18 @@ def cached_entry_float(entry: object) -> float:
 def max_publication_field_age(
     observations: EvcsPublicationObservations,
     fields: set[str] | frozenset[str],
-    now: float,
+    monotonic_at: float,
+    *,
+    service_heartbeat_fields: set[str] | frozenset[str] = frozenset(),
 ) -> float:
-    ages = [publication_field_age(observations.evcs_field_observation(field), now) for field in fields]
+    ages = [
+        publication_field_age(
+            observations.evcs_field_observation(field),
+            monotonic_at,
+            use_service_heartbeat=field in service_heartbeat_fields,
+        )
+        for field in fields
+    ]
     return max(ages, default=0.0)
 
 
@@ -169,10 +184,37 @@ def missing_publication_field_count(
     return float(sum(1 for field in fields if observations.evcs_field_observation(field) is None))
 
 
-def publication_field_age(observation: PublicationFieldObservation | None, now: float) -> float:
-    if observation is None or observation.observed_at <= 0.0:
+def publication_field_age(
+    observation: PublicationFieldObservation | None,
+    monotonic_at: float,
+    *,
+    use_service_heartbeat: bool = False,
+) -> float:
+    observed_at = publication_freshness_monotonic(
+        observation,
+        use_service_heartbeat=use_service_heartbeat,
+    )
+    if observed_at <= 0.0:
         return 0.0
-    return max(0.0, now - observation.observed_at)
+    return max(0.0, float(monotonic_at) - observed_at)
+
+
+def publication_freshness_monotonic(
+    observation: PublicationFieldObservation | None,
+    *,
+    use_service_heartbeat: bool,
+) -> float:
+    """Return the monotonic freshness anchor for one publication field."""
+    if observation is None:
+        return 0.0
+    field_confirmation = max(0.0, float(observation.observed_monotonic))
+    if not use_service_heartbeat:
+        return field_confirmation
+    return max(
+        field_confirmation,
+        0.0,
+        float(observation.service_heartbeat_monotonic),
+    )
 
 
 def publication_field_float(observation: PublicationFieldObservation | None) -> float:

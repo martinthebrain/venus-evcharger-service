@@ -273,11 +273,15 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             adapter.tick_health.record.assert_called_once_with(
                 duration_ms=adapter._last_tick_duration_ms,
                 expected_interval_s=initial_tick_interval,
+                scheduled_at=100.0,
                 now=100.0,
             )
             adapter.loop_role.update_adaptive_tick.assert_called_once_with(control)
             self.assertEqual(adapter.tick_seconds, adapter.max_tick_seconds)
-            self.assertAlmostEqual(adapter._next_work_tick_monotonic, 100.03 + adapter.tick_seconds)
+            self.assertAlmostEqual(
+                adapter._next_work_tick_monotonic,
+                100.0 + adapter.tick_seconds,
+            )
             adapter.loop_role.process_one_dbus_operation_once.assert_called_once()
             adapter.io_role.publish_cache.assert_called_once_with(control)
 

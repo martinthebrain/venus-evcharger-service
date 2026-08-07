@@ -121,9 +121,15 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
         registration = parse_register_evcs(register_evcs_command(_identity(), fields))
         self.assertIsNotNone(registration)
         assert registration is not None
-        with patch(
-            "venus_evcharger.dbus_adapter.publication.registry.time.time",
-            return_value=observed_at,
+        with (
+            patch(
+                "venus_evcharger.dbus_adapter.publication.registry.time.time",
+                return_value=observed_at,
+            ),
+            patch(
+                "venus_evcharger.dbus_adapter.publication.registry.time.monotonic",
+                return_value=observed_at,
+            ),
         ):
             self.assertEqual(self.adapter.publication_registry.register_evcs(registration), "applied")
 
@@ -148,6 +154,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(),
             topology=_topology(generation=0),
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
 
         self.assertEqual(snapshot.health.state, "ok")
@@ -165,6 +172,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(dormant_energy_source_ids=["pv-roof"]),
             topology=_topology(),
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
 
         self.assertEqual(snapshot.discovery.unusable_source_count, 0)
@@ -178,6 +186,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(),
             topology=_topology(),
             captured_at=100.5,
+            captured_monotonic=100.5,
         )
         self.assertEqual(fresh.sample("operating_mode").value, 2)
         self.assertIs(fresh.sample("charging_enabled").value, False)
@@ -208,12 +217,32 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(),
             topology=_topology(),
             captured_at=100.0 + self.adapter.slo_gui_max_age_seconds + 0.1,
+            captured_monotonic=(
+                100.0 + self.adapter.slo_gui_max_age_seconds + 0.1
+            ),
         )
         applicable = _samples_with_applicability(stale.ev_charger, "applicable")
         inactive = _samples_with_applicability(stale.ev_charger, "not-applicable")
         _assert_stale_samples(self, applicable)
         _assert_inactive_samples(self, inactive)
         self.assertTrue(stale.publication.stale)
+
+    def test_service_heartbeat_keeps_unchanged_control_values_fresh(self) -> None:
+        self.register_semantic_evcs()
+        self.register_evcs({"ac_power_w": 2300.0}, observed_at=103.0)
+
+        snapshot = self.adapter.diagnostics_role.gateway_diagnostics_snapshot(
+            health=_health(publication_freshness_deadline_s=2.0),
+            topology=_topology(),
+            captured_at=103.1,
+            captured_monotonic=103.1,
+        )
+
+        self.assertEqual(snapshot.sample("operating_mode").status, "fresh")
+        self.assertEqual(snapshot.sample("auto_start_enabled").status, "fresh")
+        self.assertEqual(snapshot.sample("ac_power_w").status, "fresh")
+        self.assertEqual(snapshot.sample("charger_state_code").status, "stale")
+        self.assertFalse(snapshot.publication.stale)
 
     def test_resource_pressure_extends_the_publication_freshness_window(self) -> None:
         self.register_semantic_evcs()
@@ -225,6 +254,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             ),
             topology=_topology(),
             captured_at=107.0,
+            captured_monotonic=107.0,
         )
         pressure_applicable = tuple(
             sample
@@ -246,6 +276,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(),
             topology=_topology(),
             captured_at=100.5,
+            captured_monotonic=100.5,
         )
 
         self.assertEqual(snapshot.sample("operating_mode").status, "error")
@@ -266,6 +297,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             ),
             topology=_topology(),
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
         self.assertEqual(running.health.maximum_latency_ms, 12.0)
         self.assertEqual(running.health.last_error_code, "timeout")
@@ -277,6 +309,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(state="degraded", last_error="connection closed"),
             topology=_topology(),
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
         self.assertEqual(degraded.health.last_error_code, "connection-failed")
         self.assertEqual(degraded.discovery.state, "degraded")
@@ -285,6 +318,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(state="protective", mainloop_heartbeat_age_s=5.0),
             topology=_topology(),
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
         self.assertTrue(protective.health.stale)
         self.assertEqual(protective.discovery.state, "protective")
@@ -293,6 +327,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(last_error="operation failed", discovery_last_error="scan failed"),
             topology=_topology(),
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
         self.assertEqual(failed.health.last_error_code, "gateway-operation-failed")
         self.assertEqual(failed.discovery.state, "error")
@@ -328,6 +363,17 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
                 payload,
                 max_tick_seconds=0.5,
             ).stale
+        )
+        payload["eventloop"] = {
+            "max_tick_gap_ms_60s": 25.0,
+            "max_glib_callback_lateness_ms_60s": 3.0,
+        }
+        self.assertEqual(
+            diagnostics_summary.health_summary(
+                payload,
+                max_tick_seconds=0.5,
+            ).maximum_event_loop_gap_ms_60s,
+            3.0,
         )
         payload["mainloop_heartbeat_age_s"] = 0.0
         payload["last_tick_at"] = 0.0
@@ -412,6 +458,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             diagnostics_summary.publication_summary(
                 registry,
                 captured_at=10.0,
+                captured_monotonic=10.0,
                 stale_after_seconds=2.0,
             ).to_payload(),
             {"registered": False, "heartbeat_at": 0.0, "stale": True},
@@ -421,6 +468,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
         at_deadline = diagnostics_summary.publication_summary(
             registry,
             captured_at=102.0,
+            captured_monotonic=102.0,
             stale_after_seconds=2.0,
         )
         self.assertEqual(
@@ -431,6 +479,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             diagnostics_summary.publication_summary(
                 registry,
                 captured_at=102.001,
+                captured_monotonic=102.001,
                 stale_after_seconds=2.0,
             ).stale
         )
@@ -497,9 +546,12 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
     def test_publication_staleness_handles_zero_heartbeat_and_clamped_deadline(self) -> None:
         registry = self.adapter.publication_registry
         self.register_evcs({"mode": 0}, observed_at=0.0)
+        record = next(iter(registry._services.values()))
+        record.publication_heartbeat_monotonic = 0.5
         missing_heartbeat = diagnostics_summary.publication_summary(
             registry,
             captured_at=0.0,
+            captured_monotonic=0.5,
             stale_after_seconds=10.0,
         )
         self.assertFalse(missing_heartbeat.registered)
@@ -511,13 +563,27 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             diagnostics_summary.publication_summary(
                 registry,
                 captured_at=0.5,
+                captured_monotonic=0.5,
                 stale_after_seconds=10.0,
             ).stale
         )
+        record = next(iter(registry._services.values()))
+        record.publication_heartbeat_monotonic = 0.0
+        missing_monotonic_heartbeat = diagnostics_summary.publication_summary(
+            registry,
+            captured_at=0.5,
+            captured_monotonic=0.5,
+            stale_after_seconds=10.0,
+        )
+        self.assertFalse(missing_monotonic_heartbeat.registered)
+        self.assertTrue(missing_monotonic_heartbeat.stale)
+
+        self.register_evcs({"mode": 0}, observed_at=0.5)
         self.assertTrue(
             diagnostics_summary.publication_summary(
                 registry,
                 captured_at=1.0,
+                captured_monotonic=1.0,
                 stale_after_seconds=-1.0,
             ).stale
         )
@@ -535,6 +601,21 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
                 self.assertEqual(
                     diagnostics_summary.diagnostic_freshness_deadline(health, 1.0),
                     16.0,
+                )
+
+    def test_freshness_deadline_prefers_shared_health_contract_exactly(self) -> None:
+        for shared_deadline in (0.5, 2.05):
+            with self.subTest(shared_deadline=shared_deadline):
+                self.assertEqual(
+                    diagnostics_summary.diagnostic_freshness_deadline(
+                        {
+                            "publication_freshness_deadline_s": shared_deadline,
+                            "state": "protective",
+                            "adaptive_tick_seconds": 10.0,
+                        },
+                        100.0,
+                    ),
+                    shared_deadline,
                 )
 
     def test_discovery_handles_dormant_dc_pv_and_default_unavailability_reason(self) -> None:
@@ -638,18 +719,24 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             "operating_mode",
             None,
             diagnostics_values._mode,
-            10.0,
-            2.0,
+            diagnostics_values._FreshnessWindow(10.0, 10.0, 2.0),
         )
         self.assertEqual(unavailable.status, "unavailable")
         self.assertEqual(unavailable.reason_code, "field-unavailable")
 
         fallback = diagnostics_values._charging_enabled_sample(
-            lambda field: PublicationFieldObservation(1, 8.0, 9.0, 9.5)
+            lambda field: PublicationFieldObservation(
+                1,
+                8.0,
+                9.0,
+                9.5,
+                8.0,
+                9.0,
+                9.5,
+            )
             if field == "enable"
             else None,
-            10.0,
-            2.0,
+            diagnostics_values._FreshnessWindow(10.0, 10.0, 2.0),
         )
         self.assertIs(fallback.value, True)
         self.assertEqual(fallback.status, "fresh")
@@ -668,11 +755,31 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
         self.assertIsNotNone(registration)
         assert registration is not None
 
-        with patch("venus_evcharger.dbus_adapter.publication.registry.time.time", return_value=110.0):
+        with (
+            patch(
+                "venus_evcharger.dbus_adapter.publication.registry.time.time",
+                return_value=110.0,
+            ),
+            patch(
+                "venus_evcharger.dbus_adapter.publication.registry.time.monotonic",
+                return_value=110.0,
+            ),
+        ):
             self.assertEqual(self.adapter.publication_registry.register_evcs(registration), "applied")
 
         refreshed = self.adapter.publication_registry.evcs_field_observation("mode")
-        self.assertEqual(refreshed, PublicationFieldObservation(1, 100.0, 110.0, 110.0))
+        self.assertEqual(
+            refreshed,
+            PublicationFieldObservation(
+                1,
+                100.0,
+                110.0,
+                110.0,
+                100.0,
+                110.0,
+                110.0,
+            ),
+        )
         self.assertEqual(first.changed_at, 100.0)
         self.assertEqual(first.observed_at, 100.0)
         self.assertIsNone(self.adapter.publication_registry.evcs_field_observation("not-a-field"))
@@ -691,6 +798,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             health=_health(),
             topology=_topology(),
             captured_at=100.5,
+            captured_monotonic=100.5,
         )
         self.assertEqual(snapshot.sample("decision_state").status, "fresh")
         self.assertEqual(snapshot.sample("decision_state").applicability, "applicable")

@@ -96,6 +96,20 @@ class TestDbusAdapterSchedulerContracts(unittest.TestCase):
         self.assertEqual(scheduler.next_read_at, {"grid": 0.0})
         scheduler.record_success("grid", monotonic_at=10.0, interval=4.0)
         self.assertEqual(scheduler.next_read_at["grid"], 14.0)
+        scheduler.record_success(
+            "grid",
+            monotonic_at=20.0,
+            interval=4.0,
+            interval_factor=3.0,
+        )
+        self.assertEqual(scheduler.next_read_at["grid"], 32.0)
+        scheduler.record_success(
+            "grid",
+            monotonic_at=20.0,
+            interval=4.0,
+            interval_factor=0.5,
+        )
+        self.assertEqual(scheduler.next_read_at["grid"], 24.0)
 
         for expected_failure, expected_due in (
             (1, 50.0),

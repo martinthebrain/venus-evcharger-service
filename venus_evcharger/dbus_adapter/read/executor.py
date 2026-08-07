@@ -46,6 +46,7 @@ class DbusReadExecutor:
         self.adapter = adapter
         self._aggregates = AggregateStore()
         self._stale_after_by_key: dict[str, float | None] = {}
+        self._interval_factors: dict[str, float] = {}
         self.last_operation_performed = False
 
     def poll_read_spec(self, key: str, spec: ReadSpec) -> CommandOutcome:
@@ -67,6 +68,8 @@ class DbusReadExecutor:
 
     def _poll_read_spec_unchecked(self, key: str, spec: ReadSpec) -> CommandOutcome:
         aggregate = _spec_text(spec, "aggregate")
+        if aggregate != PV_TOTAL_AGGREGATE:
+            self._interval_factors.pop(key, None)
         handlers: dict[str, Callable[[str, ReadSpec], CommandOutcome]] = {
             "sum": self._poll_sum_step,
             "services-sum": self._poll_services_sum_step,
@@ -87,12 +90,14 @@ class DbusReadExecutor:
     def _mark_read_error(self, key: str, spec: ReadSpec, error: BaseException) -> None:
         self._aggregates.discard(key)
         self._stale_after_by_key.pop(key, None)
+        self._interval_factors.pop(key, None)
         self.adapter.cache.mark_error(key, source=self._spec_source(spec), error=error)
         logging.debug("DBus adapter read failed key=%s: %s", key, error)
 
     def _mark_optional_zero(self, key: str, spec: ReadSpec, error: BaseException) -> None:
         self._aggregates.discard(key)
         self._stale_after_by_key.pop(key, None)
+        self._interval_factors.pop(key, None)
         self.adapter.cache.update_external_read(
             key,
             0.0,
@@ -121,6 +126,9 @@ class DbusReadExecutor:
 
     def has_pending_aggregate(self) -> bool:
         return self._aggregates.has_pending()
+
+    def consume_interval_factor(self, key: str) -> float:
+        return max(1.0, self._interval_factors.pop(str(key), 1.0))
 
     def _poll_sum_step(self, key: str, spec: ReadSpec) -> CommandOutcome:
         service = _spec_text(spec, "service")
@@ -187,9 +195,13 @@ class DbusReadExecutor:
     ) -> CommandOutcome:
         state = self._aggregates.state_for(key, signature, empty_confidence)
         index = state.index
+        if index == 0:
+            self._interval_factors[key] = 1.0
         service, path = members[index]
         value = self._read_aggregate_member(service, path, state, ignore_member_errors=ignore_member_errors)
         self.last_operation_performed = True
+        if ignore_member_errors:
+            self._record_optional_interval_factor(key, service, path)
         self._record_aggregate_member(state, service, path, value)
         state.index = index + 1
         return self._aggregate_step_outcome(key, state, len(members))
@@ -311,11 +323,29 @@ class DbusReadExecutor:
         )
         self._aggregates.discard(key)
 
+    def _record_optional_interval_factor(
+        self,
+        key: str,
+        service: str,
+        path: str,
+    ) -> None:
+        source = f"{service}{path}"
+        factor = self.adapter.circuit.optional_source_interval_factor(source)
+        self._interval_factors[key] = max(
+            self._interval_factors.get(key, 1.0),
+            factor,
+        )
+
     def read_busitem(self, service: str, path: str) -> object:
         if not service or not path:
             return None
 
-        value: object = self.adapter.timed_dbus_operation("read", lambda: self.read_busitem_now(service, path))
+        source = f"{service}{path}"
+        value: object = self.adapter.timed_dbus_operation(
+            "read",
+            lambda: self.read_busitem_now(service, path),
+            source=source,
+        )
         return value
 
     def read_optional_busitem(self, service: str, path: str) -> object:
@@ -324,8 +354,23 @@ class DbusReadExecutor:
 
         self.adapter.rate_limiter.require_due("read")
         started = time.monotonic()
-        value: object = self.read_busitem_now(service, path)
-        self.adapter.circuit.record_success((time.monotonic() - started) * 1000.0, kind="optional_read")
+        source = f"{service}{path}"
+        try:
+            value: object = self.read_busitem_now(service, path)
+        except DbusOperationDeferred:
+            raise
+        except DBUS_READ_ERRORS as error:
+            self.adapter.circuit.record_optional_source_failure(
+                error,
+                source=source,
+                latency_ms=(time.monotonic() - started) * 1000.0,
+            )
+            raise
+        self.adapter.circuit.record_success(
+            (time.monotonic() - started) * 1000.0,
+            kind="optional_read",
+            source=source,
+        )
         return value
 
     def read_busitem_now(self, service: str, path: str) -> object:

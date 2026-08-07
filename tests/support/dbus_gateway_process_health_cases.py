@@ -283,6 +283,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             record_success = install_mock(adapter.read_scheduler, "record_success", MagicMock())
             record_error = install_mock(adapter.read_scheduler, "record_error", MagicMock())
             poll_read_spec = install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="applied"))
+            adapter.read_executor._interval_factors["grid"] = 3.0
 
             with patch.object(process_io_module.time, "monotonic", return_value=123.0):
                 self.assertTrue(adapter.io_role.poll_one_due_read_once())
@@ -297,7 +298,9 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 "grid",
                 monotonic_at=123.0,
                 interval=2.5,
+                interval_factor=3.0,
             )
+            self.assertNotIn("grid", adapter.read_executor._interval_factors)
             record_error.assert_not_called()
 
             next_due.reset_mock()

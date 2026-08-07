@@ -326,18 +326,31 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             with patch.object(process_io_module.time, "monotonic", side_effect=[10.0, 10.125]):
                 self.assertEqual(adapter.timed_dbus_operation("write", lambda: "ok"), "ok")
             require_due.assert_called_once_with("write")
-            record_success.assert_called_once_with(125.0, kind="write")
+            record_success.assert_called_once_with(
+                125.0,
+                kind="write",
+                source="",
+            )
             record_error.assert_not_called()
 
             require_due.reset_mock()
             record_success.reset_mock()
             error = RuntimeError("boom")
-            with patch.object(process_io_module.time, "monotonic", return_value=20.0):
+            with patch.object(
+                process_io_module.time,
+                "monotonic",
+                side_effect=[20.0, 20.5],
+            ):
                 with self.assertRaises(RuntimeError):
                     adapter.timed_dbus_operation("read", lambda: (_ for _ in ()).throw(error))
             require_due.assert_called_once_with("read")
             record_success.assert_not_called()
-            record_error.assert_called_once_with(error, kind="read")
+            record_error.assert_called_once_with(
+                error,
+                kind="read",
+                source="",
+                latency_ms=500.0,
+            )
 
             require_due.reset_mock()
             record_error.reset_mock()

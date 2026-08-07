@@ -188,6 +188,7 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
                 "gui_control_missing_field_count": 0.0,
                 "gui_session_missing_field_count": 0.0,
                 "configured_gui_max_age_s": 2.0,
+                "publication_scheduler_tolerance_s": 0.0,
                 "core_read_max_age_s": 5.0,
                 "core_read_missing_count": 0.0,
                 "core_read_nonfresh_count": 0.0,

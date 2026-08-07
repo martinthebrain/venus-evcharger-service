@@ -276,7 +276,7 @@ class MutationAuditScriptTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(json.dumps(all_selections, separators=(",", ":")).encode()).hexdigest(),
-            "274a51405826d6070f492d8ea2aeba740e81c8c960c0e6c413ec7cd152864e2e",
+            "9423510501acb488b001869b84bf78ce263c9c546bd152ec1ef36d75b48e3828",
         )
 
     def test_mutation_config_can_target_dev_scripts(self) -> None:

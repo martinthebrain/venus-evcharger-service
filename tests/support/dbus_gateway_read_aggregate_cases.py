@@ -240,6 +240,50 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             self.assertIsNone(adapter.read_executor.read_optional_busitem("", "/Path"))
             self.assertIsNone(adapter.read_executor.read_optional_busitem("svc", ""))
 
+    def test_slow_optional_member_extends_only_its_aggregate_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            optional_read = install_mock(
+                adapter.read_executor,
+                "read_optional_busitem",
+                MagicMock(return_value=25.0),
+            )
+            interval_factor = install_mock(
+                adapter.circuit,
+                "optional_source_interval_factor",
+                MagicMock(return_value=3.0),
+            )
+
+            outcome = adapter.read_executor._poll_aggregate_step(
+                "optional",
+                ("pv-total", (("svc.optional", "/Power"),)),
+                [("svc.optional", "/Power")],
+                ignore_member_errors=True,
+            )
+
+            self.assertEqual(outcome, "applied")
+            self.assertTrue(adapter.read_executor.last_operation_performed)
+            optional_read.assert_called_once_with("svc.optional", "/Power")
+            interval_factor.assert_called_once_with("svc.optional/Power")
+            self.assertEqual(
+                adapter.read_executor.consume_interval_factor("optional"),
+                3.0,
+            )
+            self.assertEqual(
+                adapter.read_executor.consume_interval_factor("optional"),
+                1.0,
+            )
+            adapter.read_executor._interval_factors["clamped"] = 0.5
+            self.assertEqual(
+                adapter.read_executor.consume_interval_factor("clamped"),
+                1.0,
+            )
+
     def test_first_service_read_uses_discovered_battery_service(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
@@ -390,6 +434,8 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 self.assertEqual(adapter.read_executor.read_busitem("svc", "/P"), 4.0)
             self.assertEqual(fake_bus.get_object_calls, [("svc", "/P", False)])
             self.assertEqual(fake_iface.get_calls, [1.0])
+            source_health = adapter.circuit.health()["operation_sources"]
+            self.assertIn("svc/P", source_health["read"])
             self.assertIsNone(adapter.read_executor.read_busitem("", "/P"))
             self.assertIsNone(adapter.read_executor.read_busitem("svc", ""))
 

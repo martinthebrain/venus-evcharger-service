@@ -1257,7 +1257,9 @@ class TestRuntimeSupportControllerState(unittest.TestCase):
         controller = RuntimeSupportController(service, self._age_zero, self._health_zero)
         controller.initialize_runtime_support()
 
-        self.assertTrue(controller.mainloop_heartbeat_tick())
+        with patch("venus_evcharger.runtime.async_mainloop_watchdog.write_text_atomically") as write_heartbeat:
+            self.assertTrue(controller.mainloop_heartbeat_tick())
+        write_heartbeat.assert_called_once()
         self.assertIsNotNone(service._mainloop_heartbeat_at)
 
         fake_thread = SimpleNamespace(start=MagicMock())

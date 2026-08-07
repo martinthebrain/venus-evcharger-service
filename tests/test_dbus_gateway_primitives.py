@@ -1618,6 +1618,105 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertEqual(summary["timeouts_60s"], 0)
         self.assertEqual(summary["avg_latency_ms"], 30.0)
 
+    def test_latency_window_keeps_samples_at_exact_cutoff_and_reports_empty_values(self) -> None:
+        window = LatencyWindow(window_seconds=10.0)
+        window.record_latency(20.0, now=0.0)
+        window.record_timeout(now=0.0)
+        at_cutoff = window.summary(now=10.0)
+        self.assertEqual(at_cutoff["samples_60s"], 1)
+        self.assertEqual(at_cutoff["timeouts_60s"], 1)
+
+        empty = window.summary(now=10.001)
+        self.assertEqual(
+            empty,
+            {
+                "samples_60s": 0,
+                "timeouts_60s": 0,
+                "avg_latency_ms": 0.0,
+                "p95_latency_ms": 0.0,
+                "p99_latency_ms": 0.0,
+                "max_latency_ms": 0.0,
+            },
+        )
+
+    def test_latency_percentiles_monotonic_clock_and_bounded_attribution(self) -> None:
+        window = LatencyWindow()
+        for latency_ms in range(1, 101):
+            window.record_latency(float(latency_ms), now=10.0)
+        summary = window.summary(now=10.0)
+        self.assertEqual(summary["samples_60s"], 100)
+        self.assertEqual(summary["p95_latency_ms"], 95.0)
+        self.assertEqual(summary["p99_latency_ms"], 99.0)
+
+        default_clock_window = LatencyWindow()
+        with patch.object(
+            gateway_latency_module.time,
+            "monotonic",
+            side_effect=[20.0, 21.0, 22.0],
+        ):
+            default_clock_window.record_latency(7.0)
+            default_clock_window.record_timeout()
+            default_summary = default_clock_window.summary()
+        self.assertEqual(default_summary["samples_60s"], 1)
+        self.assertEqual(default_summary["timeouts_60s"], 1)
+
+        attribution = gateway_latency_module.BoundedLatencyAttribution(
+            window_seconds=0.0,
+            max_operation_kinds=2,
+            max_sources_per_kind=2,
+        )
+        self.assertEqual(attribution.window_seconds, 1.0)
+        attribution.record_latency("read", "source-a", 10.0, now=1.0)
+        attribution.record_latency("read", "source-a", 20.0, now=1.0)
+        attribution.record_latency("read", "source-b", 30.0, now=1.0)
+        attribution.record_timeout("read", "source-c", now=1.0)
+        attribution.record_latency("write", "source-d", 40.0, now=1.0)
+        attribution.record_latency("diagnostic", "source-e", 50.0, now=1.0)
+
+        attributed = attribution.summary(now=1.0)
+        self.assertEqual(
+            set(attributed),
+            {"read", gateway_latency_module.ATTRIBUTION_OVERFLOW_KEY},
+        )
+        self.assertEqual(
+            set(attributed["read"]),
+            {"source-a", gateway_latency_module.ATTRIBUTION_OVERFLOW_KEY},
+        )
+        self.assertEqual(attributed["read"]["source-a"]["samples_60s"], 2)
+        self.assertEqual(
+            attribution.source_summary("read", "source-a", now=1.0),
+            attributed["read"]["source-a"],
+        )
+        self.assertEqual(
+            attribution.source_summary("read", "source-b", now=1.0),
+            attributed["read"][gateway_latency_module.ATTRIBUTION_OVERFLOW_KEY],
+        )
+        self.assertEqual(
+            attribution.source_summary("missing", "source", now=1.0),
+            attributed[gateway_latency_module.ATTRIBUTION_OVERFLOW_KEY][
+                gateway_latency_module.ATTRIBUTION_OVERFLOW_KEY
+            ],
+        )
+
+        empty = gateway_latency_module.BoundedLatencyAttribution(
+            max_operation_kinds=0,
+            max_sources_per_kind=0,
+        )
+        empty_summary = empty.source_summary("missing", "source", now=1.0)
+        self.assertEqual(empty.max_operation_kinds, 1)
+        self.assertEqual(empty.max_sources_per_kind, 1)
+        self.assertEqual(
+            empty_summary,
+            {
+                "samples_60s": 0,
+                "timeouts_60s": 0,
+                "avg_latency_ms": 0.0,
+                "p95_latency_ms": 0.0,
+                "p99_latency_ms": 0.0,
+                "max_latency_ms": 0.0,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,13 +46,14 @@ class DbusReadScheduler:
         *,
         monotonic_at: float,
         interval: float,
+        interval_factor: float = 1.0,
     ) -> None:
         normalized = str(key)
         self.failure_counts[normalized] = 0
         self.next_read_at[normalized] = float(monotonic_at) + max(
             0.0,
             float(interval),
-        )
+        ) * max(1.0, float(interval_factor))
 
     def record_error(
         self,
