@@ -91,16 +91,20 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         ):
             breaker.record_success(4.5)
         self.assertIn("dbus", breaker.latencies_by_kind)
-        breaker.record_error(_BrokenName("plain"))
-        health = breaker.health()
-        self.assertEqual(health["state"], breaker.state())
-        self.assertEqual(health["last_success_at"], breaker.last_success_at)
-        self.assertEqual(health["last_error"], "plain")
-        self.assertIn("avg_latency_ms", health)
-        self.assertIn("operations", health)
-        self.assertIn("write", health["operations"])
-        self.assertEqual(health["errors_60s"], 1)
-        self.assertEqual(health["consecutive_failures"], 1)
+        with (
+            patch.object(rate_module.time, "time", return_value=1100.0),
+            patch.object(rate_module.time, "monotonic", return_value=200.0),
+        ):
+            breaker.record_error(_BrokenName("plain"))
+            health = breaker.health()
+            self.assertEqual(health["state"], breaker.state())
+            self.assertEqual(health["last_success_at"], breaker.last_success_at)
+            self.assertEqual(health["last_error"], "plain")
+            self.assertIn("avg_latency_ms", health)
+            self.assertIn("operations", health)
+            self.assertIn("write", health["operations"])
+            self.assertEqual(health["errors_60s"], 1)
+            self.assertEqual(health["consecutive_failures"], 1)
         self.assertEqual(breaker.state(now=2000.0), "ok")
         with (
             patch.object(rate_module.time, "time", return_value=3000.0),

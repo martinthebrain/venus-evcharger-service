@@ -230,6 +230,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                     "energy_forward_kwh": (0.0, 600.0),
                 },
                 now=now,
+                monotonic_at=1000.0,
             )
 
             self.assertFalse(
@@ -348,6 +349,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                     "session_energy_kwh": (0.1, 600.0),
                 },
                 now=now,
+                monotonic_at=1000.0,
             )
 
             self.assertTrue(

@@ -135,9 +135,10 @@ def observe_evcs_fields(
     observations: Mapping[str, tuple[object, float]],
     *,
     now: float,
+    monotonic_at: float | None = None,
 ) -> float:
     """Apply timestamped semantic EVCS observations through the real registry."""
-    monotonic_now = time.monotonic()
+    monotonic_now = time.monotonic() if monotonic_at is None else float(monotonic_at)
     if not adapter.publication_registry.evcs_registered:
         with (
             patch.object(
