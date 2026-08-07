@@ -359,7 +359,7 @@ class GatewayHealthSloCases(GatewayAdapterContractCase):
                 "session_energy_kwh",
                 adapter.health_role.gui_freshness_fields(monotonic_now),
             )
-            observed = adapter.health_role.slo_observed({}, {}, time.monotonic())
+            observed = adapter.health_role.slo_observed({}, {}, monotonic_now)
             self.assertFalse(
                 health_slo_module.slo_checks_from_observed(observed, adapter.health_role.slo_thresholds())["gui_fresh"]
             )
