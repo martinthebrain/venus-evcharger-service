@@ -11,14 +11,18 @@ from tests.support.dbus_gateway_adapter_harness import (
     Path,
     builtins,
     gateway_paths,
+    dbus_wire_call,
     health_backpressure_module,
     health_slo_module,
+    install_dbus_call_responder,
     install_mock,
     observe_evcs_fields,
     patch,
     process_io_module,
+    run_non_write_command,
     tempfile,
     time,
+    unittest,
 )
 from venus_evcharger.ipc.energy import EnergyRefreshRequest
 
@@ -85,7 +89,9 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 adapter.health_role.append_health_log({"state": "ok"})
 
             with self.assertRaises(RuntimeError):
-                adapter.timed_local_publish(lambda: (_ for _ in ()).throw(RuntimeError("publish failed")))
+                adapter.io_role.timed_local_publish(
+                    lambda: (_ for _ in ()).throw(RuntimeError("publish failed")),
+                )
 
             slow = health_backpressure_module.backpressure_snapshot(
                 circuit_state=adapter.circuit.state(),
@@ -237,10 +243,26 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             adapter.read_scheduler.next_read_at = {
                 key: (0.0 if key == "grid_power_w" else time.time() + 1000) for key in adapter.read_scheduler.specs
             }
-            install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="applied"))
+            install_mock(
+                adapter.read_executor,
+                "poll_read_spec",
+                MagicMock(
+                    side_effect=lambda _key, _spec, *, completion: (
+                        completion("applied") or "applied"
+                    )
+                ),
+            )
             self.assertTrue(adapter.io_role.poll_one_due_read_once())
             adapter.read_scheduler.next_read_at["grid_power_w"] = 0.0
-            install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="dropped"))
+            install_mock(
+                adapter.read_executor,
+                "poll_read_spec",
+                MagicMock(
+                    side_effect=lambda _key, _spec, *, completion: (
+                        completion("dropped") or "dropped"
+                    )
+                ),
+            )
             self.assertTrue(adapter.io_role.poll_one_due_read_once())
             adapter.read_scheduler.next_read_at["grid_power_w"] = 0.0
             install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="deferred"))
@@ -250,21 +272,49 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             self.assertFalse(adapter.io_role.refresh_services_if_due_once())
             topology_refresh = EnergyRefreshRequest("topology", "topology", 0.0)
             self.assertEqual(
-                adapter.process_non_write_command(topology_refresh.to_command(source="test")),
+                run_non_write_command(adapter, topology_refresh.to_command(source="test")),
                 "applied",
             )
-            install_mock(adapter.io_role, "list_services", MagicMock(return_value=["svc"]))
+            service_responder = MagicMock(return_value=["svc"])
+            send_async = install_dbus_call_responder(
+                adapter.connection,
+                service_responder,
+            )
+            expected_call = (
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "ListNames",
+                "",
+                (),
+            )
             self.assertTrue(adapter.io_role.refresh_services_if_due_once())
+            self.assertEqual(dbus_wire_call(send_async.call_args.args[0]), expected_call)
+            self.assertEqual(send_async.call_args.args[0].timeout_seconds, 1.0)
             self.assertIn("svc", adapter.cache.services)
             self.assertEqual(adapter.energy_discovery.topology_snapshot(captured_at=time.time()).generation, 1)
             adapter.discovery.next_scan_monotonic = 0.0
-            install_mock(adapter.io_role, "list_services", MagicMock(side_effect=DbusOperationDeferred("read")))
-            self.assertFalse(adapter.io_role.refresh_services_if_due_once())
-            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_energy_inputs"}), "dropped")
-            install_mock(adapter.io_role, "list_services", MagicMock(side_effect=RuntimeError("dbus down")))
+            with patch.object(
+                adapter.operation_broker,
+                "submit",
+                side_effect=DbusOperationDeferred("read"),
+            ):
+                self.assertFalse(adapter.io_role.refresh_services_if_due_once())
+            self.assertEqual(run_non_write_command(adapter, {"kind": "refresh_energy_inputs"}), "dropped")
+            adapter.rate_limiter.next_at["read"] = 0.0
+            service_error = RuntimeError("dbus down")
+            service_responder.side_effect = service_error
             adapter.discovery.next_scan_monotonic = 0.0
             self.assertTrue(adapter.io_role.refresh_services_if_due_once())
             self.assertEqual(adapter.discovery.last_error, "dbus down")
+            self.assertEqual(
+                [dbus_wire_call(mock_call.args[0]) for mock_call in send_async.call_args_list],
+                [expected_call, expected_call],
+            )
+            self.assertEqual(
+                [mock_call.args[0].timeout_seconds for mock_call in send_async.call_args_list],
+                [1.0, 1.0],
+            )
             adapter.io_role.maybe_refresh_services()
 
     def test_poll_and_discovery_contracts(self) -> None:
@@ -282,7 +332,15 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             )
             record_success = install_mock(adapter.read_scheduler, "record_success", MagicMock())
             record_error = install_mock(adapter.read_scheduler, "record_error", MagicMock())
-            poll_read_spec = install_mock(adapter.read_executor, "poll_read_spec", MagicMock(return_value="applied"))
+            poll_read_spec = install_mock(
+                adapter.read_executor,
+                "poll_read_spec",
+                MagicMock(
+                    side_effect=lambda _key, _spec, *, completion: (
+                        completion("applied") or "applied"
+                    )
+                ),
+            )
             adapter.read_executor._interval_factors["grid"] = 3.0
 
             with patch.object(process_io_module.time, "monotonic", return_value=123.0):
@@ -293,7 +351,11 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 circuit_state="degraded",
                 priority_allowed=adapter.circuit.allows_priority,
             )
-            poll_read_spec.assert_called_once_with("grid", {"service": "svc"})
+            poll_read_spec.assert_called_once_with(
+                "grid",
+                {"service": "svc"},
+                completion=unittest.mock.ANY,
+            )
             record_success.assert_called_once_with(
                 "grid",
                 monotonic_at=123.0,
@@ -307,7 +369,9 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             poll_read_spec.reset_mock(return_value=True)
             record_success.reset_mock()
             record_error.reset_mock()
-            poll_read_spec.return_value = "dropped"
+            poll_read_spec.side_effect = lambda _key, _spec, *, completion: (
+                completion("dropped") or "dropped"
+            )
             with patch.object(process_io_module.time, "monotonic", return_value=124.0):
                 self.assertTrue(adapter.io_role.poll_one_due_read_once())
             record_success.assert_not_called()
@@ -317,6 +381,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 interval=2.5,
             )
 
+            poll_read_spec.side_effect = None
             poll_read_spec.return_value = "deferred"
             adapter.read_executor.last_operation_performed = True
             record_error.reset_mock()
@@ -340,7 +405,19 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 "needs_early_pv_rescan",
                 MagicMock(return_value=True),
             )
-            install_mock(adapter.io_role, "list_services", MagicMock(return_value=["svc.a"]))
+            service_responder = MagicMock(return_value=["svc.a"])
+            send_async = install_dbus_call_responder(
+                adapter.connection,
+                service_responder,
+            )
+            expected_call = (
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "ListNames",
+                "",
+                (),
+            )
             with (
                 patch.object(process_io_module.time, "time", return_value=200.0),
                 patch.object(
@@ -350,6 +427,8 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 ),
             ):
                 self.assertTrue(adapter.io_role.refresh_services_if_due_once())
+            self.assertEqual(dbus_wire_call(send_async.call_args.args[0]), expected_call)
+            self.assertEqual(send_async.call_args.args[0].timeout_seconds, 1.0)
             discovery_due.assert_called_once_with(
                 monotonic_at=20.0,
                 priority_allowed=adapter.circuit.allows_priority,
@@ -371,7 +450,8 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
             update_energy_services.reset_mock()
             discovery_success.reset_mock()
             error = RuntimeError("dbus down")
-            adapter.io_role.list_services.side_effect = error
+            adapter.rate_limiter.next_at["read"] = 0.0
+            service_responder.side_effect = error
             with (
                 patch.object(process_io_module.time, "time", return_value=201.0),
                 patch.object(
@@ -389,10 +469,22 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 monotonic_at=21.0,
                 captured_at=201.0,
             )
+            self.assertEqual(
+                [dbus_wire_call(mock_call.args[0]) for mock_call in send_async.call_args_list],
+                [expected_call, expected_call],
+            )
+            self.assertEqual(
+                [mock_call.args[0].timeout_seconds for mock_call in send_async.call_args_list],
+                [1.0, 1.0],
+            )
 
             discovery_error.reset_mock()
-            adapter.io_role.list_services.side_effect = DbusOperationDeferred("read")
             with (
+                patch.object(
+                    adapter.operation_broker,
+                    "submit",
+                    side_effect=DbusOperationDeferred("read"),
+                ),
                 patch.object(process_io_module.time, "time", return_value=202.0),
                 patch.object(
                     process_io_module.time,

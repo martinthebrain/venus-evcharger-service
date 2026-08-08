@@ -205,6 +205,86 @@ class DurablePublicationMailboxContracts(unittest.TestCase):
             self.assertTrue(inbox.remove_if_current(path, current))
             self.assertFalse(Path(path).exists())
 
+    def test_conditional_replace_cannot_overwrite_a_newer_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = DbusGatewayCommandInbox(temp_dir)
+            path = inbox.enqueue(
+                {
+                    "kind": "set_target",
+                    "priority": "user",
+                    "coalesce_key": "target:relay",
+                    "created_at": 10.0,
+                    "phase": "write",
+                    "value": 0,
+                }
+            )
+            stale = inbox.load_pending()[0][1]
+            inbox.enqueue(
+                {
+                    "kind": "set_target",
+                    "priority": "user",
+                    "coalesce_key": "target:relay",
+                    "created_at": 11.0,
+                    "phase": "write",
+                    "value": 1,
+                }
+            )
+            current = inbox.load_pending()[0][1]
+
+            self.assertFalse(
+                inbox.replace_if_current(
+                    path,
+                    stale,
+                    {**dict(stale), "phase": "verify"},
+                )
+            )
+            self.assertEqual(inbox.load_pending()[0][1], current)
+
+    def test_conditional_replace_preserves_mailbox_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inbox = DbusGatewayCommandInbox(temp_dir)
+            path = inbox.enqueue(
+                {
+                    "kind": "set_target",
+                    "priority": "user",
+                    "coalesce_key": "target:relay",
+                    "created_at": 10.0,
+                    "phase": "write",
+                    "value": 1,
+                }
+            )
+            current = inbox.load_pending()[0][1]
+            identity_keys = (
+                "schema_version",
+                "id",
+                "created_at",
+                MAILBOX_REVISION_FIELD,
+                "queue_class",
+            )
+
+            self.assertTrue(
+                inbox.replace_if_current(
+                    path,
+                    current,
+                    {
+                        **dict(current),
+                        "phase": "verify",
+                        "schema_version": -1,
+                        "id": "replacement-id",
+                        "created_at": 99.0,
+                        MAILBOX_REVISION_FIELD: "replacement-revision",
+                        "queue_class": "replacement-queue",
+                    },
+                )
+            )
+            rewritten = inbox.load_pending()[0][1]
+
+        self.assertEqual(rewritten["phase"], "verify")
+        self.assertEqual(
+            {key: rewritten[key] for key in identity_keys},
+            {key: current[key] for key in identity_keys},
+        )
+
     def test_conditional_remove_accepts_a_matching_legacy_file_without_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             inbox = DbusGatewayCommandInbox(temp_dir)

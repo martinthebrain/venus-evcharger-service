@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
+from venus_evcharger.dbus_adapter.async_protocols import DbusConnectionLifecycle
 from venus_evcharger.dbus_adapter.process.protocols.roles import (
     HealthRole,
     IntrospectionRole,
@@ -30,6 +32,7 @@ class DbusAdapterLoopContext(Protocol):  # pragma: no cover
     paths: GatewayPaths
     cache: DbusCacheStore
     circuit: DbusCircuitBreaker
+    operation_broker: DbusAsyncOperationBroker
     resource_monitor: ResourceMonitor
     tick_health: TickHealth
     read_executor: DbusReadExecutor
@@ -47,6 +50,8 @@ class DbusAdapterLoopContext(Protocol):  # pragma: no cover
     _last_tick_monotonic: float
     _last_tick_duration_ms: float
     _prefer_read_next: bool
+    @property
+    def connection(self) -> DbusConnectionLifecycle: ...
     @property
     def runtime_role(self) -> RuntimeRole: ...
     @property

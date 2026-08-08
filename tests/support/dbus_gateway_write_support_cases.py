@@ -66,6 +66,10 @@ class GatewayWriteSupportCases(GatewayAdapterContractCase):
                 {"kind": "gx_relay_refresh", "priority": "read"}
             )
         )
+        self.assertFalse(write_support_module.is_urgent_durable_command({}))
+        self.assertFalse(
+            write_support_module.is_urgent_durable_command({"priority": None})
+        )
         self.assertFalse(write_support_module.is_local_publish_command(gx_relay_refresh_command(0)))
 
     def test_local_burst_action_and_time_budget_helpers(self) -> None:
@@ -105,6 +109,22 @@ class GatewayWriteSupportCases(GatewayAdapterContractCase):
                 "kind": "publish_evcs_fields",
                 "id": "cmd-1",
                 "coalesce_key": "gateway-publication:evcs:live",
+            },
+        )
+        self.assertEqual(
+            write_support_module.lifecycle_payload(
+                {"kind": "refresh_energy_inputs"},
+                "queued",
+                "read-fast",
+                124.0,
+            ),
+            {
+                "at": 124.0,
+                "state": "queued",
+                "queue_class": "read-fast",
+                "kind": "refresh_energy_inputs",
+                "id": "",
+                "coalesce_key": "",
             },
         )
 

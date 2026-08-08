@@ -14,6 +14,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     patch,
     rate_module,
 )
+from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
 from venus_evcharger.dbus_adapter.resource_pressure import resource_state
 from venus_evcharger.dbus_adapter.resources import ResourceMonitorSettings
 
@@ -368,24 +369,62 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
     def test_connection_manager_delegates_private_bus_and_resets_safely(self) -> None:
         manager = DbusConnectionManager()
         fake_bus = MagicMock()
-        fake_bus.get_object.return_value = "object"
+        pending = object()
+        fake_bus.call_async.return_value = pending
+        reply = MagicMock()
+        error = MagicMock()
         with patch.object(rate_module.dbus, "SystemBus", MagicMock(return_value=fake_bus)) as system_bus:
             self.assertIs(manager.bus(), fake_bus)
             self.assertIs(manager.bus(), fake_bus)
+            manager.connect()
             system_bus.assert_called_once_with(private=True)
-            self.assertEqual(manager.get_object("svc", "/Path", introspect=True), "object")
-            fake_bus.get_object.assert_called_once_with("svc", "/Path", introspect=True)
-            fake_bus.get_object.reset_mock()
-            self.assertEqual(manager.get_object("svc", "/Other"), "object")
-            fake_bus.get_object.assert_called_once_with("svc", "/Other", introspect=False)
+            self.assertIs(
+                manager.send_async(
+                    DbusWireRequest(
+                        service="svc",
+                        path="/Path",
+                        interface="interface",
+                        method_name="SetValue",
+                        signature="v",
+                        timeout_seconds=0.75,
+                        args=(1,),
+                    ),
+                    reply,
+                    error,
+                ),
+                pending,
+            )
+            fake_bus.call_async.assert_called_once_with(
+                "svc",
+                "/Path",
+                "interface",
+                "SetValue",
+                "v",
+                (1,),
+                reply,
+                error,
+                timeout=0.75,
+                require_main_loop=True,
+            )
 
         manager.reset()
         fake_bus.close.assert_called_once_with()
         self.assertIsNone(manager._bus)
 
         manager._bus = object()
-        with self.assertRaisesRegex(TypeError, "^DBus bus does not provide get_object$"):
-            manager.get_object("svc", "/Path")
+        with self.assertRaisesRegex(TypeError, "^DBus bus does not provide call_async$"):
+            manager.send_async(
+                DbusWireRequest(
+                    service="svc",
+                    path="/Path",
+                    interface="interface",
+                    method_name="GetValue",
+                    signature="",
+                    timeout_seconds=1.0,
+                ),
+                reply,
+                error,
+            )
 
     def test_resource_monitor_reports_procfs_style_resource_health(self) -> None:
         reader = MagicMock()

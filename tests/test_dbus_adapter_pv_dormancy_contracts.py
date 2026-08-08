@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import venus_evcharger.dbus_adapter.read.pv_dormancy as pv_dormancy
 from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
+from tests.support.async_dbus import install_read_responder
 
 install_venus_adapter_stubs()
 
@@ -306,12 +307,13 @@ class PvDormancyProductionChainTests(unittest.TestCase):
         adapter.energy_discovery.update_services([_AC_SERVICE], captured_at=1.0)
         spec = adapter.read_scheduler.specs["pv_power_w"]
 
-        with patch.object(
-            adapter.read_executor,
-            "read_optional_busitem",
-            side_effect=RuntimeError("inverter sleeping"),
-        ):
-            self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
+        install_read_responder(
+            adapter,
+            lambda _service, _path: (_ for _ in ()).throw(
+                RuntimeError("inverter sleeping")
+            ),
+        )
+        self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
         source_id = adapter.energy_discovery.source_ids("pv_ac")[0]
 
         adapter.energy_discovery.update_services([], captured_at=10.5)
@@ -344,12 +346,13 @@ class PvDormancyProductionChainTests(unittest.TestCase):
         adapter.energy_discovery.update_services([_AC_SERVICE], captured_at=1.0)
         spec = adapter.read_scheduler.specs["pv_power_w"]
 
-        with patch.object(
-            adapter.read_executor,
-            "read_optional_busitem",
-            side_effect=RuntimeError("org.freedesktop.DBus.Error.NoReply"),
-        ):
-            self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
+        install_read_responder(
+            adapter,
+            lambda _service, _path: (_ for _ in ()).throw(
+                RuntimeError("org.freedesktop.DBus.Error.NoReply")
+            ),
+        )
+        self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
 
         adapter.energy_discovery.update_services([], captured_at=10.5)
         with patch("venus_evcharger.dbus_adapter.process.health.time.time", return_value=11.0):
@@ -366,12 +369,13 @@ class PvDormancyProductionChainTests(unittest.TestCase):
         adapter.energy_discovery.update_services([_SYSTEM_SERVICE], captured_at=1.0)
         spec = adapter.read_scheduler.specs["pv_power_w"]
 
-        with patch.object(
-            adapter.read_executor,
-            "read_optional_busitem",
-            side_effect=RuntimeError("org.freedesktop.DBus.Error.NoReply"),
-        ):
-            self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
+        install_read_responder(
+            adapter,
+            lambda _service, _path: (_ for _ in ()).throw(
+                RuntimeError("org.freedesktop.DBus.Error.NoReply")
+            ),
+        )
+        self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
 
         with patch("venus_evcharger.dbus_adapter.process.health.time.time", return_value=10.0):
             health = adapter.health_snapshot()
@@ -386,12 +390,13 @@ class PvDormancyProductionChainTests(unittest.TestCase):
         adapter.energy_discovery.update_services([_SYSTEM_SERVICE], captured_at=1.0)
         spec = adapter.read_scheduler.specs["pv_power_w"]
 
-        with patch.object(
-            adapter.read_executor,
-            "read_optional_busitem",
-            side_effect=RuntimeError("DC inverter standby"),
-        ):
-            self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
+        install_read_responder(
+            adapter,
+            lambda _service, _path: (_ for _ in ()).throw(
+                RuntimeError("DC inverter standby")
+            ),
+        )
+        self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
 
         with patch("venus_evcharger.dbus_adapter.process.health.time.time", return_value=10.0):
             health = adapter.health_snapshot()
@@ -423,17 +428,18 @@ class PvDormancyProductionChainTests(unittest.TestCase):
         adapter.energy_discovery.update_services([_SYSTEM_SERVICE], captured_at=1.0)
         spec = adapter.read_scheduler.specs["pv_power_w"]
 
-        with patch.object(adapter.read_executor, "read_optional_busitem", return_value=0.0):
-            self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
+        install_read_responder(adapter, lambda _service, _path: 0.0)
+        self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
 
         clock.monotonic_at = 10.0
         clock.wall_clock_at = 10.0
-        with patch.object(
-            adapter.read_executor,
-            "read_optional_busitem",
-            side_effect=RuntimeError("org.freedesktop.DBus.Error.NoReply"),
-        ):
-            self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
+        install_read_responder(
+            adapter,
+            lambda _service, _path: (_ for _ in ()).throw(
+                RuntimeError("org.freedesktop.DBus.Error.NoReply")
+            ),
+        )
+        self.assertEqual(adapter.read_executor.poll_read_spec("pv_power_w", spec), "applied")
 
         with patch("venus_evcharger.dbus_adapter.process.health.time.time", return_value=10.0):
             health = adapter.health_snapshot()

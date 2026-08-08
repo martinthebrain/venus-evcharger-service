@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
 import venus_evcharger.ipc.command_mailbox as mailbox_module
+import venus_evcharger.ipc.command_mailbox_storage as mailbox_storage_module
 import venus_evcharger.ipc.core_commands as core_commands_module
 from venus_evcharger.core.contracts_control_surface import (
     CONTROL_AUTO_RUNTIME_TARGETS,
@@ -255,7 +256,11 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
             command_path.write_text("{}", encoding="utf-8")
 
             with (
-                patch.object(mailbox_module, "open", side_effect=PermissionError("denied"), create=True),
+                patch.object(
+                    mailbox_module,
+                    "_read_command_json",
+                    side_effect=PermissionError("denied"),
+                ),
                 patch.object(mailbox_module.logging, "warning") as warning,
             ):
                 self.assertEqual(mailbox.load_pending(), [])
@@ -543,7 +548,7 @@ class IpcCommandMailboxContractTests(unittest.TestCase):
             self.assertIsNone(read_command_json(str(Path(temp_dir) / "missing.json")))
 
         opener = mock_open(read_data='{"value": 1}')
-        with patch.object(mailbox_module, "open", opener, create=True):
+        with patch.object(mailbox_storage_module, "open", opener, create=True):
             self.assertEqual(read_command_json("command.json"), {"value": 1})
         opener.assert_called_once_with("command.json", encoding="utf-8")
 

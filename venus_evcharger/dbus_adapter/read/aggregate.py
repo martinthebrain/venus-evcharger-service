@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import SupportsFloat, SupportsIndex, TypedDict
+
+from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 
 PV_TOTAL_AGGREGATE = "pv-total"
 OPTIONAL_MEMBER_FAILED = object()
@@ -16,6 +19,30 @@ class AggregatePayload(TypedDict):
     source: str
     confidence: float
     last_error: str
+
+
+AggregateCompletion = Callable[[CommandOutcome], None]
+
+
+@dataclass(frozen=True, slots=True)
+class AggregateStepPlan:
+    key: str
+    signature: tuple[object, ...]
+    members: tuple[tuple[str, str], ...]
+    completion: AggregateCompletion
+    ignore_member_errors: bool = False
+    empty_confidence: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class AggregateStepContinuation:
+    key: str
+    state: AggregateState
+    service: str
+    path: str
+    member_count: int
+    ignore_member_errors: bool
+    completion: AggregateCompletion
 
 
 def aggregate_signature_members(signature: object, aggregate: str) -> list[tuple[str, str]] | None:

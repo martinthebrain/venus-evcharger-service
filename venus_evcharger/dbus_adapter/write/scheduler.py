@@ -6,6 +6,7 @@ from __future__ import annotations
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.health.slo import GatewayPressureState
 from venus_evcharger.dbus_adapter.write.core import WriteCommandQueue
+from venus_evcharger.dbus_adapter.write.dispatch import WriteCommandDispatcher
 from venus_evcharger.dbus_adapter.write.health import WriteSchedulerHealthTracker
 from venus_evcharger.dbus_adapter.write.protocols import DbusWriteSchedulerAdapter
 from venus_evcharger.dbus_adapter.write.publish import GatewayPublicationExecutor
@@ -21,10 +22,14 @@ class DbusWriteScheduler:
         self.publication_executor = GatewayPublicationExecutor(adapter.publication_registry)
         self.semantic_executor = SemanticWriteExecutor(adapter)
         self.health_tracker = WriteSchedulerHealthTracker(adapter)
-        self.command_queue = WriteCommandQueue(
+        self.command_dispatcher = WriteCommandDispatcher(
             adapter,
             publication=self.publication_executor,
             semantic=self.semantic_executor,
+        )
+        self.command_queue = WriteCommandQueue(
+            adapter,
+            dispatcher=self.command_dispatcher,
             health=self.health_tracker,
         )
 
@@ -71,7 +76,7 @@ class DbusWriteScheduler:
         return self.command_queue.remove_pending(path, expected)
 
     def process_command(self, command: CommandMapping, *, command_file: str = "") -> CommandOutcome:
-        return self.command_queue.process_command(command, command_file=command_file)
+        return self.command_dispatcher.process(command, command_file=command_file)
 
     def record_lifecycle(self, command: CommandMapping, state: str) -> None:
         self.health_tracker.record_lifecycle(command, state)

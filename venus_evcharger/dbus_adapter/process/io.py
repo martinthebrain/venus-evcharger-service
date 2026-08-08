@@ -12,8 +12,8 @@ import time
 from collections.abc import Callable, Iterable
 from typing import TypeGuard, TypeVar
 
-import dbus
-
+from venus_evcharger.dbus_adapter.async_broker import DbusMethodCall, dbus_call_operation
+from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
@@ -21,6 +21,7 @@ from venus_evcharger.dbus_adapter.read.semantic import energy_inputs_snapshot
 from venus_evcharger.ipc.energy import EnergyTopologySnapshot
 
 _T = TypeVar("_T")
+_DBUS_DISCOVERY_TIMEOUT_SECONDS = 1.0
 
 
 class DbusAdapterIo:
@@ -38,22 +39,29 @@ class DbusAdapterIo:
         if due is None:
             return False
         key, spec, interval = due
-        outcome = context.read_executor.poll_read_spec(key, spec)
-        if outcome == "applied":
-            context.read_scheduler.record_success(
-                key,
-                monotonic_at=monotonic_at,
-                interval=interval,
-                interval_factor=context.read_executor.consume_interval_factor(
-                    key
-                ),
-            )
-        elif outcome == "dropped":
-            context.read_scheduler.record_error(
-                key,
-                monotonic_at=monotonic_at,
-                interval=interval,
-            )
+        def _complete(outcome: CommandOutcome) -> None:
+            completed_at = time.monotonic()
+            if outcome == "applied":
+                context.read_scheduler.record_success(
+                    key,
+                    monotonic_at=completed_at,
+                    interval=interval,
+                    interval_factor=context.read_executor.consume_interval_factor(
+                        key
+                    ),
+                )
+            elif outcome == "dropped":
+                context.read_scheduler.record_error(
+                    key,
+                    monotonic_at=completed_at,
+                    interval=interval,
+                )
+
+        outcome = context.read_executor.poll_read_spec(
+            key,
+            spec,
+            completion=_complete,
+        )
         return outcome != "deferred" or bool(context.read_executor.last_operation_performed)
 
     def maybe_refresh_services(self) -> None:
@@ -67,72 +75,63 @@ class DbusAdapterIo:
             priority_allowed=context.circuit.allows_priority,
         ):
             return False
-        captured_at = time.time()
         try:
-            services = self.list_services()
-            context.cache.update_services(services, now=captured_at)
-            context.energy_discovery.update_services(
-                services,
-                captured_at=captured_at,
-            )
-            context.discovery.record_success(
-                monotonic_at=monotonic_at,
-                captured_at=captured_at,
-                needs_early_rescan=(
-                    context.energy_discovery.needs_early_pv_rescan()
-                ),
+            context.operation_broker.submit(
+                dbus_call_operation(
+                    context.connection,
+                    DbusMethodCall(
+                        service="org.freedesktop.DBus",
+                        path="/org/freedesktop/DBus",
+                        interface="org.freedesktop.DBus",
+                        method_name="ListNames",
+                        signature="",
+                        rate_kind="read",
+                        metric_kind="discovery",
+                        source="org.freedesktop.DBus/ListNames",
+                        priority="discovery",
+                        timeout_seconds=_DBUS_DISCOVERY_TIMEOUT_SECONDS,
+                    ),
+                    on_success=self._complete_service_discovery,
+                    on_error=self._fail_service_discovery,
+                )
             )
             return True
         except DbusOperationDeferred:
             return False
         except DBUS_GATEWAY_OPERATION_ERRORS as error:
+            self._fail_service_discovery(error)
+            return True
+
+    def _complete_service_discovery(self, value: object) -> None:
+        context = self._context
+        captured_at = time.time()
+        monotonic_at = time.monotonic()
+        try:
+            services = _service_names(value)
+        except (TypeError, ValueError) as error:
             context.discovery.record_error(
                 error,
                 monotonic_at=monotonic_at,
                 captured_at=captured_at,
             )
-            return True
+            return
+        context.cache.update_services(services, now=captured_at)
+        context.energy_discovery.update_services(
+            services,
+            captured_at=captured_at,
+        )
+        context.discovery.record_success(
+            monotonic_at=monotonic_at,
+            captured_at=captured_at,
+            needs_early_rescan=context.energy_discovery.needs_early_pv_rescan(),
+        )
 
-    def list_services(self) -> list[str]:
-        context = self._context
-
-        def _read() -> object:
-            obj = context.connection.get_object(
-                "org.freedesktop.DBus",
-                "/org/freedesktop/DBus",
-                introspect=False,
-            )
-            iface = dbus.Interface(obj, "org.freedesktop.DBus")
-            return iface.ListNames()
-
-        return _service_names(self.timed_dbus_operation("read", _read))
-
-    def timed_dbus_operation(
-        self,
-        kind: str,
-        operation: Callable[[], _T],
-        *,
-        source: str = "",
-    ) -> _T:
-        context = self._context
-        context.rate_limiter.require_due(kind)
-        started = time.monotonic()
-        try:
-            result = operation()
-            context.circuit.record_success(
-                (time.monotonic() - started) * 1000.0,
-                kind=kind,
-                source=source,
-            )
-            return result
-        except DBUS_GATEWAY_OPERATION_ERRORS as error:
-            context.circuit.record_error(
-                error,
-                kind=kind,
-                source=source,
-                latency_ms=(time.monotonic() - started) * 1000.0,
-            )
-            raise
+    def _fail_service_discovery(self, error: BaseException) -> None:
+        self._context.discovery.record_error(
+            error,
+            monotonic_at=time.monotonic(),
+            captured_at=time.time(),
+        )
 
     def timed_local_publish(self, operation: Callable[[], _T]) -> _T:
         context = self._context

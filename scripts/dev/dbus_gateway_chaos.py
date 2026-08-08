@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
@@ -21,6 +22,7 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperation, DbusAsyncTimeoutError
 from venus_evcharger.dbus_gateway import gateway_paths
 from venus_evcharger.ipc.command_mailbox import normalized_mapping
 from venus_evcharger.ipc.gateway_publication import (
@@ -32,6 +34,15 @@ from venus_evcharger.ports.gateway_publication import EvcsServiceIdentity
 
 GUI_BURST_COMMAND_COUNT = 200
 RESOURCE_PRESSURE_MIN_TICK_SECONDS = 0.3
+MAX_ASYNC_SUBMIT_TICK_SECONDS = 0.25
+
+
+class _PendingCall:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
 
 
 class _FakeDbusService(dict[str, object]):
@@ -95,23 +106,64 @@ def _assert(condition: bool, message: str) -> None:
 
 def scenario_dbus_hang(temp_dir: str) -> None:
     adapter = _adapter(temp_dir)
+    pending_call = _PendingCall()
+    reply_handlers: list[Callable[[object], None]] = []
+    errors: list[BaseException] = []
+    submitted = False
 
-    def timed_out_dbus_operation() -> bool:
-        def raise_timeout() -> bool:
-            raise TimeoutError("simulated 5s DBus hang")
+    def start_hanging_operation(
+        reply: Callable[[object], None],
+        _error: Callable[[BaseException], None],
+    ) -> _PendingCall:
+        reply_handlers.append(reply)
+        return pending_call
 
-        return adapter.io_role.timed_dbus_operation("read", raise_timeout)
+    operation = DbusAsyncOperation(
+        rate_kind="read",
+        metric_kind="read",
+        source="chaos-hanging-read",
+        priority="normal",
+        timeout_seconds=5.0,
+        starter=start_hanging_operation,
+        on_success=lambda _value: None,
+        on_error=errors.append,
+    )
+
+    def submit_once() -> bool:
+        nonlocal submitted
+        if submitted:
+            return False
+        adapter.operation_broker.submit(operation)
+        submitted = True
+        return True
 
     with (
         patch.object(
             adapter.loop_role,
             "process_one_dbus_operation_once",
-            side_effect=timed_out_dbus_operation,
+            side_effect=submit_once,
         ),
         patch.object(adapter.io_role, "publish_cache", return_value=None),
     ):
+        started_at = time.monotonic()
         _assert(bool(adapter.tick()), "tick should survive simulated DBus timeout")
+        _assert(
+            time.monotonic() - started_at < MAX_ASYNC_SUBMIT_TICK_SECONDS,
+            "submitting a hanging DBus call must not block the gateway tick",
+        )
+        _assert(adapter.operation_broker.busy, "hanging DBus call should occupy the single async slot")
+        _assert(
+            adapter.operation_broker.expire_due(now=time.monotonic() + 6.0),
+            "hanging DBus call should expire at its monotonic deadline",
+        )
+        _assert(bool(adapter.tick()), "tick should continue after broker timeout")
+    _assert(pending_call.cancelled, "expired DBus PendingCall should be cancelled")
+    _assert(len(errors) == 1 and isinstance(errors[0], DbusAsyncTimeoutError), "timeout callback should run once")
     _assert(bool(adapter.circuit.last_error), "circuit should record the simulated DBus timeout")
+    _assert(len(reply_handlers) == 1, "hanging operation should install exactly one reply callback")
+    reply_handlers[0](True)
+    broker_health = adapter.operation_broker.health()
+    _assert(broker_health.get("late_replies") == 1, "late DBus replies should be ignored and counted")
 
 
 def scenario_gui_burst(temp_dir: str) -> None:

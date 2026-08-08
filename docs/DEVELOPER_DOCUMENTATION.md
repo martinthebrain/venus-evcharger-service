@@ -79,3 +79,32 @@ The documentation gate verifies that:
   documentation
 
 The generated `build/` tree is intentionally not committed.
+
+## DBus Gateway Boundary
+
+Only modules below `venus_evcharger/dbus_adapter` may depend on Victron DBus.
+Transport primitives have narrower owners inside that package: the connection
+manager owns the private system-bus connection and is the only component that
+unfolds a `DbusWireRequest` into the concrete `dbus-python.call_async` API. The
+asynchronous broker owns single-flight execution and callback lifecycle, the
+process loop owns GLib integration, and the publication registry owns the
+local `VeDbusService` instances. Repository architecture checks enforce these
+ownership rules.
+
+External reads, writes, discovery calls, and introspection calls use the
+callback-based broker. The broker permits one external operation at a time,
+applies a monotonic deadline, cancels overdue pending calls when possible, and
+ignores callbacks from obsolete operation generations. Local publication to
+the gateway's own EV charger service remains synchronous because it does not
+wait on an external device.
+
+Durable command files remain owned by the queue until their asynchronous
+completion callback reports `applied` or `dropped`. A `deferred` result keeps
+the command available for a later retry. Every dispatched command accepts only
+its first completion result. Rewrites and retirement use the mailbox revision
+captured at dispatch time, so a late callback cannot replace or remove a newer
+coalesced command generation. Broker cancellation clears transport ownership
+without invoking normal command-error callbacks, leaving durable work queued
+for the next process generation. New gateway operations must preserve this
+lifecycle and use the semantic IPC contracts rather than exposing DBus service
+names or object paths to backend modules.

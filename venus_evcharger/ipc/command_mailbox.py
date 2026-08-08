@@ -17,13 +17,19 @@ import stat
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator, Protocol, TypeGuard, TypeVar, runtime_checkable
+from typing import Generator, Protocol, runtime_checkable
 
-from venus_evcharger.core.shared import compact_json, write_text_atomically
+from venus_evcharger.ipc.command_mailbox_storage import (
+    command_file_signature as _command_file_signature,
+    normalized_mapping as normalized_mapping,
+    now_epoch as _now,
+    read_command_json as read_command_json,
+    read_command_json_strict as _read_command_json,
+    write_command_json as write_command_json,
+)
 from venus_evcharger.ipc.command_types import (
     CommandFile,
     CommandFileList,
@@ -91,6 +97,12 @@ class CommandMailbox(Protocol):  # pragma: no cover
     def coalesce(self, commands: CommandFileList) -> CommandFileList: ...
     def remove(self, path: str) -> None: ...
     def remove_if_current(self, path: str, expected: CommandMapping) -> bool: ...
+    def replace_if_current(
+        self,
+        path: str,
+        expected: CommandMapping,
+        replacement: CommandMapping,
+    ) -> bool: ...
 
 
 class CommandQueuePolicy(Protocol):  # pragma: no cover
@@ -282,6 +294,23 @@ class FileCommandMailbox:
             self._remove_unlocked(path)
             return True
 
+    def replace_if_current(
+        self,
+        path: str,
+        expected: CommandMapping,
+        replacement: CommandMapping,
+    ) -> bool:
+        """Atomically replace exactly the command revision a callback owns."""
+        os.makedirs(self.command_dir, exist_ok=True)
+        with self._locked():
+            current = normalized_mapping(read_command_json(path))
+            if current is None or not _same_mailbox_revision(current, expected):
+                return False
+            payload = dict(self._policy.normalize(replacement))
+            _preserve_mailbox_identity(payload, current)
+            write_command_json(path, payload)
+            return True
+
     @staticmethod
     def _remove_unlocked(path: str) -> None:
         try:
@@ -401,6 +430,21 @@ def _same_mailbox_revision(current: CommandMapping, expected: CommandMapping) ->
     return bool(current == expected)
 
 
+def _preserve_mailbox_identity(
+    payload: CommandPayload,
+    current: CommandMapping,
+) -> None:
+    for key in (
+        "schema_version",
+        "id",
+        "created_at",
+        MAILBOX_REVISION_FIELD,
+        "queue_class",
+    ):
+        if key in current:
+            payload[key] = current[key]
+
+
 def _acquire_lock(descriptor: int, timeout_seconds: float) -> None:
     deadline = time.monotonic() + timeout_seconds
     while True:
@@ -411,75 +455,3 @@ def _acquire_lock(descriptor: int, timeout_seconds: float) -> None:
             if time.monotonic() >= deadline:
                 raise MailboxLockTimeout("Command mailbox lock timed out") from error
             time.sleep(MAILBOX_LOCK_RETRY_SECONDS)
-
-
-def normalized_mapping(value: object) -> CommandPayload | None:
-    if not _is_mapping(value):
-        return None
-    return {str(key): item for key, item in value.items()}
-
-
-def read_command_json(path: str) -> object:
-    try:
-        return _read_command_json(path)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def _read_command_json(path: str) -> object:
-    with open(path, encoding="utf-8") as handle:
-        payload: object = json.load(handle)
-    return payload
-
-
-def _command_file_signature(path: str) -> tuple[int, int, int] | None:
-    try:
-        status = os.stat(path)
-    except OSError:
-        return None
-    return status.st_ino, status.st_size, status.st_mtime_ns
-
-
-def write_command_json(path: str, payload: CommandMapping) -> None:
-    write_text_atomically(path, compact_json(_json_ready_mapping(payload)) + "\n")
-
-
-def _now() -> float:
-    return time.time()
-
-
-def _is_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
-    return isinstance(value, Mapping)
-
-
-def _json_ready(value: object) -> object:
-    if _is_json_scalar(value):
-        return value
-    return _json_ready_container(value)
-
-
-def _json_ready_container(value: object) -> object:
-    if _is_mapping(value):
-        return _json_ready_mapping(value)
-    if _is_object_list(value) or _is_object_tuple(value):
-        return [_json_ready(item) for item in value]
-    return str(value)
-
-
-def _is_json_scalar(value: object) -> bool:
-    return isinstance(value, (str, int, float, bool)) or value is None
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
-    return isinstance(value, tuple)
-
-
-_MappingKey = TypeVar("_MappingKey")
-
-
-def _json_ready_mapping(value: Mapping[_MappingKey, object]) -> CommandPayload:
-    return {str(key): _json_ready(item) for key, item in value.items()}

@@ -4,25 +4,27 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Literal
+
+CommandOutcome = Literal["applied", "dropped", "deferred"]
+CommandCompletion = Callable[[CommandOutcome], None]
 
 
-class DbusServiceLike(Protocol):  # pragma: no cover
-    """Only the service operations used by the DBus gateway adapter."""
+@dataclass(frozen=True, slots=True)
+class CommandExecution:
+    """Describe an immediate outcome or an accepted asynchronous operation."""
 
-    def add_path(
-        self,
-        path: str,
-        value: object,
-        *,
-        gettextcallback: Callable[[str, object], str] | None = None,
-        writeable: bool = False,
-        onchangecallback: Callable[[str, object], object] | None = None,
-    ) -> object: ...
+    outcome: CommandOutcome
+    in_flight: bool = False
 
-    def register(self) -> object: ...
+    @classmethod
+    def immediate(cls, outcome: CommandOutcome) -> CommandExecution:
+        return cls(outcome=outcome)
 
-    def __setitem__(self, path: str, value: object) -> None: ...
+    @classmethod
+    def pending(cls) -> CommandExecution:
+        return cls(outcome="deferred", in_flight=True)
 
 
-CommandOutcome = str
+__all__ = ["CommandCompletion", "CommandExecution", "CommandOutcome"]

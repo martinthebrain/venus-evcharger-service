@@ -10,6 +10,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     Path,
     gateway_paths,
     install_mock,
+    install_read_responder,
     read_pv_module,
     tempfile,
 )
@@ -33,7 +34,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                 calls.append((service, path))
                 return 123.0
 
-            setattr(adapter.read_executor, "read_busitem_now", fake_read)
+            install_read_responder(adapter, fake_read)
 
             self.assertEqual(
                 adapter.read_executor.poll_read_spec(
@@ -57,9 +58,8 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             ]
             adapter.cache.update_services(services)
             adapter.energy_discovery.update_services(services, captured_at=1.0)
-            install_mock(
-                adapter.read_executor,
-                "read_busitem_now",
+            read = install_read_responder(
+                adapter,
                 MagicMock(side_effect=RuntimeError("offline")),
             )
 
@@ -73,7 +73,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             self.assertEqual(entry["status"], "fresh")
             self.assertEqual(entry["confidence"], 0.2)
             self.assertIn("offline", entry["last_error"])
-            self.assertEqual(adapter.read_executor.read_busitem_now.call_count, 2)
+            self.assertEqual(read.call_count, 2)
 
     def test_optional_pv_member_failure_does_not_trip_circuit_breaker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -84,9 +84,8 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             services = ["com.victronenergy.pvinverter.http_1"]
             adapter.cache.update_services(services)
             adapter.energy_discovery.update_services(services, captured_at=1.0)
-            install_mock(
-                adapter.read_executor,
-                "read_busitem_now",
+            install_read_responder(
+                adapter,
                 MagicMock(side_effect=RuntimeError("night pv asleep")),
             )
             install_mock(adapter.circuit, "record_error", MagicMock())
@@ -121,7 +120,7 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=1.0))
+            install_read_responder(adapter, MagicMock(return_value=1.0))
             self.assertEqual(
                 adapter.read_executor.poll_read_spec(
                     "optional_value",
@@ -130,9 +129,8 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                 "deferred",
             )
             self.assertTrue(adapter.read_executor.has_pending_aggregate())
-            install_mock(
-                adapter.read_executor,
-                "read_busitem",
+            install_read_responder(
+                adapter,
                 MagicMock(side_effect=RuntimeError("optional offline")),
             )
 
@@ -233,9 +231,8 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
                 ("com.victronenergy.pvinverter.http_1", "/Ac/Power"): 120.0,
                 ("com.victronenergy.system", "/Dc/Pv/Power"): 30.0,
             }
-            install_mock(
-                adapter.read_executor,
-                "read_busitem_now",
+            read = install_read_responder(
+                adapter,
                 MagicMock(side_effect=lambda service, path: values[(service, path)]),
             )
 
@@ -245,8 +242,13 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             self.assertEqual(first, "deferred")
             self.assertEqual(second, "applied")
             self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 150.0)
-            adapter.read_executor.read_busitem_now.assert_any_call("com.victronenergy.pvinverter.http_1", "/Ac/Power")
-            adapter.read_executor.read_busitem_now.assert_any_call("com.victronenergy.system", "/Dc/Pv/Power")
+            self.assertEqual(
+                [call.args for call in read.call_args_list],
+                [
+                    ("com.victronenergy.pvinverter.http_1", "/Ac/Power"),
+                    ("com.victronenergy.system", "/Dc/Pv/Power"),
+                ],
+            )
 
     def test_pv_total_uses_configured_empty_confidence_when_all_sources_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -260,9 +262,8 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             ]
             adapter.cache.update_services(services)
             adapter.energy_discovery.update_services(services, captured_at=1.0)
-            install_mock(
-                adapter.read_executor,
-                "read_optional_busitem",
+            install_read_responder(
+                adapter,
                 MagicMock(side_effect=RuntimeError("all pv asleep")),
             )
             spec = {
@@ -290,9 +291,8 @@ class GatewayPvReadCases(GatewayAdapterContractCase):
             adapter.rate_limiter.intervals["read"] = 0.0
             adapter.cache.update_services(["com.victronenergy.pvinverter.http_2"])
             adapter.energy_discovery.update_services(["com.victronenergy.pvinverter.http_2"], captured_at=1.0)
-            install_mock(
-                adapter.read_executor,
-                "read_optional_busitem",
+            install_read_responder(
+                adapter,
                 MagicMock(side_effect=RuntimeError("pv asleep")),
             )
             spec = {

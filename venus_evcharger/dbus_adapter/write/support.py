@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
 from venus_evcharger.dbus_gateway_core import float_or_zero
 from venus_evcharger.ipc.command_mailbox import command_priority_rank as priority_rank
@@ -11,9 +12,12 @@ from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping, C
 from venus_evcharger.ipc.deadline import command_deadline_expired
 
 __all__ = (
+    "FastPublishBurst",
+    "LocalPublishCandidate",
     "budget_elapsed",
     "command_deadline_expired",
     "command_kind",
+    "command_matches_filters",
     "command_ready",
     "float_or_zero",
     "is_local_publish_command",
@@ -23,6 +27,21 @@ __all__ = (
     "priority_rank",
     "stale_coalesced_paths",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class LocalPublishCandidate:
+    processed: int
+    remaining_budget: int
+    pending_commands: CommandFileList
+    started: float
+
+
+@dataclass(frozen=True, slots=True)
+class FastPublishBurst:
+    processed: int
+    stopped: bool
+
 
 def command_ready(command: CommandMapping, now: float) -> bool:
     """Return whether an asynchronous command step may run now."""
@@ -35,7 +54,10 @@ def is_local_publish_command(command: CommandMapping) -> bool:
 
 def is_urgent_durable_command(command: CommandMapping) -> bool:
     """Return whether durable work must overtake transient publication bursts."""
-    priority = str(command.get("priority") or "").strip().lower()
+    raw_priority = command.get("priority")
+    if not isinstance(raw_priority, str):
+        return False
+    priority = raw_priority.strip().lower()
     return priority in {"safety", "user"}
 
 
@@ -47,6 +69,17 @@ def local_publish_action_result(processed: int, action: str) -> tuple[int, bool]
 
 def budget_elapsed(started: float, budget_seconds: float) -> bool:
     return time.monotonic() - started >= budget_seconds
+
+
+def command_matches_filters(
+    command: CommandMapping,
+    *,
+    include_local_publish: bool,
+    required_kind: str | None,
+) -> bool:
+    publish_allowed = include_local_publish or not is_local_publish_command(command)
+    kind_allowed = required_kind is None or command_kind(command) == required_kind
+    return publish_allowed and kind_allowed
 
 
 def command_kind(command: CommandMapping) -> str:

@@ -14,6 +14,7 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 install_venus_adapter_stubs()
 
 from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter
+from venus_evcharger.dbus_adapter.contracts import CommandExecution
 import venus_evcharger.dbus_adapter.write.core as write_core_module
 from venus_evcharger.dbus_gateway import gateway_paths
 from venus_evcharger.dbus_gateway_client import GatewayClient
@@ -452,8 +453,8 @@ class FastPublicationTransportTests(unittest.TestCase):
         self.assertEqual(len(self.adapter.fast_publications), 20)
         with patch.object(
             scheduler.semantic_executor,
-            "process_semantic_operation",
-            return_value="applied",
+            "schedule_semantic_operation",
+            return_value=CommandExecution.immediate("applied"),
         ) as execute:
             self.assertTrue(scheduler.process_one(include_local_publish=False))
 

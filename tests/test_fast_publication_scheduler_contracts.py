@@ -13,6 +13,7 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 
 install_venus_adapter_stubs()
 
+from venus_evcharger.dbus_adapter.contracts import CommandExecution
 from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter
 from venus_evcharger.dbus_gateway import gateway_paths
 from venus_evcharger.ipc.command_types import CommandFileList
@@ -30,14 +31,77 @@ def _ordered(fields: dict[str, object], order: int) -> dict[str, object]:
         "created_at": 100.0,
         "deadline_s": 30.0,
         PUBLICATION_ORDER_FIELD: order,
-        PUBLICATION_FIELD_ORDERS_FIELD: {
-            field: order
-            for field in fields
-        },
+        PUBLICATION_FIELD_ORDERS_FIELD: {field: order for field in fields},
     }
 
 
 class FastPublicationSchedulerContracts(unittest.TestCase):
+    def test_scheduler_wires_semantic_executor_to_the_same_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(root / "run")),
+            )
+
+        self.assertIs(
+            adapter.write_scheduler.semantic_executor.adapter,
+            adapter.write_scheduler.command_queue.adapter,
+        )
+
+    def test_scheduler_health_forwards_requested_time_and_fast_queue_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(root / "run")),
+            )
+            scheduler = adapter.write_scheduler
+            with (
+                patch.object(
+                    scheduler.health_tracker,
+                    "health",
+                    return_value={"local_publish_burst_limit": 3},
+                ) as health,
+                patch.object(
+                    adapter.fast_publications,
+                    "snapshot",
+                    return_value={"queued": 2},
+                ) as snapshot,
+            ):
+                payload = scheduler.health(now=123.5)
+
+        self.assertEqual(
+            payload,
+            {
+                "local_publish_burst_limit": 3,
+                "fast_publication_queue": {"queued": 2},
+            },
+        )
+        health.assert_called_once_with(now=123.5)
+        snapshot.assert_called_once_with()
+
+    def test_scheduler_local_publish_burst_defaults_to_ok_pressure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(root / "run")),
+            )
+            with patch.object(
+                adapter.write_scheduler.health_tracker,
+                "set_dynamic_local_publish_burst",
+            ) as set_burst:
+                adapter.write_scheduler.set_dynamic_local_publish_burst(3)
+
+        set_burst.assert_called_once_with(3, pressure_state="ok")
+
     def test_scheduler_remove_facade_preserves_expected_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -74,11 +138,7 @@ class FastPublicationSchedulerContracts(unittest.TestCase):
                 "venus_evcharger.ipc.fast_publication.time.time",
                 return_value=100.0,
             ):
-                self.assertTrue(
-                    adapter.fast_publications.enqueue(
-                        _ordered({"ac_power_w": 900.0}, 11)
-                    ).accepted
-                )
+                self.assertTrue(adapter.fast_publications.enqueue(_ordered({"ac_power_w": 900.0}, 11)).accepted)
             fast_work = adapter.fast_publications.pop_next()
             self.assertIsNotNone(fast_work)
             assert fast_work is not None
@@ -93,7 +153,11 @@ class FastPublicationSchedulerContracts(unittest.TestCase):
 
             with (
                 patch.object(queue, "command_expired", return_value=False),
-                patch.object(queue, "command_outcome", return_value="applied") as outcome,
+                patch.object(
+                    queue.dispatcher,
+                    "execute",
+                    return_value=CommandExecution.immediate("applied"),
+                ) as execution,
             ):
                 result = queue.process_loaded_command(
                     path,
@@ -101,7 +165,7 @@ class FastPublicationSchedulerContracts(unittest.TestCase):
                     pending_commands=pending,
                 )
 
-            applied = outcome.call_args.args[1]
+            applied = execution.call_args.args[1]
             fast = adapter.fast_publications.pop_next()
 
         self.assertEqual(result, "applied")
@@ -166,7 +230,7 @@ class FastPublicationSchedulerContracts(unittest.TestCase):
                     "prepare_durable",
                     side_effect=PublicationOrderCapacityError,
                 ),
-                patch.object(queue, "command_outcome") as outcome,
+                patch.object(queue.dispatcher, "outcome") as outcome,
             ):
                 result = queue.process_loaded_command(
                     path,

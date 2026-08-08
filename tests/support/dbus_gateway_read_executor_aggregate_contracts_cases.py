@@ -9,6 +9,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     MagicMock,
     Path,
     gateway_paths,
+    install_read_responder,
     install_mock,
     patch,
     read_aggregate_module,
@@ -34,6 +35,7 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
                 0.75,
             )
             aggregate = install_mock(adapter.read_executor, "_poll_aggregate_step", MagicMock(return_value="deferred"))
+            completion = MagicMock()
 
             with patch.object(adapter.energy_discovery, "pv_members") as discover:
                 self.assertEqual(
@@ -45,17 +47,24 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
                             "path": "/Ac/Power",
                             "optional_confidence": 0.75,
                         },
+                        completion,
                     ),
                     "deferred",
                 )
 
             discover.assert_not_called()
             aggregate.assert_called_once_with(
-                "pv_power_w",
-                (read_aggregate_module.PV_TOTAL_AGGREGATE, (("pv.cached", "/Ac/Power"),)),
-                [("pv.cached", "/Ac/Power")],
-                ignore_member_errors=True,
-                empty_confidence=0.75,
+                read_aggregate_module.AggregateStepPlan(
+                    key="pv_power_w",
+                    signature=(
+                        read_aggregate_module.PV_TOTAL_AGGREGATE,
+                        (("pv.cached", "/Ac/Power"),),
+                    ),
+                    members=(("pv.cached", "/Ac/Power"),),
+                    completion=completion,
+                    ignore_member_errors=True,
+                    empty_confidence=0.75,
+                )
             )
 
     def test_read_executor_update_and_complete_cache_contracts_are_exact(self) -> None:
@@ -137,33 +146,39 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            install_mock(
-                adapter.read_executor, "read_optional_busitem", MagicMock(side_effect=RuntimeError("optional asleep"))
+            install_read_responder(
+                adapter,
+                MagicMock(side_effect=RuntimeError("optional asleep")),
             )
+            completed: list[str] = []
 
             self.assertEqual(
                 adapter.read_executor._poll_aggregate_step(
-                    "empty_optional",
-                    ("pv-total", (("svc.optional", "/Power"),)),
-                    [("svc.optional", "/Power")],
-                    ignore_member_errors=True,
+                    read_aggregate_module.AggregateStepPlan(
+                        key="empty_optional",
+                        signature=("pv-total", (("svc.optional", "/Power"),)),
+                        members=(("svc.optional", "/Power"),),
+                        completion=completed.append,
+                        ignore_member_errors=True,
+                    )
                 ),
-                "applied",
+                "deferred",
             )
+            self.assertEqual(completed, ["applied"])
             self.assertEqual(adapter.cache.values["empty_optional"]["confidence"], 1.0)
             self.assertEqual(adapter.cache.values["empty_optional"]["source"], "empty_optional")
 
             adapter.cache.update_services(["svc.z", "svc.a"])
             adapter.energy_discovery.update_services(["svc.z", "svc.a"], captured_at=1.0)
-            install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=77.0))
+            read = install_read_responder(adapter, MagicMock(return_value=77.0))
             self.assertEqual(
-                adapter.read_executor._poll_first_service(
+                adapter.read_executor.poll_read_spec(
                     "first_default",
                     {"aggregate": "first-service", "prefix": "svc.", "path": "/Soc", "interval": 2.0},
                 ),
                 "applied",
             )
-            adapter.read_executor.read_busitem.assert_called_once_with("svc.a", "/Soc")
+            self.assertEqual(read.call_args.args, ("svc.a", "/Soc"))
             self.assertEqual(adapter.cache.values["first_default"]["value"], 77.0)
             self.assertEqual(adapter.cache.values["first_default"]["stale_after_s"], 6.0)
             self.assertEqual(adapter.cache.values["first_default"]["freshness_kind"], "external_read")
@@ -173,6 +188,7 @@ class GatewayReadExecutorAggregateContractCases(GatewayAdapterContractCase):
                 empty_adapter.read_executor._poll_first_service(
                     "first_missing_default",
                     {"aggregate": "first-service", "path": "/Soc"},
+                    MagicMock(),
                 )
 
     def test_read_executor_optional_aggregate_error_contract_is_exact(self) -> None:

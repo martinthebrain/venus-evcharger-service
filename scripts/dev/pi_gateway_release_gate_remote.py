@@ -4,59 +4,8 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 
-from pi_gateway_release_gate_common import ROOT, GateFailure, PiSession
-
-DEPLOY_EXCLUDES = (
-    "--exclude=.git",
-    "--exclude=.venv*",
-    "--exclude=.mypy_cache",
-    "--exclude=.pytest_cache",
-    "--exclude=.mutmut-cache",
-    "--exclude=.coverage",
-    "--exclude=coverage.xml",
-    "--exclude=htmlcov",
-    "--exclude=__pycache__",
-    "--exclude=*.pyc",
-)
-
-
-def deploy_repo(pi: PiSession, remote_dir: str) -> None:
-    pi.ssh(f"mkdir -p {remote_dir!r}", timeout=10.0)
-    tar = subprocess.Popen(
-        ["tar", *DEPLOY_EXCLUDES, "-C", str(ROOT), "-czf", "-", "."],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=False,
-    )
-    ssh = subprocess.Popen(
-        [
-            "ssh",
-            "-F",
-            pi.ssh_config,
-            "-o",
-            "BatchMode=yes",
-            pi.target,
-            f"cd {remote_dir!r} && tar -xzf -",
-        ],
-        stdin=tar.stdout,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=False,
-    )
-    if tar.stdout is not None:
-        tar.stdout.close()
-    ssh_stdout, ssh_stderr = ssh.communicate(timeout=90.0)
-    tar_stderr = tar.stderr.read().decode("utf-8", errors="replace") if tar.stderr else ""
-    tar_rc = tar.wait(timeout=10.0)
-    if tar_rc != 0 or ssh.returncode != 0:
-        raise GateFailure(
-            "deploy failed\n"
-            f"tar_rc={tar_rc} tar_stderr={tar_stderr}\n"
-            f"ssh_rc={ssh.returncode} stdout={ssh_stdout.decode(errors='replace')}"
-            f" stderr={ssh_stderr.decode(errors='replace')}"
-        )
+from pi_gateway_release_gate_common import PiSession
 
 
 def remote_compile(pi: PiSession, remote_dir: str) -> None:

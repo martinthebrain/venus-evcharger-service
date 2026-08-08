@@ -11,10 +11,13 @@ from __future__ import annotations
 import logging
 import time
 
-import dbus
-
 from venus_evcharger.core.shared import config_get_float
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.async_broker import DbusMethodCall, dbus_call_operation
+from venus_evcharger.dbus_adapter.contracts import (
+    CommandCompletion,
+    CommandExecution,
+    CommandOutcome,
+)
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionContext
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
 from venus_evcharger.dbus_gateway_core import float_or_default, float_or_zero
@@ -28,6 +31,29 @@ ENERGY_REFRESH_KEYS_BY_SCOPE: dict[str, tuple[str, ...]] = {
     "pv": ("pv_power_w",),
     "battery": ("battery_soc",),
 }
+
+
+def _introspection_call(
+    command: CommandMapping,
+    command_file: str,
+) -> DbusMethodCall | None:
+    service = str(command.get("service") or "")
+    if not service:
+        return None
+    path = str(command.get("path") or "/")
+    return DbusMethodCall(
+        service=service,
+        path=path,
+        interface="org.freedesktop.DBus.Introspectable",
+        method_name="Introspect",
+        signature="",
+        rate_kind="introspection",
+        metric_kind="introspection",
+        source=f"{service}{path}",
+        priority=str(command.get("priority") or "diagnostic"),
+        timeout_seconds=float_or_default(command.get("timeout"), 1.0),
+        owner_path=command_file,
+    )
 
 
 class DbusAdapterIntrospection:
@@ -93,16 +119,28 @@ class DbusAdapterIntrospection:
             and context.circuit.allows_priority("discovery")
         )
 
-    def process_non_write_command(self, command: CommandMapping) -> CommandOutcome:
+    def schedule_non_write_command(
+        self,
+        command: CommandMapping,
+        command_file: str,
+        completion: CommandCompletion,
+    ) -> CommandExecution:
         raw_kind = command.get("kind") or command.get("type")
         if not raw_kind:
-            return "dropped"
+            return CommandExecution.immediate("dropped")
         kind = str(raw_kind)
         handlers = {
-            ENERGY_REFRESH_COMMAND_KIND: self.refresh_energy_inputs_command,
-            "introspect": self.introspect_command_if_healthy,
+            ENERGY_REFRESH_COMMAND_KIND: lambda: CommandExecution.immediate(
+                self.refresh_energy_inputs_command(command)
+            ),
+            "introspect": lambda: self.schedule_introspection_if_healthy(
+                command,
+                command_file,
+                completion,
+            ),
         }
-        return handlers.get(kind, _drop_command)(command)
+        handler = handlers.get(kind)
+        return CommandExecution.immediate("dropped") if handler is None else handler()
 
     def refresh_energy_inputs_command(
         self,
@@ -118,9 +156,7 @@ class DbusAdapterIntrospection:
         if request.scope in {"all", "topology"}:
             self._context.discovery.force_due()
             self._context._last_introspection_full_scan_at = 0.0
-        self._context.read_scheduler.force_due(
-            self._stale_refresh_keys(keys, request.max_age_seconds)
-        )
+        self._context.read_scheduler.force_due(self._stale_refresh_keys(keys, request.max_age_seconds))
         return "applied"
 
     def _energy_refresh_keys(
@@ -130,9 +166,10 @@ class DbusAdapterIntrospection:
         fixed_keys = ENERGY_REFRESH_KEYS_BY_SCOPE.get(request.scope)
         if fixed_keys is not None:
             return fixed_keys
-        if request.scope != "energy_source" or request.source_id is None:
+        source_id = request.source_id
+        if source_id is None:
             return ()
-        return self._context.energy_discovery.read_keys_for_source(request.source_id)
+        return self._context.energy_discovery.read_keys_for_source(source_id)
 
     def _stale_refresh_keys(
         self,
@@ -143,55 +180,73 @@ class DbusAdapterIntrospection:
         return tuple(
             key
             for key in keys
-            if now
-            - float_or_zero(self._context.cache.values.get(key, {}).get("confirmed_at"))
-            > max_age_seconds
+            if now - float_or_zero(self._context.cache.values.get(key, {}).get("confirmed_at")) > max_age_seconds
         )
 
-    def introspect_command_if_healthy(
+    def schedule_introspection_if_healthy(
         self,
         command: CommandMapping,
-    ) -> CommandOutcome:
+        command_file: str,
+        completion: CommandCompletion,
+    ) -> CommandExecution:
         if self._context.circuit.state() != "ok":
-            return "deferred"
-        return self.introspect_command(command)
+            return CommandExecution.immediate("deferred")
+        return self.schedule_introspection(command, command_file, completion)
 
-    def introspect_command(self, command: CommandMapping) -> CommandOutcome:
-        service = str(command.get("service") or "")
-        path = str(command.get("path") or "/")
-        if not service:
-            return "dropped"
-        timeout = float_or_default(command.get("timeout"), 1.0)
-        outcome, xml_data = self.timed_introspection_result(service, path, timeout)
-        if outcome != "applied":
-            return outcome
+    def schedule_introspection(
+        self,
+        command: CommandMapping,
+        command_file: str,
+        completion: CommandCompletion,
+    ) -> CommandExecution:
+        try:
+            call = _introspection_call(command, command_file)
+        except ValueError:
+            return CommandExecution.immediate("dropped")
+        if call is None:
+            return CommandExecution.immediate("dropped")
+        return self._submit_introspection(call, completion)
+
+    def _submit_introspection(
+        self,
+        call: DbusMethodCall,
+        completion: CommandCompletion,
+    ) -> CommandExecution:
+        try:
+            self._context.operation_broker.submit(
+                dbus_call_operation(
+                    self._context.connection,
+                    call,
+                    on_success=lambda xml_data: completion(
+                        self._record_introspection_outcome(
+                            call.service,
+                            call.path,
+                            xml_data,
+                        )
+                    ),
+                    on_error=lambda error: completion(
+                        self.drop_failed_introspection(
+                            call.service,
+                            call.path,
+                            error,
+                        )
+                    ),
+                )
+            )
+            return CommandExecution.pending()
+        except DbusOperationDeferred:
+            return CommandExecution.immediate("deferred")
+        except DBUS_GATEWAY_OPERATION_ERRORS as error:
+            return CommandExecution.immediate(self.drop_failed_introspection(call.service, call.path, error))
+
+    def _record_introspection_outcome(
+        self,
+        service: str,
+        path: str,
+        xml_data: object,
+    ) -> CommandOutcome:
         self.record_introspection_xml(service, path, xml_data)
         return "applied"
-
-    def timed_introspection_result(
-        self,
-        service: str,
-        path: str,
-        timeout: float,
-    ) -> tuple[CommandOutcome, object]:
-        try:
-            return "applied", self._context.io_role.timed_dbus_operation(
-                "introspection", lambda: self.read_introspection_xml(service, path, timeout)
-        )
-        except DbusOperationDeferred:
-            return "deferred", None
-        except DBUS_GATEWAY_OPERATION_ERRORS as error:
-            return self.drop_failed_introspection(service, path, error), None
-
-    def read_introspection_xml(
-        self,
-        service: str,
-        path: str,
-        timeout: float,
-    ) -> object:
-        obj = self._context.connection.get_object(service, path, introspect=False)
-        iface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
-        return iface.Introspect(timeout=timeout)
 
     def drop_failed_introspection(
         self,
@@ -225,7 +280,3 @@ class DbusAdapterIntrospection:
             freshness_kind="diagnostic",
         )
         context._introspection_queue_depth = max(0, context._introspection_queue_depth - 1)
-
-
-def _drop_command(_command: CommandMapping) -> CommandOutcome:
-    return "dropped"

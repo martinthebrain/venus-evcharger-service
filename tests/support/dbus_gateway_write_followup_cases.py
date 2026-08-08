@@ -14,8 +14,11 @@ from tests.support.dbus_gateway_adapter_harness import (
     patch,
     read_json_file,
     time,
+    unittest,
     write_core_module,
+    write_dispatch_module,
 )
+from venus_evcharger.dbus_adapter.contracts import CommandExecution
 from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command, gx_relay_set_command
 
 
@@ -35,12 +38,14 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
                 command = read_json_file(command_path)
                 assert isinstance(command, dict)
                 install_mock(
-                    adapter.write_scheduler.command_queue,
-                    "process_command",
-                    MagicMock(return_value=outcome),
+                    adapter.write_scheduler.command_dispatcher,
+                    "execute",
+                    MagicMock(return_value=CommandExecution.immediate(outcome)),
                 )
 
-                self.assertEqual(adapter.write_scheduler.command_queue.process_loaded_command(command_path, command), outcome)
+                self.assertEqual(
+                    adapter.write_scheduler.command_queue.process_loaded_command(command_path, command), outcome
+                )
                 self.assertFalse(Path(command_path).exists())
 
     def test_deferred_command_is_retained_and_consumes_budget(self) -> None:
@@ -59,12 +64,14 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
             command = read_json_file(command_path)
             assert isinstance(command, dict)
             install_mock(
-                adapter.write_scheduler.command_queue,
-                "process_command",
-                MagicMock(return_value="deferred"),
+                adapter.write_scheduler.command_dispatcher,
+                "execute",
+                MagicMock(return_value=CommandExecution.immediate("deferred")),
             )
 
-            self.assertEqual(adapter.write_scheduler.command_queue.process_loaded_command(command_path, command), "deferred")
+            self.assertEqual(
+                adapter.write_scheduler.command_queue.process_loaded_command(command_path, command), "deferred"
+            )
 
             self.assertTrue(Path(command_path).exists())
             self.assertFalse(adapter.write_scheduler.health_tracker.budget_available(command, time.time()))
@@ -81,8 +88,8 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
             loaded_command = read_json_file(command_path)
             assert isinstance(loaded_command, dict)
             process_command = install_mock(
-                adapter.write_scheduler.command_queue,
-                "process_command",
+                adapter.write_scheduler.command_dispatcher,
+                "execute",
                 MagicMock(return_value="applied"),
             )
 
@@ -105,19 +112,23 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
     def test_command_outcome_turns_transient_failures_into_retry(self) -> None:
         with self.adapter_scenario() as scenario:
             scheduler = scenario.adapter.write_scheduler
-            queue = scheduler.command_queue
+            dispatcher = scheduler.command_dispatcher
             command = gx_relay_refresh_command(0)
             process_command = install_mock(
-                queue,
-                "process_command",
+                dispatcher,
+                "schedule",
                 MagicMock(side_effect=DbusOperationDeferred("busy")),
             )
-            self.assertEqual(queue.command_outcome("relay.json", command), "deferred")
+            self.assertEqual(dispatcher.outcome("relay.json", command), "deferred")
 
             process_command.side_effect = RuntimeError("offline")
-            with patch.object(vars(write_core_module)["logging"], "exception") as logged:
-                self.assertEqual(queue.command_outcome("relay.json", command), "deferred")
-            process_command.assert_called_with(command, command_file="relay.json")
+            with patch.object(vars(write_dispatch_module)["logging"], "exception") as logged:
+                self.assertEqual(dispatcher.outcome("relay.json", command), "deferred")
+            process_command.assert_called_with(
+                command,
+                command_file="relay.json",
+                completion=unittest.mock.ANY,
+            )
             logged.assert_called_once_with(
                 "Gateway command failed; keeping for retry path=%s: %s",
                 "relay.json",
@@ -127,17 +138,21 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
     def test_command_outcome_forwards_command_file_on_success(self) -> None:
         with self.adapter_scenario() as scenario:
             scheduler = scenario.adapter.write_scheduler
-            queue = scheduler.command_queue
+            dispatcher = scheduler.command_dispatcher
             command = gx_relay_refresh_command(0)
             process_command = install_mock(
-                queue,
-                "process_command",
-                MagicMock(return_value="applied"),
+                dispatcher,
+                "schedule",
+                MagicMock(return_value=CommandExecution.immediate("applied")),
             )
 
-            self.assertEqual(queue.command_outcome("relay.json", command), "applied")
+            self.assertEqual(dispatcher.outcome("relay.json", command), "applied")
 
-            process_command.assert_called_once_with(command, command_file="relay.json")
+            process_command.assert_called_once_with(
+                command,
+                command_file="relay.json",
+                completion=unittest.mock.ANY,
+            )
 
     def test_process_one_resets_and_reports_last_outcome(self) -> None:
         with self.adapter_scenario() as scenario:
@@ -189,7 +204,11 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
             command = gx_relay_refresh_command(0)
             pending = [("relay.json", command)]
             install_mock(queue, "command_expired", MagicMock(return_value=False))
-            command_outcome = install_mock(queue, "command_outcome", MagicMock(return_value="applied"))
+            command_execution = install_mock(
+                queue.dispatcher,
+                "execute",
+                MagicMock(return_value=CommandExecution.immediate("applied")),
+            )
             apply_result = install_mock(queue, "_apply_command_result", MagicMock())
             lifecycle = install_mock(health, "record_lifecycle", MagicMock())
 
@@ -198,7 +217,11 @@ class GatewayWriteFollowupCases(GatewayAdapterContractCase):
                 "applied",
             )
 
-            command_outcome.assert_called_once_with("relay.json", command)
+            command_execution.assert_called_once_with(
+                "relay.json",
+                command,
+                completion=unittest.mock.ANY,
+            )
             apply_result.assert_called_once_with(
                 "relay.json",
                 command,

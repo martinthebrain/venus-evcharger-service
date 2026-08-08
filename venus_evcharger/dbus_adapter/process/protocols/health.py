@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
 from venus_evcharger.dbus_adapter.process.protocols.roles import PublicationRole
 from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker
 from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
@@ -28,6 +29,7 @@ class DbusAdapterHealthContext(Protocol):  # pragma: no cover
     commands: DbusGatewayCommandInbox
     core_command_mailbox: CommandMailbox
     circuit: DbusCircuitBreaker
+    operation_broker: DbusAsyncOperationBroker
     discovery: DbusDiscoveryManager
     energy_discovery: DbusEnergyDiscoveryManager
     read_scheduler: DbusReadScheduler

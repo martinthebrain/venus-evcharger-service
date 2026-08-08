@@ -13,6 +13,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     install_mock,
     patch,
     write_core_module,
+    write_support_module,
 )
 from venus_evcharger.ipc.command_types import CommandMapping
 from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command
@@ -67,9 +68,7 @@ class DbusAdapterWritePublishMutationContracts(GatewayAdapterContractCase):
             frozen_pending = candidates[0].pending_commands
             self.assertEqual(frozen_pending, commands)
             self.assertIsNot(frozen_pending, commands)
-            self.assertTrue(
-                all(candidate.pending_commands is frozen_pending for candidate in candidates)
-            )
+            self.assertTrue(all(candidate.pending_commands is frozen_pending for candidate in candidates))
 
     def test_burst_uses_dynamic_limit_when_no_override_is_supplied(self) -> None:
         with self.adapter_scenario() as scenario:
@@ -99,7 +98,7 @@ class DbusAdapterWritePublishMutationContracts(GatewayAdapterContractCase):
             queue = scheduler.command_queue
             health = scheduler.health_tracker
             pending: CommandFileList = []
-            candidate = write_core_module._LocalPublishCandidate(2, 2, pending, 10.0)
+            candidate = write_support_module.LocalPublishCandidate(2, 2, pending, 10.0)
             local = evcs_publication({"connected": 1})
             remote = gx_relay_refresh_command(0)
             done = install_mock(queue, "_local_publish_burst_done", MagicMock(return_value=True))
@@ -125,7 +124,7 @@ class DbusAdapterWritePublishMutationContracts(GatewayAdapterContractCase):
             health = scheduler.health_tracker
             command = evcs_publication({"mode": 2})
             pending: CommandFileList = [("publish.json", command)]
-            candidate = write_core_module._LocalPublishCandidate(0, 4, pending, 20.0)
+            candidate = write_support_module.LocalPublishCandidate(0, 4, pending, 20.0)
             install_mock(queue, "_local_publish_burst_done", MagicMock(return_value=False))
             budget_available = install_mock(health, "budget_available", MagicMock(return_value=False))
             process_loaded = install_mock(queue, "process_loaded_command", MagicMock())

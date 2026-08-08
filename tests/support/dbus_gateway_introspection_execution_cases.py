@@ -10,11 +10,14 @@ from tests.support.dbus_gateway_adapter_harness import (
     MagicMock,
     Path,
     gateway_paths,
+    dbus_wire_call,
+    install_dbus_call_responder,
     install_mock,
     introspection_snapshot_module,
     json,
     patch,
     process_io_module,
+    run_non_write_command,
     tempfile,
 )
 from venus_evcharger.ipc.energy import EnergyRefreshRequest
@@ -29,13 +32,7 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
 
-            timed_introspection = install_mock(
-                adapter.introspection_role,
-                "timed_introspection_result",
-                MagicMock(return_value=("applied", "<unexpected/>")),
-            )
-            self.assertEqual(adapter.introspection_role.introspect_command({}), "dropped")
-            timed_introspection.assert_not_called()
+            self.assertEqual(run_non_write_command(adapter, {"kind": "introspect"}), "dropped")
 
             force_reads = install_mock(adapter.read_scheduler, "force_due", MagicMock())
             force_discovery = install_mock(adapter.discovery, "force_due", MagicMock())
@@ -47,7 +44,7 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
                 reason="test-refresh",
             )
             self.assertEqual(
-                adapter.process_non_write_command(refresh.to_command(source="test")),
+                run_non_write_command(adapter, refresh.to_command(source="test")),
                 "applied",
             )
             force_reads.assert_called_once_with(("grid_power_w", "pv_power_w", "battery_soc"))
@@ -55,18 +52,30 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
             force_reads.reset_mock()
             battery_refresh = EnergyRefreshRequest("battery", "battery", 0.0)
             self.assertEqual(
-                adapter.process_non_write_command(battery_refresh.to_command(source="test")),
+                run_non_write_command(adapter, battery_refresh.to_command(source="test")),
                 "applied",
             )
             force_reads.assert_called_once_with(("battery_soc",))
             self.assertEqual(
-                adapter.process_non_write_command(
-                    {"type": "refresh_value", "key": "grid_power_w", "service": "svc", "path": "/P"}
+                run_non_write_command(
+                    adapter, {"type": "refresh_value", "key": "grid_power_w", "service": "svc", "path": "/P"}
                 ),
                 "dropped",
             )
 
-            list_services = install_mock(adapter.io_role, "list_services", MagicMock(return_value=["svc1", "svc2"]))
+            service_responder = MagicMock(return_value=["svc1", "svc2"])
+            send_async = install_dbus_call_responder(
+                adapter.connection,
+                service_responder,
+            )
+            expected_call = (
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "ListNames",
+                "",
+                (),
+            )
             discovery_due = install_mock(adapter.discovery, "due", MagicMock(return_value=True))
             record_success = install_mock(adapter.discovery, "record_success", MagicMock())
             needs_early_rescan = install_mock(
@@ -83,7 +92,8 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
                 ),
             ):
                 self.assertTrue(adapter.io_role.refresh_services_if_due_once())
-            list_services.assert_called_once_with()
+            self.assertEqual(dbus_wire_call(send_async.call_args.args[0]), expected_call)
+            self.assertEqual(send_async.call_args.args[0].timeout_seconds, 1.0)
             self.assertEqual(sorted(adapter.cache.services), ["svc1", "svc2"])
             self.assertEqual(adapter.energy_discovery.topology_snapshot(captured_at=100.0).generation, 1)
             needs_early_rescan.assert_called_once_with()
@@ -97,19 +107,23 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
                 priority_allowed=adapter.circuit.allows_priority,
             )
 
-            list_services.reset_mock()
             record_success.reset_mock()
             discovery_due.return_value = False
             self.assertFalse(adapter.io_role.refresh_services_if_due_once())
-            list_services.assert_not_called()
+            self.assertEqual(send_async.call_count, 1)
             record_success.assert_not_called()
 
             discovery_due.return_value = True
-            install_mock(adapter.io_role, "list_services", MagicMock(side_effect=DbusOperationDeferred("read")))
-            self.assertFalse(adapter.io_role.refresh_services_if_due_once())
+            with patch.object(
+                adapter.operation_broker,
+                "submit",
+                side_effect=DbusOperationDeferred("read"),
+            ):
+                self.assertFalse(adapter.io_role.refresh_services_if_due_once())
 
             services_error = RuntimeError("dbus down")
-            install_mock(adapter.io_role, "list_services", MagicMock(side_effect=services_error))
+            adapter.rate_limiter.next_at["read"] = 0.0
+            service_responder.side_effect = services_error
             record_error = install_mock(adapter.discovery, "record_error", MagicMock())
             with (
                 patch.object(process_io_module.time, "time", return_value=123.0),
@@ -124,6 +138,14 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
                 services_error,
                 monotonic_at=12.0,
                 captured_at=123.0,
+            )
+            self.assertEqual(
+                [dbus_wire_call(mock_call.args[0]) for mock_call in send_async.call_args_list],
+                [expected_call, expected_call],
+            )
+            self.assertEqual(
+                [mock_call.args[0].timeout_seconds for mock_call in send_async.call_args_list],
+                [1.0, 1.0],
             )
 
             adapter._introspection_queue_depth = 2

@@ -16,6 +16,7 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 install_venus_adapter_stubs()
 
 import venus_evcharger.dbus_adapter.process.adapter as process
+from venus_evcharger.dbus_adapter.contracts import CommandExecution
 from venus_evcharger.dbus_adapter.process.config import (
     CasePreservingConfigParser,
     GatewayAdapterSettings,
@@ -77,14 +78,17 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertEqual(logging_level_from_config(config), logging.INFO)
 
     def test_adapter_initializes_every_component_and_runtime_field_from_settings(self) -> None:
-        config = configparser.ConfigParser()
+        config = CasePreservingConfigParser()
+        config["DEFAULT"]["AutoPvMaxServices"] = "0"
         settings = adapter_settings()
         component_names = (
             "DbusConnectionManager",
             "DbusRateLimiter",
             "DbusCircuitBreaker",
+            "DbusAsyncOperationBroker",
             "DbusCacheStore",
             "DbusGatewayCommandInbox",
+            "FastPublicationQueue",
             "CoreCommandMailbox",
             "GatewayPublicationRegistry",
             "DbusWriteScheduler",
@@ -120,8 +124,18 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
             write_interval_seconds=0.31,
             introspection_interval_seconds=2.1,
         )
+        mocks["DbusAsyncOperationBroker"].assert_called_once_with(
+            mocks["DbusRateLimiter"].return_value,
+            mocks["DbusCircuitBreaker"].return_value,
+        )
         mocks["DbusCacheStore"].assert_called_once_with(settings.paths, stale_after_seconds=12.5)
         mocks["DbusGatewayCommandInbox"].assert_called_once_with(settings.paths.command_dir)
+        mocks["FastPublicationQueue"].assert_called_once_with(
+            order_state_path=process.os.path.join(
+                settings.paths.run_dir,
+                process.PUBLICATION_ORDER_STATE_NAME,
+            ),
+        )
         mocks["CoreCommandMailbox"].assert_called_once_with(settings.paths.core_command_dir)
         registry_call = mocks["GatewayPublicationRegistry"].call_args
         self.assertEqual(registry_call.args, (config,))
@@ -134,8 +148,26 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertIsInstance(write_context, process.DbusAdapterWriteContext)
         self.assertIsNot(write_context, adapter)
         self.assertIs(write_context.cache, adapter.cache)
+        self.assertIs(write_context.circuit, adapter.circuit)
+        self.assertIs(write_context.commands, adapter.commands)
+        self.assertEqual(
+            write_context.command_lifecycle_path,
+            adapter.command_lifecycle_path,
+        )
+        self.assertEqual(
+            write_context.command_lifecycle_max_bytes,
+            adapter.command_lifecycle_max_bytes,
+        )
+        self.assertIs(write_context.config, adapter.config)
         self.assertIs(write_context.connection, adapter.connection)
+        self.assertIs(write_context.operation_broker, adapter.operation_broker)
+        self.assertIs(
+            write_context.core_command_mailbox,
+            adapter.core_command_mailbox,
+        )
+        self.assertIs(write_context.fast_publications, adapter.fast_publications)
         self.assertIs(write_context.publication_registry, adapter.publication_registry)
+        self.assertEqual(write_context.service_name, adapter.service_name)
         self.assertIs(write_context.publication_role, adapter.publication_role)
         self.assertIs(write_context.introspection_role, adapter.introspection_role)
         self.assertIs(write_context.io_role, adapter.io_role)
@@ -143,23 +175,28 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
         self.assertFalse(hasattr(write_context, "health_role"))
         write_context.publication_role.evcs_service_registered = True
         self.assertTrue(write_context.evcs_service_registered)
-        write_context.introspection_role.process_non_write_command.return_value = "dropped"
+        write_context.introspection_role.schedule_non_write_command.return_value = CommandExecution.immediate("dropped")
         command = {"kind": "unknown"}
-        self.assertEqual(write_context.process_non_write_command(command), "dropped")
-        write_context.introspection_role.process_non_write_command.assert_called_once_with(command)
-        dbus_result = object()
+        command_file = "/run/test-gateway/commands/unknown.json"
+        completion = MagicMock()
+        self.assertEqual(
+            write_context.schedule_non_write_command(command, command_file, completion),
+            CommandExecution.immediate("dropped"),
+        )
+        write_context.introspection_role.schedule_non_write_command.assert_called_once_with(
+            command,
+            command_file,
+            completion,
+        )
         local_result = object()
-        write_context.io_role.timed_dbus_operation.return_value = dbus_result
         write_context.io_role.timed_local_publish.return_value = local_result
         operation = MagicMock()
-        self.assertIs(write_context.timed_dbus_operation("write", operation), dbus_result)
         self.assertIs(write_context.timed_local_publish(operation), local_result)
-        write_context.io_role.timed_dbus_operation.assert_called_once_with("write", operation)
         write_context.io_role.timed_local_publish.assert_called_once_with(operation)
         mocks["DbusReadScheduler"].assert_called_once_with(settings.read_specs)
         mocks["DbusEnergyDiscoveryManager"].assert_called_once_with(
             settings.read_specs,
-            max_prefix_services=10,
+            max_prefix_services=1,
         )
         mocks["DbusReadExecutor"].assert_called_once_with(adapter)
         mocks["DbusDiscoveryManager"].assert_called_once_with(
@@ -188,8 +225,10 @@ class DbusAdapterProcessContractTests(unittest.TestCase):
             ("connection", "DbusConnectionManager"),
             ("rate_limiter", "DbusRateLimiter"),
             ("circuit", "DbusCircuitBreaker"),
+            ("operation_broker", "DbusAsyncOperationBroker"),
             ("cache", "DbusCacheStore"),
             ("commands", "DbusGatewayCommandInbox"),
+            ("fast_publications", "FastPublicationQueue"),
             ("core_command_mailbox", "CoreCommandMailbox"),
             ("publication_registry", "GatewayPublicationRegistry"),
             ("write_scheduler", "DbusWriteScheduler"),

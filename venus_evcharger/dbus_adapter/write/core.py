@@ -3,22 +3,21 @@
 
 from __future__ import annotations
 
-import logging
 import time
-from dataclasses import dataclass
+from enum import Enum, auto
 
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
-from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
+from venus_evcharger.dbus_adapter.write.dispatch import WriteCommandDispatcher
 from venus_evcharger.dbus_adapter.write.protocols import (
     DbusWriteSchedulerAdapter,
-    PublicationExecutor,
-    SemanticOperationExecutor,
     WriteSchedulerHealth,
 )
 from venus_evcharger.dbus_adapter.write.support import (
+    FastPublishBurst,
+    LocalPublishCandidate,
     budget_elapsed,
     command_deadline_expired,
-    command_kind,
+    command_matches_filters,
     command_ready,
     is_local_publish_command,
     is_urgent_durable_command,
@@ -27,46 +26,47 @@ from venus_evcharger.dbus_adapter.write.support import (
 )
 from venus_evcharger.ipc.command_types import CommandFile, CommandFileList, CommandMapping
 from venus_evcharger.ipc.fast_publication import FastPublicationWork
-from venus_evcharger.ipc.gateway_operations import SEMANTIC_GATEWAY_KINDS
-from venus_evcharger.ipc.gateway_publication import SEMANTIC_PUBLICATION_KINDS
-from venus_evcharger.ipc.generic_shelly_configuration import DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND
 from venus_evcharger.ipc.pending_snapshot import (
     PendingCommandSnapshot,
     TickPendingSnapshotProvider,
 )
 from venus_evcharger.ipc.publication_order import PublicationOrderDeferredError
 
-GATEWAY_COMMAND_RETRY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
+
+class _CompletionPhase(Enum):
+    DISPATCHING = auto()
+    WAITING = auto()
+    CLOSED = auto()
 
 
-@dataclass(frozen=True, slots=True)
-class _LocalPublishCandidate:
-    processed: int
-    remaining_budget: int
-    pending_commands: CommandFileList
-    started: float
+class _CompletionAction(Enum):
+    BUFFER = auto()
+    FINALIZE = auto()
+    IGNORE = auto()
 
 
-@dataclass(frozen=True, slots=True)
-class _FastPublishBurst:
-    processed: int
-    stopped: bool
+def _completion_action(phase: _CompletionPhase) -> _CompletionAction:
+    if phase is _CompletionPhase.DISPATCHING:
+        return _CompletionAction.BUFFER
+    if phase is _CompletionPhase.WAITING:
+        return _CompletionAction.FINALIZE
+    if phase is _CompletionPhase.CLOSED:
+        return _CompletionAction.IGNORE
+    raise RuntimeError
 
 
 class WriteCommandQueue:
-    """Select, dispatch, and retire queued gateway commands."""
+    """Select and retire queued gateway commands around one dispatcher."""
 
     def __init__(
         self,
         adapter: DbusWriteSchedulerAdapter,
         *,
-        publication: PublicationExecutor,
-        semantic: SemanticOperationExecutor,
+        dispatcher: WriteCommandDispatcher,
         health: WriteSchedulerHealth,
     ) -> None:
         self.adapter = adapter
-        self.publication = publication
-        self.semantic = semantic
+        self.dispatcher = dispatcher
         self.health = health
         self._pending = TickPendingSnapshotProvider(adapter.commands)
         self.last_scheduled_outcome: CommandOutcome | None = None
@@ -96,20 +96,20 @@ class WriteCommandQueue:
             return fast.processed
         return self._process_durable_publish_burst(
             pending,
-            _LocalPublishCandidate(fast.processed, remaining, pending_commands, started),
+            LocalPublishCandidate(fast.processed, remaining, pending_commands, started),
         )
 
     def _process_durable_publish_burst(
         self,
         pending: CommandFileList,
-        candidate: _LocalPublishCandidate,
+        candidate: LocalPublishCandidate,
     ) -> int:
         processed = candidate.processed
         for path, command in pending:
             action = self._process_local_publish_candidate(
                 path,
                 command,
-                _LocalPublishCandidate(
+                LocalPublishCandidate(
                     processed,
                     candidate.remaining_budget,
                     candidate.pending_commands,
@@ -131,23 +131,23 @@ class WriteCommandQueue:
             for _path, command in commands
         )
 
-    def _process_fast_publish_burst(self, limit: int, started: float) -> _FastPublishBurst:
+    def _process_fast_publish_burst(self, limit: int, started: float) -> FastPublishBurst:
         processed = 0
         while processed < limit:
             work = self.adapter.fast_publications.pop_next(now=started)
             if work is None:
-                return _FastPublishBurst(processed, False)
+                return FastPublishBurst(processed, False)
             if not self._process_fast_publish_candidate(work, started):
-                return _FastPublishBurst(processed, True)
+                return FastPublishBurst(processed, True)
             processed += 1
-        return _FastPublishBurst(processed, True)
+        return FastPublishBurst(processed, True)
 
     def _process_fast_publish_candidate(self, work: FastPublicationWork, started: float) -> bool:
         command = work.command
         if self._fast_publish_blocked(command, started):
             self.adapter.fast_publications.requeue(work, now=started)
             return False
-        outcome = self.command_outcome("", command)
+        outcome = self.dispatcher.outcome("", command)
         sample = self.adapter.fast_publications.record_outcome(work, outcome)
         if outcome == "deferred":
             self.adapter.fast_publications.requeue(work, deferred=True, now=started)
@@ -167,7 +167,7 @@ class WriteCommandQueue:
         self,
         path: str,
         command: CommandMapping,
-        candidate: _LocalPublishCandidate,
+        candidate: LocalPublishCandidate,
     ) -> str:
         if self._local_publish_burst_done(candidate.processed, candidate.remaining_budget, candidate.started):
             return "break"
@@ -177,10 +177,7 @@ class WriteCommandQueue:
         return "processed" if outcome in ("applied", "dropped") else "break"
 
     def _local_publish_burst_done(self, processed: int, remaining: int, started: float) -> bool:
-        return processed >= max(0, remaining) or budget_elapsed(
-            started,
-            self.health.local_publish_tick_budget_seconds,
-        )
+        return processed >= max(0, remaining) or budget_elapsed(started, self.health.local_publish_tick_budget_seconds)
 
     def next_local_publish_command(self) -> CommandFile | None:
         now = time.time()
@@ -201,11 +198,7 @@ class WriteCommandQueue:
         key = str(processed_command.get("coalesce_key") or "")
         if not key:
             return
-        commands = (
-            self.pending_snapshot().physical_list()
-            if pending_commands is None
-            else pending_commands
-        )
+        commands = self.pending_snapshot().physical_list() if pending_commands is None else pending_commands
         command_by_path = dict(commands)
         for stale_path in stale_coalesced_paths(
             commands,
@@ -292,46 +285,13 @@ class WriteCommandQueue:
     ) -> bool:
         return (
             command_ready(command, now)
-            and self._command_matches_filters(
+            and command_matches_filters(
                 command,
                 include_local_publish=include_local_publish,
                 required_kind=required_kind,
             )
             and self.health.budget_available(command, now)
         )
-
-    @classmethod
-    def _command_matches_filters(
-        cls,
-        command: CommandMapping,
-        *,
-        include_local_publish: bool,
-        required_kind: str | None,
-    ) -> bool:
-        publish_allowed = include_local_publish or not is_local_publish_command(command)
-        kind_allowed = required_kind is None or command_kind(command) == required_kind
-        return publish_allowed and kind_allowed
-
-    def process_command(self, command: CommandMapping, *, command_file: str = "") -> CommandOutcome:
-        if self._command_blocked(command):
-            return "deferred"
-        return self._dispatch_command(command, command_file=command_file)
-
-    def _command_blocked(self, command: CommandMapping) -> bool:
-        priority = str(command.get("priority") or "diagnostic")
-        return not self.adapter.circuit.allows_priority(priority)
-
-    def _dispatch_command(self, command: CommandMapping, *, command_file: str) -> CommandOutcome:
-        kind = command_kind(command)
-        if kind in SEMANTIC_PUBLICATION_KINDS:
-            return self.publication.process(command)
-        if self._is_semantic_operation(kind):
-            return self.semantic.process_semantic_operation(command, command_file=command_file)
-        return self.adapter.process_non_write_command(command)
-
-    @staticmethod
-    def _is_semantic_operation(kind: str) -> bool:
-        return kind in SEMANTIC_GATEWAY_KINDS or kind == DISABLE_MATCHING_GENERIC_SHELLY_ONCE_KIND
 
     def process_loaded_command(
         self,
@@ -340,6 +300,26 @@ class WriteCommandQueue:
         *,
         pending_commands: CommandFileList | None = None,
     ) -> CommandOutcome:
+        prepared = self._prepare_loaded_command(
+            path,
+            command,
+            pending_commands=pending_commands,
+        )
+        if isinstance(prepared, str):
+            return prepared
+        return self._dispatch_loaded_command(
+            path,
+            prepared,
+            pending_commands=pending_commands,
+        )
+
+    def _prepare_loaded_command(
+        self,
+        path: str,
+        command: CommandMapping,
+        *,
+        pending_commands: CommandFileList | None,
+    ) -> CommandMapping | CommandOutcome:
         if self.command_expired(command):
             return self._drop_expired_command(path, command, pending_commands=pending_commands)
         try:
@@ -354,15 +334,77 @@ class WriteCommandQueue:
                 command,
                 pending_commands=pending_commands,
             )
-        outcome = self.command_outcome(path, effective_command)
-        if is_local_publish_command(effective_command):
-            self.adapter.fast_publications.record_durable_outcome(
+        return effective_command
+
+    def _dispatch_loaded_command(
+        self,
+        path: str,
+        effective_command: CommandMapping,
+        *,
+        pending_commands: CommandFileList | None,
+    ) -> CommandOutcome:
+        completed_during_dispatch: list[CommandOutcome] = []
+        completion_phase = _CompletionPhase.DISPATCHING
+
+        def _complete(outcome: CommandOutcome) -> None:
+            nonlocal completion_phase
+            action = _completion_action(completion_phase)
+            if action is _CompletionAction.IGNORE:
+                return
+            completion_phase = _CompletionPhase.CLOSED
+            if action is _CompletionAction.BUFFER:
+                completed_during_dispatch.append(outcome)
+                return
+            self._finalize_loaded_command(
+                path,
                 effective_command,
                 outcome,
+                pending_commands=pending_commands,
             )
-        self._apply_command_result(path, effective_command, outcome, pending_commands=pending_commands)
-        self.health.record_lifecycle(effective_command, outcome)
-        return outcome
+
+        execution = self.dispatcher.execute(
+            path,
+            effective_command,
+            completion=_complete,
+        )
+        if completed_during_dispatch:
+            outcome = completed_during_dispatch[0]
+            self._finalize_loaded_command(
+                path,
+                effective_command,
+                outcome,
+                pending_commands=pending_commands,
+            )
+            return outcome
+        if execution.in_flight:
+            completion_phase = _CompletionPhase.WAITING
+            return "deferred"
+        completion_phase = _CompletionPhase.CLOSED
+        self._finalize_loaded_command(
+            path,
+            effective_command,
+            execution.outcome,
+            pending_commands=pending_commands,
+        )
+        return execution.outcome
+
+    def _finalize_loaded_command(
+        self,
+        path: str,
+        command: CommandMapping,
+        outcome: CommandOutcome,
+        *,
+        pending_commands: CommandFileList | None,
+    ) -> None:
+        if is_local_publish_command(command):
+            self.adapter.fast_publications.record_durable_outcome(command, outcome)
+        self._apply_command_result(
+            path,
+            command,
+            outcome,
+            pending_commands=pending_commands,
+        )
+        self.health.record_lifecycle(command, outcome)
 
     def _effective_durable_command(self, command: CommandMapping) -> CommandMapping | None:
         if not is_local_publish_command(command):
@@ -395,15 +437,6 @@ class WriteCommandQueue:
         self.health.record_lifecycle(command, "expired")
         self.health.record_processed()
         return "dropped"
-
-    def command_outcome(self, path: str, command: CommandMapping) -> CommandOutcome:
-        try:
-            return self.process_command(command, command_file=path)
-        except DbusOperationDeferred:
-            return "deferred"
-        except GATEWAY_COMMAND_RETRY_ERRORS as error:
-            logging.exception("Gateway command failed; keeping for retry path=%s: %s", path, error)
-            return "deferred"
 
     def _apply_command_result(
         self,

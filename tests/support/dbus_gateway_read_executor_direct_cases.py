@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from tests.support.dbus_gateway_adapter_harness import (
-    BusItemInterfaceStub,
     DbusAdapter,
     DbusOperationDeferred,
     GatewayAdapterContractCase,
@@ -12,13 +11,18 @@ from tests.support.dbus_gateway_adapter_harness import (
     Path,
     gateway_paths,
     install_mock,
+    install_read_responder,
     introspection_module,
     patch,
+    read_aggregate_module,
     read_module,
+    read_spec_module,
+    run_non_write_command,
     tempfile,
     unittest,
 )
 from venus_evcharger.ipc.energy import EnergyRefreshRequest
+from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
 
 
 class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
@@ -31,7 +35,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
             adapter.cache.update_services(["svc.first"])
             adapter.energy_discovery.update_services(["svc.first"], captured_at=1.0)
-            read_busitem = install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=12.0))
+            read_busitem = install_read_responder(adapter, MagicMock(return_value=12.0))
 
             outcome = adapter.read_executor.poll_read_spec(
                 "first_value",
@@ -47,7 +51,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=5.0))
+            install_read_responder(adapter, MagicMock(return_value=5.0))
 
             outcome = adapter.read_executor.poll_read_spec(
                 "bad_sum",
@@ -63,9 +67,8 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            install_mock(
-                adapter.read_executor,
-                "read_busitem",
+            install_read_responder(
+                adapter,
                 MagicMock(side_effect=RuntimeError("no reply")),
             )
 
@@ -94,7 +97,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=11.0))
+            install_read_responder(adapter, MagicMock(return_value=11.0))
 
             outcome = adapter.read_executor.poll_read_spec(
                 "path:svc.direct/Value",
@@ -115,7 +118,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             self.assertFalse(adapter.read_executor.has_pending_aggregate())
             self.assertIs(adapter.read_executor.last_operation_performed, False)
 
-            install_mock(adapter.read_executor, "read_busitem", MagicMock(return_value=12.5))
+            read = install_read_responder(adapter, MagicMock(return_value=12.5))
             self.assertEqual(
                 adapter.read_executor.poll_read_spec(
                     "direct_value",
@@ -123,7 +126,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 ),
                 "applied",
             )
-            adapter.read_executor.read_busitem.assert_called_once_with("svc.direct", "/Value")
+            self.assertEqual(read.call_args.args, ("svc.direct", "/Value"))
             entry = adapter.cache.values["path:svc.direct/Value"]
             self.assertEqual(entry["value"], 12.5)
             self.assertEqual(entry["source"], "svc.direct/Value")
@@ -138,17 +141,18 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 urgency="priority",
                 reason="test-stale-grid",
             )
-            self.assertEqual(adapter.process_non_write_command(refresh.to_command(source="test")), "applied")
+            self.assertEqual(run_non_write_command(adapter, refresh.to_command(source="test")), "applied")
             force_due.assert_called_once_with(("grid_power_w",))
-            adapter.read_executor.read_busitem.assert_called_once_with("svc.direct", "/Value")
+            self.assertEqual(read.call_args.args, ("svc.direct", "/Value"))
             self.assertEqual(
-                adapter.process_non_write_command(
+                run_non_write_command(
+                    adapter,
                     {
                         "kind": "refresh_value",
                         "key": "grid_power_w",
                         "service": "svc.direct",
                         "path": "/Value",
-                    }
+                    },
                 ),
                 "dropped",
             )
@@ -161,12 +165,12 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 ),
                 "applied",
             )
-            self.assertIs(adapter.read_executor.last_operation_performed, False)
+            self.assertIs(adapter.read_executor.last_operation_performed, True)
             self.assertEqual(adapter.cache.values["direct_value"]["stale_after_s"], 6.0)
             self.assertEqual(adapter.cache.values["direct_value"]["freshness_kind"], "external_read")
 
             error = RuntimeError("offline")
-            install_mock(adapter.read_executor, "read_busitem", MagicMock(side_effect=error))
+            install_read_responder(adapter, MagicMock(side_effect=error))
             with patch.object(read_module.logging, "debug") as log_debug:
                 self.assertEqual(
                     adapter.read_executor.poll_read_spec(
@@ -186,9 +190,8 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 error,
             )
 
-            install_mock(
-                adapter.read_executor,
-                "read_busitem",
+            install_read_responder(
+                adapter,
                 MagicMock(side_effect=DbusOperationDeferred("wait")),
             )
             self.assertEqual(
@@ -213,11 +216,11 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
 
             with patch.object(introspection_module.time, "time", return_value=25.0):
                 self.assertEqual(
-                    adapter.process_non_write_command(fresh_request.to_command(source="test")),
+                    run_non_write_command(adapter, fresh_request.to_command(source="test")),
                     "applied",
                 )
                 self.assertEqual(
-                    adapter.process_non_write_command(stale_request.to_command(source="test")),
+                    run_non_write_command(adapter, stale_request.to_command(source="test")),
                     "applied",
                 )
 
@@ -234,91 +237,67 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             force_due = install_mock(adapter.read_scheduler, "force_due", MagicMock())
             request = EnergyRefreshRequest("battery-source", "energy_source", 0.0, source_id=source_id)
 
-            self.assertEqual(adapter.process_non_write_command(request.to_command(source="test")), "applied")
+            self.assertEqual(run_non_write_command(adapter, request.to_command(source="test")), "applied")
             force_due.assert_called_once_with(("battery_soc",))
             unknown = EnergyRefreshRequest("missing-source", "energy_source", 0.0, source_id="unknown")
-            self.assertEqual(adapter.process_non_write_command(unknown.to_command(source="test")), "dropped")
+            self.assertEqual(run_non_write_command(adapter, unknown.to_command(source="test")), "dropped")
             self.assertEqual(
-                adapter.process_non_write_command(
+                run_non_write_command(
+                    adapter,
                     {
                         **request.to_command(source="test"),
                         "service": "svc.direct",
                         "path": "/Value",
-                    }
+                    },
                 ),
                 "dropped",
             )
 
-    def test_read_executor_optional_and_low_level_dbus_contracts_are_explicit(self) -> None:
+    def test_read_executor_async_transport_contract_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            pending = object()
 
-            install_mock(adapter.rate_limiter, "require_due", MagicMock())
-            install_mock(adapter.circuit, "record_success", MagicMock())
-            install_mock(adapter.circuit, "record_error", MagicMock())
-            install_mock(
-                adapter.circuit,
-                "record_optional_source_failure",
-                MagicMock(),
-            )
-            install_mock(adapter.read_executor, "read_busitem_now", MagicMock(return_value="8.5"))
-            with patch.object(read_module.time, "monotonic", side_effect=[10.0, 10.25]):
-                self.assertEqual(adapter.read_executor.read_optional_busitem("svc.optional", "/Power"), "8.5")
-            adapter.rate_limiter.require_due.assert_called_once_with("read")
-            adapter.read_executor.read_busitem_now.assert_called_once_with("svc.optional", "/Power")
-            adapter.circuit.record_success.assert_called_once_with(
-                250.0,
-                kind="optional_read",
-                source="svc.optional/Power",
-            )
-            adapter.circuit.record_error.assert_not_called()
-            adapter.circuit.record_optional_source_failure.assert_not_called()
+            def complete_get_value(
+                request: DbusWireRequest,
+                reply_handler: object,
+                error_handler: object,
+            ) -> object:
+                self.assertEqual(
+                    request,
+                    DbusWireRequest(
+                        service="svc.low",
+                        path="/P",
+                        interface="com.victronenergy.BusItem",
+                        method_name="GetValue",
+                        signature="",
+                        timeout_seconds=1.0,
+                    ),
+                )
+                assert callable(reply_handler)
+                assert callable(error_handler)
+                reply_handler("4.25")
+                return pending
 
-            error = RuntimeError("optional failed")
-            adapter.read_executor.read_busitem_now.side_effect = error
-            with (
-                patch.object(
-                    read_module.time,
-                    "monotonic",
-                    side_effect=[20.0, 20.5],
+            send_async = install_mock(
+                adapter.connection,
+                "send_async",
+                MagicMock(side_effect=complete_get_value),
+            )
+            self.assertEqual(
+                adapter.read_executor.poll_read_spec(
+                    "low_level",
+                    {"service": "svc.low", "path": "/P"},
                 ),
-                self.assertRaises(RuntimeError),
-            ):
-                adapter.read_executor.read_optional_busitem(
-                    "svc.optional",
-                    "/Power",
-                )
-            adapter.circuit.record_optional_source_failure.assert_called_once_with(
-                error,
-                source="svc.optional/Power",
-                latency_ms=500.0,
+                "applied",
             )
-            adapter.circuit.record_error.assert_not_called()
-
-            adapter.circuit.record_optional_source_failure.reset_mock()
-            adapter.read_executor.read_busitem_now.side_effect = DbusOperationDeferred(
-                "read"
-            )
-            with self.assertRaises(DbusOperationDeferred):
-                adapter.read_executor.read_optional_busitem(
-                    "svc.optional",
-                    "/Power",
-                )
-            adapter.circuit.record_optional_source_failure.assert_not_called()
-
-            low_level_adapter = DbusAdapter(
-                str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-low-level"))
-            )
-            fake_iface = BusItemInterfaceStub("4.25")
-            fake_obj = object()
-            get_object = install_mock(low_level_adapter.connection, "get_object", MagicMock(return_value=fake_obj))
-            with patch.object(read_module.dbus, "Interface", return_value=fake_iface) as interface:
-                self.assertEqual(low_level_adapter.read_executor.read_busitem_now("svc.low", "/P"), 4.25)
-            get_object.assert_called_once_with("svc.low", "/P", introspect=False)
-            interface.assert_called_once_with(fake_obj, "com.victronenergy.BusItem")
-            self.assertEqual(fake_iface.get_calls, [1.0])
+            send_async.assert_called_once()
+            self.assertEqual(adapter.cache.values["low_level"]["value"], 4.25)
+            health = adapter.operation_broker.health()
+            self.assertEqual(health["submitted"], 1)
+            self.assertEqual(health["completed"], 1)
 
     def test_read_executor_aggregate_contracts_preserve_members_and_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -333,7 +312,10 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             adapter.energy_discovery.update_services(["svc.2", "other.1", "svc.1"], captured_at=1.0)
             self.assertEqual(adapter.read_executor._services_for_sum({"prefix": "svc."}), ["svc.1", "svc.2"])
 
-            install_mock(adapter.read_executor, "read_busitem", MagicMock(side_effect=[2.0, 3.5]))
+            read = install_read_responder(
+                adapter,
+                MagicMock(side_effect=[2.0, 3.5]),
+            )
             spec = {"aggregate": "sum", "service": "svc.sum", "paths": ["/L1", "/L2"], "optional_confidence": 0.75}
 
             self.assertEqual(adapter.read_executor.poll_read_spec("sum_power", spec), "deferred")
@@ -344,8 +326,9 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
 
             self.assertEqual(adapter.read_executor.poll_read_spec("sum_power", spec), "applied")
             self.assertFalse(adapter.read_executor.has_pending_aggregate())
-            adapter.read_executor.read_busitem.assert_has_calls(
-                [unittest.mock.call("svc.sum", "/L1"), unittest.mock.call("svc.sum", "/L2")]
+            self.assertEqual(
+                [call.args for call in read.call_args_list],
+                [("svc.sum", "/L1"), ("svc.sum", "/L2")],
             )
             payload = adapter.cache.values["sum_power"]
             self.assertEqual(payload["value"], 5.5)
@@ -426,34 +409,58 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             )
 
     def test_read_executor_optional_helpers_have_explicit_defaults_and_sources(self) -> None:
-        self.assertEqual(read_module._spec_text({}, "service"), "")
-        self.assertEqual(read_module._spec_text({"service": None}, "service"), "")
-        self.assertEqual(read_module._spec_text({"service": 42}, "service"), "")
-        self.assertEqual(read_module._spec_text({"service": ""}, "service"), "")
-        self.assertEqual(read_module._spec_text({"service": "svc"}, "service"), "svc")
-        self.assertTrue(read_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": "TRUE"}))
-        self.assertTrue(read_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": " yes "}))
-        self.assertTrue(read_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": "on"}))
-        self.assertFalse(read_module.DbusReadExecutor._optional_zero_on_error({}))
-        self.assertFalse(
-            read_module.DbusReadExecutor._optional_zero_on_error({"optional_zero_on_error": "TRUE " + "x"})
-        )
-        self.assertEqual(read_module.DbusReadExecutor._optional_confidence({}), 0.2)
-        self.assertEqual(read_module.DbusReadExecutor._optional_confidence({"optional_confidence": None}), 0.2)
-        self.assertEqual(read_module.DbusReadExecutor._optional_confidence({"optional_confidence": 0.0}), 0.2)
-        self.assertEqual(read_module.DbusReadExecutor._optional_confidence({"optional_confidence": 0.45}), 0.45)
-        self.assertIsNone(read_module._spec_stale_after_seconds({}))
-        self.assertEqual(read_module._spec_stale_after_seconds({"interval": 2.0}), 6.0)
-        self.assertEqual(read_module._spec_stale_after_seconds({"interval": 0.25}), 1.0)
-        self.assertEqual(read_module._spec_stale_after_seconds({"stale_after_seconds": -1.0}), 0.0)
+        self.assertEqual(read_spec_module.read_spec_text({}, "service"), "")
+        self.assertEqual(read_spec_module.read_spec_text({"service": None}, "service"), "")
+        self.assertEqual(read_spec_module.read_spec_text({"service": 42}, "service"), "")
+        self.assertEqual(read_spec_module.read_spec_text({"service": ""}, "service"), "")
+        self.assertEqual(read_spec_module.read_spec_text({"service": " svc "}, "service"), "svc")
+        self.assertTrue(read_spec_module.read_spec_optional_zero_on_error({"optional_zero_on_error": "TRUE"}))
+        self.assertTrue(read_spec_module.read_spec_optional_zero_on_error({"optional_zero_on_error": " yes "}))
+        self.assertTrue(read_spec_module.read_spec_optional_zero_on_error({"optional_zero_on_error": "on"}))
+        self.assertFalse(read_spec_module.read_spec_optional_zero_on_error({}))
+        self.assertFalse(read_spec_module.read_spec_optional_zero_on_error({"optional_zero_on_error": "TRUE " + "x"}))
+        self.assertEqual(read_spec_module.read_spec_optional_confidence({}), 0.2)
         self.assertEqual(
-            read_module.DbusReadExecutor._spec_source({"service": "svc", "prefix": "ignored"}, fallback="fb"), "svc"
+            read_spec_module.read_spec_optional_confidence({"optional_confidence": None}),
+            0.2,
         )
         self.assertEqual(
-            read_module.DbusReadExecutor._spec_source({"service": "", "prefix": "pv."}, fallback="fb"), "pv."
+            read_spec_module.read_spec_optional_confidence({"optional_confidence": 0.0}),
+            0.2,
         )
-        self.assertEqual(read_module.DbusReadExecutor._spec_source({}, fallback="fb"), "fb")
-        self.assertEqual(read_module.DbusReadExecutor._spec_source({}), "")
+        self.assertEqual(
+            read_spec_module.read_spec_optional_confidence({"optional_confidence": 0.45}),
+            0.45,
+        )
+        self.assertIsNone(read_spec_module.read_spec_stale_after_seconds({}))
+        self.assertEqual(
+            read_spec_module.read_spec_stale_after_seconds({"interval": 2.0}),
+            6.0,
+        )
+        self.assertEqual(
+            read_spec_module.read_spec_stale_after_seconds({"interval": 0.25}),
+            1.0,
+        )
+        self.assertEqual(
+            read_spec_module.read_spec_stale_after_seconds({"stale_after_seconds": -1.0}),
+            0.0,
+        )
+        self.assertEqual(
+            read_spec_module.read_spec_source(
+                {"service": "svc", "prefix": "ignored"},
+                fallback="fb",
+            ),
+            "svc",
+        )
+        self.assertEqual(
+            read_spec_module.read_spec_source(
+                {"service": "", "prefix": "pv."},
+                fallback="fb",
+            ),
+            "pv.",
+        )
+        self.assertEqual(read_spec_module.read_spec_source({}, fallback="fb"), "fb")
+        self.assertEqual(read_spec_module.read_spec_source({}), "")
 
     def test_read_executor_ttl_lifecycle_is_keyed_and_preserved_while_deferred(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -499,22 +506,34 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
 
             aggregate = install_mock(adapter.read_executor, "_poll_aggregate_step", MagicMock(return_value="deferred"))
+            completion = MagicMock()
             self.assertEqual(
                 adapter.read_executor._poll_sum_step(
                     "sum_power",
                     {"aggregate": "sum", "service": "svc.sum", "paths": ["/L1", "/L2"]},
+                    completion,
                 ),
                 "deferred",
             )
             aggregate.assert_called_once_with(
-                "sum_power",
-                ("sum", (("svc.sum", "/L1"), ("svc.sum", "/L2"))),
-                [("svc.sum", "/L1"), ("svc.sum", "/L2")],
+                read_aggregate_module.AggregateStepPlan(
+                    key="sum_power",
+                    signature=(
+                        "sum",
+                        (("svc.sum", "/L1"), ("svc.sum", "/L2")),
+                    ),
+                    members=(("svc.sum", "/L1"), ("svc.sum", "/L2")),
+                    completion=completion,
+                )
             )
 
             with patch.object(adapter.cache, "update_value") as update_value:
                 self.assertEqual(
-                    adapter.read_executor._poll_sum_step("empty_sum", {"aggregate": "sum", "service": "svc.empty"}),
+                    adapter.read_executor._poll_sum_step(
+                        "empty_sum",
+                        {"aggregate": "sum", "service": "svc.empty"},
+                        completion,
+                    ),
                     "applied",
                 )
             update_value.assert_called_once_with(
@@ -531,6 +550,7 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                     adapter.read_executor._poll_sum_step(
                         "empty_path_sum",
                         {"aggregate": "sum", "service": "svc.empty", "paths": [""]},
+                        completion,
                     ),
                     "applied",
                 )
@@ -550,23 +570,33 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 adapter.read_executor._poll_services_sum_step(
                     "pv_sum",
                     {"aggregate": "services-sum", "prefix": "pv.", "path": "/Ac/Power"},
+                    completion,
                 ),
                 "deferred",
             )
             aggregate.assert_called_once_with(
-                "pv_sum",
-                ("services-sum", "/Ac/Power", ("pv.1", "pv.2")),
-                [("pv.1", "/Ac/Power"), ("pv.2", "/Ac/Power")],
+                read_aggregate_module.AggregateStepPlan(
+                    key="pv_sum",
+                    signature=(
+                        "services-sum",
+                        "/Ac/Power",
+                        ("pv.1", "pv.2"),
+                    ),
+                    members=(("pv.1", "/Ac/Power"), ("pv.2", "/Ac/Power")),
+                    completion=completion,
+                )
             )
 
             with self.assertRaisesRegex(RuntimeError, "No cached services for prefix 'missing\\.'"):
                 adapter.read_executor._poll_services_sum_step(
                     "missing_sum",
                     {"aggregate": "services-sum", "prefix": "missing.", "path": "/Ac/Power"},
+                    completion,
                 )
             with self.assertRaisesRegex(RuntimeError, "No cached services for prefix ''"):
                 empty_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-empty")))
                 empty_adapter.read_executor._poll_services_sum_step(
                     "missing_default_sum",
                     {"aggregate": "services-sum", "path": "/Ac/Power"},
+                    completion,
                 )
