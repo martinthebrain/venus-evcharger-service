@@ -12,8 +12,9 @@ from typing import TypeGuard
 
 from vedbus import VeDbusService
 
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome, DbusServiceLike
+from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.publication.identity import companion_concrete_identity
+from venus_evcharger.dbus_adapter.publication.protocols import DbusServiceLike
 from venus_evcharger.dbus_adapter.publication.schema import (
     COMPANION_PUBLICATION_SPECS,
     EVCS_PUBLICATION_SPECS,

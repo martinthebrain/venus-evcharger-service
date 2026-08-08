@@ -10,6 +10,7 @@ from contextlib import suppress
 
 import dbus
 
+from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
 from venus_evcharger.dbus_gateway import LatencyWindow
 from venus_evcharger.dbus_gateway_latency import BoundedLatencyAttribution
 from venus_evcharger.ipc.command_types import CommandPayload
@@ -397,12 +398,33 @@ class DbusConnectionManager:
             self._bus = dbus.SystemBus(private=True)
         return self._bus
 
-    def get_object(self, bus_name: str, object_path: str, *, introspect: bool = False) -> object:
-        raw_get_object = getattr(self.bus(), "get_object", None)
-        if not callable(raw_get_object):
-            raise TypeError("DBus bus does not provide get_object")
-        get_object: Callable[..., object] = raw_get_object
-        return get_object(bus_name, object_path, introspect=introspect)
+    def connect(self) -> None:
+        """Establish the private bus connection before the GLib loop starts."""
+        self.bus()
+
+    def send_async(
+        self,
+        request: DbusWireRequest,
+        reply_handler: Callable[..., None],
+        error_handler: Callable[[object], None],
+    ) -> object:
+        """Return the real dbus-python PendingCall for one bounded request."""
+        raw_call_async = getattr(self.bus(), "call_async", None)
+        if not callable(raw_call_async):
+            raise TypeError("DBus bus does not provide call_async")
+        call_async: Callable[..., object] = raw_call_async
+        return call_async(
+            request.service,
+            request.path,
+            request.interface,
+            request.method_name,
+            request.signature,
+            request.args,
+            reply_handler,
+            error_handler,
+            timeout=request.timeout_seconds,
+            require_main_loop=True,
+        )
 
     def reset(self) -> None:
         close = getattr(self._bus, "close", None)

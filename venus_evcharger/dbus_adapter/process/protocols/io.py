@@ -6,12 +6,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
+from venus_evcharger.dbus_adapter.async_protocols import DbusConnectionLifecycle
 from venus_evcharger.dbus_adapter.process.protocols.roles import (
     DiagnosticsRole,
     HealthRole,
     IntrospectionSnapshotRole,
 )
-from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusConnectionManager, DbusRateLimiter
+from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusRateLimiter
 from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.executor import DbusReadExecutor
 from venus_evcharger.dbus_adapter.scheduling import AtomicJsonWriter, DbusDiscoveryManager, DbusReadScheduler
@@ -24,9 +26,9 @@ if TYPE_CHECKING:
 class DbusAdapterIoContext(Protocol):  # pragma: no cover
     """DBus read, discovery, timing, and cache-publish surface."""
 
-    connection: DbusConnectionManager
     rate_limiter: DbusRateLimiter
     circuit: DbusCircuitBreaker
+    operation_broker: DbusAsyncOperationBroker
     cache: DbusCacheStore
     commands: DbusGatewayCommandInbox
     discovery: DbusDiscoveryManager
@@ -47,6 +49,8 @@ class DbusAdapterIoContext(Protocol):  # pragma: no cover
     _last_cache_publish_monotonic: float
     _last_cache_publish_sequence: int
     _last_topology_generation: int
+    @property
+    def connection(self) -> DbusConnectionLifecycle: ...
     @property
     def health_role(self) -> HealthRole: ...
     @property

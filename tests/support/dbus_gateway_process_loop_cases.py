@@ -12,16 +12,54 @@ from tests.support.dbus_gateway_adapter_harness import (
     Path,
     evcs_registration,
     gateway_paths,
+    install_read_responder,
     install_mock,
     patch,
     process_loop_module,
     tempfile,
     time,
 )
+from venus_evcharger.dbus_adapter.async_broker import (
+    DbusAsyncOperation,
+    DbusErrorHandler,
+    DbusReplyHandler,
+)
+from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
 
 
 class GatewayProcessLoopCases(GatewayAdapterContractCase):
     """Exercise tick and main-loop lifecycle scenarios."""
+
+    def test_urgent_write_precedes_initial_external_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            self.assertEqual(
+                adapter.write_scheduler.publication_executor.process(
+                    evcs_registration()
+                ),
+                "applied",
+            )
+            self.assertEqual(adapter.cache.services, {})
+            urgent = install_mock(
+                adapter.write_scheduler,
+                "process_urgent_once",
+                MagicMock(return_value=True),
+            )
+            discovery = install_mock(
+                adapter.io_role,
+                "refresh_services_if_due_once",
+                MagicMock(return_value=True),
+            )
+
+            self.assertTrue(adapter.loop_role.process_one_dbus_operation_once())
+
+            urgent.assert_called_once_with()
+            discovery.assert_not_called()
 
     def test_initial_discovery_survives_pressure_and_unlocks_energy_sources(
         self,
@@ -40,9 +78,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
                 paths=gateway_paths(str(Path(temp_dir) / "run")),
             )
             self.assertEqual(
-                adapter.write_scheduler.publication_executor.process(
-                    evcs_registration()
-                ),
+                adapter.write_scheduler.publication_executor.process(evcs_registration()),
                 "applied",
             )
             adapter.health_role.suspend_advisory_work(
@@ -56,19 +92,29 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
                 "com.victronenergy.pvinverter.http_48",
                 "com.victronenergy.battery.socketcan_can0",
             ]
+            def complete_list_names(
+                request: DbusWireRequest,
+                reply_handler: object,
+                _error_handler: object,
+            ) -> object:
+                self.assertEqual((request.method_name, request.signature), ("ListNames", ""))
+                assert callable(reply_handler)
+                reply_handler(services)
+                return object()
+
             install_mock(
-                adapter.io_role,
-                "list_services",
-                MagicMock(return_value=services),
+                adapter.connection,
+                "send_async",
+                MagicMock(side_effect=complete_list_names),
             )
             self.assertTrue(adapter.loop_role.process_one_dbus_operation_once())
+
             self.assertEqual(set(adapter.cache.services), set(services))
             self.assertGreater(adapter.discovery.last_success_at, 0.0)
             self.assertEqual(len(adapter.energy_discovery.source_ids("battery")), 1)
 
-            install_mock(
-                adapter.read_executor,
-                "read_optional_busitem",
+            install_read_responder(
+                adapter,
                 MagicMock(side_effect=(1250.0, 0.0)),
             )
             pv_spec = adapter.read_scheduler.specs["pv_power_w"]
@@ -82,11 +128,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             )
             self.assertEqual(adapter.cache.values["pv_power_w"]["value"], 1250.0)
 
-            install_mock(
-                adapter.read_executor,
-                "read_busitem",
-                MagicMock(return_value=62.0),
-            )
+            install_read_responder(adapter, MagicMock(return_value=62.0))
             battery_spec = adapter.read_scheduler.specs["battery_soc"]
             self.assertEqual(
                 adapter.read_executor.poll_read_spec(
@@ -96,6 +138,96 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
                 "applied",
             )
             self.assertEqual(adapter.cache.values["battery_soc"]["value"], 62.0)
+
+    def test_initial_discovery_reports_idle_when_no_operation_can_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            urgent = install_mock(
+                adapter.write_scheduler,
+                "process_urgent_once",
+                MagicMock(return_value=False),
+            )
+            discovery = install_mock(
+                adapter.loop_role,
+                "refresh_initial_services_once",
+                MagicMock(return_value=False),
+            )
+
+            self.assertIsNone(adapter.loop_role._initial_discovery_outcome())
+
+            urgent.assert_called_once_with()
+            discovery.assert_called_once_with()
+
+    def test_busy_broker_still_drains_local_publications_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text("[DEFAULT]\n", encoding="utf-8")
+            adapter = DbusAdapter(
+                str(config_path),
+                paths=gateway_paths(str(Path(temp_dir) / "run")),
+            )
+            self.assertEqual(
+                adapter.write_scheduler.publication_executor.process(evcs_registration()),
+                "applied",
+            )
+            adapter.cache.update_services(["service"])
+
+            def hold_operation(
+                _reply: DbusReplyHandler,
+                _error: DbusErrorHandler,
+            ) -> object | None:
+                return None
+
+            adapter.operation_broker.submit(
+                DbusAsyncOperation(
+                    rate_kind="read",
+                    metric_kind="read",
+                    source="held/source",
+                    priority="read",
+                    timeout_seconds=1.0,
+                    starter=hold_operation,
+                    on_success=MagicMock(),
+                    on_error=MagicMock(),
+                )
+            )
+            install_mock(
+                adapter.introspection_role,
+                "enqueue_background_introspection_if_due",
+                MagicMock(),
+            )
+            local_burst = install_mock(
+                adapter.write_scheduler,
+                "process_local_publish_burst",
+                MagicMock(return_value=3),
+            )
+            urgent = install_mock(
+                adapter.write_scheduler,
+                "process_urgent_once",
+                MagicMock(return_value=True),
+            )
+            read = install_mock(
+                adapter.io_role,
+                "poll_one_due_read_once",
+                MagicMock(return_value=True),
+            )
+            discovery = install_mock(
+                adapter.io_role,
+                "refresh_services_if_due_once",
+                MagicMock(return_value=True),
+            )
+
+            self.assertTrue(adapter.loop_role.process_one_dbus_operation_once())
+            local_burst.assert_called_once_with()
+            urgent.assert_not_called()
+            read.assert_not_called()
+            discovery.assert_not_called()
+            self.assertTrue(adapter.operation_broker.busy)
+            self.assertTrue(adapter.operation_broker.cancel_current("test complete"))
 
     def test_tick_and_dbus_operation_edges(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -216,7 +348,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             now = time.time()
             for key in ("grid_power_w", "pv_power_w", "battery_soc"):
                 aggregate_adapter.cache.update_value(key, 1.0, source="test", now=now)
-            install_mock(aggregate_adapter.read_executor, "read_busitem", MagicMock(return_value=1.0))
+            install_read_responder(aggregate_adapter, MagicMock(return_value=1.0))
             self.assertEqual(
                 aggregate_adapter.read_executor.poll_read_spec(
                     "pv_power_w",
@@ -287,8 +419,14 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
 
             deferred_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-deferred")))
             deferred_adapter._next_work_tick_monotonic = 100.01
+            install_mock(
+                deferred_adapter.operation_broker,
+                "expire_due",
+                MagicMock(return_value=False),
+            )
             with patch.object(process_loop_module.time, "monotonic", return_value=100.0):
                 self.assertTrue(deferred_adapter.tick())
+            deferred_adapter.operation_broker.expire_due.assert_called_once_with(now=100.0)
 
             stop_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-stop")))
             stop_adapter._next_work_tick_monotonic = 0.0
@@ -309,70 +447,38 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             stop_adapter.loop_role.process_one_dbus_operation_once.assert_called_once()
             stop_adapter.io_role.publish_cache.assert_called_once_with(stop_control)
 
-    def test_run_initializes_gateway_loop_and_closes_transport(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.ini"
-            config_path.write_text("[DEFAULT]\nDbusGatewayMinTickSeconds=0.9995\n", encoding="utf-8")
-            paths = gateway_paths(str(Path(temp_dir) / "run"))
-            Path(paths.run_dir).mkdir(parents=True)
-            Path(paths.command_dir).mkdir(parents=True)
-            Path(paths.core_command_dir).mkdir(parents=True)
-            adapter = DbusAdapter(str(config_path), paths=paths)
-            fake_loop = MagicMock()
-            install_mock(adapter.runtime_role, "install_signal_handlers", MagicMock())
-            install_mock(adapter.socket_role, "start_socket", MagicMock())
-            install_mock(adapter.socket_role, "install_glib_watch", MagicMock())
-            install_mock(adapter.socket_role, "close_socket", MagicMock())
-
-            with (
-                patch.object(process_loop_module, "DBusGMainLoop") as dbus_mainloop,
-                patch.object(
-                    process_loop_module.GLib,
-                    "MainLoop",
-                    return_value=fake_loop,
-                ) as main_loop_factory,
-                patch.object(process_loop_module.GLib, "timeout_add", return_value=123) as timeout_add,
-            ):
-                adapter.run()
-
-            dbus_mainloop.assert_called_once_with(set_as_default=True)
-            adapter.runtime_role.install_signal_handlers.assert_called_once()
-            self.assertTrue(Path(paths.run_dir).is_dir())
-            self.assertTrue(Path(paths.command_dir).is_dir())
-            self.assertTrue(Path(paths.core_command_dir).is_dir())
-            adapter.socket_role.start_socket.assert_called_once()
-            adapter.socket_role.install_glib_watch.assert_called_once()
-            main_loop_factory.assert_called_once_with()
-            self.assertEqual(
-                timeout_add.call_args_list,
-                [
-                    call(
-                        max(50, int(adapter.min_tick_seconds * 1000)),
-                        adapter.loop_role.tick,
-                    ),
-                ],
-            )
-            fake_loop.run.assert_called_once_with()
-            self.assertIs(adapter._main_loop, fake_loop)
-            self.assertTrue(adapter._stop)
-            adapter.socket_role.close_socket.assert_called_once()
-
     def test_run_uses_minimum_timer_interval_for_fast_ticks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\nDbusGatewayMinTickSeconds=0.05\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-fast")))
-            install_mock(adapter.runtime_role, "install_signal_handlers", MagicMock())
+            lifecycle: list[str] = []
+            install_mock(
+                adapter.connection,
+                "connect",
+                MagicMock(side_effect=lambda: lifecycle.append("connect")),
+            )
+            install_mock(
+                adapter.runtime_role,
+                "install_signal_handlers",
+                MagicMock(side_effect=lambda: lifecycle.append("signals")),
+            )
             install_mock(adapter.socket_role, "start_socket", MagicMock())
             install_mock(adapter.socket_role, "install_glib_watch", MagicMock())
             install_mock(adapter.socket_role, "close_socket", MagicMock())
+            main_loop = MagicMock()
+            main_loop.run.side_effect = lambda: lifecycle.append("run")
 
             with (
-                patch.object(process_loop_module, "DBusGMainLoop"),
+                patch.object(
+                    process_loop_module,
+                    "DBusGMainLoop",
+                    side_effect=lambda **_kwargs: lifecycle.append("mainloop-binding"),
+                ),
                 patch.object(
                     process_loop_module.GLib,
                     "MainLoop",
-                    return_value=MagicMock(),
+                    return_value=main_loop,
                 ),
                 patch.object(process_loop_module.GLib, "timeout_add", return_value=123) as timeout_add,
             ):
@@ -381,6 +487,10 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             self.assertEqual(
                 timeout_add.call_args_list,
                 [call(50, adapter.loop_role.tick)],
+            )
+            self.assertEqual(
+                lifecycle,
+                ["mainloop-binding", "connect", "signals", "run"],
             )
 
     def test_tick_recovery_records_and_logs_gateway_errors(self) -> None:

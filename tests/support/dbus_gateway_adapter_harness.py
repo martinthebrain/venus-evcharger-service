@@ -24,6 +24,7 @@ from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 from tests.dbus_adapter_venus_stubs import FakeVeDbusService
+from tests.support.async_dbus import install_read_responder, run_non_write_command
 
 _fake_vedbus = ModuleType("vedbus")
 setattr(_fake_vedbus, "VeDbusService", FakeVeDbusService)
@@ -35,6 +36,7 @@ with patch.dict(
     {"vedbus": _fake_vedbus, "dbus.mainloop.glib": _fake_dbus_mainloop},
 ):
     import venus_evcharger.dbus_adapter.rate as rate_module
+    from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
     import venus_evcharger.dbus_adapter.health.backpressure as health_backpressure_module
     import venus_evcharger.dbus_adapter.health.freshness as health_freshness_module
     import venus_evcharger.dbus_adapter.health.history as health_history_module
@@ -53,8 +55,10 @@ with patch.dict(
     import venus_evcharger.dbus_adapter.read.executor as read_module
     import venus_evcharger.dbus_adapter.read.aggregate as read_aggregate_module
     import venus_evcharger.dbus_adapter.read.pv as read_pv_module
+    import venus_evcharger.dbus_adapter.read.spec as read_spec_module
     import venus_evcharger.dbus_adapter.read.targets as read_targets_module
     import venus_evcharger.dbus_adapter.write.core as write_core_module
+    import venus_evcharger.dbus_adapter.write.dispatch as write_dispatch_module
     import venus_evcharger.dbus_adapter.write.health as write_health_module
     import venus_evcharger.dbus_adapter.write.support as write_support_module
     import venus_evcharger.dbus_gateway_core as gateway_core_module
@@ -100,6 +104,51 @@ def install_mock(target: object, name: str, mock: MagicMock) -> MagicMock:
     """Install and return a mock when the interaction itself is under test."""
     setattr(target, name, mock)
     return mock
+
+
+def install_dbus_call_responder(
+    connection: object,
+    responder: Callable[[str, str, str, str, str, tuple[object, ...]], object],
+) -> MagicMock:
+    """Complete adapter-neutral DBus requests through their callbacks."""
+
+    def send_async(
+        request: DbusWireRequest,
+        reply_handler: Callable[..., None],
+        error_handler: Callable[[object], None],
+    ) -> object:
+        try:
+            value = responder(
+                request.service,
+                request.path,
+                request.interface,
+                request.method_name,
+                request.signature,
+                request.args,
+            )
+        except Exception as error:
+            error_handler(error)
+        else:
+            reply_handler(value)
+        return object()
+
+    return install_mock(
+        connection,
+        "send_async",
+        MagicMock(side_effect=send_async),
+    )
+
+
+def dbus_wire_call(request: DbusWireRequest) -> tuple[str, str, str, str, str, tuple[object, ...]]:
+    """Return the semantic wire fields asserted by gateway scenario tests."""
+    return (
+        request.service,
+        request.path,
+        request.interface,
+        request.method_name,
+        request.signature,
+        request.args,
+    )
 
 
 def evcs_identity() -> EvcsServiceIdentity:
@@ -235,58 +284,6 @@ class RecordingDbusService(dict[str, object]):
         super().__setitem__(path, value)
 
 
-class BusItemInterfaceStub:
-    """Typed substitute for ``com.victronenergy.BusItem``."""
-
-    def __init__(self, value: object = None) -> None:
-        self.value = value
-        self.get_calls: list[float] = []
-        self.set_calls: list[tuple[object, float]] = []
-
-    def GetValue(self, *, timeout: float) -> object:  # noqa: N802 - DBus API spelling
-        self.get_calls.append(timeout)
-        return self.value
-
-    def SetValue(self, value: object, *, timeout: float) -> None:  # noqa: N802 - DBus API spelling
-        self.set_calls.append((value, timeout))
-
-
-class ServiceListInterfaceStub:
-    """Typed substitute for the DBus daemon's service-list interface."""
-
-    def __init__(self, names: object) -> None:
-        self.names = names
-        self.call_count = 0
-
-    def ListNames(self) -> object:  # noqa: N802 - DBus API spelling
-        self.call_count += 1
-        return self.names
-
-
-class IntrospectionInterfaceStub:
-    """Typed substitute for ``org.freedesktop.DBus.Introspectable``."""
-
-    def __init__(self, xml: str) -> None:
-        self.xml = xml
-        self.calls: list[float] = []
-
-    def Introspect(self, *, timeout: float) -> str:  # noqa: N802 - DBus API spelling
-        self.calls.append(timeout)
-        return self.xml
-
-
-class DbusBusStub:
-    """Minimal private-bus double with explicit object lookup history."""
-
-    def __init__(self, dbus_object: object | None = None) -> None:
-        self.dbus_object = dbus_object if dbus_object is not None else object()
-        self.get_object_calls: list[tuple[str, str, bool]] = []
-
-    def get_object(self, service: str, path: str, *, introspect: bool) -> object:
-        self.get_object_calls.append((service, path, introspect))
-        return self.dbus_object
-
-
 class SocketClientStub:
     """Context-managed socket client with deterministic receive behavior."""
 
@@ -367,12 +364,10 @@ class GatewayAdapterContractCase(unittest.TestCase):
 
 __all__ = [
     "AtomicJsonWriter",
-    "BusItemInterfaceStub",
     "Callable",
     "CommandFileList",
     "CommandMapping",
     "DbusAdapter",
-    "DbusBusStub",
     "DbusCacheStore",
     "DbusCircuitBreaker",
     "DbusGatewayCommandInbox",
@@ -385,12 +380,10 @@ __all__ = [
     "FakeVeDbusService",
     "GatewayAdapterContractCase",
     "GatewayAdapterScenario",
-    "IntrospectionInterfaceStub",
     "MagicMock",
     "Path",
     "RecordingDbusService",
     "ResourceMonitor",
-    "ServiceListInterfaceStub",
     "SocketClientStub",
     "SocketServerStub",
     "TickHealth",
@@ -413,7 +406,9 @@ __all__ = [
     "health_history_module",
     "health_queue_module",
     "health_slo_module",
+    "install_dbus_call_responder",
     "install_mock",
+    "install_read_responder",
     "introspection_module",
     "introspection_snapshot_module",
     "json",
@@ -429,6 +424,7 @@ __all__ = [
     "read_aggregate_module",
     "read_json_file",
     "read_module",
+    "run_non_write_command",
     "read_pv_module",
     "read_spec_from_mapping",
     "read_targets_module",
@@ -437,6 +433,7 @@ __all__ = [
     "time",
     "unittest",
     "write_core_module",
+    "write_dispatch_module",
     "write_health_module",
     "write_support_module",
 ]

@@ -9,7 +9,6 @@ from tests.support.dbus_gateway_adapter_harness import (
     GatewayAdapterContractCase,
     configparser,
     process_config_module,
-    read_spec_from_mapping,
 )
 
 
@@ -82,64 +81,6 @@ class GatewayReadSchedulerConfigCases(GatewayAdapterContractCase):
         self.assertIsNotNone(due)
         assert due is not None
         self.assertEqual(due[0], "battery")
-
-    def test_read_spec_from_mapping_validates_known_fields(self) -> None:
-        spec = read_spec_from_mapping(
-            {
-                "aggregate": "pv-total",
-                "dc_path": "/Dc/Pv/Power",
-                "dc_service": "com.victronenergy.system",
-                "path": "/Ac/Power",
-                "prefix": "com.victronenergy.pvinverter",
-                "priority": "read",
-                "service": "svc",
-                "paths": ["/A", "/B"],
-                "interval": 2,
-                "stale_after_seconds": 6,
-                "use_dc_pv": True,
-                "optional_zero_on_error": False,
-                "optional_confidence": 0.2,
-            }
-        )
-        self.assertEqual(spec["aggregate"], "pv-total")
-        self.assertEqual(spec["dc_path"], "/Dc/Pv/Power")
-        self.assertEqual(spec["dc_service"], "com.victronenergy.system")
-        self.assertEqual(spec["path"], "/Ac/Power")
-        self.assertEqual(spec["prefix"], "com.victronenergy.pvinverter")
-        self.assertEqual(spec["priority"], "read")
-        self.assertEqual(spec["service"], "svc")
-        self.assertEqual(spec["paths"], ["/A", "/B"])
-        self.assertEqual(spec["interval"], 2.0)
-        self.assertEqual(spec["stale_after_seconds"], 6.0)
-        self.assertEqual(spec["optional_confidence"], 0.2)
-        self.assertFalse(spec["optional_zero_on_error"])
-        self.assertTrue(spec["use_dc_pv"])
-
-        with self.assertRaisesRegex(KeyError, "unknown read spec field"):
-            read_spec_from_mapping({"unexpected": "value"})
-        with self.assertRaisesRegex(TypeError, "service must be str"):
-            read_spec_from_mapping({"service": object()})
-        with self.assertRaisesRegex(TypeError, "interval must be float"):
-            read_spec_from_mapping({"interval": True})
-        with self.assertRaisesRegex(TypeError, "paths must be list\\[str\\]"):
-            read_spec_from_mapping({"paths": ["/ok", 1]})
-        with self.assertRaisesRegex(TypeError, "use_dc_pv must be bool"):
-            read_spec_from_mapping({"use_dc_pv": 1})
-        with self.assertRaisesRegex(TypeError, "optional_confidence must be float"):
-            read_spec_from_mapping({"optional_confidence": True})
-        for bad_field, bad_value, expected_type in (
-            ("service", object(), "object"),
-            ("interval", True, "bool"),
-            ("use_dc_pv", 1, "int"),
-            ("paths", ("/ok",), "tuple"),
-        ):
-            with self.subTest(field=bad_field):
-                with self.assertRaises(TypeError) as caught:
-                    read_spec_from_mapping({bad_field: bad_value})
-                self.assertIn(f"got {expected_type}", str(caught.exception))
-
-        true_spec = read_spec_from_mapping({"optional_zero_on_error": True})
-        self.assertTrue(true_spec["optional_zero_on_error"])
 
     def test_discovery_manager_tracks_success_and_error_backoff(self) -> None:
         discovery = DbusDiscoveryManager(

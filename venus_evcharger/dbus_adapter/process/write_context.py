@@ -9,14 +9,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
 
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
+from venus_evcharger.dbus_adapter.async_protocols import AsyncDbusConnection
+from venus_evcharger.dbus_adapter.contracts import (
+    CommandCompletion,
+    CommandExecution,
+)
 from venus_evcharger.dbus_adapter.process.protocols.roles import (
     IntrospectionRole,
     IoRole,
     PublicationRole,
 )
-from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusConnectionManager
-from venus_evcharger.dbus_adapter.scheduling import AtomicJsonWriter
+from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker
 from venus_evcharger.dbus_adapter.write.protocols import PublicationRegistry
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusGatewayCommandInbox
 from venus_evcharger.ipc.command_mailbox import CommandMailbox
@@ -36,10 +40,10 @@ class DbusAdapterWriteContext:
     command_lifecycle_path: str
     command_lifecycle_max_bytes: int
     config: configparser.ConfigParser
-    connection: DbusConnectionManager
+    connection: AsyncDbusConnection
+    operation_broker: DbusAsyncOperationBroker
     core_command_mailbox: CommandMailbox
     fast_publications: FastPublicationQueue
-    json_writer: AtomicJsonWriter
     publication_registry: PublicationRegistry
     service_name: str
     publication_role: PublicationRole
@@ -50,11 +54,17 @@ class DbusAdapterWriteContext:
     def evcs_service_registered(self) -> bool:
         return self.publication_role.evcs_service_registered
 
-    def process_non_write_command(self, command: CommandMapping) -> CommandOutcome:
-        return self.introspection_role.process_non_write_command(command)
-
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T:
-        return self.io_role.timed_dbus_operation(kind, operation)
+    def schedule_non_write_command(
+        self,
+        command: CommandMapping,
+        command_file: str,
+        completion: CommandCompletion,
+    ) -> CommandExecution:
+        return self.introspection_role.schedule_non_write_command(
+            command,
+            command_file,
+            completion,
+        )
 
     def timed_local_publish(self, operation: Callable[[], _T]) -> _T:
         return self.io_role.timed_local_publish(operation)

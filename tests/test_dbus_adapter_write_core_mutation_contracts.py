@@ -13,6 +13,8 @@ from tests.support.dbus_gateway_adapter_harness import (
     install_mock,
     patch,
     write_core_module,
+    write_dispatch_module,
+    write_support_module,
 )
 from venus_evcharger.ipc.command_types import CommandMapping
 from venus_evcharger.ipc.fast_publication_work import FastPublicationWork
@@ -36,16 +38,21 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
         publication = MagicMock()
         semantic = MagicMock()
         health = MagicMock()
-        queue = write_core_module.WriteCommandQueue(
+        dispatcher = write_dispatch_module.WriteCommandDispatcher(
             adapter,
             publication=publication,
             semantic=semantic,
+        )
+        queue = write_core_module.WriteCommandQueue(
+            adapter,
+            dispatcher=dispatcher,
             health=health,
         )
 
         self.assertIs(queue.adapter, adapter)
-        self.assertIs(queue.publication, publication)
-        self.assertIs(queue.semantic, semantic)
+        self.assertIs(queue.dispatcher, dispatcher)
+        self.assertIs(dispatcher.publication, publication)
+        self.assertIs(dispatcher.semantic, semantic)
         self.assertIs(queue.health, health)
         self.assertIsNone(queue.last_scheduled_outcome)
 
@@ -88,7 +95,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             fast = install_mock(
                 queue,
                 "_process_fast_publish_burst",
-                MagicMock(return_value=write_core_module._FastPublishBurst(0, False)),
+                MagicMock(return_value=write_support_module.FastPublishBurst(0, False)),
             )
             durable = install_mock(queue, "_process_durable_publish_burst", MagicMock(return_value=6))
 
@@ -115,7 +122,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             install_mock(
                 queue,
                 "_process_fast_publish_burst",
-                MagicMock(return_value=write_core_module._FastPublishBurst(2, True)),
+                MagicMock(return_value=write_support_module.FastPublishBurst(2, True)),
             )
             durable = install_mock(queue, "_process_durable_publish_burst", MagicMock())
 
@@ -131,7 +138,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
                 ("stop.json", evcs_publication({"mode": 2})),
                 ("unseen.json", evcs_publication({"connected": 1})),
             ]
-            candidate = write_core_module._LocalPublishCandidate(2, 7, commands, 19.0)
+            candidate = write_support_module.LocalPublishCandidate(2, 7, commands, 19.0)
             process = install_mock(
                 queue,
                 "_process_local_publish_candidate",
@@ -199,14 +206,14 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
 
             self.assertEqual(
                 queue._process_fast_publish_burst(0, 10.0),
-                write_core_module._FastPublishBurst(0, True),
+                write_support_module.FastPublishBurst(0, True),
             )
             pop.assert_not_called()
 
             pop.return_value = None
             self.assertEqual(
                 queue._process_fast_publish_burst(2, 11.0),
-                write_core_module._FastPublishBurst(0, False),
+                write_support_module.FastPublishBurst(0, False),
             )
             pop.assert_called_once_with(now=11.0)
 
@@ -215,7 +222,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             process.return_value = True
             self.assertEqual(
                 queue._process_fast_publish_burst(2, 12.0),
-                write_core_module._FastPublishBurst(1, False),
+                write_support_module.FastPublishBurst(1, False),
             )
             self.assertEqual(pop.call_args_list, [call(now=12.0), call(now=12.0)])
             process.assert_called_once_with(work, 12.0)
@@ -226,7 +233,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             process.return_value = False
             self.assertEqual(
                 queue._process_fast_publish_burst(2, 13.0),
-                write_core_module._FastPublishBurst(0, True),
+                write_support_module.FastPublishBurst(0, True),
             )
             pop.assert_called_once_with(now=13.0)
             process.assert_called_once_with(work, 13.0)
@@ -238,7 +245,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             work = _fast_work(command)
             install_mock(queue, "_fast_publish_blocked", MagicMock(return_value=True))
             requeue = install_mock(scenario.adapter.fast_publications, "requeue", MagicMock())
-            outcome = install_mock(queue, "command_outcome", MagicMock())
+            outcome = install_mock(queue.dispatcher, "outcome", MagicMock())
             record = install_mock(scenario.adapter.fast_publications, "record_outcome", MagicMock())
 
             self.assertFalse(queue._process_fast_publish_candidate(work, 14.0))
@@ -252,7 +259,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             command = evcs_publication({"mode": 1})
             work = _fast_work(command)
             install_mock(queue, "_fast_publish_blocked", MagicMock(return_value=False))
-            outcome = install_mock(queue, "command_outcome", MagicMock(return_value="deferred"))
+            outcome = install_mock(queue.dispatcher, "outcome", MagicMock(return_value="deferred"))
             record = install_mock(
                 scenario.adapter.fast_publications,
                 "record_outcome",
@@ -277,7 +284,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             command = evcs_publication({"mode": 1})
             work = _fast_work(command)
             install_mock(queue, "_fast_publish_blocked", MagicMock(return_value=False))
-            install_mock(queue, "command_outcome", MagicMock(return_value="applied"))
+            install_mock(queue.dispatcher, "outcome", MagicMock(return_value="applied"))
             install_mock(
                 scenario.adapter.fast_publications,
                 "record_outcome",
@@ -324,7 +331,7 @@ class DbusAdapterWriteCoreMutationContracts(GatewayAdapterContractCase):
             local = evcs_publication({"mode": 1})
             remote = gx_relay_refresh_command(0)
             pending: CommandFileList = [("publish.json", local)]
-            candidate = write_core_module._LocalPublishCandidate(0, 3, pending, 20.0)
+            candidate = write_support_module.LocalPublishCandidate(0, 3, pending, 20.0)
             install_mock(queue, "_local_publish_burst_done", MagicMock(return_value=False))
             available = install_mock(queue.health, "budget_available", MagicMock(return_value=True))
             process = install_mock(queue, "process_loaded_command", MagicMock())

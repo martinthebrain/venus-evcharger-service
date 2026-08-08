@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 _ARCHITECTURE_TESTS = ("tests/test_architecture_contracts_script.py",)
+_DBUS_ISOLATION_TESTS = ("tests/test_gateway_isolation_operational_tools.py",)
 _CACHE_SCRIPT_TESTS = ("tests/test_gateway_cache_read_script.py",)
 _CACHE_TESTS = (
     "tests/test_dbus_gateway_primitives.py",
@@ -11,6 +12,11 @@ _CACHE_TESTS = (
     "tests/test_energy_binary_ipc_contracts.py",
 )
 _GATEWAY_SCHEDULER_TESTS = ("tests/test_dbus_gateway_adapter_scheduler.py",)
+_ASYNC_GATEWAY_TESTS = (
+    "tests/test_dbus_async_operation_broker.py",
+    "tests/test_dbus_async_operation_adapters.py",
+    "tests/test_dbus_async_gateway_edge_contracts.py",
+)
 _PROCESS_CONTRACT_TESTS = (
     "tests/test_dbus_adapter_process_contracts.py",
     "tests/test_dbus_adapter_process_ipc_contracts.py",
@@ -37,6 +43,7 @@ _WRITE_PUBLISH_TESTS = (
 )
 _WRITE_SEMANTIC_TESTS = (
     "tests/test_dbus_adapter_write_semantic_mutation_contracts.py",
+    "tests/test_dbus_adapter_write_semantic_async_contracts.py",
     "tests/test_gateway_semantic_operations.py",
 )
 _EXTERNAL_ENERGY_TESTS = (
@@ -91,12 +98,19 @@ _PUBLICATION_SNAPSHOT_TESTS = (
 FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("scripts/dev/architecture_suppression_contracts.py", _ARCHITECTURE_TESTS),
     ("scripts/dev/check_architecture_contracts.py", _ARCHITECTURE_TESTS),
+    ("scripts/dev/check_dbus_isolation.py", _DBUS_ISOLATION_TESTS),
+    ("scripts/dev/pi_gateway_release_gate_deploy.py", _DBUS_ISOLATION_TESTS),
     ("scripts/ops/gateway_cache_read.py", _CACHE_SCRIPT_TESTS),
+    ("venus_evcharger/dbus_adapter/async_broker.py", _ASYNC_GATEWAY_TESTS),
+    ("venus_evcharger/dbus_adapter/async_request.py", _ASYNC_GATEWAY_TESTS),
     (
         "venus_evcharger/dbus_adapter/health/state.py",
         ("tests/test_dbus_adapter_health_state_contracts.py",),
     ),
-    ("venus_evcharger/dbus_adapter/process/adapter.py", (*_PROCESS_CONTRACT_TESTS, "tests/test_fast_publication_ipc.py")),
+    (
+        "venus_evcharger/dbus_adapter/process/adapter.py",
+        (*_PROCESS_CONTRACT_TESTS, "tests/test_fast_publication_ipc.py"),
+    ),
     (
         "venus_evcharger/dbus_adapter/process/config.py",
         (
@@ -118,6 +132,7 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         "venus_evcharger/dbus_adapter/process/health.py",
         (
             "tests/test_dbus_gateway_adapter_scheduler.py",
+            "tests/test_dbus_adapter_process_health_async_contracts.py",
             "tests/test_dbus_adapter_resource_contracts.py",
             "tests/test_gateway_diagnostics_adapter_contracts.py",
             "tests/test_publication_mailbox_contracts.py",
@@ -125,7 +140,12 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "venus_evcharger/dbus_adapter/process/introspection.py",
-        ("tests/test_dbus_gateway_adapter_scheduler.py", "tests/test_dbus_adapter_introspection_snapshot_contracts.py"),
+        (
+            "tests/test_dbus_gateway_adapter_scheduler.py",
+            "tests/test_dbus_adapter_introspection_snapshot_contracts.py",
+            "tests/test_dbus_adapter_process_introspection_async_contracts.py",
+            "tests/test_dbus_async_gateway_edge_contracts.py",
+        ),
     ),
     (
         "venus_evcharger/dbus_adapter/process/introspection_snapshot.py",
@@ -133,7 +153,14 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "venus_evcharger/dbus_adapter/process/io.py",
-        ("tests/test_dbus_gateway_adapter_scheduler.py", "tests/test_energy_binary_ipc_contracts.py"),
+        (
+            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_poll_and_discovery_contracts",
+            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_poll_and_discovery_edges",
+            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_cache_publish_interval_contracts",
+            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_signal_handlers_andlist_services_edges",
+            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_local_publish_timing_contracts_record_latency_and_errors",
+            "tests/test_dbus_adapter_process_io_async_contracts.py",
+        ),
     ),
     (
         "venus_evcharger/dbus_adapter/process/loop.py",
@@ -170,6 +197,10 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "venus_evcharger/dbus_adapter/read/transport.py",
+        _ASYNC_GATEWAY_TESTS,
+    ),
+    (
         "venus_evcharger/dbus_adapter/read/pv_dormancy.py",
         (
             "tests/test_dbus_adapter_pv_dormancy_contracts.py",
@@ -188,6 +219,7 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         "venus_evcharger/dbus_adapter/write/core.py",
         (
             *_GATEWAY_SCHEDULER_TESTS,
+            "tests/test_dbus_async_gateway_edge_contracts.py",
             "tests/test_dbus_adapter_write_core_mutation_contracts.py",
             "tests/test_dbus_adapter_write_core_lifecycle_mutation_contracts.py",
             "tests/test_fast_publication_ipc.py",
@@ -196,11 +228,24 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "venus_evcharger/dbus_adapter/write/dispatch.py",
+        (
+            "tests/test_dbus_adapter_write_core_lifecycle_mutation_contracts.py",
+            "tests/test_dbus_gateway_adapter_scheduler.py",
+            "tests/test_dbus_async_gateway_edge_contracts.py",
+        ),
+    ),
+    (
         "venus_evcharger/dbus_adapter/write/generic_shelly.py",
         (
             "tests/test_generic_shelly_gateway_configuration.py",
+            "tests/test_dbus_adapter_write_generic_shelly_async_contracts.py",
             "tests/test_dbus_adapter_write_semantic_mutation_contracts.py",
         ),
+    ),
+    (
+        "venus_evcharger/dbus_adapter/write/busitem_calls.py",
+        _WRITE_SEMANTIC_TESTS,
     ),
     (
         "venus_evcharger/dbus_adapter/write/health.py",
@@ -217,6 +262,10 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     ("venus_evcharger/dbus_adapter/write/semantic.py", _WRITE_SEMANTIC_TESTS),
+    (
+        "venus_evcharger/dbus_adapter/write/relay_topology.py",
+        _WRITE_SEMANTIC_TESTS,
+    ),
     (
         "venus_evcharger/dbus_adapter/write/support.py",
         (

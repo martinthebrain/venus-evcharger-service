@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pi_gateway_release_gate_common import GateFailure, PiSession
-from pi_gateway_release_gate_remote import deploy_repo
+from pi_gateway_release_gate_deploy import deploy_repo
 
 
 @dataclass(frozen=True)

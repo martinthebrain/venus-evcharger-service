@@ -36,6 +36,7 @@ fi
 	scripts/dev/pi_gateway_release_gate.py \
 	scripts/dev/pi_gateway_release_gate_assertions.py \
 	scripts/dev/pi_gateway_release_gate_common.py \
+	scripts/dev/pi_gateway_release_gate_deploy.py \
 	scripts/dev/pi_gateway_release_gate_health.py \
 	scripts/dev/pi_gateway_release_gate_remote.py \
 	scripts/dev/pi_gateway_release_gate_shelly.py \

@@ -212,6 +212,7 @@ class DbusAdapterHealth:
             "queues": queue_metrics,
             "queue_classes": queue_class_health(effective_pending, current_time),
             "write_scheduler": write_scheduler_health,
+            "async_dbus": context.operation_broker.health(now=current_monotonic),
             "cache_freshness": freshness,
             "slo": slo,
             "backpressure": backpressure,
@@ -427,6 +428,8 @@ class DbusAdapterHealth:
             captured_at,
         )
         for path, command in context.write_scheduler.pending_snapshot().physical:
+            if context.operation_broker.owns_path(path):
+                continue
             if command_queue_class_name(command) not in ADVISORY_QUEUE_CLASSES:
                 continue
             context.write_scheduler.remove_pending(path, command)

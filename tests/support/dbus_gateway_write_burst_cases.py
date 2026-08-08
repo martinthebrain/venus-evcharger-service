@@ -106,17 +106,19 @@ class GatewayWriteBurstCases(GatewayAdapterContractCase):
             self.assertEqual(adapter.write_scheduler.process_local_publish_burst(), 0)
             self.assertEqual(process_loaded.call_count, 1)
 
-    def test_adapter_local_publish_timer_updates_circuit_health(self) -> None:
+    def test_io_role_local_publish_timer_updates_circuit_health(self) -> None:
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter
-            self.assertEqual(adapter.timed_local_publish(lambda: "ok"), "ok")
+            self.assertEqual(adapter.io_role.timed_local_publish(lambda: "ok"), "ok")
             successes = adapter.circuit.health()["successes_60s"]
             self.assertIsInstance(successes, int)
             assert isinstance(successes, int)
             self.assertGreater(successes, 0)
 
             with self.assertRaises(RuntimeError):
-                adapter.timed_local_publish(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+                adapter.io_role.timed_local_publish(
+                    lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+                )
             errors = adapter.circuit.health()["errors_60s"]
             self.assertIsInstance(errors, int)
             assert isinstance(errors, int)

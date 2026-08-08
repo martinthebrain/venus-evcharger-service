@@ -6,12 +6,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, TypeGuard, TypeVar
-
-import dbus
+from typing import Literal, TypeGuard
 
 from venus_evcharger.core.shared import coerce_dbus_numeric
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.async_broker import DbusMethodCall, dbus_call_operation
+from venus_evcharger.dbus_adapter.contracts import (
+    CommandCompletion,
+    CommandExecution,
+    CommandOutcome,
+)
 from venus_evcharger.dbus_adapter.introspection_xml import parse_bounded_introspection_xml
 from venus_evcharger.dbus_adapter.write.protocols import SemanticWriteAdapter
 from venus_evcharger.ipc.command_types import CommandMapping
@@ -28,7 +31,6 @@ _DBUS_TIMEOUT_SECONDS = 1.0
 _PROGRESS_FIELDS = frozenset(("phase", "devices", "cursor", "matched_device"))
 
 GenericShellyPhase = Literal["discover", "identify", "enabled", "disable"]
-_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,141 +41,258 @@ class _Progress:
     matched_device: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ExecutionContext:
+    command: CommandMapping
+    command_file: str
+    service: str
+    operation: DisableMatchingGenericShellyOnceOperation
+    progress: _Progress
+    completion: CommandCompletion
+
+
 class GenericShellyConfigurationExecutor:
     """Advance one persistent configuration request by one DBus operation."""
 
     def __init__(self, adapter: SemanticWriteAdapter) -> None:
         self._adapter = adapter
 
-    def process(self, command: CommandMapping, command_file: str) -> CommandOutcome:
+    def schedule(
+        self,
+        command: CommandMapping,
+        command_file: str,
+        completion: CommandCompletion,
+    ) -> CommandExecution:
         operation = _operation(command)
         progress = _progress(command)
         if operation is None or progress is None or not command_file:
-            return "dropped"
+            return CommandExecution.immediate("dropped")
         service = self._service()
         if not service:
             logging.warning("Dropping generic Shelly configuration because its adapter service is disabled")
-            return "dropped"
-        handlers: dict[GenericShellyPhase, Callable[[], CommandOutcome]] = {
-            "discover": lambda: self._discover(command, command_file, service),
-            "identify": lambda: self._identify(command, command_file, service, operation, progress),
-            "enabled": lambda: self._read_enabled(command, command_file, service, operation, progress),
-            "disable": lambda: self._disable(service, operation, progress),
+            return CommandExecution.immediate("dropped")
+        context = _ExecutionContext(
+            command=command,
+            command_file=command_file,
+            service=service,
+            operation=operation,
+            progress=progress,
+            completion=completion,
+        )
+        handlers: dict[GenericShellyPhase, Callable[[], CommandExecution]] = {
+            "discover": lambda: self._discover(context),
+            "identify": lambda: self._identify(context),
+            "enabled": lambda: self._read_enabled(context),
+            "disable": lambda: self._disable(context),
         }
         return handlers[progress.phase]()
 
-    def _discover(self, command: CommandMapping, command_file: str, service: str) -> CommandOutcome:
-        devices = self._introspect_devices(service)
+    def _discover(
+        self,
+        context: _ExecutionContext,
+    ) -> CommandExecution:
+        return self._schedule_method(
+            DbusMethodCall(
+                service=context.service,
+                path=_DEVICES_PATH,
+                interface="org.freedesktop.DBus.Introspectable",
+                method_name="Introspect",
+                signature="",
+                rate_kind="introspection",
+                metric_kind="introspection",
+                source=f"{context.service}{_DEVICES_PATH}",
+                priority=self._priority(context),
+                timeout_seconds=_DBUS_TIMEOUT_SECONDS,
+                owner_path=context.command_file,
+            ),
+            on_success=lambda xml_data: context.completion(self._discover_outcome(context, xml_data)),
+            on_error=lambda _error: context.completion("deferred"),
+        )
+
+    def _discover_outcome(
+        self,
+        context: _ExecutionContext,
+        xml_data: object,
+    ) -> CommandOutcome:
+        devices = self._devices_from_xml(xml_data)
         if not devices:
             logging.info("No generic Shelly devices are currently registered")
             return "applied"
-        return self._rewrite(command_file, command, phase="identify", devices=list(devices), cursor=0)
+        return self._rewrite(
+            context.command_file,
+            context.command,
+            phase="identify",
+            devices=list(devices),
+            cursor=0,
+        )
 
     def _identify(
         self,
-        command: CommandMapping,
-        command_file: str,
-        service: str,
-        operation: DisableMatchingGenericShellyOnceOperation,
-        progress: _Progress,
-    ) -> CommandOutcome:
+        context: _ExecutionContext,
+    ) -> CommandExecution:
+        progress = context.progress
         if progress.cursor >= len(progress.devices):
             logging.info("No generic Shelly device matched the configured identity")
-            return "applied"
+            return CommandExecution.immediate("applied")
         device = progress.devices[progress.cursor]
-        if self._device_matches(service, device, operation):
-            return self._rewrite(command_file, command, phase="enabled", matched_device=device)
-        return self._rewrite(command_file, command, cursor=progress.cursor + 1)
-
-    def _device_matches(
-        self,
-        service: str,
-        device: str,
-        operation: DisableMatchingGenericShellyOnceOperation,
-    ) -> bool:
-        selector = operation.request.selector
+        selector = context.operation.request.selector
         if selector.kind == "mac" and _serial_matches_mac(device, selector.value):
-            return True
+            return CommandExecution.immediate(
+                self._rewrite(
+                    context.command_file,
+                    context.command,
+                    phase="enabled",
+                    matched_device=device,
+                )
+            )
         identity_path = f"{_DEVICES_PATH}/{device}/{_identity_field(selector.kind)}"
-        return _identity_matches(selector.kind, self._read_value(service, identity_path), selector.value)
+        return self._schedule_method(
+            DbusMethodCall(
+                service=context.service,
+                path=identity_path,
+                interface="com.victronenergy.BusItem",
+                method_name="GetValue",
+                signature="",
+                rate_kind="read",
+                metric_kind="read",
+                source=f"{context.service}{identity_path}",
+                priority=self._priority(context),
+                timeout_seconds=_DBUS_TIMEOUT_SECONDS,
+                owner_path=context.command_file,
+            ),
+            on_success=lambda value: context.completion(self._identity_outcome(context, device, value)),
+            on_error=lambda _error: context.completion("deferred"),
+        )
+
+    def _identity_outcome(
+        self,
+        context: _ExecutionContext,
+        device: str,
+        value: object,
+    ) -> CommandOutcome:
+        selector = context.operation.request.selector
+        if _identity_matches(selector.kind, value, selector.value):
+            return self._rewrite(
+                context.command_file,
+                context.command,
+                phase="enabled",
+                matched_device=device,
+            )
+        return self._rewrite(
+            context.command_file,
+            context.command,
+            cursor=context.progress.cursor + 1,
+        )
 
     def _read_enabled(
         self,
-        command: CommandMapping,
-        command_file: str,
-        service: str,
-        operation: DisableMatchingGenericShellyOnceOperation,
-        progress: _Progress,
+        context: _ExecutionContext,
+    ) -> CommandExecution:
+        if not context.progress.matched_device:
+            return CommandExecution.immediate("dropped")
+        path = self._enabled_path(context.operation, context.progress)
+        return self._schedule_method(
+            DbusMethodCall(
+                service=context.service,
+                path=path,
+                interface="com.victronenergy.BusItem",
+                method_name="GetValue",
+                signature="",
+                rate_kind="read",
+                metric_kind="read",
+                source=f"{context.service}{path}",
+                priority=self._priority(context),
+                timeout_seconds=_DBUS_TIMEOUT_SECONDS,
+                owner_path=context.command_file,
+            ),
+            on_success=lambda value: context.completion(self._enabled_outcome(context, value)),
+            on_error=lambda _error: context.completion("deferred"),
+        )
+
+    def _enabled_outcome(
+        self,
+        context: _ExecutionContext,
+        value: object,
     ) -> CommandOutcome:
-        if not progress.matched_device:
-            return "dropped"
-        enabled = coerce_dbus_numeric(self._read_value(service, self._enabled_path(operation, progress)))
+        enabled = coerce_dbus_numeric(value)
         if enabled == 0:
             logging.info("Matched generic Shelly channel is already disabled")
             return "applied"
-        if enabled not in (0, 1):
+        if enabled != 1:
             logging.warning("Dropping generic Shelly configuration because Enabled is not binary")
             return "dropped"
-        return self._rewrite(command_file, command, phase="disable")
+        return self._rewrite(context.command_file, context.command, phase="disable")
 
     def _disable(
         self,
-        service: str,
-        operation: DisableMatchingGenericShellyOnceOperation,
-        progress: _Progress,
-    ) -> CommandOutcome:
-        if not progress.matched_device:
-            return "dropped"
-        path = self._enabled_path(operation, progress)
-        self._write_value(service, path, 0)
+        context: _ExecutionContext,
+    ) -> CommandExecution:
+        if not context.progress.matched_device:
+            return CommandExecution.immediate("dropped")
+        path = self._enabled_path(context.operation, context.progress)
+        return self._schedule_method(
+            DbusMethodCall(
+                service=context.service,
+                path=path,
+                interface="com.victronenergy.BusItem",
+                method_name="SetValue",
+                signature="v",
+                rate_kind="write",
+                metric_kind="write",
+                source=f"{context.service}{path}",
+                priority=self._priority(context),
+                timeout_seconds=_DBUS_TIMEOUT_SECONDS,
+                args=(0,),
+                owner_path=context.command_file,
+            ),
+            on_success=lambda _value: context.completion(self._disabled_outcome()),
+            on_error=lambda _error: context.completion("deferred"),
+        )
+
+    @staticmethod
+    def _disabled_outcome() -> CommandOutcome:
         logging.info("Disabled matched generic Shelly channel through the gateway")
         return "applied"
 
-    def _introspect_devices(self, service: str) -> tuple[str, ...]:
-        xml_data = self._timed(
-            "introspection",
-            lambda: self._introspect_now(service, _DEVICES_PATH),
-        )
+    @staticmethod
+    def _devices_from_xml(xml_data: object) -> tuple[str, ...]:
         root = parse_bounded_introspection_xml(xml_data)
         if root is None:
             logging.warning("Generic Shelly discovery returned rejected introspection XML")
             return ()
-        return tuple(
-            name
-            for node in root.findall("node")
-            if (name := str(node.attrib.get("name") or "").strip())
+        return tuple(name for node in root.findall("node") if (name := str(node.attrib.get("name") or "").strip()))
+
+    def _schedule_method(
+        self,
+        call: DbusMethodCall,
+        *,
+        on_success: Callable[[object], None],
+        on_error: Callable[[BaseException], None],
+    ) -> CommandExecution:
+        self._adapter.operation_broker.submit(
+            dbus_call_operation(
+                self._adapter.connection,
+                call,
+                on_success=on_success,
+                on_error=on_error,
+            )
         )
+        return CommandExecution.pending()
 
-    def _introspect_now(self, service: str, path: str) -> object:
-        obj = self._adapter.connection.get_object(service, path, introspect=False)
-        interface = dbus.Interface(obj, "org.freedesktop.DBus.Introspectable")
-        return interface.Introspect(timeout=_DBUS_TIMEOUT_SECONDS)
-
-    def _read_value(self, service: str, path: str) -> object:
-        return self._timed("read", lambda: self._read_value_now(service, path))
-
-    def _read_value_now(self, service: str, path: str) -> object:
-        obj = self._adapter.connection.get_object(service, path, introspect=False)
-        interface = dbus.Interface(obj, "com.victronenergy.BusItem")
-        return interface.GetValue(timeout=_DBUS_TIMEOUT_SECONDS)
-
-    def _write_value(self, service: str, path: str, value: object) -> None:
-        self._timed("write", lambda: self._write_value_now(service, path, value))
-
-    def _write_value_now(self, service: str, path: str, value: object) -> None:
-        obj = self._adapter.connection.get_object(service, path, introspect=False)
-        interface = dbus.Interface(obj, "com.victronenergy.BusItem")
-        interface.SetValue(value, timeout=_DBUS_TIMEOUT_SECONDS)
-
-    def _timed(self, kind: str, operation: Callable[[], _T]) -> _T:
-        return self._adapter.timed_dbus_operation(kind, operation)
+    @staticmethod
+    def _priority(context: _ExecutionContext) -> str:
+        return str(context.command["priority"])
 
     def _service(self) -> str:
         return str(self._adapter.config["DEFAULT"].get(_SERVICE_CONFIG_KEY, _DEFAULT_SERVICE)).strip()
 
     def _rewrite(self, command_file: str, command: CommandMapping, **changes: object) -> CommandOutcome:
-        self._adapter.json_writer.write(command_file, {**dict(command), **changes})
-        return "deferred"
+        replaced = self._adapter.commands.replace_if_current(
+            command_file,
+            command,
+            {**dict(command), **changes},
+        )
+        return "deferred" if replaced else "dropped"
 
     @staticmethod
     def _enabled_path(
@@ -204,7 +323,7 @@ def _progress(command: CommandMapping) -> _Progress | None:
 
 
 def _normalized_devices(value: object) -> tuple[str, ...] | None:
-    return tuple(value) if _is_device_sequence(value) else None
+    return tuple(item.strip() for item in value) if _is_device_sequence(value) else None
 
 
 def _valid_cursor(value: object) -> TypeGuard[int]:
@@ -217,9 +336,9 @@ def _identity_field(kind: str) -> str:
 
 def _identity_matches(kind: str, candidate: object, expected: str) -> bool:
     if kind == "ip":
-        return str(candidate or "").strip() == expected
+        return str(candidate).strip() == expected
     try:
-        return normalize_mac_address(str(candidate or "")) == expected
+        return normalize_mac_address(str(candidate)) == expected
     except ValueError:
         return False
 

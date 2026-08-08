@@ -7,10 +7,15 @@ import configparser
 from collections.abc import Callable
 from typing import Protocol, TypeVar
 
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
+from venus_evcharger.dbus_adapter.async_protocols import AsyncDbusConnection
+from venus_evcharger.dbus_adapter.contracts import (
+    CommandCompletion,
+    CommandExecution,
+    CommandOutcome,
+)
 from venus_evcharger.dbus_adapter.health.slo import GatewayPressureState
-from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusConnectionManager
-from venus_evcharger.dbus_adapter.scheduling import AtomicJsonWriter
+from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker
 from venus_evcharger.dbus_gateway import DbusCacheStore, DbusGatewayCommandInbox
 from venus_evcharger.ipc.command_mailbox import CommandMailbox
 from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping, CommandPayload
@@ -50,21 +55,25 @@ class DbusWriteSchedulerAdapter(Protocol):  # pragma: no cover
     @property
     def config(self) -> configparser.ConfigParser: ...
     @property
-    def connection(self) -> DbusConnectionManager: ...
+    def connection(self) -> AsyncDbusConnection: ...
+    @property
+    def operation_broker(self) -> DbusAsyncOperationBroker: ...
     @property
     def core_command_mailbox(self) -> CommandMailbox: ...
     @property
     def fast_publications(self) -> FastPublicationQueue: ...
-    @property
-    def json_writer(self) -> AtomicJsonWriter: ...
     @property
     def publication_registry(self) -> PublicationRegistry: ...
     @property
     def service_name(self) -> str: ...
     @property
     def evcs_service_registered(self) -> bool: ...
-    def process_non_write_command(self, command: CommandMapping) -> CommandOutcome: ...
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T: ...
+    def schedule_non_write_command(
+        self,
+        command: CommandMapping,
+        command_file: str,
+        completion: CommandCompletion,
+    ) -> CommandExecution: ...
     def timed_local_publish(self, operation: Callable[[], _T]) -> _T: ...
 
 
@@ -76,10 +85,11 @@ class SemanticWriteAdapter(Protocol):  # pragma: no cover
     @property
     def config(self) -> configparser.ConfigParser: ...
     @property
-    def connection(self) -> DbusConnectionManager: ...
+    def commands(self) -> DbusGatewayCommandInbox: ...
     @property
-    def json_writer(self) -> AtomicJsonWriter: ...
-    def timed_dbus_operation(self, kind: str, operation: Callable[[], _T]) -> _T: ...
+    def connection(self) -> AsyncDbusConnection: ...
+    @property
+    def operation_broker(self) -> DbusAsyncOperationBroker: ...
 
 
 class PublicationExecutor(Protocol):  # pragma: no cover
@@ -91,12 +101,13 @@ class PublicationExecutor(Protocol):  # pragma: no cover
 class SemanticOperationExecutor(Protocol):  # pragma: no cover
     """Execute one typed adapter-owned system operation."""
 
-    def process_semantic_operation(
+    def schedule_semantic_operation(
         self,
         command: CommandMapping,
         *,
         command_file: str,
-    ) -> CommandOutcome: ...
+        completion: CommandCompletion,
+    ) -> CommandExecution: ...
 
 
 class WriteSchedulerHealth(Protocol):  # pragma: no cover

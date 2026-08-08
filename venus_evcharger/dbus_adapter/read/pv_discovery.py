@@ -15,7 +15,7 @@ from venus_evcharger.dbus_adapter.read.pv_dormancy import (
     PvDormancyPolicy,
     PvDormancyTracker,
 )
-from venus_evcharger.dbus_adapter.read.spec import ReadSpec
+from venus_evcharger.dbus_adapter.read.spec import ReadSpec, read_spec_text
 from venus_evcharger.ipc.energy import EnergySourceDescriptor, EnergySourceState
 
 PvSourceKind = Literal["pv_ac", "pv_dc"]
@@ -68,14 +68,8 @@ class PvSourceRegistry:
         advertising_services: frozenset[str],
     ) -> list[tuple[str, str]]:
         candidates = self._candidate_targets(ac_services, advertising_services)
-        self._maintain_source_ids(
-            frozenset(target.source_id for target in candidates)
-        )
-        return [
-            (target.service, target.path)
-            for target in candidates
-            if self._tracker.probe_allowed(target.source_id)
-        ]
+        self._maintain_source_ids(frozenset(target.source_id for target in candidates))
+        return [(target.service, target.path) for target in candidates if self._tracker.probe_allowed(target.source_id)]
 
     def record_value(
         self,
@@ -184,21 +178,14 @@ class PvSourceRegistry:
         advertising_services: frozenset[str],
     ) -> bool:
         self.maintain(advertising_services)
-        return not any(
-            target.service in advertising_services
-            for target in self._validated_targets.values()
-        )
+        return not any(target.service in advertising_services for target in self._validated_targets.values())
 
     def _candidate_targets(
         self,
         ac_services: Sequence[str],
         advertising_services: frozenset[str],
     ) -> tuple[_PvTarget, ...]:
-        advertised_ac = [
-            service
-            for service in ac_services
-            if service in advertising_services
-        ]
+        advertised_ac = [service for service in ac_services if service in advertising_services]
         raw_targets = pv_total_members(self._spec, advertised_ac)
         configured_dc = _configured_dc_target(self._spec)
         return tuple(
@@ -316,10 +303,10 @@ def _ac_services(
     spec: ReadSpec,
     advertising_services: frozenset[str],
 ) -> tuple[str, ...]:
-    explicit = _spec_text(spec, "service")
+    explicit = read_spec_text(spec, "service")
     if explicit:
         return (explicit,) if explicit in advertising_services else ()
-    prefix = _spec_text(spec, "prefix")
+    prefix = read_spec_text(spec, "prefix")
     return _prefixed_services(prefix, advertising_services)
 
 
@@ -329,16 +316,7 @@ def _prefixed_services(
 ) -> tuple[str, ...]:
     if not prefix:
         return ()
-    return tuple(
-        service
-        for service in sorted(advertising_services)
-        if service.startswith(prefix)
-    )
-
-
-def _spec_text(spec: ReadSpec, key: str) -> str:
-    value = spec.get(key)
-    return value.strip() if isinstance(value, str) else ""
+    return tuple(service for service in sorted(advertising_services) if service.startswith(prefix))
 
 
 __all__ = [

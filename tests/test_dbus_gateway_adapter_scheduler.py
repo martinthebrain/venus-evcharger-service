@@ -63,10 +63,16 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
             with scenario_context as scenario:
                 adapter = scenario.adapter
                 fake_loop = MagicMock()
+                install_mock(adapter.connection, "connect", MagicMock())
                 install_mock(adapter.runtime_role, "install_signal_handlers", MagicMock())
                 install_mock(adapter.socket_role, "start_socket", MagicMock())
                 install_mock(adapter.socket_role, "install_glib_watch", MagicMock())
                 install_mock(adapter.socket_role, "close_socket", MagicMock())
+                install_mock(
+                    adapter.operation_broker,
+                    "cancel_current",
+                    MagicMock(return_value=False),
+                )
 
                 with (
                     patch.object(process_loop_module, "DBusGMainLoop") as dbus_mainloop,
@@ -77,6 +83,7 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                     adapter.run()
 
                 dbus_mainloop.assert_called_once_with(set_as_default=True)
+                adapter.connection.connect.assert_called_once_with()
                 adapter.runtime_role.install_signal_handlers.assert_called_once()
                 self.assertEqual(
                     makedirs.call_args_list,
@@ -100,6 +107,9 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                 fake_loop.run.assert_called_once_with()
                 self.assertIs(adapter._main_loop, fake_loop)
                 self.assertTrue(adapter._stop)
+                adapter.operation_broker.cancel_current.assert_called_once_with(
+                    "gateway shutdown",
+                )
                 adapter.socket_role.close_socket.assert_called_once()
 
 

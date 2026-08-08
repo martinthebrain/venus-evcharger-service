@@ -7,16 +7,15 @@ from tests.support.dbus_gateway_adapter_harness import (
     AtomicJsonWriter,
     Callable,
     DbusAdapter,
-    DbusOperationDeferred,
     GatewayAdapterContractCase,
-    IntrospectionInterfaceStub,
     MagicMock,
     Path,
-    ServiceListInterfaceStub,
     adapter_main,
     adapter_module,
     gateway_core_module,
     gateway_paths,
+    dbus_wire_call,
+    install_dbus_call_responder,
     install_mock,
     introspection_module,
     logging,
@@ -25,6 +24,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     process_socket_module,
     read_json_file,
     runtime_module,
+    run_non_write_command,
     tempfile,
     time,
 )
@@ -149,26 +149,43 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             self.assertTrue(adapter._stop)
             idle_add.assert_not_called()
 
-            fake_iface = ServiceListInterfaceStub(["svc.a", b"svc.b"])
-            fake_obj = object()
-            get_object = install_mock(adapter.connection, "get_object", MagicMock(return_value=fake_obj))
-            with patch.object(process_io_module.dbus, "Interface", return_value=fake_iface) as dbus_interface:
-                self.assertEqual(adapter.io_role.list_services(), ["svc.a", "b'svc.b'"])
-                get_object.assert_called_once_with(
-                    "org.freedesktop.DBus",
-                    "/org/freedesktop/DBus",
-                    introspect=False,
-                )
-                dbus_interface.assert_called_once_with(fake_obj, "org.freedesktop.DBus")
-                adapter.rate_limiter.next_at["read"] = 0.0
-                fake_iface.names = "svc.a"
-                with self.assertRaisesRegex(TypeError, "^DBus ListNames returned a non-iterable service list$"):
-                    adapter.io_role.list_services()
-                adapter.rate_limiter.next_at["read"] = 0.0
-                fake_iface.names = object()
-                with self.assertRaisesRegex(TypeError, "^DBus ListNames returned a non-iterable service list$"):
-                    adapter.io_role.list_services()
-            self.assertEqual(fake_iface.call_count, 3)
+            service_responder = MagicMock(
+                side_effect=(["svc.a", b"svc.b"], "svc.a", object()),
+            )
+            send_async = install_dbus_call_responder(
+                adapter.connection,
+                service_responder,
+            )
+            expected_call = (
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "ListNames",
+                "",
+                (),
+            )
+            adapter.discovery.next_scan_monotonic = 0.0
+            self.assertTrue(adapter.io_role.refresh_services_if_due_once())
+            self.assertEqual(sorted(adapter.cache.services), ["b'svc.b'", "svc.a"])
+            adapter.rate_limiter.next_at["read"] = 0.0
+            adapter.discovery.next_scan_monotonic = 0.0
+            self.assertTrue(adapter.io_role.refresh_services_if_due_once())
+            self.assertEqual(
+                adapter.discovery.last_error,
+                "DBus ListNames returned a non-iterable service list",
+            )
+            adapter.rate_limiter.next_at["read"] = 0.0
+            adapter.discovery.next_scan_monotonic = 0.0
+            self.assertTrue(adapter.io_role.refresh_services_if_due_once())
+            self.assertEqual(
+                [dbus_wire_call(mock_call.args[0]) for mock_call in send_async.call_args_list],
+                [expected_call, expected_call, expected_call],
+            )
+            self.assertEqual(
+                [mock_call.args[0].timeout_seconds for mock_call in send_async.call_args_list],
+                [1.0, 1.0, 1.0],
+            )
+            self.assertEqual(service_responder.call_count, 3)
             self.assertEqual(process_io_module._service_names(("a", b"b")), ["a", "b'b'"])
 
     def test_socket_start_without_stale_path_and_default_cache_publish(self) -> None:
@@ -204,8 +221,8 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             config_path.write_text("[DEFAULT]\nLogging=DEBUG\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
 
-            self.assertEqual(adapter.process_non_write_command({}), "dropped")
-            self.assertEqual(adapter.process_non_write_command({"kind": "nope"}), "dropped")
+            self.assertEqual(run_non_write_command(adapter, {}), "dropped")
+            self.assertEqual(run_non_write_command(adapter, {"kind": "nope"}), "dropped")
             force_due = install_mock(adapter.read_scheduler, "force_due", MagicMock())
             refresh = EnergyRefreshRequest(
                 request_id="io-pv",
@@ -214,66 +231,40 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
                 urgency="priority",
                 reason="io-contract",
             )
-            self.assertEqual(adapter.process_non_write_command(refresh.to_command(source="test")), "applied")
+            self.assertEqual(run_non_write_command(adapter, refresh.to_command(source="test")), "applied")
             force_due.assert_called_once_with(("pv_power_w",))
-            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_value"}), "dropped")
-            self.assertEqual(adapter.process_non_write_command({"kind": "refresh_services"}), "dropped")
+            self.assertEqual(run_non_write_command(adapter, {"kind": "refresh_value"}), "dropped")
+            self.assertEqual(run_non_write_command(adapter, {"kind": "refresh_services"}), "dropped")
             adapter.circuit.degraded_until = time.time() + 10.0
-            self.assertEqual(adapter.process_non_write_command({"kind": "introspect"}), "deferred")
+            self.assertEqual(run_non_write_command(adapter, {"kind": "introspect"}), "deferred")
             adapter.circuit.degraded_until = 0.0
-            self.assertEqual(adapter.introspection_role.introspect_command({}), "dropped")
-            timed_result = install_mock(
-                adapter.introspection_role,
-                "timed_introspection_result",
-                MagicMock(return_value=("deferred", None)),
-            )
-            self.assertEqual(adapter.introspection_role.introspect_command({"service": "svc"}), "deferred")
-            timed_result.assert_called_once_with("svc", "/", 1.0)
-            delattr(adapter.introspection_role, "timed_introspection_result")
-            install_mock(adapter.io_role, "timed_dbus_operation", MagicMock(return_value="<node/>"))
-            self.assertEqual(
-                adapter.process_non_write_command({"kind": "introspect", "service": "svc", "path": "/"}), "applied"
-            )
-            self.assertEqual(adapter.cache.values["introspection:svc:/"]["value"], "<node/>")
+            self.assertEqual(run_non_write_command(adapter, {"kind": "introspect"}), "dropped")
 
-            adapter._introspection_queue_depth = 1
-            install_mock(adapter.io_role, "timed_dbus_operation", MagicMock(side_effect=RuntimeError("no reply")))
-            self.assertEqual(
-                adapter.process_non_write_command({"kind": "introspect", "service": "svc", "path": "/Slow"}),
-                "dropped",
-            )
-            self.assertEqual(adapter._introspection_queue_depth, 0)
-            self.assertEqual(adapter.cache.values["introspection:svc:/Slow"]["status"], "error")
-
-            install_mock(
-                adapter.io_role,
-                "timed_dbus_operation",
-                MagicMock(side_effect=DbusOperationDeferred("rate limited")),
+            introspection_responder = MagicMock(return_value="<real/>")
+            send_async = install_dbus_call_responder(
+                adapter.connection,
+                introspection_responder,
             )
             self.assertEqual(
-                adapter.process_non_write_command({"kind": "introspect", "service": "svc", "path": "/Later"}),
-                "deferred",
+                run_non_write_command(
+                    adapter,
+                    {"kind": "introspect", "service": "svc", "path": "/Real", "timeout": 2.0},
+                ),
+                "applied",
             )
-
-            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-timed")))
-            timed_error = RuntimeError("introspect failed")
-            install_mock(adapter.io_role, "timed_dbus_operation", MagicMock(side_effect=timed_error))
-            drop_failed = install_mock(adapter.introspection_role, "drop_failed_introspection", MagicMock(return_value="dropped"))
-            self.assertEqual(adapter.introspection_role.timed_introspection_result("svc", "/Err", 3.0), ("dropped", None))
-            drop_failed.assert_called_once_with("svc", "/Err", timed_error)
-            delattr(adapter.io_role, "timed_dbus_operation")
-            delattr(adapter.introspection_role, "drop_failed_introspection")
-
-            fake_iface = IntrospectionInterfaceStub("<real/>")
-            fake_obj = object()
-            get_object = install_mock(adapter.connection, "get_object", MagicMock(return_value=fake_obj))
-            with patch.object(introspection_module.dbus, "Interface", return_value=fake_iface) as interface:
-                self.assertEqual(
-                    adapter.introspection_role.introspect_command({"service": "svc", "path": "/Real", "timeout": 2.0}), "applied"
-                )
-            get_object.assert_called_once_with("svc", "/Real", introspect=False)
-            interface.assert_called_once_with(fake_obj, "org.freedesktop.DBus.Introspectable")
-            self.assertEqual(fake_iface.calls, [2.0])
+            self.assertEqual(
+                dbus_wire_call(send_async.call_args.args[0]),
+                (
+                    "svc",
+                    "/Real",
+                    "org.freedesktop.DBus.Introspectable",
+                    "Introspect",
+                    "",
+                    (),
+                ),
+            )
+            self.assertEqual(send_async.call_args.args[0].timeout_seconds, 2.0)
+            self.assertEqual(introspection_responder.call_count, 1)
 
             adapter._introspection_queue_depth = 2
             adapter.introspection_role.record_introspection_xml("svc", "/Recorded", "<xml/>")
@@ -302,10 +293,6 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             adapter.introspection_role.record_introspection_xml("svc", "/Zero", "<xml/>")
             self.assertEqual(adapter._introspection_queue_depth, 0)
 
-            self.assertEqual(adapter.timed_dbus_operation("read", lambda: 42), 42)
-            adapter.rate_limiter.next_at["read"] = 0.0
-            with self.assertRaises(RuntimeError):
-                adapter.timed_dbus_operation("read", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
             self.assertEqual(gateway_core_module._json_ready({"ok": True}), {"ok": True})
             self.assertEqual(gateway_core_module._json_ready(object()).startswith("<object object"), True)
 
@@ -314,50 +301,18 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
                 self.assertEqual(adapter_main([str(config_path), "--run-dir", str(Path(temp_dir) / "run2")]), 0)
             run.assert_called_once()
 
-    def test_timed_operation_contracts_record_latency_and_errors(self) -> None:
+    def test_local_publish_timing_contracts_record_latency_and_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
             config_path.write_text("[DEFAULT]\n", encoding="utf-8")
             adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
-            require_due = install_mock(adapter.rate_limiter, "require_due", MagicMock())
             record_success = install_mock(adapter.circuit, "record_success", MagicMock())
             record_error = install_mock(adapter.circuit, "record_error", MagicMock())
-
-            with patch.object(process_io_module.time, "monotonic", side_effect=[10.0, 10.125]):
-                self.assertEqual(adapter.timed_dbus_operation("write", lambda: "ok"), "ok")
-            require_due.assert_called_once_with("write")
-            record_success.assert_called_once_with(
-                125.0,
-                kind="write",
-                source="",
-            )
-            record_error.assert_not_called()
-
-            require_due.reset_mock()
-            record_success.reset_mock()
-            error = RuntimeError("boom")
-            with patch.object(
-                process_io_module.time,
-                "monotonic",
-                side_effect=[20.0, 20.5],
-            ):
-                with self.assertRaises(RuntimeError):
-                    adapter.timed_dbus_operation("read", lambda: (_ for _ in ()).throw(error))
-            require_due.assert_called_once_with("read")
-            record_success.assert_not_called()
-            record_error.assert_called_once_with(
-                error,
-                kind="read",
-                source="",
-                latency_ms=500.0,
-            )
-
-            require_due.reset_mock()
-            record_error.reset_mock()
-            record_success.reset_mock()
             with patch.object(process_io_module.time, "monotonic", side_effect=[30.0, 30.25]):
-                self.assertEqual(adapter.timed_local_publish(lambda: "published"), "published")
-            require_due.assert_not_called()
+                self.assertEqual(
+                    adapter.io_role.timed_local_publish(lambda: "published"),
+                    "published",
+                )
             record_success.assert_called_once_with(250.0, kind="local_publish")
             record_error.assert_not_called()
 
@@ -365,6 +320,8 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             error = RuntimeError("publish failed")
             with patch.object(process_io_module.time, "monotonic", return_value=40.0):
                 with self.assertRaises(RuntimeError):
-                    adapter.timed_local_publish(lambda: (_ for _ in ()).throw(error))
+                    adapter.io_role.timed_local_publish(
+                        lambda: (_ for _ in ()).throw(error),
+                    )
             record_success.assert_not_called()
             record_error.assert_called_once_with(error, kind="local_publish")

@@ -3,16 +3,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Protocol, TypeVar, Unpack
+from collections.abc import Mapping
+from typing import Protocol, Unpack
 
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
+from venus_evcharger.dbus_adapter.async_protocols import AsyncDbusConnection
 from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec
 from venus_evcharger.dbus_gateway_cache_metadata import CacheValueMetadata, ExternalReadMetadata
 from venus_evcharger.dbus_gateway_core import CacheFreshnessKind
 from venus_evcharger.ipc.command_types import CommandPayload
-
-_T = TypeVar("_T")
 
 
 class ReadCacheProtocol(Protocol):  # pragma: no cover
@@ -68,43 +68,9 @@ class ReadSchedulerProtocol(Protocol):  # pragma: no cover
     def specs(self) -> Mapping[str, ReadSpec]: ...
 
 
-class ReadConnectionProtocol(Protocol):  # pragma: no cover
-    """DBus connection surface required by read execution."""
-
-    def get_object(self, bus_name: str, object_path: str, *, introspect: bool = False) -> object: ...
-
-
-class ReadRateLimiterProtocol(Protocol):  # pragma: no cover
-    """Rate limiter surface required by direct read execution."""
-
-    def require_due(self, kind: str) -> None: ...
-
-
 class ReadCircuitProtocol(Protocol):  # pragma: no cover
     """Circuit-breaker surface required by direct read execution."""
 
-    def record_success(
-        self,
-        latency_ms: float,
-        *,
-        kind: str = "dbus",
-        source: str = "",
-    ) -> None: ...
-    def record_error(
-        self,
-        error: BaseException,
-        *,
-        kind: str = "dbus",
-        source: str = "",
-        latency_ms: float | None = None,
-    ) -> None: ...
-    def record_optional_source_failure(
-        self,
-        error: BaseException,
-        *,
-        source: str,
-        latency_ms: float,
-    ) -> None: ...
     def optional_source_interval_factor(self, source: str) -> float: ...
 
 
@@ -115,7 +81,7 @@ class DbusReadAdapter(Protocol):  # pragma: no cover
     def cache(self) -> ReadCacheProtocol: ...
 
     @property
-    def connection(self) -> ReadConnectionProtocol: ...
+    def connection(self) -> AsyncDbusConnection: ...
 
     @property
     def read_scheduler(self) -> ReadSchedulerProtocol: ...
@@ -124,15 +90,7 @@ class DbusReadAdapter(Protocol):  # pragma: no cover
     def energy_discovery(self) -> DbusEnergyDiscoveryManager: ...
 
     @property
-    def rate_limiter(self) -> ReadRateLimiterProtocol: ...
-
-    @property
     def circuit(self) -> ReadCircuitProtocol: ...
 
-    def timed_dbus_operation(
-        self,
-        kind: str,
-        operation: Callable[[], _T],
-        *,
-        source: str = "",
-    ) -> _T: ...
+    @property
+    def operation_broker(self) -> DbusAsyncOperationBroker: ...

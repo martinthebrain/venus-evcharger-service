@@ -30,6 +30,7 @@ class DbusAdapterLoop:
     def run(self) -> None:  # pragma: no cover - Venus DBus/GLib process loop
         context = self._context
         DBusGMainLoop(set_as_default=True)
+        context.connection.connect()
         context.runtime_role.install_signal_handlers()
         os.makedirs(context.paths.run_dir, exist_ok=True)
         os.makedirs(context.paths.command_dir, exist_ok=True)
@@ -43,11 +44,13 @@ class DbusAdapterLoop:
             main_loop.run()
         finally:
             context._stop = True
+            context.operation_broker.cancel_current("gateway shutdown")
             context.socket_role.close_socket()
 
     def tick(self) -> bool:
         context = self._context
         tick_started = time.monotonic()
+        context.operation_broker.expire_due(now=tick_started)
         if context._stop:
             context.socket_role.close_socket()
             return False
@@ -67,9 +70,7 @@ class DbusAdapterLoop:
                 scheduled_at=scheduled_at,
                 now=tick_started,
             )
-            context._next_work_tick_monotonic = (
-                tick_started + context.tick_seconds
-            )
+            context._next_work_tick_monotonic = tick_started + context.tick_seconds
         return not context._stop
 
     def _process_work_tick(self) -> None:
@@ -96,10 +97,7 @@ class DbusAdapterLoop:
         context = self._context
         control = context.health_role.apply_slo_regulation(snapshot)
         resource_state = control.resource_state
-        if (
-            resource_state == "ok"
-            and control.eventloop_max_duration_ms > context.slo_mainloop_gap_max_ms
-        ):
+        if resource_state == "ok" and control.eventloop_max_duration_ms > context.slo_mainloop_gap_max_ms:
             resource_state = "busy"
         context.tick_seconds = self.adaptive_tick_seconds(
             circuit_state=context.circuit.state(),
@@ -128,14 +126,37 @@ class DbusAdapterLoop:
         return float(context.min_tick_seconds)
 
     def process_one_dbus_operation_once(self) -> bool:
+        startup_outcome = self._startup_operation_outcome()
+        if startup_outcome is not None:
+            return startup_outcome
+        return self._process_registered_operation()
+
+    def _startup_operation_outcome(self) -> bool | None:
         if not self._context.publication_role.evcs_service_registered:
             return self.process_evcs_registration_once()
-        if self.refresh_initial_services_once():
+        return self._initial_discovery_outcome()
+
+    def _initial_discovery_outcome(self) -> bool | None:
+        if self._context.cache.services:
+            return None
+        if (
+            self._context.operation_broker.busy
+            or self._context.write_scheduler.process_urgent_once()
+            or self.refresh_initial_services_once()
+        ):
             return True
+        return None
+
+    def _process_registered_operation(self) -> bool:
         self._context.introspection_role.enqueue_background_introspection_if_due()
         local_publish_count = self._context.write_scheduler.process_local_publish_burst()
+        if self._context.operation_broker.busy:
+            return True
         if self._context.write_scheduler.process_urgent_once():
             return True
+        return self._process_read_or_standard(local_publish_count)
+
+    def _process_read_or_standard(self, local_publish_count: int) -> bool:
         if self.priority_read_performed():
             return True
         return self.process_standard_operation_once(local_publish_count)
@@ -158,10 +179,7 @@ class DbusAdapterLoop:
     def process_standard_operation_once(self, local_publish_count: int = 0) -> bool:
         if self.process_preferred_read_or_write():
             return True
-        return bool(
-            self._context.io_role.refresh_services_if_due_once()
-            or local_publish_count > 0
-        )
+        return bool(self._context.io_role.refresh_services_if_due_once() or local_publish_count > 0)
 
     def reads_need_priority(self) -> bool:
         return self._context.read_executor.has_pending_aggregate() or self.core_reads_stale()
@@ -179,11 +197,7 @@ class DbusAdapterLoop:
         if not entry:
             return float(context.slo_core_read_max_age_seconds) + 1.0
         updated_at = float_or_zero(entry.get("updated_at"))
-        return (
-            now - float(updated_at)
-            if updated_at > 0.0
-            else float(context.slo_core_read_max_age_seconds) + 1.0
-        )
+        return now - float(updated_at) if updated_at > 0.0 else float(context.slo_core_read_max_age_seconds) + 1.0
 
     def process_preferred_read_or_write(self) -> bool:
         if self._context._prefer_read_next:

@@ -12,14 +12,12 @@ from __future__ import annotations
 import os
 import socket
 import sys
-from collections.abc import Callable
-from typing import TypeVar
 
 _VELIB_PYTHON_PATH = "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python"
 if _VELIB_PYTHON_PATH not in sys.path:
     sys.path.insert(1, _VELIB_PYTHON_PATH)
 
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
 from venus_evcharger.dbus_adapter.process.config import adapter_settings, load_adapter_config
 from venus_evcharger.dbus_adapter.process.diagnostics import DbusAdapterDiagnostics
 from venus_evcharger.dbus_adapter.process.health import DbusAdapterHealth
@@ -49,12 +47,10 @@ from venus_evcharger.dbus_gateway import (
     GatewayPaths,
 )
 from venus_evcharger.ipc.command_mailbox import CommandMailbox
-from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
+from venus_evcharger.ipc.command_types import CommandPayload
 from venus_evcharger.ipc.core_commands import CoreCommandMailbox
 from venus_evcharger.ipc.fast_publication import FastPublicationQueue
 from venus_evcharger.ipc.publication_order import PUBLICATION_ORDER_STATE_NAME
-
-_T = TypeVar("_T")
 
 
 class DbusAdapter:
@@ -83,6 +79,10 @@ class DbusAdapter:
             introspection_interval_seconds=settings.rates.introspection_interval_seconds,
         )
         self.circuit = DbusCircuitBreaker()
+        self.operation_broker = DbusAsyncOperationBroker(
+            self.rate_limiter,
+            self.circuit,
+        )
         self.cache = DbusCacheStore(
             self.paths,
             stale_after_seconds=settings.stale_after_seconds,
@@ -169,9 +169,9 @@ class DbusAdapter:
             command_lifecycle_max_bytes=self.command_lifecycle_max_bytes,
             config=self.config,
             connection=self.connection,
+            operation_broker=self.operation_broker,
             core_command_mailbox=self.core_command_mailbox,
             fast_publications=self.fast_publications,
-            json_writer=self.json_writer,
             publication_registry=self.publication_registry,
             service_name=self.service_name,
             publication_role=self.publication_role,
@@ -199,25 +199,5 @@ class DbusAdapter:
 
     def health_snapshot(self) -> CommandPayload:
         return self.health_role.health_snapshot()
-
-    def process_non_write_command(self, command: CommandMapping) -> CommandOutcome:
-        return self.introspection_role.process_non_write_command(command)
-
-    def timed_dbus_operation(
-        self,
-        kind: str,
-        operation: Callable[[], _T],
-        *,
-        source: str = "",
-    ) -> _T:
-        return self.io_role.timed_dbus_operation(
-            kind,
-            operation,
-            source=source,
-        )
-
-    def timed_local_publish(self, operation: Callable[[], _T]) -> _T:
-        return self.io_role.timed_local_publish(operation)
-
 
 __all__ = ["DbusAdapter"]

@@ -10,6 +10,7 @@ import time
 
 from pi_gateway_release_gate_assertions import assert_gui_values, exercise_gui_write
 from pi_gateway_release_gate_common import GateFailure, PiSession
+from pi_gateway_release_gate_deploy import deploy_repo
 from pi_gateway_release_gate_health import (
     assert_recent_command_lifecycle,
     assert_recent_health_history,
@@ -18,7 +19,6 @@ from pi_gateway_release_gate_health import (
 from pi_gateway_release_gate_remote import (
     assert_single_remote_instance,
     configure_remote,
-    deploy_repo,
     remote_compile,
     remote_gateway_chaos,
     remote_isolation,

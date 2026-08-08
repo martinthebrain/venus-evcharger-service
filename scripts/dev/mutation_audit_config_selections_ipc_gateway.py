@@ -13,6 +13,14 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_fast_publication_ipc.py",
         ),
     ),
+    (
+        "venus_evcharger/ipc/command_mailbox_storage.py",
+        (
+            "tests/test_ipc_command_mailbox_contracts.py",
+            "tests/test_publication_mailbox_contracts.py",
+            "tests/test_fast_publication_ipc.py",
+        ),
+    ),
     ("venus_evcharger/ipc/core_commands.py", ("tests/test_ipc_command_mailbox_contracts.py",)),
     ("venus_evcharger/ipc/energy_binary.py", ("tests/test_energy_binary_ipc_contracts.py",)),
     ("venus_evcharger/ipc/energy_refresh.py", ("tests/test_energy_ipc_contracts.py",)),
@@ -40,7 +48,17 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_ipc_publication_edges.py",
         ),
     ),
-    ("venus_evcharger/dbus_adapter/rate.py", ("tests/test_dbus_gateway_adapter_scheduler.py",)),
+    (
+        "venus_evcharger/dbus_adapter/rate.py",
+        (
+            "tests/test_dbus_gateway_adapter_scheduler.py",
+            "tests/test_dbus_adapter_rate_async_contracts.py",
+        ),
+    ),
+    (
+        "venus_evcharger/dbus_adapter/contracts.py",
+        ("tests/test_dbus_adapter_command_execution_contracts.py",),
+    ),
     ("venus_evcharger/dbus_adapter/resources.py", ("tests/test_dbus_adapter_resource_contracts.py",)),
     (
         "venus_evcharger/dbus_gateway_cache.py",
@@ -73,7 +91,14 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("tests/test_dbus_adapter_read_pv_contracts.py", "tests/test_dbus_adapter_discovery_mutation_contracts.py"),
     ),
     ("venus_evcharger/dbus_adapter/refresh_state.py", ("tests/test_dbus_adapter_refresh_state_contracts.py",)),
-    ("venus_evcharger/dbus_adapter/read/executor.py", ("tests/test_dbus_gateway_adapter_scheduler.py",)),
+    (
+        "venus_evcharger/dbus_adapter/read/executor.py",
+        (
+            "tests/test_dbus_gateway_adapter_scheduler.py",
+            "tests/test_dbus_async_gateway_edge_contracts.py",
+            "tests/test_dbus_adapter_read_executor_async_contracts.py",
+        ),
+    ),
     ("venus_evcharger/dbus_adapter/scheduling.py", ("tests/test_dbus_adapter_scheduler_contracts.py",)),
     ("venus_evcharger/dbus_adapter/health/backpressure.py", ("tests/test_dbus_adapter_backpressure_contracts.py",)),
     ("venus_evcharger/dbus_adapter/health/freshness.py", ("tests/test_dbus_adapter_freshness_contracts.py",)),
@@ -88,6 +113,7 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "tests/test_energy_ipc_contracts.py",
             "tests/test_gateway_energy_snapshot_contracts.py",
+            "tests/test_dbus_adapter_process_introspection_async_contracts.py",
             "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_background_introspection_uses_discovery_targets_and_opaque_topology",
             "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_gateway_non_write_introspection_command_contracts",
             "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_non_write_introspection_timed_logging_main_and_json_ready",
@@ -105,7 +131,8 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_poll_and_discovery_edges",
             "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_cache_publish_interval_contracts",
             "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_signal_handlers_andlist_services_edges",
-            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_timed_operation_contracts_record_latency_and_errors",
+            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_local_publish_timing_contracts_record_latency_and_errors",
+            "tests/test_dbus_adapter_process_io_async_contracts.py",
         ),
     ),
     (
@@ -128,9 +155,7 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("venus_evcharger/dbus_adapter/read/targets.py", ("tests/test_dbus_adapter_read_targets_contracts.py",)),
     (
         "venus_evcharger/dbus_adapter/read/spec.py",
-        (
-            "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_read_spec_from_mapping_validates_known_fields",
-        ),
+        ("tests/test_dbus_adapter_read_spec_contracts.py",),
     ),
     ("venus_evcharger/dbus_adapter/write/scheduler.py", ("tests/test_dbus_gateway_adapter_scheduler.py",)),
     ("venus_evcharger/dbus_adapter/write/health.py", ("tests/test_dbus_gateway_adapter_scheduler.py",)),
@@ -143,7 +168,10 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "venus_evcharger/dbus_adapter/write/semantic.py",
-        ("tests/test_dbus_adapter_write_semantic_mutation_contracts.py",),
+        (
+            "tests/test_dbus_adapter_write_semantic_mutation_contracts.py",
+            "tests/test_dbus_adapter_write_semantic_async_contracts.py",
+        ),
     ),
     ("venus_evcharger/dbus_adapter/write/core.py", ("tests/test_dbus_gateway_adapter_scheduler.py",)),
     ("venus_evcharger/dbus_adapter/write/support.py", ("tests/test_dbus_gateway_adapter_scheduler.py",)),

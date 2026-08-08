@@ -6,7 +6,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.contracts import (
+    CommandCompletion,
+    CommandExecution,
+)
 from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
 from venus_evcharger.ipc.energy import EnergyTopologySnapshot
 
@@ -63,20 +66,18 @@ class IntrospectionSnapshotRole(Protocol):  # pragma: no cover
 class IoRole(Protocol):  # pragma: no cover
     def poll_one_due_read_once(self) -> bool: ...
     def refresh_services_if_due_once(self) -> bool: ...
-    def timed_dbus_operation(
-        self,
-        kind: str,
-        operation: Callable[[], _T],
-        *,
-        source: str = "",
-    ) -> _T: ...
     def timed_local_publish(self, operation: Callable[[], _T]) -> _T: ...
     def publish_cache(self, control_snapshot: GatewayControlSnapshot | None = None) -> None: ...
 
 
 class IntrospectionRole(Protocol):  # pragma: no cover
     def enqueue_background_introspection_if_due(self) -> None: ...
-    def process_non_write_command(self, command: CommandMapping) -> CommandOutcome: ...
+    def schedule_non_write_command(
+        self,
+        command: CommandMapping,
+        command_file: str,
+        completion: CommandCompletion,
+    ) -> CommandExecution: ...
 
 
 class LoopRole(Protocol):  # pragma: no cover

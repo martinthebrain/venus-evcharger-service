@@ -17,6 +17,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     write_support_module,
 )
 from venus_evcharger.ipc.gateway_operations import gx_relay_refresh_command
+from venus_evcharger.dbus_adapter.contracts import CommandExecution
 
 
 class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
@@ -34,8 +35,8 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
 
             adapter.circuit.protective_until = 0.0
             process_command = install_mock(
-                adapter.write_scheduler.command_queue,
-                "process_command",
+                adapter.write_scheduler.command_dispatcher,
+                "schedule",
                 MagicMock(side_effect=DbusOperationDeferred("write")),
             )
             self.assertTrue(adapter.write_scheduler.process_one())
@@ -52,9 +53,9 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
             local_path = adapter.commands.enqueue(evcs_publication({"mode": 1}))
             operation_path = adapter.commands.enqueue(gx_relay_refresh_command(0))
             process_command = install_mock(
-                adapter.write_scheduler.command_queue,
-                "process_command",
-                MagicMock(return_value="applied"),
+                adapter.write_scheduler.command_dispatcher,
+                "schedule",
+                MagicMock(return_value=CommandExecution.immediate("applied")),
             )
 
             self.assertTrue(adapter.write_scheduler.process_one(include_local_publish=False))
@@ -76,13 +77,13 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
             )
             process_operation = install_mock(
                 scheduler.semantic_executor,
-                "process_semantic_operation",
-                MagicMock(return_value="deferred"),
+                "schedule_semantic_operation",
+                MagicMock(return_value=CommandExecution.immediate("deferred")),
             )
             process_non_write = install_mock(
                 scheduler.command_queue.adapter.introspection_role,
-                "process_non_write_command",
-                MagicMock(return_value="dropped"),
+                "schedule_non_write_command",
+                MagicMock(return_value=CommandExecution.immediate("dropped")),
             )
             publication = evcs_publication({"mode": 2})
             operation = gx_relay_refresh_command(1)
@@ -90,10 +91,18 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
             self.assertEqual(scheduler.process_command(publication, command_file="publish.json"), "applied")
             process_publication.assert_called_once_with(publication)
             self.assertEqual(scheduler.process_command(operation, command_file="relay.json"), "deferred")
-            process_operation.assert_called_once_with(operation, command_file="relay.json")
+            process_operation.assert_called_once_with(
+                operation,
+                command_file="relay.json",
+                completion=unittest.mock.ANY,
+            )
             unknown = {"kind": "unknown"}
             self.assertEqual(scheduler.process_command(unknown), "dropped")
-            process_non_write.assert_called_once_with(unknown)
+            process_non_write.assert_called_once_with(
+                unknown,
+                "",
+                unittest.mock.ANY,
+            )
 
     def test_process_command_uses_diagnostic_priority_and_empty_file_defaults(self) -> None:
         with self.adapter_scenario() as scenario:
@@ -104,16 +113,20 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
                 MagicMock(return_value=True),
             )
             dispatch = install_mock(
-                scheduler.command_queue,
-                "_dispatch_command",
-                MagicMock(return_value="applied"),
+                scheduler.command_dispatcher,
+                "_dispatch",
+                MagicMock(return_value=CommandExecution.immediate("applied")),
             )
             command = {"kind": "unknown"}
 
             self.assertEqual(scheduler.process_command(command), "applied")
 
             allows_priority.assert_called_once_with("diagnostic")
-            dispatch.assert_called_once_with(command, command_file="")
+            dispatch.assert_called_once_with(
+                command,
+                command_file="",
+                completion=unittest.mock.ANY,
+            )
 
     def test_command_kind_accepts_type_fallback_and_rejects_missing_identity(self) -> None:
         self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "fallback")
