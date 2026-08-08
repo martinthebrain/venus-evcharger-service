@@ -67,9 +67,28 @@ class PvSourceRegistry:
         ac_services: Sequence[str],
         advertising_services: frozenset[str],
     ) -> list[tuple[str, str]]:
+        candidates = self._maintained_candidates(ac_services, advertising_services)
+        return [(target.service, target.path) for target in candidates if self._tracker.probe_allowed(target.source_id)]
+
+    def candidates(
+        self,
+        ac_services: Sequence[str],
+        advertising_services: frozenset[str],
+    ) -> list[tuple[str, str]]:
+        """Return advertised PV targets, including targets in probe backoff."""
+        return [
+            (target.service, target.path)
+            for target in self._maintained_candidates(ac_services, advertising_services)
+        ]
+
+    def _maintained_candidates(
+        self,
+        ac_services: Sequence[str],
+        advertising_services: frozenset[str],
+    ) -> tuple[_PvTarget, ...]:
         candidates = self._candidate_targets(ac_services, advertising_services)
         self._maintain_source_ids(frozenset(target.source_id for target in candidates))
-        return [(target.service, target.path) for target in candidates if self._tracker.probe_allowed(target.source_id)]
+        return candidates
 
     def record_value(
         self,

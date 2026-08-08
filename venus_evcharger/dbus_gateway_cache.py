@@ -37,6 +37,21 @@ class _CacheReadFailure:
     retry_after_seconds: float | None = None
 
 
+def _confirmed_at(
+    previous: Mapping[str, object],
+    current: float,
+    *,
+    confirmed: bool,
+) -> float:
+    """Preserve the timestamp when a cache value is only estimated."""
+    return current if confirmed else float_or_zero(previous.get("confirmed_at"))
+
+
+def _reason_metadata(reason_code: str) -> CommandPayload:
+    """Return optional reason metadata without changing normal cache entries."""
+    return {"reason_code": reason_code} if reason_code else {}
+
+
 class DbusCacheStore:
     """RAM-owned DBus value cache with freshness and health metadata."""
 
@@ -75,11 +90,12 @@ class DbusCacheStore:
         changed_at = float_or_zero(previous.get("changed_at"))
         if previous.get("value") != normalized_value or changed_at <= 0.0:
             changed_at = current
-        self.values[str(key)] = {
+        confirmed_at = _confirmed_at(previous, current, confirmed=details.confirmed)
+        cache_value: CommandPayload = {
             "value": normalized_value,
             "source": str(details.source),
             "changed_at": changed_at,
-            "confirmed_at": current,
+            "confirmed_at": confirmed_at,
             "updated_at": current,
             "age_s": 0.0,
             "status": str(details.status),
@@ -88,7 +104,9 @@ class DbusCacheStore:
             "freshness_kind": details.freshness_kind,
             "source_state": details.source_state,
             "stale_after_s": details.stale_after_seconds,
+            **_reason_metadata(details.reason_code),
         }
+        self.values[str(key)] = cache_value
         self.sequence += 1
 
     def update_external_read(

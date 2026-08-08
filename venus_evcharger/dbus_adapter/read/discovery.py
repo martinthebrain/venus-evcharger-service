@@ -108,6 +108,15 @@ class DbusEnergyDiscoveryManager:
         self._sync_pv_revision()
         return result
 
+    def pv_candidates(self, spec: ReadSpec) -> list[tuple[str, str]]:
+        """Return advertised PV targets even while their probes back off."""
+        result = self._pv_sources.candidates(
+            self.services_for(spec),
+            self._advertising_services(),
+        )
+        self._sync_pv_revision()
+        return result
+
     def record_pv_value(
         self,
         service: str,

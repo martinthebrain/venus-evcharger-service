@@ -84,6 +84,7 @@ class AggregateState:
     total: float = 0.0
     sources: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    estimate_confidences: list[float] = field(default_factory=list)
 
     def record_member(self, service: str, path: str, value: object) -> None:
         if value is None:
@@ -94,6 +95,24 @@ class AggregateState:
     def record_error(self, service: str, path: str, error: BaseException) -> None:
         self.errors.append(f"{service}{path}: {error}")
 
+    def record_estimate(
+        self,
+        service: str,
+        path: str,
+        value: float,
+        *,
+        confidence: float,
+    ) -> None:
+        """Add one explicitly estimated member to this aggregate."""
+        self.total += float(value)
+        self.sources.append(f"{service}{path}")
+        self.estimate_confidences.append(min(1.0, max(0.0, float(confidence))))
+
+    @property
+    def estimated(self) -> bool:
+        """Return whether at least one aggregate member is estimated."""
+        return bool(self.estimate_confidences)
+
     def complete(self, member_count: int) -> bool:
         return self.index >= member_count
 
@@ -101,7 +120,11 @@ class AggregateState:
         return {
             "value": self.total,
             "source": ",".join(self.sources) if self.sources else key,
-            "confidence": 1.0 if self.sources else self.empty_confidence,
+            "confidence": (
+                min(self.estimate_confidences)
+                if self.estimate_confidences
+                else (1.0 if self.sources else self.empty_confidence)
+            ),
             "last_error": "; ".join(str(error) for error in self.errors),
         }
 
