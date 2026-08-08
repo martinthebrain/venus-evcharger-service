@@ -110,6 +110,38 @@ class TestDbusAdapterSchedulerContracts(unittest.TestCase):
             interval_factor=0.5,
         )
         self.assertEqual(scheduler.next_read_at["grid"], 24.0)
+        scheduler.record_success(
+            "grid",
+            monotonic_at=20.0,
+            interval=4.0,
+            interval_factor=3.0,
+            maximum_delay_seconds=7.0,
+        )
+        self.assertEqual(scheduler.next_read_at["grid"], 27.0)
+        scheduler.record_success(
+            "grid",
+            monotonic_at=20.0,
+            interval=4.0,
+            interval_factor=3.0,
+            maximum_delay_seconds=2.0,
+        )
+        self.assertEqual(scheduler.next_read_at["grid"], 24.0)
+        scheduler.record_success(
+            "grid",
+            monotonic_at=20.0,
+            interval=4.0,
+            interval_factor=3.0,
+            maximum_delay_seconds=-1.0,
+        )
+        self.assertEqual(scheduler.next_read_at["grid"], 24.0)
+        scheduler.record_success(
+            "grid",
+            monotonic_at=20.0,
+            interval=0.25,
+            interval_factor=10.0,
+            maximum_delay_seconds=0.0,
+        )
+        self.assertEqual(scheduler.next_read_at["grid"], 20.25)
 
         for expected_failure, expected_due in (
             (1, 50.0),

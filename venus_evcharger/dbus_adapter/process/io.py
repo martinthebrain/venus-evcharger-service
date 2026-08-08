@@ -17,7 +17,9 @@ from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter.read.keys import CORE_ENERGY_READ_KEYS
 from venus_evcharger.dbus_adapter.read.semantic import energy_inputs_snapshot
+from venus_evcharger.dbus_adapter.read.spec import ReadSpec, read_spec_stale_after_seconds
 from venus_evcharger.ipc.energy import EnergyTopologySnapshot
 
 _T = TypeVar("_T")
@@ -48,6 +50,11 @@ class DbusAdapterIo:
                     interval=interval,
                     interval_factor=context.read_executor.consume_interval_factor(
                         key
+                    ),
+                    maximum_delay_seconds=_core_read_maximum_delay(
+                        context,
+                        key,
+                        spec,
                     ),
                 )
             elif outcome == "dropped":
@@ -265,6 +272,24 @@ class DbusAdapterIo:
         dirty = context.cache.sequence != context._last_cache_publish_sequence
         dirty_due = dirty and elapsed >= context.cache_dirty_publish_interval_seconds
         return heartbeat_due or dirty_due
+
+
+def _core_read_maximum_delay(
+    context: DbusAdapterIoContext,
+    key: str,
+    spec: ReadSpec,
+) -> float | None:
+    """Reserve one worst-case tick before a core-read freshness deadline."""
+    if key not in CORE_ENERGY_READ_KEYS:
+        return None
+    freshness_deadline = max(0.0, float(context.slo_core_read_max_age_seconds))
+    stale_after = read_spec_stale_after_seconds(spec)
+    if stale_after is not None and stale_after > 0.0:
+        freshness_deadline = min(freshness_deadline, stale_after)
+    return max(
+        0.0,
+        freshness_deadline - max(0.0, float(context.max_tick_seconds)),
+    )
 
 
 def _service_names(value: object) -> list[str]:
