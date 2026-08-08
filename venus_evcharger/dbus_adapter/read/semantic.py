@@ -44,7 +44,7 @@ def _measurement(entry: Mapping[str, object] | None, source_ids: tuple[str, ...]
         status=status,
         confidence=_confidence(entry.get("confidence")),
         source_ids=source_ids,
-        reason_code=_reason_code(status, value),
+        reason_code=_reason_code(status, value, entry.get("reason_code")),
     )
 
 
@@ -77,7 +77,13 @@ def _value_status(value: object) -> EnergyValueStatus:
     return "unknown"
 
 
-def _reason_code(status: EnergyValueStatus, value: float | None) -> str:
+def _reason_code(
+    status: EnergyValueStatus,
+    value: float | None,
+    explicit: object = "",
+) -> str:
+    if isinstance(explicit, str) and explicit:
+        return explicit
     if value is None:
         return "not-observed" if status == "unknown" else "source-unavailable"
     return {"stale": "observation-stale", "error": "source-error"}.get(status, "")

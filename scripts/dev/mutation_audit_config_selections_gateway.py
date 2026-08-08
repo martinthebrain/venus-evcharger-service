@@ -194,6 +194,7 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "tests/test_dbus_adapter_pv_dormancy_contracts.py",
             "tests/test_dbus_adapter_discovery_mutation_contracts.py",
+            "tests/test_dbus_adapter_pv_last_good_contracts.py",
         ),
     ),
     (

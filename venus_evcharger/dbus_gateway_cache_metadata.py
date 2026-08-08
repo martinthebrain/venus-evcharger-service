@@ -38,6 +38,8 @@ class CacheValueMetadata:
     freshness_kind: CacheFreshnessKind = "external_read"
     source_state: CacheSourceState = "active"
     stale_after_seconds: float | None = None
+    confirmed: bool = True
+    reason_code: str = ""
 
 
 class ExternalReadMetadata(TypedDict, total=False):
@@ -50,6 +52,8 @@ class ExternalReadMetadata(TypedDict, total=False):
     now: float | None
     stale_after_seconds: float | None
     source_state: CacheSourceState
+    confirmed: bool
+    reason_code: str
 
 
 def merge_cache_value_metadata(
@@ -73,6 +77,8 @@ def merge_cache_value_metadata(
             fields.get("stale_after_seconds"),
             metadata.stale_after_seconds,
         ),
+        confirmed=_metadata_bool(fields.get("confirmed"), metadata.confirmed),
+        reason_code=str(fields.get("reason_code", metadata.reason_code)),
     )
 
 
@@ -109,6 +115,10 @@ def metadata_float(value: object, fallback: float) -> float:
     return fallback
 
 
+def _metadata_bool(value: object, fallback: bool) -> bool:
+    return value if isinstance(value, bool) else fallback
+
+
 def _metadata_from_fields(fields: Mapping[str, object]) -> CacheValueMetadata:
     return CacheValueMetadata(
         source=str(fields.get("source", "")),
@@ -119,6 +129,8 @@ def _metadata_from_fields(fields: Mapping[str, object]) -> CacheValueMetadata:
         freshness_kind=normalize_freshness_kind(fields.get("freshness_kind"), "external_read"),
         source_state=_normalize_source_state(fields.get("source_state"), "active"),
         stale_after_seconds=_optional_metadata_float(fields.get("stale_after_seconds")),
+        confirmed=_metadata_bool(fields.get("confirmed"), True),
+        reason_code=str(fields.get("reason_code", "")),
     )
 
 

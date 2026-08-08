@@ -17,6 +17,7 @@ from venus_evcharger.dbus_adapter.read.aggregate import (
 )
 from venus_evcharger.dbus_adapter.read.protocols import DbusReadAdapter
 from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS
+from venus_evcharger.dbus_adapter.read.pv_last_good import PvAggregateContinuity
 from venus_evcharger.dbus_adapter.read.spec import (
     ReadSpec,
     read_spec_optional_confidence,
@@ -35,11 +36,12 @@ ReadCompletion = Callable[[CommandOutcome], None]
 class DbusReadExecutor:
     """Execute scheduled DBus reads and update the adapter cache."""
 
-    def __init__(self, adapter: DbusReadAdapter) -> None:
+    def __init__(self, adapter: DbusReadAdapter, *, monotonic: Callable[[], float] | None = None) -> None:
         self.adapter = adapter
         self._aggregates = AggregateStore()
         self._stale_after_by_key: dict[str, float | None] = {}
         self._interval_factors: dict[str, float] = {}
+        self._pv_continuity = PvAggregateContinuity(adapter, self._aggregates, monotonic=monotonic)
         self.last_operation_performed = False
 
     def poll_read_spec(
@@ -146,6 +148,7 @@ class DbusReadExecutor:
 
     def _mark_read_error(self, key: str, spec: ReadSpec, error: BaseException) -> None:
         self._aggregates.discard(key)
+        self._pv_continuity.discard(key)
         self._stale_after_by_key.pop(key, None)
         self._interval_factors.pop(key, None)
         self.adapter.cache.mark_error(key, source=read_spec_source(spec), error=error)
@@ -153,6 +156,7 @@ class DbusReadExecutor:
 
     def _mark_optional_zero(self, key: str, spec: ReadSpec, error: BaseException) -> None:
         self._aggregates.discard(key)
+        self._pv_continuity.discard(key)
         self._stale_after_by_key.pop(key, None)
         self._interval_factors.pop(key, None)
         self.adapter.cache.update_external_read(
@@ -222,7 +226,10 @@ class DbusReadExecutor:
         spec: ReadSpec,
         completion: ReadCompletion,
     ) -> CommandOutcome:
-        members = self._in_progress_pv_total_members(key) or self.adapter.energy_discovery.pv_members(spec)
+        members, held_state = self._pv_continuity.plan(key, spec)
+        if held_state is not None:
+            self._complete_aggregate(key, held_state)
+            return "applied"
         if not members:
             raise RuntimeError("No available AC or DC PV source candidates")
         return self._poll_aggregate_step(
@@ -235,9 +242,6 @@ class DbusReadExecutor:
                 empty_confidence=read_spec_optional_confidence(spec),
             )
         )
-
-    def _in_progress_pv_total_members(self, key: str) -> list[tuple[str, str]] | None:
-        return self._aggregates.signature_members(key, PV_TOTAL_AGGREGATE)
 
     def _poll_first_service(
         self,
@@ -323,6 +327,12 @@ class DbusReadExecutor:
         continuation: AggregateStepContinuation,
         value: object,
     ) -> None:
+        self._pv_continuity.record_confirmed(
+            continuation.state,
+            continuation.service,
+            continuation.path,
+            value,
+        )
         self.adapter.energy_discovery.record_pv_value(
             continuation.service,
             continuation.path,
@@ -405,6 +415,7 @@ class DbusReadExecutor:
         state: AggregateState,
         error: BaseException,
     ) -> None:
+        self._pv_continuity.record_error(state, service, path, error)
         self.adapter.energy_discovery.record_pv_error(
             service,
             path,
@@ -448,16 +459,11 @@ class DbusReadExecutor:
         state.record_member(service, path, value)
 
     def _complete_aggregate(self, key: str, state: AggregateState) -> None:
-        payload = state.payload(key)
-        self.adapter.cache.update_external_read(
+        self._pv_continuity.complete(
             key,
-            payload["value"],
-            source=payload["source"],
-            confidence=payload["confidence"],
-            last_error=payload["last_error"],
             stale_after_seconds=self._stale_after_by_key.pop(key, None),
+            state=state,
         )
-        self._aggregates.discard(key)
 
     def _record_optional_interval_factor(
         self,

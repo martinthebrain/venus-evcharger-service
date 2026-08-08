@@ -376,15 +376,7 @@ class DbusCircuitBreaker:
 
     @staticmethod
     def _looks_like_timeout(error: BaseException) -> bool:
-        detail = str(error).lower()
-        name = _dbus_error_name(error)
-        return (
-            "timeout" in detail
-            or "timed out" in detail
-            or "noreply" in detail
-            or "no_reply" in detail
-            or "noreply" in name
-        )
+        return dbus_error_is_timeout(error)
 
 
 class DbusConnectionManager:
@@ -432,6 +424,16 @@ class DbusConnectionManager:
             with suppress(Exception):
                 close()
         self._bus = None
+
+
+def dbus_error_is_timeout(error: BaseException) -> bool:
+    """Return whether a DBus failure represents a transient missing reply."""
+    if isinstance(error, TimeoutError):
+        return True
+    detail = str(error).lower()
+    name = _dbus_error_name(error)
+    reply_markers = ("timeout", "timed out", "noreply", "no_reply")
+    return any(marker in detail for marker in reply_markers) or "noreply" in name
 
 
 def _dbus_error_name(error: BaseException) -> str:

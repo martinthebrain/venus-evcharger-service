@@ -53,6 +53,7 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "tests/test_dbus_gateway_adapter_scheduler.py",
             "tests/test_dbus_adapter_rate_async_contracts.py",
+            "tests/test_dbus_adapter_pv_last_good_contracts.py",
         ),
     ),
     (
@@ -66,6 +67,7 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_dbus_gateway_primitives.py",
             "tests/test_dbus_adapter_freshness_contracts.py",
             "tests/test_energy_binary_ipc_contracts.py",
+            "tests/test_dbus_adapter_pv_last_good_contracts.py",
         ),
     ),
     (
@@ -97,6 +99,7 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_dbus_gateway_adapter_scheduler.py",
             "tests/test_dbus_async_gateway_edge_contracts.py",
             "tests/test_dbus_adapter_read_executor_async_contracts.py",
+            "tests/test_dbus_adapter_pv_last_good_contracts.py",
         ),
     ),
     ("venus_evcharger/dbus_adapter/scheduling.py", ("tests/test_dbus_adapter_scheduler_contracts.py",)),
@@ -142,16 +145,33 @@ FOCUSED_TEST_SELECTIONS_IPC_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     ("venus_evcharger/dbus_adapter/process/socket.py", ("tests/test_dbus_adapter_process_ipc_contracts.py",)),
-    ("venus_evcharger/dbus_adapter/read/aggregate.py", ("tests/test_dbus_adapter_read_aggregate_contracts.py",)),
+    (
+        "venus_evcharger/dbus_adapter/read/aggregate.py",
+        (
+            "tests/test_dbus_adapter_read_aggregate_contracts.py",
+            "tests/test_dbus_adapter_pv_last_good_contracts.py",
+        ),
+    ),
     (
         "venus_evcharger/dbus_adapter/read/discovery.py",
         (
             "tests/test_gateway_energy_snapshot_contracts.py",
             "tests/test_dbus_adapter_discovery_mutation_contracts.py",
+            "tests/test_dbus_adapter_pv_last_good_contracts.py",
         ),
     ),
+    (
+        "venus_evcharger/dbus_adapter/read/pv_last_good.py",
+        ("tests/test_dbus_adapter_pv_last_good_contracts.py",),
+    ),
     ("venus_evcharger/dbus_adapter/read/keys.py", ("tests/test_gateway_energy_snapshot_contracts.py",)),
-    ("venus_evcharger/dbus_adapter/read/semantic.py", ("tests/test_gateway_energy_snapshot_contracts.py",)),
+    (
+        "venus_evcharger/dbus_adapter/read/semantic.py",
+        (
+            "tests/test_gateway_energy_snapshot_contracts.py",
+            "tests/test_dbus_adapter_pv_last_good_contracts.py",
+        ),
+    ),
     ("venus_evcharger/dbus_adapter/read/targets.py", ("tests/test_dbus_adapter_read_targets_contracts.py",)),
     (
         "venus_evcharger/dbus_adapter/read/spec.py",
