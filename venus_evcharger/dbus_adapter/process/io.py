@@ -44,17 +44,18 @@ class DbusAdapterIo:
         def _complete(outcome: CommandOutcome) -> None:
             completed_at = time.monotonic()
             if outcome == "applied":
+                interval_factor = context.read_executor.consume_interval_factor(key)
+                operation_count = context.read_executor.consume_operation_count(key)
                 context.read_scheduler.record_success(
                     key,
                     monotonic_at=completed_at,
                     interval=interval,
-                    interval_factor=context.read_executor.consume_interval_factor(
-                        key
-                    ),
+                    interval_factor=interval_factor,
                     maximum_delay_seconds=_core_read_maximum_delay(
                         context,
                         key,
                         spec,
+                        operation_count=operation_count,
                     ),
                 )
             elif outcome == "dropped":
@@ -278,17 +279,23 @@ def _core_read_maximum_delay(
     context: DbusAdapterIoContext,
     key: str,
     spec: ReadSpec,
+    *,
+    operation_count: int,
 ) -> float | None:
-    """Reserve one worst-case tick before a core-read freshness deadline."""
+    """Reserve one worst-case tick per DBus operation before a core-read deadline."""
     if key not in CORE_ENERGY_READ_KEYS:
         return None
     freshness_deadline = max(0.0, float(context.slo_core_read_max_age_seconds))
     stale_after = read_spec_stale_after_seconds(spec)
     if stale_after is not None and stale_after > 0.0:
         freshness_deadline = min(freshness_deadline, stale_after)
+    operation_reserve = max(1, int(operation_count)) * max(
+        0.0,
+        float(context.max_tick_seconds),
+    )
     return max(
         0.0,
-        freshness_deadline - max(0.0, float(context.max_tick_seconds)),
+        freshness_deadline - operation_reserve,
     )
 
 
