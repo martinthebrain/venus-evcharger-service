@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Literal
 
 ENERGY_IPC_SCHEMA_VERSION = 1
+ENERGY_INPUTS_SCHEMA_VERSION = 2
 ENERGY_REFRESH_COMMAND_KIND = "refresh_energy_inputs"
 
 EnergyValueStatus = Literal["fresh", "stale", "unavailable", "error", "unknown"]
@@ -16,6 +17,7 @@ EnergyRefreshUrgency = Literal["normal", "priority"]
 
 __all__ = [
     "ENERGY_IPC_SCHEMA_VERSION",
+    "ENERGY_INPUTS_SCHEMA_VERSION",
     "ENERGY_REFRESH_COMMAND_KIND",
     "EnergyRefreshScope",
     "EnergyRefreshUrgency",

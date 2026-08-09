@@ -20,9 +20,11 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
         surplus, grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
 
-        self.assertEqual(surplus, 600.0)
+        self.assertEqual(surplus, 900.0)
         self.assertEqual(grid, 100.0)
-        self.assertEqual(service._last_auto_metrics["battery_surplus_penalty_w"], 600.0)
+        self.assertEqual(service._last_auto_metrics["battery_surplus_penalty_w"], 400.0)
+        self.assertEqual(service._last_auto_metrics["battery_unadjusted_surplus_penalty_w"], 600.0)
+        self.assertEqual(service._last_auto_metrics["ev_priority_credit_w"], 100.0)
         self.assertEqual(service._last_auto_metrics["battery_support_mode"], "mixed")
         self.assertEqual(service._last_auto_metrics["battery_learning_profile_count"], 2)
         self.assertEqual(service._last_auto_metrics["battery_observed_max_charge_power_w"], 500.0)
@@ -113,7 +115,9 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
         surplus, _grid = controller.metrics.update_average_metrics(100.0, 2200.0, 400.0, 60.0, False)
 
-        self.assertAlmostEqual(surplus, 7.0, places=6)
+        self.assertAlmostEqual(surplus, 1957.0, places=6)
+        self.assertEqual(service._last_auto_metrics["battery_surplus_penalty_w"], 0.0)
+        self.assertEqual(service._last_auto_metrics["ev_priority_reclaimable_charge_w"], 700.0)
         self.assertEqual(service._last_auto_metrics["battery_headroom_charge_w"], 1200.0)
         self.assertIsNone(service._last_auto_metrics["battery_headroom_discharge_w"])
         self.assertAlmostEqual(service._last_auto_metrics["expected_near_term_export_w"], 380.0, places=6)
@@ -144,8 +148,10 @@ class _AutoControllerPrimaryBatteryBalanceCases:
 
         activity = controller.battery_balance._combined_battery_activity_context()
 
-        self.assertEqual(activity["charge_power_w"], 375.0)
-        self.assertEqual(activity["discharge_power_w"], 450.0)
+        self.assertEqual(activity["charge_power_w"], 250.0)
+        self.assertEqual(activity["discharge_power_w"], 300.0)
+        self.assertEqual(activity["charge_penalty_w"], 375.0)
+        self.assertEqual(activity["discharge_penalty_w"], 450.0)
         self.assertIsNone(activity["charge_activity_ratio"])
         self.assertEqual(activity["discharge_activity_ratio"], 0.3)
         self.assertIsNone(activity["battery_headroom_charge_w"])

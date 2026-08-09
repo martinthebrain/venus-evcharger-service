@@ -623,6 +623,7 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
             "pv": MeasuredValue(1200.0, 99.0, "stale", 0.75, ("pv",)),
             "grid": MeasuredValue(-100.0, 98.0, "fresh", 0.8, ("grid",)),
             "battery": MeasuredValue(50.0, 97.0, "fresh", 0.9, ("battery",)),
+            "battery_power": None,
         }
         sources = AutoInputSources(helper_settings(), gateway)
         external = MagicMock()

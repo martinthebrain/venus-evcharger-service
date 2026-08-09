@@ -161,7 +161,10 @@ def make_auto_controller_service(**overrides: object) -> SimpleNamespace:
             warning_throttled=MagicMock(),
             write_auto_audit_event=MagicMock(),
         ),
-        "state": SimpleNamespace(save_runtime_state=MagicMock()),
+        "state": SimpleNamespace(
+            save_runtime_state=MagicMock(),
+            last_accepted_field=MagicMock(return_value=None),
+        ),
     }
     data.update(overrides)
     return SimpleNamespace(**data)

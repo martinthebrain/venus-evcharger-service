@@ -112,10 +112,14 @@ AUTO_EMPTY_TEXT = (
     "battery_discharge_balance_victron_bias_safe_state_reason",
 )
 AUTO_EXPECTED = _typed_values(
-    none=AUTO_NONE,
-    integers=AUTO_INTS,
+    none=AUTO_NONE + ("ev_priority_available_surplus_w",),
+    integers=AUTO_INTS + ("ev_priority_active",),
     floats=(
         "battery_surplus_penalty_w",
+        "battery_unadjusted_surplus_penalty_w",
+        "ev_priority_credit_w",
+        "ev_priority_reclaimable_charge_w",
+        "ev_priority_running_load_w",
         "battery_discharge_balance_coordination_start_error_w",
         "battery_discharge_balance_coordination_penalty_w",
         "battery_discharge_balance_victron_bias_pid_output_w",
@@ -135,6 +139,12 @@ AUTO_EXPECTED = _typed_values(
         "battery_discharge_balance_victron_bias_rollback_reason": "disabled",
         "battery_discharge_balance_victron_bias_reason": "disabled",
     },
+)
+AUTO_EXPECTED.update(
+    {
+        "ev_priority_soc": 40.0,
+        "ev_priority_release_soc": 38.0,
+    }
 )
 
 BALANCE_EXPECTED = _typed_values(

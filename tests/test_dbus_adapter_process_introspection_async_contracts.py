@@ -311,7 +311,9 @@ class DbusAdapterProcessIntrospectionAsyncContractTests(GatewayAdapterContractCa
             with patch.object(introspection_module.time, "time", return_value=100.0):
                 self.assertEqual(role.refresh_energy_inputs_command(all_request), "applied")
             force_discovery.assert_called_once_with()
-            force_reads.assert_called_once_with(("pv_power_w", "battery_soc"))
+            force_reads.assert_called_once_with(
+                ("pv_power_w", "battery_soc", "battery_net_power_w")
+            )
             self.assertEqual(adapter._last_introspection_full_scan_at, 0.0)
 
             force_reads.reset_mock()

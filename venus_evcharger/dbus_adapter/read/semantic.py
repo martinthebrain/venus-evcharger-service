@@ -18,6 +18,10 @@ def energy_inputs_snapshot(
     captured_at: float,
 ) -> EnergyInputsSnapshot:
     """Return one coherent semantic view without exposing DBus identities."""
+    native_battery_power = _measurement(
+        values.get("battery_net_power_w"),
+        discovery.source_ids("battery"),
+    )
     return EnergyInputsSnapshot(
         sequence=max(0, int(sequence)),
         captured_at=float(captured_at),
@@ -28,6 +32,20 @@ def energy_inputs_snapshot(
             (*discovery.source_ids("pv_ac"), *discovery.source_ids("pv_dc")),
         ),
         battery_soc=_measurement(values.get("battery_soc"), discovery.source_ids("battery")),
+        battery_net_power_w=_semantic_battery_power(native_battery_power),
+    )
+
+
+def _semantic_battery_power(measurement: MeasuredValue) -> MeasuredValue:
+    """Normalize Victron battery power to positive discharge and negative charge."""
+    value = measurement.value
+    return MeasuredValue(
+        value=None if value is None else -float(value),
+        observed_at=measurement.observed_at,
+        status=measurement.status,
+        confidence=measurement.confidence,
+        source_ids=measurement.source_ids,
+        reason_code=measurement.reason_code,
     )
 
 
@@ -80,7 +98,7 @@ def _value_status(value: object) -> EnergyValueStatus:
 def _reason_code(
     status: EnergyValueStatus,
     value: float | None,
-    explicit: object = "",
+    explicit: object,
 ) -> str:
     if isinstance(explicit, str) and explicit:
         return explicit

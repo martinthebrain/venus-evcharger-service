@@ -10,6 +10,7 @@ from venus_evcharger.ipc.energy_snapshots import (
     EnergyTopologySnapshot,
 )
 from venus_evcharger.ipc.energy_types import (
+    ENERGY_INPUTS_SCHEMA_VERSION,
     ENERGY_IPC_SCHEMA_VERSION,
     ENERGY_REFRESH_COMMAND_KIND,
     EnergyRefreshScope,
@@ -22,6 +23,7 @@ from venus_evcharger.ipc.energy_values import MeasuredValue
 
 __all__ = [
     "ENERGY_IPC_SCHEMA_VERSION",
+    "ENERGY_INPUTS_SCHEMA_VERSION",
     "ENERGY_REFRESH_COMMAND_KIND",
     "EnergyInputsSnapshot",
     "EnergyRefreshRequest",

@@ -42,7 +42,6 @@ from venus_evcharger.inputs.helper.sources import (
     _projection_quality,
     _projection_status_rank,
     _select_pv_projection,
-    _source_scope,
     _valid_gateway_observation_time,
     empty_battery_snapshot,
     gateway_battery_snapshot,
@@ -398,11 +397,6 @@ class ExternalEnergyPayloadContractTests(unittest.TestCase):
             _measurement_observed_at(MeasuredValue(1.0, 0.001, "fresh", 1.0)),
             0.001,
         )
-        self.assertEqual(_source_scope("grid"), "grid")
-        self.assertEqual(_source_scope("pv"), "all")
-        self.assertEqual(_source_scope("battery"), "all")
-        self.assertEqual(_source_scope("unknown"), "all")
-
     def test_cycle_orchestration_reuses_one_poll_and_one_projection_chain(self) -> None:
         definition = EnergySourceDefinition("external", "battery", "command_json", "/source.ini")
         external = EnergySourceSnapshot(

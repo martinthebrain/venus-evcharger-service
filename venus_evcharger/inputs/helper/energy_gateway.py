@@ -10,7 +10,12 @@ from collections.abc import Callable
 
 from venus_evcharger.dbus_gateway_client import GatewayClient
 from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
-from venus_evcharger.inputs.helper.contracts import EnergyGatewayClientPort, EnergySnapshotReaderPort, SnapshotPort
+from venus_evcharger.inputs.helper.contracts import (
+    EnergyGatewayClientPort,
+    EnergyMeasurementKey,
+    EnergySnapshotReaderPort,
+    SnapshotPort,
+)
 from venus_evcharger.ipc.energy import (
     EnergyInputsSnapshot,
     EnergyRefreshRequest,
@@ -46,16 +51,15 @@ class GatewayEnergySnapshots:
         )
         return self._topology
 
-    def measurement(self, scope: EnergyRefreshScope) -> MeasuredValue | None:
+    def measurement(self, key: EnergyMeasurementKey) -> MeasuredValue | None:
         if self._inputs is None:
             return None
-        if scope == "pv":
-            return self._inputs.pv_power_w
-        if scope == "grid":
-            return self._inputs.grid_power_w
-        if scope == "battery":
-            return self._inputs.battery_soc
-        return None
+        return {
+            "pv": self._inputs.pv_power_w,
+            "grid": self._inputs.grid_power_w,
+            "battery": self._inputs.battery_soc,
+            "battery_power": self._inputs.battery_net_power_w,
+        }.get(key)
 
     def request_refresh(
         self,

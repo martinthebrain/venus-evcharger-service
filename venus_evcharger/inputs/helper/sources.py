@@ -9,7 +9,11 @@ import time
 from venus_evcharger.energy import read_energy_source_step
 from venus_evcharger.energy.read_steps import EnergySourceStepReader
 from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
-from venus_evcharger.inputs.helper.contracts import EnergySnapshotReaderPort, Snapshot
+from venus_evcharger.inputs.helper.contracts import (
+    EnergyMeasurementKey,
+    EnergySnapshotReaderPort,
+    Snapshot,
+)
 from venus_evcharger.inputs.helper.external_contracts import (
     ExternalEnergyCycle,
     ProjectedEnergyValue,
@@ -33,8 +37,9 @@ class AutoInputSources:
     ) -> None:
         self.settings = settings
         self.gateway = gateway
-        self._measurements: dict[EnergyRefreshScope, MeasuredValue | None] = {}
+        self._measurements: dict[EnergyMeasurementKey, MeasuredValue | None] = {}
         self._gateway_battery: MeasuredValue | None = None
+        self._gateway_battery_power: MeasuredValue | None = None
         self._battery_observed_at: float | None = None
         self._external_cycle: ExternalEnergyCycle | None = None
         self._pv_projection: ProjectedEnergyValue | None = None
@@ -53,7 +58,12 @@ class AutoInputSources:
     def prepare_cycle(self) -> None:
         current = time.time()
         self.gateway.refresh_inputs()
-        scopes: tuple[EnergyRefreshScope, ...] = ("pv", "grid", "battery")
+        scopes: tuple[EnergyMeasurementKey, ...] = (
+            "pv",
+            "grid",
+            "battery",
+            "battery_power",
+        )
         self._measurements = {
             scope: self.gateway.measurement(scope)
             for scope in scopes
@@ -67,7 +77,11 @@ class AutoInputSources:
     def _prepare_external_cycle(self, current: float) -> None:
         self._external_cycle = None
         self._gateway_battery = self._valid_battery_measurement(current)
-        self._battery_observed_at = _measurement_observed_at(self._gateway_battery)
+        self._gateway_battery_power = self._valid_measurement("battery_power", current)
+        self._battery_observed_at = _oldest_observation(
+            self._gateway_battery,
+            self._gateway_battery_power,
+        )
         gateway_pv = self._projected_gateway_value("pv", current)
         if not self.external.enabled:
             self._pv_projection = gateway_pv
@@ -85,8 +99,9 @@ class AutoInputSources:
             return _projected_observed_at(self._pv_projection)
         if source_name == "battery":
             return self._battery_observed_at
-        measurement = self._measurements.get(_source_scope(source_name))
-        return _measurement_observed_at(measurement)
+        if source_name == "grid":
+            return _measurement_observed_at(self._measurements.get("grid"))
+        return None
 
     def pv_power(self) -> float | None:
         if self._pv_projection is None:
@@ -96,7 +111,12 @@ class AutoInputSources:
         return self._pv_projection.value
 
     def grid_power(self) -> float | None:
-        return self._numeric_value("grid")
+        measurement = self._valid_measurement("grid", time.time())
+        if measurement is None:
+            self._request_missing("grid")
+            return None
+        assert measurement.value is not None
+        return float(measurement.value)
 
     def battery_snapshot(self) -> Snapshot:
         measurement = self._gateway_battery
@@ -109,6 +129,7 @@ class AutoInputSources:
         source_count = max(1, len(measurement.source_ids))
         return gateway_battery_snapshot(
             measurement.value,
+            net_power_w=_measurement_value(self._gateway_battery_power),
             confidence=measurement.confidence,
             source_count=source_count,
         )
@@ -127,20 +148,12 @@ class AutoInputSources:
             return empty_battery_snapshot()
         return dict(self._external_cycle.battery)
 
-    def _numeric_value(self, scope: EnergyRefreshScope) -> float | None:
-        measurement = self._valid_measurement(scope, time.time())
-        if measurement is None:
-            self._request_missing(scope)
-            return None
-        assert measurement.value is not None
-        return float(measurement.value)
-
     def _valid_measurement(
         self,
-        scope: EnergyRefreshScope,
+        key: EnergyMeasurementKey,
         current: float,
     ) -> MeasuredValue | None:
-        measurement = self._measurements.get(scope)
+        measurement = self._measurements.get(key)
         if measurement is None:
             return None
         if not _contributing_measurement_status(measurement.status):
@@ -155,7 +168,7 @@ class AutoInputSources:
 
     def _projected_gateway_value(
         self,
-        scope: EnergyRefreshScope,
+        scope: EnergyMeasurementKey,
         current: float,
     ) -> ProjectedEnergyValue | None:
         measurement = self._valid_measurement(scope, current)
@@ -179,6 +192,7 @@ class AutoInputSources:
 def gateway_battery_snapshot(
     battery_soc: float,
     *,
+    net_power_w: float | None = None,
     confidence: float = 1.0,
     source_count: int = 1,
 ) -> Snapshot:
@@ -193,6 +207,9 @@ def gateway_battery_snapshot(
             "battery_online_source_count": normalized_count,
             "battery_valid_soc_source_count": normalized_count,
             "battery_battery_source_count": normalized_count,
+            "battery_combined_charge_power_w": _charge_power(net_power_w),
+            "battery_combined_discharge_power_w": _discharge_power(net_power_w),
+            "battery_combined_net_power_w": net_power_w,
         }
     )
     return payload
@@ -290,7 +307,24 @@ def _measurement_observed_at(
     return float(measurement.observed_at)
 
 
-def _source_scope(source_name: str) -> EnergyRefreshScope:
-    if source_name == "grid":
-        return "grid"
-    return "all"
+def _measurement_value(measurement: MeasuredValue | None) -> float | None:
+    if measurement is None or measurement.value is None:
+        return None
+    return float(measurement.value)
+
+
+def _oldest_observation(*measurements: MeasuredValue | None) -> float | None:
+    timestamps = tuple(
+        observed_at
+        for measurement in measurements
+        if (observed_at := _measurement_observed_at(measurement)) is not None
+    )
+    return min(timestamps) if timestamps else None
+
+
+def _charge_power(net_power_w: float | None) -> float | None:
+    return None if net_power_w is None else max(0.0, -float(net_power_w))
+
+
+def _discharge_power(net_power_w: float | None) -> float | None:
+    return None if net_power_w is None else max(0.0, float(net_power_w))

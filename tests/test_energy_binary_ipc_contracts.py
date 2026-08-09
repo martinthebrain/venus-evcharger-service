@@ -52,6 +52,7 @@ def _snapshot() -> EnergyInputsSnapshot:
         grid_power_w=_measurement(-123.5, source_ids=("grid",)),
         pv_power_w=_measurement(0.0, status="stale", source_ids=("pv-ac", "pv-dc"), reason_code="night"),
         battery_soc=_measurement(None, status="unavailable", source_ids=(), reason_code="missing"),
+        battery_net_power_w=_measurement(-250.0, source_ids=("battery",)),
     )
 
 
@@ -60,7 +61,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         snapshot = _snapshot()
         encoded = binary.encode_energy_inputs(snapshot)
 
-        self.assertEqual(encoded[:4], b"VEI1")
+        self.assertEqual(encoded[:4], b"VEI2")
         self.assertEqual(binary.decode_energy_inputs(encoded), snapshot)
         self.assertLess(len(encoded), len(str(snapshot.to_payload()).encode()))
 
@@ -72,15 +73,18 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
             grid_power_w=MeasuredValue(4.0, 5.0, "fresh", 0.5, (), ""),
             pv_power_w=MeasuredValue(None, 0.0, "unavailable", 0.0, (), ""),
             battery_soc=MeasuredValue(6.0, 7.0, "error", 0.25, (), ""),
+            battery_net_power_w=MeasuredValue(-8.0, 7.0, "fresh", 0.75, (), ""),
         )
         expected = b"".join(
             (
-                struct.pack(">4sBQQd", b"VEI1", 1, 1, 3, 7.0),
+                struct.pack(">4sBQQd", b"VEI2", 2, 1, 3, 7.0),
                 struct.pack(">BBdddH", 0, 1, 4.0, 5.0, 0.5, 0),
                 b"\x00\x00",
                 struct.pack(">BBdddH", 2, 0, 0.0, 0.0, 0.0, 0),
                 b"\x00\x00",
                 struct.pack(">BBdddH", 3, 1, 6.0, 7.0, 0.25, 0),
+                b"\x00\x00",
+                struct.pack(">BBdddH", 0, 1, -8.0, 7.0, 0.75, 0),
                 b"\x00\x00",
             )
         )
@@ -146,7 +150,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         cases = (
             b"",
             b"bad!" + encoded[4:],
-            encoded[:4] + b"\x02" + encoded[5:],
+            encoded[:4] + b"\x03" + encoded[5:],
             encoded[:-1],
             encoded + b"x",
             encoded[:29] + b"\xff" + encoded[30:],
@@ -163,11 +167,11 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         cases = (
             (b"x" * 65537, binary._PAYLOAD_SIZE_ERROR),
             (b"bad!" + encoded[4:], binary._INVALID_MAGIC_ERROR),
-            (encoded[:4] + b"\x02" + encoded[5:], binary._UNSUPPORTED_SCHEMA_ERROR),
+            (encoded[:4] + b"\x03" + encoded[5:], binary._UNSUPPORTED_SCHEMA_ERROR),
             (encoded[:29] + b"\xff" + encoded[30:], binary._INVALID_STATUS_ERROR),
             (encoded[:30] + b"\x02" + encoded[31:], binary._INVALID_VALUE_MARKER_ERROR),
             (b"", binary._TRUNCATED_PAYLOAD_ERROR),
-            (encoded[:-1], binary._TRUNCATED_TEXT_ERROR),
+            (encoded[:-2] + b"\x00\x01", binary._TRUNCATED_TEXT_ERROR),
             (encoded + b"x", binary._TRAILING_DATA_ERROR),
         )
         for payload, reason in cases:
@@ -181,7 +185,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         with patch.object(
             reader,
             "unpack",
-            return_value=("VEI1", 1, 1, 1, 1.0),
+            return_value=("VEI2", 2, 1, 1, 1.0),
         ):
             with self.assertRaisesRegex(ValueError, "invalid wire value type"):
                 reader.header()
@@ -278,7 +282,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
     def test_gateway_client_prefers_split_snapshots_and_falls_back_to_canonical_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = gateway_paths(str(Path(temp_dir) / "run"))
-            self.assertEqual(paths.energy_inputs_path, str(Path(paths.run_dir) / "energy-inputs.v1.bin"))
+            self.assertEqual(paths.energy_inputs_path, str(Path(paths.run_dir) / "energy-inputs.v2.bin"))
             self.assertEqual(paths.energy_topology_path, str(Path(paths.run_dir) / "energy-topology.json"))
             captured_at = time.time()
             inputs = replace(_snapshot(), captured_at=captured_at)

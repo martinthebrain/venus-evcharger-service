@@ -190,7 +190,7 @@ class DbusEnergyDiscoveryManager:
     def read_keys_for_source(self, source_id: str) -> tuple[str, ...]:
         for source in self._source_descriptors():
             if source.source_id == source_id:
-                return _read_keys_for_kind(source.kind)
+                return self._read_keys_for_kind(source.kind)
         return ()
 
     def introspection_targets(self) -> list[IntrospectionTarget]:
@@ -231,15 +231,29 @@ class DbusEnergyDiscoveryManager:
 
     def _battery_descriptors(self) -> list[EnergySourceDescriptor]:
         spec = self._specs.get("battery_soc", {})
+        capabilities = ("soc", "net_power") if self._battery_power_configured() else ("soc",)
         return [
             EnergySourceDescriptor(
                 source_id=opaque_energy_source_id("battery", service),
                 kind="battery",
                 state=self._service_state(service),
-                capabilities=("soc",),
+                capabilities=capabilities,
             )
             for service in self.services_for(spec)
         ]
+
+    def _battery_power_configured(self) -> bool:
+        spec = self._specs.get("battery_net_power_w", {})
+        return bool(read_spec_text(spec, "service") and read_spec_text(spec, "path"))
+
+    def _read_keys_for_kind(self, kind: EnergySourceKind) -> tuple[str, ...]:
+        if kind == "battery":
+            return (
+                ("battery_soc", "battery_net_power_w")
+                if self._battery_power_configured()
+                else ("battery_soc",)
+            )
+        return _read_keys_for_kind(kind)
 
     def _service_state(self, service: str) -> EnergySourceState:
         if not self._service_names:
@@ -265,7 +279,7 @@ class DbusEnergyDiscoveryManager:
     def _battery_introspection_targets(self) -> list[IntrospectionTarget]:
         spec = self._specs.get("battery_soc", {})
         path = read_spec_text(spec, "path")
-        return [
+        targets = [
             IntrospectionTarget(
                 service,
                 path,
@@ -276,6 +290,20 @@ class DbusEnergyDiscoveryManager:
             for service in self.services_for(spec)
             if path
         ]
+        power_spec = self._specs.get("battery_net_power_w", {})
+        power_service = read_spec_text(power_spec, "service")
+        power_path = read_spec_text(power_spec, "path")
+        if power_service and power_path:
+            targets.append(
+                IntrospectionTarget(
+                    power_service,
+                    power_path,
+                    70,
+                    "battery",
+                    "configured-battery-power-field",
+                )
+            )
+        return targets
 
     def _pv_introspection_targets(self) -> list[IntrospectionTarget]:
         spec = self._specs.get("pv_power_w", {})

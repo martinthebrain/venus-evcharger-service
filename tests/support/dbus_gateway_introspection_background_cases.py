@@ -125,6 +125,13 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
                         "battery",
                         "discovered-battery-field",
                     ),
+                    (
+                        "com.victronenergy.system",
+                        "/Dc/Battery/Power",
+                        70,
+                        "battery",
+                        "configured-battery-power-field",
+                    ),
                 ],
             )
             pv_targets = [value for value in target_values if value[3] == "pv"]
@@ -221,6 +228,13 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
                     ("custom.grid", "/Custom/L2", 80, "grid", "configured-grid-field"),
                     ("custom.grid", "/Custom/L3", 80, "grid", "configured-grid-field"),
                     ("custom.battery.1", "/Custom/Soc", 70, "battery", "discovered-battery-field"),
+                    (
+                        "com.victronenergy.system",
+                        "/Dc/Battery/Power",
+                        70,
+                        "battery",
+                        "configured-battery-power-field",
+                    ),
                     ("custom.pv.1", "/Custom/Pv", 30, "pv", "discovered-ac-pv-field"),
                 ],
             )

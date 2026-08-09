@@ -203,6 +203,8 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             },
             charge_penalty=120.0,
             discharge_penalty=80.0,
+            observed_charge_power=125.0,
+            observed_discharge_power=85.0,
             max_charge_ratio=0.45,
             max_discharge_ratio=0.35,
             effective_penalty_w=55.0,
@@ -233,8 +235,10 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
             payload,
             {
                 "surplus_penalty_w": 255.0,
-                "charge_power_w": 120.0,
-                "discharge_power_w": 80.0,
+                "charge_power_w": 125.0,
+                "discharge_power_w": 85.0,
+                "charge_penalty_w": 120.0,
+                "discharge_penalty_w": 80.0,
                 "charge_activity_ratio": 0.45,
                 "discharge_activity_ratio": 0.35,
                 "mode": "mixed",
@@ -280,30 +284,36 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
         controller.service.auto_battery_discharge_balance_policy_enabled = False
 
         self.assertEqual(
-            controller.balance._combined_battery_power_payload(0.5, 0.5, 0.1, 0.2),
+            controller.balance._combined_battery_power_payload(0.6, 0.7, 0.5, 0.5, 0.1, 0.2),
             {
-                "charge_power_w": 0.5,
-                "discharge_power_w": 0.5,
+                "charge_power_w": 0.6,
+                "discharge_power_w": 0.7,
+                "charge_penalty_w": 0.5,
+                "discharge_penalty_w": 0.5,
                 "charge_activity_ratio": 0.1,
                 "discharge_activity_ratio": 0.2,
                 "mode": "mixed",
             },
         )
         self.assertEqual(
-            controller.balance._combined_battery_power_payload(0.0, 0.0, None, None),
+            controller.balance._combined_battery_power_payload(0.0, 0.0, 0.0, 0.0, None, None),
             {
                 "charge_power_w": None,
                 "discharge_power_w": None,
+                "charge_penalty_w": 0.0,
+                "discharge_penalty_w": 0.0,
                 "charge_activity_ratio": None,
                 "discharge_activity_ratio": None,
                 "mode": "idle",
             },
         )
         self.assertEqual(
-            controller.balance._combined_battery_power_payload(0.0, 25.0, None, 0.2),
+            controller.balance._combined_battery_power_payload(0.0, 30.0, 0.0, 25.0, None, 0.2),
             {
                 "charge_power_w": None,
-                "discharge_power_w": 25.0,
+                "discharge_power_w": 30.0,
+                "charge_penalty_w": 0.0,
+                "discharge_penalty_w": 25.0,
                 "charge_activity_ratio": None,
                 "discharge_activity_ratio": 0.2,
                 "mode": "discharging",
@@ -461,8 +471,10 @@ class TestAutoBatteryBalanceContracts(unittest.TestCase):
 
         payload = controller.balance._combined_battery_activity_context()
 
-        self.assertEqual(payload["charge_power_w"], 11.0)
-        self.assertEqual(payload["discharge_power_w"], 22.0)
+        self.assertEqual(payload["charge_power_w"], 10.0)
+        self.assertEqual(payload["discharge_power_w"], 20.0)
+        self.assertEqual(payload["charge_penalty_w"], 11.0)
+        self.assertEqual(payload["discharge_penalty_w"], 22.0)
         self.assertEqual(payload["charge_activity_ratio"], 0.42)
         self.assertEqual(payload["discharge_activity_ratio"], 0.66)
         self.assertEqual(payload["surplus_penalty_w"], 55.0)

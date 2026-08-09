@@ -248,6 +248,8 @@ class AutoPolicy:
     high_soc_release_threshold: float = 50.0
     min_soc: float = 30.0
     resume_soc: float = 33.0
+    ev_priority_soc: float = 40.0
+    ev_priority_release_soc: float = 38.0
     start_max_grid_import_watts: float = 50.0
     stop_grid_import_watts: float = 300.0
     grid_recovery_start_seconds: float = 10.0
@@ -330,6 +332,14 @@ class AutoPolicy:
         """Clamp invalid policy values while keeping semantic relationships intact."""
         self.min_soc = self._clamp_percentage(self.min_soc, "AutoMinSoc")
         self.resume_soc = self._clamp_percentage(self.resume_soc, "AutoResumeSoc")
+        self.ev_priority_soc = self._clamp_percentage(
+            self.ev_priority_soc,
+            "AutoEvPrioritySoc",
+        )
+        self.ev_priority_release_soc = self._clamp_percentage(
+            self.ev_priority_release_soc,
+            "AutoEvPriorityReleaseSoc",
+        )
         self.high_soc_threshold = self._clamp_percentage(self.high_soc_threshold, "AutoHighSocThreshold")
         self.high_soc_release_threshold = self._clamp_percentage(
             self.high_soc_release_threshold,
@@ -349,6 +359,13 @@ class AutoPolicy:
                 self.min_soc,
             )
             self.resume_soc = float(self.min_soc)
+        if self.ev_priority_release_soc > self.ev_priority_soc:
+            logging.warning(
+                "AutoEvPriorityReleaseSoc %s above AutoEvPrioritySoc %s, clamping",
+                self.ev_priority_release_soc,
+                self.ev_priority_soc,
+            )
+            self.ev_priority_release_soc = float(self.ev_priority_soc)
 
         self.grid_recovery_start_seconds = self._clamp_non_negative(
             self.grid_recovery_start_seconds,

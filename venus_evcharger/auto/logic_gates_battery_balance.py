@@ -33,6 +33,16 @@ class AutoBatteryBalance:
             profiles,
             learning_summary,
         )
+        observed_charge_power = self._observed_battery_power(
+            cluster,
+            "battery_combined_charge_power_w",
+            charge_penalty,
+        )
+        observed_discharge_power = self._observed_battery_power(
+            cluster,
+            "battery_combined_discharge_power_w",
+            discharge_penalty,
+        )
         behavior = self.learning._battery_learning_behavior(learning_summary)
         forecast = derive_energy_forecast(cluster, learning_summary)
         scaled_charge_penalty, scaled_discharge_penalty = self._combined_battery_scaled_penalties(
@@ -58,6 +68,8 @@ class AutoBatteryBalance:
             forecast=forecast,
             charge_penalty=scaled_charge_penalty,
             discharge_penalty=scaled_discharge_penalty,
+            observed_charge_power=observed_charge_power,
+            observed_discharge_power=observed_discharge_power,
             max_charge_ratio=max_charge_ratio,
             max_discharge_ratio=max_discharge_ratio,
             effective_penalty_w=effective_penalty_w,
@@ -65,6 +77,15 @@ class AutoBatteryBalance:
             coordination_context=coordination_context,
             coordination_policy_context=coordination_policy_context,
         )
+
+    def _observed_battery_power(
+        self,
+        cluster: Mapping[str, Any],
+        key: str,
+        fallback: float,
+    ) -> float:
+        value = self.learning._non_negative_optional_float(cluster.get(key))
+        return float(fallback) if value is None else value
 
     @staticmethod
     def _combined_battery_learning_summary(profiles: dict[str, Any]) -> dict[str, float | int | None]:
@@ -236,6 +257,8 @@ class AutoBatteryBalance:
         forecast: Mapping[str, Any],
         charge_penalty: float,
         discharge_penalty: float,
+        observed_charge_power: float,
+        observed_discharge_power: float,
         max_charge_ratio: float | None,
         max_discharge_ratio: float | None,
         effective_penalty_w: float,
@@ -246,7 +269,16 @@ class AutoBatteryBalance:
         payload: dict[str, float | int | str | None] = {
             "surplus_penalty_w": float(charge_penalty + discharge_penalty + effective_penalty_w),
         }
-        payload.update(self._combined_battery_power_payload(charge_penalty, discharge_penalty, max_charge_ratio, max_discharge_ratio))
+        payload.update(
+            self._combined_battery_power_payload(
+                observed_charge_power,
+                observed_discharge_power,
+                charge_penalty,
+                discharge_penalty,
+                max_charge_ratio,
+                max_discharge_ratio,
+            )
+        )
         payload.update(self._combined_battery_learning_payload(learning_summary))
         payload.update(self._combined_battery_behavior_payload(behavior))
         payload.update(self._combined_battery_forecast_payload(cluster, forecast))
@@ -256,14 +288,18 @@ class AutoBatteryBalance:
 
     def _combined_battery_power_payload(
         self,
+        observed_charge_power: float,
+        observed_discharge_power: float,
         charge_penalty: float,
         discharge_penalty: float,
         max_charge_ratio: float | None,
         max_discharge_ratio: float | None,
     ) -> dict[str, float | int | str | None]:
         return {
-            "charge_power_w": charge_penalty if charge_penalty > 0.0 else None,
-            "discharge_power_w": discharge_penalty if discharge_penalty > 0.0 else None,
+            "charge_power_w": observed_charge_power if observed_charge_power > 0.0 else None,
+            "discharge_power_w": observed_discharge_power if observed_discharge_power > 0.0 else None,
+            "charge_penalty_w": charge_penalty,
+            "discharge_penalty_w": discharge_penalty,
             "charge_activity_ratio": max_charge_ratio,
             "discharge_activity_ratio": max_discharge_ratio,
             "mode": self.learning._battery_activity_mode(charge_penalty, discharge_penalty),

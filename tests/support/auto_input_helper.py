@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings, load_auto_input_helper_settings
-from venus_evcharger.inputs.helper.contracts import Snapshot
+from venus_evcharger.inputs.helper.contracts import EnergyMeasurementKey, Snapshot
 from venus_evcharger.ipc.energy import (
     EnergyInputsSnapshot,
     EnergyRefreshRequest,
@@ -69,7 +69,7 @@ class FakeEnergyGateway:
     def __init__(self) -> None:
         self.inputs: EnergyInputsSnapshot | None = None
         self.topology: EnergyTopologySnapshot | None = None
-        self.measurements: dict[EnergyRefreshScope, MeasuredValue | None] = {}
+        self.measurements: dict[EnergyMeasurementKey, MeasuredValue | None] = {}
         self.requests: list[tuple[EnergyRefreshScope, str, bool]] = []
         self.input_refreshes = 0
         self.topology_refreshes = 0
@@ -83,8 +83,8 @@ class FakeEnergyGateway:
         self.topology_refreshes += 1
         return self.topology
 
-    def measurement(self, scope: EnergyRefreshScope) -> MeasuredValue | None:
-        return self.measurements.get(scope)
+    def measurement(self, key: EnergyMeasurementKey) -> MeasuredValue | None:
+        return self.measurements.get(key)
 
     def request_refresh(
         self,

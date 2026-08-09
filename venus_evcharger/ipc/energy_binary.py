@@ -11,13 +11,13 @@ from typing import TypeVar
 from venus_evcharger.core.contracts import timestamp_age_within
 from venus_evcharger.core.shared import write_bytes_atomically
 from venus_evcharger.ipc.energy import (
-    ENERGY_IPC_SCHEMA_VERSION,
+    ENERGY_INPUTS_SCHEMA_VERSION,
     EnergyInputsSnapshot,
     EnergyValueStatus,
     MeasuredValue,
 )
 
-_MAGIC = b"VEI1"
+_MAGIC = b"VEI2"
 _MAX_PAYLOAD_BYTES = 65536
 _MAX_SOURCE_IDS = 64
 _HEADER = struct.Struct(">4sBQQd")
@@ -60,7 +60,12 @@ def encode_energy_inputs(snapshot: EnergyInputsSnapshot) -> bytes:
             snapshot.captured_at,
         )
     ]
-    for measurement in (snapshot.grid_power_w, snapshot.pv_power_w, snapshot.battery_soc):
+    for measurement in (
+        snapshot.grid_power_w,
+        snapshot.pv_power_w,
+        snapshot.battery_soc,
+        snapshot.battery_net_power_w,
+    ):
         chunks.extend(_encode_measurement(measurement))
     payload = b"".join(chunks)
     if len(payload) > _MAX_PAYLOAD_BYTES:
@@ -76,9 +81,9 @@ def decode_energy_inputs(payload: bytes) -> EnergyInputsSnapshot:
     magic, schema_version, sequence, topology_generation, captured_at = reader.header()
     if magic != _MAGIC:
         raise ValueError(_INVALID_MAGIC_ERROR)
-    if schema_version != ENERGY_IPC_SCHEMA_VERSION:
+    if schema_version != ENERGY_INPUTS_SCHEMA_VERSION:
         raise ValueError(_UNSUPPORTED_SCHEMA_ERROR)
-    measurements = tuple(_decode_measurement(reader) for _unused in range(3))
+    measurements = tuple(_decode_measurement(reader) for _unused in range(4))
     reader.require_complete()
     return EnergyInputsSnapshot(
         sequence=sequence,
@@ -87,6 +92,7 @@ def decode_energy_inputs(payload: bytes) -> EnergyInputsSnapshot:
         grid_power_w=measurements[0],
         pv_power_w=measurements[1],
         battery_soc=measurements[2],
+        battery_net_power_w=measurements[3],
     )
 
 

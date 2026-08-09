@@ -35,6 +35,14 @@ AUTO_METRIC_NUMERIC_FIELDS = (
     "threshold_scale",
     "stop_alpha",
     "surplus_volatility",
+    "battery_unadjusted_surplus_penalty_w",
+    "ev_priority_active",
+    "ev_priority_credit_w",
+    "ev_priority_available_surplus_w",
+    "ev_priority_reclaimable_charge_w",
+    "ev_priority_running_load_w",
+    "ev_priority_soc",
+    "ev_priority_release_soc",
 )
 AUTO_METRIC_TEXT_FIELDS = ("profile", "threshold_mode", "stop_alpha_stage")
 

@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import venus_evcharger.ipc.energy as energy_facade
 from venus_evcharger.ipc.energy import (
+    ENERGY_INPUTS_SCHEMA_VERSION,
     ENERGY_IPC_SCHEMA_VERSION,
     ENERGY_REFRESH_COMMAND_KIND,
     EnergySourceKind,
@@ -29,6 +30,7 @@ def _measurement() -> MeasuredValue:
 class EnergyIpcContracts(unittest.TestCase):
     def test_public_facade_exports_only_the_stable_energy_contract(self) -> None:
         expected_exports = {
+            "ENERGY_INPUTS_SCHEMA_VERSION",
             "ENERGY_IPC_SCHEMA_VERSION",
             "ENERGY_REFRESH_COMMAND_KIND",
             "EnergyInputsSnapshot",
@@ -143,18 +145,27 @@ class EnergyIpcContracts(unittest.TestCase):
 
     def test_inputs_round_trip_and_runtime_types(self) -> None:
         value = _measurement()
-        inputs = EnergyInputsSnapshot(7, 101.0, 3, value, value, value)
+        inputs = EnergyInputsSnapshot(7, 101.0, 3, value, value, value, value)
         self.assertEqual(EnergyInputsSnapshot.from_payload(inputs.to_payload()), inputs)
         with self.assertRaises(TypeError):
-            EnergyInputsSnapshot(1, 101.0, 1, cast(MeasuredValue, object()), value, value)
+            EnergyInputsSnapshot(1, 101.0, 1, cast(MeasuredValue, object()), value, value, value)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(-1, 101.0, 1, value, value, value)
+            EnergyInputsSnapshot(-1, 101.0, 1, value, value, value, value)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(1, 101.0, -1, value, value, value)
+            EnergyInputsSnapshot(1, 101.0, -1, value, value, value, value)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(1, 0.0, 1, value, value, value)
+            EnergyInputsSnapshot(1, 0.0, 1, value, value, value, value)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(1, 101.0, 1, value, value, value, schema_version=2)
+            EnergyInputsSnapshot(
+                1,
+                101.0,
+                1,
+                value,
+                value,
+                value,
+                value,
+                schema_version=ENERGY_INPUTS_SCHEMA_VERSION + 1,
+            )
         with self.assertRaisesRegex(
             ValueError,
             "grid_power_w observed_at exceeds captured_at tolerance",
@@ -164,6 +175,7 @@ class EnergyIpcContracts(unittest.TestCase):
                 98.999,
                 1,
                 value,
+                MeasuredValue(None, 0.0, "unknown", 0.0),
                 MeasuredValue(None, 0.0, "unknown", 0.0),
                 MeasuredValue(None, 0.0, "unknown", 0.0),
             )
@@ -222,7 +234,15 @@ class EnergyIpcContracts(unittest.TestCase):
 
     def test_snapshot_parsers_reject_untrusted_payload_shapes(self) -> None:
         measurement = _measurement().to_payload()
-        inputs = EnergyInputsSnapshot(1, 101.0, 1, _measurement(), _measurement(), _measurement()).to_payload()
+        inputs = EnergyInputsSnapshot(
+            1,
+            101.0,
+            1,
+            _measurement(),
+            _measurement(),
+            _measurement(),
+            _measurement(),
+        ).to_payload()
         topology = EnergyTopologySnapshot(1, 1.0, ()).to_payload()
         invalid_calls: tuple[tuple[Callable[[object], object], object], ...] = (
             (MeasuredValue.from_payload, []),

@@ -46,6 +46,11 @@ class TestAutoPolicyBuilders(unittest.TestCase):
         self.assertEqual(policy.high_soc_release_threshold, expected["high_release"])
         self.assertEqual(policy.min_soc, expected["min_soc"])
         self.assertEqual(policy.resume_soc, expected["resume_soc"])
+        self.assertEqual(policy.ev_priority_soc, expected.get("ev_priority_soc", 40.0))
+        self.assertEqual(
+            policy.ev_priority_release_soc,
+            expected.get("ev_priority_release_soc", 38.0),
+        )
         self.assertEqual(policy.start_max_grid_import_watts, expected["start_grid"])
         self.assertEqual(policy.stop_grid_import_watts, expected["stop_grid"])
         self.assertEqual(policy.grid_recovery_start_seconds, expected["grid_recovery"])
@@ -85,6 +90,8 @@ class TestAutoPolicyBuilders(unittest.TestCase):
                     "AutoHighSocReleaseThreshold": "63",
                     "AutoMinSoc": "31",
                     "AutoResumeSoc": "36",
+                    "AutoEvPrioritySoc": "44",
+                    "AutoEvPriorityReleaseSoc": "39",
                     "AutoStartMaxGridImportWatts": "55",
                     "AutoStopGridImportWatts": "355",
                     "AutoGridRecoveryStartSeconds": "14",
@@ -125,6 +132,8 @@ class TestAutoPolicyBuilders(unittest.TestCase):
                 "high_release": 63.0,
                 "min_soc": 31.0,
                 "resume_soc": 36.0,
+                "ev_priority_soc": 44.0,
+                "ev_priority_release_soc": 39.0,
                 "start_grid": 55.0,
                 "stop_grid": 355.0,
                 "grid_recovery": 14.0,

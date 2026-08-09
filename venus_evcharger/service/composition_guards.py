@@ -165,7 +165,7 @@ def is_auto_decision_service(value: object) -> TypeGuard[AutoDecisionServicePort
     ) and _has_callables(
         runtime,
         ("write_auto_audit_event", "pending_relay_command"),
-    ) and _has_callables(state, ("save_runtime_state",))
+    ) and _has_callables(state, ("save_runtime_state", "last_accepted_field"))
 
 
 def require_auto_decision_service(value: object) -> AutoDecisionServicePort:

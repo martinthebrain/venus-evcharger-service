@@ -7,6 +7,7 @@ import unittest
 from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.semantic import energy_inputs_snapshot
 from venus_evcharger.dbus_adapter.read.spec import ReadSpecs
+from venus_evcharger.ipc.energy import MeasuredValue
 
 
 def _specs() -> ReadSpecs:
@@ -25,6 +26,10 @@ def _specs() -> ReadSpecs:
         "battery_soc": {
             "prefix": "com.victronenergy.battery",
             "path": "/Soc",
+        },
+        "battery_net_power_w": {
+            "service": "com.victronenergy.system",
+            "path": "/Dc/Battery/Power",
         },
     }
 
@@ -108,7 +113,10 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
         self.assertEqual(self.discovery.read_keys_for_source(by_kind["grid"]), ("grid_power_w",))
         self.assertEqual(self.discovery.read_keys_for_source(by_kind["pv_ac"]), ("pv_power_w",))
         self.assertEqual(self.discovery.read_keys_for_source(by_kind["pv_dc"]), ("pv_power_w",))
-        self.assertEqual(self.discovery.read_keys_for_source(by_kind["battery"]), ("battery_soc",))
+        self.assertEqual(
+            self.discovery.read_keys_for_source(by_kind["battery"]),
+            ("battery_soc", "battery_net_power_w"),
+        )
         self.assertEqual(self.discovery.read_keys_for_source("missing"), ())
 
     def test_introspection_targets_remain_adapter_private(self) -> None:
@@ -127,6 +135,7 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
                 ("grid", 80, "configured-grid-field"),
                 ("grid", 80, "configured-grid-field"),
                 ("battery", 70, "discovered-battery-field"),
+                ("battery", 70, "configured-battery-power-field"),
                 ("pv", 30, "discovered-ac-pv-field"),
                 ("pv", 30, "configured-dc-pv-field"),
             ],
@@ -147,7 +156,11 @@ class GatewayEnergyDiscoveryContracts(unittest.TestCase):
         self.assertEqual([item.kind for item in disabled.topology_snapshot(captured_at=1.0).sources], ["grid"])
         self.assertEqual(
             [target.reason for target in disabled.introspection_targets()],
-            ["configured-grid-field", "configured-grid-field"],
+            [
+                "configured-grid-field",
+                "configured-grid-field",
+                "configured-battery-power-field",
+            ],
         )
         specs["pv_power_w"]["use_dc_pv"] = True
         specs["pv_power_w"]["dc_path"] = ""
@@ -190,6 +203,13 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
                 "grid_power_w": {"value": -20, "updated_at": 98.0, "status": "fresh", "confidence": 1.0},
                 "pv_power_w": {"value": 500.5, "confirmed_at": 97.0, "status": "stale", "confidence": 0.7},
                 "battery_soc": {"value": 75.0, "updated_at": 99.0, "status": "fresh", "confidence": 2.0},
+                "battery_net_power_w": {
+                    "value": 1730.0,
+                    "updated_at": 99.0,
+                    "status": "fresh",
+                    "confidence": 1.0,
+                    "reason_code": "native-battery-power",
+                },
             },
             self.discovery,
             sequence=4,
@@ -202,8 +222,18 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
         self.assertEqual(snapshot.pv_power_w.status, "stale")
         self.assertEqual(snapshot.pv_power_w.reason_code, "observation-stale")
         self.assertEqual(snapshot.pv_power_w.observed_at, 97.0)
+        self.assertEqual(snapshot.pv_power_w.confidence, 0.7)
         self.assertEqual(snapshot.battery_soc.confidence, 1.0)
-        self.assertTrue(snapshot.pv_power_w.source_ids)
+        self.assertEqual(snapshot.battery_net_power_w.value, -1730.0)
+        self.assertEqual(snapshot.battery_net_power_w.status, "fresh")
+        self.assertEqual(snapshot.battery_net_power_w.reason_code, "native-battery-power")
+        self.assertEqual(snapshot.grid_power_w.source_ids, self.discovery.source_ids("grid"))
+        self.assertEqual(
+            snapshot.pv_power_w.source_ids,
+            (*self.discovery.source_ids("pv_ac"), *self.discovery.source_ids("pv_dc")),
+        )
+        self.assertEqual(snapshot.battery_soc.source_ids, self.discovery.source_ids("battery"))
+        self.assertEqual(snapshot.battery_net_power_w.source_ids, self.discovery.source_ids("battery"))
         self.assertTrue(all("com.victronenergy" not in item for item in snapshot.pv_power_w.source_ids))
 
     def test_missing_invalid_and_error_entries_are_normalized(self) -> None:
@@ -217,8 +247,17 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
             captured_at=100.0,
         )
         self.assertEqual(snapshot.sequence, 0)
-        self.assertEqual(snapshot.grid_power_w.status, "unknown")
-        self.assertEqual(snapshot.grid_power_w.reason_code, "not-observed")
+        self.assertEqual(
+            snapshot.grid_power_w,
+            MeasuredValue(
+                value=None,
+                observed_at=0.0,
+                status="unknown",
+                confidence=0.0,
+                source_ids=self.discovery.source_ids("grid"),
+                reason_code="not-observed",
+            ),
+        )
         self.assertEqual(snapshot.pv_power_w.status, "unavailable")
         self.assertEqual(snapshot.pv_power_w.reason_code, "source-unavailable")
         self.assertEqual(snapshot.battery_soc.status, "error")
@@ -254,6 +293,35 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
             captured_at=2.0,
         )
         self.assertEqual(unknown_missing.grid_power_w.reason_code, "not-observed")
+
+    def test_stale_missing_value_and_subunit_metadata_are_normalized_exactly(self) -> None:
+        snapshot = energy_inputs_snapshot(
+            {
+                "grid_power_w": {
+                    "value": 10.0,
+                    "updated_at": 0.5,
+                    "status": "fresh",
+                    "confidence": 0.25,
+                    "reason_code": 7,
+                },
+                "pv_power_w": {
+                    "value": None,
+                    "updated_at": 0.5,
+                    "status": "stale",
+                    "confidence": 0.25,
+                },
+            },
+            self.discovery,
+            sequence=1,
+            captured_at=2.0,
+        )
+
+        self.assertEqual(snapshot.grid_power_w.observed_at, 0.5)
+        self.assertEqual(snapshot.grid_power_w.confidence, 0.25)
+        self.assertEqual(snapshot.grid_power_w.reason_code, "")
+        self.assertEqual(snapshot.pv_power_w.value, None)
+        self.assertEqual(snapshot.pv_power_w.status, "unavailable")
+        self.assertEqual(snapshot.pv_power_w.reason_code, "source-unavailable")
 
 
 if __name__ == "__main__":

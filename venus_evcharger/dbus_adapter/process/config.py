@@ -157,6 +157,7 @@ def configured_read_specs(defaults: configparser.SectionProxy) -> ReadSpecs:
         "grid_power_w": _grid_read_spec(defaults),
         "pv_power_w": _pv_read_spec(defaults),
         "battery_soc": _battery_read_spec(defaults, battery_service),
+        "battery_net_power_w": _battery_power_read_spec(defaults),
     }
 
 
@@ -321,6 +322,16 @@ def _battery_read_spec(defaults: configparser.SectionProxy, battery_service: str
         "prefix": str(defaults.get("AutoBatteryServicePrefix", "com.victronenergy.battery")).strip(),
         "path": str(defaults.get("AutoBatterySocPath", "/Dc/Battery/Soc")).strip(),
         "aggregate": "first-service" if not battery_service else "",
+        "interval": 2.0,
+        "priority": "read",
+    }
+
+
+def _battery_power_read_spec(defaults: configparser.SectionProxy) -> ReadSpec:
+    """Return the native battery-power read normalized at the semantic boundary."""
+    return {
+        "service": str(defaults.get("AutoBatteryPowerService", "com.victronenergy.system")).strip(),
+        "path": str(defaults.get("AutoBatteryPowerPath", "/Dc/Battery/Power")).strip(),
         "interval": 2.0,
         "priority": "read",
     }
