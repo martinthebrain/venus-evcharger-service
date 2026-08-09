@@ -47,7 +47,9 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
                 run_non_write_command(adapter, refresh.to_command(source="test")),
                 "applied",
             )
-            force_reads.assert_called_once_with(("grid_power_w", "pv_power_w", "battery_soc"))
+            force_reads.assert_called_once_with(
+                ("grid_power_w", "pv_power_w", "battery_soc", "battery_net_power_w")
+            )
             force_discovery.assert_called_once_with()
             force_reads.reset_mock()
             battery_refresh = EnergyRefreshRequest("battery", "battery", 0.0)
@@ -55,7 +57,7 @@ class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
                 run_non_write_command(adapter, battery_refresh.to_command(source="test")),
                 "applied",
             )
-            force_reads.assert_called_once_with(("battery_soc",))
+            force_reads.assert_called_once_with(("battery_soc", "battery_net_power_w"))
             self.assertEqual(
                 run_non_write_command(
                     adapter, {"type": "refresh_value", "key": "grid_power_w", "service": "svc", "path": "/P"}

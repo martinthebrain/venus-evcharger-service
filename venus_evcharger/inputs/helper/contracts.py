@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol, TypeAlias, runtime_checkable
+from typing import Literal, Protocol, TypeAlias, runtime_checkable
 
 from venus_evcharger.ipc.energy import (
     EnergyInputsSnapshot,
@@ -16,6 +16,7 @@ from venus_evcharger.ipc.energy import (
 from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 
 Snapshot: TypeAlias = dict[str, object]
+EnergyMeasurementKey = Literal["pv", "grid", "battery", "battery_power"]
 
 
 @runtime_checkable
@@ -43,7 +44,7 @@ class EnergySnapshotReaderPort(Protocol):  # pragma: no cover
 
     def refresh_topology(self) -> EnergyTopologySnapshot | None: ...
 
-    def measurement(self, scope: EnergyRefreshScope) -> MeasuredValue | None: ...
+    def measurement(self, key: EnergyMeasurementKey) -> MeasuredValue | None: ...
 
     def request_refresh(
         self,

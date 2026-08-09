@@ -6,7 +6,11 @@ from __future__ import annotations
 from typing import Protocol, TypeGuard
 
 from venus_evcharger.auto.policy import AutoPolicy
-from venus_evcharger.core.contracts_basic import non_negative_int, normalize_binary_flag
+from venus_evcharger.core.contracts_basic import (
+    finite_float_or_none,
+    non_negative_int,
+    normalize_binary_flag,
+)
 
 
 PendingRelayCommand = tuple[bool | None, float | None]
@@ -16,6 +20,8 @@ class AutoDecisionStatePort(Protocol):
     """State operation required by Auto decisions."""
 
     def save_runtime_state(self) -> object: ...
+
+    def last_accepted_field(self, field: str) -> object: ...
 
 
 class AutoDecisionRuntimePort(Protocol):
@@ -105,6 +111,11 @@ class AutoDecisionPort:
 
     def save_runtime_state(self) -> object:
         return self.service.state.save_runtime_state()
+
+    def charging_power_w(self) -> float:
+        """Return the last accepted charger power as a non-negative value."""
+        value = finite_float_or_none(self.service.state.last_accepted_field("ac_power_w"))
+        return max(0.0, value) if value is not None else 0.0
 
     def write_auto_audit_event(self, reason: str, cached: bool = False) -> object:
         return self.service.runtime.write_auto_audit_event(reason, cached)

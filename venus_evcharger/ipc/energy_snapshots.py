@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from venus_evcharger.core.contracts import timestamp_not_future
 from venus_evcharger.ipc.energy_types import (
+    ENERGY_INPUTS_SCHEMA_VERSION,
     ENERGY_IPC_SCHEMA_VERSION,
     EnergySourceKind,
     EnergySourceState,
@@ -105,10 +106,15 @@ class EnergyInputsSnapshot:
     grid_power_w: MeasuredValue
     pv_power_w: MeasuredValue
     battery_soc: MeasuredValue
-    schema_version: int = ENERGY_IPC_SCHEMA_VERSION
+    battery_net_power_w: MeasuredValue
+    schema_version: int = ENERGY_INPUTS_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        schema_version(self.schema_version, "energy inputs")
+        schema_version(
+            self.schema_version,
+            "energy inputs",
+            expected=ENERGY_INPUTS_SCHEMA_VERSION,
+        )
         non_negative_int(self.sequence, "energy inputs sequence")
         positive_float(self.captured_at, "energy inputs captured_at")
         non_negative_int(self.topology_generation, "energy inputs topology_generation")
@@ -116,6 +122,7 @@ class EnergyInputsSnapshot:
             ("grid_power_w", self.grid_power_w),
             ("pv_power_w", self.pv_power_w),
             ("battery_soc", self.battery_soc),
+            ("battery_net_power_w", self.battery_net_power_w),
         ):
             if not isinstance(measurement, MeasuredValue):
                 raise TypeError(f"energy inputs {name} must be a MeasuredValue")
@@ -133,6 +140,7 @@ class EnergyInputsSnapshot:
             "grid_power_w": self.grid_power_w.to_payload(),
             "pv_power_w": self.pv_power_w.to_payload(),
             "battery_soc": self.battery_soc.to_payload(),
+            "battery_net_power_w": self.battery_net_power_w.to_payload(),
         }
 
     @classmethod
@@ -148,12 +156,18 @@ class EnergyInputsSnapshot:
             grid_power_w=MeasuredValue.from_payload(item["grid_power_w"]),
             pv_power_w=MeasuredValue.from_payload(item["pv_power_w"]),
             battery_soc=MeasuredValue.from_payload(item["battery_soc"]),
+            battery_net_power_w=MeasuredValue.from_payload(item["battery_net_power_w"]),
         )
 
 
 def _snapshot_mapping(payload: object, label: str) -> Mapping[str, object]:
     item = mapping(payload, label)
-    if item.get("schema_version") != ENERGY_IPC_SCHEMA_VERSION:
+    expected_schema = (
+        ENERGY_IPC_SCHEMA_VERSION
+        if label == "energy topology"
+        else ENERGY_INPUTS_SCHEMA_VERSION
+    )
+    if item.get("schema_version") != expected_schema:
         raise ValueError(f"{label} has an unsupported schema_version")
     required = (
         {"schema_version", "generation", "captured_at", "sources"}
@@ -166,6 +180,7 @@ def _snapshot_mapping(payload: object, label: str) -> Mapping[str, object]:
             "grid_power_w",
             "pv_power_w",
             "battery_soc",
+            "battery_net_power_w",
         }
     )
     exact_fields(item, required=required, label=label)

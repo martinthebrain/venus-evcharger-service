@@ -32,6 +32,10 @@ def build_auto_policy_from_config(policy_cls: type["AutoPolicy"], defaults: Sect
         ),
         min_soc=min_soc,
         resume_soc=float(_config_value(defaults, "AutoResumeSoc", min_soc + 3)),
+        ev_priority_soc=float(_config_value(defaults, "AutoEvPrioritySoc", 40)),
+        ev_priority_release_soc=float(
+            _config_value(defaults, "AutoEvPriorityReleaseSoc", 38)
+        ),
         start_max_grid_import_watts=float(_config_value(defaults, "AutoStartMaxGridImportWatts", 50)),
         stop_grid_import_watts=float(_config_value(defaults, "AutoStopGridImportWatts", 300)),
         grid_recovery_start_seconds=float(

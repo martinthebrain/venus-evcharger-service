@@ -26,10 +26,10 @@ from venus_evcharger.ipc.energy import ENERGY_REFRESH_COMMAND_KIND, EnergyRefres
 
 OPTIONAL_INTROSPECTION_PRIORITY_MIN = 90
 ENERGY_REFRESH_KEYS_BY_SCOPE: dict[str, tuple[str, ...]] = {
-    "all": ("grid_power_w", "pv_power_w", "battery_soc"),
+    "all": ("grid_power_w", "pv_power_w", "battery_soc", "battery_net_power_w"),
     "grid": ("grid_power_w",),
     "pv": ("pv_power_w",),
-    "battery": ("battery_soc",),
+    "battery": ("battery_soc", "battery_net_power_w"),
 }
 
 

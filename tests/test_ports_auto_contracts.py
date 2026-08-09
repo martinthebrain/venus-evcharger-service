@@ -4,7 +4,7 @@
 import inspect
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.ports.auto import AutoDecisionPort, _require_pending_relay_command
@@ -58,6 +58,20 @@ class AutoDecisionPortContractTests(unittest.TestCase):
         state.save_runtime_state.assert_called_once_with()
         runtime.write_auto_audit_event.assert_called_once_with("running", True)
         runtime.pending_relay_command.assert_called_once_with()
+
+    def test_charging_power_is_finite_non_negative_and_semantically_named(self) -> None:
+        last_accepted = MagicMock(side_effect=(-5.0, "invalid", float("nan"), 2013.5))
+        port = AutoDecisionPort(
+            SimpleNamespace(
+                state=SimpleNamespace(last_accepted_field=last_accepted),
+            )
+        )
+
+        self.assertEqual(port.charging_power_w(), 0.0)
+        self.assertEqual(port.charging_power_w(), 0.0)
+        self.assertEqual(port.charging_power_w(), 0.0)
+        self.assertEqual(port.charging_power_w(), 2013.5)
+        self.assertEqual(last_accepted.call_args_list, [call("ac_power_w")] * 4)
 
     def test_control_state_is_normalized_and_cutover_updates_are_atomic(self) -> None:
         service = SimpleNamespace(

@@ -3,9 +3,11 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 from venus_evcharger.auto.component_context import AutoDecisionContext
 from venus_evcharger.auto.logic_gates_metrics import AutoDecisionMetrics
+from venus_evcharger.auto.policy import AutoPolicy
 from venus_evcharger.ports.auto import AutoDecisionPort
 
 
@@ -30,6 +32,8 @@ def battery_activity(**overrides: float | int | str | None) -> dict[str, float |
         "discharge_balance_coordination_advisory_reason": "reserve",
         "charge_power_w": 27.0,
         "discharge_power_w": 28.0,
+        "charge_penalty_w": 27.0,
+        "discharge_penalty_w": 28.0,
         "charge_activity_ratio": 0.29,
         "discharge_activity_ratio": 0.31,
         "learning_profile_count": 3,
@@ -58,10 +62,14 @@ def battery_activity(**overrides: float | int | str | None) -> dict[str, float |
 
 class MetricsHarness:
     def __init__(self) -> None:
+        self.charging_power = 0.0
+        self.policy = AutoPolicy()
         self.service = SimpleNamespace(
             _last_auto_metrics={},
             _stop_smoothed_grid_power=None,
             _stop_smoothed_surplus_power=None,
+            auto_policy=self.policy,
+            state=SimpleNamespace(last_accepted_field=self.last_accepted_field),
         )
         self.average_values: dict[int, float | None] = {1: 1200.0, 2: -300.0}
         self.battery_activity = battery_activity()
@@ -81,6 +89,7 @@ class MetricsHarness:
                 _active_learned_charge_power=self._active_learned_charge_power,
                 _current_learned_charge_power_state=self._current_learned_charge_power_state,
                 _learned_charge_power_scale=self._learned_charge_power_scale,
+                _auto_policy=self._auto_policy,
             )),
             cast(Any, SimpleNamespace(
                 get_available_surplus_watts=self.available_surplus_watts,
@@ -111,6 +120,12 @@ class MetricsHarness:
     def _surplus_thresholds_for_soc(self, battery_soc: float) -> tuple[float, float, str]:
         self.calls.append(("thresholds", battery_soc))
         return self.thresholds
+
+    def _auto_policy(self) -> AutoPolicy:
+        return self.policy
+
+    def last_accepted_field(self, field: str) -> float | None:
+        return self.charging_power if field == "ac_power_w" else None
 
     def _adaptive_stop_alpha(self) -> tuple[float, str, float | None]:
         self.calls.append(("adaptive_alpha",))
@@ -179,10 +194,19 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
     def testupdate_average_metrics_builds_snapshot_and_returns_battery_adjusted_surplus(self) -> None:
         harness = MetricsHarness()
 
-        self.assertEqual(harness.metrics.update_average_metrics(20.0, 2600.0, -500.0, 56.0, False), (1225.0, -300.0))
+        with patch.object(
+            harness.metrics,
+            "_battery_adjusted_surplus_metrics",
+            wraps=harness.metrics._battery_adjusted_surplus_metrics,
+        ) as adjusted_surplus:
+            self.assertEqual(
+                harness.metrics.update_average_metrics(20.0, 2600.0, -500.0, 56.0, False),
+                (1279.0, -300.0),
+            )
+        self.assertIs(adjusted_surplus.call_args.kwargs["relay_on"], False)
 
         metrics = harness.service._last_auto_metrics
-        self.assertEqual(metrics["surplus"], 1225.0)
+        self.assertEqual(metrics["surplus"], 1279.0)
         self.assertEqual(metrics["grid"], -300.0)
         self.assertEqual(metrics["raw_surplus"], 1200.0)
         self.assertEqual(metrics["raw_grid"], -300.0)
@@ -198,8 +222,11 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         self.assertEqual(metrics["stop_alpha"], 0.5)
         self.assertEqual(metrics["stop_alpha_stage"], "stable")
         self.assertEqual(metrics["surplus_volatility"], 17.0)
-        self.assertEqual(metrics["battery_surplus_penalty_w"], 50.0)
+        self.assertEqual(metrics["battery_surplus_penalty_w"], 23.0)
+        self.assertEqual(metrics["battery_unadjusted_surplus_penalty_w"], 50.0)
         self.assertEqual(metrics["battery_near_term_adjustment_w"], 75.0)
+        self.assertEqual(metrics["ev_priority_active"], 1)
+        self.assertEqual(metrics["ev_priority_credit_w"], 27.0)
         self.assertEqual(metrics["battery_learning_profile_count"], 3)
         self.assertIn(("thresholds", 56.0), harness.calls)
         self.assertIn(("battery_activity",), harness.calls)
@@ -272,7 +299,13 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness.battery_activity = battery_activity(surplus_penalty_w=80.0, learning_profile_count=4)
         harness.near_term_adjustment = 25.0
 
-        metrics = harness.metrics._battery_adjusted_surplus_metrics(1000.0)
+        metrics = harness.metrics._battery_adjusted_surplus_metrics(
+            1000.0,
+            pv_power=2000.0,
+            grid_power=-200.0,
+            battery_soc=35.0,
+            relay_on=False,
+        )
 
         self.assertEqual(metrics["decision_surplus"], 945.0)
         self.assertEqual(metrics["raw_decision_surplus"], 1000.0)
@@ -285,12 +318,127 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         harness.battery_activity = battery_activity(surplus_penalty_w=-1.0, learning_profile_count="4")
         harness.near_term_adjustment = -15.0
 
-        metrics = harness.metrics._battery_adjusted_surplus_metrics(1000.0)
+        metrics = harness.metrics._battery_adjusted_surplus_metrics(
+            1000.0,
+            pv_power=2000.0,
+            grid_power=-200.0,
+            battery_soc=35.0,
+            relay_on=False,
+        )
 
         self.assertEqual(metrics["decision_surplus"], 985.0)
         self.assertEqual(metrics["surplus_penalty_w"], 0.0)
         self.assertEqual(metrics["near_term_adjustment_w"], -15.0)
         self.assertEqual(metrics["learning_profile_count"], 0)
+
+    def test_ev_priority_uses_soc_hysteresis_and_preserves_running_load(self) -> None:
+        harness = MetricsHarness()
+        self.assertIs(harness.metrics._ev_priority_active, False)
+        harness.near_term_adjustment = 0.0
+        harness.battery_activity = battery_activity(
+            surplus_penalty_w=1700.0,
+            charge_penalty_w=1700.0,
+            discharge_penalty_w=0.0,
+            charge_power_w=1700.0,
+            discharge_power_w=None,
+        )
+
+        below = harness.metrics._battery_adjusted_surplus_metrics(
+            800.0,
+            pv_power=2700.0,
+            grid_power=-800.0,
+            battery_soc=39.9,
+            relay_on=False,
+        )
+        activated = harness.metrics._battery_adjusted_surplus_metrics(
+            800.0,
+            pv_power=2700.0,
+            grid_power=-800.0,
+            battery_soc=40.0,
+            relay_on=False,
+        )
+        retained = harness.metrics._battery_adjusted_surplus_metrics(
+            800.0,
+            pv_power=2700.0,
+            grid_power=-800.0,
+            battery_soc=38.0,
+            relay_on=False,
+        )
+        released = harness.metrics._battery_adjusted_surplus_metrics(
+            800.0,
+            pv_power=2700.0,
+            grid_power=-800.0,
+            battery_soc=37.9,
+            relay_on=False,
+        )
+
+        self.assertEqual((below["ev_priority_active"], below["decision_surplus"]), (0, -900.0))
+        self.assertEqual((activated["ev_priority_active"], activated["decision_surplus"]), (1, 2500.0))
+        self.assertEqual((retained["ev_priority_active"], retained["decision_surplus"]), (1, 2500.0))
+        self.assertEqual((released["ev_priority_active"], released["decision_surplus"]), (0, -900.0))
+
+        harness.metrics._update_ev_priority_state(40.0, activation_soc=40.0, release_soc=38.0)
+        harness.battery_activity = battery_activity(
+            surplus_penalty_w=0.0,
+            charge_penalty_w=0.0,
+            discharge_penalty_w=0.0,
+            charge_power_w=None,
+            discharge_power_w=None,
+        )
+        harness.charging_power = 2000.0
+        running = harness.metrics._battery_adjusted_surplus_metrics(
+            600.0,
+            pv_power=2700.0,
+            grid_power=-600.0,
+            battery_soc=39.0,
+            relay_on=True,
+        )
+        self.assertEqual(running["decision_surplus"], 2600.0)
+        self.assertEqual(running["ev_priority_running_load_w"], 2000.0)
+
+    def test_ev_priority_zero_boundaries_and_boolean_state_are_exact(self) -> None:
+        harness = MetricsHarness()
+        inactive = harness.metrics._ev_priority_metrics(
+            -10.0,
+            pv_power=0.0,
+            grid_power=-50.0,
+            battery_soc=39.9,
+            relay_on=False,
+            battery_activity=battery_activity(charge_power_w=50.0),
+        )
+
+        self.assertIs(inactive["active"], False)
+        self.assertEqual(inactive["available_surplus_w"], 0.0)
+        self.assertEqual(inactive["credit_w"], 0.0)
+        self.assertEqual(inactive["reclaimable_charge_w"], 0.0)
+
+        active = harness.metrics._ev_priority_metrics(
+            -10.0,
+            pv_power=0.0,
+            grid_power=-50.0,
+            battery_soc=40.0,
+            relay_on=False,
+            battery_activity=battery_activity(charge_power_w=50.0),
+        )
+        self.assertIs(active["active"], True)
+        self.assertEqual(active["available_surplus_w"], 0.0)
+        self.assertEqual(active["credit_w"], 0.0)
+        self.assertEqual(active["reclaimable_charge_w"], 50.0)
+
+        released = harness.metrics._update_ev_priority_state(
+            37.9,
+            activation_soc=40.0,
+            release_soc=38.0,
+        )
+        self.assertIs(released, False)
+
+    def test_ev_priority_running_load_requires_active_priority_and_relay(self) -> None:
+        harness = MetricsHarness()
+        harness.charging_power = 2000.0
+
+        self.assertEqual(harness.metrics._priority_running_load(False, True), 0.0)
+        self.assertEqual(harness.metrics._priority_running_load(True, False), 0.0)
+        self.assertEqual(harness.metrics._priority_running_load(True, True), 2000.0)
 
     def test_auto_metrics_snapshot_maps_all_public_metric_keys(self) -> None:
         harness = MetricsHarness()
@@ -310,7 +458,15 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
                 "decision_surplus": 1235.0,
                 "raw_decision_surplus": 1210.0,
                 "surplus_penalty_w": 50.0,
+                "unadjusted_surplus_penalty_w": 55.0,
                 "near_term_adjustment_w": 75.0,
+                "ev_priority_active": 1,
+                "ev_priority_credit_w": 27.0,
+                "ev_priority_available_surplus_w": 1237.0,
+                "ev_priority_reclaimable_charge_w": 27.0,
+                "ev_priority_running_load_w": 0.0,
+                "ev_priority_soc": 40.0,
+                "ev_priority_release_soc": 38.0,
                 **battery_activity(learning_profile_count=4),
             },
             learned_metrics={
@@ -339,7 +495,15 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
             "stop_alpha_stage": "stable",
             "surplus_volatility": 17.0,
             "battery_surplus_penalty_w": 50.0,
+            "battery_unadjusted_surplus_penalty_w": 55.0,
             "battery_near_term_adjustment_w": 75.0,
+            "ev_priority_active": 1,
+            "ev_priority_credit_w": 27.0,
+            "ev_priority_available_surplus_w": 1237.0,
+            "ev_priority_reclaimable_charge_w": 27.0,
+            "ev_priority_running_load_w": 0.0,
+            "ev_priority_soc": 40.0,
+            "ev_priority_release_soc": 38.0,
             "battery_support_mode": "assist",
             "battery_discharge_balance_policy_enabled": 1,
             "battery_discharge_balance_warning_active": 0,

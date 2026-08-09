@@ -148,9 +148,14 @@ def non_negative_int(value: object, label: str) -> int:
     return value
 
 
-def schema_version(value: object, label: str) -> int:
+def schema_version(
+    value: object,
+    label: str,
+    *,
+    expected: int = ENERGY_IPC_SCHEMA_VERSION,
+) -> int:
     version = non_negative_int(value, f"{label} schema_version")
-    if version != ENERGY_IPC_SCHEMA_VERSION:
+    if version != expected:
         raise ValueError(f"{label} has an unsupported schema_version")
     return version
 

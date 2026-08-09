@@ -24,6 +24,7 @@ def _inputs() -> EnergyInputsSnapshot:
         grid_power_w=MeasuredValue(-20.0, 99.0, "fresh", 1.0),
         pv_power_w=MeasuredValue(500.0, 99.0, "fresh", 0.9, ("pv-ac-a",)),
         battery_soc=MeasuredValue(72.0, 98.0, "stale", 0.8, ("battery-a",)),
+        battery_net_power_w=MeasuredValue(-800.0, 99.0, "fresh", 0.9, ("battery-a",)),
     )
 
 
@@ -53,6 +54,10 @@ class AutoInputHelperGatewayContracts(unittest.TestCase):
         self.assertEqual(self.reader.measurement("pv"), self.client.inputs.pv_power_w)
         self.assertEqual(self.reader.measurement("grid"), self.client.inputs.grid_power_w)
         self.assertEqual(self.reader.measurement("battery"), self.client.inputs.battery_soc)
+        self.assertEqual(
+            self.reader.measurement("battery_power"),
+            self.client.inputs.battery_net_power_w,
+        )
         self.assertIsNone(self.reader.measurement("topology"))
 
     def test_missing_snapshot_and_reset_are_explicit(self) -> None:

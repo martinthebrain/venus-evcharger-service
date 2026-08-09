@@ -19,6 +19,7 @@ from venus_evcharger.inputs.helper.sources import (
     AutoInputSources,
     _select_pv_projection,
     empty_battery_snapshot,
+    gateway_battery_snapshot,
 )
 from venus_evcharger.ipc.energy import MeasuredValue
 
@@ -33,6 +34,7 @@ class AutoInputHelperSourceContracts(unittest.TestCase):
             "pv": MeasuredValue(1200.0, 99.0, "fresh", 0.9, ("pv-ac-a", "pv-dc-a")),
             "grid": MeasuredValue(-300.0, 98.0, "stale", 0.8, ("grid-primary",)),
             "battery": MeasuredValue(72.5, 97.0, "fresh", 0.75, ("battery-a", "battery-b")),
+            "battery_power": MeasuredValue(-1400.0, 96.0, "fresh", 0.9, ("battery-a",)),
         }
         with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0):
             self.sources.prepare_cycle()
@@ -42,10 +44,13 @@ class AutoInputHelperSourceContracts(unittest.TestCase):
         self.assertEqual(self.gateway.input_refreshes, 1)
         self.assertEqual(self.sources.observed_at("pv"), 99.0)
         self.assertEqual(self.sources.observed_at("grid"), 98.0)
-        self.assertEqual(self.sources.observed_at("battery"), 97.0)
+        self.assertEqual(self.sources.observed_at("battery"), 96.0)
         self.assertEqual(battery["battery_soc"], 72.5)
         self.assertEqual(battery["battery_source_count"], 2)
         self.assertEqual(battery["battery_average_confidence"], 0.75)
+        self.assertEqual(battery["battery_combined_charge_power_w"], 1400.0)
+        self.assertEqual(battery["battery_combined_discharge_power_w"], 0.0)
+        self.assertEqual(battery["battery_combined_net_power_w"], -1400.0)
         self.assertEqual(self.gateway.requests, [])
 
     def test_missing_error_and_expired_values_request_only_semantic_scopes(self) -> None:
@@ -63,9 +68,19 @@ class AutoInputHelperSourceContracts(unittest.TestCase):
         self.assertTrue(all(request[2] for request in self.gateway.requests))
 
     def test_unprepared_and_non_data_scopes_are_safe(self) -> None:
+        self.assertIs(self.sources._gateway_battery_power, None)
         self.assertIsNone(self.sources.pv_power())
         self.assertIsNone(self.sources.observed_at("unknown"))
         self.assertEqual(self.gateway.requests[0][0], "pv")
+
+    def test_gateway_battery_power_signs_include_an_exact_zero_boundary(self) -> None:
+        idle = gateway_battery_snapshot(50.0, net_power_w=0.0)
+        discharging = gateway_battery_snapshot(50.0, net_power_w=500.0)
+
+        self.assertEqual(idle["battery_combined_charge_power_w"], 0.0)
+        self.assertEqual(idle["battery_combined_discharge_power_w"], 0.0)
+        self.assertEqual(discharging["battery_combined_charge_power_w"], 0.0)
+        self.assertEqual(discharging["battery_combined_discharge_power_w"], 500.0)
 
     def test_pv_selection_policy_has_explicit_primary_and_fallback_order(self) -> None:
         gateway = ProjectedEnergyValue(100.0, 10.0, "victron", 1.0)

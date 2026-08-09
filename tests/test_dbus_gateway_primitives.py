@@ -108,7 +108,7 @@ def _energy_snapshots() -> tuple[EnergyInputsSnapshot, EnergyTopologySnapshot]:
     missing = MeasuredValue(None, 0.0, "unknown", 0.0, (), "not-observed")
     grid = MeasuredValue(-25.0, 100.0, "fresh", 1.0, ("grid-primary",))
     return (
-        EnergyInputsSnapshot(3, 101.0, 2, grid, missing, missing),
+        EnergyInputsSnapshot(3, 101.0, 2, grid, missing, missing, missing),
         EnergyTopologySnapshot(
             2,
             101.0,
@@ -300,6 +300,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
             grid_power_w=fresh_grid,
             pv_power_w=unavailable,
             battery_soc=unavailable,
+            battery_net_power_w=unavailable,
         )
         self.assertEqual(EnergyInputsSnapshot.from_payload(inputs.to_payload()), inputs)
 

@@ -97,6 +97,7 @@ def _composition_host() -> SimpleNamespace:
             summary=_no_operation,
             save_runtime_overrides=_no_operation,
             validate_runtime_config=_no_operation,
+            last_accepted_field=_no_operation,
         ),
         gateway_publication=object(),
         auto_policy=AutoPolicy(),

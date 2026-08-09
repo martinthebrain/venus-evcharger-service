@@ -83,6 +83,12 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                     "interval": 2.0,
                     "priority": "read",
                 },
+                "battery_net_power_w": {
+                    "service": "com.victronenergy.system",
+                    "path": "/Dc/Battery/Power",
+                    "interval": 2.0,
+                    "priority": "read",
+                },
             },
         )
 
@@ -102,6 +108,8 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "AutoBatteryService": " battery.service ",
                 "AutoBatteryServicePrefix": " battery.prefix ",
                 "AutoBatterySocPath": " /Soc ",
+                "AutoBatteryPowerService": " system.service ",
+                "AutoBatteryPowerPath": " /Battery/Power ",
             }
         )
         specs = config.configured_read_specs(source)
@@ -130,6 +138,15 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "prefix": "battery.prefix",
                 "path": "/Soc",
                 "aggregate": "",
+                "interval": 2.0,
+                "priority": "read",
+            },
+        )
+        self.assertEqual(
+            specs["battery_net_power_w"],
+            {
+                "service": "system.service",
+                "path": "/Battery/Power",
                 "interval": 2.0,
                 "priority": "read",
             },

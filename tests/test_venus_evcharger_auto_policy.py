@@ -275,12 +275,15 @@ class TestAutoPolicy(unittest.TestCase):
             high_soc_release_threshold=70.0,
             min_soc=40.0,
             resume_soc=30.0,
+            ev_priority_soc=30.0,
+            ev_priority_release_soc=40.0,
         )
 
         policy.clamp()
 
         self.assertEqual(policy.high_soc_release_threshold, 60.0)
         self.assertEqual(policy.resume_soc, 40.0)
+        self.assertEqual(policy.ev_priority_release_soc, 30.0)
 
     def test_auto_policy_accepts_well_separated_hysteresis_without_warning(self) -> None:
         policy = AutoPolicy(
