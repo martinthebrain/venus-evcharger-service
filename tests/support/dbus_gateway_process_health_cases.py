@@ -361,6 +361,7 @@ class GatewayProcessHealthCases(GatewayAdapterContractCase):
                 monotonic_at=123.0,
                 interval=2.5,
                 interval_factor=3.0,
+                maximum_delay_seconds=None,
             )
             self.assertNotIn("grid", adapter.read_executor._interval_factors)
             record_error.assert_not_called()

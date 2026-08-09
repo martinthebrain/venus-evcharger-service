@@ -47,13 +47,21 @@ class DbusReadScheduler:
         monotonic_at: float,
         interval: float,
         interval_factor: float = 1.0,
+        maximum_delay_seconds: float | None = None,
     ) -> None:
         normalized = str(key)
         self.failure_counts[normalized] = 0
-        self.next_read_at[normalized] = float(monotonic_at) + max(
+        base_delay = max(
             0.0,
             float(interval),
-        ) * max(1.0, float(interval_factor))
+        )
+        delay = base_delay * max(1.0, float(interval_factor))
+        if maximum_delay_seconds is not None:
+            delay = min(
+                delay,
+                max(base_delay, float(maximum_delay_seconds)),
+            )
+        self.next_read_at[normalized] = float(monotonic_at) + delay
 
     def record_error(
         self,

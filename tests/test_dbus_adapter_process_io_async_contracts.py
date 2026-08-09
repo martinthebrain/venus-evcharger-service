@@ -44,6 +44,100 @@ def _control_snapshot(
 class DbusAdapterProcessIoAsyncContracts(GatewayAdapterContractCase):
     """Pin IO arguments that determine scheduling, health, and freshness."""
 
+    def test_core_read_completion_reserves_time_before_freshness_deadline(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            spec = adapter.read_scheduler.specs["pv_power_w"]
+            install_mock(
+                adapter.read_scheduler,
+                "next_due",
+                MagicMock(return_value=("pv_power_w", spec, 2.0)),
+            )
+            record_success = install_mock(
+                adapter.read_scheduler,
+                "record_success",
+                MagicMock(),
+            )
+            install_mock(
+                adapter.read_executor,
+                "poll_read_spec",
+                MagicMock(
+                    side_effect=lambda _key, _spec, *, completion: (
+                        completion("applied") or "applied"
+                    )
+                ),
+            )
+            adapter.read_executor._interval_factors["pv_power_w"] = 3.0
+            adapter.read_executor._operation_counts["pv_power_w"] = 3
+
+            with patch.object(process_io_module.time, "monotonic", return_value=123.0):
+                self.assertTrue(adapter.io_role.poll_one_due_read_once())
+
+            record_success.assert_called_once_with(
+                "pv_power_w",
+                monotonic_at=123.0,
+                interval=2.0,
+                interval_factor=3.0,
+                maximum_delay_seconds=2.0,
+            )
+
+    def test_core_read_delay_handles_absent_zero_and_subsecond_deadlines(self) -> None:
+        with self.adapter_scenario() as scenario:
+            adapter = scenario.adapter
+            adapter.slo_core_read_max_age_seconds = 5.0
+            adapter.max_tick_seconds = 1.0
+            self.assertEqual(
+                process_io_module._core_read_maximum_delay(
+                    adapter,
+                    "pv_power_w",
+                    {},
+                    operation_count=1,
+                ),
+                4.0,
+            )
+            self.assertEqual(
+                process_io_module._core_read_maximum_delay(
+                    adapter,
+                    "pv_power_w",
+                    {"stale_after_seconds": 0.0},
+                    operation_count=1,
+                ),
+                4.0,
+            )
+
+            adapter.slo_core_read_max_age_seconds = 0.5
+            adapter.max_tick_seconds = 0.25
+            self.assertEqual(
+                process_io_module._core_read_maximum_delay(
+                    adapter,
+                    "pv_power_w",
+                    {},
+                    operation_count=1,
+                ),
+                0.25,
+            )
+            adapter.slo_core_read_max_age_seconds = 5.0
+            self.assertEqual(
+                process_io_module._core_read_maximum_delay(
+                    adapter,
+                    "pv_power_w",
+                    {"stale_after_seconds": 0.5},
+                    operation_count=1,
+                ),
+                0.25,
+            )
+            adapter.slo_core_read_max_age_seconds = 5.0
+            adapter.max_tick_seconds = 1.0
+            self.assertEqual(
+                process_io_module._core_read_maximum_delay(
+                    adapter,
+                    "pv_power_w",
+                    {"interval": 2.0, "stale_after_seconds": 6.0},
+                    operation_count=3,
+                ),
+                2.0,
+            )
+
     def test_discovery_submits_exact_async_dbus_operation(self) -> None:
         with self.adapter_scenario() as scenario:
             adapter = scenario.adapter

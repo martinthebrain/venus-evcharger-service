@@ -43,6 +43,7 @@ class DbusAdapterIoContext(Protocol):  # pragma: no cover
     health_publish_interval_seconds: float
     max_tick_seconds: float
     slo_gui_max_age_seconds: float
+    slo_core_read_max_age_seconds: float
     _introspection_queue_depth: int
     _last_energy_publish_monotonic: float
     _last_health_publish_monotonic: float

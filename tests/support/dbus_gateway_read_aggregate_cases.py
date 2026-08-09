@@ -284,6 +284,14 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
                 adapter.read_executor.consume_interval_factor("optional"),
                 1.0,
             )
+            self.assertEqual(
+                adapter.read_executor.consume_operation_count("optional"),
+                1,
+            )
+            self.assertEqual(
+                adapter.read_executor.consume_operation_count("optional"),
+                1,
+            )
             adapter.read_executor._interval_factors["clamped"] = 0.5
             self.assertEqual(
                 adapter.read_executor.consume_interval_factor("clamped"),
@@ -367,6 +375,10 @@ class GatewayAggregateReadCases(GatewayAdapterContractCase):
             )
             self.assertEqual(adapter.cache.values["direct"]["value"], 7)
             self.assertEqual(adapter.cache.values["path:svc/Path"]["value"], 7)
+            self.assertEqual(
+                adapter.read_executor.consume_operation_count("direct"),
+                1,
+            )
             self.assertEqual(
                 adapter.read_executor.poll_read_spec("invalid", {"service": "svc", "path": "Path"}), "dropped"
             )

@@ -335,6 +335,14 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             self.assertEqual(payload["source"], "svc.sum/L1,svc.sum/L2")
             self.assertEqual(payload["confidence"], 1.0)
             self.assertEqual(payload["last_error"], "")
+            self.assertEqual(
+                adapter.read_executor.consume_operation_count("sum_power"),
+                2,
+            )
+            self.assertEqual(
+                adapter.read_executor.consume_operation_count("sum_power"),
+                1,
+            )
 
     def test_read_executor_error_contracts_keep_cache_source_logs_and_pending_state_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -346,6 +354,10 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 ("sum", (("svc.old", "/L1"),)),
                 0.4,
             )
+            adapter.read_executor._pv_continuity._candidates_by_key["required_value"] = (
+                ("svc.old", "/L1"),
+            )
+            adapter.read_executor._operation_counts["required_value"] = 4
             error = RuntimeError("required offline")
 
             with (
@@ -359,6 +371,14 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 )
 
             self.assertFalse(adapter.read_executor.has_pending_aggregate())
+            self.assertNotIn(
+                "required_value",
+                adapter.read_executor._pv_continuity._candidates_by_key,
+            )
+            self.assertEqual(
+                adapter.read_executor.consume_operation_count("required_value"),
+                1,
+            )
             mark_error.assert_called_once_with(
                 "required_value",
                 source="svc.required",
@@ -380,6 +400,10 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 ("services-sum", "/Power", ("svc.old",)),
                 0.4,
             )
+            adapter.read_executor._pv_continuity._candidates_by_key["optional_value"] = (
+                ("svc.old", "/Power"),
+            )
+            adapter.read_executor._operation_counts["optional_value"] = 4
             error = RuntimeError("optional offline")
 
             with (
@@ -393,6 +417,14 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
                 )
 
             self.assertFalse(adapter.read_executor.has_pending_aggregate())
+            self.assertNotIn(
+                "optional_value",
+                adapter.read_executor._pv_continuity._candidates_by_key,
+            )
+            self.assertEqual(
+                adapter.read_executor.consume_operation_count("optional_value"),
+                1,
+            )
             update_value.assert_called_once_with(
                 "optional_value",
                 0.0,

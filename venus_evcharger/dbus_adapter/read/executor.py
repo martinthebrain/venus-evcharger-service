@@ -41,15 +41,12 @@ class DbusReadExecutor:
         self._aggregates = AggregateStore()
         self._stale_after_by_key: dict[str, float | None] = {}
         self._interval_factors: dict[str, float] = {}
+        self._operation_counts: dict[str, int] = {}
         self._pv_continuity = PvAggregateContinuity(adapter, self._aggregates, monotonic=monotonic)
         self.last_operation_performed = False
 
     def poll_read_spec(
-        self,
-        key: str,
-        spec: ReadSpec,
-        *,
-        completion: ReadCompletion | None = None,
+        self, key: str, spec: ReadSpec, *, completion: ReadCompletion | None = None
     ) -> CommandOutcome:
         self.last_operation_performed = False
         self._stale_after_by_key[key] = read_spec_stale_after_seconds(spec)
@@ -66,11 +63,7 @@ class DbusReadExecutor:
         return completed[-1] if completed else "deferred"
 
     def _poll_read_with_recovery(
-        self,
-        key: str,
-        spec: ReadSpec,
-        completed: list[CommandOutcome],
-        completion: ReadCompletion,
+        self, key: str, spec: ReadSpec, completed: list[CommandOutcome], completion: ReadCompletion
     ) -> None:
         try:
             outcome = self._poll_read_spec_unchecked(key, spec, completion)
@@ -89,6 +82,7 @@ class DbusReadExecutor:
         completion: ReadCompletion,
     ) -> CommandOutcome:
         aggregate = read_spec_text(spec, "aggregate")
+        self._operation_counts[key] = 1
         if aggregate != PV_TOTAL_AGGREGATE:
             self._interval_factors.pop(key, None)
         handlers: dict[str, Callable[[str, ReadSpec, ReadCompletion], CommandOutcome]] = {
@@ -151,6 +145,7 @@ class DbusReadExecutor:
         self._pv_continuity.discard(key)
         self._stale_after_by_key.pop(key, None)
         self._interval_factors.pop(key, None)
+        self._operation_counts.pop(key, None)
         self.adapter.cache.mark_error(key, source=read_spec_source(spec), error=error)
         logging.debug("DBus adapter read failed key=%s: %s", key, error)
 
@@ -159,6 +154,7 @@ class DbusReadExecutor:
         self._pv_continuity.discard(key)
         self._stale_after_by_key.pop(key, None)
         self._interval_factors.pop(key, None)
+        self._operation_counts.pop(key, None)
         self.adapter.cache.update_external_read(
             key,
             0.0,
@@ -174,6 +170,10 @@ class DbusReadExecutor:
 
     def consume_interval_factor(self, key: str) -> float:
         return max(1.0, self._interval_factors.pop(str(key), 1.0))
+
+    def consume_operation_count(self, key: str) -> int:
+        """Return and clear the DBus-operation count for one completed read cycle."""
+        return max(1, self._operation_counts.pop(str(key), 1))
 
     def _poll_sum_step(
         self,
@@ -278,6 +278,7 @@ class DbusReadExecutor:
         self,
         plan: AggregateStepPlan,
     ) -> CommandOutcome:
+        self._operation_counts[plan.key] = len(plan.members)
         state = self._aggregates.state_for(
             plan.key,
             plan.signature,
