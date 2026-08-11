@@ -106,10 +106,12 @@ class _DiagnosticsReader:
 def _unregistered_snapshot(
     *,
     captured_at: float = 100.0,
+    captured_monotonic: float = 10.0,
     health_stale: bool = False,
 ) -> GatewayDiagnosticsSnapshot:
     snapshot = gateway_diagnostics_snapshot(
         captured_at=captured_at,
+        captured_monotonic=captured_monotonic,
         health_stale=health_stale,
     )
     return replace(
@@ -319,14 +321,17 @@ class BootstrapPublicationContractTests(unittest.TestCase):
         )
         reader = _DiagnosticsReader(_unregistered_snapshot())
 
-        self.assertTrue(owner.maintain_registration(reader, 100.0))
-        self.assertFalse(owner.maintain_registration(reader, 100.1))
+        self.assertTrue(owner.maintain_registration(reader))
+        self.assertFalse(owner.maintain_registration(reader))
         self.assertEqual(reader.calls, 1)
         self.assertEqual(len(publication.evcs_registrations), 1)
         self.assertEqual(publication.evcs_registrations[0][1]["mode"], 2)
 
-        reader.snapshot = gateway_diagnostics_snapshot(captured_at=100.2)
-        self.assertFalse(owner.maintain_registration(reader, 100.2))
+        reader.snapshot = gateway_diagnostics_snapshot(
+            captured_at=100.2,
+            captured_monotonic=15.0,
+        )
+        self.assertFalse(owner.maintain_registration(reader))
         self.assertEqual(reader.calls, 2)
         self.assertEqual(len(publication.evcs_registrations), 1)
 
@@ -335,13 +340,12 @@ class BootstrapPublicationContractTests(unittest.TestCase):
         owner = EvcsPublicationOwner(
             _identity_service(publication),
             script_path="service.py",
-            monotonic=lambda: 0.0,
+            monotonic=lambda: 1.0,
         )
 
         self.assertTrue(
             owner.maintain_registration(
-                _DiagnosticsReader(_unregistered_snapshot()),
-                100.0,
+                _DiagnosticsReader(_unregistered_snapshot(captured_monotonic=1.0)),
             )
         )
         self.assertEqual(len(publication.evcs_registrations), 1)
@@ -357,29 +361,50 @@ class BootstrapPublicationContractTests(unittest.TestCase):
         reader = _DiagnosticsReader(_unregistered_snapshot())
 
         owner.register()
-        self.assertFalse(owner.maintain_registration(reader, 100.0))
+        self.assertFalse(owner.maintain_registration(reader))
         self.assertEqual(reader.calls, 0)
-        self.assertTrue(owner.maintain_registration(reader, 100.0))
+        self.assertTrue(owner.maintain_registration(reader))
         self.assertEqual(reader.calls, 1)
         self.assertEqual(len(publication.evcs_registrations), 2)
 
     def test_runtime_owner_ignores_unavailable_stale_future_and_registered_health(self) -> None:
         cases = (
-            (_DiagnosticsReader(unavailable=True), 100.0),
-            (_DiagnosticsReader(_unregistered_snapshot(health_stale=True)), 100.0),
-            (_DiagnosticsReader(_unregistered_snapshot(captured_at=89.9)), 100.0),
-            (_DiagnosticsReader(_unregistered_snapshot(captured_at=100.1)), 100.0),
-            (_DiagnosticsReader(gateway_diagnostics_snapshot()), 100.0),
+            (_DiagnosticsReader(unavailable=True), 10.0),
+            (_DiagnosticsReader(_unregistered_snapshot(health_stale=True)), 10.0),
+            (
+                _DiagnosticsReader(
+                    _unregistered_snapshot(
+                        captured_at=89.9,
+                        captured_monotonic=1.0,
+                    )
+                ),
+                20.0,
+            ),
+            (
+                _DiagnosticsReader(
+                    _unregistered_snapshot(
+                        captured_at=100.1,
+                        captured_monotonic=10.1,
+                    )
+                ),
+                10.0,
+            ),
+            (
+                _DiagnosticsReader(
+                    gateway_diagnostics_snapshot(captured_monotonic=10.0)
+                ),
+                10.0,
+            ),
         )
-        for reader, now in cases:
+        for reader, monotonic_at in cases:
             with self.subTest(snapshot=reader.snapshot, unavailable=reader.unavailable):
                 publication = _PublicationRecorder()
                 owner = EvcsPublicationOwner(
                     _identity_service(publication),
                     script_path="service.py",
-                    monotonic=lambda: 10.0,
+                    monotonic=lambda: monotonic_at,
                 )
-                self.assertFalse(owner.maintain_registration(reader, now))
+                self.assertFalse(owner.maintain_registration(reader))
                 self.assertEqual(publication.evcs_registrations, [])
 
     def test_runtime_owner_reports_rejected_registration_recovery(self) -> None:
@@ -394,7 +419,6 @@ class BootstrapPublicationContractTests(unittest.TestCase):
         with self.assertLogs(level="WARNING") as captured:
             accepted = owner.maintain_registration(
                 _DiagnosticsReader(_unregistered_snapshot()),
-                100.0,
             )
 
         self.assertFalse(accepted)

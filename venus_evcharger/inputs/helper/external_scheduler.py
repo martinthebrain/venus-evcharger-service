@@ -50,6 +50,7 @@ class EnergyConnectorRuntime:
 @dataclass(slots=True)
 class _SourceState:
     last_good: EnergySourceSnapshot | None = None
+    last_good_monotonic: float | None = None
     attempted_at: float | None = None
     next_poll_monotonic: float = 0.0
     consecutive_failures: int = 0
@@ -142,11 +143,12 @@ class ExternalSourceScheduler:
         snapshot = step.snapshot
         assert snapshot is not None
         snapshot = _configured_snapshot(definition, snapshot)
-        if not _confirms_measurement(snapshot, now):
+        completed_monotonic = self._monotonic()
+        if not _confirms_measurement(snapshot):
             self._record_failure(
                 definition,
                 state,
-                self._monotonic(),
+                completed_monotonic,
                 "source reported no online measurement",
             )
             return "failed"
@@ -154,7 +156,7 @@ class ExternalSourceScheduler:
             definition,
             state,
             snapshot,
-            self._monotonic(),
+            completed_monotonic,
         )
         return "success"
 
@@ -187,6 +189,7 @@ class ExternalSourceScheduler:
             logging.info("External energy source recovered source=%s", definition.source_id)
         self._failed_sources.discard(definition.source_id)
         state.last_good = snapshot
+        state.last_good_monotonic = completed_monotonic
         state.consecutive_failures = 0
         state.last_error = ""
         state.in_progress = False
@@ -212,7 +215,7 @@ class ExternalSourceScheduler:
         attempted: dict[str, _AttemptStatus],
     ) -> ExternalSourcePoll:
         state = self._states[definition.source_id]
-        age = _snapshot_age(state.last_good, now)
+        age = _snapshot_age(state.last_good_monotonic, monotonic_now)
         contributing = age is not None and age <= self.policy.last_good_max_age_seconds
         return ExternalSourcePoll(
             snapshot=state.last_good or _offline_source(definition),
@@ -225,6 +228,7 @@ class ExternalSourceScheduler:
             measurement_status=_measurement_status(state, age, contributing),
             attempted_at=state.attempted_at,
             observed_at=_observed_at(state.last_good),
+            observed_monotonic=state.last_good_monotonic,
             next_poll_at=now + max(
                 0.0,
                 state.next_poll_monotonic - cycle_started_monotonic,
@@ -237,11 +241,10 @@ class ExternalSourceScheduler:
 
 def _confirms_measurement(
     snapshot: EnergySourceSnapshot,
-    now: float,
 ) -> bool:
     return (
         snapshot.online
-        and _valid_observed_at(snapshot.captured_at, now)
+        and _valid_observed_at(snapshot.captured_at)
         and _has_contributing_value(snapshot)
     )
 
@@ -280,18 +283,20 @@ def _backoff_seconds(policy: ExternalPollingPolicy, failures: int) -> float:
     return float(min(policy.backoff_max_seconds, policy.backoff_base_seconds * multiplier))
 
 
-def _snapshot_age(snapshot: EnergySourceSnapshot | None, now: float) -> float | None:
-    if snapshot is None or not _valid_observed_at(snapshot.captured_at, now):
+def _snapshot_age(observed_monotonic: float | None, monotonic_now: float) -> float | None:
+    if not _valid_observed_at(observed_monotonic):
         return None
-    assert snapshot.captured_at is not None
-    return now - float(snapshot.captured_at)
+    assert observed_monotonic is not None
+    if monotonic_now < observed_monotonic:
+        return None
+    return monotonic_now - observed_monotonic
 
 
-def _valid_observed_at(observed_at: float | None, now: float) -> bool:
+def _valid_observed_at(observed_at: float | None) -> bool:
     if observed_at is None:
         return False
     normalized = float(observed_at)
-    return math.isfinite(normalized) and 0.0 <= normalized <= now
+    return math.isfinite(normalized) and normalized >= 0.0
 
 
 def _observed_at(snapshot: EnergySourceSnapshot | None) -> float | None:

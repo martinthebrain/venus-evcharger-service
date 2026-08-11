@@ -167,8 +167,8 @@ class DbusPublishCompositionContractTests(unittest.TestCase):
             "maintain_registration",
             return_value=True,
         ) as maintain:
-            self.assertTrue(controller.maintain_evcs_registration(10.0))
-        maintain.assert_called_once_with(controller._gateway_diagnostics, 10.0)
+            self.assertTrue(controller.maintain_evcs_registration())
+        maintain.assert_called_once_with(controller._gateway_diagnostics)
 
         with patch.object(controller.core, "publish_field", return_value=True) as publish_field:
             self.assertTrue(controller.publish_field("mode", 2, 11.0, 4.0, True))

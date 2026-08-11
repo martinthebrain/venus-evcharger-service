@@ -20,11 +20,12 @@ def _inputs() -> EnergyInputsSnapshot:
     return EnergyInputsSnapshot(
         sequence=2,
         captured_at=100.0,
+        captured_monotonic=100.0,
         topology_generation=3,
-        grid_power_w=MeasuredValue(-20.0, 99.0, "fresh", 1.0),
-        pv_power_w=MeasuredValue(500.0, 99.0, "fresh", 0.9, ("pv-ac-a",)),
-        battery_soc=MeasuredValue(72.0, 98.0, "stale", 0.8, ("battery-a",)),
-        battery_net_power_w=MeasuredValue(-800.0, 99.0, "fresh", 0.9, ("battery-a",)),
+        grid_power_w=MeasuredValue(-20.0, 99.0, "fresh", 1.0, observed_monotonic=99.0),
+        pv_power_w=MeasuredValue(500.0, 99.0, "fresh", 0.9, ("pv-ac-a",), observed_monotonic=99.0),
+        battery_soc=MeasuredValue(72.0, 98.0, "stale", 0.8, ("battery-a",), observed_monotonic=98.0),
+        battery_net_power_w=MeasuredValue(-800.0, 99.0, "fresh", 0.9, ("battery-a",), observed_monotonic=99.0),
     )
 
 

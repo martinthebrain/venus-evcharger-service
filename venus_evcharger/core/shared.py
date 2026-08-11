@@ -9,7 +9,7 @@ import threading
 from typing import Any, TypeAlias
 
 
-AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION = 1
+AUTO_INPUT_SNAPSHOT_SCHEMA_VERSION = 2
 NumericScalar: TypeAlias = float | int
 DbusNumeric: TypeAlias = NumericScalar | Sequence[object] | object
 ServicePredicate: TypeAlias = Callable[[str], bool]

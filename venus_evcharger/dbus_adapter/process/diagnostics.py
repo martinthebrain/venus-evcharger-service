@@ -67,6 +67,7 @@ class DbusAdapterDiagnostics:
         return GatewayDiagnosticsSnapshot(
             sequence=context.cache.sequence,
             captured_at=captured_at,
+            captured_monotonic=monotonic_at,
             health=health_summary(health, max_tick_seconds=context.max_tick_seconds),
             discovery=discovery_summary(
                 health,

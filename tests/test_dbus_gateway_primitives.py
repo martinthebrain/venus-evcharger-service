@@ -105,10 +105,34 @@ def _companion_identity(service_id: str = "battery-main") -> CompanionServiceIde
 
 
 def _energy_snapshots() -> tuple[EnergyInputsSnapshot, EnergyTopologySnapshot]:
-    missing = MeasuredValue(None, 0.0, "unknown", 0.0, (), "not-observed")
-    grid = MeasuredValue(-25.0, 100.0, "fresh", 1.0, ("grid-primary",))
+    missing = MeasuredValue(
+        None,
+        0.0,
+        "unknown",
+        0.0,
+        (),
+        "not-observed",
+        observed_monotonic=0.0,
+    )
+    grid = MeasuredValue(
+        -25.0,
+        100.0,
+        "fresh",
+        1.0,
+        ("grid-primary",),
+        observed_monotonic=100.0,
+    )
     return (
-        EnergyInputsSnapshot(3, 101.0, 2, grid, missing, missing, missing),
+        EnergyInputsSnapshot(
+            3,
+            101.0,
+            2,
+            grid,
+            missing,
+            missing,
+            missing,
+            captured_monotonic=101.0,
+        ),
         EnergyTopologySnapshot(
             2,
             101.0,
@@ -291,11 +315,27 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertEqual(gateway_core_module.float_or_default(object(), 4.0), 4.0)
 
     def test_energy_snapshot_and_refresh_contracts_hide_adapter_targets(self) -> None:
-        fresh_grid = MeasuredValue(-20.0, 100.0, "fresh", 1.0, ("grid-primary",))
-        unavailable = MeasuredValue(None, 0.0, "unavailable", 0.0, (), "source-unavailable")
+        fresh_grid = MeasuredValue(
+            -20.0,
+            100.0,
+            "fresh",
+            1.0,
+            ("grid-primary",),
+            observed_monotonic=100.0,
+        )
+        unavailable = MeasuredValue(
+            None,
+            0.0,
+            "unavailable",
+            0.0,
+            (),
+            "source-unavailable",
+            observed_monotonic=0.0,
+        )
         inputs = EnergyInputsSnapshot(
             sequence=4,
             captured_at=101.0,
+            captured_monotonic=101.0,
             topology_generation=2,
             grid_power_w=fresh_grid,
             pv_power_w=unavailable,
@@ -466,7 +506,13 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         paths = gateway_paths("/run/cache-contract")
         store = DbusCacheStore(paths)
         inputs, topology = _energy_snapshots()
-        store.update_value("grid", 12.5, source="system/grid", now=10.0)
+        store.update_value(
+            "grid",
+            12.5,
+            source="system/grid",
+            now=10.0,
+            now_monotonic=10.0,
+        )
         store.update_services(["service.b", "service.a"], now=11.0)
         store.set_semantic_energy_snapshots(inputs, topology)
         store.health = {"state": "ok", "timeouts_60s": 0}
@@ -486,7 +532,9 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
                         "source": "system/grid",
                         "changed_at": 10.0,
                         "confirmed_at": 10.0,
+                        "confirmed_monotonic": 10.0,
                         "updated_at": 10.0,
+                        "updated_monotonic": 10.0,
                         "age_s": 2.0,
                         "change_age_s": 2.0,
                         "status": "fresh",

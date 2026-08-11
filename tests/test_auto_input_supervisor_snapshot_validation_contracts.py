@@ -99,6 +99,11 @@ class TestAutoInputSupervisorSnapshotValidationContracts(unittest.TestCase):
             self.assert_invalid(valid_snapshot(writer_pid=writer_pid), "auto-input-helper-schema-invalid")
         for generation in (None, True, -1, "bad"):
             self.assert_invalid(valid_snapshot(helper_generation=generation), "auto-input-helper-schema-invalid")
+        for sequence in (None, True, 0, -1, "bad"):
+            self.assert_invalid(
+                valid_snapshot(snapshot_sequence=sequence),
+                "auto-input-helper-schema-invalid",
+            )
         for runtime_instance in (None, 1, "", "   "):
             self.assert_invalid(
                 valid_snapshot(runtime_instance_id=runtime_instance),
@@ -114,36 +119,70 @@ class TestAutoInputSupervisorSnapshotValidationContracts(unittest.TestCase):
                 "auto-input-helper-schema-invalid",
             )
 
-    def test_temporal_contracts_reject_reversal_and_newer_source_samples(self) -> None:
-        self.assert_invalid(
-            valid_snapshot(captured_at=101.0, heartbeat_at=100.0),
-            "auto-input-helper-schema-invalid",
+    def test_temporal_contracts_use_only_monotonic_ordering(self) -> None:
+        self.assertIsNotNone(
+            self.validator.validate(
+                "snapshot.json",
+                valid_snapshot(captured_at=101.0, heartbeat_at=100.0),
+            )
         )
         self.assert_invalid(
-            valid_snapshot(pv_captured_at=101.0),
+            valid_snapshot(captured_monotonic=101.0, heartbeat_monotonic=100.0),
+            "auto-input-helper-schema-invalid",
+        )
+        for source_key in ("pv", "battery", "grid"):
+            with self.subTest(source_key=source_key):
+                self.assert_invalid(
+                    valid_snapshot(**{f"{source_key}_observed_monotonic": 101.0}),
+                    "auto-input-helper-schema-invalid",
+                )
+        self.assert_invalid(
+            valid_snapshot(pv_observed_monotonic=-0.1),
             "auto-input-helper-schema-invalid",
         )
         normalized = self.validator.validate(
             "snapshot.json",
-            valid_snapshot(captured_at=100.0, heartbeat_at=100.0, pv_captured_at=100.0),
+            valid_snapshot(
+                captured_monotonic=100.0,
+                heartbeat_monotonic=100.0,
+                pv_observed_monotonic=100.0,
+            ),
         )
         self.assertIsNotNone(normalized)
+        boot_boundary = self.validator.validate(
+            "snapshot.json",
+            valid_snapshot(
+                captured_monotonic=0.0,
+                heartbeat_monotonic=0.0,
+                pv_observed_monotonic=0.0,
+                battery_observed_monotonic=0.0,
+                grid_observed_monotonic=0.0,
+            ),
+        )
+        self.assertIsNotNone(boot_boundary)
 
     def test_source_values_and_timestamps_are_atomic_pairs(self) -> None:
         cases: tuple[SnapshotPayload, ...] = (
             valid_snapshot(pv_power=None),
             valid_snapshot(pv_captured_at=None),
+            valid_snapshot(pv_observed_monotonic=None),
             valid_snapshot(battery_soc=None),
             valid_snapshot(battery_captured_at=None),
+            valid_snapshot(battery_observed_monotonic=None),
             valid_snapshot(grid_power=None),
             valid_snapshot(grid_captured_at=None),
+            valid_snapshot(grid_observed_monotonic=None),
         )
         for payload in cases:
             self.assert_invalid(payload, "auto-input-helper-schema-invalid")
         self.assertIsNotNone(
             self.validator.validate(
                 "snapshot.json",
-                valid_snapshot(pv_power=None, pv_captured_at=None),
+                valid_snapshot(
+                    pv_power=None,
+                    pv_captured_at=None,
+                    pv_observed_monotonic=None,
+                ),
             )
         )
 

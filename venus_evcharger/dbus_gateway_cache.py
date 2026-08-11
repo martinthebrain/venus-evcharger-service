@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Unpack
@@ -47,6 +48,20 @@ def _confirmed_at(
     return current if confirmed else float_or_zero(previous.get("confirmed_at"))
 
 
+def _confirmed_monotonic(
+    previous: Mapping[str, object],
+    current: float,
+    *,
+    confirmed: bool,
+) -> float:
+    """Preserve the monotonic observation anchor for estimated values."""
+    return (
+        current
+        if confirmed
+        else float_or_zero(previous.get("confirmed_monotonic"))
+    )
+
+
 def _reason_metadata(reason_code: str) -> CommandPayload:
     """Return optional reason metadata without changing normal cache entries."""
     return {"reason_code": reason_code} if reason_code else {}
@@ -85,18 +100,30 @@ class DbusCacheStore:
     ) -> None:
         details = cache_metadata.merge_cache_value_metadata(metadata, metadata_fields)
         current = _now() if details.now is None else float(details.now)
+        current_monotonic = (
+            time.monotonic()
+            if details.now_monotonic is None
+            else float(details.now_monotonic)
+        )
         previous = self.values.get(str(key), {})
         normalized_value = _json_ready(value)
         changed_at = float_or_zero(previous.get("changed_at"))
         if previous.get("value") != normalized_value or changed_at <= 0.0:
             changed_at = current
         confirmed_at = _confirmed_at(previous, current, confirmed=details.confirmed)
+        confirmed_monotonic = _confirmed_monotonic(
+            previous,
+            current_monotonic,
+            confirmed=details.confirmed,
+        )
         cache_value: CommandPayload = {
             "value": normalized_value,
             "source": str(details.source),
             "changed_at": changed_at,
             "confirmed_at": confirmed_at,
+            "confirmed_monotonic": confirmed_monotonic,
             "updated_at": current,
+            "updated_monotonic": current_monotonic,
             "age_s": 0.0,
             "status": str(details.status),
             "last_error": str(details.last_error),
@@ -179,7 +206,13 @@ class DbusCacheStore:
             "source": str(failure.source),
             "changed_at": float_or_zero(current_value.get("changed_at")),
             "confirmed_at": float_or_zero(current_value.get("confirmed_at")),
+            "confirmed_monotonic": float_or_zero(
+                current_value.get("confirmed_monotonic")
+            ),
             "updated_at": float_or_zero(current_value.get("updated_at")),
+            "updated_monotonic": float_or_zero(
+                current_value.get("updated_monotonic")
+            ),
             "error_at": current,
             "age_s": max(0.0, current - float_or_zero(current_value.get("updated_at"))),
             "status": failure.status,

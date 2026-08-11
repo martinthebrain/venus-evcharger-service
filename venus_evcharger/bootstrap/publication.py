@@ -44,16 +44,14 @@ class EvcsPublicationOwner:
     def maintain_registration(
         self,
         diagnostics: GatewayDiagnosticsReader,
-        now: float,
     ) -> bool:
         """Re-register after a gateway restart without adding a separate poller."""
-        current = float(now)
         check_at = float(self._monotonic())
         if check_at < self._next_registration_check_at:
             return False
         self._defer_registration_check(check_at)
         snapshot = self._read_snapshot(diagnostics)
-        if snapshot is None or not _registration_missing(snapshot, current):
+        if snapshot is None or not _registration_missing(snapshot, check_at):
             return False
         return self._recover_registration()
 
@@ -140,13 +138,19 @@ def _required_text(source: object, name: str) -> str:
 
 def _registration_missing(
     snapshot: GatewayDiagnosticsSnapshot,
-    now: float,
+    monotonic_at: float,
 ) -> bool:
-    if snapshot.health.stale or snapshot.captured_at > now:
+    if snapshot.health.stale:
+        return False
+    try:
+        fresh = snapshot.is_fresh(
+            monotonic_at,
+            REGISTRATION_DIAGNOSTICS_MAX_AGE_SECONDS,
+        )
+    except ValueError:
         return False
     return (
-        snapshot.is_fresh(now, REGISTRATION_DIAGNOSTICS_MAX_AGE_SECONDS)
-        and not snapshot.publication.registered
+        fresh and not snapshot.publication.registered
     )
 
 

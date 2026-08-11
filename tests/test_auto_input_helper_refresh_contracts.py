@@ -27,8 +27,23 @@ class AutoInputHelperRefreshContracts(unittest.TestCase):
 
     def test_existing_snapshots_need_no_startup_request(self) -> None:
         gateway = FakeEnergyGateway()
-        missing = MeasuredValue(None, 0.0, "unknown", 0.0)
-        gateway.inputs = EnergyInputsSnapshot(1, 100.0, 1, missing, missing, missing, missing)
+        missing = MeasuredValue(
+            None,
+            0.0,
+            "unknown",
+            0.0,
+            observed_monotonic=0.0,
+        )
+        gateway.inputs = EnergyInputsSnapshot(
+            1,
+            100.0,
+            1,
+            missing,
+            missing,
+            missing,
+            missing,
+            captured_monotonic=100.0,
+        )
         gateway.topology = EnergyTopologySnapshot(1, 100.0, ())
         snapshots = FakeSnapshots()
         coordinator = EnergyRefreshCoordinator(gateway, snapshots, lambda: False)

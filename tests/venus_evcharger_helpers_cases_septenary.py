@@ -31,19 +31,12 @@ class TestShellyWallboxHelpersSeptenary(ShellyWallboxHelpersTestBase):
                 "aenergy": {"total": 1000.0},
             },
         )
-        helper_snapshot = {
-            "snapshot_version": 1,
-            "captured_at": 100.0,
-            "heartbeat_at": 100.0,
-            "pv_captured_at": 100.0,
-            "pv_power": 2600.0,
-            "battery_captured_at": 100.0,
-            "battery_soc": 58.0,
-            "grid_captured_at": 100.0,
-            "grid_power": -2200.0,
-            "writer_pid": 4321,
-            "helper_generation": 0,
-        }
+        helper_snapshot = valid_snapshot(
+            pv_power=2600.0,
+            battery_soc=58.0,
+            grid_power=-2200.0,
+            helper_generation=0,
+        )
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 7
 

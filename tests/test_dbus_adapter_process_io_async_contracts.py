@@ -272,7 +272,7 @@ class DbusAdapterProcessIoAsyncContracts(GatewayAdapterContractCase):
                 adapter.io_role.publish_cache(control)
 
             self.assertEqual(adapter.cache.health["marker"], 17)
-            publish_energy.assert_called_once_with(55.5, 125.0)
+            publish_energy.assert_called_once_with(55.5)
             publish_topology.assert_called_once_with(energy, 125.0)
             publish_health.assert_called_once_with(
                 topology,

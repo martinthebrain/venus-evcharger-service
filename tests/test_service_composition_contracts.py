@@ -202,8 +202,8 @@ class _AutoInputDouble(_CallLog):
     def ensure_helper_process(self, now: float | None = None) -> None:
         self.add("ensure_helper_process", now)
 
-    def refresh_snapshot(self, now: float | None = None) -> None:
-        self.add("refresh_snapshot", now)
+    def refresh_snapshot(self, monotonic_at: float | None = None) -> None:
+        self.add("refresh_snapshot", monotonic_at)
 
 
 class _ResponseDouble:
@@ -294,8 +294,8 @@ class _ShellyDouble(_CallLog):
 
 
 class _PublisherDouble(_CallLog):
-    def maintain_evcs_registration(self, now: float) -> bool:
-        self.add("maintain_evcs_registration", now)
+    def maintain_evcs_registration(self) -> bool:
+        self.add("maintain_evcs_registration")
         return True
 
     def ensure_state(self) -> None:
@@ -627,7 +627,7 @@ class ServiceCompositionContractTests(unittest.TestCase):
         state.validate_runtime_config()
         self.assertIsInstance(state.load_config(), configparser.ConfigParser)
         state.ensure_publish_state()
-        self.assertTrue(state.maintain_evcs_registration(4.0))
+        self.assertTrue(state.maintain_evcs_registration())
         self.assertTrue(state.publish_field("mode", 2, 4.0, force=True))
         self.assertEqual(state.last_accepted_field("mode"), 2)
         phase_data = {"L1": {"power": 100.0, "voltage": 230.0, "current": 0.4}}

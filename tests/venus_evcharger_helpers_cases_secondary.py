@@ -136,20 +136,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
         service.auto_input_helper_stale_seconds = 15
         service.auto_input_helper_restart_seconds = 5
         service._auto_input_runtime_instance_id = "instance-1"
-        helper_snapshot = {
-            "snapshot_version": 1,
-            "captured_at": 100.0,
-            "heartbeat_at": 100.0,
-            "pv_captured_at": 100.0,
-            "pv_power": 2300.0,
-            "battery_captured_at": 100.0,
-            "battery_soc": 57.0,
-            "grid_captured_at": 100.0,
-            "grid_power": -2100.0,
-            "writer_pid": 4321,
-            "helper_generation": 0,
-            "runtime_instance_id": "instance-1",
-        }
+        helper_snapshot = valid_snapshot(helper_generation=0)
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 1
 
@@ -162,7 +149,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
                     "venus_evcharger.inputs.supervisor_snapshot_runtime.Path.read_text",
                     return_value=json.dumps(helper_snapshot),
                 ):
-                    service.runtime.refresh_auto_input_snapshot()
+                    service.runtime.refresh_auto_input_snapshot(100.0)
 
         snapshot = service.runtime.worker_snapshot()
         self.assertEqual(snapshot["pv_power"], 2300.0)
@@ -200,20 +187,11 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
         service.auto_input_helper_stale_seconds = 15
         service.auto_input_helper_restart_seconds = 5
         service._auto_input_runtime_instance_id = "instance-1"
-        helper_snapshot = {
-            "snapshot_version": 1,
-            "captured_at": 100.0,
-            "heartbeat_at": 130.0,
-            "pv_captured_at": 100.0,
-            "pv_power": 2300.0,
-            "battery_captured_at": 100.0,
-            "battery_soc": 57.0,
-            "grid_captured_at": 100.0,
-            "grid_power": -2100.0,
-            "writer_pid": 4321,
-            "helper_generation": 0,
-            "runtime_instance_id": "instance-1",
-        }
+        helper_snapshot = valid_snapshot(
+            heartbeat_at=130.0,
+            heartbeat_monotonic=130.0,
+            helper_generation=0,
+        )
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 3
 
@@ -226,7 +204,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
                     "venus_evcharger.inputs.supervisor_snapshot_runtime.Path.read_text",
                     return_value=json.dumps(helper_snapshot),
                 ):
-                    service.runtime.refresh_auto_input_snapshot()
+                    service.runtime.refresh_auto_input_snapshot(130.0)
 
         snapshot = service.runtime.worker_snapshot()
         self.assertEqual(snapshot["pv_power"], 2300.0)
@@ -267,20 +245,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
         service.auto_input_helper_stale_seconds = 15
         service.auto_input_helper_restart_seconds = 5
         service._auto_input_runtime_instance_id = "instance-1"
-        helper_snapshot = {
-            "snapshot_version": 1,
-            "captured_at": 100.0,
-            "heartbeat_at": 100.0,
-            "pv_captured_at": 100.0,
-            "pv_power": 2300.0,
-            "battery_captured_at": 100.0,
-            "battery_soc": 57.0,
-            "grid_captured_at": 100.0,
-            "grid_power": -2100.0,
-            "writer_pid": 4321,
-            "helper_generation": 0,
-            "runtime_instance_id": "instance-1",
-        }
+        helper_snapshot = valid_snapshot(helper_generation=0)
         stat_result = MagicMock()
         stat_result.st_mtime_ns = 2
 
@@ -293,7 +258,7 @@ class TestShellyWallboxHelpersSecondary(ShellyWallboxHelpersTestBase):
                     "venus_evcharger.inputs.supervisor_snapshot_runtime.Path.read_text",
                     return_value=json.dumps(helper_snapshot),
                 ):
-                    service.runtime.refresh_auto_input_snapshot()
+                    service.runtime.refresh_auto_input_snapshot(100.0)
 
         snapshot = service.runtime.worker_snapshot()
         self.assertEqual(snapshot["pm_status"], {"output": True, "apower": 1800.0})

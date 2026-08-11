@@ -156,14 +156,24 @@ class RemainingCoverageHelperTests(unittest.TestCase):
         harness = _auto_input_supervisor(service)
         service._auto_input_snapshot_seen_for_current_helper = False
 
-        harness.snapshot_runtime._apply_snapshot(None, None, 10.0, {"captured_at": 9.0}, False)
+        harness.snapshot_runtime._apply_snapshot(
+            None,
+            None,
+            {"captured_at": 9.0},
+            False,
+        )
 
         self.assertIs(service._auto_input_snapshot_last_seen, None)
         self.assertFalse(service._auto_input_snapshot_seen_for_current_helper)
 
         service._auto_input_snapshot_seen_for_current_helper = True
         service._auto_input_snapshot_last_seen = 8.0
-        harness.snapshot_runtime._apply_snapshot(None, None, 11.0, {"captured_at": 10.0}, False)
+        harness.snapshot_runtime._apply_snapshot(
+            None,
+            None,
+            {"captured_at": 10.0},
+            False,
+        )
         self.assertEqual(service._auto_input_snapshot_last_seen, 8.0)
         self.assertFalse(service._auto_input_snapshot_seen_for_current_helper)
 

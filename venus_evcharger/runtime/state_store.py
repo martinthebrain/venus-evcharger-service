@@ -74,6 +74,7 @@ class RuntimeStateStore:
             "_auto_input_snapshot_seen_for_current_helper": lambda: False,
             "_auto_input_snapshot_mtime_ns": lambda: None,
             "_auto_input_snapshot_last_captured_at": lambda: None,
+            "_auto_input_snapshot_last_sequence": lambda: None,
             "_auto_input_snapshot_version": lambda: None,
             "_auto_input_snapshot_writer_pid": lambda: None,
             "_auto_input_snapshot_generation": lambda: None,
@@ -218,6 +219,7 @@ class RuntimeStateStore:
         svc._auto_input_snapshot_seen_for_current_helper = False
         svc._auto_input_snapshot_mtime_ns = None
         svc._auto_input_snapshot_last_captured_at = None
+        svc._auto_input_snapshot_last_sequence = None
         svc._auto_input_snapshot_version = None
         svc._auto_input_snapshot_writer_pid = None
         svc._auto_input_snapshot_generation = None

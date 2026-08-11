@@ -62,11 +62,10 @@ class DbusPublishController:
     def ensure_state(self) -> None:
         self.core.ensure_state()
 
-    def maintain_evcs_registration(self, now: float) -> bool:
+    def maintain_evcs_registration(self) -> bool:
         """Recover gateway-owned EVCS registration from semantic health."""
         return self._publication_owner.maintain_registration(
             self._gateway_diagnostics,
-            now,
         )
 
     def publish_field(

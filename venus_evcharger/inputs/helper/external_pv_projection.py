@@ -37,6 +37,7 @@ def single_pv_projection(
     snapshot = poll.snapshot
     if snapshot.pv_input_power_w is None or poll.observed_at is None:
         return None
+    assert poll.observed_monotonic is not None
     return ProjectedEnergyValue(
         value=float(snapshot.pv_input_power_w),
         observed_at=float(poll.observed_at),
@@ -45,6 +46,7 @@ def single_pv_projection(
         measurement_status=projection_measurement_status(
             poll.measurement_status
         ),
+        observed_monotonic=float(poll.observed_monotonic),
     )
 
 
@@ -57,12 +59,15 @@ def aggregate_pv_projection(
     observed = pv_observation_times(polls)
     if not observed:
         return None
+    observed_monotonic = pv_observation_monotonic_times(polls)
+    assert observed_monotonic
     return ProjectedEnergyValue(
         value=float(cluster.combined_pv_input_power_w),
         observed_at=min(observed),
         source_id="external-aggregate",
         confidence=_minimum_confidence(polls),
         measurement_status=_aggregate_measurement_status(polls),
+        observed_monotonic=min(observed_monotonic),
     )
 
 
@@ -73,6 +78,17 @@ def pv_observation_times(
         float(poll.observed_at)
         for poll in polls
         if poll.observed_at is not None
+    )
+
+
+def pv_observation_monotonic_times(
+    polls: tuple[ExternalSourcePoll, ...],
+) -> tuple[float, ...]:
+    """Return monotonic observation times for one coherent PV projection."""
+    return tuple(
+        float(poll.observed_monotonic)
+        for poll in polls
+        if poll.observed_monotonic is not None
     )
 
 
@@ -91,6 +107,7 @@ def _aggregate_measurement_status(
 __all__ = [
     "aggregate_pv_projection",
     "external_pv_projection",
+    "pv_observation_monotonic_times",
     "pv_observation_times",
     "single_pv_projection",
     "usable_pv_poll",

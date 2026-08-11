@@ -17,6 +17,7 @@ from tests.support.auto_input_supervisor import (
     valid_snapshot,
 )
 from venus_evcharger.inputs.supervisor import AutoInputSupervisor
+from venus_evcharger.inputs.supervisor_snapshot_runtime import _sequence_advances
 
 
 def write_snapshot(path: Path, payload: object, mtime_ns: int) -> None:
@@ -48,16 +49,86 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
         signature = (11, 12, 13, 14)
         runtime._last_snapshot_signature = signature
 
-        runtime._apply_snapshot(None, 100.0, 100.0, valid_snapshot(), True)
+        runtime._apply_snapshot(None, 100.0, valid_snapshot(), True)
 
         self.assertEqual(runtime._last_snapshot_signature, signature)
         self.assertEqual(service.runtime.snapshots[-1]["captured_at"], 100.0)
 
-    def test_missing_freshness_timestamp_is_not_in_the_future(self) -> None:
+    def test_sequence_contract_distinguishes_restart_from_regression(self) -> None:
+        scenarios = (
+            (None, None, 1, None, "instance-1", None, False),
+            (1, None, 1, None, "instance-1", None, True),
+            (2, 1, 1, 1, "instance-1", "instance-1", True),
+            (1, 1, 1, 1, "instance-1", "instance-1", False),
+            (1, 2, 1, 1, "instance-1", "instance-1", False),
+            (1, 99, 1, 1, "instance-2", "instance-1", True),
+            (1, 99, 2, 1, "instance-1", "instance-1", True),
+        )
+        for scenario in scenarios:
+            (
+                sequence,
+                previous_sequence,
+                generation,
+                previous_generation,
+                runtime_instance,
+                previous_runtime_instance,
+                expected,
+            ) = scenario
+            with self.subTest(scenario=scenario):
+                self.assertIs(
+                    _sequence_advances(
+                        sequence,
+                        previous_sequence,
+                        generation,
+                        previous_generation,
+                        runtime_instance,
+                        previous_runtime_instance,
+                    ),
+                    expected,
+                )
+
+    def test_helper_start_boundary_includes_an_equal_monotonic_timestamp(self) -> None:
+        service = AutoInputSupervisorServiceFake(_auto_input_helper_last_start_at=0.0)
+        runtime = self.supervisor(service).snapshot_runtime
+        self.assertTrue(runtime._snapshot_after_current_helper_start(service, 0.0))
+
+        service._auto_input_helper_last_start_at = 10.0
+        self.assertFalse(runtime._snapshot_after_current_helper_start(service, 9.999))
+        self.assertTrue(runtime._snapshot_after_current_helper_start(service, 10.0))
+
+        service._auto_input_helper_last_start_at = 0.5
+        self.assertFalse(runtime._snapshot_after_current_helper_start(service, 0.0))
+
+    def test_timestamp_and_sequence_warning_throttles_have_a_one_second_floor(self) -> None:
+        service = AutoInputSupervisorServiceFake(
+            auto_input_helper_restart_seconds=0.5,
+            _auto_input_snapshot_last_sequence=1,
+            _auto_input_snapshot_generation=1,
+            _auto_input_snapshot_runtime_instance_id="instance-1",
+        )
+        runtime = self.supervisor(service).snapshot_runtime
+
+        self.assertFalse(
+            runtime._snapshot_timestamps_valid(
+                "/run/auto-input.json",
+                102.0,
+                100.0,
+            )
+        )
+        self.assertEqual(service.runtime.warnings[-1][1], 1.0)
+        self.assertFalse(
+            runtime._snapshot_sequence_valid(
+                "/run/auto-input.json",
+                valid_snapshot(snapshot_sequence=1),
+            )
+        )
+        self.assertEqual(service.runtime.warnings[-1][1], 1.0)
+
+    def test_missing_monotonic_freshness_is_not_in_the_future(self) -> None:
         supervisor = self.supervisor(AutoInputSupervisorServiceFake())
 
         self.assertTrue(
-            supervisor.snapshot_runtime._snapshot_freshness_not_future(
+            supervisor.snapshot_runtime._snapshot_timestamps_valid(
                 "/run/auto-input.json",
                 None,
                 100.0,
@@ -69,6 +140,7 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
             path = Path(temp_dir) / "snapshot.json"
             payload = valid_snapshot(
                 heartbeat_at=105.0,
+                heartbeat_monotonic=105.0,
                 pv_status="ok",
                 battery_status="ok",
                 grid_status="ok",
@@ -132,7 +204,7 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
             self.supervisor(service).refresh_snapshot()
             self.assertEqual(service.runtime.snapshots[-1]["pv_power"], 2300.0)
 
-            write_snapshot(path, valid_snapshot(), 22)
+            write_snapshot(path, valid_snapshot(snapshot_sequence=2), 22)
             service.now = 146.0
             self.supervisor(service).refresh_snapshot()
 
@@ -202,11 +274,116 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
             supervisor = self.supervisor(service)
             supervisor.refresh_snapshot()
 
-            write_snapshot(replacement, valid_snapshot(pv_power=1200.0), 40)
+            write_snapshot(
+                replacement,
+                valid_snapshot(snapshot_sequence=2, pv_power=1200.0),
+                40,
+            )
             replacement.replace(path)
             supervisor.refresh_snapshot()
 
         self.assertEqual([snapshot["pv_power"] for snapshot in service.runtime.snapshots], [900.0, 1200.0])
+
+    def test_sequence_must_increase_within_one_helper_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "snapshot.json"
+            service = AutoInputSupervisorServiceFake(
+                auto_input_snapshot_path=str(path),
+                now=100.0,
+            )
+            supervisor = self.supervisor(service)
+
+            write_snapshot(path, valid_snapshot(snapshot_sequence=2), 80)
+            supervisor.refresh_snapshot()
+            write_snapshot(path, valid_snapshot(snapshot_sequence=2), 81)
+            supervisor.refresh_snapshot()
+            write_snapshot(path, valid_snapshot(snapshot_sequence=1), 82)
+            supervisor.refresh_snapshot()
+
+            self.assertEqual(len(service.runtime.snapshots), 1)
+            self.assertEqual(
+                service.runtime.warnings[-2:],
+                [
+                    (
+                        "auto-input-helper-sequence-regressed",
+                        5.0,
+                        "Auto input helper snapshot %s has non-increasing sequence %s after %s",
+                        (str(path), 2, 2),
+                        None,
+                    ),
+                    (
+                        "auto-input-helper-sequence-regressed",
+                        5.0,
+                        "Auto input helper snapshot %s has non-increasing sequence %s after %s",
+                        (str(path), 1, 2),
+                        None,
+                    ),
+                ],
+            )
+
+            service._auto_input_runtime_instance_id = "instance-2"
+            write_snapshot(
+                path,
+                valid_snapshot(
+                    snapshot_sequence=1,
+                    runtime_instance_id="instance-2",
+                ),
+                83,
+            )
+            supervisor.refresh_snapshot()
+
+        self.assertEqual(len(service.runtime.snapshots), 2)
+        self.assertEqual(service._auto_input_snapshot_last_sequence, 1)
+        self.assertEqual(
+            service._auto_input_snapshot_runtime_instance_id,
+            "instance-2",
+        )
+
+    def test_consumer_monotonic_time_is_sampled_after_the_file_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "snapshot.json"
+            write_snapshot(path, valid_snapshot(), 84)
+            service = AutoInputSupervisorServiceFake(
+                auto_input_snapshot_path=str(path),
+                now=99.0,
+            )
+            supervisor = self.supervisor(service)
+
+            def complete_read(*_args: object, **_kwargs: object) -> str:
+                service.now = 100.0
+                return json.dumps(valid_snapshot())
+
+            with patch.object(Path, "read_text", side_effect=complete_read):
+                supervisor.refresh_snapshot()
+
+        self.assertEqual(len(service.runtime.snapshots), 1)
+        self.assertEqual(service._auto_input_snapshot_last_seen, 100.0)
+
+    def test_new_helper_generation_may_restart_its_snapshot_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "snapshot.json"
+            write_snapshot(
+                path,
+                valid_snapshot(
+                    snapshot_sequence=1,
+                    helper_generation=2,
+                ),
+                85,
+            )
+            service = AutoInputSupervisorServiceFake(
+                auto_input_snapshot_path=str(path),
+                now=100.0,
+                _auto_input_helper_generation=2,
+                _auto_input_snapshot_last_sequence=99,
+                _auto_input_snapshot_generation=1,
+                _auto_input_snapshot_runtime_instance_id="instance-1",
+            )
+
+            self.supervisor(service).refresh_snapshot()
+
+        self.assertEqual(len(service.runtime.snapshots), 1)
+        self.assertEqual(service._auto_input_snapshot_last_sequence, 1)
+        self.assertEqual(service._auto_input_snapshot_generation, 2)
 
     def test_snapshot_file_signature_and_change_detection_are_exact(self) -> None:
         service = AutoInputSupervisorServiceFake(_auto_input_snapshot_mtime_ns=10)
@@ -252,7 +429,7 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
                 supervisor.refresh_snapshot()
             self.assertEqual(service.runtime.warnings[-1][0], "auto-input-helper-read-failed")
 
-    def test_regressed_and_future_timestamps_are_rejected(self) -> None:
+    def test_epoch_regression_is_accepted_but_future_monotonic_time_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "snapshot.json"
             service = AutoInputSupervisorServiceFake(
@@ -263,23 +440,52 @@ class TestAutoInputSupervisorSnapshotRuntimeContracts(unittest.TestCase):
             supervisor = self.supervisor(service)
             write_snapshot(path, valid_snapshot(captured_at=100.0), 60)
             supervisor.refresh_snapshot()
-            self.assertEqual(service.runtime.warnings[-1][0], "auto-input-helper-captured-at-regressed")
+            self.assertEqual(service.runtime.snapshots[-1]["captured_at"], 100.0)
 
-            service._auto_input_snapshot_last_captured_at = None
-            write_snapshot(path, valid_snapshot(captured_at=101.1, heartbeat_at=101.1, pv_captured_at=101.1, battery_captured_at=101.1, grid_captured_at=101.1), 61)
+            write_snapshot(
+                path,
+                valid_snapshot(
+                    snapshot_sequence=2,
+                    captured_at=50.0,
+                    heartbeat_at=50.0,
+                    captured_monotonic=101.1,
+                    heartbeat_monotonic=101.1,
+                    pv_captured_at=50.0,
+                    pv_observed_monotonic=101.1,
+                    battery_captured_at=50.0,
+                    battery_observed_monotonic=101.1,
+                    grid_captured_at=50.0,
+                    grid_observed_monotonic=101.1,
+                ),
+                61,
+            )
             supervisor.refresh_snapshot()
-            self.assertEqual(service.runtime.warnings[-1][0], "auto-input-helper-future-timestamp")
-        self.assertEqual(service.runtime.snapshots, [])
+            self.assertEqual(
+                service.runtime.warnings[-1],
+                (
+                    "auto-input-helper-future-timestamp",
+                    5.0,
+                    "Auto input helper snapshot %s moved monotonic freshness into the future: %.3f > %.3f",
+                    (str(path), 101.1, 100.0),
+                    None,
+                ),
+            )
+        self.assertEqual(len(service.runtime.snapshots), 1)
 
     def test_timestamp_tolerance_and_equal_capture_are_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "snapshot.json"
             payload = valid_snapshot(
                 captured_at=101.0,
+                captured_monotonic=101.0,
                 heartbeat_at=101.0,
+                heartbeat_monotonic=101.0,
                 pv_captured_at=101.0,
+                pv_observed_monotonic=101.0,
                 battery_captured_at=101.0,
+                battery_observed_monotonic=101.0,
                 grid_captured_at=101.0,
+                grid_observed_monotonic=101.0,
             )
             write_snapshot(path, payload, 70)
             service = AutoInputSupervisorServiceFake(

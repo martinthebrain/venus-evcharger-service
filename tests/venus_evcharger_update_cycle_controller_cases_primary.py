@@ -462,7 +462,7 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
         controller = UpdateCycleController(service, _phase_values, lambda reason: 0)
 
         self.assertTrue(controller.components.state.publish_virtual_state_paths(123.0, 45, 6.0, 1, 100.0))
-        service._maintain_evcs_registration.assert_called_once_with(100.0)
+        service._maintain_evcs_registration.assert_called_once_with()
         service._publish_energy_time_measurements.assert_called_once_with(
             6.0,
             {"L1": 0.0, "L2": 6.0, "L3": 0.0},
@@ -534,8 +534,8 @@ class TestUpdateCycleControllerPrimary(UpdateCycleControllerTestBase):
         )
         service._start_io_worker.assert_called_once_with()
         service._watchdog_recover.assert_called_once_with(100.0)
-        service._ensure_auto_input_helper_process.assert_called_once_with(100.0)
-        service._refresh_auto_input_snapshot.assert_called_once_with(100.0)
+        service._ensure_auto_input_helper_process.assert_called_once_with()
+        service._refresh_auto_input_snapshot.assert_called_once_with()
         service._get_worker_snapshot.assert_called_once_with()
 
         service = SimpleNamespace(

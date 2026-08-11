@@ -365,15 +365,16 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
         snapshot = gateway_diagnostics_snapshot()
         self.assertEqual(snapshot.sample("operating_mode").value, 2)
         self.assertEqual(snapshot.critical_unavailable_fields(), ())
-        self.assertEqual(snapshot.age_seconds(99.0), -1.0)
         with self.assertRaisesRegex(
             ValueError,
-            "^gateway diagnostics captured_at exceeds gateway diagnostics captured_at tolerance$",
+            "current monotonic time precedes captured_monotonic",
         ):
-            snapshot.age_seconds(98.999)
+            snapshot.age_seconds(99.0)
+        self.assertEqual(snapshot.age_seconds(100.0), 0.0)
         self.assertEqual(snapshot.age_seconds(125.0), 25.0)
-        self.assertTrue(snapshot.is_fresh(99.0, 0.0))
-        self.assertFalse(snapshot.is_fresh(98.999, 100.0))
+        self.assertTrue(snapshot.is_fresh(100.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "precedes captured_monotonic"):
+            snapshot.is_fresh(99.0, 100.0)
         self.assertTrue(snapshot.is_fresh(125.0, 25.0))
         self.assertFalse(snapshot.is_fresh(125.1, 25.0))
 
@@ -401,11 +402,12 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             GatewayDiagnosticsSnapshot(
                 sequence=snapshot.sequence,
                 captured_at=snapshot.captured_at,
+                captured_monotonic=snapshot.captured_monotonic,
                 health=snapshot.health,
                 discovery=snapshot.discovery,
                 publication=snapshot.publication,
                 ev_charger=snapshot.ev_charger,
-                schema_version=3,
+                schema_version=4,
             )
         with self.assertRaisesRegex(TypeError, "invalid sample"):
             diagnostics_contract._sample_tuple([*samples])
@@ -423,6 +425,21 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             with self.subTest(label=label), self.assertRaisesRegex(TypeError, label):
                 validator(value)
 
+    def test_epoch_clock_changes_do_not_affect_snapshot_freshness(self) -> None:
+        before_epoch_adjustment = gateway_diagnostics_snapshot(
+            captured_at=1_000.0,
+            captured_monotonic=100.0,
+        )
+        after_epoch_adjustment = gateway_diagnostics_snapshot(
+            captured_at=10.0,
+            captured_monotonic=100.0,
+        )
+
+        self.assertEqual(before_epoch_adjustment.age_seconds(104.0), 4.0)
+        self.assertEqual(after_epoch_adjustment.age_seconds(104.0), 4.0)
+        self.assertTrue(before_epoch_adjustment.is_fresh(104.0, 4.0))
+        self.assertTrue(after_epoch_adjustment.is_fresh(104.0, 4.0))
+
     def test_payload_schema_is_exact_at_every_boundary(self) -> None:
         snapshot = gateway_diagnostics_snapshot()
         payload = snapshot.to_payload()
@@ -430,7 +447,7 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             payload | {"extra": True},
             {key: value for key, value in payload.items() if key != "health"},
             payload | {"schema_version": True},
-            payload | {"schema_version": 3},
+            payload | {"schema_version": 2},
             payload | {"sequence": 1.5},
             payload | {"ev_charger": "bad"},
             payload | {"ev_charger": object()},

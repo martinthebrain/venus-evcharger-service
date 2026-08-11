@@ -17,7 +17,7 @@ class HelperProcess(Protocol):
 
 
 class SnapshotRefreshPort(Protocol):
-    def refresh_snapshot(self, now: float | None = None) -> None: ...
+    def refresh_snapshot(self, monotonic_at: float | None = None) -> None: ...
 
 
 class SupervisorRuntimePort(Protocol):
@@ -58,6 +58,7 @@ class AutoInputSupervisorService(Protocol):
     _auto_input_runtime_instance_id: str
     _auto_input_snapshot_generation: int | None
     _auto_input_snapshot_last_captured_at: float | None
+    _auto_input_snapshot_last_sequence: int | None
     _auto_input_snapshot_last_seen: float | None
     _auto_input_snapshot_mtime_ns: int | None
     _auto_input_snapshot_runtime_instance_id: str | None
@@ -65,6 +66,7 @@ class AutoInputSupervisorService(Protocol):
     _auto_input_snapshot_version: int | None
     _auto_input_snapshot_writer_pid: int | None
     def time_now(self) -> float: ...
+    def monotonic_now(self) -> float: ...
 
 
 @dataclass(frozen=True)

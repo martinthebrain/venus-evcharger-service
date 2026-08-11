@@ -96,6 +96,7 @@ def gateway_diagnostics_snapshot(
     health_stale: bool = False,
     sequence: int = 7,
     captured_at: float = 100.0,
+    captured_monotonic: float | None = None,
     discovery_state: GatewayDiscoveryState = "idle",
     discovery_pending_work: int = 0,
     discovered_source_count: int = 4,
@@ -104,6 +105,9 @@ def gateway_diagnostics_snapshot(
     return GatewayDiagnosticsSnapshot(
         sequence=sequence,
         captured_at=captured_at,
+        captured_monotonic=(
+            captured_at if captured_monotonic is None else captured_monotonic
+        ),
         health=GatewayHealthSummary(
             state=health_state,
             stale=health_stale,
@@ -135,44 +139,6 @@ def gateway_diagnostics_snapshot(
     )
 
 
-def gateway_diagnostics_legacy_payload(
-    *,
-    observed_at: float | None = None,
-) -> dict[str, object]:
-    """Return the canonical schema-v1 representation used by migration tests."""
-    snapshot = gateway_diagnostics_snapshot()
-    legacy_samples = [
-        {
-            "name": sample.name,
-            "value": sample.value,
-            "status": sample.status,
-            "observed_at": sample.confirmed_at if observed_at is None else observed_at,
-            "confidence": sample.confidence,
-            "reason_code": sample.reason_code,
-        }
-        for sample in snapshot.ev_charger
-    ]
-    discovery = snapshot.discovery.to_payload()
-    legacy_discovery = {
-        key: discovery[key]
-        for key in (
-            "enabled",
-            "state",
-            "pending_work",
-            "discovered_source_count",
-            "unusable_source_count",
-        )
-    }
-    return {
-        "schema_version": 1,
-        "sequence": snapshot.sequence,
-        "captured_at": snapshot.captured_at,
-        "health": snapshot.health.to_payload(),
-        "discovery": legacy_discovery,
-        "ev_charger": legacy_samples,
-    }
-
-
 @dataclass(frozen=True, slots=True)
 class StaticGatewayDiagnosticsReader:
     """Deterministic transport-neutral reader for consumer contract tests."""
@@ -186,6 +152,7 @@ class StaticGatewayDiagnosticsReader:
 def gateway_diagnostics_reader(
     *,
     captured_at: float = 100.0,
+    captured_monotonic: float | None = None,
     discovery_state: GatewayDiscoveryState = "idle",
     discovery_pending_work: int = 0,
     discovered_source_count: int = 4,
@@ -195,6 +162,7 @@ def gateway_diagnostics_reader(
     return StaticGatewayDiagnosticsReader(
         gateway_diagnostics_snapshot(
             captured_at=captured_at,
+            captured_monotonic=captured_monotonic,
             discovery_state=discovery_state,
             discovery_pending_work=discovery_pending_work,
             discovered_source_count=discovered_source_count,

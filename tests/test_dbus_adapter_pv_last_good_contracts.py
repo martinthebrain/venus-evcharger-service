@@ -416,6 +416,7 @@ class PvLastGoodGatewayIntegrationTests(unittest.TestCase):
                 adapter.energy_discovery,
                 sequence=adapter.cache.sequence,
                 captured_at=float(decayed["updated_at"]),
+                captured_monotonic=float(decayed["updated_monotonic"]),
             )
             self.assertEqual(snapshot.pv_power_w.status, "stale")
             self.assertEqual(snapshot.pv_power_w.reason_code, PV_TRANSIENT_HOLD_REASON)

@@ -41,6 +41,8 @@ class AutoInputSources:
         self._gateway_battery: MeasuredValue | None = None
         self._gateway_battery_power: MeasuredValue | None = None
         self._battery_observed_at: float | None = None
+        self._battery_observed_monotonic: float | None = None
+        self._cycle_monotonic = 0.0
         self._external_cycle: ExternalEnergyCycle | None = None
         self._pv_projection: ProjectedEnergyValue | None = None
         self.external = ConfiguredEnergySources(
@@ -56,8 +58,9 @@ class AutoInputSources:
         )
 
     def prepare_cycle(self) -> None:
-        current = time.time()
         self.gateway.refresh_inputs()
+        current_epoch = time.time()
+        self._cycle_monotonic = time.monotonic()
         scopes: tuple[EnergyMeasurementKey, ...] = (
             "pv",
             "grid",
@@ -68,26 +71,43 @@ class AutoInputSources:
             scope: self.gateway.measurement(scope)
             for scope in scopes
         }
-        self._prepare_external_cycle(current)
+        self._prepare_external_cycle(current_epoch, self._cycle_monotonic)
 
     def close(self) -> None:
         """Release connector resources owned by this helper."""
         self.external.close()
 
-    def _prepare_external_cycle(self, current: float) -> None:
+    def _prepare_external_cycle(
+        self,
+        current_epoch: float,
+        current_monotonic: float,
+    ) -> None:
         self._external_cycle = None
-        self._gateway_battery = self._valid_battery_measurement(current)
-        self._gateway_battery_power = self._valid_measurement("battery_power", current)
+        self._gateway_battery = self._valid_battery_measurement(current_monotonic)
+        self._gateway_battery_power = self._valid_measurement(
+            "battery_power",
+            current_monotonic,
+        )
         self._battery_observed_at = _oldest_observation(
             self._gateway_battery,
             self._gateway_battery_power,
         )
-        gateway_pv = self._projected_gateway_value("pv", current)
+        self._battery_observed_monotonic = _oldest_monotonic_observation(
+            self._gateway_battery,
+            self._gateway_battery_power,
+        )
+        gateway_pv = self._projected_gateway_value("pv", current_monotonic)
         if not self.external.enabled:
             self._pv_projection = gateway_pv
             return
-        self._external_cycle = self.external.collect_cycle(self._gateway_battery, current)
+        self._external_cycle = self.external.collect_cycle(
+            self._gateway_battery,
+            current_epoch,
+        )
         self._battery_observed_at = self._external_cycle.battery_observed_at
+        self._battery_observed_monotonic = (
+            self._external_cycle.battery_observed_monotonic
+        )
         self._pv_projection = _select_pv_projection(
             gateway_pv,
             self._external_cycle.pv,
@@ -103,6 +123,18 @@ class AutoInputSources:
             return _measurement_observed_at(self._measurements.get("grid"))
         return None
 
+    def observed_monotonic(self, source_name: str) -> float | None:
+        """Return the source's native monotonic observation timestamp."""
+        if source_name == "pv":
+            return _projected_observed_monotonic(self._pv_projection)
+        if source_name == "battery":
+            return self._battery_observed_monotonic
+        if source_name == "grid":
+            return _measurement_observed_monotonic(
+                self._measurements.get("grid")
+            )
+        return None
+
     def pv_power(self) -> float | None:
         if self._pv_projection is None:
             if self.settings.pv_projection_policy.name != "external_only":
@@ -111,7 +143,7 @@ class AutoInputSources:
         return self._pv_projection.value
 
     def grid_power(self) -> float | None:
-        measurement = self._valid_measurement("grid", time.time())
+        measurement = self._valid_measurement("grid", self._cycle_monotonic)
         if measurement is None:
             self._request_missing("grid")
             return None
@@ -151,17 +183,20 @@ class AutoInputSources:
     def _valid_measurement(
         self,
         key: EnergyMeasurementKey,
-        current: float,
+        current_monotonic: float,
     ) -> MeasuredValue | None:
         measurement = self._measurements.get(key)
         if measurement is None:
             return None
         if not _contributing_measurement_status(measurement.status):
             return None
-        observed_at = float(measurement.observed_at)
-        if not _valid_gateway_observation_time(observed_at, current):
+        observed_monotonic = float(measurement.observed_monotonic)
+        if not _valid_gateway_observation_monotonic(
+            observed_monotonic,
+            current_monotonic,
+        ):
             return None
-        age = current - observed_at
+        age = current_monotonic - observed_monotonic
         if age > self.settings.gateway_max_age_seconds:
             return None
         return measurement
@@ -183,6 +218,7 @@ class AutoInputSources:
             measurement_status=projection_measurement_status(
                 measurement.status
             ),
+            observed_monotonic=float(measurement.observed_monotonic),
         )
 
     def _request_missing(self, scope: EnergyRefreshScope) -> None:
@@ -289,8 +325,14 @@ def _contributing_measurement_status(status: str) -> bool:
     return status in {"fresh", "stale"}
 
 
-def _valid_gateway_observation_time(observed_at: float, current: float) -> bool:
-    return math.isfinite(observed_at) and 0.0 < observed_at <= current
+def _valid_gateway_observation_monotonic(
+    observed_monotonic: float,
+    current_monotonic: float,
+) -> bool:
+    return (
+        math.isfinite(observed_monotonic)
+        and 0.0 < observed_monotonic <= current_monotonic
+    )
 
 
 def _projected_observed_at(
@@ -299,12 +341,26 @@ def _projected_observed_at(
     return None if projection is None else projection.observed_at
 
 
+def _projected_observed_monotonic(
+    projection: ProjectedEnergyValue | None,
+) -> float | None:
+    return None if projection is None else projection.observed_monotonic
+
+
 def _measurement_observed_at(
     measurement: MeasuredValue | None,
 ) -> float | None:
     if measurement is None or measurement.observed_at <= 0.0:
         return None
     return float(measurement.observed_at)
+
+
+def _measurement_observed_monotonic(
+    measurement: MeasuredValue | None,
+) -> float | None:
+    if measurement is None or measurement.observed_monotonic <= 0.0:
+        return None
+    return float(measurement.observed_monotonic)
 
 
 def _measurement_value(measurement: MeasuredValue | None) -> float | None:
@@ -318,6 +374,20 @@ def _oldest_observation(*measurements: MeasuredValue | None) -> float | None:
         observed_at
         for measurement in measurements
         if (observed_at := _measurement_observed_at(measurement)) is not None
+    )
+    return min(timestamps) if timestamps else None
+
+
+def _oldest_monotonic_observation(
+    *measurements: MeasuredValue | None,
+) -> float | None:
+    timestamps = tuple(
+        observed_monotonic
+        for measurement in measurements
+        if (
+            observed_monotonic := _measurement_observed_monotonic(measurement)
+        )
+        is not None
     )
     return min(timestamps) if timestamps else None
 
