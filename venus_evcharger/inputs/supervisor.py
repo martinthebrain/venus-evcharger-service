@@ -22,13 +22,19 @@ class AutoInputSupervisor:
         required_keys=frozenset(
             {
                 "snapshot_version",
+                "snapshot_sequence",
                 "captured_at",
+                "captured_monotonic",
                 "heartbeat_at",
+                "heartbeat_monotonic",
                 "pv_captured_at",
+                "pv_observed_monotonic",
                 "pv_power",
                 "battery_captured_at",
+                "battery_observed_monotonic",
                 "battery_soc",
                 "grid_captured_at",
+                "grid_observed_monotonic",
                 "grid_power",
                 "writer_pid",
                 "helper_generation",
@@ -62,5 +68,5 @@ class AutoInputSupervisor:
     def ensure_helper_process(self, now: float | None = None) -> None:
         self.process_lifecycle.ensure_helper_process(now)
 
-    def refresh_snapshot(self, now: float | None = None) -> None:
-        self.snapshot_runtime.refresh_snapshot(now)
+    def refresh_snapshot(self, monotonic_at: float | None = None) -> None:
+        self.snapshot_runtime.refresh_snapshot(monotonic_at)

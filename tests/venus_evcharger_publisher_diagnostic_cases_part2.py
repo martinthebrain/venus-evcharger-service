@@ -206,8 +206,12 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         ), mode="split", meter_type="template_meter", switch_type="switch_group", charger_type="smartevse_charger")
         controller = build_publish_controller(service, self._real_age_seconds)
 
-        counter_values = controller.diagnostics.counter_values(current_time)
-        age_values = controller.diagnostics.age_values(current_time)
+        with patch(
+            "venus_evcharger.publish.dbus_diagnostics.time.monotonic",
+            return_value=current_time,
+        ):
+            counter_values = controller.diagnostics.counter_values(current_time)
+            age_values = controller.diagnostics.age_values(current_time)
 
         self.assertEqual(counter_values["status"], 6)
         self.assertEqual(counter_values["auto_fault_active"], 0)
@@ -290,8 +294,12 @@ class _TestDbusPublishControllerDiagnosticsPart2:
             ),
         )
 
-        counter_values = controller.diagnostics.counter_values(current_time)
-        age_values = controller.diagnostics.age_values(current_time)
+        with patch(
+            "venus_evcharger.publish.dbus_diagnostics.time.monotonic",
+            return_value=current_time,
+        ):
+            counter_values = controller.diagnostics.counter_values(current_time)
+            age_values = controller.diagnostics.age_values(current_time)
 
         self.assertEqual(
             set(counter_values),

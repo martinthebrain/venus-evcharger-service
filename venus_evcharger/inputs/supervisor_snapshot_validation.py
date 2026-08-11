@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
-
 from venus_evcharger.core.contracts import paired_optional_values, valid_battery_soc
 from venus_evcharger.inputs.supervisor_contracts import (
     AutoInputSupervisorService,
@@ -129,7 +127,18 @@ class AutoInputSnapshotValidator:
         return True
 
     def _normalize_scalars(self, path: str, source: SnapshotPayload, target: SnapshotPayload) -> bool:
-        timestamp_keys = ("captured_at", "heartbeat_at", "pv_captured_at", "battery_captured_at", "grid_captured_at")
+        timestamp_keys = (
+            "captured_at",
+            "captured_monotonic",
+            "heartbeat_at",
+            "heartbeat_monotonic",
+            "pv_captured_at",
+            "pv_observed_monotonic",
+            "battery_captured_at",
+            "battery_observed_monotonic",
+            "grid_captured_at",
+            "grid_observed_monotonic",
+        )
         if not self._normalize_fields(path, source, target, timestamp_keys, snapshot_timestamp, "timestamp"):
             return False
         if not self._normalize_fields(
@@ -160,12 +169,27 @@ class AutoInputSnapshotValidator:
         runtime_instance = self._runtime_instance(path, source.get("runtime_instance_id"))
         if runtime_instance is None:
             return False
+        sequence = self._snapshot_sequence(path, source.get("snapshot_sequence"))
+        if sequence is None:
+            return False
         target.update(
             writer_pid=writer_pid,
             helper_generation=generation,
             runtime_instance_id=runtime_instance,
+            snapshot_sequence=sequence,
         )
         return True
+
+    def _snapshot_sequence(self, path: str, raw_value: object) -> int | None:
+        sequence = snapshot_int(raw_value)
+        if sequence is None or sequence <= 0:
+            self._invalid(
+                "auto-input-helper-schema-invalid",
+                path,
+                "Auto input helper snapshot %s requires positive integer snapshot_sequence field",
+            )
+            return None
+        return sequence
 
     def _writer_pid(self, path: str, raw_value: object) -> int | None:
         writer_pid = snapshot_int(raw_value)
@@ -282,24 +306,36 @@ class AutoInputSnapshotValidator:
         return target if self._normalize_structured(path, source, target) else None
 
     def _timestamps_ordered(self, path: str, snapshot: SnapshotPayload) -> bool:
-        captured_at = cast(float, snapshot["captured_at"])
-        heartbeat_at = cast(float, snapshot["heartbeat_at"])
-        if heartbeat_at >= captured_at:
+        captured_monotonic = snapshot_timestamp(snapshot.get("captured_monotonic"))
+        heartbeat_monotonic = snapshot_timestamp(snapshot.get("heartbeat_monotonic"))
+        if (
+            captured_monotonic is not None
+            and captured_monotonic >= 0.0
+            and heartbeat_monotonic is not None
+            and heartbeat_monotonic >= captured_monotonic
+        ):
             return True
         self._invalid(
             "auto-input-helper-schema-invalid",
             path,
-            "Auto input helper snapshot %s has heartbeat_at older than captured_at",
+            "Auto input helper snapshot %s requires ordered non-negative monotonic timestamps",
         )
         return False
 
     def _source_timestamp_valid(self, source_key: str, snapshot: SnapshotPayload) -> bool:
-        timestamp = snapshot_timestamp(snapshot.get(f"{source_key}_captured_at"))
+        timestamp = snapshot_timestamp(
+            snapshot.get(f"{source_key}_observed_monotonic")
+        )
         if timestamp is None:
             return True
-        captured_at = snapshot_timestamp(snapshot.get("captured_at"))
-        heartbeat_at = snapshot_timestamp(snapshot.get("heartbeat_at"))
-        return captured_at is not None and heartbeat_at is not None and timestamp <= min(captured_at, heartbeat_at)
+        captured_at = snapshot_timestamp(snapshot.get("captured_monotonic"))
+        heartbeat_at = snapshot_timestamp(snapshot.get("heartbeat_monotonic"))
+        return (
+            captured_at is not None
+            and heartbeat_at is not None
+            and timestamp >= 0.0
+            and timestamp <= min(captured_at, heartbeat_at)
+        )
 
     def _source_timestamps_valid(self, path: str, snapshot: SnapshotPayload) -> bool:
         for source_key in self._schema.source_keys:
@@ -308,7 +344,7 @@ class AutoInputSnapshotValidator:
             self._invalid(
                 "auto-input-helper-schema-invalid",
                 path,
-                "Auto input helper snapshot %s has %s_captured_at newer than captured_at/heartbeat_at",
+                "Auto input helper snapshot %s has invalid or newer %s_observed_monotonic",
                 source_key,
             )
             return False
@@ -317,15 +353,23 @@ class AutoInputSnapshotValidator:
     def _source_pairs_valid(self, path: str, snapshot: SnapshotPayload) -> bool:
         for source_key in self._schema.source_keys:
             timestamp_key = f"{source_key}_captured_at"
+            monotonic_key = f"{source_key}_observed_monotonic"
             value_key = "battery_soc" if source_key == "battery" else f"{source_key}_power"
-            if paired_optional_values(snapshot.get(value_key), snapshot.get(timestamp_key)):
+            if paired_optional_values(
+                snapshot.get(value_key),
+                snapshot.get(timestamp_key),
+            ) and paired_optional_values(
+                snapshot.get(value_key),
+                snapshot.get(monotonic_key),
+            ):
                 continue
             self._invalid(
                 "auto-input-helper-schema-invalid",
                 path,
-                "Auto input helper snapshot %s must provide %s and %s together",
+                "Auto input helper snapshot %s must provide %s, %s, and %s together",
                 value_key,
                 timestamp_key,
+                monotonic_key,
             )
             return False
         return True

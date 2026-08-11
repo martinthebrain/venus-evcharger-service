@@ -54,6 +54,13 @@ FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS: tuple[tuple[str, tuple[str, ...]], ...] =
         "venus_evcharger/inputs/helper/external_pv_projection.py",
         ("tests/test_auto_input_external_sources_contracts.py",),
     ),
+    (
+        "venus_evcharger/inputs/helper/external_soc.py",
+        (
+            "tests/test_auto_input_external_sources_contracts.py",
+            "tests/test_auto_input_external_energy_scenario.py",
+        ),
+    ),
     ("venus_evcharger/inputs/helper/glib_runtime.py", ("tests/test_auto_input_helper_glib_runtime_contracts.py",)),
     (
         "venus_evcharger/inputs/helper/liveness.py",
@@ -63,6 +70,10 @@ FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS: tuple[tuple[str, tuple[str, ...]], ...] =
         ),
     ),
     ("venus_evcharger/inputs/helper/snapshot.py", ("tests/test_auto_input_helper_snapshot_liveness_contracts.py",)),
+    (
+        "venus_evcharger/inputs/helper/snapshot_defaults.py",
+        ("tests/test_auto_input_helper_snapshot_liveness_contracts.py",),
+    ),
     (
         "venus_evcharger/inputs/helper/sources.py",
         (

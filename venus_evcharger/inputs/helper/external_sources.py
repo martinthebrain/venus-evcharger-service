@@ -21,7 +21,6 @@ from venus_evcharger.energy import (
     update_energy_learning_profiles,
 )
 from venus_evcharger.energy.http_session import ConnectorHttpSession
-from venus_evcharger.energy.physical_sources import unique_weighted_soc_sources
 from venus_evcharger.energy.read_steps import EnergySourceStepReader
 from venus_evcharger.inputs.helper.contracts import Snapshot
 from venus_evcharger.inputs.helper.external_pv_projection import (
@@ -34,6 +33,11 @@ from venus_evcharger.inputs.helper.external_contracts import (
     PvProjectionPolicy,
 )
 from venus_evcharger.inputs.helper.external_scheduler import ExternalSourceScheduler
+from venus_evcharger.inputs.helper.external_soc import (
+    _selected_soc,
+    _selected_soc_observed_monotonic,
+    _with_gateway_source,
+)
 from venus_evcharger.ipc.energy import MeasuredValue
 
 
@@ -133,13 +137,26 @@ class ConfiguredEnergySources:
             gateway_source,
             self.use_combined_soc,
         )
+        battery_observed_monotonic = _selected_soc_observed_monotonic(
+            cluster,
+            polls,
+            gateway_source,
+            gateway_battery,
+            self.use_combined_soc,
+        )
         battery = _battery_payload(
             effective_soc,
             cluster.as_dict(),
             forecast,
             discharge_balance,
             discharge_control,
-            _source_payloads(polls, gateway_source, discharge_balance, discharge_control),
+            _source_payloads(
+                polls,
+                gateway_source,
+                None if gateway_battery is None else gateway_battery.observed_monotonic,
+                discharge_balance,
+                discharge_control,
+            ),
             self._learning_profiles,
         )
         return ExternalEnergyCycle(
@@ -147,6 +164,7 @@ class ConfiguredEnergySources:
             pv=external_pv_projection(polls, self.pv_policy.external_source_id),
             battery_observed_at=battery_observed_at,
             polls=polls,
+            battery_observed_monotonic=battery_observed_monotonic,
         )
 
 
@@ -164,13 +182,6 @@ def _newly_observed_snapshots(
 
 def _newly_observed(poll: _ObservedPollPort) -> bool:
     return poll.contributing and poll.poll_status == "success"
-
-
-def _with_gateway_source(
-    external: tuple[EnergySourceSnapshot, ...],
-    gateway: EnergySourceSnapshot | None,
-) -> tuple[EnergySourceSnapshot, ...]:
-    return external if gateway is None else external + (gateway,)
 
 
 def _gateway_battery_source(
@@ -224,75 +235,6 @@ def _gateway_service_name(
     return "semantic-gateway"
 
 
-def _selected_soc(
-    cluster: EnergyClusterSnapshot,
-    external: tuple[EnergySourceSnapshot, ...],
-    gateway: EnergySourceSnapshot | None,
-    use_combined_soc: bool,
-) -> tuple[float | None, float | None]:
-    if use_combined_soc and cluster.combined_soc is not None:
-        return _combined_soc_selection(cluster.combined_soc, external, gateway)
-    return _fallback_soc_selection(external, gateway)
-
-
-def _combined_soc_selection(
-    combined_soc: float,
-    external: tuple[EnergySourceSnapshot, ...],
-    gateway: EnergySourceSnapshot | None,
-) -> tuple[float, float | None]:
-    return float(combined_soc), _oldest_weighted_soc_observation(external, gateway)
-
-
-def _fallback_soc_selection(
-    external: tuple[EnergySourceSnapshot, ...],
-    gateway: EnergySourceSnapshot | None,
-) -> tuple[float | None, float | None]:
-    selected = _first_external_soc_source(external)
-    if selected is None:
-        selected = _gateway_soc_source(gateway)
-    if selected is None or selected.soc is None:
-        return None, None
-    return float(selected.soc), selected.captured_at
-
-
-def _oldest_weighted_soc_observation(
-    external: tuple[EnergySourceSnapshot, ...],
-    gateway: EnergySourceSnapshot | None,
-) -> float | None:
-    sources = unique_weighted_soc_sources(_with_gateway_source(external, gateway))
-    observed = tuple(
-        observed_at
-        for observed_at in map(_weighted_soc_observed_at, sources)
-        if observed_at is not None
-    )
-    return min(observed) if observed else None
-
-
-def _weighted_soc_observed_at(source: EnergySourceSnapshot) -> float | None:
-    if source.soc is None or source.usable_capacity_wh is None:
-        return None
-    if source.usable_capacity_wh <= 0.0 or source.captured_at is None:
-        return None
-    return float(source.captured_at)
-
-
-def _first_external_soc_source(
-    external: tuple[EnergySourceSnapshot, ...],
-) -> EnergySourceSnapshot | None:
-    for source in external:
-        if source.online and source.soc is not None and source.captured_at is not None:
-            return source
-    return None
-
-
-def _gateway_soc_source(
-    gateway: EnergySourceSnapshot | None,
-) -> EnergySourceSnapshot | None:
-    if gateway is None or gateway.soc is None or gateway.captured_at is None:
-        return None
-    return gateway
-
-
 def _forecast_cluster_payload(cluster: EnergyClusterSnapshot) -> dict[str, object]:
     return {
         "battery_combined_soc": cluster.combined_soc,
@@ -307,6 +249,7 @@ def _forecast_cluster_payload(cluster: EnergyClusterSnapshot) -> dict[str, objec
 def _source_payloads(
     polls: tuple[ExternalSourcePoll, ...],
     gateway: EnergySourceSnapshot | None,
+    gateway_observed_monotonic: float | None,
     discharge_balance: Mapping[str, object],
     discharge_control: Mapping[str, object],
 ) -> list[dict[str, object]]:
@@ -317,7 +260,9 @@ def _source_payloads(
         for poll in polls
     ]
     if gateway is not None:
-        payloads.append(_gateway_source_payload(gateway))
+        payloads.append(
+            _gateway_source_payload(gateway, gateway_observed_monotonic)
+        )
     return payloads
 
 
@@ -333,7 +278,10 @@ def _external_source_payload(
     return payload
 
 
-def _gateway_source_payload(gateway: EnergySourceSnapshot) -> dict[str, object]:
+def _gateway_source_payload(
+    gateway: EnergySourceSnapshot,
+    observed_monotonic: float | None,
+) -> dict[str, object]:
     payload = dict(gateway.as_dict())
     payload.update(
         {
@@ -342,6 +290,7 @@ def _gateway_source_payload(gateway: EnergySourceSnapshot) -> dict[str, object]:
             "measurement_status": "fresh",
             "attempted_at": None,
             "observed_at": gateway.captured_at,
+            "observed_monotonic": observed_monotonic,
             "next_poll_at": 0.0,
             "age_seconds": None,
             "consecutive_failures": 0,

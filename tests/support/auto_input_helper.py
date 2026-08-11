@@ -107,12 +107,19 @@ class FakeSources:
         self.grid: float | None = -20.0
         self.prepared = 0
         self.observed: dict[str, float | None] = {}
+        self.observed_monotonic_values: dict[str, float | None] = {}
 
     def prepare_cycle(self) -> None:
         self.prepared += 1
 
     def observed_at(self, source_name: str) -> float | None:
         return self.observed.get(source_name)
+
+    def observed_monotonic(self, source_name: str) -> float | None:
+        return self.observed_monotonic_values.get(
+            source_name,
+            self.observed.get(source_name),
+        )
 
     def pv_power(self) -> float | None:
         return self.pv

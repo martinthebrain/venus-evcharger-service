@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Boundary and migration contracts for semantic gateway diagnostics."""
+"""Boundary contracts for semantic gateway diagnostics."""
 
 from __future__ import annotations
 
 import unittest
 from collections.abc import Callable
 
-from tests.gateway_diagnostics_fixtures import (
-    gateway_diagnostics_legacy_payload,
-)
+from tests.gateway_diagnostics_fixtures import gateway_diagnostics_snapshot
 from venus_evcharger.ports import gateway_diagnostic_discovery as discovery_contract
 from venus_evcharger.ports import gateway_diagnostic_health as health_contract
 from venus_evcharger.ports import gateway_diagnostic_values as values_contract
@@ -392,24 +390,19 @@ class GatewayDiagnosticsBoundaryContractsTests(unittest.TestCase):
         )
         self.assertEqual(inactive.value, "idle")
 
-    def test_schema_one_documents_migrate_changed_and_confirmed_times(self) -> None:
-        legacy = gateway_diagnostics_legacy_payload()
-        migrated = GatewayDiagnosticsSnapshot.from_payload(legacy)
-        self.assertEqual(migrated.schema_version, 2)
-        self.assertEqual(migrated.sample("operating_mode").changed_at, 99.0)
-        self.assertEqual(migrated.sample("operating_mode").confirmed_at, 99.0)
-        self.assertTrue(migrated.publication.registered)
+    def test_snapshot_rejects_prior_schema_and_incomplete_semantic_values(self) -> None:
+        payload = gateway_diagnostics_snapshot().to_payload()
+        for unsupported in (0, 1, 2):
+            with self.subTest(unsupported=unsupported), self.assertRaisesRegex(
+                ValueError,
+                "unsupported schema_version",
+            ):
+                GatewayDiagnosticsSnapshot.from_payload(
+                    payload | {"schema_version": unsupported}
+                )
 
-    def test_schema_one_rejects_unsupported_versions_and_incomplete_values(self) -> None:
-        unsupported = gateway_diagnostics_legacy_payload()
-        unsupported["schema_version"] = 0
-        with self.assertRaisesRegex(ValueError, "unsupported schema_version"):
-            GatewayDiagnosticsSnapshot.from_payload(unsupported)
-
-        empty = gateway_diagnostics_legacy_payload()
-        empty["ev_charger"] = []
         with self.assertRaisesRegex(ValueError, "every semantic field"):
-            GatewayDiagnosticsSnapshot.from_payload(empty)
+            GatewayDiagnosticsSnapshot.from_payload(payload | {"ev_charger": []})
 
 
 if __name__ == "__main__":

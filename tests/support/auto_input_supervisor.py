@@ -75,8 +75,8 @@ class HelperProcessFake:
 class SnapshotRefreshFake:
     calls: list[float | None] = field(default_factory=lambda: list[float | None]())
 
-    def refresh_snapshot(self, now: float | None = None) -> None:
-        self.calls.append(now)
+    def refresh_snapshot(self, monotonic_at: float | None = None) -> None:
+        self.calls.append(monotonic_at)
 
 
 @dataclass
@@ -99,6 +99,7 @@ class AutoInputSupervisorServiceFake:
     _auto_input_runtime_instance_id: str = "instance-1"
     _auto_input_snapshot_generation: int | None = None
     _auto_input_snapshot_last_captured_at: float | None = None
+    _auto_input_snapshot_last_sequence: int | None = None
     _auto_input_snapshot_last_seen: float | None = None
     _auto_input_snapshot_mtime_ns: int | None = None
     _auto_input_snapshot_runtime_instance_id: str | None = None
@@ -109,18 +110,27 @@ class AutoInputSupervisorServiceFake:
     def time_now(self) -> float:
         return self.now
 
+    def monotonic_now(self) -> float:
+        return self.now
+
 
 def valid_snapshot(**overrides: object) -> dict[str, object]:
     """Build one complete, current helper snapshot."""
     payload: dict[str, object] = {
         "snapshot_version": AutoInputSupervisor.SCHEMA.version,
+        "snapshot_sequence": 1,
         "captured_at": 100.0,
+        "captured_monotonic": 100.0,
         "heartbeat_at": 100.0,
+        "heartbeat_monotonic": 100.0,
         "pv_captured_at": 100.0,
+        "pv_observed_monotonic": 100.0,
         "pv_power": 2300.0,
         "battery_captured_at": 100.0,
+        "battery_observed_monotonic": 100.0,
         "battery_soc": 57.0,
         "grid_captured_at": 100.0,
+        "grid_observed_monotonic": 100.0,
         "grid_power": -2100.0,
         "writer_pid": 4321,
         "helper_generation": 1,

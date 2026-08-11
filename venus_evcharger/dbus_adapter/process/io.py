@@ -168,7 +168,7 @@ class DbusAdapterIo:
         captured_at = control.captured_at
         context.cache.health.update(control.health)
         now = time.monotonic()
-        topology = self._publish_energy_if_due(now, captured_at)
+        topology = self._publish_energy_if_due(now)
         topology = self._publish_topology_if_changed(topology, captured_at)
         topology = self._publish_health_if_due(
             topology,
@@ -180,7 +180,6 @@ class DbusAdapterIo:
     def _publish_energy_if_due(
         self,
         now: float,
-        captured_at: float,
     ) -> EnergyTopologySnapshot | None:
         context = self._context
         if _publish_due(
@@ -188,14 +187,27 @@ class DbusAdapterIo:
             context._last_energy_publish_monotonic,
             context.energy_publish_interval_seconds,
         ):
+            values = {
+                key: dict(context.cache.values.get(key, {}))
+                for key in (
+                    "grid_power_w",
+                    "pv_power_w",
+                    "battery_soc",
+                    "battery_net_power_w",
+                )
+            }
+            sequence = context.cache.sequence
+            snapshot_captured_at = time.time()
+            snapshot_captured_monotonic = time.monotonic()
             topology = context.energy_discovery.topology_snapshot(
-                captured_at=captured_at
+                captured_at=snapshot_captured_at
             )
             inputs = energy_inputs_snapshot(
-                context.cache.values,
+                values,
                 context.energy_discovery,
-                sequence=context.cache.sequence,
-                captured_at=captured_at,
+                sequence=sequence,
+                captured_at=snapshot_captured_at,
+                captured_monotonic=snapshot_captured_monotonic,
             )
             context.cache.set_semantic_energy_snapshots(inputs, topology)
             context.cache.write_energy_inputs_snapshot()

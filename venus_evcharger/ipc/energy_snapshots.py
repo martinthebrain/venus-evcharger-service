@@ -4,9 +4,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 
-from venus_evcharger.core.contracts import timestamp_not_future
 from venus_evcharger.ipc.energy_types import (
     ENERGY_INPUTS_SCHEMA_VERSION,
     ENERGY_IPC_SCHEMA_VERSION,
@@ -108,6 +107,8 @@ class EnergyInputsSnapshot:
     battery_soc: MeasuredValue
     battery_net_power_w: MeasuredValue
     schema_version: int = ENERGY_INPUTS_SCHEMA_VERSION
+    _: KW_ONLY
+    captured_monotonic: float
 
     def __post_init__(self) -> None:
         schema_version(
@@ -117,6 +118,10 @@ class EnergyInputsSnapshot:
         )
         non_negative_int(self.sequence, "energy inputs sequence")
         positive_float(self.captured_at, "energy inputs captured_at")
+        captured_monotonic = positive_float(
+            self.captured_monotonic,
+            "energy inputs captured_monotonic",
+        )
         non_negative_int(self.topology_generation, "energy inputs topology_generation")
         for name, measurement in (
             ("grid_power_w", self.grid_power_w),
@@ -126,9 +131,9 @@ class EnergyInputsSnapshot:
         ):
             if not isinstance(measurement, MeasuredValue):
                 raise TypeError(f"energy inputs {name} must be a MeasuredValue")
-            if not timestamp_not_future(measurement.observed_at, self.captured_at):
+            if measurement.observed_monotonic > captured_monotonic:
                 raise ValueError(
-                    f"energy inputs {name} observed_at exceeds captured_at tolerance"
+                    f"energy inputs {name} observed_monotonic exceeds captured_monotonic"
                 )
 
     def to_payload(self) -> dict[str, object]:
@@ -136,6 +141,7 @@ class EnergyInputsSnapshot:
             "schema_version": self.schema_version,
             "sequence": self.sequence,
             "captured_at": self.captured_at,
+            "captured_monotonic": self.captured_monotonic,
             "topology_generation": self.topology_generation,
             "grid_power_w": self.grid_power_w.to_payload(),
             "pv_power_w": self.pv_power_w.to_payload(),
@@ -149,6 +155,10 @@ class EnergyInputsSnapshot:
         return cls(
             sequence=non_negative_int(item["sequence"], "energy inputs sequence"),
             captured_at=positive_float(item["captured_at"], "energy inputs captured_at"),
+            captured_monotonic=positive_float(
+                item["captured_monotonic"],
+                "energy inputs captured_monotonic",
+            ),
             topology_generation=non_negative_int(
                 item["topology_generation"],
                 "energy inputs topology_generation",
@@ -176,6 +186,7 @@ def _snapshot_mapping(payload: object, label: str) -> Mapping[str, object]:
             "schema_version",
             "sequence",
             "captured_at",
+            "captured_monotonic",
             "topology_generation",
             "grid_power_w",
             "pv_power_w",

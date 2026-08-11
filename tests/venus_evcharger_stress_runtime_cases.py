@@ -15,6 +15,7 @@ from tests.support.auto_input_supervisor import (
     HelperProcessFake,
     SupervisorAutoFake,
     SupervisorRuntimeFake,
+    valid_snapshot,
 )
 from tests.venus_evcharger_shelly_io_controller_support import (
     ShellyAutoOperationsHarness,
@@ -219,6 +220,35 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                 with errors_lock:
                     errors.append(message)
 
+            def snapshot_document(
+                sequence: int,
+                *,
+                epoch: float,
+                monotonic: float,
+                pv_power: float,
+                battery_soc: float,
+                grid_power: float,
+            ) -> str:
+                return json.dumps(
+                    valid_snapshot(
+                        snapshot_sequence=sequence,
+                        captured_at=epoch,
+                        captured_monotonic=monotonic,
+                        heartbeat_at=epoch,
+                        heartbeat_monotonic=monotonic,
+                        pv_captured_at=epoch,
+                        pv_observed_monotonic=monotonic,
+                        pv_power=pv_power,
+                        battery_captured_at=epoch,
+                        battery_observed_monotonic=monotonic,
+                        battery_soc=battery_soc,
+                        grid_captured_at=epoch,
+                        grid_observed_monotonic=monotonic,
+                        grid_power=grid_power,
+                        helper_generation=1,
+                    )
+                )
+
             def writer():
                 start.wait()
                 try:
@@ -228,38 +258,22 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                         elif index % 4 == 1:
                             payload = json.dumps(["not-a-dict"])
                         elif index % 4 == 2:
-                            payload = json.dumps(
-                                {
-                                    "snapshot_version": 1,
-                                    "captured_at": float(index),
-                                    "heartbeat_at": float(index),
-                                    "pv_captured_at": float(index),
-                                    "pv_power": 1200.0,
-                                    "battery_captured_at": float(index),
-                                    "battery_soc": 55.0,
-                                    "grid_captured_at": float(index),
-                                    "grid_power": -800.0,
-                                    "writer_pid": 4321,
-                                    "helper_generation": 1,
-                                    "runtime_instance_id": "instance-1",
-                                }
+                            payload = snapshot_document(
+                                index + 1,
+                                epoch=float(index),
+                                monotonic=float(index),
+                                pv_power=1200.0,
+                                battery_soc=55.0,
+                                grid_power=-800.0,
                             )
                         else:
-                            payload = json.dumps(
-                                {
-                                    "snapshot_version": 1,
-                                    "captured_at": float(index - 100),
-                                    "heartbeat_at": float(index - 100),
-                                    "pv_captured_at": float(index - 100),
-                                    "pv_power": 900.0,
-                                    "battery_captured_at": float(index - 100),
-                                    "battery_soc": 50.0,
-                                    "grid_captured_at": float(index - 100),
-                                    "grid_power": -500.0,
-                                    "writer_pid": 4321,
-                                    "helper_generation": 1,
-                                    "runtime_instance_id": "instance-1",
-                                }
+                            payload = snapshot_document(
+                                index + 1,
+                                epoch=float(index - 100),
+                                monotonic=float(index),
+                                pv_power=900.0,
+                                battery_soc=50.0,
+                                grid_power=-500.0,
                             )
                         write_snapshot(payload)
                 except Exception as error:  # pylint: disable=broad-except
@@ -269,7 +283,7 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
                 start.wait()
                 try:
                     for index in range(iterations):
-                        controller.refresh_snapshot(now=float(index))
+                        controller.refresh_snapshot(monotonic_at=float(index))
                 except Exception as error:  # pylint: disable=broad-except
                     _record_error(f"reader: {error}")
 
@@ -282,50 +296,34 @@ class TestShellyWallboxStressRuntime(StressTestCaseBase):
             reader_thread.join()
 
             write_snapshot("{broken-json")
-            controller.refresh_snapshot(now=float(iterations + 0.25))
+            controller.refresh_snapshot(monotonic_at=float(iterations + 0.25))
 
             write_snapshot(json.dumps(["not-a-dict"]))
-            controller.refresh_snapshot(now=float(iterations + 0.5))
+            controller.refresh_snapshot(monotonic_at=float(iterations + 0.5))
 
             write_snapshot(
-                json.dumps(
-                    {
-                        "snapshot_version": 1,
-                        "captured_at": float(iterations + 2),
-                        "heartbeat_at": float(iterations + 2),
-                        "pv_captured_at": float(iterations + 2),
-                        "pv_power": 900.0,
-                        "battery_captured_at": float(iterations + 2),
-                        "battery_soc": 50.0,
-                        "grid_captured_at": float(iterations + 2),
-                        "grid_power": -500.0,
-                        "writer_pid": 4321,
-                        "helper_generation": 1,
-                        "runtime_instance_id": "instance-1",
-                    }
+                snapshot_document(
+                    iterations + 1,
+                    epoch=float(iterations + 2),
+                    monotonic=float(iterations + 2),
+                    pv_power=900.0,
+                    battery_soc=50.0,
+                    grid_power=-500.0,
                 ),
             )
-            controller.refresh_snapshot(now=float(iterations + 10))
+            controller.refresh_snapshot(monotonic_at=float(iterations + 10))
 
             write_snapshot(
-                json.dumps(
-                    {
-                        "snapshot_version": 1,
-                        "captured_at": float(iterations + 11),
-                        "heartbeat_at": float(iterations + 11),
-                        "pv_captured_at": float(iterations + 11),
-                        "pv_power": 1200.0,
-                        "battery_captured_at": float(iterations + 11),
-                        "battery_soc": 55.0,
-                        "grid_captured_at": float(iterations + 11),
-                        "grid_power": -800.0,
-                        "writer_pid": 4321,
-                        "helper_generation": 1,
-                        "runtime_instance_id": "instance-1",
-                    }
+                snapshot_document(
+                    iterations + 2,
+                    epoch=float(iterations + 11),
+                    monotonic=float(iterations + 11),
+                    pv_power=1200.0,
+                    battery_soc=55.0,
+                    grid_power=-800.0,
                 ),
             )
-            controller.refresh_snapshot(now=float(iterations + 11))
+            controller.refresh_snapshot(monotonic_at=float(iterations + 11))
 
         self.assertEqual(errors, [])
         self.assertGreater(len(service.runtime.snapshots), 0)

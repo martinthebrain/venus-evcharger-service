@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, TypeGuard, runtime_checkable
 
-from venus_evcharger.core.contracts import timestamp_age_within
 from venus_evcharger.ports import gateway_diagnostic_discovery as diagnostic_discovery
 from venus_evcharger.ports import gateway_diagnostic_health as diagnostic_health
 from venus_evcharger.ports import gateway_diagnostic_values as diagnostic_values
@@ -19,12 +18,9 @@ from venus_evcharger.ports.gateway_diagnostics_validation import (
     non_negative_int,
     object_sequence,
     positive_float,
-    timestamp_not_after,
 )
 
-GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 2
-LEGACY_GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 1
-_LEGACY_PUBLICATION_MAX_AGE_SECONDS = 1.0
+GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 3
 
 
 class GatewayDiagnosticsUnavailable(RuntimeError):
@@ -37,6 +33,7 @@ class GatewayDiagnosticsSnapshot:
 
     sequence: int
     captured_at: float
+    captured_monotonic: float
     health: diagnostic_health.GatewayHealthSummary
     discovery: diagnostic_discovery.GatewayDiscoverySummary
     publication: diagnostic_health.GatewayPublicationSummary
@@ -46,18 +43,16 @@ class GatewayDiagnosticsSnapshot:
     def __post_init__(self) -> None:
         _schema_version(self.schema_version)
         non_negative_int(self.sequence, "gateway diagnostics sequence")
-        captured_at = positive_float(self.captured_at, "gateway diagnostics captured_at")
+        positive_float(self.captured_at, "gateway diagnostics captured_at")
+        positive_float(
+            self.captured_monotonic,
+            "gateway diagnostics captured_monotonic",
+        )
         _health_summary(self.health)
         _discovery_summary(self.discovery)
         _publication_summary(self.publication)
         samples = _sample_tuple(self.ev_charger)
         _validate_samples(samples)
-        _validate_snapshot_timestamps(
-            captured_at,
-            self.health,
-            self.publication,
-            samples,
-        )
 
     def sample(
         self, name: diagnostic_values.GatewayDiagnosticFieldName
@@ -75,25 +70,28 @@ class GatewayDiagnosticsSnapshot:
             if self.sample(name).status in unavailable
         )
 
-    def age_seconds(self, now: float) -> float:
-        timestamp = non_negative_float(now, "gateway diagnostics current time")
-        timestamp_not_after(
-            self.captured_at,
-            timestamp,
-            "gateway diagnostics captured_at",
+    def age_seconds(self, monotonic_at: float) -> float:
+        """Return snapshot age in the process-independent monotonic clock domain."""
+        timestamp = non_negative_float(
+            monotonic_at,
+            "gateway diagnostics current monotonic time",
         )
-        return timestamp - self.captured_at
+        if timestamp < self.captured_monotonic:
+            raise ValueError(
+                "gateway diagnostics current monotonic time precedes captured_monotonic"
+            )
+        return timestamp - self.captured_monotonic
 
-    def is_fresh(self, now: float, max_age_seconds: float) -> bool:
-        timestamp = non_negative_float(now, "gateway diagnostics current time")
+    def is_fresh(self, monotonic_at: float, max_age_seconds: float) -> bool:
         maximum = non_negative_float(max_age_seconds, "gateway diagnostics max_age_seconds")
-        return timestamp_age_within(self.captured_at, timestamp, maximum)
+        return self.age_seconds(monotonic_at) <= maximum
 
     def to_payload(self) -> dict[str, object]:
         return {
             "schema_version": self.schema_version,
             "sequence": self.sequence,
             "captured_at": self.captured_at,
+            "captured_monotonic": self.captured_monotonic,
             "health": self.health.to_payload(),
             "discovery": self.discovery.to_payload(),
             "publication": self.publication.to_payload(),
@@ -106,6 +104,10 @@ class GatewayDiagnosticsSnapshot:
         return cls(
             sequence=non_negative_int(item["sequence"], "gateway diagnostics sequence"),
             captured_at=positive_float(item["captured_at"], "gateway diagnostics captured_at"),
+            captured_monotonic=positive_float(
+                item["captured_monotonic"],
+                "gateway diagnostics captured_monotonic",
+            ),
             health=diagnostic_health.GatewayHealthSummary.from_payload(item["health"]),
             discovery=diagnostic_discovery.GatewayDiscoverySummary.from_payload(item["discovery"]),
             publication=diagnostic_health.GatewayPublicationSummary.from_payload(
@@ -131,35 +133,6 @@ def _validate_samples(samples: tuple[diagnostic_values.GatewayDiagnosticSample, 
         raise ValueError("gateway diagnostics ev_charger must contain every semantic field exactly once")
 
 
-def _validate_snapshot_timestamps(
-    captured_at: float,
-    health: diagnostic_health.GatewayHealthSummary,
-    publication: diagnostic_health.GatewayPublicationSummary,
-    samples: tuple[diagnostic_values.GatewayDiagnosticSample, ...],
-) -> None:
-    timestamp_not_after(
-        health.last_success_at,
-        captured_at,
-        "gateway health last_success_at",
-    )
-    timestamp_not_after(
-        publication.heartbeat_at,
-        captured_at,
-        "gateway publication heartbeat_at",
-    )
-    for sample in samples:
-        timestamp_not_after(
-            sample.changed_at,
-            captured_at,
-            f"{sample.name} diagnostic changed_at",
-        )
-        timestamp_not_after(
-            sample.confirmed_at,
-            captured_at,
-            f"{sample.name} diagnostic confirmed_at",
-        )
-
-
 def _sample_tuple(value: object) -> tuple[diagnostic_values.GatewayDiagnosticSample, ...]:
     if not _is_sample_tuple(value):
         raise TypeError("gateway diagnostics ev_charger contains an invalid sample")
@@ -181,74 +154,26 @@ def _samples(value: object) -> tuple[diagnostic_values.GatewayDiagnosticSample, 
 
 
 def _snapshot_mapping(payload: object) -> Mapping[str, object]:
-    base_names = {"schema_version", "sequence", "captured_at", "health", "discovery", "ev_charger"}
     if not is_string_object_mapping(payload):
         raise TypeError("gateway diagnostics snapshot must be an object with string keys")
-    if payload.get("schema_version") == GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
-        return exact_mapping(
-            payload,
-            "gateway diagnostics snapshot",
-            base_names | {"publication"},
-        )
-    return _migrate_legacy_snapshot(payload, base_names)
-
-
-def _migrate_legacy_snapshot(
-    payload: object,
-    base_names: set[str],
-) -> Mapping[str, object]:
-    legacy = exact_mapping(payload, "gateway diagnostics snapshot", base_names)
-    if _legacy_schema_version(legacy["schema_version"]) != LEGACY_GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
+    # Diagnostics live under /run. After a schema change the active producer
+    # replaces them on its next tick; inventing a monotonic timestamp for an
+    # older document would make freshness and ordering unsafe.
+    if payload.get("schema_version") != GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
         raise ValueError("gateway diagnostics has an unsupported schema_version")
-    samples = _samples(legacy["ev_charger"])
-    captured_at = positive_float(legacy["captured_at"], "gateway diagnostics captured_at")
-    health = diagnostic_health.GatewayHealthSummary.from_payload(legacy["health"])
-    migrated_discovery = diagnostic_discovery.GatewayDiscoverySummary.from_payload(
-        legacy["discovery"]
-    ).to_payload()
-    return {
-        **legacy,
-        "schema_version": GATEWAY_DIAGNOSTICS_SCHEMA_VERSION,
-        "discovery": migrated_discovery,
-        "publication": _legacy_publication_payload(samples, captured_at, health),
-    }
-
-
-def _legacy_publication_payload(
-    samples: tuple[diagnostic_values.GatewayDiagnosticSample, ...],
-    captured_at: float,
-    health: diagnostic_health.GatewayHealthSummary,
-) -> dict[str, object]:
-    heartbeat_at = max((sample.confirmed_at for sample in samples), default=0.0)
-    registered = heartbeat_at > 0.0
-    return {
-        "registered": registered,
-        "heartbeat_at": heartbeat_at if registered else 0.0,
-        "stale": _legacy_publication_stale(
-            registered,
-            heartbeat_at,
-            captured_at,
-            health,
-            samples,
-        ),
-    }
-
-
-def _legacy_publication_stale(
-    registered: bool,
-    heartbeat_at: float,
-    captured_at: float,
-    health: diagnostic_health.GatewayHealthSummary,
-    samples: tuple[diagnostic_values.GatewayDiagnosticSample, ...],
-) -> bool:
-    if not registered or health.stale:
-        return True
-    if any(sample.status == "stale" for sample in samples):
-        return True
-    return not timestamp_age_within(
-        heartbeat_at,
-        captured_at,
-        _LEGACY_PUBLICATION_MAX_AGE_SECONDS,
+    return exact_mapping(
+        payload,
+        "gateway diagnostics snapshot",
+        {
+            "schema_version",
+            "sequence",
+            "captured_at",
+            "captured_monotonic",
+            "health",
+            "discovery",
+            "publication",
+            "ev_charger",
+        },
     )
 
 
@@ -257,10 +182,6 @@ def _schema_version(value: object) -> int:
     if version != GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
         raise ValueError("gateway diagnostics has an unsupported schema_version")
     return version
-
-
-def _legacy_schema_version(value: object) -> int:
-    return non_negative_int(value, "gateway diagnostics schema_version")
 
 
 def _health_summary(value: object) -> diagnostic_health.GatewayHealthSummary:
@@ -283,7 +204,6 @@ def _publication_summary(value: object) -> diagnostic_health.GatewayPublicationS
 
 __all__ = [
     "GATEWAY_DIAGNOSTICS_SCHEMA_VERSION",
-    "LEGACY_GATEWAY_DIAGNOSTICS_SCHEMA_VERSION",
     "GatewayDiagnosticsReader",
     "GatewayDiagnosticsSnapshot",
     "GatewayDiagnosticsUnavailable",

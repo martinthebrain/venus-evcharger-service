@@ -58,7 +58,7 @@ class AutoInputProcessLifecycle:
     def spawn_helper(self, now: float | None = None) -> None:
         svc = self._service
         svc.runtime.ensure_worker_state()
-        current = svc.time_now() if now is None else float(now)
+        current = svc.monotonic_now() if now is None else float(now)
         self._ensure_runtime_instance_id()
         generation = svc._auto_input_helper_generation + 1
         svc._auto_input_helper_generation = generation
@@ -102,6 +102,7 @@ class AutoInputProcessLifecycle:
         svc._auto_input_snapshot_writer_pid = None
         svc._auto_input_snapshot_generation = None
         svc._auto_input_snapshot_runtime_instance_id = None
+        svc._auto_input_snapshot_last_sequence = None
 
     def _remove_stale_snapshot_file(self) -> None:
         svc = self._service
@@ -271,7 +272,7 @@ class AutoInputProcessLifecycle:
     def ensure_helper_process(self, now: float | None = None) -> None:
         svc = self._service
         svc.runtime.ensure_worker_state()
-        current = svc.time_now() if now is None else float(now)
+        current = svc.monotonic_now() if now is None else float(now)
         process = svc._auto_input_helper_process
         if process is not None and self._handle_existing_helper_process(process, current):
             return

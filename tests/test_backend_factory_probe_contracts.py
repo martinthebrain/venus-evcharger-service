@@ -669,7 +669,11 @@ class TestBackendProbeContracts(unittest.TestCase):
 
     def test_gateway_diagnostics_summary_uses_only_semantic_snapshot_fields(self) -> None:
         reader = _GatewayDiagnosticsReader()
-        payload = probe._gateway_diagnostics_probe_summary(reader, now=110.0, max_age_seconds=20.0)
+        payload = probe._gateway_diagnostics_probe_summary(
+            reader,
+            monotonic_at=110.0,
+            max_age_seconds=20.0,
+        )
         self.assertEqual(
             payload,
             {
@@ -683,7 +687,13 @@ class TestBackendProbeContracts(unittest.TestCase):
                 "critical_unavailable_fields": [],
             },
         )
-        self.assertFalse(probe._gateway_diagnostics_probe_summary(reader, now=120.1, max_age_seconds=20.0)["fresh"])
+        self.assertFalse(
+            probe._gateway_diagnostics_probe_summary(
+                reader,
+                monotonic_at=120.1,
+                max_age_seconds=20.0,
+            )["fresh"]
+        )
 
     def test_gateway_diagnostics_summary_reports_transport_unavailability(self) -> None:
         self.assertEqual(

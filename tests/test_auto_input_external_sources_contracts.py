@@ -46,16 +46,21 @@ from venus_evcharger.inputs.helper.external_scheduler import (
     _snapshot_age,
     _valid_observed_at,
 )
-from venus_evcharger.inputs.helper.external_sources import (
-    ConfiguredEnergySources,
+from venus_evcharger.inputs.helper.external_soc import (
     _combined_soc_selection,
     _first_external_soc_source,
-    _gateway_battery_source,
     _gateway_soc_source,
-    _nested_mappings,
     _oldest_weighted_soc_observation,
+    _poll_observation_times,
     _selected_soc,
+    _selected_soc_observed_monotonic,
+    _source_poll_observation_time,
     _weighted_soc_observed_at,
+)
+from venus_evcharger.inputs.helper.external_sources import (
+    ConfiguredEnergySources,
+    _gateway_battery_source,
+    _nested_mappings,
 )
 from venus_evcharger.inputs.helper.sources import AutoInputSources
 from venus_evcharger.ipc.energy import MeasuredValue
@@ -184,7 +189,9 @@ def _poll(
     *,
     contributing: bool = True,
     observed_at: float | None = 10.0,
+    observed_monotonic: float | None = None,
 ) -> ExternalSourcePoll:
+    monotonic_at = observed_at if observed_monotonic is None else observed_monotonic
     return ExternalSourcePoll(
         snapshot=snapshot,
         contributing=contributing,
@@ -192,6 +199,7 @@ def _poll(
         measurement_status="fresh",
         attempted_at=observed_at,
         observed_at=observed_at,
+        observed_monotonic=monotonic_at,
         next_poll_at=11.0,
         age_seconds=0.0,
         consecutive_failures=0,
@@ -319,6 +327,7 @@ class ExternalSourceSchedulerMutationContracts(unittest.TestCase):
         self.assertEqual(recovered.snapshot.physical_id, "physical")
         self.assertEqual(recovered.snapshot.physical_priority, 7)
         self.assertEqual(recovered.observed_at, 102.0)
+        self.assertEqual(recovered.observed_monotonic, 11.0)
         self.assertEqual(recovered.next_poll_at, 103.0)
         self.assertEqual(recovered.age_seconds, 0.0)
         self.assertEqual(recovered.consecutive_failures, 0)
@@ -445,18 +454,21 @@ class ExternalSourceSchedulerMutationContracts(unittest.TestCase):
         self.assertEqual(scheduler._cursor, 0)
 
     def test_last_good_freshness_includes_the_configured_age_boundary(self) -> None:
+        clock = _Clock(10.0)
         scheduler = ExternalSourceScheduler(
             (_definition("source"),),
             _policy(stale_age=5.0),
             1.0,
             MagicMock(),
-            monotonic=_Clock(10.0),
+            monotonic=clock,
         )
         state = scheduler._states["source"]
         state.last_good = _online_source(50.0, 95.0, source_id="source")
+        state.last_good_monotonic = 5.0
         state.next_poll_monotonic = 20.0
 
         boundary = scheduler.poll(100.0)[0]
+        clock.current = 10.001
         expired = scheduler.poll(100.001)[0]
 
         self.assertTrue(boundary.contributing)
@@ -465,6 +477,27 @@ class ExternalSourceSchedulerMutationContracts(unittest.TestCase):
         self.assertFalse(expired.contributing)
         self.assertAlmostEqual(expired.age_seconds or 0.0, 5.001)
         self.assertEqual(expired.measurement_status, "expired")
+
+    def test_last_good_age_ignores_epoch_regression(self) -> None:
+        clock = _Clock(10.0)
+        scheduler = ExternalSourceScheduler(
+            (_definition("source"),),
+            _policy(stale_age=5.0),
+            1.0,
+            MagicMock(),
+            monotonic=clock,
+        )
+        state = scheduler._states["source"]
+        state.last_good = _online_source(50.0, 1_000.0, source_id="source")
+        state.last_good_monotonic = 9.0
+        state.next_poll_monotonic = 20.0
+
+        result = scheduler.poll(10.0)[0]
+
+        self.assertTrue(result.contributing)
+        self.assertEqual(result.observed_at, 1_000.0)
+        self.assertEqual(result.observed_monotonic, 9.0)
+        self.assertEqual(result.age_seconds, 1.0)
 
     def test_scheduler_primitives_define_all_boundaries_exactly(self) -> None:
         policy = ExternalPollingPolicy(
@@ -484,18 +517,18 @@ class ExternalSourceSchedulerMutationContracts(unittest.TestCase):
         )
         self.assertEqual(_backoff_seconds(uncapped, 32), float(2**30))
         validity_cases = (
-            (None, 10.0, False),
-            (-0.001, 10.0, False),
-            (0.0, 10.0, True),
-            (10.0, 10.0, True),
-            (10.001, 10.0, False),
-            (float("nan"), 10.0, False),
-            (float("inf"), 10.0, False),
-            (-float("inf"), 10.0, False),
+            (None, False),
+            (-0.001, False),
+            (0.0, True),
+            (10.0, True),
+            (10.001, True),
+            (float("nan"), False),
+            (float("inf"), False),
+            (-float("inf"), False),
         )
-        for observed_at, now, expected in validity_cases:
+        for observed_at, expected in validity_cases:
             with self.subTest(observed_at=observed_at):
-                self.assertIs(_valid_observed_at(observed_at, now), expected)
+                self.assertIs(_valid_observed_at(observed_at), expected)
 
         state = _SourceState()
         self.assertEqual(_poll_status(state, 0.0, "success"), "success")
@@ -525,7 +558,7 @@ class ExternalSourceSchedulerMutationContracts(unittest.TestCase):
             captured_at=0.0,
         )
         self.assertFalse(_has_contributing_value(empty))
-        self.assertFalse(_confirms_measurement(empty, 10.0))
+        self.assertFalse(_confirms_measurement(empty))
         value_fields = (
             "soc",
             "usable_capacity_wh",
@@ -540,9 +573,14 @@ class ExternalSourceSchedulerMutationContracts(unittest.TestCase):
             snapshot = replace(empty, **{field: 0.0})
             with self.subTest(field=field):
                 self.assertTrue(_has_contributing_value(snapshot))
-                self.assertTrue(_confirms_measurement(snapshot, 10.0))
-                self.assertFalse(_confirms_measurement(replace(snapshot, online=False), 10.0))
-                self.assertFalse(_confirms_measurement(replace(snapshot, captured_at=10.001), 10.0))
+                self.assertTrue(_confirms_measurement(snapshot))
+                self.assertFalse(_confirms_measurement(replace(snapshot, online=False)))
+                self.assertTrue(_confirms_measurement(replace(snapshot, captured_at=10.001)))
+                self.assertFalse(
+                    _confirms_measurement(
+                        replace(snapshot, captured_at=float("nan"))
+                    )
+                )
 
     def test_snapshot_helpers_preserve_identity_age_and_service_fallback_order(self) -> None:
         connector = _online_source(50.0, 8.0, source_id="connector")
@@ -559,8 +597,8 @@ class ExternalSourceSchedulerMutationContracts(unittest.TestCase):
         self.assertEqual(configured.service_name, connector.service_name)
         self.assertEqual(configured.physical_id, "physical")
         self.assertEqual(configured.physical_priority, 9)
-        self.assertEqual(_snapshot_age(configured, 10.0), 2.0)
-        self.assertIsNone(_snapshot_age(configured, 7.999))
+        self.assertEqual(_snapshot_age(8.0, 10.0), 2.0)
+        self.assertIsNone(_snapshot_age(8.0, 7.999))
         self.assertIsNone(_snapshot_age(None, 10.0))
 
         explicit = _offline_source(definition)
@@ -600,6 +638,7 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
         self.assertEqual(sources._measurements, {})
         self.assertIsNone(sources._gateway_battery)
         self.assertIsNone(sources._battery_observed_at)
+        self.assertIsNone(sources._battery_observed_monotonic)
         self.assertIsNone(sources._external_cycle)
         self.assertIsNone(sources._pv_projection)
         self.assertIs(sources.external, external)
@@ -620,9 +659,9 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
     def test_disabled_external_cycle_preserves_exact_gateway_measurements(self) -> None:
         gateway = FakeEnergyGateway()
         gateway.measurements = {
-            "pv": MeasuredValue(1200.0, 99.0, "stale", 0.75, ("pv",)),
-            "grid": MeasuredValue(-100.0, 98.0, "fresh", 0.8, ("grid",)),
-            "battery": MeasuredValue(50.0, 97.0, "fresh", 0.9, ("battery",)),
+            "pv": MeasuredValue(1200.0, 99.0, "stale", 0.75, ("pv",), observed_monotonic=99.0),
+            "grid": MeasuredValue(-100.0, 98.0, "fresh", 0.8, ("grid",), observed_monotonic=98.0),
+            "battery": MeasuredValue(50.0, 97.0, "fresh", 0.9, ("battery",), observed_monotonic=97.0),
             "battery_power": None,
         }
         sources = AutoInputSources(helper_settings(), gateway)
@@ -630,13 +669,17 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
         external.enabled = False
         sources.external = external
 
-        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0):
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0), patch(
+            "venus_evcharger.inputs.helper.sources.time.monotonic",
+            return_value=100.0,
+        ):
             sources.prepare_cycle()
 
         self.assertEqual(gateway.input_refreshes, 1)
         self.assertEqual(sources._measurements, gateway.measurements)
         self.assertEqual(sources._gateway_battery, gateway.measurements["battery"])
         self.assertEqual(sources._battery_observed_at, 97.0)
+        self.assertEqual(sources._battery_observed_monotonic, 97.0)
         self.assertEqual(
             sources._pv_projection,
             ProjectedEnergyValue(
@@ -645,6 +688,7 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
                 source_id=sources.settings.grid_fusion_config.backup_source_id,
                 confidence=0.75,
                 measurement_status="stale",
+                observed_monotonic=99.0,
             ),
         )
         self.assertIsNone(sources._external_cycle)
@@ -654,33 +698,44 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
     def test_enabled_external_cycle_overrides_gateway_projection_coherently(self) -> None:
         gateway = FakeEnergyGateway()
         gateway.measurements = {
-            "pv": MeasuredValue(100.0, 99.0, "fresh", 0.6, ("pv",)),
+            "pv": MeasuredValue(100.0, 99.0, "fresh", 0.6, ("pv",), observed_monotonic=99.0),
             "grid": None,
-            "battery": MeasuredValue(40.0, 98.0, "fresh", 0.8, ("battery",)),
+            "battery": MeasuredValue(40.0, 98.0, "fresh", 0.8, ("battery",), observed_monotonic=98.0),
         }
         settings = replace(
             helper_settings(),
             pv_projection_policy=PvProjectionPolicy("external_preferred"),
         )
         sources = AutoInputSources(settings, gateway)
-        external_pv = ProjectedEnergyValue(200.0, 100.0, "external", 0.9)
+        external_pv = ProjectedEnergyValue(
+            200.0,
+            100.0,
+            "external",
+            0.9,
+            observed_monotonic=100.0,
+        )
         cycle = ExternalEnergyCycle(
             battery={"battery_soc": 55.0},
             pv=external_pv,
             battery_observed_at=96.0,
             polls=(),
+            battery_observed_monotonic=96.0,
         )
         external = MagicMock()
         external.enabled = True
         external.collect_cycle.return_value = cycle
         sources.external = external
 
-        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0):
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0), patch(
+            "venus_evcharger.inputs.helper.sources.time.monotonic",
+            return_value=100.0,
+        ):
             sources.prepare_cycle()
 
         external.collect_cycle.assert_called_once_with(gateway.measurements["battery"], 100.0)
         self.assertIs(sources._external_cycle, cycle)
         self.assertEqual(sources._battery_observed_at, 96.0)
+        self.assertEqual(sources._battery_observed_monotonic, 96.0)
         self.assertIs(sources._pv_projection, external_pv)
         self.assertEqual(sources.battery_snapshot(), {"battery_soc": 55.0})
         self.assertEqual(gateway.requests, [])
@@ -688,7 +743,7 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
     def test_enabled_gateway_preferred_cycle_retains_better_gateway_pv(self) -> None:
         gateway = FakeEnergyGateway()
         gateway.measurements = {
-            "pv": MeasuredValue(100.0, 100.0, "fresh", 0.9, ("pv",)),
+            "pv": MeasuredValue(100.0, 100.0, "fresh", 0.9, ("pv",), observed_monotonic=100.0),
             "grid": None,
             "battery": None,
         }
@@ -697,19 +752,29 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
             pv_projection_policy=PvProjectionPolicy("gateway_preferred"),
         )
         sources = AutoInputSources(settings, gateway)
-        external_pv = ProjectedEnergyValue(200.0, 99.0, "external", 0.6)
+        external_pv = ProjectedEnergyValue(
+            200.0,
+            99.0,
+            "external",
+            0.6,
+            observed_monotonic=99.0,
+        )
         cycle = ExternalEnergyCycle(
             battery={},
             pv=external_pv,
             battery_observed_at=None,
             polls=(),
+            battery_observed_monotonic=None,
         )
         external = MagicMock()
         external.enabled = True
         external.collect_cycle.return_value = cycle
         sources.external = external
 
-        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0):
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0), patch(
+            "venus_evcharger.inputs.helper.sources.time.monotonic",
+            return_value=100.0,
+        ):
             sources.prepare_cycle()
 
         self.assertEqual(
@@ -719,6 +784,7 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
                 100.0,
                 settings.grid_fusion_config.backup_source_id,
                 0.9,
+                observed_monotonic=100.0,
             ),
         )
 
@@ -733,7 +799,14 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
             (100.001, False),
         )
         for value, valid in values:
-            measurement = MeasuredValue(value, 100.0, "fresh", 0.5, ("battery",))
+            measurement = MeasuredValue(
+                value,
+                100.0,
+                "fresh",
+                0.5,
+                ("battery",),
+                observed_monotonic=100.0,
+            )
             sources._measurements["battery"] = measurement
             with self.subTest(value=value):
                 self.assertIs(
@@ -747,6 +820,7 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
             "stale",
             0.4,
             ("grid",),
+            observed_monotonic=100.0 - settings.gateway_max_age_seconds,
         )
         sources._measurements["grid"] = boundary
         self.assertIs(
@@ -760,7 +834,15 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
             sources._measurements["grid"] = replace(boundary, status=status)
             with self.subTest(status=status):
                 self.assertIsNone(sources._valid_measurement("grid", 100.0))
-        sources._measurements["grid"] = replace(boundary, observed_at=100.001)
+        sources._measurements["grid"] = replace(
+            boundary,
+            observed_at=1_000.0,
+        )
+        self.assertIs(sources._valid_measurement("grid", 100.0), sources._measurements["grid"])
+        sources._measurements["grid"] = replace(
+            boundary,
+            observed_monotonic=100.001,
+        )
         self.assertIsNone(sources._valid_measurement("grid", 100.0))
 
         sources._request_missing("grid")
@@ -771,6 +853,52 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
 
 
 class ConfiguredEnergySourceContracts(unittest.TestCase):
+    def test_external_timestamp_contracts_require_atomic_clock_pairs(self) -> None:
+        poll = _poll(_online_source(50.0, 10.0))
+        with self.assertRaisesRegex(
+            ValueError,
+            "external source observation timestamps must be present together",
+        ):
+            replace(poll, observed_monotonic=None)
+        with self.assertRaisesRegex(
+            ValueError,
+            "projected observation monotonic timestamp must be non-negative",
+        ):
+            ProjectedEnergyValue(
+                100.0,
+                10.0,
+                "external",
+                1.0,
+                observed_monotonic=-0.001,
+            )
+        with self.assertRaisesRegex(
+            ValueError,
+            "external battery observation timestamps must be present together",
+        ):
+            ExternalEnergyCycle(
+                battery={},
+                pv=None,
+                battery_observed_at=10.0,
+                polls=(poll,),
+                battery_observed_monotonic=None,
+            )
+        for field, changes, expected in (
+            (
+                "epoch",
+                {"observed_at": -0.001},
+                "External energy-source external source observation epoch timestamp must be non-negative",
+            ),
+            (
+                "monotonic",
+                {"observed_monotonic": -0.001},
+                "External energy-source external source observation monotonic timestamp must be non-negative",
+            ),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError) as raised:
+                    replace(poll, **changes)
+                self.assertEqual(str(raised.exception), expected)
+
     def test_external_polling_policy_enforces_each_named_numeric_boundary(self) -> None:
         defaults = {
             "poll_interval_seconds": 1.0,
@@ -951,7 +1079,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         )
 
         cycle = sources.collect_cycle(
-            MeasuredValue(60.0, 99.0, "fresh", 1.0, ("battery",)),
+            MeasuredValue(60.0, 99.0, "fresh", 1.0, ("battery",), observed_monotonic=99.0),
             100.0,
         )
 
@@ -1023,7 +1151,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
     def test_gateway_soc_is_fallback_and_offline_source_does_not_create_learning(self) -> None:
         reader = _SequenceReader([OSError("offline")])
         sources = _sources(reader, _Clock(), use_combined_soc=True)
-        gateway = MeasuredValue(61.0, 20.0, "fresh", 0.8)
+        gateway = MeasuredValue(61.0, 20.0, "fresh", 0.8, observed_monotonic=20.0)
 
         with patch("venus_evcharger.inputs.helper.external_scheduler.logging.warning"):
             cycle = sources.collect_cycle(gateway, 20.0)
@@ -1164,6 +1292,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
                 source_id="pv-a",
                 confidence=0.625,
                 measurement_status="fresh",
+                observed_monotonic=8.5,
             ),
         )
         self.assertEqual(
@@ -1174,6 +1303,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
                 source_id="pv-a",
                 confidence=0.625,
                 measurement_status="stale",
+                observed_monotonic=8.5,
             ),
         )
         self.assertIsNone(single_pv_projection(_poll(replace(snapshot, pv_input_power_w=None))))
@@ -1213,6 +1343,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
                 source_id="external-aggregate",
                 confidence=0.4,
                 measurement_status="stale",
+                observed_monotonic=8.0,
             ),
         )
         self.assertEqual(
@@ -1228,6 +1359,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
                 source_id="external-aggregate",
                 confidence=0.4,
                 measurement_status="fresh",
+                observed_monotonic=8.0,
             ),
         )
 
@@ -1264,11 +1396,25 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         )
         self.assertEqual(
             external_pv_projection(polls, "selected"),
-            ProjectedEnergyValue(10.0, 1.0, "selected", 0.9, "fresh"),
+            ProjectedEnergyValue(
+                10.0,
+                1.0,
+                "selected",
+                0.9,
+                "fresh",
+                observed_monotonic=1.0,
+            ),
         )
         self.assertEqual(
             external_pv_projection(polls, ""),
-            ProjectedEnergyValue(30.0, 1.0, "external-aggregate", 0.5, "fresh"),
+            ProjectedEnergyValue(
+                30.0,
+                1.0,
+                "external-aggregate",
+                0.5,
+                "fresh",
+                observed_monotonic=1.0,
+            ),
         )
         self.assertIsNone(external_pv_projection((), ""))
 
@@ -1337,7 +1483,14 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
             physical_id="configured-physical",
             physical_priority=12,
         )
-        measured = MeasuredValue(57.0, 12.0, "fresh", 0.4, ("bus-a", "bus-b"))
+        measured = MeasuredValue(
+            57.0,
+            12.0,
+            "fresh",
+            0.4,
+            ("bus-a", "bus-b"),
+            observed_monotonic=12.0,
+        )
         expected = EnergySourceSnapshot(
             source_id="configured",
             role="battery",
@@ -1374,7 +1527,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         self.assertIsNone(_gateway_battery_source(None, "fallback", definition))
         self.assertIsNone(
             _gateway_battery_source(
-                MeasuredValue(None, 0.0, "unknown", 0.0),
+                MeasuredValue(None, 0.0, "unknown", 0.0, observed_monotonic=0.0),
                 "fallback",
                 definition,
             )
@@ -1393,10 +1546,75 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
             captured_at=6.0,
         )
         cluster = EnergyClusterSnapshot(combined_soc=52.5)
+        polls = (
+            _poll(late, observed_at=9.0, observed_monotonic=90.0),
+            _poll(early, observed_at=7.0, observed_monotonic=70.0),
+        )
+        gateway_measurement = MeasuredValue(
+            50.0,
+            6.0,
+            "fresh",
+            1.0,
+            observed_monotonic=60.0,
+        )
 
+        self.assertEqual(
+            _poll_observation_times(polls, frozenset({"early"})),
+            (70.0,),
+        )
+        self.assertEqual(_source_poll_observation_time(polls, "early"), 70.0)
+        self.assertIsNone(_source_poll_observation_time(polls, "missing"))
         self.assertEqual(_selected_soc(cluster, (late, early), gateway, True), (52.5, 6.0))
         self.assertEqual(_combined_soc_selection(52.5, (late, early), gateway), (52.5, 6.0))
         self.assertEqual(_oldest_weighted_soc_observation((late, early), gateway), 6.0)
+        self.assertEqual(
+            _selected_soc_observed_monotonic(
+                cluster,
+                polls,
+                gateway,
+                gateway_measurement,
+                True,
+            ),
+            60.0,
+        )
+        self.assertEqual(
+            _selected_soc_observed_monotonic(
+                cluster,
+                polls,
+                gateway,
+                gateway_measurement,
+                False,
+            ),
+            90.0,
+        )
+        self.assertEqual(
+            _selected_soc_observed_monotonic(
+                cluster,
+                tuple(replace(poll, contributing=False) for poll in polls),
+                gateway,
+                gateway_measurement,
+                False,
+            ),
+            60.0,
+        )
+        self.assertIsNone(
+            _selected_soc_observed_monotonic(
+                EnergyClusterSnapshot(),
+                (),
+                None,
+                None,
+                False,
+            )
+        )
+        self.assertIsNone(
+            _selected_soc_observed_monotonic(
+                EnergyClusterSnapshot(),
+                (),
+                gateway,
+                None,
+                False,
+            )
+        )
         self.assertIs(_first_external_soc_source((late, early)), late)
         offline = replace(early, source_id="offline", online=False)
         self.assertIs(_first_external_soc_source((offline, late)), late)
@@ -1417,12 +1635,30 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         self.assertFalse(usable_pv_poll(poll, "other"))
         self.assertFalse(usable_pv_poll(_poll(replace(source, pv_input_power_w=None)), "pv"))
         self.assertFalse(usable_pv_poll(_poll(replace(source, pv_input_power_w=-0.1)), "pv"))
-        self.assertEqual(pv_observation_times((poll, replace(poll, observed_at=None))), (10.0,))
+        self.assertEqual(
+            pv_observation_times(
+                (
+                    poll,
+                    replace(
+                        poll,
+                        observed_at=None,
+                        observed_monotonic=None,
+                    ),
+                )
+            ),
+            (10.0,),
+        )
         projection = single_pv_projection(poll)
         assert projection is not None
         self.assertEqual(
-            (projection.value, projection.observed_at, projection.source_id, projection.confidence),
-            (0.0, 10.0, "pv", 0.75),
+            (
+                projection.value,
+                projection.observed_at,
+                projection.observed_monotonic,
+                projection.source_id,
+                projection.confidence,
+            ),
+            (0.0, 10.0, 10.0, "pv", 0.75),
         )
         stale = replace(poll, measurement_status="stale")
         aggregated = aggregate_pv_projection((poll, stale))
@@ -1436,7 +1672,13 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
             external_polling_policy=_policy(),
         )
         gateway = FakeEnergyGateway()
-        gateway.measurements["battery"] = MeasuredValue(120.0, 99.0, "fresh", 1.0)
+        gateway.measurements["battery"] = MeasuredValue(
+            120.0,
+            99.0,
+            "fresh",
+            1.0,
+            observed_monotonic=99.0,
+        )
         reader = _SequenceReader([_online_source(42.0, 100.0)])
         sources = AutoInputSources(settings, gateway, energy_source_reader=reader)
 

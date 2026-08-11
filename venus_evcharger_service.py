@@ -71,6 +71,11 @@ class ShellyWallboxService:
         """Return the current wall-clock time."""
         return time.time()
 
+    @staticmethod
+    def monotonic_now() -> float:
+        """Return the process-local monotonic clock for durations and ordering."""
+        return time.monotonic()
+
     def __init__(self) -> None:
         """Initialize configuration, DBus service, and runtime state."""
         functions = ServiceFunctionBundle(

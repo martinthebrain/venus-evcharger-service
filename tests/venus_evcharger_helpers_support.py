@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+from tests.support.auto_input_supervisor import valid_snapshot
+
 sys.modules["vedbus"] = MagicMock()
 sys.modules["dbus"] = MagicMock()
 sys.modules["dbus.mainloop.glib"] = MagicMock()

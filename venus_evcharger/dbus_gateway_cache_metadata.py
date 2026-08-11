@@ -35,6 +35,7 @@ class CacheValueMetadata:
     confidence: float = 1.0
     last_error: str = ""
     now: float | None = None
+    now_monotonic: float | None = None
     freshness_kind: CacheFreshnessKind = "external_read"
     source_state: CacheSourceState = "active"
     stale_after_seconds: float | None = None
@@ -50,6 +51,7 @@ class ExternalReadMetadata(TypedDict, total=False):
     confidence: float
     last_error: str
     now: float | None
+    now_monotonic: float | None
     stale_after_seconds: float | None
     source_state: CacheSourceState
     confirmed: bool
@@ -71,6 +73,10 @@ def merge_cache_value_metadata(
         confidence=metadata_float(fields.get("confidence"), metadata.confidence),
         last_error=str(fields.get("last_error", metadata.last_error)),
         now=_metadata_now(fields.get("now"), metadata.now),
+        now_monotonic=_metadata_now(
+            fields.get("now_monotonic"),
+            metadata.now_monotonic,
+        ),
         freshness_kind=normalize_freshness_kind(fields.get("freshness_kind"), metadata.freshness_kind),
         source_state=_normalize_source_state(fields.get("source_state"), metadata.source_state),
         stale_after_seconds=_optional_metadata_float(
@@ -126,6 +132,7 @@ def _metadata_from_fields(fields: Mapping[str, object]) -> CacheValueMetadata:
         confidence=metadata_float(fields.get("confidence"), 1.0),
         last_error=str(fields.get("last_error", "")),
         now=_metadata_now(fields.get("now")),
+        now_monotonic=_metadata_now(fields.get("now_monotonic")),
         freshness_kind=normalize_freshness_kind(fields.get("freshness_kind"), "external_read"),
         source_state=_normalize_source_state(fields.get("source_state"), "active"),
         stale_after_seconds=_optional_metadata_float(fields.get("stale_after_seconds")),

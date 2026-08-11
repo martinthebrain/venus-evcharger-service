@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 
 from venus_evcharger.core.common import _charger_retry_remaining_seconds, _fresh_charger_transport_timestamp
@@ -32,11 +33,10 @@ from venus_evcharger.publish.gateway_diagnostics import (
 def _gateway_values(
     source: GatewayDiscoveryDiagnostics,
     supplied: GatewayDiscoveryDiagnosticValues | None,
-    now: float,
 ) -> GatewayDiscoveryDiagnosticValues:
     if supplied is not None:
         return supplied
-    return source.values(now)
+    return source.values(time.monotonic())
 
 
 class DbusPublishDiagnostics:
@@ -73,7 +73,7 @@ class DbusPublishDiagnostics:
         gateway: GatewayDiscoveryDiagnosticValues | None = None,
     ) -> dict[str, DiagnosticValue]:
         """Return change-driven diagnostic counters keyed by semantic EVCS field."""
-        gateway_values = _gateway_values(self.gateway, gateway, now)
+        gateway_values = _gateway_values(self.gateway, gateway)
         error_state = self._runtime_error_state(self.service)
         scheduled_snapshot = self.runtime_views.summary.scheduled_snapshot(self.service, now)
         auto_state, auto_state_code = normalized_auto_state_pair(
@@ -112,7 +112,7 @@ class DbusPublishDiagnostics:
         gateway: GatewayDiscoveryDiagnosticValues | None = None,
     ) -> dict[str, float]:
         """Return slower-changing age-like diagnostic values keyed by semantic EVCS field."""
-        gateway_values = _gateway_values(self.gateway, gateway, now)
+        gateway_values = _gateway_values(self.gateway, gateway)
         svc = self.service
         stale_base = (
             svc._last_successful_update_at
@@ -173,7 +173,7 @@ class DbusPublishDiagnostics:
 
     def snapshot(self, now: float) -> DiagnosticSnapshot:
         """Return one immutable-cycle view of all diagnostic values."""
-        gateway = self.gateway.values(now)
+        gateway = self.gateway.values(time.monotonic())
         return DiagnosticSnapshot(
             counters=self.counter_values(now, gateway),
             ages=self.age_values(now, gateway),

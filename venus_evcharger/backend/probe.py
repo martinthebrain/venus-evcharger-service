@@ -238,7 +238,7 @@ def validate_wallbox_config(
 def _gateway_diagnostics_probe_summary(
     reader: GatewayDiagnosticsReader | None = None,
     *,
-    now: float | None = None,
+    monotonic_at: float | None = None,
     max_age_seconds: float = _GATEWAY_DIAGNOSTICS_MAX_AGE_SECONDS,
 ) -> dict[str, object]:
     source = reader or GatewayDiagnosticsFileReader()
@@ -250,7 +250,7 @@ def _gateway_diagnostics_probe_summary(
             "fresh": False,
             "error": str(error),
         }
-    current_time = time.time() if now is None else now
+    current_time = time.monotonic() if monotonic_at is None else monotonic_at
     return {
         "available": True,
         "fresh": snapshot.is_fresh(current_time, max_age_seconds),

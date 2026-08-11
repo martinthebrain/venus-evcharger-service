@@ -68,12 +68,18 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             install_mock(adapter.diagnostics_role, "write_gateway_diagnostics", MagicMock())
             install_mock(adapter.health_role, "append_health_log", MagicMock())
             install_mock(adapter.introspection_snapshot_role, "write_introspection_snapshot", MagicMock())
+            install_mock(adapter.io_role, "_publish_energy_if_due", MagicMock(return_value=None))
             control = _control_snapshot()
 
             with patch.object(process_io_module.time, "monotonic", side_effect=[10.0, 10.5, 11.0]):
                 adapter.io_role.publish_cache(control)
                 adapter.io_role.publish_cache(control)
-                adapter.cache.update_value("path:svc/P", 1, source="svc/P")
+                adapter.cache.update_value(
+                    "path:svc/P",
+                    1,
+                    source="svc/P",
+                    now_monotonic=10.75,
+                )
                 adapter.io_role.publish_cache(control)
 
             self.assertEqual(adapter.cache.write_cache_snapshot.call_count, 1)
@@ -99,11 +105,20 @@ class GatewayProcessIoCases(GatewayAdapterContractCase):
             install_mock(adapter.introspection_snapshot_role, "write_introspection_snapshot", MagicMock())
             control = _control_snapshot()
 
-            with patch.object(process_io_module.time, "monotonic", side_effect=[10.0, 10.5, 11.0, 12.0]):
+            with patch.object(
+                process_io_module.time,
+                "monotonic",
+                side_effect=[10.0, 10.1, 10.5, 11.0, 11.1, 12.0, 12.1],
+            ):
                 adapter.io_role.publish_cache(control)
                 adapter.io_role.publish_cache(control)
                 adapter.io_role.publish_cache(control)
-                adapter.cache.update_value("path:svc/P", 1, source="svc/P")
+                adapter.cache.update_value(
+                    "path:svc/P",
+                    1,
+                    source="svc/P",
+                    now_monotonic=11.5,
+                )
                 adapter.io_role.publish_cache(control)
 
             self.assertEqual(adapter.cache.health["state"], "ok")

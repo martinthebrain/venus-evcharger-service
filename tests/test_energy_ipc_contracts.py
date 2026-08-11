@@ -24,7 +24,15 @@ from venus_evcharger.ipc.energy import (
 
 
 def _measurement() -> MeasuredValue:
-    return MeasuredValue(42.5, 100.0, "fresh", 0.9, ("source-a",), "")
+    return MeasuredValue(
+        42.5,
+        100.0,
+        "fresh",
+        0.9,
+        ("source-a",),
+        "",
+        observed_monotonic=100.0,
+    )
 
 
 class EnergyIpcContracts(unittest.TestCase):
@@ -86,16 +94,43 @@ class EnergyIpcContracts(unittest.TestCase):
                 {
                     "value": None,
                     "observed_at": 0,
+                    "observed_monotonic": 0,
                     "status": "unknown",
                     "confidence": 0,
                     "source_ids": [],
                     "reason_code": "not-observed",
                 }
             ),
-            MeasuredValue(None, 0.0, "unknown", 0.0, (), "not-observed"),
+            MeasuredValue(
+                None,
+                0.0,
+                "unknown",
+                0.0,
+                (),
+                "not-observed",
+                observed_monotonic=0.0,
+            ),
         )
-        self.assertEqual(MeasuredValue(1.0, 1.0, "unavailable", 0.2).status, "unavailable")
-        self.assertEqual(MeasuredValue(1.0, 1.0, "error", 0.2).status, "error")
+        self.assertEqual(
+            MeasuredValue(
+                1.0,
+                1.0,
+                "unavailable",
+                0.2,
+                observed_monotonic=1.0,
+            ).status,
+            "unavailable",
+        )
+        self.assertEqual(
+            MeasuredValue(
+                1.0,
+                1.0,
+                "error",
+                0.2,
+                observed_monotonic=1.0,
+            ).status,
+            "error",
+        )
 
     def test_measurement_rejects_invalid_direct_values(self) -> None:
         invalid: tuple[tuple[tuple[Any, ...], type[BaseException]], ...] = (
@@ -112,7 +147,56 @@ class EnergyIpcContracts(unittest.TestCase):
         )
         for args, error in invalid:
             with self.subTest(args=args), self.assertRaises(error):
-                MeasuredValue(*args)
+                MeasuredValue(*args, observed_monotonic=1.0)
+        with self.assertRaises(ValueError):
+            MeasuredValue(1.0, 1.0, "fresh", 1.0, observed_monotonic=0.0)
+
+    def test_observed_measurement_requires_complete_atomic_timestamps(self) -> None:
+        for status in ("fresh", "stale"):
+            with self.subTest(status=status, missing="value"):
+                with self.assertRaises(ValueError) as raised:
+                    MeasuredValue(
+                        None,
+                        1.0,
+                        status,
+                        1.0,
+                        observed_monotonic=1.0,
+                    )
+                self.assertEqual(
+                    str(raised.exception),
+                    f"{status} measurement requires a value",
+                )
+
+            for field_name, observed_at, observed_monotonic in (
+                ("observed_at", 0.0, 1.0),
+                ("observed_monotonic", 1.0, 0.0),
+            ):
+                with self.subTest(status=status, missing=field_name):
+                    with self.assertRaises(ValueError) as raised:
+                        MeasuredValue(
+                            1.0,
+                            observed_at,
+                            status,
+                            1.0,
+                            observed_monotonic=observed_monotonic,
+                        )
+                    self.assertEqual(
+                        str(raised.exception),
+                        f"{status} measurement requires a positive {field_name}",
+                    )
+
+    def test_non_observed_measurement_statuses_do_not_claim_timestamp_freshness(self) -> None:
+        for status in ("unknown", "unavailable", "error"):
+            with self.subTest(status=status):
+                measurement = MeasuredValue(
+                    None,
+                    0.0,
+                    status,
+                    0.0,
+                    observed_monotonic=0.0,
+                )
+                self.assertEqual(measurement.observed_at, 0.0)
+                self.assertEqual(measurement.observed_monotonic, 0.0)
 
     def test_descriptor_and_topology_round_trip(self) -> None:
         sources = (
@@ -145,16 +229,34 @@ class EnergyIpcContracts(unittest.TestCase):
 
     def test_inputs_round_trip_and_runtime_types(self) -> None:
         value = _measurement()
-        inputs = EnergyInputsSnapshot(7, 101.0, 3, value, value, value, value)
+        inputs = EnergyInputsSnapshot(
+            7,
+            101.0,
+            3,
+            value,
+            value,
+            value,
+            value,
+            captured_monotonic=101.0,
+        )
         self.assertEqual(EnergyInputsSnapshot.from_payload(inputs.to_payload()), inputs)
         with self.assertRaises(TypeError):
-            EnergyInputsSnapshot(1, 101.0, 1, cast(MeasuredValue, object()), value, value, value)
+            EnergyInputsSnapshot(
+                1,
+                101.0,
+                1,
+                cast(MeasuredValue, object()),
+                value,
+                value,
+                value,
+                captured_monotonic=101.0,
+            )
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(-1, 101.0, 1, value, value, value, value)
+            EnergyInputsSnapshot(-1, 101.0, 1, value, value, value, value, captured_monotonic=101.0)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(1, 101.0, -1, value, value, value, value)
+            EnergyInputsSnapshot(1, 101.0, -1, value, value, value, value, captured_monotonic=101.0)
         with self.assertRaises(ValueError):
-            EnergyInputsSnapshot(1, 0.0, 1, value, value, value, value)
+            EnergyInputsSnapshot(1, 0.0, 1, value, value, value, value, captured_monotonic=101.0)
         with self.assertRaises(ValueError):
             EnergyInputsSnapshot(
                 1,
@@ -164,20 +266,22 @@ class EnergyIpcContracts(unittest.TestCase):
                 value,
                 value,
                 value,
+                captured_monotonic=101.0,
                 schema_version=ENERGY_INPUTS_SCHEMA_VERSION + 1,
             )
         with self.assertRaisesRegex(
             ValueError,
-            "grid_power_w observed_at exceeds captured_at tolerance",
+            "grid_power_w observed_monotonic exceeds captured_monotonic",
         ):
             EnergyInputsSnapshot(
                 1,
                 98.999,
                 1,
                 value,
-                MeasuredValue(None, 0.0, "unknown", 0.0),
-                MeasuredValue(None, 0.0, "unknown", 0.0),
-                MeasuredValue(None, 0.0, "unknown", 0.0),
+                MeasuredValue(None, 0.0, "unknown", 0.0, observed_monotonic=0.0),
+                MeasuredValue(None, 0.0, "unknown", 0.0, observed_monotonic=0.0),
+                MeasuredValue(None, 0.0, "unknown", 0.0, observed_monotonic=0.0),
+                captured_monotonic=98.999,
             )
 
     def test_refresh_request_round_trip_and_transport_envelope(self) -> None:
@@ -242,6 +346,7 @@ class EnergyIpcContracts(unittest.TestCase):
             _measurement(),
             _measurement(),
             _measurement(),
+            captured_monotonic=101.0,
         ).to_payload()
         topology = EnergyTopologySnapshot(1, 1.0, ()).to_payload()
         invalid_calls: tuple[tuple[Callable[[object], object], object], ...] = (

@@ -137,6 +137,7 @@ class RuntimeSupportContractTests(unittest.TestCase):
                 "_auto_input_snapshot_last_captured_at", "_auto_input_snapshot_version",
                 "_auto_input_snapshot_writer_pid", "_auto_input_snapshot_generation",
                 "_auto_input_snapshot_runtime_instance_id",
+                "_auto_input_snapshot_last_sequence",
             ),
             false=(
                 "_relay_sync_failure_reported", "_auto_input_snapshot_seen_for_current_helper",

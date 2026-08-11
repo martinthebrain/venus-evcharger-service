@@ -7,9 +7,6 @@ import math
 from collections.abc import Mapping, Sequence, Set
 from typing import TypeGuard
 
-from venus_evcharger.core.contracts import timestamp_not_future
-
-
 def is_string_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
     """Narrow an untrusted JSON object to the diagnostics mapping contract."""
     return _is_object_mapping(value) and all(isinstance(key, str) for key in value)
@@ -108,16 +105,6 @@ def bounded_float(value: object, label: str, minimum: float, maximum: float) -> 
     return result
 
 
-def timestamp_not_after(
-    timestamp: float,
-    reference: float,
-    label: str,
-) -> None:
-    """Require a timestamp to remain within the canonical future tolerance."""
-    if not timestamp_not_future(timestamp, reference):
-        raise ValueError(f"{label} exceeds gateway diagnostics captured_at tolerance")
-
-
 def normalized_epoch_timestamp(value: object, captured_at: object) -> float:
     """Normalize an untrusted epoch timestamp at the diagnostics boundary."""
     timestamp = _non_negative_finite_or_zero(value)
@@ -146,5 +133,4 @@ __all__ = [
     "object_sequence",
     "positive_float",
     "text",
-    "timestamp_not_after",
 ]

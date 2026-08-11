@@ -16,6 +16,7 @@ def energy_inputs_snapshot(
     *,
     sequence: int,
     captured_at: float,
+    captured_monotonic: float,
 ) -> EnergyInputsSnapshot:
     """Return one coherent semantic view without exposing DBus identities."""
     native_battery_power = _measurement(
@@ -25,6 +26,7 @@ def energy_inputs_snapshot(
     return EnergyInputsSnapshot(
         sequence=max(0, int(sequence)),
         captured_at=float(captured_at),
+        captured_monotonic=float(captured_monotonic),
         topology_generation=discovery.generation,
         grid_power_w=_measurement(values.get("grid_power_w"), discovery.source_ids("grid")),
         pv_power_w=_measurement(
@@ -42,6 +44,7 @@ def _semantic_battery_power(measurement: MeasuredValue) -> MeasuredValue:
     return MeasuredValue(
         value=None if value is None else -float(value),
         observed_at=measurement.observed_at,
+        observed_monotonic=measurement.observed_monotonic,
         status=measurement.status,
         confidence=measurement.confidence,
         source_ids=measurement.source_ids,
@@ -51,19 +54,52 @@ def _semantic_battery_power(measurement: MeasuredValue) -> MeasuredValue:
 
 def _measurement(entry: Mapping[str, object] | None, source_ids: tuple[str, ...]) -> MeasuredValue:
     if entry is None:
-        return MeasuredValue(None, 0.0, "unknown", 0.0, source_ids, "not-observed")
-    status = _value_status(entry.get("status"))
+        return _unknown_measurement(source_ids)
     value = _numeric_value(entry.get("value"))
-    if value is None and status in {"fresh", "stale"}:
-        status = "unavailable"
+    status = _measurement_status(entry.get("status"), value)
     return MeasuredValue(
         value=value,
-        observed_at=_non_negative_number(entry.get("confirmed_at") or entry.get("updated_at")),
+        observed_at=_entry_timestamp(entry, "confirmed_at", "updated_at"),
+        observed_monotonic=_entry_timestamp(
+            entry,
+            "confirmed_monotonic",
+            "updated_monotonic",
+        ),
         status=status,
         confidence=_confidence(entry.get("confidence")),
         source_ids=source_ids,
         reason_code=_reason_code(status, value, entry.get("reason_code")),
     )
+
+
+def _unknown_measurement(source_ids: tuple[str, ...]) -> MeasuredValue:
+    """Return the canonical representation for an unobserved semantic field."""
+    return MeasuredValue(
+        None,
+        0.0,
+        "unknown",
+        0.0,
+        source_ids,
+        "not-observed",
+        observed_monotonic=0.0,
+    )
+
+
+def _measurement_status(raw_status: object, value: float | None) -> EnergyValueStatus:
+    """Prevent fresh/stale claims when their numeric value is unavailable."""
+    status = _value_status(raw_status)
+    if value is None and status in {"fresh", "stale"}:
+        return "unavailable"
+    return status
+
+
+def _entry_timestamp(
+    entry: Mapping[str, object],
+    confirmed_key: str,
+    updated_key: str,
+) -> float:
+    """Prefer a confirmation timestamp and fall back to the last update."""
+    return _non_negative_number(entry.get(confirmed_key) or entry.get(updated_key))
 
 
 def _numeric_value(value: object) -> float | None:

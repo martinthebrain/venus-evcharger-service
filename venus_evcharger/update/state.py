@@ -39,9 +39,12 @@ class StateReadbackPort(Protocol):
 
 class StateRuntimePort(Protocol):
     def ensure_observability_state(self) -> None: ...
-    def ensure_auto_input_helper(self, now: float) -> None: ...
+    def ensure_auto_input_helper(self, now: float | None = None) -> None: ...
     def recover_watchdog(self, now: float) -> None: ...
-    def refresh_auto_input_snapshot(self, now: float) -> None: ...
+    def refresh_auto_input_snapshot(
+        self,
+        monotonic_at: float | None = None,
+    ) -> None: ...
     def worker_snapshot(self) -> dict[str, object]: ...
     def mark_failure(self, source_key: str) -> None: ...
     def mark_recovery(self, source_key: str, message: str, *args: object) -> None: ...
@@ -60,7 +63,7 @@ class StateRuntimePort(Protocol):
 
 class StatePublishPort(Protocol):
     def save_runtime_state(self) -> object: ...
-    def maintain_evcs_registration(self, now: float) -> bool: ...
+    def maintain_evcs_registration(self) -> bool: ...
     def publish_energy_time_measurements(
         self,
         session_energy: float,
@@ -336,7 +339,7 @@ class UpdateStateController:
         # Shelly ``aenergy.total`` is a lifetime counter. Venus' EV-charger UI
         # expects the charger-facing energy paths to describe the active charge.
         phase_energies = self.phase_energies_for_total(svc, session_energy)
-        changed = svc.state.maintain_evcs_registration(now)
+        changed = svc.state.maintain_evcs_registration()
         changed |= svc.state.publish_energy_time_measurements(
             session_energy,
             phase_energies,
@@ -386,8 +389,8 @@ class UpdateStateController:
         if svc.topology_configured:
             svc.runtime.start_io_worker()
         svc.runtime.recover_watchdog(now)
-        svc.runtime.ensure_auto_input_helper(now)
-        svc.runtime.refresh_auto_input_snapshot(now)
+        svc.runtime.ensure_auto_input_helper()
+        svc.runtime.refresh_auto_input_snapshot()
         return svc.runtime.worker_snapshot()
 
 

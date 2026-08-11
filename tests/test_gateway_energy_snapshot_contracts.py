@@ -200,12 +200,13 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
     def test_snapshot_projects_values_quality_and_opaque_sources(self) -> None:
         snapshot = energy_inputs_snapshot(
             {
-                "grid_power_w": {"value": -20, "updated_at": 98.0, "status": "fresh", "confidence": 1.0},
-                "pv_power_w": {"value": 500.5, "confirmed_at": 97.0, "status": "stale", "confidence": 0.7},
-                "battery_soc": {"value": 75.0, "updated_at": 99.0, "status": "fresh", "confidence": 2.0},
+                "grid_power_w": {"value": -20, "updated_at": 98.0, "updated_monotonic": 98.0, "status": "fresh", "confidence": 1.0},
+                "pv_power_w": {"value": 500.5, "confirmed_at": 97.0, "confirmed_monotonic": 97.0, "status": "stale", "confidence": 0.7},
+                "battery_soc": {"value": 75.0, "updated_at": 99.0, "updated_monotonic": 99.0, "status": "fresh", "confidence": 2.0},
                 "battery_net_power_w": {
                     "value": 1730.0,
                     "updated_at": 99.0,
+                    "updated_monotonic": 99.0,
                     "status": "fresh",
                     "confidence": 1.0,
                     "reason_code": "native-battery-power",
@@ -214,6 +215,7 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
             self.discovery,
             sequence=4,
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
         self.assertEqual(snapshot.sequence, 4)
         self.assertEqual(snapshot.topology_generation, 3)
@@ -245,6 +247,7 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
             self.discovery,
             sequence=-3,
             captured_at=100.0,
+            captured_monotonic=100.0,
         )
         self.assertEqual(snapshot.sequence, 0)
         self.assertEqual(
@@ -252,6 +255,7 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
             MeasuredValue(
                 value=None,
                 observed_at=0.0,
+                observed_monotonic=0.0,
                 status="unknown",
                 confidence=0.0,
                 source_ids=self.discovery.source_ids("grid"),
@@ -269,12 +273,13 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
         unavailable = energy_inputs_snapshot(
             {
                 "grid_power_w": {"value": None, "status": "unavailable"},
-                "pv_power_w": {"value": 0, "updated_at": 1, "status": "other"},
+                "pv_power_w": {"value": 0, "updated_at": 1, "updated_monotonic": 1, "status": "other"},
                 "battery_soc": {"value": True, "status": "error"},
             },
             self.discovery,
             sequence=1,
             captured_at=2.0,
+            captured_monotonic=2.0,
         )
         self.assertEqual(unavailable.grid_power_w.reason_code, "source-unavailable")
         self.assertEqual(unavailable.pv_power_w.status, "unknown")
@@ -285,12 +290,13 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
         unknown_missing = energy_inputs_snapshot(
             {
                 "grid_power_w": {"value": None, "status": "other"},
-                "pv_power_w": {"value": 0.0, "updated_at": 1.0, "status": "fresh"},
-                "battery_soc": {"value": 50.0, "updated_at": 1.0, "status": "fresh"},
+                "pv_power_w": {"value": 0.0, "updated_at": 1.0, "updated_monotonic": 1.0, "status": "fresh"},
+                "battery_soc": {"value": 50.0, "updated_at": 1.0, "updated_monotonic": 1.0, "status": "fresh"},
             },
             self.discovery,
             sequence=1,
             captured_at=2.0,
+            captured_monotonic=2.0,
         )
         self.assertEqual(unknown_missing.grid_power_w.reason_code, "not-observed")
 
@@ -300,6 +306,7 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
                 "grid_power_w": {
                     "value": 10.0,
                     "updated_at": 0.5,
+                    "updated_monotonic": 0.5,
                     "status": "fresh",
                     "confidence": 0.25,
                     "reason_code": 7,
@@ -307,6 +314,7 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
                 "pv_power_w": {
                     "value": None,
                     "updated_at": 0.5,
+                    "updated_monotonic": 0.5,
                     "status": "stale",
                     "confidence": 0.25,
                 },
@@ -314,6 +322,7 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
             self.discovery,
             sequence=1,
             captured_at=2.0,
+            captured_monotonic=2.0,
         )
 
         self.assertEqual(snapshot.grid_power_w.observed_at, 0.5)

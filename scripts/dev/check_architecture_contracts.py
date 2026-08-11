@@ -97,7 +97,12 @@ REQUIRED_GATEWAY_CONTRACT_SYMBOLS = {
         }
     ),
     "venus_evcharger/ipc/energy_snapshots.py": frozenset(
-        {"EnergyInputsSnapshot", "__post_init__", "timestamp_not_future"}
+        {
+            "EnergyInputsSnapshot",
+            "__post_init__",
+            "captured_monotonic",
+            "observed_monotonic",
+        }
     ),
     "venus_evcharger/ipc/deadline.py": frozenset(
         {

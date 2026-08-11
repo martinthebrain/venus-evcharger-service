@@ -203,9 +203,10 @@ class ExternalSourceSchedulerContracts(unittest.TestCase):
         self.assertEqual(empty[0].consecutive_failures, 2)
         warning.assert_called_once()
 
-    def test_future_and_non_finite_observation_times_fail_closed(self) -> None:
-        results = iter(
-            EnergySourceSnapshot(
+    def test_epoch_skew_is_diagnostic_but_non_finite_times_fail_closed(self) -> None:
+        outcomes: list[tuple[str, str, float | None]] = []
+        for captured_at in (11.0, -0.1, float("nan"), float("inf")):
+            snapshot = EnergySourceSnapshot(
                 source_id="a",
                 role="battery",
                 service_name="a",
@@ -213,38 +214,38 @@ class ExternalSourceSchedulerContracts(unittest.TestCase):
                 online=True,
                 captured_at=captured_at,
             )
-            for captured_at in (11.0, -0.1, float("nan"), float("inf"))
-        )
 
-        def reader(
-            _runtime: object,
-            _source: EnergySourceDefinition,
-            _now: float,
-        ) -> EnergySourceReadStep:
-            return completed_read(next(results))
+            def reader(
+                _runtime: object,
+                _source: EnergySourceDefinition,
+                _now: float,
+                *,
+                result: EnergySourceSnapshot = snapshot,
+            ) -> EnergySourceReadStep:
+                return completed_read(result)
 
-        clock = _Clock()
-        scheduler = ExternalSourceScheduler(
-            (_definition("a"),),
-            _policy(backoff_base=1.0, backoff_max=1.0),
-            2.0,
-            reader,
-            monotonic=clock,
-        )
+            clock = _Clock()
+            scheduler = ExternalSourceScheduler(
+                (_definition("a"),),
+                _policy(backoff_base=1.0, backoff_max=1.0),
+                2.0,
+                reader,
+                monotonic=clock,
+            )
+            with patch(
+                "venus_evcharger.inputs.helper.external_scheduler.logging.warning"
+            ):
+                poll = scheduler.poll(10.0)[0]
+            outcomes.append(
+                (poll.poll_status, poll.measurement_status, poll.observed_at)
+            )
 
-        with patch("venus_evcharger.inputs.helper.external_scheduler.logging.warning"):
-            polls = []
-            for current in (10.0, 11.0, 12.0, 13.0):
-                clock.current = current - 10.0
-                polls.append(scheduler.poll(current)[0])
-
+        self.assertEqual(outcomes[0], ("success", "fresh", 11.0))
         self.assertEqual(
-            [(poll.poll_status, poll.measurement_status) for poll in polls],
-            [("failed", "missing")] * 4,
+            outcomes[1:],
+            [("failed", "missing", None)] * 3,
         )
-        self.assertTrue(all(poll.observed_at is None for poll in polls))
-        self.assertTrue(all(not poll.contributing for poll in polls))
-        self.assertFalse(_valid_observed_at(None, 10.0))
+        self.assertFalse(_valid_observed_at(None))
 
     def test_in_progress_source_is_resumed_without_blocking_other_sources(self) -> None:
         clock = _Clock()

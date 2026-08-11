@@ -102,8 +102,11 @@ class ServiceRuntimeFacade:
     def ensure_auto_input_helper(self, now: float | None = None) -> None:
         self._controllers.runtime.auto_input.ensure_helper_process(now)
 
-    def refresh_auto_input_snapshot(self, now: float | None = None) -> None:
-        self._controllers.runtime.auto_input.refresh_snapshot(now)
+    def refresh_auto_input_snapshot(
+        self,
+        monotonic_at: float | None = None,
+    ) -> None:
+        self._controllers.runtime.auto_input.refresh_snapshot(monotonic_at)
 
     def request(self, url: str) -> JsonObject:
         return self._controllers.runtime.shelly.request(url)

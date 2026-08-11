@@ -71,17 +71,21 @@ class UpdateCycleRuntimeRole:
         _fixture_callable(self._owner, "_ensure_observability_state")()
 
     def ensure_auto_input_helper(self, now: float | None = None) -> None:
-        effective_now = now
-        if effective_now is None:
-            clock = getattr(self._owner, "time_now", None)
-            effective_now = float(clock()) if callable(clock) else 0.0
-        _fixture_callable(self._owner, "_ensure_auto_input_helper_process")(effective_now)
+        callback = _fixture_callable(self._owner, "_ensure_auto_input_helper_process")
+        if now is None:
+            callback()
+        else:
+            callback(now)
 
     def recover_watchdog(self, now: float) -> None:
         _fixture_callable(self._owner, "_watchdog_recover")(now)
 
-    def refresh_auto_input_snapshot(self, now: float) -> None:
-        _fixture_callable(self._owner, "_refresh_auto_input_snapshot")(now)
+    def refresh_auto_input_snapshot(self, now: float | None = None) -> None:
+        callback = _fixture_callable(self._owner, "_refresh_auto_input_snapshot")
+        if now is None:
+            callback()
+        else:
+            callback(now)
 
     def worker_snapshot(self) -> dict[str, object]:
         value = _fixture_callable(self._owner, "_get_worker_snapshot")()
@@ -206,8 +210,8 @@ class UpdateCycleStateRole:
             )
         )
 
-    def maintain_evcs_registration(self, now: float) -> bool:
-        return bool(_fixture_callable(self._owner, "_maintain_evcs_registration")(now))
+    def maintain_evcs_registration(self) -> bool:
+        return bool(_fixture_callable(self._owner, "_maintain_evcs_registration")())
 
     def publish_config_paths(self, startstop_display: int, now: float) -> bool:
         return bool(_fixture_callable(self._owner, "_publish_config_paths")(startstop_display, now))
@@ -264,7 +268,7 @@ def _install_fixture_defaults(fixture: object) -> None:
     callback_defaults: dict[str, Callable[..., object]] = {
         "_apply_phase_selection": lambda selection: selection,
         "_auto_decide_relay": lambda relay_on, _pv, _soc, _grid: relay_on,
-        "_ensure_auto_input_helper_process": lambda _now: None,
+        "_ensure_auto_input_helper_process": lambda _now=None: None,
         "_ensure_observability_state": lambda: None,
         "_ensure_worker_state": lambda: None,
         "_get_worker_snapshot": lambda: {},
@@ -284,7 +288,7 @@ def _install_fixture_defaults(fixture: object) -> None:
         "_publish_live_measurements": lambda *_args: False,
         "_publish_local_pm_status": lambda relay_on, _now: {"output": relay_on},
         "_queue_relay_command": lambda _relay_on, _now: None,
-        "_refresh_auto_input_snapshot": lambda _now: None,
+        "_refresh_auto_input_snapshot": lambda _now=None: None,
         "_save_runtime_state": lambda: None,
         "_set_health": lambda _reason, **_kwargs: None,
         "_source_retry_ready": source_retry_ready,

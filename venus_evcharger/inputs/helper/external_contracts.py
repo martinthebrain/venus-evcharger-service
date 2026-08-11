@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import Literal
 
 from venus_evcharger.energy.models import EnergySourceSnapshot
@@ -58,6 +58,15 @@ class ExternalSourcePoll:
     age_seconds: float | None
     consecutive_failures: int
     last_error: str
+    _: KW_ONLY
+    observed_monotonic: float | None
+
+    def __post_init__(self) -> None:
+        _validate_timestamp_pair(
+            self.observed_at,
+            self.observed_monotonic,
+            "external source observation",
+        )
 
     def payload(self) -> dict[str, object]:
         payload = dict(self.snapshot.as_dict())
@@ -68,6 +77,7 @@ class ExternalSourcePoll:
                 "measurement_status": self.measurement_status,
                 "attempted_at": self.attempted_at,
                 "observed_at": self.observed_at,
+                "observed_monotonic": self.observed_monotonic,
                 "next_poll_at": self.next_poll_at,
                 "age_seconds": self.age_seconds,
                 "consecutive_failures": self.consecutive_failures,
@@ -86,6 +96,14 @@ class ProjectedEnergyValue:
     source_id: str
     confidence: float
     measurement_status: ProjectionMeasurementStatus = "fresh"
+    _: KW_ONLY
+    observed_monotonic: float
+
+    def __post_init__(self) -> None:
+        _require_non_negative(
+            self.observed_monotonic,
+            "projected observation monotonic timestamp",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +114,15 @@ class ExternalEnergyCycle:
     pv: ProjectedEnergyValue | None
     battery_observed_at: float | None
     polls: tuple[ExternalSourcePoll, ...]
+    _: KW_ONLY
+    battery_observed_monotonic: float | None
+
+    def __post_init__(self) -> None:
+        _validate_timestamp_pair(
+            self.battery_observed_at,
+            self.battery_observed_monotonic,
+            "external battery observation",
+        )
 
 
 def _validate_external_polling_policy(policy: ExternalPollingPolicy) -> None:
@@ -116,6 +143,23 @@ def _require_positive(value: float, label: str) -> None:
 def _require_non_negative(value: float, label: str) -> None:
     if not math.isfinite(value) or value < 0.0:
         raise ValueError(f"External energy-source {label} must be non-negative")
+
+
+def _validate_timestamp_pair(
+    observed_at: float | None,
+    observed_monotonic: float | None,
+    label: str,
+) -> None:
+    if (observed_at is None) != (observed_monotonic is None):
+        raise ValueError(f"{label} timestamps must be present together")
+    if observed_at is None:
+        return
+    assert observed_monotonic is not None
+    _require_non_negative(float(observed_at), f"{label} epoch timestamp")
+    _require_non_negative(
+        float(observed_monotonic),
+        f"{label} monotonic timestamp",
+    )
 
 
 def projection_measurement_status(value: str) -> ProjectionMeasurementStatus:

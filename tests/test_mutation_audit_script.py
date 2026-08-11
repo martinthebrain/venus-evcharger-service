@@ -263,11 +263,11 @@ class MutationAuditScriptTests(unittest.TestCase):
         prefixes = tuple(prefix for prefix, _selection in core_selections)
         serialized = json.dumps(core_selections, separators=(",", ":")).encode()
 
-        self.assertEqual(len(core_selections), 239)
+        self.assertEqual(len(core_selections), 241)
         self.assertEqual(len(prefixes), len(set(prefixes)))
         self.assertEqual(
             hashlib.sha256(serialized).hexdigest(),
-            "6f6ca0cd1e44509998afc9e5774c661a74c009cf4520c9d98b4a890909f5afb7",
+            "853c453d95cd0032535296d5e507283168642958bb3d6935b8de80629b18adfa",
         )
 
         all_selections = mutation_audit_config.focused_test_selections()
@@ -278,7 +278,7 @@ class MutationAuditScriptTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(json.dumps(all_selections, separators=(",", ":")).encode()).hexdigest(),
-            "ff2849292ed0a8792c073e096c5703ef974ab59fbbc6d9d190bcd29bc9087cfb",
+            "91569182c0242801af6efd76b2fe3870100bddb5c70bb08f180255f60d433158",
         )
 
     def test_mutation_config_can_target_dev_scripts(self) -> None:

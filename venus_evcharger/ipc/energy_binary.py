@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
+import math
 import struct
 import time
 from pathlib import Path
 from typing import TypeVar
 
-from venus_evcharger.core.contracts import timestamp_age_within
 from venus_evcharger.core.shared import write_bytes_atomically
 from venus_evcharger.ipc.energy import (
     ENERGY_INPUTS_SCHEMA_VERSION,
@@ -17,11 +17,11 @@ from venus_evcharger.ipc.energy import (
     MeasuredValue,
 )
 
-_MAGIC = b"VEI2"
+_MAGIC = b"VEI3"
 _MAX_PAYLOAD_BYTES = 65536
 _MAX_SOURCE_IDS = 64
-_HEADER = struct.Struct(">4sBQQd")
-_MEASUREMENT = struct.Struct(">BBdddH")
+_HEADER = struct.Struct(">4sBQQdd")
+_MEASUREMENT = struct.Struct(">BBddddH")
 _TEXT_LENGTH = struct.Struct(">H")
 _PAYLOAD_SIZE_ERROR = "energy inputs binary payload exceeds the size limit"
 _INVALID_MAGIC_ERROR = "energy inputs binary payload has invalid magic"
@@ -58,6 +58,7 @@ def encode_energy_inputs(snapshot: EnergyInputsSnapshot) -> bytes:
             snapshot.sequence,
             snapshot.topology_generation,
             snapshot.captured_at,
+            snapshot.captured_monotonic,
         )
     ]
     for measurement in (
@@ -78,7 +79,14 @@ def decode_energy_inputs(payload: bytes) -> EnergyInputsSnapshot:
     if len(payload) > _MAX_PAYLOAD_BYTES:
         raise ValueError(_PAYLOAD_SIZE_ERROR)
     reader = _BinaryReader(payload)
-    magic, schema_version, sequence, topology_generation, captured_at = reader.header()
+    (
+        magic,
+        schema_version,
+        sequence,
+        topology_generation,
+        captured_at,
+        captured_monotonic,
+    ) = reader.header()
     if magic != _MAGIC:
         raise ValueError(_INVALID_MAGIC_ERROR)
     if schema_version != ENERGY_INPUTS_SCHEMA_VERSION:
@@ -88,6 +96,7 @@ def decode_energy_inputs(payload: bytes) -> EnergyInputsSnapshot:
     return EnergyInputsSnapshot(
         sequence=sequence,
         captured_at=captured_at,
+        captured_monotonic=captured_monotonic,
         topology_generation=topology_generation,
         grid_power_w=measurements[0],
         pv_power_w=measurements[1],
@@ -105,21 +114,60 @@ def load_energy_inputs_file(
     path: str,
     *,
     max_age_seconds: float,
-    now: float | None = None,
+    now_monotonic: float | None = None,
 ) -> EnergyInputsSnapshot | None:
     """Load a fresh binary snapshot, returning ``None`` for absent or invalid data."""
+    snapshot = _load_energy_inputs_payload(path)
+    freshness = _normalized_freshness_inputs(max_age_seconds, now_monotonic)
+    if snapshot is None or freshness is None:
+        return None
+    current, maximum_age = freshness
+    return snapshot if _snapshot_is_fresh(snapshot, current, maximum_age) else None
+
+
+def _load_energy_inputs_payload(path: str) -> EnergyInputsSnapshot | None:
+    """Decode one bounded payload without leaking filesystem or wire errors."""
     try:
-        snapshot = decode_energy_inputs(_read_bounded_payload(Path(path)))
+        return decode_energy_inputs(_read_bounded_payload(Path(path)))
     except (OSError, TypeError, ValueError):
         return None
-    current = time.time() if now is None else float(now)
-    if max_age_seconds >= 0.0 and not timestamp_age_within(
-        snapshot.captured_at,
-        current,
-        max_age_seconds,
-    ):
+
+
+def _normalized_freshness_inputs(
+    max_age_seconds: float,
+    now_monotonic: float | None,
+) -> tuple[float, float] | None:
+    """Normalize caller-provided freshness inputs at the IPC boundary."""
+    try:
+        current = _current_monotonic(now_monotonic)
+        maximum_age = float(max_age_seconds)
+    except (TypeError, ValueError):
         return None
-    return snapshot
+    if not _valid_current_monotonic(current):
+        return None
+    if not math.isfinite(maximum_age):
+        return None
+    return current, maximum_age
+
+
+def _current_monotonic(now_monotonic: float | None) -> float:
+    """Resolve an explicit test clock or the process monotonic clock."""
+    return time.monotonic() if now_monotonic is None else float(now_monotonic)
+
+
+def _valid_current_monotonic(value: float) -> bool:
+    """Return whether a monotonic freshness reference is usable."""
+    return value >= 0.0 and math.isfinite(value)
+
+
+def _snapshot_is_fresh(
+    snapshot: EnergyInputsSnapshot,
+    current_monotonic: float,
+    maximum_age: float,
+) -> bool:
+    """Return whether a snapshot belongs to the current monotonic time window."""
+    age = current_monotonic - snapshot.captured_monotonic
+    return age >= 0.0 and (maximum_age < 0.0 or age <= maximum_age)
 
 
 def _read_bounded_payload(path: Path) -> bytes:
@@ -143,6 +191,7 @@ def _encode_measurement(measurement: MeasuredValue) -> list[bytes]:
             int(has_value),
             measurement.value if has_value else 0.0,
             measurement.observed_at,
+            measurement.observed_monotonic,
             measurement.confidence,
             len(source_ids),
         )
@@ -153,7 +202,15 @@ def _encode_measurement(measurement: MeasuredValue) -> list[bytes]:
 
 
 def _decode_measurement(reader: _BinaryReader) -> MeasuredValue:
-    status_code, has_value, value, observed_at, confidence, source_count = (
+    (
+        status_code,
+        has_value,
+        value,
+        observed_at,
+        observed_monotonic,
+        confidence,
+        source_count,
+    ) = (
         reader.measurement_fields()
     )
     status = _decoded_status(status_code)
@@ -162,6 +219,7 @@ def _decode_measurement(reader: _BinaryReader) -> MeasuredValue:
     return MeasuredValue(
         value=decoded_value,
         observed_at=observed_at,
+        observed_monotonic=observed_monotonic,
         status=status,
         confidence=confidence,
         source_ids=source_ids,
@@ -214,27 +272,42 @@ class _BinaryReader:
         self._offset = end
         return values
 
-    def header(self) -> tuple[bytes, int, int, int, float]:
-        magic, schema_version, sequence, topology_generation, captured_at = self.unpack(
-            _HEADER
-        )
+    def header(self) -> tuple[bytes, int, int, int, float, float]:
+        (
+            magic,
+            schema_version,
+            sequence,
+            topology_generation,
+            captured_at,
+            captured_monotonic,
+        ) = self.unpack(_HEADER)
         return (
             _wire_value(magic, bytes),
             _wire_value(schema_version, int),
             _wire_value(sequence, int),
             _wire_value(topology_generation, int),
             _wire_value(captured_at, float),
+            _wire_value(captured_monotonic, float),
         )
 
-    def measurement_fields(self) -> tuple[int, int, float, float, float, int]:
-        status_code, has_value, value, observed_at, confidence, source_count = self.unpack(
-            _MEASUREMENT
-        )
+    def measurement_fields(
+        self,
+    ) -> tuple[int, int, float, float, float, float, int]:
+        (
+            status_code,
+            has_value,
+            value,
+            observed_at,
+            observed_monotonic,
+            confidence,
+            source_count,
+        ) = self.unpack(_MEASUREMENT)
         return (
             _wire_value(status_code, int),
             _wire_value(has_value, int),
             _wire_value(value, float),
             _wire_value(observed_at, float),
+            _wire_value(observed_monotonic, float),
             _wire_value(confidence, float),
             _wire_value(source_count, int),
         )
