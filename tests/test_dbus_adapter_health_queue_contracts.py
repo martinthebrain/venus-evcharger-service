@@ -7,6 +7,7 @@ import unittest
 
 from venus_evcharger.dbus_adapter.health.queue import (
     command_activity_at,
+    critical_queue_operation_count,
     oldest_command_age,
     oldest_slo_command_age,
     physical_command_count_from_pending,
@@ -38,6 +39,32 @@ def pending_commands() -> CommandFileList:
 
 
 class DbusAdapterHealthQueueContractTests(unittest.TestCase):
+    def test_critical_count_includes_only_valid_user_facing_work(self) -> None:
+        self.assertEqual(
+            critical_queue_operation_count(
+                {
+                    "startup/register": {"pending": "2"},
+                    "gui-critical-publish": {"pending": 1},
+                    "local-publish": {"pending": 3},
+                    "remote-write": {"pending": 4},
+                    "read-fast": {"pending": 5},
+                    "read-slow": {"pending": 99},
+                    "diagnostic": {"pending": 99},
+                }
+            ),
+            15,
+        )
+        self.assertEqual(
+            critical_queue_operation_count(
+                {
+                    "startup/register": {"pending": -2},
+                    "gui-critical-publish": {"pending": "invalid"},
+                    "local-publish": "invalid",
+                }
+            ),
+            0,
+        )
+
     def test_activity_prefers_present_updated_at_and_defaults_to_now(self) -> None:
         self.assertEqual(command_activity_at({"created_at": 1.0, "updated_at": 99.0}, 100.0), 99.0)
         self.assertEqual(command_activity_at({"created_at": 98.0, "updated_at": None}, 100.0), 98.0)

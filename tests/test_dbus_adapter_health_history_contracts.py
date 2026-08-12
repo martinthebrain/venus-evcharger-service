@@ -69,6 +69,16 @@ class DbusAdapterHealthHistoryContractTests(unittest.TestCase):
             },
             "eventloop": {"max_tick_gap_ms_60s": 123.0, "ignored": 9},
             "backpressure": {"state": "slow", "ignored": 9},
+            "operations": {
+                "read": {
+                    "samples_60s": 4,
+                    "timeouts_60s": 1,
+                    "p95_latency_ms": 12.0,
+                    "p99_latency_ms": 15.0,
+                    "max_latency_ms": 17.0,
+                    "avg_latency_ms": 9.0,
+                }
+            },
             "cache_freshness": {
                 "grid_power_w_age_s": 1.0,
                 "grid_power_w_status": "fresh",
@@ -93,6 +103,15 @@ class DbusAdapterHealthHistoryContractTests(unittest.TestCase):
                     "core_queue_oldest_age_s": 5.5,
                     "max_tick_gap_ms_60s": 123.0,
                     "timeouts_60s": 3,
+                    "operation_latency": {
+                        "read": {
+                            "samples_60s": 4,
+                            "timeouts_60s": 1,
+                            "p95_latency_ms": 12.0,
+                            "p99_latency_ms": 15.0,
+                            "max_latency_ms": 17.0,
+                        }
+                    },
                     "cache_freshness": history.health_log_cache_freshness(health["cache_freshness"]),
                 },
             )
@@ -111,9 +130,35 @@ class DbusAdapterHealthHistoryContractTests(unittest.TestCase):
                     "core_queue_oldest_age_s": 0.0,
                     "max_tick_gap_ms_60s": 0.0,
                     "timeouts_60s": 0,
+                    "operation_latency": {},
                     "cache_freshness": history.health_log_cache_freshness({}),
                 },
             )
+
+    def test_operation_latency_summary_is_bounded_and_rejects_bad_children(self) -> None:
+        operations: dict[str, object] = {
+            f"operation-{index}": {
+                "samples_60s": index,
+                "p95_latency_ms": float(index),
+            }
+            for index in range(10)
+        }
+        operations["bad"] = "not-a-summary"
+
+        result = history.health_log_operation_latency(operations)
+
+        self.assertEqual(len(result), history.MAX_LOGGED_OPERATION_CLASSES)
+        self.assertNotIn("bad", result)
+        self.assertEqual(
+            result["operation-0"],
+            {
+                "samples_60s": 0,
+                "timeouts_60s": 0,
+                "p95_latency_ms": 0.0,
+                "p99_latency_ms": 0,
+                "max_latency_ms": 0,
+            },
+        )
 
     def test_append_health_log_delegates_payload_and_limit(self) -> None:
         health = {"state": "ok"}

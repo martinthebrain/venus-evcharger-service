@@ -263,11 +263,11 @@ class MutationAuditScriptTests(unittest.TestCase):
         prefixes = tuple(prefix for prefix, _selection in core_selections)
         serialized = json.dumps(core_selections, separators=(",", ":")).encode()
 
-        self.assertEqual(len(core_selections), 241)
+        self.assertEqual(len(core_selections), 245)
         self.assertEqual(len(prefixes), len(set(prefixes)))
         self.assertEqual(
             hashlib.sha256(serialized).hexdigest(),
-            "853c453d95cd0032535296d5e507283168642958bb3d6935b8de80629b18adfa",
+            "ee97d7c30812a409ef7b894fe395c7fb927ea95c642db66b6e9ab5d87c00c9d8",
         )
 
         all_selections = mutation_audit_config.focused_test_selections()
@@ -278,7 +278,7 @@ class MutationAuditScriptTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(json.dumps(all_selections, separators=(",", ":")).encode()).hexdigest(),
-            "91569182c0242801af6efd76b2fe3870100bddb5c70bb08f180255f60d433158",
+            "a291089406c6d345299bff02dffbd5d7a4a42be62ed46cdda3ec4fa21ca04bd7",
         )
 
     def test_mutation_config_can_target_dev_scripts(self) -> None:
@@ -527,7 +527,10 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertIn("venus_evcharger", parsed["tool"]["mutmut"]["also_copy"])
 
     def test_grid_fusion_targets_use_focused_contract_selection(self) -> None:
-        expected = ("tests/test_grid_measurement_fusion.py",)
+        expected = (
+            "tests/test_grid_measurement_fusion.py",
+            "tests/test_grid_fusion_timestamp_contracts.py",
+        )
         self.assertEqual(
             mutation_audit_config.test_selection_for_target("venus_evcharger/energy/grid_fusion.py"),
             expected,

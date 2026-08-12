@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig, GridFusionResult, GridMeasurement
+from venus_evcharger.energy.timestamped_measurement import TimestampedMeasurement
 
 
 class GridMeasurementFusion:
@@ -20,12 +21,12 @@ class GridMeasurementFusion:
         self,
         primary: GridMeasurement,
         backup: GridMeasurement,
-        now: float,
+        monotonic_at: float,
     ) -> GridFusionResult:
-        primary_valid = self._measurement_usable(primary, now, self.config.primary_max_age_seconds)
-        backup_valid = self._measurement_usable(backup, now, self.config.backup_max_age_seconds)
+        primary_valid = self._measurement_usable(primary, monotonic_at, self.config.primary_max_age_seconds)
+        backup_valid = self._measurement_usable(backup, monotonic_at, self.config.backup_max_age_seconds)
         self._record_primary(primary, primary_valid)
-        selected, state = self._select_measurement(primary, backup, now, primary_valid, backup_valid)
+        selected, state = self._select_measurement(primary, backup, monotonic_at, primary_valid, backup_valid)
         difference, tolerance = self._plausibility(primary, backup, primary_valid, backup_valid)
         selected, state = self._apply_disagreement_limit(
             primary,
@@ -40,16 +41,21 @@ class GridMeasurementFusion:
             state,
             primary,
             backup,
-            now,
+            monotonic_at,
             primary_valid,
             backup_valid,
             difference,
             tolerance,
         )
 
-    def _measurement_usable(self, measurement: GridMeasurement, now: float, max_age_seconds: float) -> bool:
+    def _measurement_usable(
+        self,
+        measurement: GridMeasurement,
+        monotonic_at: float,
+        max_age_seconds: float,
+    ) -> bool:
         return measurement.is_usable(
-            now,
+            monotonic_at,
             max_age_seconds=max_age_seconds,
             minimum_confidence=self.config.minimum_confidence,
             future_tolerance_seconds=self.config.future_tolerance_seconds,
@@ -63,7 +69,7 @@ class GridMeasurementFusion:
         self,
         primary: GridMeasurement,
         backup: GridMeasurement,
-        now: float,
+        monotonic_at: float,
         primary_valid: bool,
         backup_valid: bool,
     ) -> tuple[GridMeasurement | None, str]:
@@ -72,7 +78,7 @@ class GridMeasurementFusion:
         if self._active_source_id is None:
             return self._select_initial(primary, backup, primary_valid, backup_valid)
         if self._active_source_id == self.config.primary_source_id:
-            return self._select_while_primary(primary, backup, now, primary_valid, backup_valid)
+            return self._select_while_primary(primary, backup, monotonic_at, primary_valid, backup_valid)
         return self._select_while_backup(primary, backup, primary_valid, backup_valid)
 
     def _select_initial(
@@ -94,7 +100,7 @@ class GridMeasurementFusion:
         self,
         primary: GridMeasurement,
         backup: GridMeasurement,
-        now: float,
+        monotonic_at: float,
         primary_valid: bool,
         backup_valid: bool,
     ) -> tuple[GridMeasurement | None, str]:
@@ -102,7 +108,7 @@ class GridMeasurementFusion:
             self._primary_invalid_samples = 0
             return primary, "primary"
         self._primary_invalid_samples += 1
-        held = self._held_primary(now)
+        held = self._held_primary(monotonic_at)
         if self._primary_invalid_samples < self.config.failover_samples and held is not None:
             return held, "primary-held"
         if backup_valid:
@@ -147,9 +153,9 @@ class GridMeasurementFusion:
         self._primary_invalid_samples = 0
         self._primary_recovery_samples = 0
 
-    def _held_primary(self, now: float) -> GridMeasurement | None:
-        assert self._last_primary.captured_at is not None
-        age_seconds = float(now) - float(self._last_primary.captured_at)
+    def _held_primary(self, monotonic_at: float) -> GridMeasurement | None:
+        assert self._last_primary.observed_monotonic is not None
+        age_seconds = float(monotonic_at) - float(self._last_primary.observed_monotonic)
         hold_limit = self.config.primary_max_age_seconds + self.config.failover_hold_seconds
         return self._last_primary if age_seconds <= hold_limit else None
 
@@ -202,20 +208,28 @@ class GridMeasurementFusion:
 
     @staticmethod
     def _conservative_measurement(primary: GridMeasurement, backup: GridMeasurement) -> GridMeasurement:
-        assert primary.power_w is not None
-        assert backup.power_w is not None
-        assert primary.captured_at is not None
-        assert backup.captured_at is not None
-        primary_power = primary.power_w
-        backup_power = backup.power_w
-        primary_captured_at = primary.captured_at
-        backup_captured_at = backup.captured_at
+        primary_power, primary_captured_at, primary_monotonic = (
+            GridMeasurementFusion._complete_measurement_values(primary)
+        )
+        backup_power, backup_captured_at, backup_monotonic = (
+            GridMeasurementFusion._complete_measurement_values(backup)
+        )
         return GridMeasurement(
             source_id="conservative",
-            power_w=max(primary_power, backup_power),
-            captured_at=min(primary_captured_at, backup_captured_at),
+            measurement=TimestampedMeasurement.observed(
+                max(primary_power, backup_power),
+                captured_at=min(primary_captured_at, backup_captured_at),
+                observed_monotonic=min(primary_monotonic, backup_monotonic),
+            ),
             confidence=min(float(primary.confidence), float(backup.confidence), 0.5),
         )
+
+    @staticmethod
+    def _complete_measurement_values(measurement: GridMeasurement) -> tuple[float, float, float]:
+        assert measurement.power_w is not None
+        assert measurement.captured_at is not None
+        assert measurement.observed_monotonic is not None
+        return measurement.power_w, measurement.captured_at, measurement.observed_monotonic
 
     def _result(
         self,
@@ -223,22 +237,25 @@ class GridMeasurementFusion:
         state: str,
         primary: GridMeasurement,
         backup: GridMeasurement,
-        now: float,
+        monotonic_at: float,
         primary_valid: bool,
         backup_valid: bool,
         difference: float | None,
         tolerance: float | None,
     ) -> GridFusionResult:
         return GridFusionResult(
-            power_w=None if selected is None else selected.power_w,
-            captured_at=None if selected is None else selected.captured_at,
+            measurement=(
+                TimestampedMeasurement.unavailable()
+                if selected is None
+                else selected.measurement
+            ),
             selected_source_id="" if selected is None else selected.source_id,
             state=state,
             confidence=0.0 if selected is None else float(selected.confidence),
             primary_valid=primary_valid,
             backup_valid=backup_valid,
-            primary_age_seconds=primary.age_seconds(now),
-            backup_age_seconds=backup.age_seconds(now),
+            primary_age_seconds=primary.age_seconds(monotonic_at),
+            backup_age_seconds=backup.age_seconds(monotonic_at),
             difference_watts=difference,
             tolerance_watts=tolerance,
             primary_invalid_samples=self._primary_invalid_samples,

@@ -81,6 +81,7 @@ def empty_snapshot(captured_at: float | None = None) -> Snapshot:
         "grid_observed_monotonic": None,
         "grid_power": None,
         "grid_gateway_captured_at": None,
+        "grid_gateway_observed_monotonic": None,
         "grid_gateway_power": None,
         "grid_primary_captured_at": None,
         "grid_primary_power": None,

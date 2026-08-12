@@ -136,6 +136,9 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
             self.assertEqual(snapshot.resource_state, "resource-busy")
             self.assertEqual(snapshot.pressure_state, "slow")
             self.assertEqual(snapshot.stale_core_reads, ("grid_power_w", "pv_power_w"))
+            self.assertEqual(snapshot.critical_read_operations, 3)
+            self.assertEqual(snapshot.critical_queue_operations, 2)
+            self.assertEqual(snapshot.operation_p95_ms, 0.0)
             self.assertEqual(
                 snapshot.health,
                 {
@@ -175,6 +178,11 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                     "adaptive_tick_seconds": 0.4,
                     "min_tick_seconds": 0.1,
                     "max_tick_seconds": 2.5,
+                    "tick_demand": {
+                        "critical_read_operations": 3,
+                        "critical_queue_operations": 2,
+                        "operation_p95_ms": 0.0,
+                    },
                     "eventloop": {
                         "last_tick_at": 1980.0,
                         "tick_duration_ms": 44.5,
@@ -390,6 +398,9 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                 resource_state="resource-busy",
                 pressure_state="slow",
                 stale_core_reads=("battery_soc", "pv_power_w"),
+                critical_read_operations=2,
+                critical_queue_operations=3,
+                operation_p95_ms=17.0,
             )
             adapter.health_role.slo_thresholds = MagicMock(return_value=_thresholds())
             adapter.write_scheduler.set_dynamic_local_publish_burst = MagicMock()
@@ -438,6 +449,9 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                 resource_state="ok",
                 pressure_state="ok",
                 stale_core_reads=(),
+                critical_read_operations=0,
+                critical_queue_operations=0,
+                operation_p95_ms=0.0,
             )
             healthy = GatewayControlSnapshot(
                 captured_at=40.0,
@@ -450,6 +464,9 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                 resource_state="ok",
                 pressure_state="ok",
                 stale_core_reads=(),
+                critical_read_operations=0,
+                critical_queue_operations=0,
+                operation_p95_ms=0.0,
             )
 
             adapter.health_role.apply_slo_regulation(fallback)

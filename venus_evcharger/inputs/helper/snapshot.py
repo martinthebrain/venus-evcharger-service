@@ -14,11 +14,15 @@ from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
 from venus_evcharger.inputs.helper.config_runtime import AutoInputHelperSettings
 from venus_evcharger.inputs.helper.contracts import Snapshot, SnapshotWriterPort, SourceReaderPort
 from venus_evcharger.inputs.helper.grid_fusion_snapshot import apply_grid_fusion
-from venus_evcharger.inputs.helper.payload_types import is_object_mapping
-from venus_evcharger.inputs.helper.snapshot_defaults import (
-    BATTERY_SNAPSHOT_FIELDS,
-    empty_snapshot,
+from venus_evcharger.inputs.helper.snapshot_builder import (
+    BATTERY_TARGET,
+    GRID_GATEWAY_TARGET,
+    PV_TARGET,
+    SnapshotBuilder,
+    SnapshotTarget,
+    SourceSample,
 )
+from venus_evcharger.inputs.helper.snapshot_defaults import empty_snapshot
 
 
 class AtomicSnapshotWriter:
@@ -46,20 +50,10 @@ class AtomicSnapshotWriter:
 
 
 @dataclass(frozen=True, slots=True)
-class _SourceTarget:
-    """Snapshot destination for one semantic source."""
-
-    name: str
-    value_key: str
-    captured_key: str
-    monotonic_key: str
-
-
-@dataclass(frozen=True, slots=True)
 class _SourcePollSpec:
     """One scheduled source read and its snapshot destination."""
 
-    target: _SourceTarget
+    target: SnapshotTarget
     interval: float
     getter: Callable[[], object]
 
@@ -106,8 +100,7 @@ class SnapshotStore:
                 source_monotonic,
             )
             with self._lock:
-                self._apply_source(
-                    snapshot,
+                SnapshotBuilder(snapshot).apply_source(
                     spec.target,
                     value,
                     observed_at,
@@ -151,15 +144,14 @@ class SnapshotStore:
         )
         with self._lock:
             snapshot = dict(self._state)
-            self._apply_source(
-                snapshot,
+            SnapshotBuilder(snapshot).apply_source(
                 target,
                 value,
                 observed_at,
                 observed_monotonic,
             )
             if source_name in {"battery", "grid"}:
-                apply_grid_fusion(self._grid_fusion, snapshot, current)
+                apply_grid_fusion(self._grid_fusion, snapshot, current_monotonic)
             self._stamp(snapshot, current, current_monotonic)
             self._state = snapshot
             self.writer.write(snapshot)
@@ -181,13 +173,13 @@ class SnapshotStore:
         )
         with self._lock:
             snapshot = dict(self._state)
-            for value, target, observed_at, observed_monotonic in samples:
-                self._apply_source(
-                    snapshot,
-                    target,
-                    value,
-                    observed_at,
-                    observed_monotonic,
+            builder = SnapshotBuilder(snapshot)
+            for sample in samples:
+                builder.apply_source(
+                    sample.target,
+                    sample.value,
+                    sample.captured_at,
+                    sample.observed_monotonic,
                 )
             self._finalize(snapshot, current, current_monotonic)
             self._state = snapshot
@@ -235,60 +227,30 @@ class SnapshotStore:
     ) -> tuple[_SourcePollSpec, ...]:
         specs = (
             _SourcePollSpec(
-                _SourceTarget(
-                    "pv",
-                    "pv_power",
-                    "pv_captured_at",
-                    "pv_observed_monotonic",
-                ),
+                PV_TARGET,
                 self.settings.auto_pv_poll_interval_seconds,
                 self.sources.pv_power,
             ),
             _SourcePollSpec(
-                _SourceTarget(
-                    "battery",
-                    "battery_soc",
-                    "battery_captured_at",
-                    "battery_observed_monotonic",
-                ),
+                BATTERY_TARGET,
                 self.settings.auto_battery_poll_interval_seconds,
                 self.sources.battery_snapshot,
             ),
             _SourcePollSpec(
-                _SourceTarget(
-                    "grid",
-                    "grid_gateway_power",
-                    "grid_gateway_captured_at",
-                    "grid_observed_monotonic",
-                ),
+                GRID_GATEWAY_TARGET,
                 self.settings.auto_grid_poll_interval_seconds,
                 self.sources.grid_power,
             ),
         )
         return tuple(spec for spec in specs if current >= self._next_poll_at[spec.target.name])
 
-    def _source_read(self, source_name: str) -> tuple[object, _SourceTarget] | None:
+    def _source_read(self, source_name: str) -> tuple[object, SnapshotTarget] | None:
         if source_name == "pv":
-            return self.sources.pv_power(), _SourceTarget(
-                "pv",
-                "pv_power",
-                "pv_captured_at",
-                "pv_observed_monotonic",
-            )
+            return self.sources.pv_power(), PV_TARGET
         if source_name == "battery":
-            return self.sources.battery_snapshot(), _SourceTarget(
-                "battery",
-                "battery_soc",
-                "battery_captured_at",
-                "battery_observed_monotonic",
-            )
+            return self.sources.battery_snapshot(), BATTERY_TARGET
         if source_name == "grid":
-            return self.sources.grid_power(), _SourceTarget(
-                "grid",
-                "grid_gateway_power",
-                "grid_gateway_captured_at",
-                "grid_observed_monotonic",
-            )
+            return self.sources.grid_power(), GRID_GATEWAY_TARGET
         return None
 
     def _prepared_source_sample(
@@ -296,7 +258,7 @@ class SnapshotStore:
         source_name: str,
         current: float,
         current_monotonic: float,
-    ) -> tuple[object, _SourceTarget, float, float] | None:
+    ) -> SourceSample | None:
         source = self._source_read(source_name)
         if source is None:
             return None
@@ -305,7 +267,7 @@ class SnapshotStore:
         observed_monotonic = (
             self.sources.observed_monotonic(source_name) or current_monotonic
         )
-        return value, target, observed_at, observed_monotonic
+        return SourceSample(value, target, observed_at, observed_monotonic)
 
     def _finalize(
         self,
@@ -313,7 +275,7 @@ class SnapshotStore:
         current: float,
         current_monotonic: float,
     ) -> None:
-        apply_grid_fusion(self._grid_fusion, snapshot, current)
+        apply_grid_fusion(self._grid_fusion, snapshot, current_monotonic)
         self._stamp(snapshot, current, current_monotonic)
 
     def _stamp(
@@ -333,51 +295,6 @@ class SnapshotStore:
         snapshot["writer_pid"] = os.getpid()
         snapshot["helper_generation"] = self.settings.helper_generation
         snapshot["runtime_instance_id"] = self.settings.runtime_instance_id
-
-    @staticmethod
-    def _apply_source(
-        snapshot: Snapshot,
-        target: _SourceTarget,
-        value: object,
-        current: float,
-        current_monotonic: float,
-    ) -> None:
-        if target.name == "battery" and is_object_mapping(value):
-            SnapshotStore._apply_battery(
-                snapshot,
-                value,
-                target.captured_key,
-                target.monotonic_key,
-                current,
-                current_monotonic,
-            )
-            return
-        snapshot[target.value_key] = value
-        snapshot[target.captured_key] = None if value is None else current
-        snapshot[target.monotonic_key] = (
-            None if value is None else current_monotonic
-        )
-        _set_source_status(snapshot, target.name, value is not None)
-
-    @staticmethod
-    def _apply_battery(
-        snapshot: Snapshot,
-        value: Mapping[object, object],
-        captured_key: str,
-        monotonic_key: str,
-        current: float,
-        current_monotonic: float,
-    ) -> None:
-        battery_soc = value.get("battery_soc")
-        snapshot["battery_soc"] = battery_soc
-        snapshot[captured_key] = None if battery_soc is None else current
-        snapshot[monotonic_key] = (
-            None if battery_soc is None else current_monotonic
-        )
-        for field_name in BATTERY_SNAPSHOT_FIELDS[1:]:
-            snapshot[field_name] = value.get(field_name)
-        _set_source_status(snapshot, "battery", battery_soc is not None)
-
 
 def _collection_clock(
     now: float | None,
@@ -406,8 +323,3 @@ def _source_observed_monotonic(
 ) -> float:
     return sources.observed_monotonic(source_name) or fallback
 
-
-def _set_source_status(snapshot: Snapshot, source_name: str, available: bool) -> None:
-    snapshot[f"{source_name}_status"] = "ok" if available else "missing"
-    snapshot["helper_state"] = "running"
-    snapshot["helper_status"] = "running"

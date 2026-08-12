@@ -11,6 +11,15 @@ from venus_evcharger.dbus_gateway_core import float_or_zero
 from venus_evcharger.ipc.command_types import CommandFileList, CommandMapping, CommandPayload
 
 ADVISORY_QUEUE_CLASSES = frozenset({"diagnostic", "discovery", "introspection"})
+TICK_CRITICAL_QUEUE_CLASSES = frozenset(
+    {
+        "startup/register",
+        "gui-critical-publish",
+        "local-publish",
+        "remote-write",
+        "read-fast",
+    }
+)
 
 
 def queue_class_health(pending: CommandFileList, now: float) -> CommandPayload:
@@ -44,6 +53,16 @@ def queue_health(
         "queue_drain_rate_per_s": float(processed_commands_60s) / 60.0,
         "last_processed_at": float_or_zero(scheduler.get("last_processed_at")),
     }
+
+
+def critical_queue_operation_count(queue_classes: Mapping[str, object]) -> int:
+    """Count pending commands whose latency contributes to user-facing SLOs."""
+    total = 0
+    for queue_class in TICK_CRITICAL_QUEUE_CLASSES:
+        metrics = queue_classes.get(queue_class)
+        if isinstance(metrics, Mapping):
+            total += max(0, int(float_or_zero(metrics.get("pending"))))
+    return total
 
 
 def oldest_command_age(commands: CommandFileList, now: float) -> float:

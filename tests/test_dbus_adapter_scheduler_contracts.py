@@ -15,6 +15,29 @@ from venus_evcharger.dbus_adapter.scheduling import (
 
 
 class TestDbusAdapterSchedulerContracts(unittest.TestCase):
+    def test_due_count_filters_selected_groups_without_changing_schedule(self) -> None:
+        scheduler = DbusReadScheduler(
+            {
+                "grid": {"interval": 2.0},
+                "pv": {"interval": 2.0},
+                "battery": {"interval": 2.0},
+            }
+        )
+        scheduler.next_read_at.update({"grid": 10.0, "pv": 11.0, "battery": 12.0})
+
+        self.assertEqual(scheduler.due_count(monotonic_at=11.0), 2)
+        self.assertEqual(
+            scheduler.due_count(
+                monotonic_at=11.0,
+                keys=("pv", "battery", "missing"),
+            ),
+            1,
+        )
+        self.assertEqual(
+            scheduler.next_read_at,
+            {"grid": 10.0, "pv": 11.0, "battery": 12.0},
+        )
+
     def test_scheduler_initial_state_and_due_at_zero(self) -> None:
         scheduler = DbusReadScheduler(
             {

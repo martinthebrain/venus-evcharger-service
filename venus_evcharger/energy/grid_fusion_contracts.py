@@ -6,6 +6,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from venus_evcharger.energy.timestamped_measurement import TimestampedMeasurement
+
 
 def _require(condition: bool, message: str) -> None:
     if not condition:
@@ -60,19 +62,30 @@ def _validate_mismatch_policy(config: GridFusionConfig) -> None:
     _require(all(value >= 0.0 for value in tolerances), "Grid fusion mismatch tolerances must be non-negative")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GridMeasurement:
-    """One normalized grid measurement where import is positive."""
+    """One normalized grid measurement with epoch and monotonic timestamps."""
 
     source_id: str
-    power_w: float | None
-    captured_at: float | None
+    measurement: TimestampedMeasurement[float]
     online: bool = True
     confidence: float = 1.0
 
+    @property
+    def power_w(self) -> float | None:
+        return self.measurement.value
+
+    @property
+    def captured_at(self) -> float | None:
+        return self.measurement.captured_at
+
+    @property
+    def observed_monotonic(self) -> float | None:
+        return self.measurement.observed_monotonic
+
     def is_usable(
         self,
-        now: float,
+        monotonic_at: float,
         *,
         max_age_seconds: float,
         minimum_confidence: float,
@@ -80,30 +93,34 @@ class GridMeasurement:
     ) -> bool:
         if not self._has_online_value() or not self._values_are_finite():
             return False
-        assert self.captured_at is not None
-        age_seconds = float(now) - float(self.captured_at)
-        freshness_ok = -float(future_tolerance_seconds) <= age_seconds <= float(max_age_seconds)
-        return freshness_ok and float(self.confidence) >= float(minimum_confidence)
+        return self.measurement.fresh(
+            monotonic_at,
+            max_age_seconds=max_age_seconds,
+            future_tolerance_seconds=future_tolerance_seconds,
+        ) and float(self.confidence) >= float(minimum_confidence)
 
     def _has_online_value(self) -> bool:
-        return self.online and self.power_w is not None and self.captured_at is not None
+        return (
+            self.online
+            and self.measurement.available
+        )
 
     def _values_are_finite(self) -> bool:
-        values = (self.power_w, self.captured_at, self.confidence)
+        values = (
+            self.power_w,
+            self.confidence,
+        )
         return all(value is not None and math.isfinite(value) for value in values)
 
-    def age_seconds(self, now: float) -> float | None:
-        if self.captured_at is None or not math.isfinite(self.captured_at):
-            return None
-        return max(0.0, float(now) - float(self.captured_at))
+    def age_seconds(self, monotonic_at: float) -> float | None:
+        return self.measurement.age_seconds(monotonic_at)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GridFusionResult:
     """Canonical grid value plus explainable source-selection diagnostics."""
 
-    power_w: float | None
-    captured_at: float | None
+    measurement: TimestampedMeasurement[float]
     selected_source_id: str
     state: str
     confidence: float
@@ -116,3 +133,15 @@ class GridFusionResult:
     primary_invalid_samples: int
     primary_recovery_samples: int
     mismatch_samples: int
+
+    @property
+    def power_w(self) -> float | None:
+        return self.measurement.value
+
+    @property
+    def captured_at(self) -> float | None:
+        return self.measurement.captured_at
+
+    @property
+    def observed_monotonic(self) -> float | None:
+        return self.measurement.observed_monotonic

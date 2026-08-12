@@ -38,6 +38,9 @@ def _control_snapshot(
         resource_state="ok",
         pressure_state="ok",
         stale_core_reads=(),
+        critical_read_operations=0,
+        critical_queue_operations=0,
+        operation_p95_ms=0.0,
     )
 
 

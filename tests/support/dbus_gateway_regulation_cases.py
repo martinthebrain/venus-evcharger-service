@@ -340,6 +340,9 @@ class GatewayRegulationCases(GatewayAdapterContractCase):
                 resource_state="ok",
                 pressure_state="ok",
                 stale_core_reads=(),
+                critical_read_operations=0,
+                critical_queue_operations=0,
+                operation_p95_ms=0.0,
             )
             adapter.health_role.apply_slo_regulation(degraded)
             adapter.health_role.suspend_advisory_work.assert_called_once_with(
