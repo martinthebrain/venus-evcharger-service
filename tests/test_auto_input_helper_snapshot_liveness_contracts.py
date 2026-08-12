@@ -14,7 +14,14 @@ from venus_evcharger.inputs.helper.liveness import HelperLiveness, WarningThrott
 from venus_evcharger.inputs.helper.snapshot import (
     AtomicSnapshotWriter,
     SnapshotStore,
-    _SourceTarget,
+)
+from venus_evcharger.inputs.helper.snapshot_builder import (
+    BATTERY_TARGET,
+    GRID_GATEWAY_TARGET,
+    PV_TARGET,
+    SnapshotBuilder,
+    SnapshotTarget,
+    SourceSample,
 )
 from venus_evcharger.inputs.helper.snapshot_defaults import (
     BATTERY_SNAPSHOT_FIELDS,
@@ -75,9 +82,9 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         sources = FakeSources()
         sources.observed["battery"] = 7.0
         sources.observed_monotonic_values = {
-            "pv": 101.0,
-            "battery": 102.0,
-            "grid": 103.0,
+            "pv": 110.5,
+            "battery": 111.5,
+            "grid": 112.5,
         }
         store = SnapshotStore(settings, sources, MemoryWriter(), lambda: False)
 
@@ -91,11 +98,12 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
             snapshot = store.collect()
 
         self.assertEqual(snapshot["pv_captured_at"], 11.0)
-        self.assertEqual(snapshot["pv_observed_monotonic"], 101.0)
+        self.assertEqual(snapshot["pv_observed_monotonic"], 110.5)
         self.assertEqual(snapshot["battery_captured_at"], 7.0)
-        self.assertEqual(snapshot["battery_observed_monotonic"], 102.0)
+        self.assertEqual(snapshot["battery_observed_monotonic"], 111.5)
         self.assertEqual(snapshot["grid_gateway_captured_at"], 13.0)
-        self.assertEqual(snapshot["grid_observed_monotonic"], 103.0)
+        self.assertEqual(snapshot["grid_gateway_observed_monotonic"], 112.5)
+        self.assertEqual(snapshot["grid_observed_monotonic"], 112.5)
         self.assertEqual(snapshot["captured_at"], 14.0)
         self.assertEqual(snapshot["captured_monotonic"], 114.0)
         self.assertEqual(snapshot["heartbeat_at"], 14.0)
@@ -165,7 +173,7 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
     def test_refresh_source_contracts_cover_each_source_and_observation_time(self) -> None:
         sources = FakeSources()
         sources.observed = {"pv": 8.0, "grid": 9.0}
-        sources.observed_monotonic_values = {"pv": 18.0, "grid": 19.0}
+        sources.observed_monotonic_values = {"pv": 8.0, "grid": 9.0}
         writer = MemoryWriter()
         store = SnapshotStore(helper_settings(), sources, writer, lambda: False)
 
@@ -175,13 +183,14 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         self.assertEqual(sources.prepared, 2)
         self.assertEqual(writer.payloads[0]["pv_power"], 100.0)
         self.assertEqual(writer.payloads[0]["pv_captured_at"], 8.0)
-        self.assertEqual(writer.payloads[0]["pv_observed_monotonic"], 18.0)
+        self.assertEqual(writer.payloads[0]["pv_observed_monotonic"], 8.0)
         self.assertEqual(writer.payloads[0]["captured_at"], 10.0)
         self.assertEqual(writer.payloads[0]["captured_monotonic"], 10.0)
         self.assertEqual(writer.payloads[0]["heartbeat_monotonic"], 10.0)
         self.assertEqual(writer.payloads[1]["grid_gateway_power"], -20.0)
         self.assertEqual(writer.payloads[1]["grid_gateway_captured_at"], 9.0)
-        self.assertEqual(writer.payloads[1]["grid_observed_monotonic"], 19.0)
+        self.assertEqual(writer.payloads[1]["grid_gateway_observed_monotonic"], 9.0)
+        self.assertEqual(writer.payloads[1]["grid_observed_monotonic"], 9.0)
         self.assertEqual(writer.payloads[1]["captured_at"], 11.0)
         self.assertEqual(writer.payloads[1]["captured_monotonic"], 11.0)
         self.assertEqual(writer.payloads[1]["heartbeat_monotonic"], 11.0)
@@ -218,9 +227,9 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         sources = FakeSources()
         sources.observed = {"pv": 1.0, "battery": 2.0, "grid": 3.0}
         sources.observed_monotonic_values = {
-            "pv": 11.0,
-            "battery": 12.0,
-            "grid": 13.0,
+            "pv": 8.0,
+            "battery": 9.0,
+            "grid": 10.0,
         }
         writer = MemoryWriter()
         store = SnapshotStore(helper_settings(), sources, writer, lambda: False)
@@ -230,11 +239,12 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         payload = writer.payloads[-1]
         self.assertEqual(sources.prepared, 1)
         self.assertEqual(payload["pv_captured_at"], 1.0)
-        self.assertEqual(payload["pv_observed_monotonic"], 11.0)
+        self.assertEqual(payload["pv_observed_monotonic"], 8.0)
         self.assertEqual(payload["battery_captured_at"], 2.0)
-        self.assertEqual(payload["battery_observed_monotonic"], 12.0)
+        self.assertEqual(payload["battery_observed_monotonic"], 9.0)
         self.assertEqual(payload["grid_gateway_captured_at"], 3.0)
-        self.assertEqual(payload["grid_observed_monotonic"], 13.0)
+        self.assertEqual(payload["grid_gateway_observed_monotonic"], 10.0)
+        self.assertEqual(payload["grid_observed_monotonic"], 10.0)
         self.assertEqual(payload["captured_at"], 10.0)
         self.assertEqual(payload["captured_monotonic"], 10.0)
         self.assertEqual(payload["heartbeat_at"], 10.0)
@@ -409,6 +419,7 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
                 "grid_observed_monotonic": None,
                 "grid_power": None,
                 "grid_gateway_captured_at": None,
+                "grid_gateway_observed_monotonic": None,
                 "grid_gateway_power": None,
                 "grid_primary_captured_at": None,
                 "grid_primary_power": None,
@@ -498,7 +509,7 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
             "venus_evcharger.inputs.helper.snapshot.apply_grid_fusion"
         ) as apply_fusion:
             store._finalize(finalized, 9.0, 19.0)
-        apply_fusion.assert_called_once_with(store._grid_fusion, finalized, 9.0)
+        apply_fusion.assert_called_once_with(store._grid_fusion, finalized, 19.0)
         self.assertEqual(finalized["captured_at"], 9.0)
         self.assertEqual(finalized["captured_monotonic"], 19.0)
         self.assertEqual(finalized["heartbeat_at"], 9.0)
@@ -508,27 +519,17 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         sources.observed_monotonic_values = {"pv": 20.0}
         self.assertEqual(
             store._prepared_source_sample("pv", 11.0, 21.0),
-            (
-                100.0,
-                _SourceTarget(
-                    "pv",
-                    "pv_power",
-                    "pv_captured_at",
-                    "pv_observed_monotonic",
-                ),
-                10.0,
-                20.0,
-            ),
+            SourceSample(100.0, PV_TARGET, 10.0, 20.0),
         )
 
-        target = _SourceTarget(
+        target = SnapshotTarget(
             "pv",
             "pv_power",
             "pv_captured_at",
             "pv_observed_monotonic",
         )
         state = empty_snapshot()
-        SnapshotStore._apply_source(state, target, 123.0, 8.0, 18.0)
+        SnapshotBuilder(state).apply_source(target, 123.0, 8.0, 18.0)
         self.assertEqual(state["pv_power"], 123.0)
         self.assertEqual(state["pv_captured_at"], 8.0)
         self.assertEqual(state["pv_observed_monotonic"], 18.0)
@@ -542,14 +543,8 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
             for index, field_name in enumerate(BATTERY_SNAPSHOT_FIELDS)
         }
         state = empty_snapshot()
-        SnapshotStore._apply_source(
-            state,
-            _SourceTarget(
-                "battery",
-                "battery_soc",
-                "battery_captured_at",
-                "battery_observed_monotonic",
-            ),
+        SnapshotBuilder(state).apply_source(
+            BATTERY_TARGET,
             value,
             9.0,
             19.0,
@@ -576,30 +571,15 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
             tuple((spec.target, spec.interval) for spec in due),
             (
                 (
-                    _SourceTarget(
-                        "pv",
-                        "pv_power",
-                        "pv_captured_at",
-                        "pv_observed_monotonic",
-                    ),
+                    PV_TARGET,
                     1.0,
                 ),
                 (
-                    _SourceTarget(
-                        "battery",
-                        "battery_soc",
-                        "battery_captured_at",
-                        "battery_observed_monotonic",
-                    ),
+                    BATTERY_TARGET,
                     2.0,
                 ),
                 (
-                    _SourceTarget(
-                        "grid",
-                        "grid_gateway_power",
-                        "grid_gateway_captured_at",
-                        "grid_observed_monotonic",
-                    ),
+                    GRID_GATEWAY_TARGET,
                     3.0,
                 ),
             ),
@@ -609,39 +589,15 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
         self.assertEqual(due[2].getter(), -20.0)
         self.assertEqual(
             store._source_read("pv"),
-            (
-                100.0,
-                _SourceTarget(
-                    "pv",
-                    "pv_power",
-                    "pv_captured_at",
-                    "pv_observed_monotonic",
-                ),
-            ),
+            (100.0, PV_TARGET),
         )
         self.assertEqual(
             store._source_read("battery"),
-            (
-                {"battery_soc": 50.0},
-                _SourceTarget(
-                    "battery",
-                    "battery_soc",
-                    "battery_captured_at",
-                    "battery_observed_monotonic",
-                ),
-            ),
+            ({"battery_soc": 50.0}, BATTERY_TARGET),
         )
         self.assertEqual(
             store._source_read("grid"),
-            (
-                -20.0,
-                _SourceTarget(
-                    "grid",
-                    "grid_gateway_power",
-                    "grid_gateway_captured_at",
-                    "grid_observed_monotonic",
-                ),
-            ),
+            (-20.0, GRID_GATEWAY_TARGET),
         )
         self.assertIsNone(store._source_read("unknown"))
 
@@ -670,24 +626,31 @@ class AutoInputHelperSnapshotContracts(unittest.TestCase):
             },
         )
 
-    def test_non_battery_mapping_remains_an_ordinary_source_value(self) -> None:
+    def test_non_numeric_source_payload_is_rejected_at_builder_boundary(self) -> None:
         state = empty_snapshot()
+        state.update(
+            {
+                "battery_soc": 55.0,
+                "battery_captured_at": 7.0,
+                "battery_observed_monotonic": 17.0,
+                "battery_status": "ok",
+            }
+        )
         value = {"raw": 1}
-        SnapshotStore._apply_source(
-            state,
-            _SourceTarget(
-                "pv",
-                "pv_power",
-                "pv_captured_at",
-                "pv_observed_monotonic",
-            ),
+        SnapshotBuilder(state).apply_source(
+            PV_TARGET,
             value,
             9.0,
             19.0,
         )
-        self.assertEqual(state["pv_power"], value)
-        self.assertEqual(state["pv_captured_at"], 9.0)
-        self.assertEqual(state["pv_status"], "ok")
+        self.assertIsNone(state["pv_power"])
+        self.assertIsNone(state["pv_captured_at"])
+        self.assertIsNone(state["pv_observed_monotonic"])
+        self.assertEqual(state["pv_status"], "missing")
+        self.assertEqual(state["battery_soc"], 55.0)
+        self.assertEqual(state["battery_captured_at"], 7.0)
+        self.assertEqual(state["battery_observed_monotonic"], 17.0)
+        self.assertEqual(state["battery_status"], "ok")
 
     def test_composed_source_boundary_uses_only_semantic_measurements(self) -> None:
         gateway = FakeEnergyGateway()

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec, read_spec_from_mapping
 from venus_evcharger.dbus_gateway import write_json_file
@@ -39,6 +39,21 @@ class DbusReadScheduler:
                 return key, spec, interval
             return None
         return None
+
+    def due_count(
+        self,
+        *,
+        monotonic_at: float,
+        keys: Collection[str] | None = None,
+    ) -> int:
+        """Count selected read groups that are currently due."""
+        selected = self.specs.keys() if keys is None else keys
+        return sum(
+            1
+            for key in selected
+            if key in self.next_read_at
+            and float(monotonic_at) >= self.next_read_at[key]
+        )
 
     def record_success(
         self,

@@ -71,6 +71,10 @@ FOCUSED_TEST_SELECTIONS_ENERGY_INPUTS: tuple[tuple[str, tuple[str, ...]], ...] =
     ),
     ("venus_evcharger/inputs/helper/snapshot.py", ("tests/test_auto_input_helper_snapshot_liveness_contracts.py",)),
     (
+        "venus_evcharger/inputs/helper/snapshot_builder.py",
+        ("tests/test_auto_input_helper_snapshot_liveness_contracts.py",),
+    ),
+    (
         "venus_evcharger/inputs/helper/snapshot_defaults.py",
         ("tests/test_auto_input_helper_snapshot_liveness_contracts.py",),
     ),

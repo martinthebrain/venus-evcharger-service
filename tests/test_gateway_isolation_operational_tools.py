@@ -382,8 +382,10 @@ class GatewayIsolationOperationalToolsTests(unittest.TestCase):
         self.assertEqual(
             payload.get("results"),
             {
+                "competing-grid-sources": "ok",
                 "core-overproduction": "ok",
                 "dbus-hang": "ok",
+                "epoch-clock-jump": "ok",
                 "gui-burst": "ok",
                 "reboot-mid-burst": "ok",
                 "resource-pressure": "ok",

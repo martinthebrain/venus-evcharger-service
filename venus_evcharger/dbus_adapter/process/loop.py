@@ -17,6 +17,11 @@ from gi.repository import GLib
 
 from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.loop import DbusAdapterLoopContext
+from venus_evcharger.dbus_adapter.tick_policy import (
+    TickDemand,
+    TickPolicy,
+    adaptive_tick_seconds,
+)
 from venus_evcharger.dbus_gateway_core import float_or_zero
 
 GATEWAY_TICK_RECOVERY_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
@@ -102,6 +107,13 @@ class DbusAdapterLoop:
         context.tick_seconds = self.adaptive_tick_seconds(
             circuit_state=context.circuit.state(),
             resource_state=resource_state,
+            demand=TickDemand(
+                critical_read_operations=control.critical_read_operations,
+                critical_queue_operations=control.critical_queue_operations,
+                core_read_age_seconds=control.core_read_age_seconds,
+                queue_age_seconds=control.queue_age_seconds,
+                operation_p95_ms=control.operation_p95_ms,
+            ),
         )
 
     def adaptive_tick_seconds(
@@ -109,21 +121,20 @@ class DbusAdapterLoop:
         *,
         circuit_state: str,
         resource_state: str,
+        demand: TickDemand | None = None,
     ) -> float:
         context = self._context
-        if circuit_state == "protective" or resource_state == "constrained":
-            return float(context.max_tick_seconds)
-        if circuit_state == "degraded":
-            return min(
-                float(context.max_tick_seconds),
-                max(float(context.min_tick_seconds) * 2.5, 0.5),
-            )
-        if resource_state == "busy":
-            return min(
-                float(context.max_tick_seconds),
-                max(float(context.min_tick_seconds) * 1.5, 0.3),
-            )
-        return float(context.min_tick_seconds)
+        return adaptive_tick_seconds(
+            TickPolicy(
+                min_tick_seconds=context.min_tick_seconds,
+                max_tick_seconds=context.max_tick_seconds,
+                core_read_slo_seconds=context.slo_core_read_max_age_seconds,
+                queue_slo_seconds=context.slo_queue_max_age_seconds,
+            ),
+            TickDemand() if demand is None else demand,
+            circuit_state=circuit_state,
+            resource_state=resource_state,
+        )
 
     def process_one_dbus_operation_once(self) -> bool:
         startup_outcome = self._startup_operation_outcome()

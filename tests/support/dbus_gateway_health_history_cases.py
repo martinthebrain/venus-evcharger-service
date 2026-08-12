@@ -36,6 +36,16 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
             },
             "eventloop": {"max_tick_gap_ms_60s": 123.0},
             "backpressure": {"state": "slow"},
+            "operations": {
+                "optional_read": {
+                    "samples_60s": 5,
+                    "timeouts_60s": 2,
+                    "p95_latency_ms": 120.0,
+                    "p99_latency_ms": 180.0,
+                    "max_latency_ms": 200.0,
+                    "avg_latency_ms": 80.0,
+                }
+            },
             "cache_freshness": {
                 "grid_power_w_age_s": 1.0,
                 "grid_power_w_status": "fresh",
@@ -60,6 +70,15 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
                     "core_queue_oldest_age_s": 5.5,
                     "max_tick_gap_ms_60s": 123.0,
                     "timeouts_60s": 3,
+                    "operation_latency": {
+                        "optional_read": {
+                            "samples_60s": 5,
+                            "timeouts_60s": 2,
+                            "p95_latency_ms": 120.0,
+                            "p99_latency_ms": 180.0,
+                            "max_latency_ms": 200.0,
+                        }
+                    },
                     "cache_freshness": {
                         "grid_power_w_age_s": 1.0,
                         "grid_power_w_status": "fresh",
@@ -92,6 +111,7 @@ class GatewayHealthHistoryCases(GatewayAdapterContractCase):
                     "core_queue_oldest_age_s": 0.0,
                     "max_tick_gap_ms_60s": 0.0,
                     "timeouts_60s": 0,
+                    "operation_latency": {},
                     "cache_freshness": {
                         "grid_power_w_age_s": None,
                         "grid_power_w_status": None,

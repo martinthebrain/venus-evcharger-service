@@ -7,6 +7,7 @@ from typing import Any
 
 from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
 from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig, GridFusionResult, GridMeasurement
+from venus_evcharger.energy.timestamped_measurement import TimestampedMeasurement
 from venus_evcharger.inputs.helper import grid_fusion_snapshot as snapshot_adapter
 from venus_evcharger.inputs.helper.grid_fusion_snapshot import apply_grid_fusion
 
@@ -39,7 +40,12 @@ def _measurement(
     online: bool = True,
     confidence: float = 1.0,
 ) -> GridMeasurement:
-    return GridMeasurement(source_id, power_w, captured_at, online, confidence)
+    return GridMeasurement(
+        source_id,
+        TimestampedMeasurement.from_optional(power_w, captured_at, captured_at),
+        online,
+        confidence,
+    )
 
 
 class GridMeasurementContractTests(unittest.TestCase):
@@ -115,8 +121,11 @@ class GridMeasurementFusionTests(unittest.TestCase):
         self.assertEqual(
             result,
             GridFusionResult(
-                power_w=-400.0,
-                captured_at=98.0,
+                measurement=TimestampedMeasurement.observed(
+                    -400.0,
+                    captured_at=98.0,
+                    observed_monotonic=98.0,
+                ),
                 selected_source_id="victron",
                 state="backup",
                 confidence=1.0,
@@ -298,12 +307,14 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
         snapshot: dict[str, object] = {
             "grid_gateway_power": -300.0,
             "grid_gateway_captured_at": 100.0,
+            "grid_gateway_observed_monotonic": 100.0,
             "battery_sources": [
                 {"source_id": "other", "grid_interaction_w": 900.0, "captured_at": 100.0, "online": True},
                 {
                     "source_id": "huawei",
                     "grid_interaction_w": -500.0,
                     "captured_at": 100.0,
+                    "observed_monotonic": 99.0,
                     "online": True,
                     "confidence": 0.8,
                 },
@@ -318,13 +329,14 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
             "grid_primary_captured_at": 100.0,
             "grid_power": -500.0,
             "grid_captured_at": 100.0,
+            "grid_observed_monotonic": 99.0,
             "grid_status": "primary",
             "grid_selected_source_id": "huawei",
             "grid_fusion_state": "primary",
             "grid_fusion_confidence": 0.8,
             "grid_fusion_primary_valid": True,
             "grid_fusion_backup_valid": True,
-            "grid_fusion_primary_age_seconds": 0.0,
+            "grid_fusion_primary_age_seconds": 1.0,
             "grid_fusion_backup_age_seconds": 0.0,
             "grid_fusion_difference_watts": 200.0,
             "grid_fusion_tolerance_watts": 300.0,
@@ -355,6 +367,7 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
         snapshot = {
             "grid_gateway_power": 20.0,
             "grid_gateway_captured_at": 100.0,
+            "grid_gateway_observed_monotonic": 100.0,
             "battery_sources": [None, {"source_id": "huawei", "grid_interaction_w": False, "online": True}],
         }
         apply_grid_fusion(fusion, snapshot, 100.0)
@@ -370,6 +383,7 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
                     "source_id": " huawei ",
                     "grid_interaction_w": 75,
                     "captured_at": 100,
+                    "observed_monotonic": 100,
                     "online": True,
                     "confidence": 4.0,
                 }
@@ -388,6 +402,7 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
                     "source_id": "huawei",
                     "grid_interaction_w": 75.0,
                     "captured_at": 100.0,
+                    "observed_monotonic": 100.0,
                     "online": True,
                     "confidence": -2.0,
                 }
@@ -400,6 +415,7 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
         primary_offline: dict[str, object] = {
             "grid_gateway_power": 30.0,
             "grid_gateway_captured_at": 100.0,
+            "grid_gateway_observed_monotonic": 100.0,
             "battery_sources": [
                 {
                     "source_id": "huawei",
@@ -427,6 +443,7 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
         snapshot: dict[str, object] = {
             "grid_gateway_power": 25.0,
             "grid_gateway_captured_at": 100.0,
+            "grid_gateway_observed_monotonic": 100.0,
             "battery_sources": [],
         }
         apply_grid_fusion(fusion, snapshot, 100.0)
@@ -444,7 +461,7 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
         fusion = GridMeasurementFusion(_config())
         self.assertEqual(
             snapshot_adapter._primary_measurement(fusion, {"battery_sources": []}),
-            GridMeasurement("huawei", None, None, False, 0.0),
+            GridMeasurement("huawei", TimestampedMeasurement.unavailable(), False, 0.0),
         )
         self.assertEqual(
             snapshot_adapter._primary_measurement(
@@ -455,24 +472,47 @@ class GridFusionSnapshotAdapterTests(unittest.TestCase):
                             "source_id": "huawei",
                             "grid_interaction_w": 12,
                             "captured_at": 99,
+                            "observed_monotonic": 199,
                             "online": 1,
                             "confidence": None,
                         }
                     ]
                 },
             ),
-            GridMeasurement("huawei", 12.0, 99.0, False, 0.0),
+            GridMeasurement(
+                "huawei",
+                TimestampedMeasurement.observed(
+                    12.0,
+                    captured_at=99.0,
+                    observed_monotonic=199.0,
+                ),
+                False,
+                0.0,
+            ),
         )
         self.assertEqual(
             snapshot_adapter._backup_measurement(
                 fusion,
-                {"grid_gateway_power": 23, "grid_gateway_captured_at": 98},
+                {
+                    "grid_gateway_power": 23,
+                    "grid_gateway_captured_at": 98,
+                    "grid_gateway_observed_monotonic": 198,
+                },
             ),
-            GridMeasurement("victron", 23.0, 98.0, True, 1.0),
+            GridMeasurement(
+                "victron",
+                TimestampedMeasurement.observed(
+                    23.0,
+                    captured_at=98.0,
+                    observed_monotonic=198.0,
+                ),
+                True,
+                1.0,
+            ),
         )
         self.assertEqual(
             snapshot_adapter._backup_measurement(fusion, {}),
-            GridMeasurement("victron", None, None, False, 0.0),
+            GridMeasurement("victron", TimestampedMeasurement.unavailable(), False, 0.0),
         )
 
     def test_adapter_source_identity_and_confidence_contracts(self) -> None:

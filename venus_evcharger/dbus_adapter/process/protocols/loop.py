@@ -42,6 +42,7 @@ class DbusAdapterLoopContext(Protocol):  # pragma: no cover
     max_tick_seconds: float
     slo_mainloop_gap_max_ms: float
     slo_core_read_max_age_seconds: float
+    slo_queue_max_age_seconds: float
     _main_loop: MainLoopLike | None
     _stop: bool
     _next_work_tick_monotonic: float

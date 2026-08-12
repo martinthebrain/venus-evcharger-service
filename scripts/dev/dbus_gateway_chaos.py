@@ -23,7 +23,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperation, DbusAsyncTimeoutError
+from venus_evcharger.dbus_adapter.tick_policy import TickDemand
 from venus_evcharger.dbus_gateway import gateway_paths
+from venus_evcharger.energy.grid_fusion import GridMeasurementFusion
+from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig, GridMeasurement
+from venus_evcharger.energy.timestamped_measurement import TimestampedMeasurement
 from venus_evcharger.ipc.command_mailbox import normalized_mapping
 from venus_evcharger.ipc.gateway_publication import (
     publish_companion_fields_command,
@@ -35,6 +39,7 @@ from venus_evcharger.ports.gateway_publication import EvcsServiceIdentity
 GUI_BURST_COMMAND_COUNT = 200
 RESOURCE_PRESSURE_MIN_TICK_SECONDS = 0.3
 MAX_ASYNC_SUBMIT_TICK_SECONDS = 0.25
+CONSERVATIVE_GRID_POWER_W = -100.0
 
 
 class _PendingCall:
@@ -223,6 +228,112 @@ def scenario_resource_pressure(temp_dir: str) -> None:
         adapter.tick_seconds >= RESOURCE_PRESSURE_MIN_TICK_SECONDS,
         "long tick pressure should slow adaptive tick",
     )
+    idle_constrained = adapter.loop_role.adaptive_tick_seconds(
+        circuit_state="ok",
+        resource_state="constrained",
+    )
+    urgent_constrained = adapter.loop_role.adaptive_tick_seconds(
+        circuit_state="ok",
+        resource_state="constrained",
+        demand=TickDemand(
+            critical_read_operations=2,
+            core_read_age_seconds=adapter.slo_core_read_max_age_seconds - 1.0,
+            operation_p95_ms=100.0,
+        ),
+    )
+    _assert(
+        idle_constrained == adapter.max_tick_seconds,
+        "idle constrained gateway should use its low-CPU cadence",
+    )
+    _assert(
+        adapter.min_tick_seconds <= urgent_constrained < idle_constrained,
+        "critical SLO demand should accelerate a constrained gateway",
+    )
+
+
+def scenario_epoch_clock_jump(_temp_dir: str) -> None:
+    config = GridFusionConfig(
+        enabled=True,
+        primary_source_id="primary",
+        backup_source_id="gateway",
+        primary_max_age_seconds=5.0,
+        backup_max_age_seconds=5.0,
+    )
+    primary = _grid_measurement("primary", 120.0, captured_at=1_000.0, monotonic_at=99.0)
+    backup_before = _grid_measurement("gateway", 110.0, captured_at=2_000.0, monotonic_at=99.0)
+    backup_after = _grid_measurement("gateway", 110.0, captured_at=10.0, monotonic_at=99.0)
+
+    before = GridMeasurementFusion(config).resolve(primary, backup_before, 100.0)
+    after = GridMeasurementFusion(config).resolve(primary, backup_after, 100.0)
+
+    _assert(
+        (before.state, before.power_w, before.backup_age_seconds)
+        == (after.state, after.power_w, after.backup_age_seconds),
+        "epoch clock jumps must not change grid freshness or source selection",
+    )
+
+
+def scenario_competing_grid_sources(_temp_dir: str) -> None:
+    fusion = GridMeasurementFusion(
+        GridFusionConfig(
+            enabled=True,
+            primary_source_id="primary",
+            backup_source_id="gateway",
+            primary_max_age_seconds=5.0,
+            backup_max_age_seconds=5.0,
+            failover_samples=2,
+            recovery_samples=2,
+            mismatch_absolute_watts=50.0,
+            mismatch_relative=0.0,
+            mismatch_samples=2,
+        )
+    )
+    primary = _grid_measurement("primary", -900.0, captured_at=100.0, monotonic_at=100.0)
+    backup = _grid_measurement(
+        "gateway",
+        CONSERVATIVE_GRID_POWER_W,
+        captured_at=100.0,
+        monotonic_at=100.0,
+    )
+
+    first = fusion.resolve(primary, backup, 100.0)
+    disagreement = fusion.resolve(primary, backup, 100.1)
+    _assert(first.state == "primary", "one mismatch sample must not switch the selected source")
+    _assert(
+        disagreement.state == "disagreement"
+        and disagreement.power_w == CONSERVATIVE_GRID_POWER_W,
+        "persistent source disagreement must choose the conservative grid value",
+    )
+
+    missing = GridMeasurement(
+        source_id="primary",
+        measurement=TimestampedMeasurement.unavailable(),
+        online=False,
+        confidence=0.0,
+    )
+    fusion.resolve(missing, backup, 101.0)
+    failed_over = fusion.resolve(missing, backup, 101.1)
+    _assert(
+        failed_over.state == "backup" and failed_over.selected_source_id == "gateway",
+        "confirmed primary loss must fail over to the healthy gateway source",
+    )
+
+
+def _grid_measurement(
+    source_id: str,
+    power_w: float,
+    *,
+    captured_at: float,
+    monotonic_at: float,
+) -> GridMeasurement:
+    return GridMeasurement(
+        source_id=source_id,
+        measurement=TimestampedMeasurement.observed(
+            power_w,
+            captured_at=captured_at,
+            observed_monotonic=monotonic_at,
+        ),
+    )
 
 
 def run() -> dict[str, str]:
@@ -232,6 +343,8 @@ def run() -> dict[str, str]:
         "core-overproduction": scenario_core_overproduction,
         "reboot-mid-burst": scenario_reboot_mid_burst,
         "resource-pressure": scenario_resource_pressure,
+        "epoch-clock-jump": scenario_epoch_clock_jump,
+        "competing-grid-sources": scenario_competing_grid_sources,
     }
     results: dict[str, str] = {}
     with tempfile.TemporaryDirectory(prefix="evcharger-gateway-chaos-") as temp_dir:

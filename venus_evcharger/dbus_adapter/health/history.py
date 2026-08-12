@@ -10,6 +10,15 @@ from collections.abc import Mapping
 from venus_evcharger.dbus_adapter.jsonl import DEFAULT_HEALTH_HISTORY_MAX_BYTES, append_jsonl
 from venus_evcharger.ipc.command_types import CommandPayload
 
+MAX_LOGGED_OPERATION_CLASSES = 8
+OPERATION_LATENCY_FIELDS = (
+    "samples_60s",
+    "timeouts_60s",
+    "p95_latency_ms",
+    "p99_latency_ms",
+    "max_latency_ms",
+)
+
 
 def append_health_log(
     path: str,
@@ -25,6 +34,7 @@ def health_log_payload(health: Mapping[str, object]) -> CommandPayload:
     eventloop = mapping_child(health, "eventloop")
     cache = mapping_child(health, "cache_freshness")
     backpressure = mapping_child(health, "backpressure")
+    operations = mapping_child(health, "operations")
     return {
         "at": time.time(),
         "state": health.get("state", "unknown"),
@@ -34,6 +44,7 @@ def health_log_payload(health: Mapping[str, object]) -> CommandPayload:
         "core_queue_oldest_age_s": queues.get("oldest_core_command_age_s", 0.0),
         "max_tick_gap_ms_60s": eventloop.get("max_tick_gap_ms_60s", 0.0),
         "timeouts_60s": health.get("timeouts_60s", 0),
+        "operation_latency": health_log_operation_latency(operations),
         "cache_freshness": health_log_cache_freshness(cache),
     }
 
@@ -57,3 +68,20 @@ def health_log_cache_freshness(cache_freshness: Mapping[str, object]) -> Command
             "optional_source_unavailable_count",
         )
     }
+
+
+def health_log_operation_latency(
+    operations: Mapping[str, object],
+) -> CommandPayload:
+    """Keep a bounded percentile summary for each DBus operation class."""
+    result: CommandPayload = {}
+    for operation, raw_summary in sorted(operations.items()):
+        if not isinstance(raw_summary, Mapping):
+            continue
+        result[str(operation)] = {
+            field: raw_summary.get(field, 0)
+            for field in OPERATION_LATENCY_FIELDS
+        }
+        if len(result) >= MAX_LOGGED_OPERATION_CLASSES:
+            break
+    return result

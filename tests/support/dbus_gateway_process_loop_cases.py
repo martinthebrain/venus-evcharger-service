@@ -673,7 +673,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
             install_mock(adapter.resource_monitor, "snapshot", MagicMock(return_value={"state": "constrained"}))
             install_mock(adapter.circuit, "state", MagicMock(return_value="degraded"))
             adapter.loop_role.update_adaptive_tick()
-            self.assertEqual(adapter.tick_seconds, adapter.max_tick_seconds)
+            self.assertEqual(adapter.tick_seconds, 1.0)
 
             boundary_adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run-boundary")))
             install_mock(boundary_adapter.resource_monitor, "snapshot", MagicMock(return_value={"state": "ok"}))

@@ -15,6 +15,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     process_loop_module,
 )
 from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+from venus_evcharger.dbus_adapter.tick_policy import TickDemand
 
 
 def _control(*, resource_state: str = "ok", max_duration_ms: float = 0.0) -> GatewayControlSnapshot:
@@ -29,6 +30,9 @@ def _control(*, resource_state: str = "ok", max_duration_ms: float = 0.0) -> Gat
         resource_state=resource_state,
         pressure_state="ok",
         stale_core_reads=(),
+        critical_read_operations=0,
+        critical_queue_operations=0,
+        operation_p95_ms=0.0,
     )
 
 
@@ -285,6 +289,8 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
                 (0.2, 1.0, "ok", "ok", 0.2),
                 (0.2, 1.0, "protective", "ok", 1.0),
                 (0.2, 1.0, "ok", "constrained", 1.0),
+                (0.6, 1.0, "ok", "constrained", 1.0),
+                (0.2, 0.4, "ok", "constrained", 0.4),
                 (0.1, 1.0, "degraded", "ok", 0.5),
                 (0.4, 2.0, "degraded", "ok", 1.0),
                 (0.4, 0.75, "degraded", "ok", 0.75),
@@ -309,6 +315,45 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
                         expected,
                     )
 
+            adapter.min_tick_seconds = 0.2
+            adapter.max_tick_seconds = 1.0
+            adapter.slo_core_read_max_age_seconds = 5.0
+            adapter.slo_queue_max_age_seconds = 10.0
+            self.assertAlmostEqual(
+                adapter.loop_role.adaptive_tick_seconds(
+                    circuit_state="ok",
+                    resource_state="constrained",
+                    demand=TickDemand(
+                        critical_read_operations=2,
+                        core_read_age_seconds=4.0,
+                        operation_p95_ms=100.0,
+                    ),
+                ),
+                0.3,
+            )
+            self.assertEqual(
+                adapter.loop_role.adaptive_tick_seconds(
+                    circuit_state="protective",
+                    resource_state="constrained",
+                    demand=TickDemand(
+                        critical_queue_operations=10,
+                        queue_age_seconds=20.0,
+                    ),
+                ),
+                1.0,
+            )
+            self.assertEqual(
+                adapter.loop_role.adaptive_tick_seconds(
+                    circuit_state="ok",
+                    resource_state="constrained",
+                    demand=TickDemand(
+                        critical_queue_operations=1,
+                        queue_age_seconds=9.0,
+                    ),
+                ),
+                0.8,
+            )
+
     def test_adaptive_update_forwards_snapshot_and_uses_strict_busy_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             adapter = self._adapter(temp_dir)
@@ -330,6 +375,60 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
             self.assertEqual(
                 apply_regulation.call_args_list,
                 [call(boundary), call(over_limit)],
+            )
+
+    def test_adaptive_update_forwards_complete_tick_demand(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = self._adapter(temp_dir)
+            control = GatewayControlSnapshot(
+                captured_at=1.0,
+                monotonic_at=2.0,
+                health={},
+                queue_age_seconds=7.0,
+                core_read_age_seconds=3.0,
+                eventloop_gap_ms=0.0,
+                eventloop_max_duration_ms=0.0,
+                resource_state="constrained",
+                pressure_state="slow",
+                stale_core_reads=("grid_power_w",),
+                critical_read_operations=2,
+                critical_queue_operations=4,
+                operation_p95_ms=125.0,
+            )
+            install_mock(
+                adapter.health_role,
+                "apply_slo_regulation",
+                MagicMock(return_value=control),
+            )
+            install_mock(adapter.circuit, "state", MagicMock(return_value="degraded"))
+            choose_tick = install_mock(
+                adapter.loop_role,
+                "adaptive_tick_seconds",
+                MagicMock(return_value=0.45),
+            )
+
+            adapter.loop_role.update_adaptive_tick(control)
+
+            self.assertEqual(adapter.tick_seconds, 0.45)
+            choose_tick.assert_called_once()
+            self.assertEqual(
+                choose_tick.call_args.kwargs["circuit_state"],
+                "degraded",
+            )
+            self.assertEqual(
+                choose_tick.call_args.kwargs["resource_state"],
+                "constrained",
+            )
+            demand = choose_tick.call_args.kwargs["demand"]
+            self.assertEqual(
+                (
+                    demand.critical_read_operations,
+                    demand.critical_queue_operations,
+                    demand.core_read_age_seconds,
+                    demand.queue_age_seconds,
+                    demand.operation_p95_ms,
+                ),
+                (2, 4, 3.0, 7.0, 125.0),
             )
 
 

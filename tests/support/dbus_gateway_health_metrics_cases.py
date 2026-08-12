@@ -128,6 +128,23 @@ class GatewayHealthMetricCases(GatewayAdapterContractCase):
             },
         )
         self.assertEqual(
+            health_queue_module.critical_queue_operation_count(
+                health_queue_module.queue_class_health(pending, 100.0)
+            ),
+            3,
+        )
+        self.assertEqual(
+            health_queue_module.critical_queue_operation_count(
+                {
+                    "startup/register": {"pending": "2"},
+                    "local-publish": {"pending": -1},
+                    "diagnostic": {"pending": 99},
+                    "remote-write": "bad",
+                }
+            ),
+            2,
+        )
+        self.assertEqual(
             health_queue_module.queue_health(
                 pending,
                 core_pending,

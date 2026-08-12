@@ -27,9 +27,11 @@ from venus_evcharger.dbus_adapter.health.gui import (
     GUI_MEASUREMENT_FRESHNESS_FIELDS,
 )
 from venus_evcharger.dbus_adapter.health.history import append_health_log
+from venus_evcharger.dbus_adapter.health.latency import operation_p95_ms
 from venus_evcharger.dbus_adapter.health.queue import (
     ADVISORY_QUEUE_CLASSES,
     command_queue_class_name,
+    critical_queue_operation_count,
     queue_class_health,
     queue_health,
 )
@@ -76,6 +78,9 @@ class GatewayControlSnapshot:
     resource_state: str
     pressure_state: GatewayPressureState
     stale_core_reads: tuple[str, ...]
+    critical_read_operations: int
+    critical_queue_operations: int
+    operation_p95_ms: float
 
 
 class DbusAdapterHealth:
@@ -127,6 +132,7 @@ class DbusAdapterHealth:
             physical_count=len(pending),
             write_scheduler_health=write_scheduler_health,
         )
+        queue_classes = queue_class_health(effective_pending, current_time)
         freshness = self.cache_freshness_snapshot(current_time)
         thresholds = self.slo_thresholds()
         slo = self.slo_snapshot(
@@ -137,6 +143,23 @@ class DbusAdapterHealth:
             thresholds=thresholds,
         )
         circuit_health = context.circuit.health()
+        stale_reads = tuple(
+            sorted(
+                stale_core_read_keys(
+                    freshness,
+                    CORE_ENERGY_READ_KEYS,
+                    max_age_seconds=context.slo_core_read_max_age_seconds,
+                )
+            )
+        )
+        critical_read_operations = context.read_scheduler.due_count(
+            monotonic_at=current_monotonic,
+            keys=CORE_ENERGY_READ_KEYS,
+        )
+        critical_queue_operations = (
+            critical_queue_operation_count(queue_classes) + len(core_pending)
+        )
+        operation_p95 = operation_p95_ms(circuit_health)
         circuit_state = str(circuit_health.get("state", "ok"))
         backpressure = backpressure_snapshot(
             circuit_state=circuit_state,
@@ -210,7 +233,7 @@ class DbusAdapterHealth:
             ),
             "mainloop_heartbeat_age_s": heartbeat_age,
             "queues": queue_metrics,
-            "queue_classes": queue_class_health(effective_pending, current_time),
+            "queue_classes": queue_classes,
             "write_scheduler": write_scheduler_health,
             "async_dbus": context.operation_broker.health(now=current_monotonic),
             "cache_freshness": freshness,
@@ -223,6 +246,11 @@ class DbusAdapterHealth:
             "adaptive_tick_seconds": context.tick_seconds,
             "min_tick_seconds": context.min_tick_seconds,
             "max_tick_seconds": context.max_tick_seconds,
+            "tick_demand": {
+                "critical_read_operations": critical_read_operations,
+                "critical_queue_operations": critical_queue_operations,
+                "operation_p95_ms": operation_p95,
+            },
             "eventloop": {
                 "last_tick_at": context._last_tick_at,
                 "tick_duration_ms": context._last_tick_duration_ms,
@@ -248,15 +276,10 @@ class DbusAdapterHealth:
             ),
             resource_state=resource_state,
             pressure_state=pressure_state,
-            stale_core_reads=tuple(
-                sorted(
-                    stale_core_read_keys(
-                        freshness,
-                        CORE_ENERGY_READ_KEYS,
-                        max_age_seconds=context.slo_core_read_max_age_seconds,
-                    )
-                )
-            ),
+            stale_core_reads=stale_reads,
+            critical_read_operations=critical_read_operations,
+            critical_queue_operations=critical_queue_operations,
+            operation_p95_ms=operation_p95,
         )
 
     def cache_freshness_snapshot(self, now: float) -> CommandPayload:
@@ -376,7 +399,7 @@ class DbusAdapterHealth:
             monotonic_at,
         ) > effective_gui_max_age_seconds(self.slo_thresholds()):
             return 0.0
-        return publication_field_float(observation)
+        return float(publication_field_float(observation))
 
     def apply_slo_regulation(
         self,
@@ -442,18 +465,23 @@ class DbusAdapterHealth:
         *,
         service_heartbeat_fields: set[str] | frozenset[str] = frozenset(),
     ) -> float:
-        return max_publication_field_age(
+        return float(max_publication_field_age(
             self._context.publication_registry,
             fields,
             monotonic_at,
             service_heartbeat_fields=service_heartbeat_fields,
-        )
+        ))
 
     def missing_publication_field_count(
         self,
         fields: set[str] | frozenset[str],
     ) -> float:
-        return missing_publication_field_count(self._context.publication_registry, fields)
+        return float(
+            missing_publication_field_count(
+                self._context.publication_registry,
+                fields,
+            )
+        )
 
 
 def _eventloop_metric(
@@ -462,4 +490,5 @@ def _eventloop_metric(
     legacy: str,
 ) -> float:
     value = metrics.get(preferred) if preferred in metrics else metrics.get(legacy)
-    return float_or_zero(value)
+    return float(float_or_zero(value))
+
