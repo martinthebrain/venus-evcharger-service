@@ -41,6 +41,7 @@ class TestVenusEvchargerRename(unittest.TestCase):
             ".coverage",
             "build",
             "mutants",
+            "target",
         }
         return path.suffix in {".pyc", ".pyo"} or any(part in ignored_parts for part in path.parts)
 
@@ -75,6 +76,12 @@ class TestVenusEvchargerRename(unittest.TestCase):
             for token in forbidden:
                 self.assertNotIn(token, relative, relative)
             self.assertNotIn("tests/wallbox_", relative, relative)
+
+    def test_generated_rust_target_files_are_not_project_files(self) -> None:
+        repo_root = self._repo_root()
+        generated_binary = repo_root / "rust" / "forensic-observer" / "target" / "debug" / "observer"
+
+        self.assertTrue(self._ignored_project_path(generated_binary))
 
     def test_project_file_contents_do_not_use_legacy_project_identifiers(self) -> None:
         repo_root = self._repo_root()
