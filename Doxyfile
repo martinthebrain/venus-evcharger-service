@@ -41,11 +41,12 @@ INPUT                  = README.md \
                          build/doxygen/generated/function_inventory.md \
                          venus_evcharger \
                          venus_evcharger_service.py \
-                         venus_evcharger_observer.py \
                          venus_evcharger_dbus_adapter.py \
                          venus_evcharger_auto_input_helper.py \
                          venus_evcharger_generic_shelly_configuration.py \
                          venus_evchargerctl.py \
+                         rust/forensic-observer/README.md \
+                         rust/forensic-observer/CONTRACTS.md \
                          scripts/ops
 FILE_PATTERNS          = *.py *.md
 RECURSIVE              = YES

@@ -337,6 +337,11 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/bin").mkdir(parents=True)
+            (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
+                "observer-binary\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log/run").write_text(
@@ -484,6 +489,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             self.assertEqual(receipt["schema_version"], 1)
             self.assertEqual(receipt["version"], "1.2.3")
             self.assertEqual(receipt["critical_files"]["venus_evcharger_service.py"], hashlib.sha256(b"#!/usr/bin/env python3\n").hexdigest())
+            self.assertEqual(
+                receipt["critical_files"]["deploy/venus/bin/venus-evcharger-forensic-observer"],
+                hashlib.sha256(b"observer-binary\n").hexdigest(),
+            )
             self.assertIn("venus_evcharger_dbus_adapter.py", receipt["missing_critical_files"])
 
     def test_bootstrap_updater_rejects_invalid_preserved_config_when_validation_fails(self) -> None:
@@ -512,6 +521,11 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/bin").mkdir(parents=True)
+            (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
+                "observer-binary\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log/run").write_text(
@@ -571,6 +585,11 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/bin").mkdir(parents=True)
+            (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
+                "observer-binary\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log/run").write_text(

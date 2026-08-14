@@ -19,12 +19,12 @@ PROCESS_LOOP = ADAPTER_PACKAGE / "process" / "loop.py"
 ROOT_FILES = (
     "venus_evcharger_service.py",
     "venus_evcharger_auto_input_helper.py",
-    "venus_evcharger_observer.py",
     "venus_evchargerctl.py",
 )
 PRODUCTION_ROOTS = ("venus_evcharger", "scripts")
 SHELL_ROOTS = ("scripts", "deploy")
 DOCUMENTATION_ROOTS = ("docs", "examples")
+RUST_OBSERVER_ROOT = REPO / "rust" / "forensic-observer"
 FORBIDDEN_IMPORT_ROOTS = {"dbus", "vedbus"}
 FORBIDDEN_CALLS = {
     "SystemBus",
@@ -73,6 +73,12 @@ FORBIDDEN_CLI_PATTERN = re.compile(
     r"busctl\s+(?:call|get-property|set-property|introspect|list|monitor)\b|"
     r"dbus-monitor(?:\s|$)"
     r")",
+)
+RUST_DBUS_PATTERN = re.compile(
+    r"(?:\b(?:dbus|zbus|vedbus)::|"
+    r"\b(?:extern\s+crate|use)\s+(?:dbus|zbus|vedbus)\b|"
+    r"Command::new\(\s*\"(?:dbus|dbus-send|gdbus|busctl|dbus-monitor)\"|"
+    r"^\s*(?:dbus|zbus|vedbus)\s*=)",
 )
 
 
@@ -318,12 +324,31 @@ def _text_violations() -> list[str]:
     return _collect_violations(_scanned_text_files(), _cli_violations)
 
 
+def _rust_observer_violations() -> list[str]:
+    paths = sorted((RUST_OBSERVER_ROOT / "src").rglob("*.rs"))
+    paths.append(RUST_OBSERVER_ROOT / "Cargo.toml")
+    violations: list[str] = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        for line_number, line in enumerate(_read_text(path).splitlines(), start=1):
+            if RUST_DBUS_PATTERN.search(line) is not None:
+                relative = path.relative_to(REPO)
+                violations.append(f"{relative}:{line_number}: Rust observer must not access DBus")
+    return violations
+
+
 def _collect_violations(paths: Iterable[Path], inspect: Callable[[Path], list[str]]) -> list[str]:
     return [violation for path in paths for violation in inspect(path)]
 
 
 def _all_violations() -> list[str]:
-    return _production_violations() + _gateway_violations() + _text_violations()
+    return (
+        _production_violations()
+        + _gateway_violations()
+        + _text_violations()
+        + _rust_observer_violations()
+    )
 
 
 def _report_violations(violations: list[str]) -> int:

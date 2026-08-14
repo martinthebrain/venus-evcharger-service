@@ -19,6 +19,15 @@ class TestVenusEvchargerRename(unittest.TestCase):
         return path.is_file() and not TestVenusEvchargerRename._ignored_project_path(path)
 
     @staticmethod
+    def _included_project_text_file(path: Path, repo_root: Path) -> bool:
+        relative = path.relative_to(repo_root)
+        return TestVenusEvchargerRename._included_project_file(path) and relative.parts[:3] != (
+            "deploy",
+            "venus",
+            "bin",
+        )
+
+    @staticmethod
     def _ignored_project_path(path: Path) -> bool:
         ignored_parts = {
             ".git",
@@ -79,7 +88,9 @@ class TestVenusEvchargerRename(unittest.TestCase):
             repo_root / "venus_evcharger" / "backend" / "shelly_profiles.py",
         }
 
-        for path in self._project_files(repo_root):
+        for path in repo_root.rglob("*"):
+            if not self._included_project_text_file(path, repo_root):
+                continue
             if path in allowed_shelly_context:
                 continue
             text = path.read_text(encoding="utf-8")

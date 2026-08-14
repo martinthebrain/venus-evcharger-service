@@ -6,6 +6,12 @@
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../../..")
 CONFIG_PATH="$REPO_DIR/deploy/venus/config.venus_evcharger.ini"
+OBSERVER_BINARY="$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer"
 exec 2>&1
 
-exec python3 "$(realpath "$REPO_DIR/venus_evcharger_observer.py")" "$CONFIG_PATH"
+if [ ! -x "$OBSERVER_BINARY" ]; then
+	echo "Forensic observer binary is missing or not executable: $OBSERVER_BINARY" >&2
+	exit 1
+fi
+
+exec "$OBSERVER_BINARY" "$CONFIG_PATH"

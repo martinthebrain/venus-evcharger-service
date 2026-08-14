@@ -1,7 +1,8 @@
 # Developer Documentation
 
 The project uses Doxygen to publish one navigable reference for architecture
-documents and every deployed Python function.
+documents and every deployed Python function. Rust APIs use Rustdoc, whose
+parser and link checker understand Rust syntax and documentation semantics.
 
 ## Build The Reference
 
@@ -17,13 +18,24 @@ creates XML output in `build/doxygen/xml` for automated validation.
 `make docs-check` runs the same reproducible build and completeness gate used
 by CI.
 
+Build and validate the Rust observer reference with:
+
+```bash
+bash rust/forensic-observer/scripts/check.sh
+```
+
+That gate runs Rustdoc with warnings denied. The observer README and contracts
+are also included in the Doxygen architecture reference.
+
 ## Source Coverage
 
 The production source set consists of:
 
 - the complete `venus_evcharger` package
-- the six root service and command entry points
+- the five root service and command entry points
 - operational Python tools in `scripts/ops`
+- the native forensic observer under `rust/forensic-observer`, documented by
+  Rustdoc
 
 Tests, mutation worktrees, virtual environments, and developer-only scripts
 are excluded.
@@ -66,6 +78,9 @@ Generated briefs are a completeness fallback, not a replacement for explaining
 non-trivial domain behavior. New public APIs and complex private logic should
 therefore receive native English docstrings during implementation.
 
+For Rust, use `///` on items and `//!` for module-level contracts. Public Rust
+items must pass the warnings-as-errors Rustdoc build.
+
 ## Quality Contract
 
 The documentation gate verifies that:
@@ -77,6 +92,7 @@ The documentation gate verifies that:
   count in the inventory
 - every emitted function has an English build-time brief or richer source
   documentation
+- every native observer API passes Rustdoc with warnings denied
 
 The generated `build/` tree is intentionally not committed.
 

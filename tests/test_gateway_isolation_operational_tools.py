@@ -669,8 +669,9 @@ class GatewayIsolationOperationalToolsTests(unittest.TestCase):
             patch.object(self.isolation, "_production_violations", return_value=["p"]),
             patch.object(self.isolation, "_gateway_violations", return_value=["g"]),
             patch.object(self.isolation, "_text_violations", return_value=["t"]),
+            patch.object(self.isolation, "_rust_observer_violations", return_value=["r"]),
         ):
-            self.assertEqual(self.isolation._all_violations(), ["p", "g", "t"])
+            self.assertEqual(self.isolation._all_violations(), ["p", "g", "t", "r"])
 
         error_output = StringIO()
         with redirect_stderr(error_output):

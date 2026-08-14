@@ -12,7 +12,6 @@ FOCUSED_TEST_SELECTIONS_RUNTIME_SERVICES: tuple[tuple[str, tuple[str, ...]], ...
     ("venus_evcharger/inventory/render.py", ("tests/test_device_inventory_config.py",)),
     ("venus_evcharger/inventory/schema.py", ("tests/test_device_inventory_config.py",)),
     ("venus_evcharger/ops/disable_generic_shelly_once.py", ("tests/test_disable_generic_shelly_once_contracts.py",)),
-    ("venus_evcharger/ops/forensic_observer.py", ("tests/test_forensic_observer_contracts.py",)),
     ("venus_evcharger/ports/auto.py", ("tests/test_venus_evcharger_ports.py", "tests/test_ports_auto_contracts.py")),
     ("venus_evcharger/ports/gateway_diagnostics.py", ("tests/test_gateway_diagnostics_contracts.py",)),
     ("venus_evcharger/ports/gateway_diagnostic_values.py", ("tests/test_gateway_diagnostics_contracts.py",)),

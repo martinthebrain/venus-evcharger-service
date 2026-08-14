@@ -14,7 +14,6 @@ from doxygen_python_filter import native_or_generated_brief
 
 _ROOT_MODULES = (
     "venus_evcharger_service.py",
-    "venus_evcharger_observer.py",
     "venus_evcharger_dbus_adapter.py",
     "venus_evcharger_auto_input_helper.py",
     "venus_evcharger_generic_shelly_configuration.py",

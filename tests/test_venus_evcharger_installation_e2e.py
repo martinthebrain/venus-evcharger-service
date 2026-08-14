@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import tempfile
 import time
@@ -52,17 +53,30 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
         return repo_copy
 
     def test_runit_entrypoints_replace_the_shell_process(self) -> None:
-        run_scripts = (
+        python_run_scripts = (
             "deploy/venus/service_venus_evcharger/run",
             "deploy/venus/service_venus_evcharger_dbus_adapter/run",
-            "deploy/venus/service_venus_evcharger_observer/run",
         )
-        for relative_path in run_scripts:
+        for relative_path in python_run_scripts:
             with self.subTest(relative_path=relative_path):
                 lines = (REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines()
                 python_commands = [line for line in lines if "python3 " in line]
                 self.assertEqual(len(python_commands), 1)
                 self.assertTrue(python_commands[0].startswith("exec python3 "))
+
+        observer_run = (REPO_ROOT / "deploy/venus/service_venus_evcharger_observer/run").read_text(encoding="utf-8")
+        self.assertNotIn("python3 ", observer_run)
+        self.assertIn('exec "$OBSERVER_BINARY" "$CONFIG_PATH"', observer_run)
+
+    def test_observer_artifact_is_armv7_hard_float_elf(self) -> None:
+        binary = REPO_ROOT / "deploy/venus/bin/venus-evcharger-forensic-observer"
+        header = binary.read_bytes()[:52]
+
+        self.assertGreaterEqual(len(header), 52)
+        self.assertEqual(header[:7], b"\x7fELF\x01\x01\x01")
+        self.assertEqual(struct.unpack_from("<H", header, 18)[0], 40)
+        self.assertNotEqual(struct.unpack_from("<I", header, 36)[0] & 0x400, 0)
+        self.assertNotEqual(binary.stat().st_mode & stat.S_IXUSR, 0)
 
     def test_each_runit_service_has_a_bounded_volatile_logger(self) -> None:
         services = (

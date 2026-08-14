@@ -70,7 +70,6 @@ venus_managed_service_pids() {
 		for entrypoint in \
 			"$REPO_DIR/venus_evcharger_service.py" \
 			"$REPO_DIR/venus_evcharger_dbus_adapter.py" \
-			"$REPO_DIR/venus_evcharger_observer.py" \
 			"$REPO_DIR/venus_evcharger_auto_input_helper.py"; do
 			case "$command_line" in
 			"python3 $entrypoint "* | "/usr/bin/python3 $entrypoint "*)
@@ -79,6 +78,13 @@ venus_managed_service_pids() {
 				;;
 			esac
 		done
+		case "$command_line" in
+		"$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer "* | \
+			"python3 $REPO_DIR/venus_evcharger_observer.py "* | \
+			"/usr/bin/python3 $REPO_DIR/venus_evcharger_observer.py "*)
+			basename "$process_dir"
+			;;
+		esac
 	done
 }
 

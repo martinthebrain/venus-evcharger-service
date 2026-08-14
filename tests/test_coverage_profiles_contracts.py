@@ -37,7 +37,6 @@ class CoverageProfilesContractTests(unittest.TestCase):
                 "venus_evcharger",
                 "venus_evcharger_auto_input_helper",
                 "venus_evcharger_dbus_adapter",
-                "venus_evcharger_observer",
                 "venus_evcharger_service",
                 "venus_evchargerctl",
             },

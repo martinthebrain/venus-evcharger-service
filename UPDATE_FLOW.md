@@ -70,6 +70,7 @@ The updater refreshes the wallbox codebase in the selected target directory.
 That includes:
 
 - Python service code
+- the prebuilt native forensic-observer binary
 - deployment scripts
 - runit service files
 - documentation
@@ -135,6 +136,11 @@ These artifacts include:
 - whether validation passed
 - whether the active `current/` release was kept
 - why promotion was aborted when an update failed
+
+The deployment receipt hashes the native forensic observer alongside the
+critical Python entrypoints and installer files. A missing or changed observer
+binary is therefore visible to the lightweight deployment verifier without
+running a compiler on the GX.
 
 Normal GitHub updates resolve the channel to one concrete commit before the
 archive is downloaded. The updater then downloads that commit-specific archive
