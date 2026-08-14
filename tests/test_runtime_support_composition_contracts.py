@@ -42,7 +42,12 @@ class RuntimeSupportCompositionContractTests(unittest.TestCase):
 
     def test_composition_owns_only_runtime_responsibilities(self) -> None:
         service = SimpleNamespace()
-        controller = RuntimeSupportController(service, lambda *_args: 0, lambda _reason: 0)
+        controller = RuntimeSupportController(
+            service,
+            lambda *_args: 0,
+            lambda _reason: 0,
+            script_path="/data/evcharger/service.py",
+        )
 
         for component in (
             controller.state,
@@ -60,6 +65,7 @@ class RuntimeSupportCompositionContractTests(unittest.TestCase):
         self.assertIs(controller.executor.control_commands, controller.control_commands)
         self.assertIs(controller.setup.state_store, controller.state)
         self.assertIs(controller.setup.async_state, controller.async_state)
+        self.assertEqual(controller.setup.repo_root, "/data/evcharger")
         self.assertIs(controller.audit.fields, controller.audit_fields)
         self.assertIs(controller.audit.state_store, controller.state)
         self.assertIs(controller.health.state_store, controller.state)

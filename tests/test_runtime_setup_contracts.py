@@ -22,7 +22,7 @@ class RuntimeSetupFixture:
     async_state: MagicMock
 
 
-def _setup(service: object) -> RuntimeSetupFixture:
+def _setup(service: object, *, script_path: str = "") -> RuntimeSetupFixture:
     health_code = MagicMock(return_value=17)
     state_store = MagicMock()
     async_state = MagicMock()
@@ -31,7 +31,13 @@ def _setup(service: object) -> RuntimeSetupFixture:
         "_failure_active": lambda: {"failure": True},
     }
     return RuntimeSetupFixture(
-        setup=RuntimeSetup(service, health_code, state_store, async_state),
+        setup=RuntimeSetup(
+            service,
+            health_code,
+            state_store,
+            async_state,
+            script_path=script_path,
+        ),
         health_code=health_code,
         state_store=state_store,
         async_state=async_state,
@@ -48,18 +54,12 @@ def _assert_attributes(
 
 
 class RuntimeSetupContractTests(unittest.TestCase):
-    def test_service_repo_root_accepts_class_or_instance_path_and_empty(self) -> None:
-        class ClassPathService:
-            _script_path_value = "/opt/evcharger/main.py"
-
-        self.assertEqual(RuntimeSetup._service_repo_root(ClassPathService()), "/opt/evcharger")
+    def test_repo_root_comes_from_explicit_script_path_only(self) -> None:
         self.assertEqual(
-            RuntimeSetup._service_repo_root(
-                SimpleNamespace(_script_path_value="/data/evcharger/service.py")
-            ),
+            _setup(SimpleNamespace(), script_path="/data/evcharger/service.py").setup.repo_root,
             "/data/evcharger",
         )
-        self.assertEqual(RuntimeSetup._service_repo_root(SimpleNamespace()), "")
+        self.assertEqual(_setup(SimpleNamespace()).setup.repo_root, "")
 
     def test_system_uptime_parses_clamps_and_rejects_invalid_input(self) -> None:
         with patch("builtins.open", side_effect=OSError("missing")):
@@ -95,7 +95,7 @@ class RuntimeSetupContractTests(unittest.TestCase):
 
     def test_initialize_runtime_support_owns_exact_initial_state(self) -> None:
         service = SimpleNamespace(core_command_mailbox_dir="/run/gateway/core")
-        fixture = _setup(service)
+        fixture = _setup(service, script_path="/repo/service.py")
         setup = fixture.setup
         inbox = object()
         session = object()
@@ -108,14 +108,12 @@ class RuntimeSetupContractTests(unittest.TestCase):
             patch("venus_evcharger.runtime.setup.initialize_victron_balance_runtime_state") as init_balance,
             patch("venus_evcharger.runtime.setup.initialize_runtime_override_state") as init_overrides,
             patch("venus_evcharger.runtime.setup.initialize_software_update_runtime_state") as init_update,
-            patch.object(setup, "_service_repo_root", return_value="/repo") as repo_root,
             patch.object(setup, "_read_local_version", return_value="2.4.1") as local_version,
             patch.object(setup, "_boot_delayed_update_due_at", return_value=456.0) as boot_due,
         ):
             setup.initialize_runtime_support()
 
         inbox_type.assert_called_once_with("/run/gateway/core")
-        repo_root.assert_called_once_with(service)
         local_version.assert_called_once_with("/repo")
         boot_due.assert_called_once_with(123.0, 3600.0)
         init_balance.assert_called_once_with(service)
@@ -196,7 +194,6 @@ class RuntimeSetupContractTests(unittest.TestCase):
             patch("venus_evcharger.runtime.setup.initialize_victron_balance_runtime_state"),
             patch("venus_evcharger.runtime.setup.initialize_runtime_override_state"),
             patch("venus_evcharger.runtime.setup.initialize_software_update_runtime_state"),
-            patch.object(setup, "_service_repo_root", return_value=""),
             patch.object(setup, "_read_local_version", return_value=""),
             patch.object(setup, "_boot_delayed_update_due_at", return_value=None),
         ):

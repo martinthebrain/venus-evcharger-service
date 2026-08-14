@@ -29,19 +29,21 @@ class RuntimeSetup:
         health_code: HealthCode,
         state_store: RuntimeStateStorePort,
         async_state: AsyncRuntimeStatePort,
+        *,
+        script_path: str = "",
     ) -> None:
         self.service = service
         self._health_code = health_code
         self.state_store = state_store
         self.async_state = async_state
+        self.repo_root = self._repo_root_from_script_path(script_path)
 
     @staticmethod
-    def _service_repo_root(service: Any) -> str:
-        """Return the repository root inferred from the main entrypoint path."""
-        script_path = getattr(service, "_script_path_value", None)
+    def _repo_root_from_script_path(script_path: str) -> str:
+        """Return the repository root inferred from an explicit entrypoint path."""
         if not script_path:
             return ""
-        return os.path.dirname(os.path.realpath(str(script_path)))
+        return os.path.dirname(os.path.realpath(script_path))
 
     @staticmethod
     def _system_uptime_seconds() -> float | None:
@@ -76,7 +78,7 @@ class RuntimeSetup:
     def initialize_runtime_support(self) -> None:
         """Initialize runtime caches and watchdog state kept in RAM only."""
         svc = self.service
-        repo_root = self._service_repo_root(svc)
+        repo_root = self.repo_root
         started_at = time.time()
         svc.last_update = 0
         svc.session = requests.Session()

@@ -143,6 +143,7 @@ class ServiceControllerOwner:
             service=self._service,
             age_seconds_func=self.functions.age_seconds,
             health_code_func=self.functions.health_code,
+            script_path=self.functions.script_path,
         )
         runtime.initialize_runtime_support()
         runtime.init_worker_state()

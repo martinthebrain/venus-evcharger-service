@@ -8,7 +8,7 @@ import unittest
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from requests.auth import HTTPDigestAuth
 
@@ -659,7 +659,6 @@ class ServiceCompositionContractTests(unittest.TestCase):
         constructor_values: dict[str, object] = {
             "ServiceStateController": state,
             "ServiceBootstrapController": bootstrap,
-            "RuntimeSupportController": runtime,
             "AutoDecisionController": auto,
             "DbusPublishController": publisher,
             "ShellyIoController": shelly,
@@ -673,6 +672,8 @@ class ServiceCompositionContractTests(unittest.TestCase):
             return lambda *args, **kwargs: value
 
         patches = [patch.object(owner_module, name, factory(value)) for name, value in constructor_values.items()]
+        runtime_constructor = MagicMock(return_value=runtime)
+        patches.append(patch.object(owner_module, "RuntimeSupportController", runtime_constructor))
         def identity(value: object) -> object:
             return value
 
@@ -694,7 +695,8 @@ class ServiceCompositionContractTests(unittest.TestCase):
             active_patch.start()
             self.addCleanup(active_patch.stop)
 
-        owner = ServiceControllerOwner(service, _functions())
+        functions = _functions()
+        owner = ServiceControllerOwner(service, functions)
         with self.assertRaisesRegex(RuntimeError, "not initialized"):
             _ = owner.runtime
         with self.assertRaisesRegex(RuntimeError, "semantic gateway operations are not initialized"):
@@ -712,6 +714,12 @@ class ServiceCompositionContractTests(unittest.TestCase):
         self.assertEqual(service._charger_backend, "charger")
         self.assertTrue(service.topology_configured)
         self.assertFalse(service.primary_rpc_configured)
+        runtime_constructor.assert_called_once_with(
+            service=service,
+            age_seconds_func=functions.age_seconds,
+            health_code_func=functions.health_code,
+            script_path=functions.script_path,
+        )
         self.assertEqual(
             [call[0] for call in runtime.calls[:3]],
             [
@@ -723,7 +731,7 @@ class ServiceCompositionContractTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "already initialized"):
             owner.initialize_runtime()
 
-        prepared_owner = ServiceControllerOwner(service, _functions())
+        prepared_owner = ServiceControllerOwner(service, functions)
         self.assertIs(prepared_owner.prepare_runtime_state(), runtime)
         with self.assertRaisesRegex(RuntimeError, "already prepared"):
             prepared_owner.prepare_runtime_state()
