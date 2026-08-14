@@ -80,6 +80,94 @@ class AutoInputHelperSourceContracts(unittest.TestCase):
         self.assertEqual([request[0] for request in self.gateway.requests], ["pv", "grid", "battery"])
         self.assertTrue(all(request[2] for request in self.gateway.requests))
 
+    def test_gateway_only_mode_projects_power_and_handles_a_missing_battery(self) -> None:
+        settings = replace(
+            helper_settings(),
+            gateway_energy_source=None,
+            energy_sources=(),
+        )
+        sources = AutoInputSources(settings, self.gateway)
+        self.gateway.measurements = {
+            "battery": MeasuredValue(
+                55.0,
+                99.0,
+                "fresh",
+                1.0,
+                ("battery",),
+                observed_monotonic=99.0,
+            ),
+            "battery_power": MeasuredValue(
+                -750.0,
+                99.0,
+                "fresh",
+                1.0,
+                ("battery",),
+                observed_monotonic=99.0,
+            ),
+        }
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0), patch(
+            "venus_evcharger.inputs.helper.sources.time.monotonic",
+            return_value=100.0,
+        ):
+            sources.prepare_cycle()
+            available = sources.battery_snapshot()
+        self.assertEqual(available["battery_soc"], 55.0)
+        self.assertEqual(available["battery_combined_net_power_w"], -750.0)
+
+        self.gateway.measurements = {}
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=101.0), patch(
+            "venus_evcharger.inputs.helper.sources.time.monotonic",
+            return_value=101.0,
+        ):
+            sources.prepare_cycle()
+            missing = sources.battery_snapshot()
+        self.assertEqual(missing, empty_battery_snapshot())
+        self.assertEqual(self.gateway.requests[-1][0], "battery")
+
+    def test_non_positive_gateway_capacity_metadata_is_not_projected(self) -> None:
+        self.gateway.measurements = {
+            "battery": MeasuredValue(
+                98.0,
+                99.0,
+                "fresh",
+                1.0,
+                ("battery",),
+                observed_monotonic=99.0,
+            ),
+            "battery_capacity_wh": MeasuredValue(
+                0.0,
+                99.0,
+                "fresh",
+                1.0,
+                ("capacity-wh",),
+                observed_monotonic=99.0,
+            ),
+            "battery_capacity_ah": MeasuredValue(
+                -100.0,
+                99.0,
+                "fresh",
+                1.0,
+                ("capacity-ah",),
+                observed_monotonic=99.0,
+            ),
+            "battery_voltage": MeasuredValue(
+                0.0,
+                99.0,
+                "fresh",
+                1.0,
+                ("voltage",),
+                observed_monotonic=99.0,
+            ),
+        }
+        with patch("venus_evcharger.inputs.helper.sources.time.time", return_value=100.0), patch(
+            "venus_evcharger.inputs.helper.sources.time.monotonic",
+            return_value=100.0,
+        ):
+            self.sources.prepare_cycle()
+            snapshot = self.sources.battery_snapshot()
+
+        self.assertIsNone(snapshot["battery_combined_usable_capacity_wh"])
+
     def test_unprepared_and_non_data_scopes_are_safe(self) -> None:
         self.assertEqual(self.sources._cycle_monotonic, 0.0)
         self.assertIs(self.sources._gateway_battery_power, None)

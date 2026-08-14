@@ -1671,6 +1671,19 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
             )
         )
 
+        overflow = _gateway_battery_source(
+            GatewayBatteryMeasurements(
+                soc=measured(98.0, "soc"),
+                capacity_ah=measured(1e308, "capacity-ah"),
+                voltage_v=measured(52.8, "voltage"),
+            ),
+            "fallback",
+            inferred_definition,
+        )
+        assert overflow is not None
+        self.assertIsNone(overflow.usable_capacity_wh)
+        self.assertEqual(overflow.usable_capacity_source, "")
+
     def test_soc_projection_uses_oldest_weighted_observation_and_strict_fallbacks(self) -> None:
         early = _online_source(40.0, 7.0, source_id="early", capacity_wh=1000.0)
         late = _online_source(60.0, 9.0, source_id="late", capacity_wh=2000.0)

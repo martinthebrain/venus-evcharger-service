@@ -252,10 +252,6 @@ class DbusEnergyDiscoveryManager:
             for service in self.services_for(spec)
         ]
 
-    def _battery_power_configured(self) -> bool:
-        spec = self._specs.get("battery_net_power_w", {})
-        return bool(read_spec_text(spec, "service") and read_spec_text(spec, "path"))
-
     def _read_keys_for_kind(self, kind: EnergySourceKind) -> tuple[str, ...]:
         if kind == "battery":
             return tuple(
