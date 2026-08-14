@@ -48,7 +48,9 @@ while IFS= read -r -d '' path; do
 done < <(
 	{
 		printf '%s\0' venus_evcharger_service.py venus_evcharger_dbus_adapter.py venus_evchargerctl.py
-		find venus_evcharger scripts rust/forensic-observer -type f \
+		find venus_evcharger scripts rust/forensic-observer \
+			-path '*/target' -prune -o \
+			-type f \
 			\( -name '*.py' -o -name '*.rs' -o -name '*.sh' \) -print0
 	}
 )
