@@ -17,7 +17,14 @@ Build the ARMv7 Venus OS binary:
 ./scripts/build-armv7.sh
 ```
 
-The cross-build writes `deploy/venus/bin/venus-evcharger-forensic-observer` at the repository root. The regular Venus installer validates and starts that binary; target devices do not require a Rust toolchain.
+The release build uses the digest-pinned Rust container and pinned GNU ARM
+cross-toolchain packages by default so local and CI builds use the same
+toolchain. An explicitly non-release host build can be requested with
+`VENUS_EVCHARGER_OBSERVER_USE_HOST_TOOLCHAIN=1` when Cargo and the ARM GNU
+cross-linker are installed. The cross-build writes
+`deploy/venus/bin/venus-evcharger-forensic-observer` at the repository root.
+The regular Venus installer validates and starts that binary; target devices do
+not require a Rust toolchain.
 
 Validate a deployed configuration without starting the observation loop:
 
