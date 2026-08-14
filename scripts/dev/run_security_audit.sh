@@ -22,7 +22,6 @@ fi
 	--severity-level medium \
 	venus_evcharger \
 	venus_evcharger_service.py \
-	venus_evcharger_observer.py \
 	venus_evcharger_dbus_adapter.py \
 	venus_evchargerctl.py \
 	scripts/dev

@@ -75,9 +75,11 @@ def restart_remote_services(pi: PiSession) -> None:
         "python3 - <<'PY'\n"
         "import os, signal, subprocess\n"
         "markers = (\n"
-        "    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_service.py',\n"
-        "    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_dbus_adapter.py',\n"
-        "    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_observer.py',\n"
+		"    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_service.py',\n"
+		"    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_dbus_adapter.py',\n"
+		"    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/deploy/venus/bin/venus-evcharger-forensic-observer',\n"
+		"    # Migration cleanup for an image that still ran the Python observer.\n"
+		"    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_observer.py',\n"
         "    '/data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_auto_input_helper.py',\n"
         ")\n"
         "protected = {os.getpid(), os.getppid()}\n"
@@ -111,7 +113,7 @@ import subprocess
 patterns = {
     "service": "python3 /data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_service.py",
     "adapter": "python3 /data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_dbus_adapter.py",
-    "observer": "python3 /data/bootstrap-venus-evcharger/dbus-venus-evcharger/venus_evcharger_observer.py",
+    "observer": "/data/bootstrap-venus-evcharger/dbus-venus-evcharger/deploy/venus/bin/venus-evcharger-forensic-observer",
 }
 out = subprocess.check_output(["ps", "w"], text=True)
 for label, marker in patterns.items():

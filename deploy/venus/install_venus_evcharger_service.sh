@@ -5,7 +5,7 @@
 #
 # The installer does four main things:
 # 1. validate that the wallbox config exists
-# 2. restore executable bits on Python and shell entrypoints
+# 2. restore executable bits on runtime entrypoints
 # 3. register the runit service symlink under /service
 # 4. make sure rc.local calls the lightweight boot helper on every reboot
 #
@@ -27,7 +27,7 @@ GENERIC_SHELLY_HELPER="$REPO_DIR/venus_evcharger_generic_shelly_configuration.py
 BOOT_HELPER="$SCRIPT_DIR/boot_venus_evcharger_service.sh"
 MAIN_ENTRYPOINT="$REPO_DIR/venus_evcharger_service.py"
 DBUS_ADAPTER_ENTRYPOINT="$REPO_DIR/venus_evcharger_dbus_adapter.py"
-OBSERVER_ENTRYPOINT="$REPO_DIR/venus_evcharger_observer.py"
+OBSERVER_ENTRYPOINT="$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer"
 AUTO_INPUT_HELPER="$REPO_DIR/venus_evcharger_auto_input_helper.py"
 CONFIGURE_HELPER="$SCRIPT_DIR/configure_venus_evcharger_service.sh"
 RESTART_HELPER="$SCRIPT_DIR/restart_venus_evcharger_service.sh"
@@ -44,6 +44,11 @@ mkdir -p "$SERVICE_DIR/log" "$DBUS_ADAPTER_SERVICE_DIR/log" "$OBSERVER_SERVICE_D
 # missing so the user notices a broken deployment immediately.
 if [ ! -f "$CONFIG_PATH" ]; then
 	echo "config.venus_evcharger.ini file not found."
+	exit 1
+fi
+
+if [ ! -f "$OBSERVER_ENTRYPOINT" ]; then
+	echo "Rust forensic observer binary not found: $OBSERVER_ENTRYPOINT" >&2
 	exit 1
 fi
 
@@ -66,10 +71,20 @@ if [ -f "$AUTO_INPUT_HELPER" ]; then
 	chmod 755 "$AUTO_INPUT_HELPER"
 fi
 
-if [ -f "$OBSERVER_ENTRYPOINT" ]; then
-	chmod a+x "$OBSERVER_ENTRYPOINT"
-	chmod 755 "$OBSERVER_ENTRYPOINT"
-fi
+chmod a+x "$OBSERVER_ENTRYPOINT"
+chmod 755 "$OBSERVER_ENTRYPOINT"
+
+# The checked-in binary targets Venus OS ARMv7 and cannot run in the x86
+# installer harness. On actual GX architectures, validate it before touching
+# the active runit services.
+case "$(uname -m)" in
+arm* | aarch64)
+	if ! "$OBSERVER_ENTRYPOINT" --validate-config "$CONFIG_PATH"; then
+		echo "Rust forensic observer rejected the active configuration." >&2
+		exit 1
+	fi
+	;;
+esac
 
 if [ -f "$CONFIGURE_HELPER" ]; then
 	chmod a+x "$CONFIGURE_HELPER"

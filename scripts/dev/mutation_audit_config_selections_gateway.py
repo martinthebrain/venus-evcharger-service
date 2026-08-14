@@ -50,10 +50,6 @@ _EXTERNAL_ENERGY_TESTS = (
     "tests/test_auto_input_external_sources_contracts.py",
     "tests/test_auto_input_external_energy_scenario.py",
 )
-_FORENSIC_OBSERVER_TESTS = (
-    "tests/test_forensic_observer_contracts.py",
-    "tests/test_venus_evcharger_forensic_observer.py",
-)
 _GATEWAY_DIAGNOSTIC_PORT_TESTS = (
     "tests/test_gateway_diagnostics_contracts.py",
     "tests/test_gateway_diagnostics_boundary_contracts.py",
@@ -375,16 +371,6 @@ FOCUSED_TEST_SELECTIONS_GATEWAY: tuple[tuple[str, tuple[str, ...]], ...] = (
         "venus_evcharger/ipc/publication_payload.py",
         _PUBLICATION_PAYLOAD_TESTS,
     ),
-    ("venus_evcharger/ops/forensic_observer.py", _FORENSIC_OBSERVER_TESTS),
-    (
-        "venus_evcharger/ops/forensic_observer_artifacts.py",
-        _FORENSIC_OBSERVER_TESTS,
-    ),
-    (
-        "venus_evcharger/ops/forensic_observer_probe.py",
-        ("tests/test_forensic_observer_probe_contracts.py",),
-    ),
-    ("venus_evcharger/ops/forensic_observer_schema.py", _FORENSIC_OBSERVER_TESTS),
     (
         "venus_evcharger/ops/removable_storage_coordination.py",
         ("tests/test_removable_storage_coordination.py",),

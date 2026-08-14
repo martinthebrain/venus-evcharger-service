@@ -32,13 +32,25 @@ jobs:
             python3-dbus \
             python3-gi \
             doxygen \
+            gcc-arm-linux-gnueabihf \
             shellcheck
 
       - name: Install pinned Python dev tools
         run: bash ./scripts/dev/install_dev_tools.sh
 
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.88.0
+
       - name: Run syntax, tests, and typecheck
         run: bash ./scripts/dev/check_all.sh
+
+      - name: Verify pinned ARMv7 observer artifact
+        run: |
+          cp deploy/venus/bin/venus-evcharger-forensic-observer /tmp/observer.before
+          bash rust/forensic-observer/scripts/build-armv7.sh
+          cmp /tmp/observer.before deploy/venus/bin/venus-evcharger-forensic-observer
 
       - name: Run optional audits
         run: make audit

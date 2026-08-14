@@ -46,7 +46,6 @@ _API_NOQA_METHODS = {
 _SECURITY_NOQA_MARKERS = {
     ("scripts/dev/pi_gateway_release_gate_shelly.py", "S310"): "urlopen(",
     ("tests/test_mock_shelly_rpc.py", "S310"): "urlopen(",
-    ("venus_evcharger/ops/forensic_observer_probe.py", "S310"): "urlopen(",
 }
 _DOCUMENTED_NO_COVER_CALLABLES = {
     "venus_evcharger/dbus_adapter/process/loop.py": {

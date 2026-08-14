@@ -19,6 +19,15 @@ class TestVenusEvchargerRename(unittest.TestCase):
         return path.is_file() and not TestVenusEvchargerRename._ignored_project_path(path)
 
     @staticmethod
+    def _included_project_text_file(path: Path, repo_root: Path) -> bool:
+        relative = path.relative_to(repo_root)
+        return TestVenusEvchargerRename._included_project_file(path) and relative.parts[:3] != (
+            "deploy",
+            "venus",
+            "bin",
+        )
+
+    @staticmethod
     def _ignored_project_path(path: Path) -> bool:
         ignored_parts = {
             ".git",
@@ -32,6 +41,7 @@ class TestVenusEvchargerRename(unittest.TestCase):
             ".coverage",
             "build",
             "mutants",
+            "target",
         }
         return path.suffix in {".pyc", ".pyo"} or any(part in ignored_parts for part in path.parts)
 
@@ -67,6 +77,12 @@ class TestVenusEvchargerRename(unittest.TestCase):
                 self.assertNotIn(token, relative, relative)
             self.assertNotIn("tests/wallbox_", relative, relative)
 
+    def test_generated_rust_target_files_are_not_project_files(self) -> None:
+        repo_root = self._repo_root()
+        generated_binary = repo_root / "rust" / "forensic-observer" / "target" / "debug" / "observer"
+
+        self.assertTrue(self._ignored_project_path(generated_binary))
+
     def test_project_file_contents_do_not_use_legacy_project_identifiers(self) -> None:
         repo_root = self._repo_root()
         forbidden = self._forbidden_tokens()
@@ -79,7 +95,9 @@ class TestVenusEvchargerRename(unittest.TestCase):
             repo_root / "venus_evcharger" / "backend" / "shelly_profiles.py",
         }
 
-        for path in self._project_files(repo_root):
+        for path in repo_root.rglob("*"):
+            if not self._included_project_text_file(path, repo_root):
+                continue
             if path in allowed_shelly_context:
                 continue
             text = path.read_text(encoding="utf-8")

@@ -25,6 +25,5 @@ fi
 	venus_evcharger \
 	scripts \
 	venus_evcharger_service.py \
-	venus_evcharger_observer.py \
 	venus_evcharger_dbus_adapter.py \
 	venus_evchargerctl.py

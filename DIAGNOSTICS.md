@@ -12,6 +12,20 @@ tail -f /var/volatile/log/dbus-venus-evcharger/current
 tail -f /var/volatile/log/dbus-venus-evcharger/auto-reasons.log
 ```
 
+The external forensic observer has its own runit service and log:
+
+```bash
+svstat /service/dbus-venus-evcharger-observer
+tail -f /var/volatile/log/dbus-venus-evcharger-observer/current
+```
+
+The observer is a small native process. It reads the bounded semantic gateway
+diagnostics and service status only; it neither connects to DBus nor writes to
+the charger. When an incident meets the documented policy, it writes one
+redacted, bounded bundle to recognized removable storage while holding the
+shared storage-maintenance lease. If no writable removable storage is
+available, it skips the artifact instead of writing to internal flash.
+
 ## First Five Checks
 
 When the charger did something unexpected, start with these paths:

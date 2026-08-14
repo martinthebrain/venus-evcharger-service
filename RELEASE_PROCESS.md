@@ -7,9 +7,17 @@ development input, not a customer release.
 
 1. Update `version.txt` and the release notes.
 2. Commit all changes and create a clean, exact candidate commit.
-3. Provision `/data/venus-evcharger-testbed` once on the dedicated Pi. The gate
+3. Rebuild the pinned ARMv7 forensic-observer artifact and verify that the
+   result is byte-identical to the checked-in deployment binary:
+
+   ```bash
+   bash rust/forensic-observer/scripts/build-armv7.sh
+   git diff --exit-code -- deploy/venus/bin/venus-evcharger-forensic-observer
+   ```
+
+4. Provision `/data/venus-evcharger-testbed` once on the dedicated Pi. The gate
    refuses every target without that marker, before deploying anything.
-4. Run the `Release candidate hardware gate` workflow, or run locally:
+5. Run the `Release candidate hardware gate` workflow, or run locally:
 
    ```bash
    bash scripts/dev/run_release_candidate_gate.sh \
@@ -65,4 +73,5 @@ maintenance window.
 
 Release evidence consists of the hardware-gate receipt, exact source commit,
 signed manifest, bundle hash, updater hash and deployment receipt written by
-the GX updater.
+the GX updater. The CI gate rebuilds the ARMv7 observer with the pinned Rust
+toolchain and compares it byte-for-byte with the packaged binary.

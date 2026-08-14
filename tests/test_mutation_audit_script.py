@@ -263,11 +263,11 @@ class MutationAuditScriptTests(unittest.TestCase):
         prefixes = tuple(prefix for prefix, _selection in core_selections)
         serialized = json.dumps(core_selections, separators=(",", ":")).encode()
 
-        self.assertEqual(len(core_selections), 245)
+        self.assertEqual(len(core_selections), 244)
         self.assertEqual(len(prefixes), len(set(prefixes)))
         self.assertEqual(
             hashlib.sha256(serialized).hexdigest(),
-            "ee97d7c30812a409ef7b894fe395c7fb927ea95c642db66b6e9ab5d87c00c9d8",
+            "a87bb005ed197ee15720170fe8f5eef9b6c333023e50fdb3813465841d5e7c5f",
         )
 
         all_selections = mutation_audit_config.focused_test_selections()
@@ -278,7 +278,7 @@ class MutationAuditScriptTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(json.dumps(all_selections, separators=(",", ":")).encode()).hexdigest(),
-            "a291089406c6d345299bff02dffbd5d7a4a42be62ed46cdda3ec4fa21ca04bd7",
+            "07bd0b705735d227bbfa95ef316d4dc09e0f4840b76d3937db2c08aadd0d7d57",
         )
 
     def test_mutation_config_can_target_dev_scripts(self) -> None:
@@ -363,9 +363,6 @@ class MutationAuditScriptTests(unittest.TestCase):
             "venus_evcharger/ipc/publication_order.py",
             "venus_evcharger/ipc/publication_order_state.py",
             "venus_evcharger/ipc/publication_payload.py",
-            "venus_evcharger/ops/forensic_observer.py",
-            "venus_evcharger/ops/forensic_observer_probe.py",
-            "venus_evcharger/ops/forensic_observer_schema.py",
             "venus_evcharger/ports/gateway_diagnostic_discovery.py",
             "venus_evcharger/ports/gateway_diagnostic_health.py",
             "venus_evcharger/ports/gateway_diagnostic_values.py",
@@ -466,7 +463,6 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_publication_mailbox_contracts.py",
                 "tests/test_ipc_publication_edges.py",
             ),
-            "venus_evcharger/ops/forensic_observer_probe.py": ("tests/test_forensic_observer_probe_contracts.py",),
             "venus_evcharger/ports/gateway_diagnostic_discovery.py": (
                 "tests/test_gateway_diagnostics_contracts.py",
                 "tests/test_gateway_diagnostics_boundary_contracts.py",

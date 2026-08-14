@@ -3,8 +3,8 @@
 
 # Uninstaller for the Venus EV charger service.
 #
-# This removes the runit service symlink, stops the currently running Python
-# process, and cleans up the boot hooks that were added to /data/rc.local.
+# This removes the runit service symlink, stops the project processes, and
+# cleans up the boot hooks that were added to /data/rc.local.
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
@@ -23,6 +23,8 @@ fi
 
 # Stop any still-running foreground/background wallbox main process.
 pkill -f "$REPO_DIR/venus_evcharger_service.py" || true
+pkill -f "$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer" || true
+# One-time migration cleanup for releases that still ran the Python observer.
 pkill -f "$REPO_DIR/venus_evcharger_observer.py" || true
 
 STARTUP=$SCRIPT_DIR/install_venus_evcharger_service.sh

@@ -83,9 +83,6 @@ class ArchitectureContractsScriptTests(unittest.TestCase):
                     "def GetValue(self) -> object:  # noqa: N802 - DBus spelling\n"
                     "    return 1\n"
                 ),
-                "venus_evcharger/ops/forensic_observer_probe.py": (
-                    "value = urlopen(url)  # noqa: S310\n"
-                ),
                 "scripts/dev/pi_gateway_release_gate_shelly.py": (
                     "value = urlopen(url)  # noqa: S310\n"
                 ),

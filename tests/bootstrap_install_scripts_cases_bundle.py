@@ -41,9 +41,9 @@ class _BootstrapInstallScriptsBundleCases(_BootstrapInstallScriptsBase):
             for rel_path in (
                 "./venus_evcharger_service.py",
                 "./venus_evcharger_dbus_adapter.py",
-                "./venus_evcharger_observer.py",
                 "./venus_evcharger_auto_input_helper.py",
                 "./venus_evchargerctl.py",
+                "./deploy/venus/bin/venus-evcharger-forensic-observer",
                 "./deploy/venus/service_venus_evcharger/run",
                 "./deploy/venus/service_venus_evcharger_dbus_adapter/run",
                 "./deploy/venus/service_venus_evcharger_observer/run",

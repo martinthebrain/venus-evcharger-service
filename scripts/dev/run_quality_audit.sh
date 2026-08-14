@@ -19,7 +19,6 @@ fi
 
 QUALITY_PATHS=(
 	venus_evcharger_service.py
-	venus_evcharger_observer.py
 	venus_evcharger_dbus_adapter.py
 	venus_evchargerctl.py
 	venus_evcharger
@@ -48,8 +47,11 @@ while IFS= read -r -d '' path; do
 	fi
 done < <(
 	{
-		printf '%s\0' venus_evcharger_service.py venus_evcharger_observer.py venus_evcharger_dbus_adapter.py venus_evchargerctl.py
-		find venus_evcharger scripts -name '*.py' -print0
+		printf '%s\0' venus_evcharger_service.py venus_evcharger_dbus_adapter.py venus_evchargerctl.py
+		find venus_evcharger scripts rust/forensic-observer \
+			-path '*/target' -prune -o \
+			-type f \
+			\( -name '*.py' -o -name '*.rs' -o -name '*.sh' \) -print0
 	}
 )
 

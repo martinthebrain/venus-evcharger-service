@@ -135,7 +135,6 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
     def test_consumers_do_not_depend_on_raw_gateway_or_dbus_shapes(self) -> None:
         root = Path(__file__).resolve().parents[1]
         consumers = (
-            root / "venus_evcharger/ops/forensic_observer.py",
             root / "venus_evcharger/backend/probe.py",
             root / "venus_evcharger/publish/gateway_diagnostics.py",
             root / "venus_evcharger/publish/dbus_diagnostics.py",
