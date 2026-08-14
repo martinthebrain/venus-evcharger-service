@@ -45,7 +45,6 @@ INPUT                  = README.md \
                          venus_evcharger_auto_input_helper.py \
                          venus_evcharger_generic_shelly_configuration.py \
                          venus_evchargerctl.py \
-                         rust/forensic-observer/README.md \
                          rust/forensic-observer/CONTRACTS.md \
                          scripts/ops
 FILE_PATTERNS          = *.py *.md
